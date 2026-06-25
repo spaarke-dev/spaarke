@@ -488,8 +488,7 @@ public static class ChatEndpoints
                 latestUserMessage: effectiveMessage,
                 uploadedFiles: session.UploadedFiles,
                 cancellationToken: cancellationToken,
-                // R6 Pillar 8 / task 082 / FR-50: forward the soft-slash hint to the
-                // CapabilityRouter Layer 0.5 pre-pass. Null in the common path.
+                // R6 Pillar 8 / task 082 / FR-50: forward the soft-slash hint downstream.
                 // Wire-format field renamed `commandIntent` → `intentHint` per
                 // chat-routing-redesign-r1 FR-07 / task 022 (2026-06-22).
                 intentHint: request.IntentHint);
@@ -576,8 +575,7 @@ public static class ChatEndpoints
             // call site. Null when the user turn has no attachments (existing message-only path).
             // FR-20 (task 115): also forward the soft-slash intentHint as a vector-query bias
             // signal. Phase B uses it to prefix the per-file query; the pre-task-115 path is
-            // preserved when IntentHint is null/empty. Same field powers the existing
-            // CapabilityRouter Layer 0.5 short-circuit above — task 115 is bias-side only.
+            // preserved when IntentHint is null/empty.
             var dispatchResult = await dispatcher.DispatchAsync(
                 request.Message,
                 session.HostContext,
@@ -698,7 +696,7 @@ public static class ChatEndpoints
             if (!actionChipsEmitted)
             {
                 // R6 Hotfix Wave B-G10d (2026-06-10) — Skip suggestion generation when the
-                // assistant response is very short (<150 chars). This happens when the CapabilityRouter
+                // assistant response is very short (<150 chars). This happens when the FR-24
                 // dedup directive (R6 task 042 + B-G9b/B-G10a) constrains the chat-side LLM to a
                 // single-sentence acknowledgment because a playbook will render the primary result
                 // in the workspace tab. The suggestion-LLM call would have no substantive content
@@ -2658,9 +2656,7 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// <param name="IntentHint">
 /// Optional closed-vocabulary soft-slash hint emitted by the frontend
 /// `SoftSlashRouter.decorateBody()` (`summarize` / `draft` / `extract-entities`
-/// / `analyze`). As of Phase 5R task 116 / FR-20 the BFF `CapabilityRouter`
-/// IGNORES this hint (the dict-based Layer 0.5 pre-pass was removed); the same
-/// hint biases the PlaybookDispatcher Phase B per-file vector query (task 115)
+/// / `analyze`). The hint biases the PlaybookDispatcher Phase B per-file vector query (task 115)
 /// so slash + natural-language flows converge on the SAME path. Default null
 /// preserves backwards compatibility.
 /// ADR-015 audit: this is a closed-vocabulary identifier, NEVER raw user message text.

@@ -37,9 +37,6 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// </list>
 ///
 /// <para>
-/// The <see cref="Capabilities.CapabilityRouter"/> Layer 0 voice-command pre-pass (task 069
-/// addition) recognises these three phrases and selects the synthetic
-/// <c>manage_pinned_context</c> capability so the LLM is biased toward invoking this tool.
 /// Tool registration via the <c>sprk_analysistool</c> seed row (auto-discovered by
 /// <c>ToolFrameworkExtensions.AddToolHandlersFromAssembly</c>) makes the tool visible to the
 /// agent.

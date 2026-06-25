@@ -39,7 +39,7 @@
       <ExcludeAssets>all</ExcludeAssets>
     </PackageReference>
 
-    <!-- Microsoft.Extensions.AI: needed to resolve IChatClient, ChatCompletion, ChatMessage for CapabilityRouter tests (AIPU2-013/014) -->
+    <!-- Microsoft.Extensions.AI: needed to resolve IChatClient, ChatCompletion, ChatMessage for chat agent tests -->
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.3.0" />
   </ItemGroup>
   <ItemGroup>

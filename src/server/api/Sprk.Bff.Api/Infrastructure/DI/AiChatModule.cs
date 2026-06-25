@@ -19,12 +19,14 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   4. AddSingleton&lt;IPlaybookCandidateSelector, PlaybookCandidateSelector&gt; — chat-routing-redesign-r1 task 113R / FR-47 + FR-48 top-N selector
 ///   5. AddScoped&lt;IIntentRerankerService, IntentRerankerService&gt;             — chat-routing-redesign-r1 task 111R / FR-46 hybrid LLM intent reranker
 ///   6. AddScoped&lt;PlaybookOptionsEventBuilder&gt;                              — chat-routing-redesign-r1 task 117a / FR-49 playbook_options SSE payload builder
+///   7. AddSingleton&lt;OrchestratorPromptBuilder&gt; (and as IOrchestratorPromptBuilder)
+///      — chat-routing-redesign-r1 task 141 / FR-22: orchestrator-side prompt builder.
 ///
-/// Planned registrations (future AIPU2 tasks):
+/// Planned registrations (future tasks):
 ///   - SprkChatAgentFactory          — Extended factory (replaces AiModule registration in R2)
 ///   - ChatOrchestrationService      — Three-pane experience orchestration (router + event bus)
 ///
-/// DI count: 6 unconditional (ADR-010 compliant, well within ≤15 limit).
+/// DI count: 7 unconditional (ADR-010 compliant, well within ≤15 limit).
 ///
 /// Prerequisites (must already be registered before calling AddAiChatModule):
 ///   - <c>IConfiguration</c>   — registered by the host
@@ -53,10 +55,18 @@ public static class AiChatModule
         // DirectOpenAiAgent is the Phase 2 full implementation that streams directly from Azure OpenAI.
         // Constructor deps resolved from DI:
         //   - IChatClient                (singleton, registered in AiModule via AddChatClient().UseFunctionInvocation())
-        //   - IOrchestratorPromptBuilder (singleton, registered in AiCapabilitiesModule)
+        //   - IOrchestratorPromptBuilder (singleton, registered below in this module)
         //   - ILogger<DirectOpenAiAgent> (framework, always available)
         // Phase 3 will introduce FoundryAgent and a MultiAgentOrchestrator to replace this registration.
         services.AddSingleton<ISprkAgent, DirectOpenAiAgent>();
+
+        // chat-routing-redesign-r1 task 141 / FR-22: OrchestratorPromptBuilder.
+        // Singleton — holds an in-process MemoryCache for the stable prefix (keyed by active
+        // playbook name). Singleton lifetime is required so the cache persists across requests
+        // (ADR-009 exception: in-process structural metadata, not business data).
+        services.AddSingleton<OrchestratorPromptBuilder>();
+        services.AddSingleton<IOrchestratorPromptBuilder>(sp =>
+            sp.GetRequiredService<OrchestratorPromptBuilder>());
 
         // AIPU2-066: AI Latency telemetry services.
         // AiLatencyTelemetry — singleton: Meter instances are thread-safe and long-lived.

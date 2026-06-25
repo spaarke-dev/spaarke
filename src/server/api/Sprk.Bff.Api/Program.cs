@@ -143,9 +143,6 @@ builder.Services.AddInsightsFacadeModule();
 // AI Platform R2: safety perimeter (content safety, prompt shield, groundedness)
 builder.Services.AddAiSafetyModule(builder.Configuration);
 
-// AI Platform R2: multi-provider capabilities (search, summarization, citations)
-builder.Services.AddAiCapabilitiesModule(builder.Configuration);
-
 // AI Platform R2: Cosmos DB persistence (sessions, prompts, audit, memory, feedback)
 builder.Services.AddAiPersistenceModule(builder.Configuration);
 

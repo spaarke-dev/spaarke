@@ -32,7 +32,7 @@ public static class AnalysisServicesModule
         // R6 Pillar 6c (FR-37 / task 063) — IContextEventEmitter for context.* execution-trace
         // events (tool_call_started/completed, knowledge_retrieved, playbook_node_executing/completed,
         // decision_made). Registered unconditionally at the top of the module like R5SummarizeTelemetry
-        // so emission sites in CapabilityRouter / PlaybookOrchestrationService / ToolHandlerToAIFunctionAdapter
+        // so emission sites in PlaybookOrchestrationService / ToolHandlerToAIFunctionAdapter
         // can resolve it regardless of feature flags. ADR-015 binding: the implementation is structurally
         // constrained to deterministic IDs only — see ContextEventEmitter.cs class header.
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter,

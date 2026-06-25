@@ -18,8 +18,7 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///     unconditional-registration ceiling per the audit block at the bottom
 ///     of that file. Adding a 16th line would violate the per-module cap.
 ///     Feature-module-per-concern is the established pattern
-///     (<c>AiCapabilitiesModule</c>, <c>AiChatModule</c>,
-///     <c>AiSafetyModule</c>, etc.).
+///     (<c>AiChatModule</c>, <c>AiSafetyModule</c>, etc.).
 ///   </item>
 ///   <item>
 ///     <b>ADR-013 facade boundary</b>: <see cref="IConsumerRoutingService"/>
