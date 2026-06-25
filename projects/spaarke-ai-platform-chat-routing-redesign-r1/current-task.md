@@ -14,10 +14,10 @@
 | **Branch state** | After Phase 1R POML commit: 5 commits ahead of origin/master `8579d6536`. **Working tree clean.** Pushing now. |
 | **Phase status** | Phase 0/1/2-partial/3/4-MVP ✅ shipped to bff-dev. **Phase 5R + Phase 1R spec + TASK-INDEX + 18 new POMLs locked in. Ready for W1 parallel execution.** |
 | **Deployed state** | BFF master deployed; SpaarkeAi Code Page master deployed; Dataverse `RECALL-SESSION-FILE` row seeded; `Workspace__MatterPreFillPlaybookId` env var set |
-| **Active Task** | **028d — Migrate 2 Pattern B consumers to IConsumerRoutingService.ResolveAsync** ✅ DONE 2026-06-24 — `SessionSummarizeOrchestrator` + `AppOnlyAnalysisService` migrated, 9 new tests (45 targeted pass), 2 const stable-IDs removed (lines :46+:1068 per task 027 evidence), BFF publish 44.96 MB (cumulative -1.32 MB), const fallback retained for FR-1R-06 deprecation window |
-| **Next Task** | **028e (Phase 1R exit gate)** — env-var deprecation telemetry + final routing-table verification |
+| **Active Tasks** | **Wave 1-M ✅ COMPLETE 2026-06-24** — 028c (4 Pattern A consumers; commit `2cbe21d96`) + 028d (2 Pattern B consumers; commit `7c34bc1a9`) both done. 111 routing+consumer tests passing. Cumulative BFF publish 46.29 MB (+0.01 MB vs 46.28 MB baseline; 13.71 MB headroom under NFR-01). Env-var fallbacks retained per FR-1R-06 deprecation window. `ConsumerTypes.*` constants used throughout (S-5 hardening). |
+| **Next Task** | **028e (Phase 1R exit gate)** — env-var deprecation telemetry (`WorkspaceOptionsValidator` startup warn + Activity tag on runtime fallback) + startup health-log diffing `ConsumerTypes.All` against Dataverse (S-5C addition) + grep `Workspace__.*PlaybookId` in `Services/` final removal check |
 | **Owner action pending** | Optional: set `sprk_environment = '*'` explicitly on the 2 user-created records (null handled defensively). |
-| **Next Action** | 028e exit gate (env-var deprecation telemetry + grep `Workspace__.*PlaybookId` in `Services/`). |
+| **Next Action** | Launch 028e via `task-execute`. After 028e: Phase 1R complete; merge-readiness review. |
 
 ### Critical context (3-sentence version)
 
