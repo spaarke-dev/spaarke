@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="RegardingResolver" version="1.1.0" display-name-key="Regarding Resolver" description-key="Virtual PCF: 11-entity regarding picker bound to sprk_regardingrecordtype; wraps applyResolverFields (ADR-024) — reusable for sprk_todo and sprk_communication (FR-22)" control-type="virtual">
+  <control namespace="Spaarke.Controls" constructor="RegardingResolver" version="1.2.0" display-name-key="Regarding Resolver" description-key="Virtual PCF: 11-entity regarding picker bound to sprk_regardingrecordtype; wraps applyResolverFields (ADR-024) — HOST-only (sprk_todo, sprk_communication per FR-22); do NOT bind to target entities like sprk_matter/sprk_event" control-type="virtual">
     <external-service-usage enabled="false">
     </external-service-usage>
     <!-- Bound lookup property — the resolver's "discriminator" field on the host entity (sprk_regardingrecordtype) -->

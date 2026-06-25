@@ -64,7 +64,12 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { DismissRegular, Open16Regular, SearchRegular } from '@fluentui/react-icons';
-import { TODO_REGARDING_CATALOG, buildRecordUrl, type ITodoRegardingTargetCatalogEntry } from '@spaarke/ui-components';
+import {
+  TODO_REGARDING_CATALOG,
+  buildRecordUrl,
+  resolveRecordType,
+  type ITodoRegardingTargetCatalogEntry,
+} from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import {
   applyRegardingSelection,
@@ -345,16 +350,37 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
         };
       }
 
-      // Notify PCF class so the bound lookup output is kept in sync. The
-      // sprk_regardingrecordtype was written by applyResolverFields via
-      // @odata.bind; for the form we surface it as a LookupValue using the
-      // existing bound value (if any) — the form's next refresh will pick up
-      // the new sprk_recordtype_ref id from the host record itself.
-      onRecordTypeChanged({
-        id: cleanId,
-        name: picked.name,
-        entityType: selectedEntityType,
-      });
+      // Notify PCF class so the bound `sprk_regardingrecordtype` lookup output
+      // is kept in sync. CRITICAL (Bug-1 fix 2026-06-24): the bound lookup
+      // targets `sprk_recordtype_ref` — NOT the parent entity. We MUST pass
+      // the matching `sprk_recordtype_ref` record's id + 'sprk_recordtype_ref'
+      // as the entityType. Passing the parent (e.g., `sprk_matter` GUID +
+      // entityType) causes MDA to throw:
+      //   "Unable to find many-to-one relationship, entity: sprk_todo,
+      //    referenced entity: sprk_matter, field: sprk_regardingrecordtype"
+      // because that m:1 path doesn't exist.
+      //
+      // `resolveRecordType` queries sprk_recordtype_ref for the entry where
+      // sprk_recordlogicalname === selection.entityType and is cached per page.
+      // `applyResolverFields` already used this internally to write the
+      // host record's @odata.bind, so this is a cache hit in practice.
+      try {
+        const recordType = await resolveRecordType(writeCtx.webApi, selection.entityType);
+        if (recordType) {
+          onRecordTypeChanged({
+            id: recordType.id,
+            name: recordType.name,
+            entityType: 'sprk_recordtype_ref',
+          });
+        } else {
+          // No matching record-type-ref — clear the bound output rather than
+          // setting it to a stale value.
+          onRecordTypeChanged(null);
+        }
+      } catch (rtErr) {
+        console.warn('[RegardingResolver] resolveRecordType for output notify failed:', rtErr);
+        onRecordTypeChanged(null);
+      }
 
       setStatusMsg(`Associated with ${selection.recordName}.`);
     } catch (err) {
