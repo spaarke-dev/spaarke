@@ -21,7 +21,7 @@
   <role>SPAARKE platform Dataverse verifier. Reads schema via Dataverse MCP `describe`; reports mismatches; does NOT modify schema.</role>
 
   <goal>
-    Dataverse `describe sprk_playbookconsumer` confirms the 8-column contract (FR-1R-01 table), alternate key `ak_consumertype_code_env`, audit enabled, change tracking enabled, ownership = Organization. Evidence file written to `notes/handoffs/028-table-verification-evidence.md` with the describe output + checklist.
+    Dataverse `describe sprk_playbookconsumer` confirms the 8-column contract (FR-1R-01 table), alternate key `sprk_ConsumerTypeCodeEnvironment`, audit enabled, change tracking enabled, ownership = Organization. Evidence file written to `notes/handoffs/028-table-verification-evidence.md` with the describe output + checklist.
   </goal>
 
   <context>
@@ -35,7 +35,7 @@
   </context>
 
   <constraints>
-    <constraint source="spec FR-1R-01">8 columns with exact types/requirements/defaults per spec table; alternate key `ak_consumertype_code_env`; audit + change-tracking enabled; Organization ownership.</constraint>
+    <constraint source="spec FR-1R-01">8 columns with exact types/requirements/defaults per spec table; alternate key `sprk_ConsumerTypeCodeEnvironment`; audit + change-tracking enabled; Organization ownership.</constraint>
     <constraint source="project">Owner-driven action — BFF MUST NOT attempt to create or modify the table. Verification only.</constraint>
     <constraint source="project">If verification fails, file P1 blocker note + stop; downstream tasks 028a–028e block until table is correct.</constraint>
   </constraints>
@@ -57,7 +57,7 @@
     <step order="1">Read spec.md §"Phase 1R" FR-1R-01 table to confirm the binding 8-column contract (name, consumertype, consumercode, playbookid lookup, priority, matchconditions, enabled, environment).</step>
     <step order="2">Invoke Dataverse MCP `describe sprk_playbookconsumer` against the Dev environment.</step>
     <step order="3">Build a checklist comparing actual vs spec for each of the 8 columns (type, required flag, default value); record each mismatch (if any) verbatim.</step>
-    <step order="4">Verify alternate key `ak_consumertype_code_env` = (`sprk_consumertype` + `sprk_consumercode` + `sprk_environment`).</step>
+    <step order="4">Verify alternate key `sprk_ConsumerTypeCodeEnvironment` = (`sprk_consumertype` + `sprk_consumercode` + `sprk_environment`).</step>
     <step order="5">Verify audit enabled, change tracking enabled, ownership = Organization.</step>
     <step order="6">If any mismatch: write `notes/handoffs/028-table-verification-evidence.md` with status=BLOCKED, the mismatch list, and the recommended fix (column-by-column); STOP — do NOT proceed to 028a.</step>
     <step order="7">If all checks pass: write `notes/handoffs/028-table-verification-evidence.md` with status=GO, the describe output (redact tenant IDs), and the checklist confirmation.</step>
@@ -76,7 +76,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">Dataverse describe matches all 8 columns in FR-1R-01 (type + required + default).</criterion>
-    <criterion testable="true">Alternate key `ak_consumertype_code_env` present.</criterion>
+    <criterion testable="true">Alternate key `sprk_ConsumerTypeCodeEnvironment` present.</criterion>
     <criterion testable="true">Audit enabled + change tracking enabled + ownership = Organization.</criterion>
     <criterion testable="true">Evidence file `notes/handoffs/028-table-verification-evidence.md` exists with explicit GO or BLOCKED verdict.</criterion>
     <criterion testable="true">If BLOCKED: P1 mismatch list + recommended owner fix; downstream tasks 028a–028e remain pending.</criterion>

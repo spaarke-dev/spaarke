@@ -84,13 +84,13 @@ The §1.7 Stable-ID migration (Phase 1) ships consumers that resolve playbooks B
 | 1 | `sprk_name` | Single Line Text (250) | Yes | (auto) | Display name `{consumertype}/{consumercode} → {playbookcode}`. |
 | 2 | `sprk_consumertype` | Single Line Text (64) | **Yes** | — | Stable consumer code (`matter-pre-fill`, `project-pre-fill`, `ai-summary`, `summarize-file`, `chat-summarize`, `email-analysis`, ...). Lowercase + hyphens; no spaces. |
 | 3 | `sprk_consumercode` | Single Line Text (64) | No | `default` | Sub-discriminator within a consumer type. |
-| 4 | `sprk_playbookid` | Lookup → `sprk_analysisplaybook` | **Yes** | — | Target playbook. |
+| 4 | `sprk_playbook` | Lookup → `sprk_analysisplaybook` | **Yes** | — | Target playbook. (As-built name; OData accessor `_sprk_playbook_value`.) |
 | 5 | `sprk_priority` | Whole Number (0–1000) | Yes | `500` | Lower wins on tie; admin-override headroom. |
 | 6 | `sprk_matchconditions` | Multiple Lines of Text (4000) | No | `null` | JSON predicate (see FR-1R-04 schema). `null`/`{}` = always match. |
 | 7 | `sprk_enabled` | Two Options (Yes/No) | Yes | `Yes` | Soft-disable preserves audit trail. |
 | 8 | `sprk_environment` | Single Line Text (16) | Yes | `*` | Env scope (`dev`/`test`/`prod`/`*`). |
 
-**Alternate key**: `ak_consumertype_code_env` = (`sprk_consumertype` + `sprk_consumercode` + `sprk_environment`).
+**Alternate key**: `sprk_ConsumerTypeCodeEnvironment` = (`sprk_consumertype` + `sprk_consumercode` + `sprk_environment`). [As-built name per 2026-06-24 owner table creation.]
 **Ownership**: Organization. **Audit + change tracking**: Enabled (BFF cache invalidates on change-tracking notification).
 
 #### Functional Requirements (Phase 1R)
