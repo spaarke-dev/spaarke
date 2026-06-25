@@ -3,7 +3,7 @@
   <metadata>
     <title>Migrate 4 Pattern A consumers to IConsumerRoutingService</title>
     <phase>1R: sprk_playbookconsumer Routing Table</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>028b</dependencies>
     <blocks>028e</blocks>

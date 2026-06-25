@@ -14,10 +14,10 @@
 | **Branch state** | After Phase 1R POML commit: 5 commits ahead of origin/master `8579d6536`. **Working tree clean.** Pushing now. |
 | **Phase status** | Phase 0/1/2-partial/3/4-MVP ✅ shipped to bff-dev. **Phase 5R + Phase 1R spec + TASK-INDEX + 18 new POMLs locked in. Ready for W1 parallel execution.** |
 | **Deployed state** | BFF master deployed; SpaarkeAi Code Page master deployed; Dataverse `RECALL-SESSION-FILE` row seeded; `Workspace__MatterPreFillPlaybookId` env var set |
-| **Active Task** | **028b — Seed-PlaybookConsumers.ps1** ✅ DONE 2026-06-24 — 6 records seeded via MCP + script authored + README documented |
-| **Next Tasks (parallel)** | **028c (Pattern A 4 consumers) + 028d (Pattern B 2 consumers)** — Wave 1-M; UNBLOCKED |
+| **Active Task** | **028c — Migrate 4 Pattern A consumers to IConsumerRoutingService.ResolveAsync** ✅ DONE 2026-06-24 — 4 consumers migrated, 40 tests passing (+17 vs Phase 1), BFF publish 46.29 MB (+0.01 MB), env-var fallback retained for FR-1R-06 deprecation window |
+| **Next Tasks (parallel)** | **028d (Pattern B 2 consumers)** — Wave 1-M; UNBLOCKED (likely in flight in parallel — `IConsumerRoutingService` already injected into `AppOnlyAnalysisService` + `SessionSummarizeOrchestrator`) |
 | **Owner action pending** | Optional: set `sprk_environment = '*'` explicitly on the 2 user-created records (null handled defensively). |
-| **Next Action** | Launch 028c + 028d in parallel via task-execute. After both land: 028e exit gate. |
+| **Next Action** | Confirm 028d state → 028e exit gate (env-var deprecation telemetry). |
 
 ### Critical context (3-sentence version)
 
