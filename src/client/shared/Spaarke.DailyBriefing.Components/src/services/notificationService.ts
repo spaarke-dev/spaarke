@@ -39,15 +39,47 @@ import type {
   ChannelGroup,
   ChannelFetchResult,
 } from '../types/notifications';
-import { CHANNEL_REGISTRY, tryCatch } from '../types/notifications';
+import {
+  CHANNEL_REGISTRY,
+  tryCatch,
+  BRIEFING_STATE_CHECKED,
+  BRIEFING_STATE_REMOVED,
+} from '../types/notifications';
 import type { IResult } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/** OData columns to select from appnotification. */
-const NOTIFICATION_SELECT = ['appnotificationid', 'title', 'body', 'data', 'toasttype', 'createdon'].join(',');
+/**
+ * OData columns to select from appnotification.
+ *
+ * R3 task 020 / FR-3: added `sprk_briefingstate` (Daily-Briefing read-state) so
+ * `toNotificationItem` can derive `isRead` from the new Choice column. `toasttype`
+ * is RETAINED for display-behavior context (Microsoft semantics — NOT a read marker).
+ */
+const NOTIFICATION_SELECT = [
+  'appnotificationid',
+  'title',
+  'body',
+  'data',
+  'toasttype',
+  'createdon',
+  'sprk_briefingstate',
+].join(',');
+
+/**
+ * Server-side filter (OData $filter expression body) excluding briefings the user
+ * has marked Removed (sprk_briefingstate = 2). Includes `eq null` clause so
+ * pre-rollout existing rows (no sprk_briefingstate value) remain visible — they
+ * coalesce to Unread on read per FR-3 AC-3c.
+ *
+ * R3 task 020 / FR-3 AC-3b.
+ */
+const EXCLUDE_REMOVED_FILTER = '(sprk_briefingstate ne 2 or sprk_briefingstate eq null)';
+
+/** Extension increment for the "Keep 7 more days" action (FR-6): 7 × 24 × 60 × 60 = 604800 seconds. */
+const TTL_EXTEND_SECONDS = 604800;
 
 /** Maximum notifications to fetch per query (unread, recent). */
 const MAX_NOTIFICATIONS = 200;
@@ -120,7 +152,12 @@ function toNotificationItem(entity: WebApiEntity): NotificationItem | null {
     regardingName: customData?.regardingName ?? '',
     regardingEntityType: customData?.regardingEntityType ?? '',
     regardingId: customData?.regardingId ?? '',
-    isRead: (entity['toasttype'] as number) === 200000000, // 200000000 = Dismissed (treated as "read")
+    // R3 FR-3 AC-3a/AC-3c: derive read-state from the Daily-Briefing-scoped
+    // `sprk_briefingstate` Choice column, NOT from `toasttype` (which is
+    // Microsoft's display-behavior "Timed"/"Persistent" setting and was the
+    // root cause of the UAT empty-state defect). Null-coalesce to Unread (0)
+    // so pre-rollout existing rows render correctly without a backfill.
+    isRead: ((entity['sprk_briefingstate'] as number) ?? 0) === BRIEFING_STATE_CHECKED,
     isAiGenerated: customData?.isAiGenerated ?? false,
     aiConfidence: customData?.aiConfidence,
     createdOn: (entity['createdon'] as string) ?? new Date().toISOString(),
@@ -150,11 +187,23 @@ export async function fetchNotifications(
   const top = options.top ?? MAX_NOTIFICATIONS;
   const unreadOnly = options.unreadOnly ?? false;
 
-  // Build OData query — appnotification is automatically scoped to the current user
-  let filter = '';
+  // Build OData query — appnotification is automatically scoped to the current user.
+  //
+  // R3 task 020 / FR-3:
+  //   - ALWAYS exclude items the user has Removed from the briefing
+  //     (`sprk_briefingstate eq 2`), but keep nulls (pre-rollout existing rows
+  //     coalesce to Unread per FR-3 AC-3c).
+  //   - When `unreadOnly`, AND-join the not-Checked predicate. Anything that is
+  //     NOT `sprk_briefingstate = 1` (Checked) counts as unread for the digest,
+  //     including nulls.
+  //
+  // FR-7 invariant: filters do NOT read or write `toasttype` / `isread` for
+  // read-state purposes — those are bell-panel concerns.
+  const predicates: string[] = [EXCLUDE_REMOVED_FILTER];
   if (unreadOnly) {
-    filter = '&$filter=toasttype ne 200000000'; // Exclude dismissed notifications
+    predicates.push('(sprk_briefingstate ne 1 or sprk_briefingstate eq null)');
   }
+  const filter = `&$filter=${predicates.join(' and ')}`;
 
   const query = `?$select=${NOTIFICATION_SELECT}` + filter + `&$orderby=createdon desc` + `&$top=${top}`;
 
@@ -261,28 +310,44 @@ export async function fetchAndGroupNotifications(webApi: IWebApi): Promise<Chann
 }
 
 /**
- * Mark a single notification as read.
+ * Mark a single Daily Briefing item as "Checked" (read in the widget's terms).
+ *
+ * R3 task 020 / FR-4:
+ *   Writes `{ sprk_briefingstate: 1 }` (Checked) directly to Dataverse via
+ *   `Xrm.WebApi.updateRecord`. Does NOT touch `toasttype` or `isread` — those
+ *   are bell-panel state and remain independent (FR-7 invariant).
+ *
+ * Renamed from R2's `markNotificationRead` (which previously wrote
+ * `toasttype = 200000000`, conflating display-behavior with read-state — the
+ * root cause of the empty-state defect). Hook + UI consumers in tasks 030/031
+ * will import this new name.
  *
  * @param webApi - Xrm.WebApi reference
  * @param notificationId - The appnotificationid GUID
  * @returns IResult<void>
  */
-export async function markNotificationRead(webApi: IWebApi, notificationId: string): Promise<IResult<void>> {
+export async function markBriefingChecked(webApi: IWebApi, notificationId: string): Promise<IResult<void>> {
   return tryCatch(async () => {
     await webApi.updateRecord('appnotification', notificationId, {
-      toasttype: 200000000, // Dismissed
+      sprk_briefingstate: BRIEFING_STATE_CHECKED,
     });
-  }, 'NOTIFICATION_MARK_READ_ERROR');
+  }, 'BRIEFING_MARK_CHECKED_ERROR');
 }
 
 /**
- * Mark all notifications as read for the current user.
+ * Mark all of the current user's unread briefing items as "Checked".
  * Fetches unread notifications and updates each one.
+ *
+ * R3 task 020 / FR-4 (bulk):
+ *   Writes `{ sprk_briefingstate: 1 }` per item via `Promise.allSettled` to
+ *   keep partial-failure semantics from the original implementation.
+ *
+ * Renamed from R2's `markAllNotificationsRead` (which wrote `toasttype`).
  *
  * @param webApi - Xrm.WebApi reference
  * @returns IResult<{ succeeded: number; failed: number }>
  */
-export async function markAllNotificationsRead(
+export async function markAllBriefingsChecked(
   webApi: IWebApi
 ): Promise<IResult<{ succeeded: number; failed: number }>> {
   return tryCatch(async () => {
@@ -294,13 +359,14 @@ export async function markAllNotificationsRead(
     let succeeded = 0;
     let failed = 0;
 
-    // Use Promise.allSettled for parallel mark-read operations.
-    // Write toasttype=200000000 to match the single-record markNotificationRead path
-    // and the read/filter paths above (line 123, 156). The previous {isread:true} was
-    // either a no-op (isread not on appnotification schema) or wrote to a different
-    // field than the read path checks — bulk dismiss was therefore silently broken.
+    // Per FR-4 bulk path: write sprk_briefingstate = Checked. Matches the
+    // single-record markBriefingChecked write + the toNotificationItem read
+    // derivation (line 144) + the EXCLUDE_REMOVED_FILTER (line 75). Field
+    // alignment guarantees the next fetch reflects the bulk update.
     const results = await Promise.allSettled(
-      unread.data.map(item => webApi.updateRecord('appnotification', item.id, { toasttype: 200000000 }))
+      unread.data.map(item =>
+        webApi.updateRecord('appnotification', item.id, { sprk_briefingstate: BRIEFING_STATE_CHECKED })
+      )
     );
 
     for (const r of results) {
@@ -312,5 +378,72 @@ export async function markAllNotificationsRead(
     }
 
     return { succeeded, failed };
-  }, 'NOTIFICATION_MARK_ALL_READ_ERROR');
+  }, 'BRIEFING_MARK_ALL_CHECKED_ERROR');
 }
+
+/**
+ * Remove a single Daily Briefing item from the widget.
+ *
+ * R3 task 020 / FR-5:
+ *   Writes `{ sprk_briefingstate: 2 }` (Removed) so the item is filtered out of
+ *   subsequent `fetchNotifications` calls server-side (per EXCLUDE_REMOVED_FILTER).
+ *   The underlying `appnotification` record is preserved — the user can still
+ *   see and dismiss it in the native bell panel (FR-7 AC-7b).
+ *
+ * @param webApi - Xrm.WebApi reference
+ * @param notificationId - The appnotificationid GUID
+ * @returns IResult<void>
+ */
+export async function markBriefingRemoved(webApi: IWebApi, notificationId: string): Promise<IResult<void>> {
+  return tryCatch(async () => {
+    await webApi.updateRecord('appnotification', notificationId, {
+      sprk_briefingstate: BRIEFING_STATE_REMOVED,
+    });
+  }, 'BRIEFING_MARK_REMOVED_ERROR');
+}
+
+/**
+ * Extend a single Daily Briefing item's time-to-live by 7 calendar days.
+ *
+ * R3 task 020 / FR-6:
+ *   Computes `newTtl = currentTtlSeconds + 604800` and writes
+ *   `{ ttlinseconds: newTtl }` via `Xrm.WebApi.updateRecord`. The caller is
+ *   responsible for sourcing `currentTtlSeconds` from the item being extended
+ *   (the widget displays this in the success toast via the returned new value).
+ *
+ * Per owner clarification (design.md): no weekend-aware date math; the future
+ * due-date engine will own that. This is a literal +604800-second increment.
+ *
+ * @param webApi - Xrm.WebApi reference
+ * @param notificationId - The appnotificationid GUID
+ * @param currentTtlSeconds - Current `ttlinseconds` value of the item (>= 0)
+ * @returns IResult<number> — the new TTL value in seconds (so the toast can render it)
+ */
+export async function extendBriefingTtl(
+  webApi: IWebApi,
+  notificationId: string,
+  currentTtlSeconds: number
+): Promise<IResult<number>> {
+  return tryCatch(async () => {
+    const newTtl = currentTtlSeconds + TTL_EXTEND_SECONDS;
+    await webApi.updateRecord('appnotification', notificationId, {
+      ttlinseconds: newTtl,
+    });
+    return newTtl;
+  }, 'BRIEFING_EXTEND_TTL_ERROR');
+}
+
+// ─── R3 task 020: transitional aliases (removed by tasks 030/031) ───────────
+// R3 renames `markNotificationRead` → `markBriefingChecked` and
+// `markAllNotificationsRead` → `markAllBriefingsChecked` to align with the
+// spec's "Checked" semantic and FR-7 bell-panel decoupling. The hook in
+// `useBriefingActions.ts` and the smoke test still import the old names;
+// tasks 030 (hook) and 031 (UI) will rewire to the canonical names + drop
+// these aliases. Keeping them here for ONE task cycle so this task's
+// rename does not break the build in unrelated files.
+
+/** @deprecated R3 task 020 — use `markBriefingChecked`. Removed by task 030. */
+export const markNotificationRead = markBriefingChecked;
+
+/** @deprecated R3 task 020 — use `markAllBriefingsChecked`. Removed by task 030. */
+export const markAllNotificationsRead = markAllBriefingsChecked;

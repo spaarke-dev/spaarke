@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (project initialized, no task active) |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Execute Wave 1 in parallel: invoke `task-execute` 3 times in one message for tasks 001, 010, 020. See `tasks/TASK-INDEX.md`. |
+| **Task** | 020 - Widget service layer: read-state swap + 3 new action functions + Removed filter + jest tests |
+| **Step** | 14 of 14: ✅ COMPLETE — TASK-INDEX.md updated |
+| **Status** | completed |
+| **Next Action** | Task 030 (useBriefingActions hook extension) is now unblocked. Tasks 030 + 031 must remove transitional aliases from `notificationService.ts` + `services/index.ts` when they rewire consumers. |
 
 ### Files Modified This Session
 - `projects/spaarke-daily-update-service-r3/design.md` — Created (initial commit)

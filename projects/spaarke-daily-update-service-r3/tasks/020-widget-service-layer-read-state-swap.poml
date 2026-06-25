@@ -3,7 +3,7 @@
   <metadata>
     <title>Widget service layer: read-state swap + 3 new action functions + Removed filter + jest tests</title>
     <phase>Phase 3: Widget Service Layer</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>030, 040</blocks>
