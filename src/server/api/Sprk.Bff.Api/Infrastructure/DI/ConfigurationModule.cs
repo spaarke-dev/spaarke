@@ -124,6 +124,10 @@ public static class ConfigurationModule
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
         services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
+        // Phase 1R FR-1R-06: deprecation warning when any Workspace__*PlaybookId env var
+        // is set (routing now lives in sprk_playbookconsumer Dataverse table; env vars
+        // are graceful-degrade fallback only during the deprecation window).
+        services.AddSingleton<IValidateOptions<WorkspaceOptions>, WorkspaceOptionsValidator>();
 
         // Startup health check to validate configuration
         services.AddHostedService<StartupValidationService>();

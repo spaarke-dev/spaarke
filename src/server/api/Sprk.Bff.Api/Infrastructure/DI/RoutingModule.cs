@@ -55,13 +55,23 @@ public static class RoutingModule
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddRoutingModule(this IServiceCollection services)
     {
-        // UNCONDITIONAL (1 / 15 — well under ADR-010 module cap):
+        // UNCONDITIONAL (2 / 15 — well under ADR-010 module cap):
         //   1. AddScoped<IConsumerRoutingService, ConsumerRoutingService>
         //      — consumer→playbook routing facade (Phase 1R FR-1R-02).
         //      No feature flag — routing is always-on; Dataverse errors
         //      log + return null (caller graceful-degrades to env var
         //      during the FR-1R-06 deprecation window).
         services.AddScoped<IConsumerRoutingService, ConsumerRoutingService>();
+
+        //   2. AddHostedService<RoutingConsumerTypeHealthCheck>
+        //      — Phase 1R S-5C startup health check (per 2026-06-24 code
+        //      review): diffs ConsumerTypes.All vs Dataverse distinct
+        //      sprk_consumertype values at app start. Emits operator WARN
+        //      on mismatch (admin typo on Dataverse side, or missing seed
+        //      record). Fail-soft: Dataverse outage during startup logs
+        //      info and continues — health check is a deploy-time
+        //      diagnostic, NOT a runtime dependency.
+        services.AddHostedService<RoutingConsumerTypeHealthCheck>();
 
         return services;
     }

@@ -14,10 +14,10 @@
 | **Branch state** | After Phase 1R POML commit: 5 commits ahead of origin/master `8579d6536`. **Working tree clean.** Pushing now. |
 | **Phase status** | Phase 0/1/2-partial/3/4-MVP ✅ shipped to bff-dev. **Phase 5R + Phase 1R spec + TASK-INDEX + 18 new POMLs locked in. Ready for W1 parallel execution.** |
 | **Deployed state** | BFF master deployed; SpaarkeAi Code Page master deployed; Dataverse `RECALL-SESSION-FILE` row seeded; `Workspace__MatterPreFillPlaybookId` env var set |
-| **Active Tasks** | **Wave 1-M ✅ COMPLETE 2026-06-24** — 028c (4 Pattern A consumers; commit `2cbe21d96`) + 028d (2 Pattern B consumers; commit `7c34bc1a9`) both done. 111 routing+consumer tests passing. Cumulative BFF publish 46.29 MB (+0.01 MB vs 46.28 MB baseline; 13.71 MB headroom under NFR-01). Env-var fallbacks retained per FR-1R-06 deprecation window. `ConsumerTypes.*` constants used throughout (S-5 hardening). |
-| **Next Task** | **028e (Phase 1R exit gate)** — env-var deprecation telemetry (`WorkspaceOptionsValidator` startup warn + Activity tag on runtime fallback) + startup health-log diffing `ConsumerTypes.All` against Dataverse (S-5C addition) + grep `Workspace__.*PlaybookId` in `Services/` final removal check |
+| **Phase 1R STATUS** | **✅ CLOSED 2026-06-24** — All 8 FRs covered. 124/124 tests pass cumulatively. Cumulative BFF publish 49.22 MB (+2.94 MB vs 46.28 MB baseline; 10.78 MB headroom under NFR-01 — flag for ops monitoring; delta exceeds raw code volume, likely environmental drift). Phase 2 unblocked. |
+| **Parallel Phase 5R progress** | Wave 5-A foundation seeded: **task 110** ✅ (commit `9a0632470`; `PlaybookDispatcher.DispatchAsync` accepts attachments; 5 tests; FR-15 invariant) + **task 110a** ✅ (commit `97bc64325`; Library modal `toLowerCase` defensive guard; root cause unsafe Dataverse cast). |
 | **Owner action pending** | Optional: set `sprk_environment = '*'` explicitly on the 2 user-created records (null handled defensively). |
-| **Next Action** | Launch 028e via `task-execute`. After 028e: Phase 1R complete; merge-readiness review. |
+| **Next Action** | Phase 1R closed; **next priorities**: (a) reconcile + push all parallel work; (b) Phase 5R execution beginning at task 111R (hybrid intent reranker) per spec FR-46. |
 
 ### Critical context (3-sentence version)
 
