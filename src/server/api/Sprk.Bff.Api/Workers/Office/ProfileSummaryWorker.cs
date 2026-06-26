@@ -1,9 +1,9 @@
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Office;
@@ -37,7 +37,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
 {
     private readonly ILogger<ProfileSummaryWorker> _logger;
     private readonly ServiceBusClient _serviceBusClient;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly IProcessingJobService _processingJobService;
     private readonly IJobStatusService _jobStatusService;
     private readonly IAppOnlyAnalysisService _analysisService;
@@ -58,7 +58,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
     public ProfileSummaryWorker(
         ILogger<ProfileSummaryWorker> logger,
         ServiceBusClient serviceBusClient,
-        IDistributedCache cache,
+        ITenantCache cache,
         IProcessingJobService processingJobService,
         IJobStatusService jobStatusService,
         IAppOnlyAnalysisService analysisService,
@@ -123,17 +123,9 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
 
         try
         {
-            // Step 1: Check idempotency
-            if (await IsAlreadyProcessedAsync(message.IdempotencyKey, cancellationToken))
-            {
-                _logger.LogInformation(
-                    "Job {JobId} already processed (idempotency key: {IdempotencyKey}), skipping",
-                    message.JobId,
-                    message.IdempotencyKey);
-                return JobOutcome.Success();
-            }
-
-            // Step 2: Deserialize payload
+            // Step 1: Deserialize payload (reordered before idempotency check per task 010
+            // migration to ITenantCache — payload.TenantId is required to build the
+            // tenant-scoped idempotency cache key).
             var payload = DeserializePayload(message.Payload);
             if (payload == null)
             {
@@ -141,6 +133,16 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
                     "OFFICE_INTERNAL",
                     "Failed to deserialize profile job payload",
                     retryable: false);
+            }
+
+            // Step 2: Check idempotency (tenant-scoped per FR-05)
+            if (await IsAlreadyProcessedAsync(payload.TenantId, message.IdempotencyKey, cancellationToken))
+            {
+                _logger.LogInformation(
+                    "Job {JobId} already processed (idempotency key: {IdempotencyKey}), skipping",
+                    message.JobId,
+                    message.IdempotencyKey);
+                return JobOutcome.Success();
             }
 
             // Step 3: Update job status to profile processing
@@ -191,7 +193,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
             }
 
             // Step 5: Mark as processed (idempotency)
-            await MarkAsProcessedAsync(message.IdempotencyKey, payload.DocumentId, cancellationToken);
+            await MarkAsProcessedAsync(payload.TenantId, message.IdempotencyKey, payload.DocumentId, cancellationToken);
 
             // Step 6: Check if RAG indexing is requested
             if (payload.RagIndex)
@@ -351,24 +353,33 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
         await args.CompleteMessageAsync(args.Message);
     }
 
-    private async Task<bool> IsAlreadyProcessedAsync(string idempotencyKey, CancellationToken cancellationToken)
+    private async Task<bool> IsAlreadyProcessedAsync(string tenantId, string idempotencyKey, CancellationToken cancellationToken)
     {
-        var cacheKey = $"office:profile:processed:{idempotencyKey}";
-        var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+        var effectiveTenantId = string.IsNullOrWhiteSpace(tenantId) ? "bff" : tenantId;
+        var cached = await _cache.GetAsync<string>(
+            effectiveTenantId,
+            resource: "office-profile-processed",
+            id: idempotencyKey,
+            version: 1,
+            ct: cancellationToken);
         return !string.IsNullOrEmpty(cached);
     }
 
     private async Task MarkAsProcessedAsync(
+        string tenantId,
         string idempotencyKey,
         Guid documentId,
         CancellationToken cancellationToken)
     {
-        var cacheKey = $"office:profile:processed:{idempotencyKey}";
-        await _cache.SetStringAsync(
-            cacheKey,
-            documentId.ToString(),
-            new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = IdempotencyKeyTtl },
-            cancellationToken);
+        var effectiveTenantId = string.IsNullOrWhiteSpace(tenantId) ? "bff" : tenantId;
+        await _cache.SetAsync<string>(
+            effectiveTenantId,
+            resource: "office-profile-processed",
+            id: idempotencyKey,
+            version: 1,
+            value: documentId.ToString(),
+            ttl: IdempotencyKeyTtl,
+            ct: cancellationToken);
     }
 
     private static ProfileJobPayload? DeserializePayload(JsonElement payload)

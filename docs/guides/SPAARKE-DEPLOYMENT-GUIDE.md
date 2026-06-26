@@ -1,7 +1,7 @@
 # Spaarke Deployment Guide
 
 > **Version**: 1.0 (consolidated)
-> **Last Updated**: 2026-04-24
+> **Last Updated**: 2026-06-26
 > **Status**: Authoritative — supersedes `ENVIRONMENT-DEPLOYMENT-GUIDE.md` and `PRODUCTION-DEPLOYMENT-GUIDE.md`
 > **Audience**: Claude Code AI (primary executor) + Human developers (approver/operator)
 > **Applies To**: Deploying Spaarke to any environment — dev, UAT, demo, production
@@ -376,7 +376,17 @@ MSYS_NO_PATHCONV=1 az webapp identity assign \
 
 </details>
 
-### 4.5 Per-Customer Resources
+### 4.5 Phase 1.5: Redis Cache
+
+Redis is provisioned **once per environment** as `spaarke-bff-redis-{env}` (top-level env-suffix per NFR-03/NFR-10) and is shared by the BFF across all customers — all five BFF cache types (Graph tokens, embeddings, Graph metadata, authorization data, analysis sessions) are platform-level, not per-customer. The deploy script provisions the Bicep, upserts the connection string into Key Vault, and (optionally) cuts the BFF App Service over to Key Vault references in one idempotent run.
+
+```
+pwsh ./scripts/Deploy-RedisCache.ps1 -Environment <env> -KeyVaultName <kv-name> -CutoverBffSettings
+```
+
+See [`docs/architecture/caching-architecture.md`](../architecture/caching-architecture.md) for the design rationale (tenant-scoped keys, symmetric DI, Null-Object kill-switch) and [`docs/guides/redis-cache-azure-setup.md`](redis-cache-azure-setup.md) for the operational runbook (per-environment SKU sizing, Key Vault secret naming, cutover verification, rollback).
+
+### 4.6 Per-Customer Resources
 
 Per-customer Azure resources are created by `Provision-Customer.ps1` (§12). The Bicep template is `infrastructure/bicep/customer.bicep` and creates:
 
@@ -387,7 +397,7 @@ Per-customer Azure resources are created by `Provision-Customer.ps1` (§12). The
 | Service Bus | `sprk-{customerId}-{env}-sbus` |
 | Redis Cache | `sprk-{customerId}-{env}-redis` |
 
-### 4.6 Verify Platform
+### 4.7 Verify Platform
 
 ```powershell
 az group show --name rg-spaarke-platform-prod --query "{name:name, location:location}" -o table
@@ -395,7 +405,7 @@ az webapp show -g rg-spaarke-platform-prod -n spaarke-bff-prod --query "{state:s
 az keyvault show --name sprk-platform-prod-kv --query "{name:name, location:location}" -o table
 ```
 
-### 4.7 Increase Dataverse Max Upload Size
+### 4.8 Increase Dataverse Max Upload Size
 
 **[AI]** Before importing Dataverse solutions, increase max upload file size to 32MB (default 5MB is too small for PCF control bundles):
 
@@ -1975,6 +1985,7 @@ All scripts are in the `scripts/` directory:
 | Script | Purpose | Key Parameters |
 |--------|---------|----------------|
 | `Deploy-Platform.ps1` | Deploy shared platform Bicep | `-EnvironmentName`, `-WhatIf` |
+| `Deploy-RedisCache.ps1` | Provision per-environment Redis (`spaarke-bff-redis-{env}`), upsert KV secret, optionally cut BFF App Settings over to KV references | `-Environment`, `-KeyVaultName`, `-CutoverBffSettings`, `-VerifyOnly`, `-WhatIf`, `-Force` (required for prod/demo per NFR-05). Location: `scripts/Deploy-RedisCache.ps1`. |
 | `Deploy-BffApi.ps1` | Deploy BFF API with zero-downtime | `-Environment`, `-UseSlotDeploy`, `-SkipBuild` |
 | `Deploy-DataverseSolutions.ps1` | Import 10 managed solutions in order | `-EnvironmentUrl`, `-TenantId`, `-ClientId`, `-ClientSecret`, `-SolutionPath` |
 | `Register-EntraAppRegistrations.ps1` | Create Entra ID app registrations | `-DryRun`, `-SkipBffApi`, `-SkipDataverseS2S` |

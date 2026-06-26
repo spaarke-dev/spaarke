@@ -1,8 +1,11 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Xunit;
@@ -34,29 +37,10 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 /// </remarks>
 public sealed class HandlerTemperaturePassThroughTests : TypedToolHandlerTestFixture
 {
-    private readonly Mock<IDistributedCache> _cacheMock = new();
-    private readonly Dictionary<string, byte[]> _cacheStore = new(StringComparer.Ordinal);
-
-    public HandlerTemperaturePassThroughTests()
-    {
-        // Wire the cache to a simple in-memory store so handlers can complete normally.
-        _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string key, CancellationToken _) =>
-                _cacheStore.TryGetValue(key, out var bytes) ? bytes : null!);
-
-        _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Returns((string key, byte[] bytes, DistributedCacheEntryOptions _, CancellationToken _) =>
-            {
-                _cacheStore[key] = bytes;
-                return Task.CompletedTask;
-            });
-    }
+    // FR-05 redis remediation r1: a real in-memory ITenantCache so handlers complete normally.
+    private readonly ITenantCache _cache = new TenantCache(
+        new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+        NullLogger<TenantCache>.Instance);
 
     [Theory]
     [InlineData(0.0, "deterministic default (action.Temperature == null)")]
@@ -83,7 +67,7 @@ public sealed class HandlerTemperaturePassThroughTests : TypedToolHandlerTestFix
 
         var handler = new EntityExtractorHandler(
             OpenAiClientMock.Object,
-            _cacheMock.Object,
+            _cache,
             Options.Create(new ModelSelectorOptions
             {
                 ToolHandlerModel = "gpt-4o-mini",
@@ -132,7 +116,7 @@ public sealed class HandlerTemperaturePassThroughTests : TypedToolHandlerTestFix
 
         var handler = new RiskDetectorHandler(
             OpenAiClientMock.Object,
-            _cacheMock.Object,
+            _cache,
             Options.Create(new ModelSelectorOptions
             {
                 ToolHandlerModel = "gpt-4o-mini",

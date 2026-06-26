@@ -1,5 +1,4 @@
-using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -10,7 +9,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// Manages the lifecycle of chat sessions: create, retrieve, and delete.
 ///
 /// Storage Strategy (ADR-009, ADR-014, NFR-07, D-06):
-///   - Hot path: Redis <see cref="IDistributedCache"/> with 24-hour sliding TTL.
+///   - Hot path: Redis via <see cref="ITenantCache"/> with 24-hour sliding TTL.
 ///   - Warm path: Cosmos DB via <see cref="ISessionPersistenceService"/> — write-through on every
 ///     Redis write; consulted on Redis miss before falling back to Dataverse (decision D-06).
 ///   - Cold path: Dataverse <c>sprk_aichatsummary</c> for persistent storage and audit.
@@ -20,10 +19,12 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// executed as a fire-and-forget background task. Cosmos failures are logged at Warning and never
 /// propagate to the caller — the Redis/response path is never blocked.
 ///
-/// Cache Key Pattern (ADR-014): <c>"chat:session:{tenantId}:{sessionId}"</c>
-/// The key is tenant-scoped to enforce multi-tenant isolation (NFR-09).
+/// Cache Key Pattern (spaarke-redis-cache-remediation-r1 FR-05): the wrapper produces
+/// <c>tenant:{tenantId}:session:{sessionId}:v1</c> (resource = <c>"session"</c>). Combined with the
+/// configured InstanceName (<c>spaarke:</c>), the on-wire key matches the FR-14 smoke-test format
+/// <c>spaarke:tenant:{tenantId}:session:{sessionId}:v1</c>.
 ///
-/// Lifetime: Scoped — one instance per HTTP request. <see cref="IDistributedCache"/> and
+/// Lifetime: Scoped — one instance per HTTP request. <see cref="ITenantCache"/> and
 /// <see cref="IChatDataverseRepository"/> are injected and handle their own thread-safety.
 /// </summary>
 public class ChatSessionManager
@@ -31,7 +32,13 @@ public class ChatSessionManager
     /// <summary>Sliding TTL for the Redis hot cache (NFR-07: 24-hour idle expiry).</summary>
     internal static readonly TimeSpan SessionCacheTtl = TimeSpan.FromHours(24);
 
-    private readonly IDistributedCache _cache;
+    /// <summary>Tenant-cache resource name for session payloads (FR-05 / FR-14 smoke test).</summary>
+    internal const string CacheResource = "session";
+
+    /// <summary>Tenant-cache schema version for session payloads.</summary>
+    internal const int CacheVersion = 1;
+
+    private readonly ITenantCache _cache;
     private readonly IChatDataverseRepository _dataverseRepository;
     private readonly ILogger<ChatSessionManager> _logger;
 
@@ -51,12 +58,24 @@ public class ChatSessionManager
     /// </summary>
     private readonly ISessionFilesCleanupSignal? _cleanupSignal;
 
-    // ADR-014: centralise key pattern in one place
+    // FR-05 / FR-14: key construction is now centralised in ITenantCache. Producing
+    // (tenantId, "session", sessionId, v1) yields the on-wire key
+    // "spaarke:tenant:{tenantId}:session:{sessionId}:v1" once the StackExchangeRedisCache
+    // instance-name prefix is prepended.
+
+    /// <summary>
+    /// Reproduces the cache key form used by <see cref="ITenantCache"/> so external
+    /// pub-sub / SCAN consumers (e.g., <see cref="SessionFilesCleanupJob"/>) that go
+    /// around <c>IDistributedCache</c> via raw <c>IConnectionMultiplexer.GetDatabase()</c>
+    /// can probe for live session keys directly. Format:
+    /// <c>tenant:{tenantId}:session:{sessionId}:v1</c> — the StackExchangeRedisCache
+    /// <c>InstanceName</c> is prepended on-wire (e.g., <c>spaarke:</c>).
+    /// </summary>
     internal static string BuildCacheKey(string tenantId, string sessionId)
-        => $"chat:session:{tenantId}:{sessionId}";
+        => $"tenant:{tenantId}:{CacheResource}:{sessionId}:v{CacheVersion}";
 
     public ChatSessionManager(
-        IDistributedCache cache,
+        ITenantCache cache,
         IChatDataverseRepository dataverseRepository,
         ILogger<ChatSessionManager> logger,
         ISessionPersistenceService? persistence = null,
@@ -147,20 +166,15 @@ public class ChatSessionManager
         string sessionId,
         CancellationToken ct = default)
     {
-        var key = BuildCacheKey(tenantId, sessionId);
-
-        // Hot path: Redis cache (ADR-009 — Redis first)
-        var cachedBytes = await _cache.GetAsync(key, ct);
-        if (cachedBytes is not null)
+        // Hot path: Redis cache (ADR-009 — Redis first). Tenant-scoped key produced by
+        // ITenantCache: tenant:{tenantId}:session:{sessionId}:v1 (spaarke-redis-cache-remediation-r1 FR-05).
+        var cached = await _cache.GetAsync<ChatSession>(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
+        if (cached is not null)
         {
             _logger.LogDebug("Cache HIT for session {SessionId} (tenant={TenantId})", sessionId, tenantId);
-            var cached = JsonSerializer.Deserialize<ChatSession>(cachedBytes);
-            if (cached is not null)
-            {
-                // Refresh sliding TTL on access
-                await _cache.RefreshAsync(key, ct);
-                return cached;
-            }
+            // Refresh sliding TTL on access
+            await _cache.RefreshAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
+            return cached;
         }
 
         // Warm path: Cosmos DB fallback (decision D-06 — checked before Dataverse on Redis miss)
@@ -216,10 +230,8 @@ public class ChatSessionManager
             "Deleting chat session {SessionId} (tenant={TenantId})",
             sessionId, tenantId);
 
-        var key = BuildCacheKey(tenantId, sessionId);
-
-        // Remove from Redis hot cache
-        await _cache.RemoveAsync(key, ct);
+        // Remove from Redis hot cache (tenant-scoped key per FR-05).
+        await _cache.RemoveAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
 
         // Mark as archived in Dataverse (preserves audit trail — archive-not-delete pattern)
         await _dataverseRepository.ArchiveSessionAsync(tenantId, sessionId, ct);
@@ -281,14 +293,16 @@ public class ChatSessionManager
     /// </summary>
     private async Task CacheSessionAsync(ChatSession session, CancellationToken ct)
     {
-        var key = BuildCacheKey(session.TenantId, session.SessionId);
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(session);
-        var options = new DistributedCacheEntryOptions
-        {
-            // Sliding expiry: resets on every RefreshAsync/GetAsync access (ADR-009, NFR-07)
-            SlidingExpiration = SessionCacheTtl
-        };
-        await _cache.SetAsync(key, bytes, options, ct);
+        // Sliding expiry: resets on every RefreshAsync/GetAsync access (ADR-009, NFR-07).
+        // Tenant-scoped key produced by ITenantCache per FR-05.
+        await _cache.SetSlidingAsync(
+            session.TenantId,
+            CacheResource,
+            session.SessionId,
+            CacheVersion,
+            session,
+            SessionCacheTtl,
+            ct: ct);
     }
 
     /// <summary>

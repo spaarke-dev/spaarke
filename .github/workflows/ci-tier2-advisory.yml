@@ -1,0 +1,612 @@
+name: CI Tier 2 (Advisory)
+
+# Tier 2 advisory CI per spec FR-A03 / NFR-02 (ci-cd-unit-test-remediation-r1).
+#
+# CONTRACT (binding):
+#   - ADVISORY ONLY. NEVER blocking. NEVER referenced by branch protection.
+#   - Aggregates 7 advisory jobs + a single deduplicated PR comment.
+#   - Total p95 budget: <= 8 min (spec NFR-02).
+#   - Invoked by ci-router.yml (FR-A01) via workflow_call OR runs standalone
+#     on pull_request (during shadow period alongside legacy sdap-ci.yml).
+#
+# DEDUP PATTERN: copied verbatim from sdap-ci.yml lines 591-619 (adr-pr-comment
+# job) with marker text changed to "Tier 2 Advisory Report" so this workflow's
+# comment does NOT collide with the existing sdap-ci "ADR Architecture
+# Validation Report" comment during the 14-day shadow window (spec MUST §123).
+#
+# NOTE: Job 5 (markdown-link-validator) depends on scripts/validate-markdown-links.ps1
+# which ships in parallel task CICD-044. If 044 has not yet merged when this
+# workflow first runs, the job step short-circuits with an explanatory notice
+# rather than failing — the workflow remains advisory regardless.
+
+on:
+  workflow_call:
+    inputs:
+      run-format:
+        description: 'Run dotnet format check'
+        required: false
+        type: boolean
+        default: true
+      run-lint:
+        description: 'Run ESLint + Prettier on src/client/**'
+        required: false
+        type: boolean
+        default: true
+      run-unit-tests:
+        description: 'Run full unit-test suite (Debug only — Release blocked until 7-day soak per CICD-075)'
+        required: false
+        type: boolean
+        default: true
+      run-adr-compliance:
+        description: 'Run full NetArchTest ADR suite'
+        required: false
+        type: boolean
+        default: true
+      run-markdown:
+        description: 'Run markdown link validator'
+        required: false
+        type: boolean
+        default: true
+      run-last-reviewed:
+        description: 'Run Last Reviewed stamp check on .claude/ + docs/standards/'
+        required: false
+        type: boolean
+        default: true
+      run-plugin-size:
+        description: 'Run plugin size validation'
+        required: false
+        type: boolean
+        default: true
+  pull_request:
+    paths-ignore:
+      - 'projects/_backlog/**'
+      - 'projects/x-*/**'
+
+permissions:
+  contents: read
+  pull-requests: write   # tier2-pr-comment writes ONE deduplicated comment
+
+concurrency:
+  group: ci-tier2-advisory-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # ============================================================================
+  # Job 1 — format (dotnet format --verify-no-changes). Budget: <30s.
+  # ============================================================================
+  format:
+    name: Format (dotnet format)
+    runs-on: ubuntu-latest
+    if: ${{ inputs.run-format != false }}
+    continue-on-error: true   # Advisory — never blocking
+    timeout-minutes: 3
+    outputs:
+      result: ${{ steps.report.outputs.result }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Restore
+        run: dotnet restore --verbosity minimal
+
+      - name: Format verification (whitespace-only — mirrors sdap-ci policy)
+        id: fmt
+        continue-on-error: true
+        # whitespace-only mirrors sdap-ci.yml code-quality job rationale:
+        # IDE1006 naming-rule warnings fire on intentionally-lowercase Dataverse
+        # field names (sprk_*, accountid) in anonymous payloads. See
+        # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
+        run: dotnet format whitespace --verify-no-changes --verbosity minimal
+
+      - name: Report result
+        id: report
+        if: always()
+        run: |
+          if [ "${{ steps.fmt.outcome }}" = "success" ]; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ============================================================================
+  # Job 2 — lint (ESLint + Prettier on src/client/**). Budget: <60s.
+  # ============================================================================
+  lint:
+    name: Lint (ESLint + Prettier)
+    runs-on: ubuntu-latest
+    if: ${{ inputs.run-lint != false }}
+    continue-on-error: true
+    timeout-minutes: 3
+    outputs:
+      result: ${{ steps.report.outputs.result }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache root npm
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-root-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-root-
+
+      - name: Install root deps (Prettier)
+        # `npm install --legacy-peer-deps` per root CLAUDE.md §11 Node Installs:
+        # repo lockfiles drift; `npm ci` blocks CI on harmless transitive churn.
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
+
+      - name: Prettier format check
+        id: prettier
+        continue-on-error: true
+        run: npx prettier --check "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
+
+      - name: Install PCF deps (ESLint)
+        working-directory: src/client/pcf
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
+
+      - name: ESLint check
+        id: eslint
+        continue-on-error: true
+        working-directory: src/client/pcf
+        # node_modules/.bin/eslint (not npx) per PR #393 root-cause fix
+        # (2026-06-18): npx silently auto-fetches eslint from registry when
+        # local copy is missing, masking install bugs.
+        run: node_modules/.bin/eslint .
+
+      - name: Report result
+        id: report
+        if: always()
+        run: |
+          if [ "${{ steps.prettier.outcome }}" = "success" ] && [ "${{ steps.eslint.outcome }}" = "success" ]; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ============================================================================
+  # Job 3 — full-unit-tests (Debug only — spec MUST §125 forbids Release until
+  # after 7-day soak per CICD-075). Budget: <3 min.
+  # ============================================================================
+  full-unit-tests:
+    name: Full Unit Tests (Debug)
+    runs-on: windows-latest
+    if: ${{ inputs.run-unit-tests != false }}
+    continue-on-error: true
+    timeout-minutes: 6
+    outputs:
+      result: ${{ steps.report.outputs.result }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Debug-only is BINDING through Phase 2 per spec MUST §125 / FR-B07.
+        # Restore Release here ONLY after surviving suite green >= 7 days (CICD-075).
+        configuration: [Debug]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Cache NuGet
+        uses: actions/cache@v5
+        continue-on-error: true
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore --verbosity minimal
+
+      - name: Build
+        # WarningsAsErrors centralized in Directory.Build.props per
+        # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
+        run: dotnet build -c ${{ matrix.configuration }} --no-restore
+
+      - name: Run unit tests
+        id: tests
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          dotnet test -c ${{ matrix.configuration }} --no-build `
+            --logger "trx;LogFileName=tier2-unit.trx" `
+            --results-directory ./TestResults/tier2
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tier2-unit-test-results-${{ matrix.configuration }}
+          path: ./TestResults/tier2/
+          if-no-files-found: warn
+
+      - name: Report result
+        id: report
+        if: always()
+        run: |
+          if ("${{ steps.tests.outcome }}" -eq "success") {
+            "result=pass" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "result=fail" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+        shell: pwsh
+
+  # ============================================================================
+  # Job 4 — adr-compliance (NetArchTest full suite). Budget: <60s.
+  # ============================================================================
+  adr-compliance:
+    name: ADR Compliance (NetArchTest)
+    runs-on: ubuntu-latest
+    if: ${{ inputs.run-adr-compliance != false }}
+    continue-on-error: true
+    timeout-minutes: 3
+    outputs:
+      result: ${{ steps.report.outputs.result }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Restore
+        run: dotnet restore --verbosity minimal
+
+      - name: NetArchTest full suite
+        id: arch
+        continue-on-error: true
+        run: |
+          dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj \
+            --logger "trx;LogFileName=tier2-adr.trx" \
+            --results-directory ./TestResults
+
+      - name: Upload ADR test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tier2-adr-results
+          path: ./TestResults/tier2-adr.trx
+          if-no-files-found: warn
+
+      - name: Report result
+        id: report
+        if: always()
+        run: |
+          if [ "${{ steps.arch.outcome }}" = "success" ]; then
+            echo "result=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=fail" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ============================================================================
+  # Job 5 — markdown-link-validator (invokes scripts/validate-markdown-links.ps1
+  # from parallel task CICD-044). Budget: <30s.
+  #
+  # TODO (CICD-044 follow-up): when scripts/validate-markdown-links.ps1 lands,
+  # this job runs as designed. Until then the step short-circuits with a notice
+  # and reports `skip` so the aggregated PR comment shows a clear "pending"
+  # marker rather than a false pass/fail.
+  # ============================================================================
+  markdown-link-validator:
+    name: Markdown Link Validator
+    runs-on: ubuntu-latest
+    if: ${{ inputs.run-markdown != false }}
+    continue-on-error: true
+    timeout-minutes: 2
+    outputs:
+      result: ${{ steps.report.outputs.result }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run markdown link validator
+        id: mdcheck
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $script = './scripts/validate-markdown-links.ps1'
+          if (-not (Test-Path $script)) {
+            Write-Host "::notice::scripts/validate-markdown-links.ps1 not yet present (ships in CICD-044). Skipping."
+            "skipped=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            exit 0
+          }
+          & pwsh -File $script
+
+      - name: Report result
+        id: report
+        if: always()
+        shell: pwsh
+        run: |
+          if ("${{ steps.mdcheck.outputs.skipped }}" -eq "true") {
+            "result=skip" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } elseif ("${{ steps.mdcheck.outcome }}" -eq "success") {
+            "result=pass" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "result=fail" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+  # ============================================================================
+  # Job 6 — last-reviewed-stamp. Budget: <30s.
+  #
+  # No prior implementation existed in sdap-ci.yml; this is a NEW pattern for
+  # the Tier 2 advisory tier. Verifies every modified `.claude/skills/*/SKILL.md`,
+  # `.claude/constraints/*.md`, `docs/standards/*.md`, `docs/architecture/*.md`,
+  # and `docs/procedures/*.md` file carries a `> **Last Reviewed**: YYYY-MM-DD`
+  # stamp dated within the last 365 days. Advisory only.
+  # ============================================================================
+  last-reviewed-stamp:
+    name: Last Reviewed Stamp
+    runs-on: ubuntu-latest
+    if: ${{ inputs.run-last-reviewed != false }}
+    continue-on-error: true
+    timeout-minutes: 2
+    outputs:
+      result: ${{ steps.report.outputs.result }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # need history for git diff
+
+      - name: Check Last Reviewed stamp on touched docs
+        id: stamp
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # Determine merge base for diff
+          $baseRef = $env:GITHUB_BASE_REF
+          if (-not $baseRef) { $baseRef = 'master' }
+          git fetch origin $baseRef --depth=1 2>$null
+          $base = "origin/$baseRef"
+          $changed = git diff --name-only --diff-filter=AM $base...HEAD 2>$null
+          if (-not $changed) { Write-Host 'No changed files vs base'; exit 0 }
+
+          $targets = @(
+            '^\.claude/skills/[^/]+/SKILL\.md$',
+            '^\.claude/constraints/.+\.md$',
+            '^docs/standards/.+\.md$',
+            '^docs/architecture/.+\.md$',
+            '^docs/procedures/.+\.md$'
+          )
+          $tracked = $changed | Where-Object {
+            $f = $_
+            $targets | Where-Object { $f -match $_ }
+          }
+          if (-not $tracked) { Write-Host 'No tracked-surface docs changed'; exit 0 }
+
+          $cutoff = (Get-Date).AddDays(-365)
+          $violations = @()
+          foreach ($f in $tracked) {
+            if (-not (Test-Path $f)) { continue }
+            $content = Get-Content $f -Raw
+            $m = [regex]::Match($content, '(?m)^>\s*\*\*Last Reviewed\*\*:\s*(\d{4}-\d{2}-\d{2})')
+            if (-not $m.Success) {
+              $violations += "${f}: missing 'Last Reviewed' stamp"
+              continue
+            }
+            try {
+              $stamped = [datetime]::ParseExact($m.Groups[1].Value, 'yyyy-MM-dd', $null)
+              if ($stamped -lt $cutoff) {
+                $violations += "${f}: stamp ${($m.Groups[1].Value)} older than 365 days"
+              }
+            } catch {
+              $violations += "${f}: unparseable stamp '${($m.Groups[1].Value)}'"
+            }
+          }
+          if ($violations.Count -gt 0) {
+            Write-Host "::warning::Last Reviewed stamp issues:"
+            $violations | ForEach-Object { Write-Host "  - $_" }
+            exit 1
+          }
+          Write-Host "All touched docs have valid Last Reviewed stamps."
+
+      - name: Report result
+        id: report
+        if: always()
+        shell: pwsh
+        run: |
+          if ("${{ steps.stamp.outcome }}" -eq "success") {
+            "result=pass" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "result=fail" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+  # ============================================================================
+  # Job 7 — plugin-size (mirrors sdap-ci.yml code-quality "Plugin size
+  # validation" step verbatim — ADR-002 1MB cap). Budget: <30s.
+  # ============================================================================
+  plugin-size:
+    name: Plugin Size (ADR-002)
+    runs-on: windows-latest
+    if: ${{ inputs.run-plugin-size != false }}
+    continue-on-error: true
+    timeout-minutes: 5
+    outputs:
+      result: ${{ steps.report.outputs.result }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Setup .NET Framework targeting pack
+        shell: pwsh
+        run: |
+          if (!(Test-Path "C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8")) {
+            Write-Warning ".NET Framework 4.8 targeting pack not found. Plugin build may fail."
+          }
+
+      - name: Restore
+        run: dotnet restore --verbosity minimal
+
+      - name: Build plugin (Release)
+        # Plugin must be Release-built for size validation. The repo-wide
+        # Debug-only rule (CICD spec MUST §125) applies to test matrices,
+        # not to single-target Release publish for size measurement.
+        continue-on-error: true
+        run: dotnet build power-platform/plugins/Spaarke.Plugins/Spaarke.Plugins.csproj -c Release --no-restore
+
+      - name: Plugin size validation
+        id: size
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # Mirrors sdap-ci.yml code-quality "Plugin size validation" step.
+          $pluginPath = "power-platform/plugins/Spaarke.Plugins/bin/Release/net48/Spaarke.Plugins.dll"
+          if (Test-Path $pluginPath) {
+            $size = (Get-Item $pluginPath).Length
+            Write-Host "Plugin assembly size: $size bytes"
+            if ($size -gt 1MB) {
+              Write-Error "Plugin assembly exceeds 1MB size limit (ADR-002)"
+              exit 1
+            }
+          } else {
+            Write-Host "::notice::Plugin DLL not present at $pluginPath — skipping size check (build may have been skipped)."
+          }
+
+      - name: Report result
+        id: report
+        if: always()
+        shell: pwsh
+        run: |
+          if ("${{ steps.size.outcome }}" -eq "success") {
+            "result=pass" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "result=fail" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
+  # ============================================================================
+  # Job 8 — tier2-pr-comment. Aggregates jobs 1-7 results into ONE deduplicated
+  # PR comment.
+  #
+  # DEDUP PATTERN: copied verbatim from sdap-ci.yml lines 591-619 (adr-pr-comment
+  # job). The only intentional difference is the OWNERSHIP MARKER string:
+  #   - sdap-ci uses:    body.includes('ADR Architecture Validation Report')
+  #   - tier2 uses:      body.includes('Tier 2 Advisory Report')
+  # Distinct markers are REQUIRED for sdap-ci.yml + ci-tier2-advisory.yml to
+  # co-exist during the 14-day shadow window (spec MUST §123).
+  # ============================================================================
+  tier2-pr-comment:
+    name: Tier 2 Advisory PR Comment
+    runs-on: ubuntu-latest
+    needs:
+      - format
+      - lint
+      - full-unit-tests
+      - adr-compliance
+      - markdown-link-validator
+      - last-reviewed-stamp
+      - plugin-size
+    if: always() && github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Aggregate & post deduplicated PR comment
+        uses: actions/github-script@v8
+        env:
+          FORMAT_RESULT: ${{ needs.format.result }}
+          LINT_RESULT: ${{ needs.lint.result }}
+          UNIT_RESULT: ${{ needs.full-unit-tests.result }}
+          ADR_RESULT: ${{ needs.adr-compliance.result }}
+          MARKDOWN_RESULT: ${{ needs.markdown-link-validator.result }}
+          MARKDOWN_OUTPUT: ${{ needs.markdown-link-validator.outputs.result }}
+          LASTREVIEW_RESULT: ${{ needs.last-reviewed-stamp.result }}
+          PLUGIN_RESULT: ${{ needs.plugin-size.result }}
+        with:
+          script: |
+            // Map a `needs.<job>.result` value to an emoji+label.
+            // Possible values: success, failure, cancelled, skipped.
+            function fmt(name, result, outputResult) {
+              if (outputResult === 'skip') return `- ⏭️ **${name}**: pending (CICD-044 follow-up)`;
+              if (result === 'success') return `- ✅ **${name}**: pass`;
+              if (result === 'skipped') return `- ⏭️ **${name}**: skipped`;
+              if (result === 'cancelled') return `- ⚪ **${name}**: cancelled`;
+              return `- ⚠️ **${name}**: fail (advisory — not blocking)`;
+            }
+
+            let comment = '## 🛈 Tier 2 Advisory Report\n\n';
+            comment += '_Advisory checks only — none of these block merge. See ';
+            comment += '[spec FR-A03](../blob/master/projects/ci-cd-unit-test-remediation-r1/spec.md) ';
+            comment += 'for the binding contract._\n\n';
+
+            comment += '### Results\n\n';
+            comment += fmt('Format (dotnet format)',       process.env.FORMAT_RESULT)     + '\n';
+            comment += fmt('Lint (ESLint + Prettier)',     process.env.LINT_RESULT)       + '\n';
+            comment += fmt('Full Unit Tests (Debug)',      process.env.UNIT_RESULT)       + '\n';
+            comment += fmt('ADR Compliance (NetArchTest)', process.env.ADR_RESULT)        + '\n';
+            comment += fmt('Markdown Link Validator',      process.env.MARKDOWN_RESULT, process.env.MARKDOWN_OUTPUT) + '\n';
+            comment += fmt('Last Reviewed Stamp',          process.env.LASTREVIEW_RESULT) + '\n';
+            comment += fmt('Plugin Size (ADR-002)',        process.env.PLUGIN_RESULT)     + '\n';
+
+            comment += '\n---\n\n';
+            comment += '### How to investigate\n\n';
+            comment += '- View per-job logs in the [Actions tab](../actions).\n';
+            comment += '- Run locally: `dotnet test`, `dotnet format whitespace --verify-no-changes`, `npx prettier --check`, `npx eslint .`.\n';
+            comment += '- Tier 2 budget: **p95 ≤ 8 min** (spec NFR-02). If consistently over budget, file an issue tagged `ci-tier2-budget`.\n\n';
+            comment += '_Generated by `.github/workflows/ci-tier2-advisory.yml`._\n';
+
+            // ----------------------------------------------------------------
+            // Dedup pattern — COPIED VERBATIM from sdap-ci.yml lines 591-619
+            // (adr-pr-comment job). Only the ownership-marker text below
+            // differs: 'Tier 2 Advisory Report' vs 'ADR Architecture
+            // Validation Report'. Distinct markers are REQUIRED so the two
+            // workflows can co-exist during the 14-day shadow window
+            // (spec MUST §123).
+            // ----------------------------------------------------------------
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('Tier 2 Advisory Report')
+            );
+
+            // Create or update comment
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }

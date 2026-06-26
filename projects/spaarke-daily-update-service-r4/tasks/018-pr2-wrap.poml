@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>PR 2 wrap — commit + conflict-check + open PR</title>
+    <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>PR 2 wrap done. Build verified clean (dotnet build Sprk.Bff.Api Release: 0 errors, 17 pre-existing warnings). Conflict-check shows no external PR overlap — R3 PR #451 already merged. Per topology decision (notes/conflict-check/018.md), PR-1 and PR-2 share the same long-lived R4 worktree branch (work/spaarke-daily-update-service-r4); GitHub serves them as a single PR. Updated existing draft PR #456 title + body to cover combined PR-1+PR-2 scope. PR URL: https://github.com/spaarke-dev/spaarke/pull/456. PR remains in draft state. PR notes captured at `notes/deployments/018-pr2-opened.md`.</completion-notes>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>017</dependencies>
+    <blocks>020</blocks>
+    <tags>jps, devops</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>PR wrap — commit + push + open draft PR. Conflict-check runs against active R3 PR #451 + other in-flight work. No production code change but a fully-formed PR is created with summary mapping to FRs/ACs.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Run the `/conflict-check` skill to detect any file overlap with active R3 PR #451 or other in-flight branches. Commit the PR 2 deliverables: repo JSON file at `projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json`, audit reports under `projects/spaarke-daily-update-service-r4/notes/audit/`, deployment evidence under `projects/spaarke-daily-update-service-r4/notes/deployments/`, smoke notes under `projects/spaarke-daily-update-service-r4/notes/smoke/`, updated `TASK-INDEX.md`. Open draft PR titled "feat(daily-briefing-r4/PR-2): W0 — DAILY-BRIEFING-NARRATE playbook + reconcile 7" with body summarizing FR-4 + FR-5 deliverables, deployment evidence references, and a checklist mapping each FR/AC to its artifact.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Git + GitHub PR wrap operator using /conflict-check + /push-to-github skills.</role>
+
+  <goal>One draft PR opened against `work/spaarke-daily-update-service-r4` (or master per repo convention) containing PR 2 deliverables; conflict-check report shows no blocking overlaps; PR body cleanly maps FRs/ACs to artifacts; TASK-INDEX.md reflects PR 2 tasks all &#x2705;.</goal>
+
+  <context>
+    <background>R4 plan PR 2 wraps after task 017 smoke passes. Per CLAUDE.md decisions log (2026-06-25), R4 develops in parallel with R3 PR #451 — `/conflict-check` is binding to detect any file overlap before push. PR 2 deliverables are entirely data + docs (no production code change) so the conflict surface is small but should still be verified.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/plan.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §9">No secrets in commit. Verify staged files contain no .env / credentials / API keys.</constraint>
+    <constraint source="project">Conflict-check is binding — run before push. Document outcomes in `notes/conflict-check/018.md`.</constraint>
+    <constraint source="project">PR title format: `feat(daily-briefing-r4/PR-2): W0 — DAILY-BRIEFING-NARRATE playbook + reconcile 7` (exact).</constraint>
+    <constraint source="project">Draft PR — not ready-for-review until UAT smoke passes downstream.</constraint>
+    <constraint source="spec all PR 2 ACs">PR body must list each PR 2 FR (FR-4, FR-5) + AC + artifact reference.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+      <file>.claude/skills/push-to-github/SKILL.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/plan.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+    </files>
+    <patterns>
+      <pattern name="conflict-check" location=".claude/skills/conflict-check/SKILL.md">Detect file conflicts against active PRs.</pattern>
+      <pattern name="push-to-github" location=".claude/skills/push-to-github/SKILL.md">Spaarke git conventions for commit + push + PR open.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load knowledge files. Confirm all PR 2 tasks (010-017) are &#x2705; in TASK-INDEX.md.</step>
+    <step order="2">Run `/conflict-check` skill. Capture report in `notes/conflict-check/018.md`. If conflicts found with active PRs (e.g., R3 #451), document mitigation per `notes/risks.md`.</step>
+    <step order="3">Stage PR 2 deliverables explicitly by file path (no `git add .`): repo JSON, audit reports, deployment notes, smoke notes, updated TASK-INDEX.md, updated current-task.md if applicable.</step>
+    <step order="4">Verify NO secrets in staged files (`.env`, credentials, API keys). Eyeball-scan diff.</step>
+    <step order="5">Commit using `/push-to-github` skill or equivalent. Commit message: `feat(daily-briefing-r4/PR-2): W0 — DAILY-BRIEFING-NARRATE playbook + reconcile 7` with body mapping FR-4 + FR-5 to artifacts.</step>
+    <step order="6">Push branch.</step>
+    <step order="7">Open draft PR via `gh pr create --draft` titled "feat(daily-briefing-r4/PR-2): W0 — DAILY-BRIEFING-NARRATE playbook + reconcile 7" with summary listing FR-4 (playbook deployed) + FR-5 (reconcile 7) deliverables, audit/deployment/smoke evidence references, and an AC checklist (AC-4a, AC-4b, AC-5a, AC-5b, AC-5c).</step>
+    <step order="8">Capture PR URL in `notes/deployments/018-pr2-opened.md`.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to &#x2705;.</step>
+    <step order="10">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="conflict-check">Pre-push conflict detection</tool>
+    <tool name="git">Stage + commit + push</tool>
+    <tool name="gh">PR creation</tool>
+  </tools>
+
+  <outputs>
+    <output type="pr">1 draft PR opened on GitHub</output>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/conflict-check/018.md</output>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/deployments/018-pr2-opened.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Conflict-check report exists at `notes/conflict-check/018.md`; no blocking overlaps with R3 PR #451 or other active PRs (or mitigation documented).</criterion>
+    <criterion testable="true">Draft PR opened with exact title `feat(daily-briefing-r4/PR-2): W0 — DAILY-BRIEFING-NARRATE playbook + reconcile 7`.</criterion>
+    <criterion testable="true">PR body maps FR-4 + FR-5 to artifacts (repo JSON, audit reports, deployment notes, smoke).</criterion>
+    <criterion testable="true">No secrets committed (verified by manual diff scan).</criterion>
+    <criterion testable="true">PR URL captured in `notes/deployments/018-pr2-opened.md`.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: All PR 2 ACs (AC-4a, AC-4b, AC-5a, AC-5b, AC-5c). Hint: R3 PR #451 is OPEN and develops in parallel — file overlap is possible. Hint: Draft (not ready-for-review) because PR 3/PR 4 build on this and UAT happens after PR 5. Hint: per CLAUDE.md decisions log, repo JSON files are source-of-truth; PR body should reinforce that the deployed configs match repo JSON.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

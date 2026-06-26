@@ -1,81 +1,113 @@
 # Testing Constraints
 
-> **Domain**: Unit and Integration Testing
-> **See Also**: [Testing and Code Quality Procedure](../../docs/procedures/testing-and-code-quality.md) (definitive testing strategy)
-> **Last Updated**: 2026-04-05
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
-> **Status**: Current (removed incorrect ADR-022 reference, fixed pattern paths)
+> **Domain**: .NET unit + integration testing (server-side; `tests/unit/**` and `tests/integration/**`)
+> **Source ADR**: [ADR-038](../adr/INDEX.md) — Testing Strategy (Integration-Heavy Pyramid, Path-Based KEEP Categories)
+> **Operational Standard**: [`docs/standards/TEST-ARCHITECTURE.md`](../../docs/standards/TEST-ARCHITECTURE.md)
+> **See Also**: [Testing and Code Quality Procedure](../../docs/procedures/testing-and-code-quality.md), [`tests/CLAUDE.md`](../../tests/CLAUDE.md)
+> **Last Updated**: 2026-06-26
+> **Last Reviewed**: 2026-06-26
+> **Reviewed By**: ci-cd-unit-test-remediation-r1 task CICD-022 (Stream B directive rewrite per spec FR-B01)
+> **Status**: Current (full rewrite — superseded the coverage-% culture directives)
 
 ---
 
 ## When to Load This File
 
 Load when:
-- Writing unit tests for new code
-- Creating integration tests
-- Setting up test fixtures and mocks
-- Reviewing test coverage
-- Implementing test data builders
+- Writing unit tests for new code (`tests/unit/domain/**`)
+- Writing integration tests for any endpoint, auth path, mutation, tenant boundary, or regression scenario
+- Modifying or deleting any existing test file
+- Reviewing a PR that touches `tests/**`
+- Designing a new test fixture or test double
 
 ---
 
 ## MUST Rules
 
-### Test Structure (ADR-022)
+### 1. Six KEEP path categories (deletion-protected)
 
-- ✅ **MUST** write tests for all code changes
-- ✅ **MUST** mirror `src/` directory structure in `tests/unit/`
+Tests under these six paths are **KEEP-protected**. Deleting a file under any of these paths in a PR requires **a same-PR replacement** covering the same scenario. Enforced at code-review (`task-execute` Step 9.5) by path inspection — NOT by CSV lookup.
+
+| Path | Category | What lives here |
+|---|---|---|
+| `tests/integration/auth/**` | security-auth | Authentication, authorization, OBO exchange, claims handling, token validation |
+| `tests/integration/regression/**` | regression | One file per past production bug — "every bug = regression test" |
+| `tests/integration/data-mutation/**` | data-mutation | Writes, transactions, rollback semantics |
+| `tests/integration/tenant/**` | tenant-isolation | Tenant boundary enforcement (cross-tenant reads MUST 404, not 403) |
+| `tests/integration/contract/**` | endpoint-contract | Route + status + ProblemDetails + payload shape. "Every new endpoint = ≥1 integration test." |
+| `tests/unit/domain/**` | domain-logic | Pure domain logic: calculations, mappings, parsing, serialization, handler-internal orchestration |
+
+### 2. Authoring rules
+
+- ✅ **MUST** write a regression test for every fixed production bug — file lands under `tests/integration/regression/Issue{N}_*Tests.cs`
+- ✅ **MUST** write at least one integration test under `tests/integration/contract/**` for every new endpoint
+- ✅ **MUST** mirror `src/` directory structure within each KEEP path (e.g., `tests/integration/contract/Api/Ai/ChatEndpointsTests.cs` mirrors `src/server/api/.../Api/Ai/`)
 - ✅ **MUST** use xUnit as the test framework
-- ✅ **MUST** use NSubstitute for mocking
-- ✅ **MUST** follow Arrange-Act-Assert (AAA) pattern
-- ✅ **MUST** name tests using `{Method}_{Scenario}_{ExpectedResult}` convention
-
-### Unit Tests
-
+- ✅ **MUST** use Moq (NOT NSubstitute) for mocking — matches the existing codebase
+- ✅ **MUST** use FluentAssertions for assertions
+- ✅ **MUST** follow integration-first AAA pattern (see `tests/CLAUDE.md` for the template)
+- ✅ **MUST** name tests `{Method}_{Scenario}_{ExpectedResult}` (e.g., `GetDocument_WhenNotFound_ReturnsNotFound`)
 - ✅ **MUST** test one behavior per test method
-- ✅ **MUST** isolate unit tests from external dependencies
-- ✅ **MUST** mock all I/O operations (database, HTTP, file system)
-- ✅ **MUST** use test data builders for complex object creation
-- ✅ **MUST** keep unit tests fast (<100ms per test)
+- ✅ **MUST** use `TimeProvider` (or `FakeTimeProvider`) for any code that reads the current time, schedules, or delays. **Banned**: `Stopwatch`, `DateTime.UtcNow`, `Task.Delay` in tests.
 
-### Integration Tests
+### 3. Test isolation
 
-- ✅ **MUST** use `WebApplicationFactory<Program>` for API integration tests
-- ✅ **MUST** use test containers or in-memory databases where appropriate
-- ✅ **MUST** clean up test data after each test run
+- ✅ **MUST** isolate tests from external production services (use real test tenants for integration, in-memory for unit)
+- ✅ **MUST** clean up test data after each integration test run
 - ✅ **MUST** use separate test configuration (not production settings)
+- ✅ **MUST** be runnable in any order (no inter-test state dependencies)
 
-### Coverage Requirements
+### 4. Coverage is observation, not gate
 
-- ✅ **MUST** maintain minimum 80% line coverage for new code
-- ✅ **MUST** cover all public API endpoints with integration tests
-- ✅ **MUST** cover error handling paths (not just happy path)
+- 🚫 **MUST NOT** mandate any line-coverage percentage. Coverage is measured nightly via `nightly-health.yml` Tier 3 and surfaced in the rolling health report for awareness only. **Binding for ≥6 months from 2026-06-26 per ADR-038.**
 
 ---
 
 ## MUST NOT Rules
 
-### Anti-Patterns
+### Banned wiring-test antipatterns (5)
+
+1. ❌ **MUST NOT** use `Mock<HttpMessageHandler>` — transport-level mock encodes wire format into the test; breaks on production refactors without catching real bugs. **Use a fake `HttpClient` via test-double + integration boundary instead.**
+2. ❌ **MUST NOT** use `Mock<IServiceClient>` or other typed HttpClient wrappers as test doubles when they hide the HttpMessageHandler antipattern.
+3. ❌ **MUST NOT** write DI-registration tests (`Assert.NotNull(services.GetRequiredService<X>())` or similar container-introspection assertions). DI wiring is verified by the app actually starting; tests should assert behavior.
+4. ❌ **MUST NOT** write constructor null-argument tests (`Assert.Throws<ArgumentNullException>(() => new X(null))`). Add `ArgumentNullException.ThrowIfNull(x)` in production code if needed; do not test it.
+5. ❌ **MUST NOT** mock the class-under-test's collaborators when an in-memory test double + a real integration boundary is cheaper and more honest.
+
+### General anti-patterns
 
 - ❌ **MUST NOT** test implementation details (private methods directly)
-- ❌ **MUST NOT** use production databases or services in tests
-- ❌ **MUST NOT** create interdependent tests (tests must be isolated)
-- ❌ **MUST NOT** ignore or skip tests without documented reason
-- ❌ **MUST NOT** use `Thread.Sleep` or arbitrary delays in tests
-- ❌ **MUST NOT** hard-code test data that could change (use builders)
-
-### Mocking Anti-Patterns
-
+- ❌ **MUST NOT** use production databases or services
+- ❌ **MUST NOT** ignore or skip tests without a `[Trait("skip-reason", "<concrete reason + ticket>")]` marker and a follow-up issue
+- ❌ **MUST NOT** use `Thread.Sleep` or arbitrary delays (use `TimeProvider`/`FakeTimeProvider`)
 - ❌ **MUST NOT** mock value objects or DTOs
-- ❌ **MUST NOT** over-mock (verify behavior, not implementation)
-- ❌ **MUST NOT** use `Arg.Any<>()` when specific values matter
+- ❌ **MUST NOT** introduce a new test under any path OTHER than the 6 KEEP categories — if you have a test that doesn't fit, the test is the wrong shape OR a new KEEP category needs an ADR amendment first.
+
+---
+
+## Mock-boundary rules
+
+✅ **Acceptable mocking** (module boundary — between cohesive units):
+
+```csharp
+// Unit test of DocumentService — mock the repository (true module boundary)
+var repo = new Mock<IDocumentRepository>();
+repo.Setup(r => r.GetByIdAsync("123")).ReturnsAsync(new Document { Id = "123" });
+var sut = new DocumentService(repo.Object);
+```
+
+❌ **Banned mocking** (transport-level or wire-format):
+
+```csharp
+// Wiring test — couples to HttpClient internals; breaks on refactors
+var handler = new Mock<HttpMessageHandler>();
+handler.Protected().Setup<Task<HttpResponseMessage>>("SendAsync", ...);  // BANNED
+```
 
 ---
 
 ## Quick Reference Patterns
 
-### Test Naming
+### Test naming
 
 ```csharp
 // ✅ Good: Clear scenario and expected result
@@ -87,34 +119,42 @@ public async Task GetDocument_WhenNotFound_ReturnsNotFound()
 public async Task Test1()
 ```
 
-### AAA Pattern
+### Integration-first AAA (preferred)
 
 ```csharp
 [Fact]
-public async Task CreateContainer_WithValidInput_ReturnsCreatedContainer()
+public async Task CreateDocument_WithValidInput_ReturnsCreatedAndPersists()
 {
-    // Arrange
-    var request = new CreateContainerRequestBuilder().Build();
-    _speFileStore.CreateContainerAsync(Arg.Any<CreateContainerRequest>())
-        .Returns(new Container { Id = "123" });
+    // Arrange — real WebApplicationFactory<Program>; real test tenant; in-memory FakeTimeProvider
+    using var factory = new TestWebApplicationFactory();
+    var client = factory.CreateClient();
+    var request = new CreateDocumentRequestBuilder().Build();
 
     // Act
-    var result = await _sut.CreateContainer(request);
+    var response = await client.PostAsJsonAsync("/api/documents", request);
 
-    // Assert
-    result.Should().BeOfType<Created<Container>>();
+    // Assert — behavior (HTTP contract + persistence side effect)
+    response.StatusCode.Should().Be(HttpStatusCode.Created);
+    var created = await response.Content.ReadFromJsonAsync<Document>();
+    created!.Id.Should().NotBeNullOrEmpty();
+    var persisted = await factory.GetRepository().GetByIdAsync(created.Id);
+    persisted.Should().NotBeNull();
 }
 ```
 
-### Mocking with NSubstitute
+### TimeProvider usage
 
 ```csharp
-// Setup
-var speFileStore = Substitute.For<ISpeFileStore>();
-speFileStore.GetContainerAsync("123").Returns(new Container { Id = "123" });
+// ✅ Acceptable
+var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-06-26T12:00:00Z"));
+var sut = new ExpirationCalculator(time);
+time.Advance(TimeSpan.FromMinutes(5));
+sut.IsExpired(token).Should().BeTrue();
 
-// Verification
-await speFileStore.Received(1).GetContainerAsync("123");
+// ❌ Banned
+var stopwatch = Stopwatch.StartNew();
+await Task.Delay(5000);  // flake source
+stopwatch.Elapsed.Should().BeGreaterThan(TimeSpan.FromSeconds(4));
 ```
 
 ---
@@ -129,9 +169,11 @@ await speFileStore.Received(1).GetContainerAsync("123");
 
 ## Authoritative References
 
-- [Testing and Code Quality Procedure](../../docs/procedures/testing-and-code-quality.md) — Module-specific test guidance, coverage targets, architecture test enforcement
-- Note: ADR-022 is the PCF Platform Libraries ADR, not a testing strategy ADR. There is no dedicated testing-strategy ADR — testing rules live in the procedure doc above.
+- **[ADR-038](../adr/INDEX.md)** — Testing Strategy ADR (standalone — does NOT supersede ADR-022; ADR-022 is the unrelated PCF Platform Libraries ADR)
+- **[`docs/standards/TEST-ARCHITECTURE.md`](../../docs/standards/TEST-ARCHITECTURE.md)** — Operational standard (test pyramid, KEEP categories with examples, forcing-function enforcement)
+- **[`tests/CLAUDE.md`](../../tests/CLAUDE.md)** — Module-specific Claude session directive (integration-first template, repo conventions)
+- **[Testing and Code Quality Procedure](../../docs/procedures/testing-and-code-quality.md)** — Development-process guidance
 
 ---
 
-**Lines**: ~115
+**Lines**: ~165

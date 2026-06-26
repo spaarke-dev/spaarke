@@ -18,13 +18,12 @@
 //            Identity normalization contract; ADR-009, ADR-010, ADR-028, ADR-024.
 
 using System.Diagnostics;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 
 namespace Sprk.Bff.Api.Services.Ai.Membership;
@@ -39,32 +38,35 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 /// </summary>
 public sealed class IdentityNormalizationService : IIdentityNormalizationService
 {
-    /// <summary>Redis cache key prefix for per-user identity records.</summary>
+    /// <summary>
+    /// Cache resource label (per ITenantCache contract). The on-wire key becomes
+    /// <c>tenant:{tenantId}:membership-identity:{systemUserId:D}:v1</c>
+    /// (with the configured <c>InstanceName</c> prepended by StackExchangeRedisCache).
+    /// </summary>
     /// <remarks>
-    /// Format: <c>membership:identity:{systemUserId}</c>. The
-    /// <c>membership:</c> namespace prefix matches the membership-cache
-    /// invalidation channel introduced in Phase 2 (FR-2P2.8).
+    /// Phase 2 invalidation channel (FR-2P2.8) — a future per-user invalidation can
+    /// target this resource label without affecting other Redis namespaces.
     /// </remarks>
-    internal const string CacheKeyPrefix = "membership:identity:";
+    internal const string CacheResource = "membership-identity";
+
+    /// <summary>Cache schema version per ADR-009.</summary>
+    private const int CacheVersion = 1;
 
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
-
     private readonly IDataverseService _dataverse;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly IEnumerable<IIdentityOrganizationResolver> _organizationResolvers;
     private readonly ILogger<IdentityNormalizationService> _logger;
 
     public IdentityNormalizationService(
         IDataverseService dataverse,
-        IDistributedCache cache,
+        ITenantCache cache,
         IEnumerable<IIdentityOrganizationResolver> organizationResolvers,
         IOptions<MembershipOptions> options,
-        ILogger<IdentityNormalizationService> logger)
+        ILogger<IdentityNormalizationService> logger,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         ArgumentNullException.ThrowIfNull(dataverse);
         ArgumentNullException.ThrowIfNull(cache);
@@ -74,6 +76,7 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
 
         _dataverse = dataverse;
         _cache = cache;
+        _httpContextAccessor = httpContextAccessor;
         _organizationResolvers = organizationResolvers;
         _logger = logger;
         _ = options.Value; // Currently unused at runtime; reserved for future tuning
@@ -81,6 +84,16 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
                            // Resolving here surfaces binding errors at construction
                            // rather than first call.
     }
+
+    /// <summary>
+    /// Resolves the tenant ID for tenant-scoped cache keys (FR-05).
+    /// Reads the AAD <c>tid</c> claim from the current HttpContext per ADR-028;
+    /// falls back to <c>"anonymous"</c> when no HttpContext is available.
+    /// </summary>
+    private string GetTenantId()
+        => _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
+            ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? "anonymous";
 
     /// <inheritdoc/>
     public async Task<PersonIdentity> ResolveAsync(Guid systemUserId, CancellationToken ct)
@@ -95,8 +108,9 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
         ct.ThrowIfCancellationRequested();
 
         // ── Cache lookup ────────────────────────────────────────────────────
-        var cacheKey = CacheKeyPrefix + systemUserId.ToString("D");
-        var cached = await TryGetFromCacheAsync(cacheKey, ct).ConfigureAwait(false);
+        var tenantId = GetTenantId();
+        var cacheId = systemUserId.ToString("D");
+        var cached = await TryGetFromCacheAsync(tenantId, cacheId, ct).ConfigureAwait(false);
         if (cached is not null)
         {
             _logger.LogDebug(
@@ -154,7 +168,7 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
             AccountId: accountId,
             OrganizationIds: organizationIds);
 
-        await TrySetCacheAsync(cacheKey, identity, ct).ConfigureAwait(false);
+        await TrySetCacheAsync(tenantId, cacheId, identity, ct).ConfigureAwait(false);
 
         sw.Stop();
         _logger.LogInformation(
@@ -410,18 +424,18 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
 
     // ── Cache helpers ──────────────────────────────────────────────────────
     private async Task<PersonIdentity?> TryGetFromCacheAsync(
-        string cacheKey,
+        string tenantId,
+        string cacheId,
         CancellationToken ct)
     {
         try
         {
-            var bytes = await _cache.GetAsync(cacheKey, ct).ConfigureAwait(false);
-            if (bytes is null || bytes.Length == 0)
-            {
-                return null;
-            }
-
-            return JsonSerializer.Deserialize<PersonIdentity>(bytes, JsonOptions);
+            return await _cache.GetAsync<PersonIdentity>(
+                tenantId,
+                CacheResource,
+                cacheId,
+                CacheVersion,
+                ct: ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -432,26 +446,29 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
             // Cache failure must NOT break resolution — fall through to re-resolve.
             _logger.LogWarning(
                 ex,
-                "IdentityNormalizationService failed to read cache for {CacheKey}; " +
+                "IdentityNormalizationService failed to read cache for tenant={TenantId} id={CacheId}; " +
                 "falling through to live resolve",
-                cacheKey);
+                tenantId, cacheId);
             return null;
         }
     }
 
     private async Task TrySetCacheAsync(
-        string cacheKey,
+        string tenantId,
+        string cacheId,
         PersonIdentity identity,
         CancellationToken ct)
     {
         try
         {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(identity, JsonOptions);
             await _cache.SetAsync(
-                cacheKey,
-                bytes,
-                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheTtl },
-                ct).ConfigureAwait(false);
+                tenantId,
+                CacheResource,
+                cacheId,
+                CacheVersion,
+                identity,
+                CacheTtl,
+                ct: ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -461,9 +478,9 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
         {
             _logger.LogWarning(
                 ex,
-                "IdentityNormalizationService failed to write cache for {CacheKey}; " +
+                "IdentityNormalizationService failed to write cache for tenant={TenantId} id={CacheId}; " +
                 "next call will re-resolve (no functional impact)",
-                cacheKey);
+                tenantId, cacheId);
         }
     }
 

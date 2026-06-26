@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Migrate Document/AI services to ITenantCache</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>012</dependencies>
+    <blocks>014</blocks>
+    <tags>bff-api, cache, redis, refactoring, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + ai + .cs modifications + interacts with AI rate-limited paths</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Atomic migration ordering</parallel-reason>
+  </metadata>
+  <prompt>Migrate Document Intelligence + other AI service direct `IDistributedCache.` calls to `ITenantCache`. Specifically: `EmbeddingCache`, `GraphTokenCache`, `GraphMetadataCache`, any `Services/Ai/*` consumer outside Chat/Membership (covered already). Preserve `SemaphoreSlim` rate-limit patterns (ADR-013).</prompt>
+  <role>Spaarke .NET developer with AI service rate-limit familiarity.</role>
+  <goal>`grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/Services/Ai/` (excluding Chat + Membership directories which are already migrated) returns ZERO unflagged matches.</goal>
+  <context>
+    <background>Existing wrappers (`EmbeddingCache`, `GraphTokenCache`, `GraphMetadataCache`, `CachedAccessDataSource`) use `IDistributedCache` INTERNALLY. Their public API stays — internal calls migrate to `ITenantCache`. Per spec Assumption: if a wrapper's public API needs to change to expose tenantId, escalate.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-06 atomic migration.</constraint>
+    <constraint source="spec">Assumption — preserve existing wrapper public APIs; escalate if tenantId surfacing requires API change.</constraint>
+    <constraint source="ADR-013">`SemaphoreSlim` rate-limit patterns preserved.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/ITenantCache.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Open inventory Document/AI section.</step>
+    <step order="2">For each wrapper (`EmbeddingCache`, etc.): inject `ITenantCache`; replace internal `IDistributedCache.` calls; preserve external API contract. If tenantId is unavailable, escalate.</step>
+    <step order="3">Verify `SemaphoreSlim` patterns intact.</step>
+    <step order="4">`dotnet build` + `dotnet test` (AI tests).</step>
+    <step order="5">Update inventory + `TASK-INDEX.md` + `current-task.md`.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Inventory + AI wrappers</tool>
+    <tool name="Edit">Per-wrapper migration</tool>
+    <tool name="Bash">dotnet build + test</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/* (modified — excluding Chat + Membership)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/Services/Ai/` excluding Chat+Membership returns ZERO unflagged matches.</criterion>
+    <criterion testable="true">Existing wrapper public APIs unchanged.</criterion>
+    <criterion testable="true">`dotnet test` AI service tests pass; `SemaphoreSlim` rate-limit assertions intact.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor.</protocol>
+  </execution>
+</task>

@@ -38,14 +38,14 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
-using System.Text.Json;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 
 namespace Sprk.Bff.Api.Services.Ai.Membership;
@@ -58,20 +58,22 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 /// </summary>
 public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
 {
-    /// <summary>Redis cache key prefix for per-entity discovery results.</summary>
+    /// <summary>
+    /// Cache resource label (per ITenantCache contract). On-wire key becomes
+    /// <c>tenant:{tenantId}:membership-discovery:{entityType}:v1</c>.
+    /// </summary>
     /// <remarks>
-    /// Format: <c>membership:discovery:{entityType}</c>. The <c>membership:</c>
-    /// namespace prefix matches the membership-cache invalidation channel
-    /// introduced in Phase 2 (FR-2P2.8) — a future
-    /// <c>refresh-metadata</c> admin endpoint (task 036) can wipe all entries
-    /// under this prefix without affecting other Redis namespaces.
+    /// Phase 2 invalidation (FR-2P2.8): admin <c>refresh-metadata</c> endpoint
+    /// (task 036) wipes all entries by entity. NOTE (NFR-08 SYSTEM-LEVEL exception
+    /// candidate, inventory group 017): the underlying field-discovery catalog
+    /// is Dataverse-entity-schema metadata — effectively org-wide. Per inventory
+    /// recommendation, migrated as tenant-scoped because one BFF == one tenant
+    /// (Q5 audit 2026-05-27); within a tenant, the data is org-wide.
     /// </remarks>
-    internal const string CacheKeyPrefix = "membership:discovery:";
+    internal const string CacheResource = "membership-discovery";
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
+    /// <summary>Cache schema version per ADR-009.</summary>
+    private const int CacheVersion = 1;
 
     // Strip trailing decimal digits from a logical name suffix, e.g.,
     // "assignedattorney1" → "assignedattorney". Matches the CamelCase strategy
@@ -81,7 +83,8 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly IDataverseService _dataverse;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly MembershipOptions _options;
     private readonly ILogger<MembershipFieldDiscoveryService> _logger;
 
@@ -94,9 +97,10 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
 
     public MembershipFieldDiscoveryService(
         IDataverseService dataverse,
-        IDistributedCache cache,
+        ITenantCache cache,
         IOptions<MembershipOptions> options,
-        ILogger<MembershipFieldDiscoveryService> logger)
+        ILogger<MembershipFieldDiscoveryService> logger,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         ArgumentNullException.ThrowIfNull(dataverse);
         ArgumentNullException.ThrowIfNull(cache);
@@ -105,9 +109,21 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
 
         _dataverse = dataverse;
         _cache = cache;
+        _httpContextAccessor = httpContextAccessor;
         _options = options.Value;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Resolves the tenant ID for tenant-scoped cache keys (FR-05).
+    /// Reads the AAD <c>tid</c> claim from the current HttpContext per ADR-028;
+    /// falls back to <c>"anonymous"</c> when no HttpContext is available (e.g.,
+    /// admin / background-job invocations of <c>InvalidateCacheAsync</c>).
+    /// </summary>
+    private string GetTenantId()
+        => _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
+            ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? "anonymous";
 
     /// <inheritdoc/>
     public async Task<DiscoveryResult> DiscoverAsync(string entityLogicalName, CancellationToken ct)
@@ -122,10 +138,10 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         ct.ThrowIfCancellationRequested();
 
         var normalizedName = entityLogicalName.Trim().ToLowerInvariant();
-        var cacheKey = CacheKeyPrefix + normalizedName;
+        var tenantId = GetTenantId();
 
         // ── 1. Cache lookup ────────────────────────────────────────────────
-        var cached = await TryGetFromCacheAsync(cacheKey, ct).ConfigureAwait(false);
+        var cached = await TryGetFromCacheAsync(tenantId, normalizedName, ct).ConfigureAwait(false);
         if (cached is not null)
         {
             _logger.LogDebug(
@@ -146,7 +162,7 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         var result = BuildDiscoveryResult(normalizedName, lookups);
 
         // ── 6. Cache + return ──────────────────────────────────────────────
-        await TrySetCacheAsync(cacheKey, result, ct).ConfigureAwait(false);
+        await TrySetCacheAsync(tenantId, normalizedName, result, ct).ConfigureAwait(false);
 
         sw.Stop();
         _logger.LogInformation(
@@ -453,18 +469,18 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
 
     // ── Cache helpers ──────────────────────────────────────────────────────
     private async Task<DiscoveryResult?> TryGetFromCacheAsync(
-        string cacheKey,
+        string tenantId,
+        string entityType,
         CancellationToken ct)
     {
         try
         {
-            var bytes = await _cache.GetAsync(cacheKey, ct).ConfigureAwait(false);
-            if (bytes is null || bytes.Length == 0)
-            {
-                return null;
-            }
-
-            return JsonSerializer.Deserialize<DiscoveryResult>(bytes, JsonOptions);
+            return await _cache.GetAsync<DiscoveryResult>(
+                tenantId,
+                CacheResource,
+                entityType,
+                CacheVersion,
+                ct: ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -474,45 +490,40 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         {
             // Cache failure must NOT break discovery — fall through to live fetch.
             _logger.LogWarning(ex,
-                "MembershipFieldDiscoveryService failed to read cache for {CacheKey}; " +
+                "MembershipFieldDiscoveryService failed to read cache for tenant={TenantId} entity={EntityType}; " +
                 "falling through to live metadata fetch",
-                cacheKey);
+                tenantId, entityType);
             return null;
         }
     }
 
     private async Task TrySetCacheAsync(
-        string cacheKey,
+        string tenantId,
+        string entityType,
         DiscoveryResult result,
         CancellationToken ct)
     {
         try
         {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(result, JsonOptions);
             var ttlMinutes = _options.MetadataCacheTtlMinutes > 0
                 ? _options.MetadataCacheTtlMinutes
                 : 60;
             await _cache.SetAsync(
-                cacheKey,
-                bytes,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(ttlMinutes)
-                },
-                ct).ConfigureAwait(false);
+                tenantId,
+                CacheResource,
+                entityType,
+                CacheVersion,
+                result,
+                TimeSpan.FromMinutes(ttlMinutes),
+                ct: ct).ConfigureAwait(false);
 
-            // Track the lowercase-normalized entity-type derived from the cache key
-            // so InvalidateCacheAsync(null, ...) can enumerate populated entries
-            // (IDistributedCache exposes no portable scan-by-prefix API). Cache write
-            // succeeded before we reach this point — recording on success preserves the
-            // invariant that the tracking set never references keys that don't exist.
-            if (cacheKey.StartsWith(CacheKeyPrefix, StringComparison.Ordinal))
+            // Track the lowercase-normalized entity-type so InvalidateCacheAsync(null, ...)
+            // can enumerate populated entries (ITenantCache exposes no portable scan-by-prefix API).
+            // Cache write succeeded — recording on success preserves the invariant that the
+            // tracking set never references keys that don't exist.
+            if (!string.IsNullOrWhiteSpace(entityType))
             {
-                var entityType = cacheKey.Substring(CacheKeyPrefix.Length);
-                if (!string.IsNullOrWhiteSpace(entityType))
-                {
-                    _populatedEntityKeys.TryAdd(entityType, 0);
-                }
+                _populatedEntityKeys.TryAdd(entityType, 0);
             }
         }
         catch (OperationCanceledException)
@@ -522,9 +533,9 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "MembershipFieldDiscoveryService failed to write cache for {CacheKey}; " +
+                "MembershipFieldDiscoveryService failed to write cache for tenant={TenantId} entity={EntityType}; " +
                 "next call will re-resolve (no functional impact)",
-                cacheKey);
+                tenantId, entityType);
         }
     }
 
@@ -536,6 +547,8 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
     {
         ct.ThrowIfCancellationRequested();
 
+        var tenantId = GetTenantId();
+
         // Single-entity path: targeted invalidation. We invalidate regardless of
         // whether the entity is in the tracked set — the operator may know about a
         // cache entry the service never populated (e.g., set by an older process
@@ -544,11 +557,11 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         if (!string.IsNullOrWhiteSpace(entityLogicalName))
         {
             var normalized = entityLogicalName.Trim().ToLowerInvariant();
-            var cacheKey = CacheKeyPrefix + normalized;
 
             try
             {
-                await _cache.RemoveAsync(cacheKey, ct).ConfigureAwait(false);
+                await _cache.RemoveAsync(tenantId, CacheResource, normalized, CacheVersion, ct: ct)
+                    .ConfigureAwait(false);
                 _populatedEntityKeys.TryRemove(normalized, out _);
                 _logger.LogInformation(
                     "MembershipFieldDiscoveryService invalidated cache for entity={EntityType}",
@@ -586,10 +599,10 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         foreach (var entityType in keysToInvalidate)
         {
             ct.ThrowIfCancellationRequested();
-            var cacheKey = CacheKeyPrefix + entityType;
             try
             {
-                await _cache.RemoveAsync(cacheKey, ct).ConfigureAwait(false);
+                await _cache.RemoveAsync(tenantId, CacheResource, entityType, CacheVersion, ct: ct)
+                    .ConfigureAwait(false);
                 _populatedEntityKeys.TryRemove(entityType, out _);
                 invalidated.Add(entityType);
             }

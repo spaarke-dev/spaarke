@@ -98,7 +98,8 @@ The dependency direction is strictly one-way: `Spaarke.Core` depends on `Spaarke
 - **MUST**: Use `IDataverseService` or narrower ISP interface for Dataverse access — never call `DataverseWebApiClient` directly from endpoints
 - **MUST**: Register `AuthorizationService` with ordered `IAuthorizationRule` chain — rule evaluation order matters
 - **MUST**: Follow fail-closed pattern — return `AccessRights.None` on any authorization error
-- **MUST**: Use `DistributedCacheExtensions.CreateKey()` for cache key construction — ensures `sdap:` prefix consistency
+- **MUST** (non-BFF callers): Use `DistributedCacheExtensions.CreateKey()` for cache key construction — ensures `spaarke:` prefix consistency (formerly `sdap:`; rebranded by `spaarke-redis-cache-remediation-r1` FR-07).
+- **MUST** (BFF callers): Use `ITenantCache` wrapper (`Sprk.Bff.Api.Infrastructure.Cache.ITenantCache`); direct `IDistributedCache` or `DistributedCacheExtensions.CreateKey` calls in `Sprk.Bff.Api/` are prohibited except for `SystemCacheKeys`-enumerated exceptions.
 - **MUST NOT**: Add circular dependencies — `Spaarke.Core` depends on `Spaarke.Dataverse`, never the reverse at the project level
 - **MUST NOT**: Create per-request `DataverseWebApiClient` instances — it is designed as a singleton with thread-safe token refresh
 - **MUST NOT**: Use `ServiceClient` from `Microsoft.PowerPlatform.Dataverse.Client` for new code — `DataverseWebApiClient` is the replacement

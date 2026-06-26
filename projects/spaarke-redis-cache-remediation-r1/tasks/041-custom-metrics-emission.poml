@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Custom metrics emission from ITenantCache</title>
+    <phase>4: Observability</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>006,019</dependencies>
+    <blocks>042</blocks>
+    <tags>bff-api, monitoring, ai, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + .cs modification + central metric emission point</rigor-reason>
+    <parallel-group>Phase4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Code change feeds 042 verification</parallel-reason>
+  </metadata>
+  <prompt>Add custom metric emission from `TenantCache` (the default `ITenantCache` impl): emit `cache.hits`, `cache.misses`, `cache.hit_rate` (computed from hits/(hits+misses) over interval), `cache.redis_p95_ms` (per-call latency histogram → P95) with a `resource` dimension. Use `Meter` from `System.Diagnostics.Metrics` (works with App Insights OpenTelemetry pipeline).</prompt>
+  <role>Spaarke .NET developer; metrics.</role>
+  <goal>`TenantCache.GetAsync`/`SetAsync` emit metrics with `resource` dimension. Build + tests pass; publish-size delta ≤+0.05 MB (single Meter + a few counters).</goal>
+  <context><background>The wrapper is the single seam — all cache calls flow through it, so metric emission centralizes here.</background><relevant-files><file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs</file></relevant-files></context>
+  <constraints>
+    <constraint source="ADR-029">Publish-size delta tracking.</constraint>
+    <constraint source="spec">FR-16.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Inject `IMeterFactory` (or use static `Meter` with name `"Spaarke.Cache"`) into `TenantCache`.</step>
+    <step order="2">Create counters: `cache.hits`, `cache.misses` (Counter&lt;long&gt;); histogram: `cache.redis_call_duration_ms` (Histogram&lt;double&gt;). `cache.hit_rate` is a derived metric (computed in App Insights / Prometheus, not emitted directly).</step>
+    <step order="3">In `GetAsync`: stopwatch around `IDistributedCache.GetAsync` call; record histogram. If result non-null → increment hits; else → misses. Tag with `resource` dimension.</step>
+    <step order="4">In `SetAsync`: histogram on `IDistributedCache.SetAsync` call.</step>
+    <step order="5">Verify `Sprk.Bff.Api.csproj` references a metrics package (App Insights / OpenTelemetry already present). If missing OpenTelemetry exporter, add (small).</step>
+    <step order="6">`dotnet build` + `dotnet test`.</step>
+    <step order="7">Measure publish-size delta.</step>
+    <step order="8">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">TenantCache</tool><tool name="Edit">add metrics</tool><tool name="Bash">build/test/publish</tool></tools>
+  <outputs><output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs (modified)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Metrics emit on every wrapper call (verified by adding a test that exercises `IMeterFactory.CreateMeter` and reads counter values).</criterion>
+    <criterion testable="true">`resource` dimension present on each metric.</criterion>
+    <criterion testable="true">Publish-size delta ≤+0.05 MB.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>

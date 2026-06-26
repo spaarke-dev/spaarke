@@ -13,6 +13,7 @@ export { WaitForm } from './WaitForm';
 export { UpdateRecordForm } from './UpdateRecordForm';
 export { CreateNotificationForm } from './CreateNotificationForm';
 export { LookupUserMembershipForm } from './LookupUserMembershipForm';
+export { EntityNameValidatorForm } from './EntityNameValidatorForm';
 export { VariableReferencePanel } from './VariableReferencePanel';
 export { NodeValidationBadge } from './NodeValidationBadge';
 export { ConditionEditor } from './ConditionEditor';

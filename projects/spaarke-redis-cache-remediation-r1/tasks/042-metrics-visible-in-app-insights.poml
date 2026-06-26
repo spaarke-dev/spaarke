@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Verify custom metrics visible in App Insights</title>
+    <phase>4: Observability</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>none</blocks>
+    <tags>azure, monitoring, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Telemetry verification</rigor-reason>
+    <parallel-group>Phase4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Deploy task-041 changes to dev (via existing CI/CD or manual `bff-deploy` skill). Verify `cache.hits`, `cache.misses`, `cache.redis_call_duration_ms` visible in App Insights metrics explorer with `resource` dimension.</prompt>
+  <role>Spaarke operator.</role>
+  <goal>App Insights metrics explorer shows the custom metrics post-deploy. Reference workbook section drafted for `redis-cache-azure-setup.md` (task 051).</goal>
+  <context><background>End-to-end verification of metric emission pipeline.</background><relevant-files><file>App Insights</file></relevant-files></context>
+  <constraints><constraint source="spec">FR-16.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Deploy task-041 changes (via `bff-deploy` skill or CI/CD).</step>
+    <step order="2">Generate cache traffic.</step>
+    <step order="3">Open App Insights metrics explorer; query custom metrics with `resource` dimension.</step>
+    <step order="4">Document in `notes/custom-metrics-verification.md`.</step>
+    <step order="5">Draft workbook section for `redis-cache-azure-setup.md` (used in task 051).</step>
+    <step order="6">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">deploy + query</tool><tool name="Write">notes + workbook draft</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/custom-metrics-verification.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Custom metrics visible in App Insights with `resource` dimension.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

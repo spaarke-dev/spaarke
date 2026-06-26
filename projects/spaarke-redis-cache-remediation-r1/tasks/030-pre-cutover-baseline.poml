@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Pre-cutover baseline (App Settings, KV name, MI permissions)</title>
+    <phase>3: Dev environment cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>019,029</dependencies>
+    <blocks>031,032,033</blocks>
+    <tags>azure, deploy, infrastructure, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Pre-flight Azure inspection; no changes</rigor-reason>
+    <parallel-group>Phase3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase 3 cutover sequence — strictly serial</parallel-reason>
+  </metadata>
+  <prompt>Capture pre-cutover state to `notes/dev-cutover-baseline.md`: current `spaarke-bff-dev` App Settings (esp. `Redis*` + `ConnectionStrings__Redis`), actual dev Key Vault name (verify Assumption §1: `spaarke-spekvcert` vs `sprkspaarkedev-aif-kv` — pick the one that exists and is in scope), MI role assignments on that KV, current Redis state in `spe-infrastructure-westus2` RG.</prompt>
+  <role>Spaarke operator with Azure CLI access.</role>
+  <goal>`notes/dev-cutover-baseline.md` documents: BFF App Service state, current Redis App Settings values, target KV name (verified), MI roles, legacy Redis existence + tags. All subsequent cutover steps reference this baseline.</goal>
+  <context><background>Resolves spec Assumption §1 (KV name ambiguity) before any secret upsert. Captures rollback baseline.</background><relevant-files><file>spaarke-bff-dev (Azure resource)</file><file>spaarke-spekvcert OR alternate dev KV (Azure resource)</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">NFR-05 — no touch prod/demo.</constraint>
+    <constraint source="spec">Assumption §1 — KV name verification.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">`az webapp config appsettings list -g rg-spaarke-dev -n spaarke-bff-dev --query "[?contains(name, 'Redis')]"`. Capture all Redis settings.</step>
+    <step order="2">`az keyvault list -g rg-spaarke-dev` and `az keyvault list -g spe-infrastructure-westus2`. Find the actual dev KV; verify against Assumption §1.</step>
+    <step order="3">`az role assignment list --scope $kvId --query "[?principalType=='ServicePrincipal']"` — confirm BFF MI has read access to KV secrets.</step>
+    <step order="4">`az redis list -g spe-infrastructure-westus2 --query "[].name"` — confirm legacy `spe-redis-dev-67e2xz` exists; capture its current tags.</step>
+    <step order="5">Write `notes/dev-cutover-baseline.md` with table of findings + the resolved KV name as canonical for subsequent tasks.</step>
+    <step order="6">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">az CLI queries</tool><tool name="Write">baseline notes</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/dev-cutover-baseline.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Baseline file lists all Redis App Settings + canonical KV name + MI roles.</criterion>
+    <criterion testable="true">Assumption §1 resolved: actual dev KV name documented.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

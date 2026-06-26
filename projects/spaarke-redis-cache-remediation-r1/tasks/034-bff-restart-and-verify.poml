@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>BFF restart + verify (Success Criterion #1 + sister-project gate)</title>
+    <phase>3: Dev environment cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>033</dependencies>
+    <blocks>035,038</blocks>
+    <tags>azure, deploy, app-service, verification, bff-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Gate signal verification; binds Success Criterion #1 + sister project NFR-13</rigor-reason>
+    <parallel-group>Phase3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase 3 cutover sequence — strictly serial</parallel-reason>
+  </metadata>
+  <prompt>Restart `spaarke-bff-dev`. Stream startup logs. Verify the exact line `"Distributed cache: Redis enabled with instance name 'spaarke:'"` appears with NO in-memory warning line. Hit `/healthz` — expect 200. This is Success Criterion #1 — the gate signal for sister project NFR-13.</prompt>
+  <role>Spaarke operator; live verification.</role>
+  <goal>BFF startup log contains the exact expected line; `/healthz` returns 200; cutover log captures the verification with timestamp.</goal>
+  <context><background>This is THE gate signal. Once this task passes, the sister project (`spaarke-ai-azure-setup-dev-r1`) can begin its Phase 3.</background><relevant-files><file>spaarke-bff-dev (Azure App Service)</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">FR-14 + Success Criterion #1.</constraint>
+    <constraint source="spec">NFR-11 — gate signal for sister project.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cutover-deploy-log.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">`az webapp restart -g rg-spaarke-dev -n spaarke-bff-dev`. Note timestamp.</step>
+    <step order="2">`az webapp log tail -g rg-spaarke-dev -n spaarke-bff-dev` — capture ~60 seconds of startup output.</step>
+    <step order="3">Grep captured output for: (a) the exact line `"Distributed cache: Redis enabled with instance name 'spaarke:'"`, (b) absence of any in-memory warning line.</step>
+    <step order="4">Hit `https://spaarke-bff-dev.azurewebsites.net/healthz`. Verify 200.</step>
+    <step order="5">If startup log does NOT show the expected line OR shows an in-memory warning OR `/healthz` ≠ 200: rollback per `redis-cache-azure-setup.md` (task 051 will produce that doc; for this task fall back to: revert App Settings to baseline from task 030).</step>
+    <step order="6">Append timestamped verification record to `notes/cutover-deploy-log.md` — this is the gate-signal record cited by sister project's NFR-13.</step>
+    <step order="7">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">az webapp restart, log tail, curl healthz</tool><tool name="Write">verification log</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/cutover-deploy-log.md (gate-signal record appended)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Startup log contains exact line `"Distributed cache: Redis enabled with instance name 'spaarke:'"`.</criterion>
+    <criterion testable="true">Startup log does NOT contain in-memory warning.</criterion>
+    <criterion testable="true">`/healthz` returns 200.</criterion>
+    <criterion testable="true">Gate-signal record appended to cutover log with timestamp.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>
