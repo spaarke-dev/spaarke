@@ -166,3 +166,11 @@ This is a verification-completeness gap, not a design flaw — the architecture 
 - **Phase 2 membership infrastructure** (junction-table + Service Bus topic): remain feature-gated OFF per spec §Out of Scope
 - **AI Search "matter context" knowledge node for `/narrate`**: deferred per spec §Out of Scope
 - **Insights Engine integration**: deferred per spec §Out of Scope
+
+### Compare-to-peer visual-diff AC (added 2026-06-26 UAT hotfix #2)
+
+Task 004's `NODE_TYPE_INFO` entry for `entityNameValidator` was structurally incomplete — the change was confined to `BaseNode.tsx` color scheme + `NODE_TYPE_INFO` + `EntityNameValidatorForm` and never added a dedicated `EntityNameValidatorNode.tsx` to register in `nodes/index.ts` `nodeTypes`. Result: React Flow rendered the type as a default plain box on the canvas with no icon, no category label, no output preview, and no Configured indicator. The companion gap — `Label required` was decorative because the per-ActionType validator was never added to `canvasValidation.ts` — was a sibling oversight from the same task.
+
+**Lesson for future palette / new-node tasks**: AC criteria for any "add new node type" task MUST include a `compare-to-peer` visual-diff step that drags the new node alongside a known-good peer (Wait, AI Analysis) and verifies presence of EACH structural element (icon, type label, output preview, Configured indicator, minimap color). The check is one screenshot; the lesson cost two UAT hotfixes.
+
+**Lesson for required-field forms**: a Fluent `Label required` prop is purely visual. Required-field enforcement requires a per-ActionType validator function in `canvasValidation.ts` returning `'error'` severity for missing values. Future tasks adding `*Form.tsx` with required fields MUST also add `validate<NodeType>Node` alongside the peer (LookupUserMembership / EntityNameValidator are the canonical templates).

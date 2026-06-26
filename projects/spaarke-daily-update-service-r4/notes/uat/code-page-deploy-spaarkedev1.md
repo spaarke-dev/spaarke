@@ -145,3 +145,63 @@ During UAT of PlaybookBuilder, two surfaces surfaced as missing despite R4 task 
 - BFF + other code pages (DailyBriefing, SpaarkeAi) were NOT redeployed — they don't reference `entityNameValidator`.
 - The errant `sprk_node_type` column created during initial MCP `update_table` investigation was deleted before the live fix (Web API `DELETE` against the EntityDefinitions attribute path); confirmed not present in the post-publish describe.
 
+---
+
+## UAT Hotfix #2 — Node visual parity + required-field validation (2026-06-26)
+
+A second UAT pass surfaced two further gaps in the R4 task 004 wiring that the 08:28 hotfix did not catch:
+
+### Gap A — Canvas node rendered as a default plain box (no icon, type label, or output preview)
+
+**Root cause**: `nodes/index.ts` `nodeTypes` registry (consumed by @xyflow/react v12 via `<ReactFlow nodeTypes={…} />`) was missing the `entityNameValidator` entry. Without a custom node component for the type, React Flow falls back to its default plain-box renderer. Peer nodes (Start, AI Analysis, Wait, etc.) each have a dedicated `*Node.tsx` component that delegates to `BaseNode` with an icon + type label + output preview. Task 004 had wired the type into `BaseNode.tsx:141` color scheme + `NODE_TYPE_INFO` (palette command catalog) + `EntityNameValidatorForm` but never authored a node component for the canvas.
+
+**Pieces that were missing on canvas**:
+1. Icon on the left (peers: `Play20Regular`, `BrainCircuit20Regular`, `Clock20Regular` etc.)
+2. Category/type label below the node name (peers: "Start" / "AI Analysis" / "Wait" — passed as `typeLabel` prop)
+3. `Output: {data.outputVariable}` preview line (peers render conditionally when `data.outputVariable` is set)
+4. "Configured" / "Needs configuration" indicator (BaseNode already handles this — it just doesn't run because the registry fallback bypasses BaseNode entirely)
+
+**Fix**: Created `src/client/code-pages/PlaybookBuilder/src/components/nodes/EntityNameValidatorNode.tsx` mirroring the WaitNode / AiAnalysisNode pattern. Wired it into the `nodeTypes` registry at `nodes/index.ts` (new line under `wait`). Also updated `PlaybookCanvas.tsx` MiniMap color mapping to include `entityNameValidator` in the magenta family alongside `wait`.
+
+**Icon chosen**: `ShieldCheckmark20Regular` — semantically signals "validation / scrubbing pass". Selected over `Broom20Regular` (too literal — implies the executor cleans rather than gates) and `ScanText20Regular` (too OCR-adjacent). The shield-with-checkmark aesthetic matches the existing Tool family's intent of "post-LLM gate".
+
+**Type label**: `"Tool"` — per task 003/004 design EntityNameValidator IS a Tool node (distinct from AI Analysis / Output / Control / Workflow families). The label distinguishes it on the canvas without conflating it with neighbors.
+
+### Gap B — Required-field "*" was decorative; save accepted empty values
+
+**Root cause**: The `EntityNameValidatorForm` marked `candidateText` / `allowList` / `outputVariable` with the Fluent `Label required` prop (visual asterisk) but the canvas-time validation in `services/canvasValidation.ts` had no per-ActionType rules for the type. The save-blocking path (`playbookNodeSync.syncNodesToDataverseAndValidate` → `hasValidationErrors`) only enforces what the validator returns; without a rule, missing values pass through silently.
+
+**Fix (full enforcement, mirroring LookupUserMembership pattern)**: Added `validateEntityNameValidatorNode(nodeId, node)` to `canvasValidation.ts` plus three new rule-id values to the `PromptSchemaValidation['rule']` discriminated union. The validator parses `node.data.configJson` for `candidateText` + `allowList` and checks `node.data.outputVariable` (the shared Basic-section field). Missing-required values surface as `'error'` severity which the existing `hasValidationErrors()` save-gate consumes — no new shared-code refactor needed.
+
+This matches how LookupUserMembership has enforced its `entityType` + `outputVariable` required fields since R3 task 043; the pattern was the explicit template per R4 CLAUDE.md "Canonical Code Analogs".
+
+### Files modified
+
+| File | Change |
+|---|---|
+| `src/client/code-pages/PlaybookBuilder/src/components/nodes/EntityNameValidatorNode.tsx` | New — peer of `WaitNode.tsx` / `AiAnalysisNode.tsx`. |
+| `src/client/code-pages/PlaybookBuilder/src/components/nodes/index.ts` | Added export + import + `nodeTypes['entityNameValidator']` entry. |
+| `src/client/code-pages/PlaybookBuilder/src/components/canvas/PlaybookCanvas.tsx` | MiniMap node-color switch added `entityNameValidator` to magenta family. |
+| `src/client/code-pages/PlaybookBuilder/src/services/canvasValidation.ts` | Added 3 rule-id values + `validateEntityNameValidatorNode` (~50 LOC) + per-node-type loop case. |
+
+### Redeploy timestamp
+
+- **Build start**: 2026-06-26 ~09:04 (webpack production)
+- **Inline + deploy completed**: 2026-06-26 09:07:25
+- **Bundle size**: 2,975 KB (identical to 08:28 build to within rounding — new node component + validator are < 1 KB minified)
+- **Web resource ID**: `3dfd3713-9515-f111-8343-7ced8d1dc988` (UPDATE + PublishXml) — confirmed via MCP `read_query` on `webresource` (`modifiedon` = `2026-06-26T09:07:25`).
+
+### How UAT operator verifies the hotfix landed
+
+1. **Hard refresh** the PlaybookBuilder code page (Ctrl+Shift+R to bypass Dataverse static-asset cache).
+2. **Drag an Entity Name Validator** node onto the canvas. The node should now render with: shield-checkmark icon (left), node-name title, "Tool" subtitle, an "Output: output_entityNameValidator" line, and "Needs configuration" red status (because required fields are still empty).
+3. **Try to save the playbook without configuring the node** — save should be BLOCKED with three error messages (Candidate text source binding required / Allow-list source binding required / Output Variable required). Console will log `[playbookNodeSync] Sync blocked: 3 validation error(s) found.`.
+4. **Open the properties pane**, fill all three required fields (e.g. `{{narrate.output.result}}` for candidate, `{{names.output.result}}` for allow-list, `scrubbedNarrative` for outputVariable), save again — should succeed and the node should flip to "Configured" green status with `Output: scrubbedNarrative` preview.
+5. **Regression check**: drag other node types (Start, AI Analysis, Wait, LookupUserMembership); confirm their canvas rendering + validation continue to work as before.
+
+### Notes
+
+- Both fixes are PlaybookBuilder-only — no BFF or other-code-page redeploy needed.
+- The localized validator function avoids any churn to shared validation infrastructure; future per-ActionType node forms can follow the same `validate<NodeType>Node` pattern alongside LookupUserMembership.
+- The MiniMap color update was a small visual-parity additional fix — without it the entityNameValidator dot would appear neutral grey in the minimap instead of magenta with the rest of the Tool family.
+
