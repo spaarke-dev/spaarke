@@ -174,3 +174,19 @@ Task 004's `NODE_TYPE_INFO` entry for `entityNameValidator` was structurally inc
 **Lesson for future palette / new-node tasks**: AC criteria for any "add new node type" task MUST include a `compare-to-peer` visual-diff step that drags the new node alongside a known-good peer (Wait, AI Analysis) and verifies presence of EACH structural element (icon, type label, output preview, Configured indicator, minimap color). The check is one screenshot; the lesson cost two UAT hotfixes.
 
 **Lesson for required-field forms**: a Fluent `Label required` prop is purely visual. Required-field enforcement requires a per-ActionType validator function in `canvasValidation.ts` returning `'error'` severity for missing values. Future tasks adding `*Form.tsx` with required fields MUST also add `validate<NodeType>Node` alongside the peer (LookupUserMembership / EntityNameValidator are the canonical templates).
+
+### Empirical-smoke-before-shipping-facade-reuse (added 2026-06-26 UAT hotfix #3 — narrate-503)
+
+Task 030's decision document confidently bound Path A.5 (reuse `IInvokePlaybookAi` facade) over Path B (new method) based on the agent's reading of a CODE COMMENT at `InvokePlaybookAi.cs:67–72`:
+
+> "The orchestration service interprets an empty documentIds array as 'no document context' (consistent with the existing M365 Copilot adapter path)."
+
+The agent did NOT run a single empirical smoke through the actual code path before signing off. In production UAT the comment was discovered to be true ONLY for node-based playbook execution — for legacy-mode playbooks (zero `sprk_playbooknode` rows) the dispatch crashes at `AnalysisOrchestrationService.ExecutePlaybookAsync:707` with `request.DocumentIds[0]` → `IndexOutOfRangeException`. Task 030 shipped, task 031 wired the wrapper, the playbook was deployed with metadata only (no nodes), and `/narrate` returned 503 on every call in spaarkedev1. Post-mortem at `notes/uat/narrate-503-hotfix.md`.
+
+**Lesson for future Path A.5-style facade reuse decisions**: a code-comment-based confidence claim is not a substitute for an empirical smoke. ANY decision document that reuses an existing facade based on a documented contract MUST include — BEFORE sign-off — an empirical smoke of the boundary edge case the comment claims is supported. For `IInvokePlaybookAi`-style facades that span streaming-to-non-streaming aggregation across N hops, the smoke is: write a single unit test that constructs the empty-payload edge case and verifies the chain produces a clean result (or a typed failure, not a runtime crash). The cost is one test method (~30 LOC); the cost of skipping is two hours of UAT outage + hotfix + post-mortem.
+
+**Pattern for the decision-doc AC checklist**: when a path decision binds reuse of an existing facade with an edge-case behavior cited from a comment, the doc MUST include a section titled "Empirical Smoke Result" with:
+- The exact test method name + commit hash that demonstrates the edge case works
+- OR an explicit "Smoke deferred — risk accepted" statement acknowledging the empirical gap
+
+Task 030's "Confirmation — IPlaybookService survey result" section was thorough on the interface enumeration but skipped the smoke. Future decision docs must close this gap before sign-off.
