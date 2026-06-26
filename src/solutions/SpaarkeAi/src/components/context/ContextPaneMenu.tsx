@@ -181,6 +181,15 @@ const CONTEXT_TOOLS: readonly ToolDescriptor[] = [
     id: 'pinned-memory',
     label: 'Pinned Memory',
   },
+  {
+    // R6 Pillar 6c / task 095 — Claude-Code-like trace of the agent's
+    // tool calls, knowledge retrievals, playbook node executions, and
+    // routing decisions. Subscribes to the existing `context` PaneEventBus
+    // channel; populated when emissions reach the bus (full SSE bridge
+    // tracked separately).
+    id: 'execution-trace',
+    label: 'Execution Trace',
+  },
 ];
 
 // ---------------------------------------------------------------------------

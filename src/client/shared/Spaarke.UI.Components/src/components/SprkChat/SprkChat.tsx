@@ -347,6 +347,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onPlaybookOptions: onPlaybookOptionsProp,
   onSelectPlaybook,
   onOpenLibraryModal,
+  // R6 Pillar 6c / task 095 — trace bridge: context_event SSE forwarding to host.
+  onContextEvent: onContextEventProp,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -435,6 +437,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     setOnDocumentStreamEvent,
     setOnPaneEvent,
     setOnPlaybookOptions,
+    setOnContextEvent,
   } = sseStream;
 
   // Track current streaming state
@@ -1004,6 +1007,33 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       setOnPlaybookOptions(null);
     };
   }, [onPlaybookOptionsProp, setOnPlaybookOptions]);
+
+  // R6 Pillar 6c / task 095 — wire `onContextEvent` prop into the SSE pipeline.
+  // Synchronous callback-ref pattern — mirrors the setOnPlaybookOptions useEffect
+  // above. The host (typically ConversationPane) forwards each context_event
+  // payload to the `context` PaneEventBus channel so ExecutionTraceWidget can
+  // render in real time.
+  //
+  // ADR-015: SprkChat MUST NOT log the payload here. Wrapper-only forwarding.
+  React.useEffect(() => {
+    if (!onContextEventProp) {
+      setOnContextEvent(null);
+      return;
+    }
+
+    setOnContextEvent(data => {
+      try {
+        onContextEventProp(data);
+      } catch (err) {
+        // Per ADR-015: do NOT include the payload — only the error.
+        console.error('[SprkChat] Failed to forward context_event SSE:', err);
+      }
+    });
+
+    return () => {
+      setOnContextEvent(null);
+    };
+  }, [onContextEventProp, setOnContextEvent]);
 
   // Auto-scroll to bottom on new messages
   React.useEffect(() => {

@@ -205,6 +205,14 @@ export type ChatSseEventType =
   | 'document_stream_start'
   | 'document_stream_token'
   | 'document_stream_end'
+  // R6 Pillar 6c / task 095 — ContextEventEmitter trace bridge. Carries one
+  // of the 6 typed context.* events from the BFF to the frontend via the
+  // chat SSE stream. The frontend SprkChat host forwards verbatim to the
+  // `context` PaneEventBus channel where ExecutionTraceWidget renders it.
+  // ADR-015 binding: payload contains typed enumerated fields ONLY (no user
+  // content). ADR-030 compliant: existing `context` channel, additive event
+  // types (see ContextPaneEvent in @spaarke/ai-widgets).
+  | 'context_event'
   // chat-routing-redesign-r1 task 117a/117b — file-aware playbook routing
   // surfaces top-N candidates + an Open Library CTA inline in the chat.
   | 'playbook_options';
@@ -307,6 +315,70 @@ export interface IChatSseEventData {
   rerankInvoked?: boolean;
   /** Controlled-vocabulary tag describing the rerank outcome (when invoked). */
   rerankReason?: string | null;
+
+  // ── context_event fields (R6 task 095 — Pillar 6c trace bridge) ─────────────
+  //
+  // Discriminant + 6 typed sub-shapes, mirroring ContextPaneEvent in
+  // @spaarke/ai-widgets/events/PaneEventTypes. ADR-015 binding: ONLY the typed
+  // enumerated fields below are read — never arbitrary free-form attributes.
+  //
+  // The frontend SprkChat host receives `context_event` SSE events and forwards
+  // each payload verbatim to the `context` PaneEventBus channel so subscribers
+  // (ExecutionTraceWidget) can render in real time.
+
+  /**
+   * Trace event sub-type. Matches the six R6 task 059 / 063 discriminants.
+   * Present on 'context_event' SSE events ONLY.
+   */
+  contextEventType?:
+    | 'tool_call_started'
+    | 'tool_call_completed'
+    | 'knowledge_retrieved'
+    | 'playbook_node_executing'
+    | 'playbook_node_completed'
+    | 'decision_made';
+
+  /** ISO-8601 UTC timestamp of the trace event. Present on 'context_event'. */
+  contextTimestamp?: string;
+
+  /** Registered tool name (tool_call_* events). */
+  contextToolName?: string;
+
+  /** Tool / decision correlation GUID (tool_call_*, decision_made). */
+  contextDecisionId?: string;
+
+  /** Tool outcome enum (tool_call_completed). */
+  contextOutcome?: string;
+
+  /** Wall-clock duration ms (tool_call_completed, playbook_node_completed). */
+  contextDurationMs?: number;
+
+  /** Knowledge source identifier (knowledge_retrieved). */
+  contextKnowledgeSourceId?: string;
+
+  /** Numeric relevance score 0..1 (knowledge_retrieved). */
+  contextRelevanceScore?: number;
+
+  /** Result count (knowledge_retrieved). */
+  contextResultCount?: number;
+
+  /** Playbook GUID (playbook_node_*). */
+  contextPlaybookId?: string;
+
+  /** Node GUID (playbook_node_*). */
+  contextNodeId?: string;
+
+  /** Node type enum (playbook_node_executing). */
+  contextNodeType?: string;
+
+  /** Routing-layer identifier (decision_made). */
+  contextLayer?: string;
+
+  /** Decision enum-like string (decision_made). */
+  contextDecision?: string;
+
+  /** Capability name (decision_made). */
+  contextCapabilityName?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -795,6 +867,20 @@ export interface ISprkChatProps {
    * routing decisions) and consults its own helpers (`routeSummarizeIntent`).
    */
   onBeforeSendMessage?: (messageText: string) => void;
+
+  /**
+   * Fires for each `context_event` SSE event received from the BFF (R6
+   * Pillar 6c / task 095). The caller MUST forward `data` verbatim to the
+   * `context` PaneEventBus channel so subscribers (ExecutionTraceWidget)
+   * render in real time. Payload contains typed enumerated fields ONLY
+   * (ADR-015 tier-1 safe by BFF construction).
+   *
+   * Same synchronous callback-ref pattern as onPaneEvent / onPlaybookOptions
+   * — invoked from the fetch loop without React state batching.
+   *
+   * R6 task 095 — trace bridge (2026-06-26).
+   */
+  onContextEvent?: ((data: IChatSseEventData) => void) | null;
 
   /**
    * Fires whenever the internal `messages` array changes (new user message,

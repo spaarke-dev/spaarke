@@ -1510,6 +1510,118 @@ export function ConversationPane(): React.JSX.Element {
    * reasons, admin display names, opaque IDs only). The handler MUST NOT log
    * the payload — only structural counts.
    */
+  /**
+   * R6 Pillar 6c / task 095 — trace bridge handler.
+   *
+   * Receives `context_event` SSE payloads from SprkChat and dispatches each one
+   * verbatim to the `context` PaneEventBus channel where ExecutionTraceWidget
+   * renders it. The payload carries the BFF ContextEventEmitter's 6 typed
+   * sub-shapes (tool_call_started, tool_call_completed, knowledge_retrieved,
+   * playbook_node_executing, playbook_node_completed, decision_made) discriminated
+   * by `data.contextEventType`.
+   *
+   * ADR-015: log STRUCTURAL signals (event type discriminant) only — NEVER any
+   * of the typed field values (toolName, decisionId, etc.) which carry session
+   * identifiers. The widget renders the typed fields with its own
+   * tier-1-safe discipline.
+   * ADR-030: additive event types on the existing `context` channel — no new
+   * channel introduced.
+   */
+  const handleContextEvent = React.useCallback(
+    (data: {
+      contextEventType?: string;
+      contextTimestamp?: string;
+      contextToolName?: string;
+      contextDecisionId?: string;
+      contextOutcome?: string;
+      contextDurationMs?: number;
+      contextKnowledgeSourceId?: string;
+      contextRelevanceScore?: number;
+      contextResultCount?: number;
+      contextPlaybookId?: string;
+      contextNodeId?: string;
+      contextNodeType?: string;
+      contextLayer?: string;
+      contextDecision?: string;
+      contextCapabilityName?: string;
+    }): void => {
+      const eventType = data.contextEventType;
+      if (!eventType) return;
+
+      // ADR-015 telemetry: log discriminant only — never typed-field values.
+      console.log("[ConversationPane] context_event received — type:%s", eventType);
+
+      const timestamp = data.contextTimestamp ?? new Date().toISOString();
+
+      // Map the SSE payload to the matching ContextPaneEvent discriminated union
+      // declared in @spaarke/ai-widgets/events/PaneEventTypes (R6 task 059).
+      // We use `dispatch('context', ...)` so any payload field omission is
+      // caught by the TS discriminant; widgets that don't recognise the type
+      // ignore the event per their own switch (additive-discriminant
+      // ADR-030 invariant).
+      switch (eventType) {
+        case "tool_call_started":
+          dispatch("context", {
+            type: "tool_call_started",
+            timestamp,
+            toolName: data.contextToolName ?? "",
+            decisionId: data.contextDecisionId ?? "",
+          } as ContextPaneEvent);
+          break;
+        case "tool_call_completed":
+          dispatch("context", {
+            type: "tool_call_completed",
+            timestamp,
+            toolName: data.contextToolName ?? "",
+            decisionId: data.contextDecisionId ?? "",
+            outcome: data.contextOutcome ?? "",
+            durationMs: data.contextDurationMs ?? 0,
+          } as ContextPaneEvent);
+          break;
+        case "knowledge_retrieved":
+          dispatch("context", {
+            type: "knowledge_retrieved",
+            timestamp,
+            knowledgeSourceId: data.contextKnowledgeSourceId ?? "",
+            relevanceScore: data.contextRelevanceScore ?? 0,
+            resultCount: data.contextResultCount ?? 0,
+          } as ContextPaneEvent);
+          break;
+        case "playbook_node_executing":
+          dispatch("context", {
+            type: "playbook_node_executing",
+            timestamp,
+            playbookId: data.contextPlaybookId ?? "",
+            nodeId: data.contextNodeId ?? "",
+            nodeType: data.contextNodeType ?? "",
+          } as ContextPaneEvent);
+          break;
+        case "playbook_node_completed":
+          dispatch("context", {
+            type: "playbook_node_completed",
+            timestamp,
+            playbookId: data.contextPlaybookId ?? "",
+            nodeId: data.contextNodeId ?? "",
+            durationMs: data.contextDurationMs ?? 0,
+          } as ContextPaneEvent);
+          break;
+        case "decision_made":
+          dispatch("context", {
+            type: "decision_made",
+            timestamp,
+            layer: data.contextLayer ?? "",
+            decision: data.contextDecision ?? "",
+            capabilityName: data.contextCapabilityName,
+          } as ContextPaneEvent);
+          break;
+        default:
+          // Unknown discriminant — defensive ignore per ADR-030 additive policy.
+          return;
+      }
+    },
+    [dispatch],
+  );
+
   const handlePlaybookOptions = React.useCallback(
     (payload: {
       candidates: Array<{
@@ -2306,6 +2418,11 @@ export function ConversationPane(): React.JSX.Element {
               onPlaybookOptions={handlePlaybookOptions}
               onSelectPlaybook={handleSelectPlaybook}
               onOpenLibraryModal={handleOpenLibraryModal}
+              // R6 Pillar 6c / task 095 — trace bridge. Forward each
+              // context_event SSE payload to the `context` PaneEventBus channel
+              // so ExecutionTraceWidget renders in real time. ADR-015: payload
+              // already tier-1 safe by BFF construction.
+              onContextEvent={handleContextEvent}
             />
             {/*
               R6 task 085 / D-D-06 (Pillar 8 `/help` UI affordance) — a

@@ -53,6 +53,8 @@ import {
   GetStartedCardsWidget,
   // R6 Pillar 7 / task 096 — Pinned Memory affordance for the Context pane.
   PinnedMemoryListWidget,
+  // R6 Pillar 6c / task 095 — Claude-Code-like activity trace.
+  ExecutionTraceWidget,
 } from "@spaarke/ai-widgets";
 import type {
   ContextWidgetComponent,
@@ -690,6 +692,24 @@ export function ContextPaneController(): React.JSX.Element {
       return (
         <div className={styles.content} data-testid="context-pane-pinned-memory">
           <PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />
+        </div>
+      );
+    }
+
+    // R6 Pillar 6c / task 095 — Execution Trace surface. The widget subscribes
+    // to the `context` PaneEventBus channel and renders an ordered list of
+    // tool calls, knowledge retrievals, playbook node executions, and decisions.
+    // ADR-015 is enforced at the widget level (typed fields only).
+    //
+    // Today's bridge: the widget renders empty until events reach the
+    // PaneEventBus context channel. BFF currently emits to OpenTelemetry +
+    // structured logs (R6 task 063). Full BFF→SSE→PaneEventBus bridge is
+    // tracked as a follow-up R7 backlog item — the widget is mounted now so
+    // the surface exists and can light up as soon as the bridge lands.
+    if (selectedTool === "execution-trace") {
+      return (
+        <div className={styles.content} data-testid="context-pane-execution-trace">
+          <ExecutionTraceWidget data={{}} widgetType="execution-trace" />
         </div>
       );
     }
