@@ -181,6 +181,18 @@ Restore 7 active indexes + formalize the provisioning process:
 - 5 endpoints registered + auth-gated (401 not 404)
 - healthz returns 200
 
+### Dataverse State (dev — `spaarkedev1.crm.dynamics.com`) — POST-WRAP-UP BACKFILL
+- 21 of 21 stale `sprk_searchindexname` records updated to canonical `spaarke-files-index`
+  (16 matters + 3 projects + 2 business units; 0 invoices had the field set)
+- 5 AI-Search-related env vars audited: 4 canonical, 2 intentionally NULL (BFF
+  resolves via App Service KV refs per Spaarke "no direct frontend→AI Search" rule)
+- 27 JS web resources scanned: ZERO contain stale index names
+- `sprk_aiknowledgedeployment` empty (no records to update)
+- 34 `sprk_aianalysisplaybook` records ↔ 34 `spaarke-playbook-embeddings` docs (1:1)
+- 2 reusable scripts added for future env provisioning:
+  - `scripts/Update-StaleDataverseIndexNames.ps1` (canonical rewriter)
+  - `scripts/Audit-DataverseAiSearchSurfaces.ps1` (6-audit verification)
+
 ### Project Artifacts (8 evidence files)
 - `notes/pre-phase-3-verification.md`, `notes/group-c-disposition.md`, `notes/kv-migration-verification.md`, `notes/test-fixture-sweep.md`, `notes/phase-4-final-verification.md`, `notes/phase-5-deploy-evidence.md`, `notes/phase-5-ingestion-evidence.md`, `notes/phase-5-functional-verification.md`, `notes/deploy-allindexes-validation.md`, `notes/lessons-learned.md`
 
