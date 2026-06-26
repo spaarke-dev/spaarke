@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Final /adr-check run</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>059</dependencies>
+    <blocks>061</blocks>
+    <tags>verification, adr-check</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>ADR-compliance gate</rigor-reason>
+    <parallel-group>Wrap</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wrap-up gate sequence</parallel-reason>
+  </metadata>
+  <prompt>Run `/adr-check` skill on the project diff. Verify compliance with ADR-009 (amended), ADR-010, ADR-013, ADR-028, ADR-029, ADR-032. Resolve any violations.</prompt>
+  <role>Spaarke quality reviewer; ADR compliance.</role>
+  <goal>ADR-check report exists; no violations.</goal>
+  <context><background>Pre-merge ADR-compliance gate.</background><relevant-files><file>All modified files</file></relevant-files></context>
+  <constraints><constraint source="project">Zero ADR violations.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Invoke `adr-check`.</step>
+    <step order="2">Resolve violations.</step>
+    <step order="3">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Skill">adr-check</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/adr-check-report.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">ADR-check report exists; zero violations.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -729,7 +729,7 @@ public class SessionSummarizeOrchestratorTests
     private sealed class TestableChatSessionManager : ChatSessionManager
     {
         public TestableChatSessionManager() : base(
-            cache: Mock.Of<IDistributedCache>(),
+            cache: Mock.Of<ITenantCache>(),
             dataverseRepository: Mock.Of<IChatDataverseRepository>(),
             logger: Mock.Of<ILogger<ChatSessionManager>>(),
             persistence: null,

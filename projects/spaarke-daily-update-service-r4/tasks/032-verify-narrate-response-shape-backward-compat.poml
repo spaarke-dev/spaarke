@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Verify /narrate response shape backward compat — widget parser unchanged</title>
+    <phase>4: W2 Consumer — /narrate dispatch + cache + fallback (PR 4)</phase>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>Added DailyBriefingResponseShapeTests.cs (3 tests, all pass) verifying /narrate response shape backward compat. Frozen R3 sample captured at notes/samples/narrate-response-r3.json. Tests assert: (1) every widget-consumed field is populated end-to-end, (2) camelCase serialization (no PascalCase leak — widget parser break guard), (3) frozen sample round-trips structurally identical (TL;DR text + per-bullet entity refs preserved; category/priority counts correctly re-injected from request).</completion-notes>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks>035</blocks>
+    <tags>bff-api, integration-test, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test creation only — STANDARD per CLAUDE.md §8 (testing tag, no code-implementation change).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Add integration test invoking /narrate against running BFF. Verify response JSON shape (top-level fields: `tldr`, `channelNarratives`, `generatedUtc`) matches what existing `parseNotificationData` consumes. Compare against a frozen R3 sample at `notes/samples/narrate-response-r3.json` (capture it first if not present).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Integration testing of BFF /narrate response contract; freeze the R3 shape as golden sample.</role>
+  <goal>Integration test exists asserting /narrate response shape matches `notes/samples/narrate-response-r3.json`. Test passes against task 031's playbook-dispatch implementation. Sample file captured + checked in if not already present.</goal>
+  <context>
+    <background>R4 FR-12 requires that converting /narrate to playbook dispatch preserves the response JSON contract so the existing widget parser (`parseNotificationData` in Spaarke.DailyBriefing.Components) continues to work without modification (NFR-05). Without an explicit contract test, response-shape drift could occur silently during refactor.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/samples/narrate-response-r3.json</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/utils/parseNotificationData.ts</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">BFF AI placement — /narrate is thin wrapper dispatching to existing playbook engine</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — publish-size + CVE per task; placement justification in PR description</constraint>
+    <constraint source="project">Response shape backward compat — existing widget parser must work unchanged (NFR-05)</constraint>
+    <constraint source="project">No hardcoded LLM prompt strings remain in DailyBriefingEndpoints.cs (FR-12)</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">If `notes/samples/narrate-response-r3.json` does not exist, capture it from R3 baseline (git history of prior /narrate response or a recorded UAT response)</step>
+    <step order="2">Locate the BFF integration test project (likely `tests/integration/Sprk.Bff.Api.IntegrationTests/`)</step>
+    <step order="3">Add integration test invoking /narrate with a representative payload</step>
+    <step order="4">Assert top-level fields present + types: `tldr` (string), `channelNarratives` (array), `generatedUtc` (DateTime/ISO-8601)</step>
+    <step order="5">Assert each `channelNarratives` element shape matches what `parseNotificationData` consumes</step>
+    <step order="6">Run integration test against task 031 implementation — must pass</step>
+    <step order="7">Update TASK-INDEX.md ✅</step>
+    <step order="8">Document deviations in notes/</step>
+  </steps>
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="code">tests/integration/Sprk.Bff.Api.IntegrationTests/DailyBriefing/NarrateResponseShapeTests.cs</output>
+    <output type="data">projects/spaarke-daily-update-service-r4/notes/samples/narrate-response-r3.json</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">AC-12b: Integration test asserts response shape matches frozen R3 sample</criterion>
+    <criterion testable="true">Test passes against task 031's playbook-dispatch implementation</criterion>
+    <criterion testable="true">`parseNotificationData` consumes the response without modification (manual or asserted contract overlap)</criterion>
+  </acceptance-criteria>
+  <notes>The frozen sample MUST be canonicalized (sorted keys, deterministic content) so future drift tests are reliable. If R3 sample is not recoverable from git history, capture from a running pre-031 endpoint before merging task 031.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

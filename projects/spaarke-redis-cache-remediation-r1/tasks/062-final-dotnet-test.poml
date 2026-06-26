@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Final dotnet test pass (full suite)</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>061</dependencies>
+    <blocks>063</blocks>
+    <tags>testing, verification, ci-cd</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Final test gate</rigor-reason>
+    <parallel-group>Wrap</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wrap-up gate sequence</parallel-reason>
+  </metadata>
+  <prompt>Run `dotnet test` (full suite). All tests pass — including the new CacheModuleTests (4 branches + Null-Object).</prompt>
+  <role>Spaarke developer.</role>
+  <goal>Full test suite passes; documented in `notes/final-dotnet-test.md`.</goal>
+  <context><background>Last verification before merge.</background><relevant-files><file>tests/</file></relevant-files></context>
+  <constraints><constraint source="project">All tests pass.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">`dotnet test`.</step>
+    <step order="2">Capture result.</step>
+    <step order="3">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">dotnet test</tool><tool name="Write">test report</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/final-dotnet-test.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Full `dotnet test` passes.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

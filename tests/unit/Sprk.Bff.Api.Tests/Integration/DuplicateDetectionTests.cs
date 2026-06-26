@@ -6,10 +6,13 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Office;
 using Xunit;
 
@@ -32,10 +35,10 @@ namespace Sprk.Bff.Api.Tests.Integration;
 /// </remarks>
 public class DuplicateDetectionTests : IDisposable
 {
-    private readonly Mock<IDistributedCache> _cacheMock;
+    private readonly IDistributedCache _innerCache;
+    private readonly ITenantCache _cache;
     private readonly Mock<ILogger<IdempotencyFilter>> _loggerMock;
     private readonly IdempotencyFilter _filter;
-    private readonly Dictionary<string, byte[]> _cacheStorage;
 
     /// <summary>
     /// Test constants for consistent testing.
@@ -45,46 +48,18 @@ public class DuplicateDetectionTests : IDisposable
         public const string UserId = "user-123";
         public const string DifferentUserId = "user-456";
         public const string EndpointPath = "/office/save";
+        public const string TenantId = "test-tenant-1";
     }
 
     public DuplicateDetectionTests()
     {
-        _cacheStorage = new Dictionary<string, byte[]>();
-        _cacheMock = new Mock<IDistributedCache>();
+        // Per task 010: IdempotencyFilter now takes ITenantCache. Use real MemoryDistributedCache
+        // wrapped in TenantCache so we exercise the actual tenant-scoped key format.
+        _innerCache = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+        _cache = new TenantCache(_innerCache, Mock.Of<ILogger<TenantCache>>());
         _loggerMock = new Mock<ILogger<IdempotencyFilter>>();
 
-        // Setup cache mock to use in-memory dictionary
-        SetupCacheMock();
-
-        _filter = new IdempotencyFilter(_cacheMock.Object, _loggerMock.Object);
-    }
-
-    private void SetupCacheMock()
-    {
-        // GetAsync
-        _cacheMock.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string key, CancellationToken _) =>
-                _cacheStorage.TryGetValue(key, out var value) ? value : null);
-
-        // GetStringAsync (extension method implementation)
-        _cacheMock.Setup(c => c.Get(It.IsAny<string>()))
-            .Returns((string key) =>
-                _cacheStorage.TryGetValue(key, out var value) ? value : null);
-
-        // SetAsync
-        _cacheMock.Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Callback((string key, byte[] value, DistributedCacheEntryOptions _, CancellationToken _) =>
-                _cacheStorage[key] = value)
-            .Returns(Task.CompletedTask);
-
-        // RemoveAsync
-        _cacheMock.Setup(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Callback((string key, CancellationToken _) => _cacheStorage.Remove(key))
-            .Returns(Task.CompletedTask);
+        _filter = new IdempotencyFilter(_cache, _loggerMock.Object);
     }
 
     #region Test Helpers
@@ -174,11 +149,12 @@ public class DuplicateDetectionTests : IDisposable
     }
 
     /// <summary>
-    /// Simulates caching a response for a given idempotency key.
+    /// Simulates caching a response for a given idempotency key (tenant-scoped key per task 010).
+    /// Returns the wire-format cache key for verification by callers.
     /// </summary>
-    private void SimulateCachedResponse(string idempotencyKey, object response, int statusCode = 202)
+    private string SimulateCachedResponse(string idempotencyKey, object response, int statusCode = 202)
     {
-        var cacheKey = $"idempotency:request:{idempotencyKey}";
+        var cacheKey = $"tenant:{TestConstants.TenantId}:idempotency-request:{idempotencyKey}:v1";
         var cachedResponse = new
         {
             StatusCode = statusCode,
@@ -186,17 +162,24 @@ public class DuplicateDetectionTests : IDisposable
             ResultType = "Microsoft.AspNetCore.Http.HttpResults.Accepted"
         };
         var json = JsonSerializer.Serialize(cachedResponse);
-        _cacheStorage[cacheKey] = Encoding.UTF8.GetBytes(json);
+        // TenantCache.SetAsync<string> wraps the value as JSON-encoded string. Mirror that here.
+        _innerCache.SetString(cacheKey, JsonSerializer.Serialize(json));
+        return cacheKey;
     }
 
     /// <summary>
-    /// Simulates acquiring a lock for an idempotency key.
+    /// Simulates acquiring a lock for an idempotency key (tenant-scoped key per task 010).
+    /// Returns the wire-format lock key for verification.
     /// </summary>
-    private void SimulateLock(string idempotencyKey)
+    private string SimulateLock(string idempotencyKey)
     {
-        var lockKey = $"idempotency:lock:{idempotencyKey}";
-        _cacheStorage[lockKey] = Encoding.UTF8.GetBytes("locked");
+        var lockKey = $"tenant:{TestConstants.TenantId}:idempotency-lock:{idempotencyKey}:v1";
+        // TenantCache.SetAsync<string>("locked") wraps as JSON-encoded string.
+        _innerCache.SetString(lockKey, JsonSerializer.Serialize("locked"));
+        return lockKey;
     }
+
+    private bool CacheContainsKey(string cacheKey) => _innerCache.Get(cacheKey) != null;
 
     #endregion
 
@@ -224,11 +207,10 @@ public class DuplicateDetectionTests : IDisposable
             StatusUrl = $"/office/jobs/{expectedJobId}",
             StreamUrl = $"/office/jobs/{expectedJobId}/stream"
         };
-        SimulateCachedResponse(idempotencyKey, cachedResponse);
+        var cacheKey = SimulateCachedResponse(idempotencyKey, cachedResponse);
 
-        // Assert - verify cache contains the response
-        var cacheKey = $"idempotency:request:{idempotencyKey}";
-        _cacheStorage.Should().ContainKey(cacheKey);
+        // Assert - verify cache contains the response at the tenant-scoped key
+        CacheContainsKey(cacheKey).Should().BeTrue();
     }
 
     [Fact]
@@ -238,28 +220,28 @@ public class DuplicateDetectionTests : IDisposable
         var clientIdempotencyKey = "client-provided-key-12345";
         var expectedJobId = Guid.NewGuid();
 
-        // The actual key stored is userId:clientKey
+        // The actual key stored is userId:clientKey, scoped by tenant per task 010 migration.
         var fullKey = $"{TestConstants.UserId}:{clientIdempotencyKey}";
-        var cacheKey = $"idempotency:request:{fullKey}";
+        var cacheKey = $"tenant:{TestConstants.TenantId}:idempotency-request:{fullKey}:v1";
 
-        // Pre-cache a response
+        // Pre-cache a response (JSON-encoded string per TenantCache wire format)
         var cachedResponse = new SaveResponse
         {
             Success = true,
             Duplicate = false,
             JobId = expectedJobId
         };
-        var json = JsonSerializer.Serialize(new
+        var innerJson = JsonSerializer.Serialize(new
         {
             StatusCode = 202,
             Value = cachedResponse,
             ResultType = "Microsoft.AspNetCore.Http.HttpResults.Accepted"
         });
-        _cacheStorage[cacheKey] = Encoding.UTF8.GetBytes(json);
+        _innerCache.SetString(cacheKey, JsonSerializer.Serialize(innerJson));
 
         // Assert - verify cache contains the response
-        _cacheStorage.Should().ContainKey(cacheKey);
-        var storedValue = Encoding.UTF8.GetString(_cacheStorage[cacheKey]);
+        CacheContainsKey(cacheKey).Should().BeTrue();
+        var storedValue = _innerCache.GetString(cacheKey);
         storedValue.Should().Contain(expectedJobId.ToString());
     }
 
@@ -338,7 +320,7 @@ public class DuplicateDetectionTests : IDisposable
         var expectedTtl = TimeSpan.FromHours(24);
 
         // Create filter with default TTL
-        var filter = new IdempotencyFilter(_cacheMock.Object, _loggerMock.Object);
+        var filter = new IdempotencyFilter(_cache, _loggerMock.Object);
 
         // The default TTL is internal, but we can verify the caching behavior
         // by checking that SetAsync is called with correct options
@@ -357,13 +339,10 @@ public class DuplicateDetectionTests : IDisposable
             TestConstants.EndpointPath,
             request);
 
-        var cacheKey = $"idempotency:request:{idempotencyKey}";
+        var cacheKey = $"tenant:{TestConstants.TenantId}:idempotency-request:{idempotencyKey}:v1";
 
         // Verify key is NOT in cache (simulating expiration)
-        _cacheStorage.Should().NotContainKey(cacheKey);
-
-        // Assert - when not in cache, a new job would be created
-        _cacheStorage.ContainsKey(cacheKey).Should().BeFalse();
+        CacheContainsKey(cacheKey).Should().BeFalse();
     }
 
     [Fact]
@@ -371,7 +350,7 @@ public class DuplicateDetectionTests : IDisposable
     {
         // Arrange
         var customTtl = TimeSpan.FromMinutes(30);
-        var filterWithCustomTtl = new IdempotencyFilter(_cacheMock.Object, _loggerMock.Object, customTtl);
+        var filterWithCustomTtl = new IdempotencyFilter(_cache, _loggerMock.Object, customTtl);
 
         // Assert - filter created successfully with custom TTL
         filterWithCustomTtl.Should().NotBeNull();
@@ -522,11 +501,10 @@ public class DuplicateDetectionTests : IDisposable
             request);
 
         // Simulate an existing lock (another request is processing)
-        SimulateLock(idempotencyKey);
+        var lockKey = SimulateLock(idempotencyKey);
 
-        // Assert - verify lock exists
-        var lockKey = $"idempotency:lock:{idempotencyKey}";
-        _cacheStorage.Should().ContainKey(lockKey);
+        // Assert - verify lock exists at tenant-scoped key
+        CacheContainsKey(lockKey).Should().BeTrue();
     }
 
     [Fact]
@@ -737,14 +715,15 @@ public class DuplicateDetectionTests : IDisposable
     {
         // Per implementation, cache failures result in "fail open" - request proceeds
 
-        // Arrange
+        // Arrange — wrap a failing IDistributedCache in TenantCache to match new filter ctor signature.
         var failingCacheMock = new Mock<IDistributedCache>();
         failingCacheMock
             .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Redis unavailable"));
+        var failingTenantCache = new TenantCache(failingCacheMock.Object, Mock.Of<ILogger<TenantCache>>());
 
         // Create filter with failing cache
-        var filterWithFailingCache = new IdempotencyFilter(failingCacheMock.Object, _loggerMock.Object);
+        var filterWithFailingCache = new IdempotencyFilter(failingTenantCache, _loggerMock.Object);
 
         // Assert - filter should be created (fail-open behavior verified via integration)
         filterWithFailingCache.Should().NotBeNull();
@@ -754,7 +733,7 @@ public class DuplicateDetectionTests : IDisposable
 
     public void Dispose()
     {
-        _cacheStorage.Clear();
+        // MemoryDistributedCache disposes itself; no manual cleanup needed.
     }
 }
 

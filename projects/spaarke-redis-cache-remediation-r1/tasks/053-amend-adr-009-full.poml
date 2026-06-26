@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>AMEND docs/adr/ADR-009-caching-redis-first.md (full)</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>052</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, adr</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>ADR amendment — lockstep with task 052</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Lockstep with task 052 — single PR</parallel-reason>
+  </metadata>
+  <prompt>AMEND `docs/adr/ADR-009-caching-redis-first.md` (full version) in LOCKSTEP with task 052. Preserve all existing constraint text; add the same 8 operational MUSTs (with deeper rationale appropriate to the full version). Match Last Updated date to task 052.</prompt>
+  <role>Spaarke architect; ADR maintainer.</role>
+  <goal>Full ADR-009 file contains the new operational MUSTs in addition to preserved existing content. Last Updated date matches task 052.</goal>
+  <context><background>Lockstep amendment is binding (FR-20). The full version cites rationale; the concise version (task 052) cites the MUSTs only.</background><relevant-files><file>docs/adr/ADR-009-caching-redis-first.md</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">FR-20 — lockstep amendment.</constraint>
+    <constraint source="project">Last Updated dates MUST match across both files.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>docs/architecture/caching-architecture.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>docs/adr/ADR-009-caching-redis-first.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read full ADR-009. Identify section structure (Context, Decision, Consequences, Alternatives, Operationalization, Exceptions, Success Metrics, Compliance, AI-Directed Guidance).</step>
+    <step order="2">Add "Operational MUSTs (added 2026-XX-XX)" subsection under Operationalization or as a new section.</step>
+    <step order="3">Mirror the 8 MUSTs from concise version + add 1-2 sentences of rationale each (full version = more context).</step>
+    <step order="4">Update Operationalization pattern table to include `ITenantCache` as a row.</step>
+    <step order="5">Refresh Last Updated date to match task 052.</step>
+    <step order="6">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">existing full ADR</tool><tool name="Edit">amend</tool></tools>
+  <outputs><output type="docs">docs/adr/ADR-009-caching-redis-first.md (modified)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">8 new operational MUSTs mirror task 052 (verified by grep + diff).</criterion>
+    <criterion testable="true">Existing content unchanged in text.</criterion>
+    <criterion testable="true">Last Updated date matches task 052.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>

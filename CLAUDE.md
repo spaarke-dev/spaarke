@@ -136,8 +136,9 @@ Every task is executed via `task-execute` at one of three rigor levels, auto-det
 | Level | When applied | Quality gates |
 |---|---|---|
 | **FULL** | Code implementation, architecture changes, post-compaction recovery, tags include `bff-api`/`pcf`/`plugin`/`auth`, modifying `.cs`/`.ts`/`.tsx`, 6+ steps, deps on 3+ tasks | ✅ code-review + adr-check at Step 9.5 |
-| **STANDARD** | Tests, new file creation, tasks with constraints, tags include `testing`/`integration-test`, Phase 2.x+ tasks | ⏭️ Skipped |
+| **STANDARD** | New file creation, tasks with constraints, Phase 2.x+ tasks | ⏭️ Skipped |
 | **MINIMAL** | Documentation, inventory, simple updates | ⏭️ Skipped |
+| **TEST-MODIFYING (override row, added 2026-06-26 by ci-cd-unit-test-remediation-r1 spec FR-B07 + ADR-038)** | **Any task that modifies `tests/**` OR has tags including `testing` / `test-reset` / `deletion` / `integration-test`** | ✅ code-review + adr-check at Step 9.5 **UNCONDITIONALLY** (overrides default STANDARD skip; binding ≥6 months from 2026-06-26) |
 
 ### Mandatory Rigor Level Declaration
 
@@ -187,6 +188,8 @@ When a task adds NEW endpoints, services, DI registrations, packages, or backgro
 Full procedure-doc reference: [`docs/procedures/testing-and-code-quality.md`](docs/procedures/testing-and-code-quality.md) §§18.1–18.4. ADR-030 is the canonical mechanism implementing §10 bullet 6 when a service must remain feature-gated.
 
 **Project-level imperative**: every project that adds code to the BFF MUST have a `design.md` section titled **Placement Justification** answering the decision criteria for each major component. Projects skipping this section will be flagged in code review.
+
+**Hot-Path Declaration (added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-062 per spec FR-C04)**: any project that touches BFF (or the parallel SpaarkeAi code page at `src/solutions/SpaarkeAi/**`) MUST include a `<hot-path-declaration>` XML block in its `design.md`. Block enumerates: BFF Y/N, SpaarkeAi Y/N, ci-workflows Y/N, skill-directives Y/N, root-CLAUDE.md Y/N. See [`.claude/constraints/bff-extensions.md` § G](.claude/constraints/bff-extensions.md#g-hot-path-declaration-binding-per-ci-cd-unit-test-remediation-r1-fr-c04-added-2026-06-26) for the full rule + evidence base. `project-pipeline` Step 3 emits HARD WARNING if missing. Active-project registry: [`projects/INDEX.md`](projects/INDEX.md). 2026-06-26 sweep found 13 of 17 active worktrees touch BFF, 8 of 17 touch SpaarkeAi.
 
 **Evidence base**: [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](docs/assessments/bff-ai-extraction-assessment-2026-05-20.md) — the 2026-05-20 BFF AI extraction assessment found the codebase structurally AI-dominant (69% of `Services/` LOC) but operationally justified to keep unified. It also surfaced the process debt this section addresses.
 
@@ -327,6 +330,9 @@ Hooks are **NOT configured** in `.claude/settings.json` beyond what exists. Qual
 | **Calendar shared components (two intentional variants)** | `@spaarke/events-components` — **`CalendarSection`** (workspace widget; click-day filter, controlled mode, stateless; existing) + **`CalendarFilterPane`** (side-pane filter builder; Calendar + From/To + date-field dropdown + Apply; session-storage; R4 task 055 / B-6 hoist 2026-05-26). Same lib, different intents per `notes/b6-pre-change-diff.md`. |
 | Operational guides (deploy, configure, troubleshoot) | [`docs/guides/`](docs/guides/) — 40+ guides incl. `auth-deployment-setup.md`, `PCF-DEPLOYMENT-GUIDE.md`, `DATAVERSE-MCP-INTEGRATION-GUIDE.md`, `ENVIRONMENT-DEPLOYMENT-GUIDE.md` |
 | Development procedures (test, CI/CD, code review) | [`docs/procedures/`](docs/procedures/) — `testing-and-code-quality.md`, `ci-cd-workflow.md`, `context-recovery.md` |
+| **Testing strategy ADR (standalone)** | [`docs/adr/ADR-038-testing-strategy.md`](docs/adr/ADR-038-testing-strategy.md) — integration-heavy pyramid; 6 KEEP path categories as MUST rules; coverage = observation never gate (binding ≥6 months from 2026-06-26); ban `Mock<HttpMessageHandler>` + DI-registration + ctor null-check tests. **STANDALONE — does NOT supersede ADR-022 (PCF Platform Libraries)**. ci-cd-unit-test-remediation-r1 Phase 1. |
+| **Test architecture standard (operational)** | [`docs/standards/TEST-ARCHITECTURE.md`](docs/standards/TEST-ARCHITECTURE.md) — test pyramid, 6 KEEP categories with examples, `TimeProvider` over `Stopwatch`, mock-boundary rules, forcing-function enforcement. Cross-referenced by `tests/CLAUDE.md` + `.claude/constraints/testing.md`. |
+| **Active-project registry (hot-path coordination)** | [`projects/INDEX.md`](projects/INDEX.md) — every active worktree (last-30-day-active) with hot-path declarations (BFF / SpaarkeAi / ci-workflows / skill-directives / root-CLAUDE Y/N). Maintained atomically by `project-pipeline` (new project) + `task-execute` Step 0.5 (hot-path touch). No cron. Consumed by `/conflict-check` auto-invoke. 2026-06-26 sweep: 17 active, 13 touch BFF, 8 touch SpaarkeAi. |
 | Dataverse data model (entity schemas, ERD) | [`docs/data-model/`](docs/data-model/) |
 | Azure resources (endpoints, names, conventions) | [`docs/architecture/auth-azure-resources.md`](docs/architecture/auth-azure-resources.md) |
 | Project initialization workflow | [`/design-to-spec`](.claude/skills/design-to-spec/) → [`/project-pipeline`](.claude/skills/project-pipeline/) |

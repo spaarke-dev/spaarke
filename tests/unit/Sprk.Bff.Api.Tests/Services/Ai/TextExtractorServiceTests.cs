@@ -1,10 +1,14 @@
 using System.Text;
 using FluentAssertions;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MimeKit;
 using Moq;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Xunit;
@@ -17,11 +21,17 @@ public class TextExtractorServiceTests
     private readonly IOptions<DocumentIntelligenceOptions> _options;
     private readonly TextExtractorService _service;
 
+    // Helper: spin up a no-op ITenantCache backed by an in-memory distributed cache so the
+    // service's required ctor dependency is satisfied. Tests don't exercise cache hits.
+    private static ITenantCache CreateNoOpCache() => new TenantCache(
+        new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+        NullLogger<TenantCache>.Instance);
+
     public TextExtractorServiceTests()
     {
         _loggerMock = new Mock<ILogger<TextExtractorService>>();
         _options = Options.Create(new DocumentIntelligenceOptions());
-        _service = new TextExtractorService(_options, _loggerMock.Object);
+        _service = new TextExtractorService(_options, _loggerMock.Object, CreateNoOpCache());
     }
 
     [Theory]
@@ -144,7 +154,7 @@ public class TextExtractorServiceTests
             DocIntelKey = "test-key"
             // DocIntelEndpoint not set
         });
-        var service = new TextExtractorService(options, _loggerMock.Object);
+        var service = new TextExtractorService(options, _loggerMock.Object, CreateNoOpCache());
 
         using var stream = CreateStream("content");
         var result = await service.ExtractAsync(stream, $"document{extension}");
@@ -165,7 +175,7 @@ public class TextExtractorServiceTests
             DocIntelEndpoint = "https://test.cognitiveservices.azure.com/"
             // DocIntelKey not set
         });
-        var service = new TextExtractorService(options, _loggerMock.Object);
+        var service = new TextExtractorService(options, _loggerMock.Object, CreateNoOpCache());
 
         using var stream = CreateStream("content");
         var result = await service.ExtractAsync(stream, $"document{extension}");
@@ -184,7 +194,7 @@ public class TextExtractorServiceTests
             DocIntelKey = "test-key",
             MaxFileSizeBytes = 100 // 100 bytes max
         });
-        var service = new TextExtractorService(options, _loggerMock.Object);
+        var service = new TextExtractorService(options, _loggerMock.Object, CreateNoOpCache());
 
         var content = new string('a', 200); // 200 bytes > 100 bytes limit
         using var stream = CreateStream(content);
@@ -227,7 +237,7 @@ public class TextExtractorServiceTests
         {
             ImageSummarizeModel = "gpt-4o"
         });
-        var service = new TextExtractorService(options, _loggerMock.Object);
+        var service = new TextExtractorService(options, _loggerMock.Object, CreateNoOpCache());
 
         using var stream = CreateStream("fake image");
 
@@ -351,7 +361,7 @@ public class TextExtractorServiceTests
         {
             MaxFileSizeBytes = 100 // 100 bytes max
         });
-        var service = new TextExtractorService(options, _loggerMock.Object);
+        var service = new TextExtractorService(options, _loggerMock.Object, CreateNoOpCache());
 
         var content = new string('a', 200); // 200 bytes > 100 bytes limit
         using var stream = CreateStream(content);
@@ -391,7 +401,7 @@ public class TextExtractorServiceTests
         {
             MaxInputTokens = 100 // Very small limit for testing
         });
-        var service = new TextExtractorService(options, _loggerMock.Object);
+        var service = new TextExtractorService(options, _loggerMock.Object, CreateNoOpCache());
 
         // Create EML with large body
         var largeBody = new string('x', 1000);
@@ -596,7 +606,7 @@ public class TextExtractorServiceTests
         {
             MaxInputTokens = 100000 // Large enough to not truncate the AI text
         });
-        var service = new TextExtractorService(options, _loggerMock.Object);
+        var service = new TextExtractorService(options, _loggerMock.Object, CreateNoOpCache());
 
         // Create email with body larger than 10K chars
         var largeBody = new string('x', 15000);
@@ -736,7 +746,7 @@ public class TextExtractorServiceTests
         {
             MaxInputTokens = 100 // Very small limit for testing
         });
-        var service = new TextExtractorService(options, _loggerMock.Object);
+        var service = new TextExtractorService(options, _loggerMock.Object, CreateNoOpCache());
 
         // Create content larger than limit (100 tokens * 4 chars = 400 chars)
         var content = new string('a', 1000);
@@ -756,7 +766,7 @@ public class TextExtractorServiceTests
         {
             MaxFileSizeBytes = 100 // 100 bytes max
         });
-        var service = new TextExtractorService(options, _loggerMock.Object);
+        var service = new TextExtractorService(options, _loggerMock.Object, CreateNoOpCache());
 
         var content = new string('a', 200); // 200 chars > 100 bytes
         using var stream = CreateStream(content);

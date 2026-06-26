@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>System-level cache exception allow-list (NFR-08)</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>018</blocks>
+    <tags>bff-api, cache, redis, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + .cs modifications + binding NFR-08 documentation</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Atomic migration ordering</parallel-reason>
+  </metadata>
+  <prompt>For every call site flagged during tasks 010–016 as "system-level exception" (feature flags, system config, global lease keys — legitimately non-tenant-scoped): document the rationale inline with a JSON comment per NFR-08. Add a static `SystemCacheKeys` helper class enumerating allowed system-level key prefixes. If count >20 across BFF, escalate per spec Assumption.</prompt>
+  <role>Spaarke .NET developer. Apply CLAUDE.md §11 three-question template per exception.</role>
+  <goal>Every system-level direct `IDistributedCache.` call left in the BFF has: (a) an inline `// SYSTEM-LEVEL EXCEPTION: {reason}` comment, (b) is enumerated in `SystemCacheKeys` static class, (c) appears in `notes/system-cache-exceptions.md` with the three-question justification. Count is ≤20 (escalate if higher).</goal>
+  <context><background>NFR-08 explicitly allows non-tenant-scoped keys for legitimate system concerns but requires per-site justification. The allow-list documents WHAT system keys exist so future code review can validate any new exception attempt.</background><relevant-files><file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/SystemCacheKeys.cs (NEW)</file><file>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md (NEW)</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">NFR-08 — system exceptions documented with JSON comment justification per call site.</constraint>
+    <constraint source="spec">Assumption — if count exceeds 20, escalate for architecture review.</constraint>
+    <constraint source="CLAUDE.md §11">Three-question template per exception.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Gather all system-level flagged sites from tasks 010–016 inventory updates.</step>
+    <step order="2">Count. If &gt;20, escalate immediately (do not proceed without architecture review sign-off).</step>
+    <step order="3">For each flagged site: add `// SYSTEM-LEVEL EXCEPTION (NFR-08): {reason}` comment above the call.</step>
+    <step order="4">Create `SystemCacheKeys.cs` static class enumerating allowed system prefixes (e.g., `public const string FeatureFlags = "system:feature-flags";`).</string>.</step>
+    <step order="5">Create `notes/system-cache-exceptions.md` — for each exception: file:line, current key, three-question justification.</step>
+    <step order="6">`dotnet build` + `dotnet test`.</step>
+    <step order="7">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">Sites + inventory</tool><tool name="Edit">Add comments</tool><tool name="Write">SystemCacheKeys.cs + notes</tool><tool name="Bash">build/test</tool></tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Cache/SystemCacheKeys.cs (NEW)</output>
+    <output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md (NEW)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Every system-level call site has inline `SYSTEM-LEVEL EXCEPTION` comment naming the rationale.</criterion>
+    <criterion testable="true">`SystemCacheKeys.cs` enumerates all allowed system prefixes.</criterion>
+    <criterion testable="true">`notes/system-cache-exceptions.md` has three-question justification per exception.</criterion>
+    <criterion testable="true">Total exception count ≤20.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>

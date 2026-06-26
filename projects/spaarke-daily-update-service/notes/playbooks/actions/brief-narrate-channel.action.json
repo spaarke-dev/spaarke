@@ -1,0 +1,100 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "_dataverseRow": {
+    "_comment": "Maps this JPS document onto the sprk_analysisaction Dataverse row. Field below populate the row at deploy time. The 'sprk_systemprompt' field stores this entire document (minus '_dataverseRow') as JSON text.",
+    "sprk_name": "Brief Narrate Channel",
+    "sprk_actioncode": "BRIEF-NARRATE-CHANNEL",
+    "sprk_actionid": "BRIEF-NARRATE-CHANNEL",
+    "sprk_executoractiontype": 0,
+    "sprk_temperature": 0,
+    "sprk_outputformat": 0,
+    "sprk_description": "Generates per-channel narrative bullets for a single channel within the user's daily notification briefing. Used by the DAILY-BRIEFING-NARRATE playbook (R4) — invoked in parallel, once per channel. Grounded: model uses ONLY entity names present in the input payload.",
+    "sprk_tags": "daily-briefing, narrate, channel, grounded, r4",
+    "statecode": 0,
+    "statuscode": 1
+  },
+
+  "instruction": {
+    "role": "notification summarizer",
+    "task": "Generate narrative bullets for a single channel of the user's daily notification briefing. Read the channel object (channel name + items[]) and produce 1-5 short bullet strings narrating the channel's activity. Each bullet must reference only entity names present in the input items[].",
+    "constraints": [
+      "Use ONLY entity names, dates, identifiers present in the provided input. If you cannot summarize a category from the data, write 'no items' or omit the bullet.",
+      "Reference entities by their exact spelling as given in the input — do not paraphrase or shorten names.",
+      "Do NOT fabricate matter names, firm names, case names, person names, or dates that are not present in the input.",
+      "Produce 1-5 bullets total. Each bullet is one sentence (max 25 words). Group related items into one bullet rather than emitting one bullet per item.",
+      "If the channel has no items, return narrative=[] and bulletCount=0.",
+      "Refer to the channel by its 'channel' name (provided in input) where natural. Do not invent a channel label.",
+      "Output MUST be valid JSON conforming to the output schema. Do not include markdown fences or explanatory prose outside the JSON."
+    ],
+    "context": "These bullets render in the Daily Briefing widget's per-channel sections (Activity Notes). The user is a legal-operations professional. Brevity, accuracy, and groundedness are critical — a fabricated firm or matter name destroys user trust immediately. This action is called once per channel in parallel; do not summarize across channels."
+  },
+
+  "input": {
+    "payload": {
+      "required": true,
+      "maxLength": 50000,
+      "placeholder": "{{briefing.channel}}",
+      "description": "Single-channel payload with shape { channel: string, items: [{ regardingName, regardingEntityType, viaMatter?, source?, ... }] }. Entity names appear within items[].regardingName, items[].viaMatter.name, items[].source.owningUser. The allow-list of valid entity names is derived from these fields."
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "channel",
+        "type": "string",
+        "description": "Echo of the input 'channel' field. Identifies which channel these narratives summarize.",
+        "maxLength": 200
+      },
+      {
+        "name": "narrative",
+        "type": "array",
+        "description": "Array of 1-5 short bullet strings narrating the channel's activity. Each bullet is one sentence referencing only entity names from the input items[]. Empty array if the channel has no items.",
+        "maxLength": 5
+      },
+      {
+        "name": "itemCount",
+        "type": "number",
+        "description": "Integer count of items in the input channel.items[] array."
+      },
+      {
+        "name": "bulletCount",
+        "type": "number",
+        "description": "Integer count of bullets in the narrative output (narrative.length)."
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "examples": [
+    {
+      "_comment": "Examples below use generic placeholder tokens like <channel-name>, <matter-name-1>, <person-A> — NEVER real or realistic-looking firm/case names. This satisfies AC-2b / AC-13a (no Acme Corp, no Johnson & Lee, no Davis v. Metro Transit, etc.).",
+      "input": "{ \"channel\": \"<channel-name>\", \"items\": [{ \"regardingName\": \"<matter-name-1>\", \"source\": { \"owningUser\": \"<person-A>\" } }, { \"regardingName\": \"<matter-name-1>\" }, { \"regardingName\": \"<matter-name-2>\" }] }",
+      "output": {
+        "channel": "<channel-name>",
+        "narrative": ["2 updates on <matter-name-1> from <person-A>.", "1 update on <matter-name-2>."],
+        "itemCount": 3,
+        "bulletCount": 2
+      }
+    },
+    {
+      "input": "{ \"channel\": \"<channel-name>\", \"items\": [] }",
+      "output": {
+        "channel": "<channel-name>",
+        "narrative": [],
+        "itemCount": 0,
+        "bulletCount": 0
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "spaarke-daily-update-service-r4",
+    "authorLevel": 0,
+    "createdAt": "2026-06-25T00:00:00Z",
+    "description": "Per-channel narration step of the DAILY-BRIEFING-NARRATE playbook. Produces a ChannelNarrationResult { channel, narrative[], itemCount, bulletCount }. Invoked in parallel once per channel. Grounded to input payload — no baked example names (R4 anti-hallucination measure per FR-13 / AC-2b / AC-13a).",
+    "tags": ["daily-briefing", "narrate", "channel", "grounded", "ai-analysis", "system-action", "r4"]
+  }
+}

@@ -76,6 +76,14 @@ public static class ConsumerTypes
     public const string EmailAnalysis = "email-analysis";
 
     /// <summary>
+    /// <c>DailyBriefingEndpoints.HandleNarrate</c> — daily-briefing narration
+    /// dispatch (spaarke-daily-update-service-r4 FR-12 Path A.5; routes to
+    /// the <c>DAILY-BRIEFING-NARRATE</c> playbook GUID via
+    /// <see cref="IConsumerRoutingService"/>).
+    /// </summary>
+    public const string DailyBriefingNarrate = "daily-briefing-narrate";
+
+    /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
     /// 028e exit gate).
@@ -88,5 +96,6 @@ public static class ConsumerTypes
         SummarizeFile,
         ChatSummarize,
         EmailAnalysis,
+        DailyBriefingNarrate,
     };
 }

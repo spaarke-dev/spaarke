@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Provision spaarke-bff-redis-dev (Basic C0)</title>
+    <phase>3: Dev environment cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022,025,030</dependencies>
+    <blocks>032</blocks>
+    <tags>azure, deploy, infrastructure</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Irreversible Azure operation; creates real resource</rigor-reason>
+    <parallel-group>Phase3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase 3 cutover sequence — strictly serial</parallel-reason>
+  </metadata>
+  <prompt>Run `pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev`. Provisions `spaarke-bff-redis-dev` (Basic C0) in `spe-infrastructure-westus2` RG. Wait for provisioning to complete (Azure Cache for Redis can take 15-20 min).</prompt>
+  <role>Spaarke operator running Azure deploy.</role>
+  <goal>`az redis show -g spe-infrastructure-westus2 -n spaarke-bff-redis-dev` returns `provisioningState: Succeeded`, Basic C0. Per FR-13.</goal>
+  <context><background>Live Azure deploy. First irreversible step of Phase 3.</background><relevant-files><file>scripts/Deploy-RedisCache.ps1</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">FR-13 — provision via deploy script.</constraint>
+    <constraint source="spec">NFR-01 — idempotent (re-run safe).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/dev-cutover-baseline.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>scripts/Deploy-RedisCache.ps1</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Re-confirm baseline (notes from task 030).</step>
+    <step order="2">Run `pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev`. Tee output to `notes/cutover-deploy-log.md`.</step>
+    <step order="3">Wait for provisioning complete (poll `az redis show ... --query provisioningState`).</step>
+    <step order="4">Verify final state: `az redis show -g spe-infrastructure-westus2 -n spaarke-bff-redis-dev`.</step>
+    <step order="5">Update TASK-INDEX + current-task with timestamp.</step>
+  </steps>
+  <tools><tool name="Bash">PowerShell deploy script + az CLI polling</tool><tool name="Write">deploy log</tool></tools>
+  <outputs>
+    <output type="azure">spaarke-bff-redis-dev (Azure resource — Basic C0)</output>
+    <output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/cutover-deploy-log.md (NEW)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`az redis show -g spe-infrastructure-westus2 -n spaarke-bff-redis-dev --query provisioningState` returns "Succeeded".</criterion>
+    <criterion testable="true">SKU is Basic, capacity 0 (C0).</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>
