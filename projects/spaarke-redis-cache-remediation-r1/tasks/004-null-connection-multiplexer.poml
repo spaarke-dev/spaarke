@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>NullConnectionMultiplexer (ADR-032 Null-Object)</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>005,009</blocks>
+    <tags>bff-api, cache, redis, di, null-object</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + new file (.cs) + ADR-032 pattern + symmetric DI requirement</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create `src/server/api/Sprk.Bff.Api/Infrastructure/Cache/NullObjects/NullConnectionMultiplexer.cs` implementing `IConnectionMultiplexer` per ADR-032. Subscribe = no-op; Publish = log-once-no-op; GetDatabase() returns a stub that throws `NotSupportedException` with message "In-memory cache mode does not support direct Redis database operations. Use IDistributedCache." Mirror the pattern in `NullMembershipCacheInvalidator.cs`.
+  </prompt>
+
+  <role>
+    Spaarke .NET developer with StackExchange.Redis interface familiarity. Implement the full `IConnectionMultiplexer` surface defensively — every member must be a safe no-op or throw with a clear message.
+  </role>
+
+  <goal>
+    A `NullConnectionMultiplexer` class implementing `IConnectionMultiplexer` with: no-op Pub/Sub (log-once on first call), throw-with-message on database operations, sane defaults for connection-state properties (e.g., `IsConnected = false`, `ClientName = "null-object"`). Constructor takes `ILogger<NullConnectionMultiplexer>` for the log-once warning.
+  </goal>
+
+  <context>
+    <background>
+      Per ADR-032, conditional services consumed by unconditional endpoint handlers must be registered as Null-Objects rather than left null/missing. `IConnectionMultiplexer` is consumed by Pub/Sub-using services (`MembershipCacheInvalidator`, `MembershipCacheInvalidationSubscriber`, `JobStatusService`, possibly more). In dev-in-memory mode those services must continue to resolve cleanly — but Pub/Sub will be no-op (documented multi-instance limitation per Q-B).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/NullObjects/NullConnectionMultiplexer.cs (NEW)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/NullMembershipCacheInvalidator.cs (REFERENCE PATTERN)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-032">P3 fail-fast tier for database operations; quiet no-op (P2) for Pub/Sub; log-once-at-construction.</constraint>
+    <constraint source="ADR-010">No new interface needed (`IConnectionMultiplexer` exists; this is a new concrete class — interface justification not required for concrete classes per ADR-010).</constraint>
+    <constraint source="project">Namespace `Sprk.Bff.Api.Infrastructure.Cache.NullObjects` per Q9.</constraint>
+    <constraint source="project">No new packages.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/NullMembershipCacheInvalidator.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `NullMembershipCacheInvalidator.cs` to internalize Spaarke's Null-Object conventions (log-once, ILogger constructor injection, sealed class).</step>
+    <step order="2">Read the `IConnectionMultiplexer` interface surface (via StackExchange.Redis package metadata or by inspecting source / IDE). Enumerate the members to implement.</step>
+    <step order="3">Create `Infrastructure/Cache/NullObjects/NullConnectionMultiplexer.cs`. Class signature: `internal sealed class NullConnectionMultiplexer : IConnectionMultiplexer`.</step>
+    <step order="4">Implement Pub/Sub members: `GetSubscriber()` returns a `NullSubscriber` (nested class). `NullSubscriber.Publish*` methods return 0 (no subscribers) without throwing; `Subscribe*` accept callbacks and store them but never deliver. Log once on first call.</step>
+    <step order="5">Implement `GetDatabase()` returning `NullDatabase` (nested class). `NullDatabase` throws `NotSupportedException("In-memory cache mode does not support direct Redis database operations. Use IDistributedCache.")` on every method.</step>
+    <step order="6">Implement connection-state surface: `IsConnected => false`, `Configuration => string.Empty`, `ClientName => "null-object"`, etc. Use sane defaults.</step>
+    <step order="7">Add XML doc comments to the class and to the throw-message database stub. Reference ADR-032 in the class summary.</step>
+    <step order="8">Run `dotnet build` to verify all interface members are implemented. Compile errors here indicate missing members.</step>
+    <step order="9">Update `TASK-INDEX.md` — mark 004 ✅. Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect NullMembershipCacheInvalidator reference + StackExchange.Redis interface</tool>
+    <tool name="Write">Create NullConnectionMultiplexer.cs</tool>
+    <tool name="Bash">dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Cache/NullObjects/NullConnectionMultiplexer.cs (NEW)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File exists at the prescribed path; class is `internal sealed`; namespace is `Sprk.Bff.Api.Infrastructure.Cache.NullObjects`.</criterion>
+    <criterion testable="true">`GetSubscriber().Publish(...)` returns 0 without throwing; logs once on first call.</criterion>
+    <criterion testable="true">`GetSubscriber().Subscribe(...)` is a no-op; callbacks never delivered.</criterion>
+    <criterion testable="true">`GetDatabase().StringGetAsync(...)` (any database method) throws `NotSupportedException` with the prescribed message.</criterion>
+    <criterion testable="true">`dotnet build` succeeds; no missing-interface-member errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Justification (CLAUDE.md §11 three-question): Existing — no Null-Object impl of `IConnectionMultiplexer` exists; cannot extend (interface is from StackExchange.Redis package — cannot modify). Cost-of-doing-nothing: dev-in-memory mode would fail to resolve `IConnectionMultiplexer`, breaking `MembershipCacheInvalidator`, `JobStatusService`, `MembershipCacheInvalidationSubscriber` (per ADR-032 anti-pattern). This is justified per ADR-010/ADR-032.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Quality gates at Step 9.5.</protocol>
+  </execution>
+</task>

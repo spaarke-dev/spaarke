@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="059" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Final /code-review run on full project diff</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>058</dependencies>
+    <blocks>060</blocks>
+    <tags>verification, code-review</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Final quality gate</rigor-reason>
+    <parallel-group>Wrap</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wrap-up gate sequence</parallel-reason>
+  </metadata>
+  <prompt>Run `/code-review` skill on the full project diff against master. Address all critical findings. Document non-critical findings as follow-ups in lessons-learned.</prompt>
+  <role>Spaarke quality reviewer.</role>
+  <goal>Code-review report exists; critical findings resolved; non-critical findings tracked.</goal>
+  <context><background>Pre-merge quality gate.</background><relevant-files><file>All modified files in the branch</file></relevant-files></context>
+  <constraints><constraint source="project">No critical findings unresolved at merge.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Invoke `code-review` skill on the project diff.</step>
+    <step order="2">Capture findings.</step>
+    <step order="3">Resolve criticals. Track non-criticals in lessons-learned.</step>
+    <step order="4">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Skill">code-review</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/code-review-report.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Code-review report exists; no unresolved criticals.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

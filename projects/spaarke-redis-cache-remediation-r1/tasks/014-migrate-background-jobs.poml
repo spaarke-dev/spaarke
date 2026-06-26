@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Migrate Background-job services to ITenantCache</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>015</blocks>
+    <tags>bff-api, cache, redis, refactoring, worker, job</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + worker + .cs modifications</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Atomic migration ordering</parallel-reason>
+  </metadata>
+  <prompt>Migrate `Services/Jobs/` + any hosted-service direct `IDistributedCache.` calls to `ITenantCache`. Background jobs may need tenantId from job message payload — surface explicitly.</prompt>
+  <role>Spaarke .NET developer with hosted-service familiarity.</role>
+  <goal>`grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/Services/Jobs/` returns ZERO unflagged matches.</goal>
+  <context>
+    <background>Background jobs (ServiceBusJobProcessor and friends) read/write cache during processing. Tenant context typically lives on the job message.</background>
+    <relevant-files><file>src/server/api/Sprk.Bff.Api/Services/Jobs/</file></relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-06 atomic migration.</constraint>
+    <constraint source="jobs">Background jobs must surface tenantId explicitly (no ambient).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/ITenantCache.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Open inventory Jobs section.</step>
+    <step order="2">For each site: inject `ITenantCache`; surface tenantId from job message.</step>
+    <step order="3">If tenantId is genuinely system-level (e.g., global lease key), flag for task 017 allow-list.</step>
+    <step order="4">`dotnet build` + `dotnet test`.</step>
+    <step order="5">Update inventory + TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">Inventory + sites</tool><tool name="Edit">Migration</tool><tool name="Bash">build/test</tool></tools>
+  <outputs><output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/* (modified)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/Services/Jobs/` returns ZERO unflagged matches.</criterion>
+    <criterion testable="true">`dotnet test` job tests pass.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>
