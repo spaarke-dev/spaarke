@@ -1,4 +1,5 @@
-# BISECT STEP 5 — add tier2 reusable workflow call (with fixed string-type inputs)
+# BISECT STEP 6 — same as step 5, but grant pull-requests: write so tier2's
+# PR-comment job has the permission it needs (caller-permissions floor).
 name: CI
 
 on:
@@ -10,7 +11,8 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write   # tier2 declares pull-requests: write for tier2-pr-comment;
+                         # a reusable workflow cannot exceed caller's permissions.
 
 concurrency:
   group: ci-router-${{ github.event.pull_request.number || github.ref }}
