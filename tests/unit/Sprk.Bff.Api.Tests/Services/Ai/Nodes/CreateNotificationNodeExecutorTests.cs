@@ -4,6 +4,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Moq.Protected;
 using Spaarke.Dataverse;
@@ -51,6 +52,12 @@ public class CreateNotificationNodeExecutorTests
         _entityServiceMock
             .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => Guid.NewGuid());
+
+        // Default idempotency check returns no duplicate so FR-6 tests can rely on the
+        // executor proceeding to the entity-creation path. Individual tests override if needed.
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new Microsoft.Xrm.Sdk.EntityCollection());
 
         _executor = new CreateNotificationNodeExecutor(
             _templateEngineMock.Object,
@@ -673,6 +680,354 @@ public class CreateNotificationNodeExecutorTests
         // (c) customData.actionUrl populated
         dataRoot.TryGetProperty("customData", out var customData).Should().BeTrue();
         customData.GetProperty("actionUrl").GetString().Should().Contain(itemRegardingId.ToString());
+    }
+
+    #endregion
+
+    #region FR-6 / AC-6: customData enrichment (R4 task 020)
+
+    /// <summary>
+    /// FR-6 / AC-6a: When all enrichment scalars + viaMatter are supplied, the produced
+    /// appnotification.data.customData JSON contains the full enriched schema:
+    /// regardingName, regardingEntityType, regardingId, source (entityType/id/modifiedOn/owningUser),
+    /// viaMatter (id/name/memberships[]), plus legacy fields actionUrl/dueDate.
+    /// </summary>
+    [Fact]
+    public async Task FR6_ExecuteAsync_WithEnrichmentFields_PopulatesCustomDataWithEnrichedSchema()
+    {
+        // Arrange
+        var recipientId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var sourceRecordId = Guid.NewGuid();
+        var owningUserId = Guid.NewGuid();
+        var modifiedOn = "2026-06-25T12:00:00Z";
+
+        // Upstream LookupUserMembership output bound to "myMatters" (canonical name).
+        // byRole is the dictionary the executor projects from.
+        var myMattersOutput = BuildLookupMembershipOutput(matterId, "owner");
+
+        var config = JsonSerializer.Serialize(new
+        {
+            title = "New document on Acme Matter",
+            body = "A document was uploaded",
+            category = "document-upload",
+            recipientId = recipientId.ToString(),
+            actionUrl = "/main.aspx?pagetype=entityrecord&etn=sprk_document&id=" + sourceRecordId,
+            // FR-6 enrichment fields
+            regardingName = "Acme Corp v. Smith",
+            sourceEntityType = "sprk_document",
+            sourceId = sourceRecordId.ToString(),
+            sourceModifiedOn = modifiedOn,
+            sourceOwningUser = owningUserId.ToString(),
+            viaMatterId = matterId.ToString(),
+            viaMatterName = "Acme Corp v. Smith",
+            viaMatterMembershipsVariable = "myMatters",
+            regardingId = matterId.ToString(),
+            regardingType = "sprk_matter"
+        });
+
+        var context = CreateValidContext(config) with
+        {
+            PreviousOutputs = new Dictionary<string, NodeOutput>
+            {
+                ["myMatters"] = myMattersOutput
+            }
+        };
+
+        SetupMockPassThrough();
+        Entity? capturedEntity = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedEntity.Should().NotBeNull();
+
+        var data = capturedEntity!["data"] as string;
+        data.Should().NotBeNullOrEmpty();
+
+        using var doc = JsonDocument.Parse(data!);
+        var customData = doc.RootElement.GetProperty("customData");
+
+        // Existing fields preserved (AC-6b backward compat)
+        customData.GetProperty("actionUrl").GetString().Should().Contain(sourceRecordId.ToString());
+
+        // FR-6 new fields present (AC-6a)
+        customData.GetProperty("regardingName").GetString().Should().Be("Acme Corp v. Smith");
+        customData.GetProperty("regardingEntityType").GetString().Should().Be("sprk_matter");
+        customData.GetProperty("regardingId").GetString().Should().Be(matterId.ToString());
+
+        var viaMatter = customData.GetProperty("viaMatter");
+        viaMatter.GetProperty("id").GetString().Should().Be(matterId.ToString());
+        viaMatter.GetProperty("name").GetString().Should().Be("Acme Corp v. Smith");
+        viaMatter.GetProperty("memberships").GetArrayLength().Should().Be(1,
+            "single-role membership produces one entry in memberships[]");
+        viaMatter.GetProperty("memberships")[0].GetProperty("role").GetString().Should().Be("owner");
+
+        var source = customData.GetProperty("source");
+        source.GetProperty("entityType").GetString().Should().Be("sprk_document");
+        source.GetProperty("id").GetString().Should().Be(sourceRecordId.ToString());
+        source.GetProperty("modifiedOn").GetString().Should().Be(modifiedOn);
+        source.GetProperty("owningUser").GetString().Should().Be(owningUserId.ToString());
+    }
+
+    /// <summary>
+    /// FR-6 omission rule: when source-record has no matter linkage (viaMatterId absent),
+    /// the viaMatter field MUST be omitted entirely from customData (not present as null).
+    /// </summary>
+    [Fact]
+    public async Task FR6_ExecuteAsync_WithoutViaMatterId_OmitsViaMatterFieldEntirely()
+    {
+        // Arrange
+        var recipientId = Guid.NewGuid();
+        var sourceRecordId = Guid.NewGuid();
+
+        var config = JsonSerializer.Serialize(new
+        {
+            title = "Standalone notification",
+            body = "No matter linkage",
+            category = "general",
+            recipientId = recipientId.ToString(),
+            actionUrl = "/somewhere",
+            regardingName = "Standalone record",
+            sourceEntityType = "sprk_event",
+            sourceId = sourceRecordId.ToString()
+            // No viaMatterId — viaMatter MUST be omitted
+        });
+        var context = CreateValidContext(config);
+
+        SetupMockPassThrough();
+        Entity? capturedEntity = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var data = (string)capturedEntity!["data"];
+        using var doc = JsonDocument.Parse(data);
+        var customData = doc.RootElement.GetProperty("customData");
+
+        customData.TryGetProperty("viaMatter", out _).Should().BeFalse(
+            "FR-6 omission rule: viaMatter MUST be omitted (not null) when no matter linkage");
+        // Other FR-6 fields still surface
+        customData.GetProperty("regardingName").GetString().Should().Be("Standalone record");
+        customData.GetProperty("source").GetProperty("entityType").GetString().Should().Be("sprk_event");
+    }
+
+    /// <summary>
+    /// FR-6: when source-record has multiple membership roles (owner + assignedAttorney),
+    /// viaMatter.memberships is an array with one entry per role.
+    /// </summary>
+    [Fact]
+    public async Task FR6_ExecuteAsync_WithMultipleMembershipRoles_ProducesMultipleMembershipEntries()
+    {
+        // Arrange
+        var recipientId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+
+        // Upstream membership: same matter in two role buckets.
+        var myMattersOutput = BuildMultiRoleLookupMembershipOutput(matterId, "owner", "assignedAttorney");
+
+        var config = JsonSerializer.Serialize(new
+        {
+            title = "Matter activity",
+            body = "Activity on a matter you're attached to",
+            category = "matter-activity",
+            recipientId = recipientId.ToString(),
+            actionUrl = "/somewhere",
+            viaMatterId = matterId.ToString(),
+            viaMatterName = "Multi-Role Matter",
+            viaMatterMembershipsVariable = "myMatters"
+        });
+        var context = CreateValidContext(config) with
+        {
+            PreviousOutputs = new Dictionary<string, NodeOutput>
+            {
+                ["myMatters"] = myMattersOutput
+            }
+        };
+
+        SetupMockPassThrough();
+        Entity? capturedEntity = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var data = (string)capturedEntity!["data"];
+        using var doc = JsonDocument.Parse(data);
+        var memberships = doc.RootElement
+            .GetProperty("customData")
+            .GetProperty("viaMatter")
+            .GetProperty("memberships");
+
+        memberships.GetArrayLength().Should().Be(2,
+            "FR-6 multi-role case: memberships[] has one entry per role");
+        var roles = memberships.EnumerateArray()
+            .Select(m => m.GetProperty("role").GetString())
+            .ToArray();
+        roles.Should().Contain("owner");
+        roles.Should().Contain("assignedAttorney");
+    }
+
+    /// <summary>
+    /// AC-6b backward compat: a config that supplies only legacy fields (no FR-6 enrichment
+    /// inputs) produces the legacy customData shape — widget's parseNotificationData still
+    /// works against the existing structure.
+    /// </summary>
+    [Fact]
+    public async Task FR6_ExecuteAsync_LegacyConfigShape_ProducesBackwardCompatibleCustomData()
+    {
+        // Arrange — config that matches the pre-R4 shape exactly
+        var recipientId = Guid.NewGuid();
+        var config = JsonSerializer.Serialize(new
+        {
+            title = "Legacy notification",
+            body = "Body",
+            category = "legacy-channel",
+            recipientId = recipientId.ToString(),
+            actionUrl = "/main.aspx?id=123",
+            dueDate = "2026-07-01T00:00:00Z"
+        });
+        var context = CreateValidContext(config);
+
+        SetupMockPassThrough();
+        Entity? capturedEntity = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var data = (string)capturedEntity!["data"];
+        using var doc = JsonDocument.Parse(data);
+        var customData = doc.RootElement.GetProperty("customData");
+
+        // Legacy fields still present
+        customData.GetProperty("actionUrl").GetString().Should().Be("/main.aspx?id=123");
+        customData.GetProperty("dueDate").GetString().Should().Be("2026-07-01T00:00:00Z");
+
+        // None of the FR-6 fields should leak in
+        customData.TryGetProperty("regardingName", out _).Should().BeFalse();
+        customData.TryGetProperty("viaMatter", out _).Should().BeFalse();
+        customData.TryGetProperty("source", out _).Should().BeFalse();
+        customData.TryGetProperty("regardingEntityType", out _).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// AC-6c payload-size ceiling: typical enriched customData payload stays well under the
+    /// 10KB hard ceiling specified in FR-6 / AC-6c (and the typical-target &lt;2KB).
+    /// </summary>
+    [Fact]
+    public async Task FR6_ExecuteAsync_TypicalPayloadSize_BelowTenKilobyteCeiling()
+    {
+        // Arrange — representative enriched notification matching the membership-aware playbook shape
+        var recipientId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var sourceRecordId = Guid.NewGuid();
+        var owningUserId = Guid.NewGuid();
+        var myMattersOutput = BuildMultiRoleLookupMembershipOutput(matterId, "owner", "assignedAttorney", "assignedParalegal");
+
+        var config = JsonSerializer.Serialize(new
+        {
+            title = "New document uploaded on Acme Corporation v. Smith Industries (Matter 123-456)",
+            body = "Document 'Q3 Financial Statement.pdf' was uploaded by Jane Doe. Review required.",
+            category = "document-upload",
+            recipientId = recipientId.ToString(),
+            actionUrl = "/main.aspx?pagetype=entityrecord&etn=sprk_document&id=" + sourceRecordId,
+            dueDate = "2026-07-01T17:00:00Z",
+            regardingName = "Acme Corporation v. Smith Industries",
+            sourceEntityType = "sprk_document",
+            sourceId = sourceRecordId.ToString(),
+            sourceModifiedOn = "2026-06-25T14:30:00Z",
+            sourceOwningUser = owningUserId.ToString(),
+            viaMatterId = matterId.ToString(),
+            viaMatterName = "Acme Corporation v. Smith Industries",
+            viaMatterMembershipsVariable = "myMatters",
+            regardingId = matterId.ToString(),
+            regardingType = "sprk_matter"
+        });
+        var context = CreateValidContext(config) with
+        {
+            PreviousOutputs = new Dictionary<string, NodeOutput>
+            {
+                ["myMatters"] = myMattersOutput
+            }
+        };
+
+        SetupMockPassThrough();
+        Entity? capturedEntity = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        var data = (string)capturedEntity!["data"];
+        var sizeInBytes = Encoding.UTF8.GetByteCount(data);
+
+        sizeInBytes.Should().BeLessThan(10_000,
+            "AC-6c hard ceiling: appnotification.data payload MUST be <10KB");
+        sizeInBytes.Should().BeLessThan(2_000,
+            "AC-6c typical target: representative payload should fit <2KB");
+    }
+
+    private static NodeOutput BuildLookupMembershipOutput(Guid matterId, string role)
+    {
+        // Mirror LookupUserMembershipNodeExecutor's structured output shape.
+        return NodeOutput.Ok(
+            nodeId: Guid.NewGuid(),
+            outputVariable: "myMatters",
+            data: new
+            {
+                entityType = "sprk_matter",
+                count = 1,
+                ids = new[] { matterId.ToString() },
+                byRole = new Dictionary<string, string[]>
+                {
+                    [role] = new[] { matterId.ToString() }
+                }
+            },
+            textContent: "1 matter resolved");
+    }
+
+    private static NodeOutput BuildMultiRoleLookupMembershipOutput(Guid matterId, params string[] roles)
+    {
+        var byRole = roles.ToDictionary(r => r, _ => new[] { matterId.ToString() });
+        return NodeOutput.Ok(
+            nodeId: Guid.NewGuid(),
+            outputVariable: "myMatters",
+            data: new
+            {
+                entityType = "sprk_matter",
+                count = 1,
+                ids = new[] { matterId.ToString() },
+                byRole = byRole
+            },
+            textContent: $"1 matter in {roles.Length} role(s)");
     }
 
     #endregion

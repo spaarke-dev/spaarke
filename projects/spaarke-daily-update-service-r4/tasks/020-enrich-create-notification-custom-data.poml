@@ -3,8 +3,18 @@
   <metadata>
     <title>Enrich CreateNotificationNodeExecutor.BuildNotificationEntity with viaMatter/regardingName/source</title>
     <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
     <estimated-hours>4</estimated-hours>
+    <completion-notes>
+      Enriched BuildNotificationEntity to populate FR-6 customData fields: regardingName, regardingEntityType, regardingId, viaMatter (id/name/memberships[]), source (entityType/id/modifiedOn/owningUser).
+      All 5 new fields are optional config inputs (playbook-template-rendered) — non-migrated playbooks produce the legacy customData shape unchanged (AC-6b backward compat).
+      viaMatter is OMITTED entirely (not null) when source-record has no matter linkage; memberships[] is one-entry-per-role projected from upstream LookupUserMembership node's byRole bucket.
+      Justification (§11): existing = BuildNotificationEntity itself (lines 471-546); extension = YES (in-method extension, no new types/DI/endpoints); cost-of-doing-nothing = FR-13 + FR-14 fail (EntityNameValidator allow-list cannot be built, widget narration loses grounding).
+      Tests: 5 new FR-6 tests pass (AC-6a enriched-fields, omission rule, multi-role, AC-6b backward-compat, AC-6c &lt;2KB / &lt;10KB).
+      Build clean. Publish-size 46.31 MB (+1.33 MB vs PR 1 baseline 44.98 MB; not from this task — accumulated PR 2 changes). CVE: 1 pre-existing HIGH (Microsoft.Kiota.Abstractions GHSA-7j59-v9qr-6fq9) carried from master — NOT introduced by task 020.
+      TTL fix at line 490 (ttlinseconds = 604800) preserved untouched. Idempotency check (CheckForDuplicateNotificationAsync) preserved.
+    </completion-notes>
     <dependencies>018</dependencies>
     <blocks>021, 022, 023, 024, 025, 026, 028</blocks>
     <tags>bff-api, ai, refactoring</tags>

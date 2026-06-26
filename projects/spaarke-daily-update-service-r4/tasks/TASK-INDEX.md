@@ -52,7 +52,7 @@
 
 | ID | Title | Status | Dependencies | Blocks | Parallel | Rigor |
 |----|-------|--------|--------------|--------|----------|-------|
-| 020 | Enrich CreateNotificationNodeExecutor.BuildNotificationEntity (viaMatter/regardingName/source) | 🔲 | 018 | 021, 022, 023, 024, 025, 026, 028 | — | FULL |
+| 020 | Enrich CreateNotificationNodeExecutor.BuildNotificationEntity (viaMatter/regardingName/source) | ✅ | 018 | 021, 022, 023, 024, 025, 026, 028 | — | FULL |
 | 021 | Ensure sprk_category column dual-write (audit + fix if missing) | 🔲 | 020 | 022, 023, 024, 025, 028 | — | FULL |
 | 022 | Migrate notification-tasks-overdue.json to membership-scope union FetchXml | 🔲 | 020, 021 | 026 | Group D | STANDARD |
 | 023 | Migrate notification-tasks-due-soon.json to membership-scope | 🔲 | 020, 021 | 026 | Group D | STANDARD |
