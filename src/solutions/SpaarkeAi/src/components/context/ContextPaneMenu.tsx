@@ -175,6 +175,12 @@ const CONTEXT_TOOLS: readonly ToolDescriptor[] = [
     id: 'semantic-search',
     label: 'Semantic Search',
   },
+  {
+    // R6 Pillar 7 / task 096 — make voice-trigger pins inspectable in the
+    // shell. The widget renders inline in the context pane when selected.
+    id: 'pinned-memory',
+    label: 'Pinned Memory',
+  },
 ];
 
 // ---------------------------------------------------------------------------

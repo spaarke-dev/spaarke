@@ -51,6 +51,8 @@ import {
   resolveContextWidget,
   getContextWidgetForTab,
   GetStartedCardsWidget,
+  // R6 Pillar 7 / task 096 — Pinned Memory affordance for the Context pane.
+  PinnedMemoryListWidget,
 } from "@spaarke/ai-widgets";
 import type {
   ContextWidgetComponent,
@@ -670,6 +672,24 @@ export function ContextPaneController(): React.JSX.Element {
       return (
         <div className={styles.content} data-testid="context-pane-semantic-search">
           <SemanticSearchCriteriaTool />
+        </div>
+      );
+    }
+
+    // R6 Pillar 7 / task 096 — Pinned Memory affordance: lets the user
+    // inspect + manage voice-trigger pins ("remember X", "forget X") that
+    // the agent has been collecting via ManagePinnedContextHandler. This
+    // is the user-facing inspection surface while WP5 (successor's 6-tier
+    // memory composition wiring) is being built.
+    //
+    // The widget is BFF-driven (GET/POST/PUT/DELETE /api/memory/pins);
+    // it owns its own data fetching and CRUD. We pass an empty object as
+    // the context payload — PinnedMemoryListWidget reads tenantId + matterId
+    // from useAiSession() internally, so no widget-prop wiring is needed.
+    if (selectedTool === "pinned-memory") {
+      return (
+        <div className={styles.content} data-testid="context-pane-pinned-memory">
+          <PinnedMemoryListWidget data={{}} widgetType="pinned-memory-list" />
         </div>
       );
     }
