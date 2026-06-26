@@ -159,3 +159,117 @@ Per task 001 step 2 + AC, an MCP `read_query` smoke against spaarkedev1 was requ
 **High** for Path A.5 over Path B. Pure Path A is structurally precluded by the document-centric `ExecutePlaybookAsync`. Path B sacrifices a clean routing precedent for no benefit. Path A.5 preserves the §10 / chat-routing-redesign-r1 pattern with one small new entry point — the right architectural fit.
 
 **Open** for the exact new-method placement (on `IAnalysisOrchestrationService` vs sibling `IPlaybookExecutorService`). Task 030 decides based on `IPlaybookService` survey.
+
+---
+
+## Confirmation — IPlaybookService survey result (task 030, 2026-06-26)
+
+### Methods enumerated on `IPlaybookService` and document-centric status
+
+Survey of `src/server/api/Sprk.Bff.Api/Services/Ai/IPlaybookService.cs` (interface declaration) yields 12 methods. NONE execute a playbook — all are CRUD / lookup / index-tracking:
+
+| # | Method | Surface | Executes a playbook? |
+|---|---|---|---|
+| 1 | `CreatePlaybookAsync` | CRUD — create row | No (CRUD) |
+| 2 | `UpdatePlaybookAsync` | CRUD — update row | No (CRUD) |
+| 3 | `GetPlaybookAsync` | CRUD — read by ID | No (lookup) |
+| 4 | `UserHasAccessAsync` | Authorization | No (auth check) |
+| 5 | `ValidateAsync` | Validation | No (validation) |
+| 6 | `ListUserPlaybooksAsync` | CRUD — list owned | No (query) |
+| 7 | `ListPublicPlaybooksAsync` | CRUD — list public | No (query) |
+| 8 | `GetByNameAsync` | Lookup by name (cached) | No (lookup) |
+| 9 | `GetCanvasLayoutAsync` | Canvas-layout read | No (CRUD) |
+| 10 | `SaveCanvasLayoutAsync` | Canvas-layout write | No (CRUD) |
+| 11 | `ListTemplatesAsync` | CRUD — list templates | No (query, currently disabled) |
+| 12 | `ClonePlaybookAsync` | CRUD — clone template | No (CRUD) |
+| 13 | `ListAllActivePlaybooksAsync` | Drift-detection enumeration | No (query for FR-13) |
+| 14 | `UpdateIndexStatusAsync` | Indexing tracking | No (CRUD on tracking fields) |
+
+**Conclusion on `IPlaybookService`**: this is exclusively a CRUD + lookup + indexing service. Playbook **execution** is on a different interface family — `IAnalysisOrchestrationService` (document-centric, streaming) and `IPlaybookOrchestrationService` (legacy + node-based, streaming).
+
+### CRITICAL discovery — `IInvokePlaybookAi` already provides the exact non-document execution path
+
+While completing the survey, a Grep across `Services/Ai` for execute/invoke entry points surfaced an existing facade that PERFECTLY fits Path A.5:
+
+- **`src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs:51`** — `IInvokePlaybookAi` (R6 Pillar 3 / Q11) public facade in `PublicContracts/` (the ADR-013 boundary).
+- **Method signature** (lines 82–86):
+  ```csharp
+  Task<PlaybookInvocationResult> InvokePlaybookAsync(
+      Guid playbookId,
+      IReadOnlyDictionary<string, string>? parameters,
+      PlaybookInvocationContext context,
+      CancellationToken cancellationToken = default);
+  ```
+- **`InvokePlaybookAi.cs:67–72`** — Implementation comment **explicitly documents the non-document semantic**:
+  > "Construct the orchestration request. Note: the facade does NOT accept documentIds today — invoke_playbook callers pass parameters only. The orchestration service interprets an empty documentIds array as 'no document context' (consistent with the existing M365 Copilot adapter path)."
+- **Return type**: `PlaybookInvocationResult` — non-streaming, single typed result. Carries `TextContent`, `StructuredData` (JsonElement), `Citations`, `Confidence`, `Success`, `ErrorMessage`, `ErrorCode` — every shape `/narrate` needs.
+- **Wave 7b precedent**: this facade is already used by `InvokePlaybookHandler` (chat-tool dispatch path) and is destined for the M365 Copilot adapter — both consume the same non-document, parameters-only contract.
+
+### Final Path A.5 decision: USE EXISTING facade — no new method required
+
+**Task 031 does NOT need to author a new playbook-execution method.** The existing `IInvokePlaybookAi.InvokePlaybookAsync` is the right binding. Task 031's work simplifies to:
+
+1. **Add `DailyBriefingNarrate = "daily-briefing-narrate"` to `ConsumerTypes`** (+ update `ConsumerTypes.All`).
+2. **Deploy `sprk_playbookconsumer` row** in spaarkedev1: `sprk_consumertype = "daily-briefing-narrate"` → `sprk_analysisplaybookid = DAILY-BRIEFING-NARRATE GUID`.
+3. **Wire `HandleNarrate`** to inject `IConsumerRoutingService` + `IInvokePlaybookAi`:
+   - Call `routing.ResolveAsync(ConsumerTypes.DailyBriefingNarrate, "default", null, null, ct)` to get the playbook GUID.
+   - Build `IReadOnlyDictionary<string, string>` of parameters from `DailyBriefingNarrateRequest` (serialize the structured payload — Categories / PriorityItems / Channels / totals — as one or more JSON-string parameter entries the playbook node graph can read via template substitution).
+   - Call `invokePlaybookAi.InvokePlaybookAsync(playbookId, parameters, new PlaybookInvocationContext { TenantId = …, HttpContext = httpContext }, ct)`.
+   - Map `PlaybookInvocationResult.TextContent` / `StructuredData` to `DailyBriefingNarrateResponse { Tldr, ChannelNarratives, GeneratedAtUtc }` — preserving the existing widget-parser contract.
+4. **Preserve empty-payload tolerance + 503 fail-fast branches** (unchanged from the prior sketch).
+
+### One caveat → task 031 must validate playbook parameter shape
+
+The `IInvokePlaybookAi` parameter dictionary is `IReadOnlyDictionary<string, string>` — designed for **template substitution in node prompts**, NOT for arbitrary structured payloads. The daily-briefing payload (categories array, channels array, priorityItems array) must be serialized into string-valued parameter entries that the DAILY-BRIEFING-NARRATE playbook's node graph can read via Handlebars template references like `{{categoriesJson}}` or `{{channelsJson}}`.
+
+**Action for task 031**: cross-check with task 010's playbook node graph design (`projects/spaarke-daily-update-service-r4/notes/design/010-narrate-playbook-graph.md` or the deployed `sprk_configjson`) to confirm the playbook expects parameter inputs as JSON-string values readable via template substitution. If the playbook was designed assuming structured object inputs (not JSON strings), task 031 must serialize on the BFF side as part of the parameter-dictionary build.
+
+### Concrete signature recommendation for task 031 — DI on `HandleNarrate`
+
+```csharp
+private static async Task<IResult> HandleNarrate(
+    DailyBriefingNarrateRequest request,
+    ILoggerFactory loggerFactory,
+    IConsumerRoutingService routing,             // existing — no changes
+    IInvokePlaybookAi invokePlaybookAi,           // existing — no changes
+    HttpContext httpContext,
+    CancellationToken cancellationToken)
+{ ... }
+```
+
+**No new interface authored. No new service registered. No surface delta to publish-size.** Task 031 simplifies to: ConsumerTypes constant addition + Dataverse row deployment + `HandleNarrate` rewrite + payload serialization + response mapping.
+
+### MCP smoke — closes task 001 AC-3 deferral
+
+Per `notes/debug/001-mcp-smoke-deferred.md`, task 030 ran the deferred Dataverse-MCP smoke against spaarkedev1:
+
+```sql
+SELECT TOP 1 sprk_analysisactionid, sprk_name, sprk_executoractiontype
+FROM sprk_analysisaction
+WHERE sprk_executoractiontype = 52
+```
+
+Result (full evidence in `notes/smoke/030-mcp-spaarkedev1-smoke.md`):
+
+```json
+[{
+  "sprk_analysisactionid": "ca44b7aa-fc70-f111-ab0e-7ced8ddc4cc6",
+  "sprk_name": "Lookup User Membership",
+  "sprk_executoractiontype": 52
+}]
+```
+
+MCP connectivity to spaarkedev1 is live. Cross-purpose smoke confirms SYS-LOOKUP-MEMBERSHIP (task 005) is deployed. Task 001 AC-3 deferral is closed.
+
+### Net impact on Risks Surfaced section above
+
+| Original risk | Updated status (post-IInvokePlaybookAi discovery) |
+|---|---|
+| **D-1** — `IPlaybookService` may not expose non-document path; new method increases surface | **RESOLVED** — `IInvokePlaybookAi` provides the exact contract. ZERO publish-size delta from new code. ZERO new interface surface. |
+| **D-2** — `sprk_playbookconsumer` matching may be opinionated toward document MIME-type | Unchanged — null `RoutingContext` is supported. |
+| **D-3** — Streaming-to-non-streaming aggregation could lose error fidelity | **PARTIALLY RESOLVED** — `InvokePlaybookAi.cs:84–135` shows the existing aggregation already handles `NodeFailed` / `RunFailed` / `RunCancelled` and surfaces typed `errorMessage` + `errorCode` in `PlaybookInvocationResult`. Task 031 just maps these to ProblemDetails. |
+
+### Sign-off
+
+Task 030 complete. Path A.5 is binding. Task 031 implementation simplified — no new method authoring required. AC-12c satisfied with concrete IPlaybookService + IInvokePlaybookAi survey evidence (file:line citations).
+

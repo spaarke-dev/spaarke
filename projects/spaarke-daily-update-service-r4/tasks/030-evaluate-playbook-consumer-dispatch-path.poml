@@ -3,7 +3,9 @@
   <metadata>
     <title>Evaluate sprk_playbookconsumer dispatch path; document decision (AC-12c)</title>
     <phase>4: W2 Consumer — /narrate dispatch + cache + fallback (PR 4)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>Path A.5 confirmed. IPlaybookService survey: 14 methods, none execute a playbook (all CRUD / lookup / indexing). CRITICAL discovery: IInvokePlaybookAi.InvokePlaybookAsync (PublicContracts/IInvokePlaybookAi.cs:51) ALREADY provides the exact non-document, parameters-only playbook execution facade required for /narrate — implementation comment in InvokePlaybookAi.cs:67–72 explicitly documents "no document context" semantic. Task 031 simplifies — NO new method authoring required. MCP smoke against spaarkedev1 successful (closes task 001 AC-3 deferral). Decision doc updated with full IPlaybookService method enumeration + IInvokePlaybookAi binding + simplified task 031 wiring sketch + updated risk register (D-1 RESOLVED).</completion-notes>
     <estimated-hours>2.5</estimated-hours>
     <dependencies>001, 029</dependencies>
     <blocks>031</blocks>
