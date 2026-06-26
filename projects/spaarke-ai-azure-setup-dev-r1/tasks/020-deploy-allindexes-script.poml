@@ -3,7 +3,7 @@
   <metadata>
     <title>Write scripts/ai-search/Deploy-AllIndexes.ps1 (unified deployer per FR-07)</title>
     <phase>3: Deploy Infrastructure</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>001, 002, 003, 010, 011, 012, 013, 014, 015, 016</dependencies>
     <blocks>021, 050</blocks>
@@ -121,4 +121,26 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>FULL rigor: load all knowledge files; declare RIGOR LEVEL at start; run code-review + adr-check at Step 9.5.</protocol>
   </execution>
+
+  <notes-results>
+    <completed-on>2026-06-26</completed-on>
+    <summary>
+      Wrote `scripts/ai-search/Deploy-AllIndexes.ps1` (~430 lines) as single canonical deployer for all 7 catalog indexes per FR-07.
+      Catalog-driven design: `$Catalog` hashtable declares Name+SchemaFile+Invariants per index; -Indexes subset filter selects from catalog keys.
+      Mirrors `scripts/Deploy-RedisCache.ps1` structure: SupportsShouldProcess wraps every PUT/POST, NFR-05 Force gate for prod/demo (exit 2), idempotency via PUT verb (Azure AI Search PUT creates-or-updates), live admin key from `az search admin-key` with optional KV fallback, optional -CutoverBffSettings for App Service KV-ref migration.
+      Post-deploy invariant verifier (NFR-02): asserts per-index name match + key field present + required-filterable fields exist+filterable=true + vector fields are 3072-dim HNSW cosine + semantic config references canonical field (FR-17 documentType) + forbidden field names absent (FR-17 domain). Verifier runs after every successful deploy AND on -VerifyOnly runs; exits 6 on any violation.
+      Retired 6 legacy scripts in same PR per FR-07 atomic-PR rule: Deploy-IndexSchemas.ps1, Deploy-InvoiceSearchIndex.ps1, deploy-invoice-index.ps1, deploy-invoice-index.bicep, deploy-session-files-index.ps1, Create-PlaybookEmbeddingsIndex.ps1.
+      Updated `docs/guides/ai-search-azure-setup.md` §2.4 — removed the Phase 1 "deployer is deferred" NOTE since it now ships.
+      Validated against dev: -DryRun shows 7-index plan with all invariants (exit 0); -Indexes subset works (exit 0); -Environment prod without -Force exits 2 (NFR-05 gate); -VerifyOnly against empty dev returns 7×HTTP 404 FAIL with exit 6 (correct — verifier catches missing indexes).
+      No orphaned references to deleted scripts in `scripts/` or `.github/` workflows (verified by grep).
+    </summary>
+    <verification>
+      <evidence>scripts/ai-search/Deploy-AllIndexes.ps1 (430 LOC, SupportsShouldProcess + Force gate + verifier)</evidence>
+      <evidence>git rm of 6 retired scripts (atomic per FR-07)</evidence>
+      <evidence>docs/guides/ai-search-azure-setup.md §2.4 NOTE removed</evidence>
+      <evidence>-DryRun against dev: exit 0, lists all 7 indexes + invariants</evidence>
+      <evidence>-VerifyOnly against empty dev: exit 6, 7 FETCH-FAILED (HTTP 404) FAILs</evidence>
+      <evidence>-Environment prod -DryRun without -Force: exit 2, NFR-05 message</evidence>
+    </verification>
+  </notes-results>
 </task>

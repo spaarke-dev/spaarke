@@ -187,8 +187,6 @@ Expect one row pointing at the target search service resource ID.
 
 All schemas deploy via the **single canonical deployer** `scripts/ai-search/Deploy-AllIndexes.ps1` (FR-07 — catalog-driven, idempotent, mirrors the validated `scripts/Deploy-RedisCache.ps1` structure). The script reads the canonical index list from [`AI-SEARCH-INDEX-CATALOG.md`](../architecture/AI-SEARCH-INDEX-CATALOG.md) §4 and PUTs each schema against the target environment's search service.
 
-> **NOTE (Phase 1 of `spaarke-ai-azure-setup-dev-r1`)**: `Deploy-AllIndexes.ps1` is a Phase 3 deliverable (task 020). Until it lands, individual schemas can be deployed via the legacy per-index scripts (`deploy-session-files-index.ps1`, `Deploy-InvoiceSearchIndex.ps1`, etc.) — but these are retired by FR-07 in the same PR that ships the unified deployer. **Do not add new per-index wrapper scripts.**
-
 Deploy all 7 indexes:
 
 ```powershell
