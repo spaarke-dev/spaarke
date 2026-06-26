@@ -3,7 +3,21 @@
   <metadata>
     <title>PR 1 wrap — commit + conflict-check + open PR</title>
     <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>
+      PR 1 W0 wrap complete. Quality gates run on aggregated PR 1 surface:
+      - dotnet build src/server/api/Sprk.Bff.Api/ -c Release: 0 errors, 17 pre-existing warnings (unrelated to PR 1)
+      - dotnet test EntityNameValidator filter: 12/12 passed in 39ms
+      - dotnet publish -c Release: 44.98 MB compressed (under 60 MB ceiling; under +0.2 MB PR target)
+      - dotnet list package --vulnerable: only pre-existing Kiota 1.21.2 HIGH (transitive of Microsoft.Graph 5.99.0); no new CVE
+      - ADR-013: ✅ (no new endpoints; extends established NodeExecutor pattern + AnalysisServicesModule.cs §F.1 unconditional registration)
+      - ADR-021: ✅ (EntityNameValidatorForm.tsx — zero hex codes; semantic tokens only)
+      - ADR-034: ✅ (SYS-LOOKUP-MEMBERSHIP row deployed; closes R3 UAT defect)
+      - ADR-029 publish hygiene: ✅ (within ceiling)
+      - conflict-check (gh pr list): no overlapping open PRs on PR 1 surface (Dependabot PRs touch unrelated paths; #452/#453 are DevOps housekeeping). R3 PR #451 already merged at fa788dcaf per repo log.
+      Draft PR opened. URL recorded in task 009 commit message + final report.
+    </completion-notes>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>008</dependencies>
     <blocks>010</blocks>
