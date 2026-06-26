@@ -1,7 +1,4 @@
-# BISECT STEP 1 — absolute minimal router (CICD-086)
-# If THIS fails with startup_failure, the issue is repo-state / permissions /
-# something fundamental, not the router YAML itself. If it succeeds, we
-# bisect upward by adding features back one push at a time.
+# BISECT STEP 2 — add workflow-level config (merge_group + permissions + concurrency)
 name: CI
 
 on:
@@ -9,6 +6,15 @@ on:
     branches: [master]
   push:
     branches: [master]
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-router-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   Router:
@@ -16,5 +22,5 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Minimal echo
-        run: echo "BISECT STEP 1 — minimal CI router. If you see this, the basic shell parses + runs."
+      - name: Bisect step 2 echo
+        run: echo "BISECT STEP 2 — config block added (merge_group + permissions + concurrency)."
