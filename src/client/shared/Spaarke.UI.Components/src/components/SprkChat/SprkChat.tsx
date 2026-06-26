@@ -336,6 +336,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   injectLocalMessage,
   onLocalMessageInjected,
   onBeforeSendMessage,
+  // R6 Pillar 8 task 097b / TIER-C surface completion — fires whenever the
+  // internal messages array changes. Optional; ADR-012 context-agnostic.
+  onMessagesChange,
   // R6 Pillar 8 (tasks 080+) outbound-body decoration hook (optional; ADR-012
   // context-agnostic). Existing consumers ignore.
   onDecorateOutboundBody,
@@ -1008,6 +1011,17 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
     }
   }, [messages, streamedContent]);
+
+  // R6 task 097b / TIER-C — fire onMessagesChange whenever the messages array
+  // changes so hosts (ConversationPane / future "summarize conversation"
+  // affordances) can maintain a read-only ref of the current conversation.
+  // ADR-015: snapshot is the same content already rendered to the chat surface;
+  // host must apply its own ADR-015 boundary if logging.
+  React.useEffect(() => {
+    if (onMessagesChange) {
+      onMessagesChange(messages);
+    }
+  }, [messages, onMessagesChange]);
 
   // Send a message and start streaming the response
   const handleSend = React.useCallback(

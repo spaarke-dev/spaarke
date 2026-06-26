@@ -797,6 +797,29 @@ export interface ISprkChatProps {
   onBeforeSendMessage?: (messageText: string) => void;
 
   /**
+   * Fires whenever the internal `messages` array changes (new user message,
+   * new assistant response, streamed token update, refine/status message
+   * inserted, history loaded from BFF).
+   *
+   * The host receives a SNAPSHOT of the current message list — useful for
+   * features that need read-only access to conversation state without
+   * embedding SprkChat's internal hooks (e.g. R6 Pillar 8 task 097b
+   * `/export` markdown generation, or future "summarize this conversation"
+   * affordances).
+   *
+   * Use this callback to maintain a host-side ref/state of messages; do NOT
+   * use it to drive React state cascades — call sites are inside the chat
+   * render loop, and high-frequency setState here will re-render SprkChat.
+   *
+   * ADR-015: the callback delivers the same message content already rendered
+   * to the chat surface. Hosts must NOT log it verbatim into telemetry; the
+   * host's own ADR-015 boundary applies (deterministic IDs + counts only).
+   *
+   * R6 task 097b / TIER-C surface completion (2026-06-25).
+   */
+  onMessagesChange?: (messages: IChatMessage[]) => void;
+
+  /**
    * Outbound-body decoration hook — R6 task 080+ Pillar 8 (Command Router)
    * integration point. Fires BETWEEN body construction and `startStream`.
    *

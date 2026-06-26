@@ -844,6 +844,12 @@ export function ConversationPane(): React.JSX.Element {
   // change — only the synchronous callback consumes the value.
   const focusedTabIdRef = React.useRef<string | null>(null);
 
+  // R6 task 097b / TIER-C surface completion — track latest SprkChat messages
+  // via ref so `/export` (and future affordances) can read conversation history.
+  // Ref pattern matches focusedTabIdRef above — avoids re-rendering on every
+  // streamed token; only the synchronous getConversationHistory callback reads it.
+  const messagesRef = React.useRef<IChatMessage[]>([]);
+
   usePaneEvent("workspace", (event: WorkspacePaneEvent): void => {
     if (event.type === "tab_change") {
       focusedTabIdRef.current = event.tabId ?? null;
@@ -1393,7 +1399,21 @@ export function ConversationPane(): React.JSX.Element {
           return null;
         }
       },
-      getConversationHistory: (): HardSlashConversationMessage[] => [],
+      // R6 task 097b — return a snapshot of the SprkChat conversation by reading
+      // messagesRef (kept in sync via SprkChat.onMessagesChange below). Maps
+      // SprkChat's IChatMessage shape (role: 'User'|'Assistant'|'System',
+      // timestamp: required) to the HardSlashExecutor's slim shape
+      // (role: lowercase, timestamp: optional ISO-8601). Filters system messages
+      // out per HardSlashExecutor contract — only user + assistant turns are
+      // exported as conversation transcript.
+      getConversationHistory: (): HardSlashConversationMessage[] =>
+        messagesRef.current
+          .filter((m) => m.role === "User" || m.role === "Assistant")
+          .map((m) => ({
+            role: m.role === "User" ? "user" : "assistant",
+            content: m.content,
+            timestamp: m.timestamp,
+          })),
       // R6 closeout (Pillar 8 / task 097c): return the most-recently-focused
       // workspace tab id tracked by the usePaneEvent('workspace', tab_change)
       // subscription above. Returns null if no tab has been focused yet.
@@ -2275,6 +2295,12 @@ export function ConversationPane(): React.JSX.Element {
               injectLocalMessage={pendingInjection}
               onLocalMessageInjected={handleLocalMessageInjected}
               onBeforeSendMessage={handleBeforeSendMessage}
+              // R6 task 097b / TIER-C — maintain a ref of conversation messages
+              // for /export markdown generation (consumed by HardSlashExecutor
+              // via getConversationHistory above).
+              onMessagesChange={(messages) => {
+                messagesRef.current = messages;
+              }}
               onDecorateOutboundBody={handleDecorateOutboundBody}
               // chat-routing-redesign-r1 task 117b (FR-49 + FR-50 + FR-51)
               onPlaybookOptions={handlePlaybookOptions}
