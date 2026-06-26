@@ -858,7 +858,17 @@ TRANSITION current-task.md:
    IF no more tasks (project complete):
      - Task ID: "none"
      - Status: "none"
-     - Next Action: "Project complete. Run /repo-cleanup"
+     - Next Action: "Project complete. Run /test-diet then /repo-cleanup"
+
+   **BINDING — Test Diet Gate at Project Close** (added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-081 per spec FR-B09):
+
+   IF the just-completed task is a `090-wrapup-*` task AND `/test-diet` was NOT invoked during the task:
+     → 🚨 **HARD WARNING**: "Wrap-up task completed without running /test-diet. Spec FR-B09 requires test diet pass before project close. Run /test-diet now to reconcile build-vs-maintain tests per ADR-038 §7."
+     → If user proceeds without `/test-diet`: log warning in `current-task.md` Decisions section and continue, BUT the wrap-up PR description MUST include "test-diet: SKIPPED (rationale required)".
+     → Test diet output (`notes/test-diet-report.md`) is the binding artifact — reviewer judgment on each DELETE/MAINTAIN/AMBIGUOUS classification belongs in the wrap-up PR.
+
+   IF wrap-up task was completed AND `/test-diet` was invoked AND `notes/test-diet-report.md` exists:
+     → Confirm reconciliation: "✅ Test diet executed; report at notes/test-diet-report.md. {D} delete candidates / {B} ambiguous / {M} confirmed maintain."
 
 5. REPORT to user:
    "✅ Task {completed_id} complete.

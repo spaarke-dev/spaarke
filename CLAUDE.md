@@ -127,6 +127,10 @@ After completing any task:
 
 `current-task.md` tracks only the **active task** — history is in `TASK-INDEX.md` and per-task `.poml` files.
 
+### Project-close test diet gate (BINDING, added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-081 per spec FR-B09)
+
+When the just-completed task is a `090-wrapup-*` task (i.e., the project is closing), `task-execute` Step 11 invokes `/test-diet` BEFORE marking the project complete. `/test-diet` reconciles tests added/modified during the project against the 17-ban build-vs-maintain classifier ([ADR-038 §7](docs/adr/ADR-038-testing-strategy.md#7-build-vs-maintain-criteria-scaffolding-test-bans--added-2026-06-26-per-spec-fr-b08)): MAINTAIN-class tests stay at their KEEP path, SCAFFOLDING-class tests are deleted, AMBIGUOUS tests require reviewer judgment. The skill is read-only — it emits `git rm` / `git mv` commands for the reviewer; it does not auto-execute. Output: `projects/{name}/notes/test-diet-report.md`. Skipping this gate is a HARD WARNING; wrap-up PR description MUST cite the report or document the skip rationale. Binding for ≥6 months from 2026-06-26.
+
 ---
 
 ## 8. Task Execution Rigor Levels

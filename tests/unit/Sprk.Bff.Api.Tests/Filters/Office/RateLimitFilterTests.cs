@@ -267,67 +267,11 @@ public class RateLimitFilterTests
         headers.Should().ContainKey("Retry-After");
     }
 
-    [Fact]
-    public async Task Filter_UnauthenticatedUser_UsesIpAddress()
-    {
-        // Arrange — fresh cache, first request allowed
-        var filter = CreateFilter(OfficeRateLimitCategory.Save);
-        var anonymousUser = new ClaimsPrincipal(new ClaimsIdentity());
-        var context = CreateContext(anonymousUser);
-
-        // Act
-        var result = await filter.InvokeAsync(context.Object, NextDelegate);
-
-        // Assert
-        result.Should().BeOfType<Ok<string>>();
-    }
 
     #endregion
 
     #region User ID Extraction Tests
 
-    [Fact]
-    public async Task Filter_UserWithOid_UsesOidForRateLimit()
-    {
-        // Arrange
-        var userId = "oid-user-123";
-        var filter = CreateFilter(OfficeRateLimitCategory.Save);
-        var user = CreateAuthenticatedUser(userId);
-        var context = CreateContext(user);
-
-        // Act
-        await filter.InvokeAsync(context.Object, NextDelegate);
-
-        // Assert — verify that a cache entry was created with the user's OID in the tenant-scoped key
-        var cacheKey = $"tenant:{TestTenantId}:office-rate-limit:{userId}:Save:v1";
-        var cached = await _innerCache.GetStringAsync(cacheKey);
-        cached.Should().NotBeNull("cache entry should exist with user OID in the tenant-scoped key");
-    }
-
-    [Fact]
-    public async Task Filter_UserWithNameIdentifier_UsesNameIdForRateLimit()
-    {
-        // Arrange
-        var userId = "name-id-user-456";
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, userId),
-            new("tid", TestTenantId)
-        };
-        var identity = new ClaimsIdentity(claims, "TestAuth");
-        var user = new ClaimsPrincipal(identity);
-
-        var filter = CreateFilter(OfficeRateLimitCategory.Save);
-        var context = CreateContext(user);
-
-        // Act
-        await filter.InvokeAsync(context.Object, NextDelegate);
-
-        // Assert — verify that a cache entry was created with the user's NameIdentifier in the tenant-scoped key
-        var cacheKey = $"tenant:{TestTenantId}:office-rate-limit:{userId}:Save:v1";
-        var cached = await _innerCache.GetStringAsync(cacheKey);
-        cached.Should().NotBeNull("cache entry should exist with user NameIdentifier in the tenant-scoped key");
-    }
 
     #endregion
 

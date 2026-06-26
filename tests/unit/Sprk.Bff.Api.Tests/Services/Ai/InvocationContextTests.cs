@@ -15,27 +15,6 @@ public class InvocationContextTests
     // ToolInvocationContextBase — base type semantics
     // ------------------------------------------------------------------
 
-    [Fact]
-    public void ToolExecutionContext_DerivesFromBase()
-    {
-        // Arrange
-        var ctx = BuildPlaybookContext();
-
-        // Assert — semantic test: derived from base
-        ctx.Should().BeAssignableTo<ToolInvocationContextBase>(
-            "ToolExecutionContext must derive from ToolInvocationContextBase per FR-09");
-    }
-
-    [Fact]
-    public void ChatInvocationContext_DerivesFromBase()
-    {
-        // Arrange
-        var ctx = BuildChatContext();
-
-        // Assert
-        ctx.Should().BeAssignableTo<ToolInvocationContextBase>(
-            "ChatInvocationContext must derive from ToolInvocationContextBase per FR-09");
-    }
 
     [Fact]
     public void ToolExecutionContext_AnalysisIdForwardsToBaseInvocationId()

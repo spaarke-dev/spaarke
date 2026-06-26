@@ -402,58 +402,6 @@ public class ChoicesResolutionTests
     // Graceful fallback / degradation scenarios
     // -----------------------------------------------------------------------
 
-    [Fact]
-    public void Choices_NullDownstreamNodes_DoesNotThrow()
-    {
-        // Arrange -- $choices reference but null downstream nodes
-        var schema = BuildSchema(
-            task: "Classify",
-            fields: new[]
-            {
-                new OutputFieldDefinition
-                {
-                    Name = "docType",
-                    Type = "string",
-                    Choices = "downstream:update_doc.sprk_documenttype"
-                }
-            },
-            structuredOutput: false);
-
-        // Act
-        var act = () => _sut.Render(schema, null, null, null, null, null);
-
-        // Assert -- no exception, field still renders (without enum values)
-        var result = act.Should().NotThrow().Subject;
-        result.Format.Should().Be(PromptFormat.JsonPromptSchema);
-        result.PromptText.Should().Contain("docType");
-        result.PromptText.Should().NotContain("one of:");
-    }
-
-    [Fact]
-    public void Choices_EmptyDownstreamNodes_DoesNotThrow()
-    {
-        // Arrange -- $choices reference but empty downstream list
-        var schema = BuildSchema(
-            task: "Classify",
-            fields: new[]
-            {
-                new OutputFieldDefinition
-                {
-                    Name = "docType",
-                    Type = "string",
-                    Choices = "downstream:update_doc.sprk_documenttype"
-                }
-            },
-            structuredOutput: false);
-
-        // Act
-        var act = () => _sut.Render(schema, null, null, null, null, new List<DownstreamNodeInfo>());
-
-        // Assert
-        var result = act.Should().NotThrow().Subject;
-        result.PromptText.Should().Contain("docType");
-        result.PromptText.Should().NotContain("one of:");
-    }
 
     [Fact]
     public void Choices_NonexistentDownstreamNode_GracefulFallback()

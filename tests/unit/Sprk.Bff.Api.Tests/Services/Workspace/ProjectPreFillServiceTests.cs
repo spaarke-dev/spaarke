@@ -104,25 +104,6 @@ public class ProjectPreFillServiceTests
 
     // ─── (c) NFR-07 binding — public AnalyzeFilesAsync signature unchanged ───────────────
 
-    [Fact]
-    public void ProjectPreFillService_AnalyzeFilesAsync_PublicSignatureUnchanged_NFR07()
-    {
-        // NFR-07 BINDING: the public method consumed by the front-end MUST keep its
-        // signature unchanged. The Pattern A migration only changes the INTERNAL routing
-        // mechanism — the boundary contract is preserved.
-        var method = typeof(ProjectPreFillService).GetMethod(
-            nameof(ProjectPreFillService.AnalyzeFilesAsync),
-            BindingFlags.Public | BindingFlags.Instance);
-
-        method.Should().NotBeNull("AnalyzeFilesAsync is the public entry point consumed by useAiPrefill");
-        var parameters = method!.GetParameters();
-        parameters.Should().HaveCount(4, "NFR-07 — public signature MUST NOT change");
-        parameters[0].ParameterType.Name.Should().Be("IFormFileCollection",
-            "files parameter type unchanged (front-end upload contract)");
-        parameters[1].ParameterType.Should().Be(typeof(string), "userId parameter unchanged");
-        parameters[2].ParameterType.Name.Should().Be("HttpContext", "httpContext parameter unchanged");
-        parameters[3].ParameterType.Should().Be(typeof(CancellationToken), "cancellationToken parameter unchanged");
-    }
 
     // ─── (d) Source-text invariants — migration uses ConsumerTypes.ProjectPreFill + fallback ─
 

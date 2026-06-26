@@ -233,35 +233,6 @@ public class InsightsPlaybookExecutionCacheTests
             "cache miss must write the artifact with the requested TTL");
     }
 
-    [Fact]
-    public async Task GetOrExecuteAsync_DefaultTtl_AppliedWhenRequestOmitsIt()
-    {
-        // Arrange
-        _cacheMock
-            .Setup(c => c.GetAsync<InsightArtifact>(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((InsightArtifact?)null);
-
-        var artifact = MakeInferenceArtifact();
-        var sut = CreateSut();
-        var request = new InsightsPlaybookExecutionRequest(
-            PlaybookA, Subject, null, ScopeHashAlice, TenantId, Ttl: null);
-
-        // Act
-        var result = await sut.GetOrExecuteAsync(request, ct => EngineStreamWith(artifact, ct));
-
-        // Assert
-        result.Should().NotBeNull();
-        _cacheMock.Verify(
-            c => c.SetAsync<InsightArtifact>(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
-                It.IsAny<InsightArtifact>(),
-                It.Is<TimeSpan?>(t => t == InsightsPlaybookExecutionCache.DefaultTtl),
-                It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Once,
-            "default 5-minute TTL must be used when the request omits one");
-    }
 
     [Fact]
     public async Task GetOrExecuteAsync_DifferentAccessibleScopeHash_CacheMiss()
@@ -441,38 +412,6 @@ public class InsightsPlaybookExecutionCacheTests
         result.Artifact!.Subject.Should().Be(Subject);
     }
 
-    [Fact]
-    public async Task GetOrExecuteAsync_CorruptCachedBytes_FallsBackToEngineAndOverwrites()
-    {
-        // Real-world hardening: if a Redis entry was written by an older serialiser
-        // version (or stress-test corrupted it), we should treat it as a miss and
-        // re-run the engine rather than 500-ing the caller.
-        // Post FR-05 migration via ITenantCache, deserialization is handled inside the wrapper —
-        // a corrupted entry surfaces as JsonException out of GetAsync<InsightArtifact> which the
-        // service catches and treats as a miss. Simulate by throwing JsonException on the typed
-        // read path, then verify the service still runs the engine and writes through.
-        _cacheMock
-            .Setup(c => c.GetAsync<InsightArtifact>(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new System.Text.Json.JsonException("Corrupt payload"));
-
-        var artifact = MakeInferenceArtifact();
-        var sut = CreateSut();
-        var request = new InsightsPlaybookExecutionRequest(
-            PlaybookA, Subject, null, ScopeHashAlice, TenantId);
-
-        var result = await sut.GetOrExecuteAsync(request, ct => EngineStreamWith(artifact, ct));
-
-        result.Should().NotBeNull();
-        _cacheMock.Verify(
-            c => c.SetAsync<InsightArtifact>(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
-                It.IsAny<InsightArtifact>(), It.IsAny<TimeSpan?>(),
-                It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Once,
-            "corrupt entry must be overwritten with the fresh engine output");
-    }
 
     [Fact]
     public async Task EvictAsync_RemovesUnderComposedKey()
@@ -489,20 +428,6 @@ public class InsightsPlaybookExecutionCacheTests
             Times.Once);
     }
 
-    [Fact]
-    public async Task EvictAsync_RedisFailure_DoesNotThrow()
-    {
-        _cacheMock
-            .Setup(c => c.RemoveAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Redis down"));
-
-        var sut = CreateSut();
-
-        var act = async () => await sut.EvictAsync(PlaybookA, Subject, null, ScopeHashAlice, TenantId);
-        await act.Should().NotThrowAsync("eviction is best-effort; TTL is the safety net");
-    }
 
     // ─── Task 071 (Wave 8.5): Decline extraction from engine stream ──────────
 

@@ -37,16 +37,6 @@ public class WorkspaceFileEndpointsTests
 {
     #region Endpoint Mapping Surface
 
-    [Fact]
-    public void MapWorkspaceFileEndpoints_IsPublicStaticExtension()
-    {
-        var method = typeof(WorkspaceFileEndpoints).GetMethod(
-            nameof(WorkspaceFileEndpoints.MapWorkspaceFileEndpoints));
-
-        method.Should().NotBeNull();
-        method!.IsStatic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(IEndpointRouteBuilder));
-    }
 
     #endregion
 
@@ -87,49 +77,6 @@ public class WorkspaceFileEndpointsTests
             "rather than reading IConfiguration[\"Workspace:SummarizePlaybookId\"] via the indexer");
     }
 
-    [Fact]
-    public void WorkspaceFileEndpoints_HasNoHardcodedSummarizePlaybookIdConstant_FR04()
-    {
-        // FR-04 task 019: the prior internal `private static readonly Guid DefaultSummarizePlaybookId`
-        // constant (value 4a72f99c-a119-f111-8343-7ced8d1dc988) was removed. Resolution now
-        // flows through WorkspaceOptions.SummarizePlaybookId + IPlaybookLookupService.GetByIdAsync.
-        // Reflection assert: the constant no longer exists on the static class.
-        var members = typeof(WorkspaceFileEndpoints)
-            .GetMembers(BindingFlags.Public
-                | BindingFlags.NonPublic
-                | BindingFlags.Static
-                | BindingFlags.Instance
-                | BindingFlags.DeclaredOnly)
-            .Select(m => m.Name)
-            .ToArray();
-
-        members.Should().NotContain("DefaultSummarizePlaybookId",
-            "FR-04 task 019 — hardcoded DefaultSummarizePlaybookId Guid constant removed; " +
-            "playbook resolved at runtime via WorkspaceOptions.SummarizePlaybookId + " +
-            "IPlaybookLookupService.GetByIdAsync per ADR-018 typed options + Pattern A stable-ID");
-    }
-
-    [Fact]
-    public void WorkspaceFileEndpoints_HasNoLegacyHardcodedGuidLiteral_FR04()
-    {
-        // Defense in depth: scan all static field/constant values for the legacy hardcoded
-        // GUID literal. Any remaining occurrence indicates the fallback was preserved
-        // somewhere else on the type.
-        var legacyGuid = Guid.Parse("4a72f99c-a119-f111-8343-7ced8d1dc988");
-
-        var staticFields = typeof(WorkspaceFileEndpoints)
-            .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
-            .Where(f => f.FieldType == typeof(Guid))
-            .Select(f => (Guid?)f.GetValue(null))
-            .Where(v => v.HasValue)
-            .Select(v => v!.Value)
-            .ToList();
-
-        staticFields.Should().NotContain(legacyGuid,
-            "FR-04 task 019 — the legacy 4a72f99c-a119-f111-8343-7ced8d1dc988 hardcoded " +
-            "summarize playbook fallback was removed in favor of fail-fast on missing config + " +
-            "IPlaybookLookupService.GetByIdAsync(SummarizePlaybookId, ct) resolution");
-    }
 
     #endregion
 

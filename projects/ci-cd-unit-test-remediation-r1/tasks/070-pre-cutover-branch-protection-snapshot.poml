@@ -1,7 +1,8 @@
 <task id="CICD-070" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Pre-cutover snapshot: notes/branch-protection-pre-cutover.json (fresh, authoritative)</title>
-    <status>not-started</status>
+    <status>complete</status>
+    <completion-note>2026-06-26 12:55Z: Snapshot captured at HEAD be07090bc (PR #459 merge commit). Pre-cutover state = DISABLED (404 from /branches/master/protection + protected:false + 0 rulesets). Files: notes/branch-protection-pre-cutover.json (authoritative rollback source) + notes/branch-protection-snapshot-meta.md (rollback procedure + forward-target context).</completion-note>
     <estimated-effort>0.5 hours</estimated-effort>
     <phase>3 - Cutover</phase>
     <stream>A+C - Cutover</stream>

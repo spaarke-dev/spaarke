@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Create AI-SEARCH-INDEX-CATALOG.md (canonical doc)</title>
+    <phase>1: Documentation Foundation + Pre-Flight Verification</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>010, 011, 012, 020</blocks>
+    <tags>docs, architecture, canonical-doc, azure-search</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New doc creation with explicit acceptance criteria (FR-01); 7-section structure</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create `docs/architecture/AI-SEARCH-INDEX-CATALOG.md` as the single source of truth for every Spaarke AI Search index.
+    Use design.md §Active Index Catalog + §Schema Property Policy + §Retired Indexes as content seeds.
+  </prompt>
+
+  <role>
+    Spaarke platform technical writer. Familiar with Azure AI Search schema concepts, vector embeddings, multi-tenant data architecture.
+  </role>
+
+  <goal>
+    `docs/architecture/AI-SEARCH-INDEX-CATALOG.md` exists as canonical source of truth with all required FR-01 sections.
+  </goal>
+
+  <context>
+    <background>
+      No single doc currently owns AI Search index provisioning. Index inventory is scattered across AiSearchOptions.cs,
+      AI-EMBEDDING-STRATEGY.md, MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md, and individual schema files. 3 of those are stale.
+      This catalog becomes the single source of truth.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/design.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-01">MUST contain: naming convention (top-level vs sub-resource rule), schema property policy with rationale + past-bug reference, vector + embedding config, per-index canonical table (7 active), retired indexes appendix (5 deprecated), cross-links to AI-EMBEDDING-STRATEGY / MULTI-CONTAINER-RUNBOOK / rag-architecture / INSIGHTS-ENGINE-ARCHITECTURE / RAG-CONFIGURATION</constraint>
+    <constraint source="NFR-03">Index names MUST be environment-agnostic (no -dev/-prod/-demo suffix)</constraint>
+    <constraint source="NFR-10">Naming policy (top-level resource env-suffix vs sub-resource env-agnostic) MUST be documented as canonical</constraint>
+    <constraint source="NFR-11">Vector profiles MUST specify 3072 dim + text-embedding-3-large + HNSW cosine</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/design.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/CLAUDE.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/rag-architecture.md</file>
+      <file>docs/guides/AI-EMBEDDING-STRATEGY.md</file>
+      <file>infrastructure/ai-search/spaarke-rag-references.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read design.md §Naming Convention + §Schema Property Policy + §Active Index Catalog + §Retired Indexes</step>
+    <step order="2">Draft Section 1: Naming Convention (top-level env-suffixed vs sub-resource env-agnostic)</step>
+    <step order="3">Draft Section 2: Schema Property Policy (table + rationale + past-bug reference + override discipline)</step>
+    <step order="4">Draft Section 3: Vector + Embedding Configuration (model, dim, algorithm, metric, parameters, profile naming)</step>
+    <step order="5">Draft Section 4: Per-Index Canonical Table (7 active indexes: name, purpose, schema-file, scope, ingestion, consumers, post-deploy invariants)</step>
+    <step order="6">Draft Section 5: Retired Indexes Appendix (5 deprecated indexes with replacement notes)</step>
+    <step order="7">Draft Section 6: Cross-Links to related docs</step>
+    <step order="8">Write the file to `docs/architecture/AI-SEARCH-INDEX-CATALOG.md`</step>
+    <step order="9">Verify all 7 FR-01 sections present; update TASK-INDEX.md: task 002 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create the canonical doc file</tool>
+    <tool name="Grep">Verify cross-link targets exist</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/AI-SEARCH-INDEX-CATALOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File exists at `docs/architecture/AI-SEARCH-INDEX-CATALOG.md`</criterion>
+    <criterion testable="true">Contains all 6 required sections per FR-01</criterion>
+    <criterion testable="true">Naming convention documents top-level-vs-sub-resource rule</criterion>
+    <criterion testable="true">Schema property policy includes past-bug reference (filterable missing on knowledge index)</criterion>
+    <criterion testable="true">Per-index canonical table has all 7 active indexes</criterion>
+    <criterion testable="true">Retired indexes appendix lists 5 deprecated indexes with replacement notes</criterion>
+    <criterion testable="true">All cross-links resolve to existing files</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before drafting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+
+  <notes-results>
+    <completed-on>2026-06-26</completed-on>
+    <deliverable>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</deliverable>
+    <sections-present>
+      1. Naming Convention (two-tier rule: top-level env-suffixed vs sub-resource env-agnostic);
+      2. Schema Property Policy (table + rationale + rag-references domain/documentType past-bug reference + override discipline);
+      3. Vector + Embedding Configuration (3072 dim + text-embedding-3-large + HNSW cosine + appsettings dimensionality match per NFR-11 + FR-20);
+      4. Active Index Catalog (7-index table with canonical name, purpose, schema file, scope, ingestion, consumers, post-deploy invariants + restoration matrix);
+      5. Retired Indexes Appendix (5 indexes with replacement notes + grep verification commands);
+      6. Cross-Links (operational + architecture + project context).
+    </sections-present>
+    <acceptance-gates-pass>all 7 (file exists; 6 sections per FR-01; top-level-vs-sub-resource naming rule; past-bug reference; 7 active indexes in canonical table; 5 retired indexes with replacement notes; all cross-links resolve to existing files)</acceptance-gates-pass>
+    <decisions>
+      Used both PowerShell- and grep-style verification examples in §5 retired appendix for tooling neutrality.
+      Bicep-vs-PowerShell split for insights index noted in §4 deploy procedure paragraph.
+      RAG-CONFIGURATION.md confirmed present at docs/guides/RAG-CONFIGURATION.md (cross-link target).
+    </decisions>
+    <omissions>None — all FR-01 required sections and cross-links present.</omissions>
+  </notes-results>
+</task>

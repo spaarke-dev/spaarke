@@ -195,15 +195,47 @@ These remain explicit non-goals for the current Phase 1 remediation; the wrapper
 
 ## Observability
 
-`CacheMetrics` (meter name: `Sprk.Bff.Api.Cache`) exposes three OpenTelemetry instruments:
+### Emission point: `MetricsDistributedCache` decorator (R7-S7 closure)
 
-- `cache.hits` (Counter): total hits, dimensioned by `cache.type` and `tenant_id` (cardinality-capped)
-- `cache.misses` (Counter): total misses, dimensioned by `cache.type` and `tenant_id`
-- `cache.latency` (Histogram): operation latency in ms, dimensioned by `cache.result`, `cache.type`, and `tenant_id`
+The `Sprk.Bff.Api.Cache` Meter is owned by `TenantCache` (static fields) but emission is at the **`IDistributedCache` decorator layer** via `MetricsDistributedCache`. Rationale: ~11 system-cache call sites (`CommunicationAccountService`, MSAL token cache, `MembershipResolverService`) inject `IDistributedCache` directly per the `SystemCacheKeys.cs` allow-list — they bypass `TenantCache`. Emitting at the wrapper layer left those sites invisible.
 
-Cache types reported: `graph`, `embedding`, `auth-access`, `graph-metadata`, `graph-folder-listing`, `graph-container-drive`, `tenant-cache` (wrapper-level).
+The decorator is wired in `CacheModule.DecorateDistributedCacheWithMetrics`: it removes the `IDistributedCache` registration produced by `AddStackExchangeRedisCache(...)` (or `AddDistributedMemoryCache()` in dev fallback) and re-registers a `MetricsDistributedCache` that wraps it. Every cache I/O — whether routed through `TenantCache` or through the system-cache path — is now counted exactly once.
 
-App Insights also captures Redis dependency calls (Success Criterion #8) — visible in Live Metrics and the dependency-failure dashboard.
+### Instruments emitted
+
+- `cache.hits` (Counter): emitted on `GetAsync` returning non-null bytes. Dimensions: `op=get`, `tier=raw`
+- `cache.misses` (Counter): emitted on `GetAsync` returning null/empty bytes. Dimensions: `op=get`, `tier=raw`
+- `cache.redis_call_duration_ms` (Histogram): emitted on every op (get/set/refresh/remove). Dimensions: `op`, `tier=raw`
+
+> **Known limitation** (tracked in `notes/defer-issues.md` C-1 / DEF-007): the decorator does not currently track failures. Exceptions thrown by the inner cache (Redis timeout, connection drop) skip the `sw.Stop() + Record` calls, so a Redis outage produces zero metric — not a high error rate. Add `try/finally` + `cache.failures` counter with `outcome` dimension in R2.
+>
+> **Known limitation** (tracked as I-1 in R2 design): the `resource` dimension that the old `TenantCache`-layer emission carried (`session`, `document-analysis`, etc.) is not preserved at the decorator layer because cache keys are opaque strings at that layer. Pre-existing dashboards that filter by `resource` are broken. R2 will restore `resource` at the wrapper layer with bounded cardinality.
+
+### OTel→Azure Monitor exporter (mandatory for any of this to reach App Insights)
+
+The classic `AddApplicationInsightsTelemetry()` SDK does NOT auto-instrument StackExchange.Redis AND has no exporter for OTel-emitted custom Meters. R7-S7 wired the modern pipeline:
+
+- `Program.cs` — `builder.Services.AddOpenTelemetry().UseAzureMonitor()` (replaces classic SDK); package `Azure.Monitor.OpenTelemetry.AspNetCore 1.4.0`. Guarded on `APPLICATIONINSIGHTS_CONNECTION_STRING` presence so test hosts continue to start.
+- `TelemetryModule.cs` — `tracing.AddRedisInstrumentation()` in the `WithTracing` block; package `OpenTelemetry.Instrumentation.StackExchangeRedis 1.12.0-beta.1`.
+- `CacheModule.cs` — `RedisCacheOptions.ConnectionMultiplexerFactory = () => Task.FromResult(connectionMultiplexer)`. Without this, `Microsoft.Extensions.Caching.StackExchangeRedis` builds its own internal multiplexer and the instrumented DI-registered one is idle.
+
+### Verification queries
+
+```kql
+// Custom cache metrics — should be non-empty within 10 min of post-deploy traffic
+customMetrics
+| where timestamp > ago(10m)
+| where name startswith 'cache.'
+| summarize total=sum(value), records=count() by name
+
+// Redis dependency telemetry — should show HMGET / UNLINK / CLIENT / SET / GET
+dependencies
+| where timestamp > ago(10m)
+| where type contains 'Redis'
+| summarize count() by type, name
+```
+
+Both queries returning empty after 10 min of traffic = exporter / instrumentation / factory wiring drift. See ADR-009 §9 for the required wiring.
 
 ## Failure Mode Catalog
 

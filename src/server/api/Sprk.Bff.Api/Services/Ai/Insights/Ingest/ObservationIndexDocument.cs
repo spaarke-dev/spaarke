@@ -4,7 +4,7 @@ namespace Sprk.Bff.Api.Services.Ai.Insights.Ingest;
 
 /// <summary>
 /// AI Search document shape for the <c>spaarke-insights-index</c> per SPEC §3.4 schema
-/// (see <c>infra/insights/schemas/spaarke-insights-index.index.json</c>). One document
+/// (see <c>infrastructure/ai-search/spaarke-insights-index.json</c>). One document
 /// per Observation when written via the D-P7 universal ingest pipeline.
 /// </summary>
 /// <remarks>
@@ -117,7 +117,7 @@ internal sealed record EvidenceIndexEntry
 /// <summary>
 /// Wave D6 (task 035) — projection of <see cref="Models.Insights.Scope"/> onto the index
 /// schema's top-level <c>scope</c> ComplexType. Mirrors the fields defined in
-/// <c>infra/insights/schemas/spaarke-insights-index.index.json</c>. All fields are
+/// <c>infrastructure/ai-search/spaarke-insights-index.json</c>. All fields are
 /// nullable strings; the writer populates them per design-a6 §4.4:
 /// <list type="bullet">
 ///   <item>matter subjects: matterId + entityType="matter" + entityId=&lt;guid&gt; (dual-write per <see cref="AiSearchOptions.DualWriteScopeMatterId"/>)</item>

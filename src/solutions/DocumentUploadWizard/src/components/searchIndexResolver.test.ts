@@ -63,7 +63,7 @@ const BU_ID = "22222222-2222-2222-2222-222222222222";
 
 describe("isNonEmptyIndexName", () => {
     it("returns true for non-empty strings", () => {
-        expect(isNonEmptyIndexName("spaarke-knowledge-index-v2")).toBe(true);
+        expect(isNonEmptyIndexName("spaarke-files-index")).toBe(true);
     });
 
     it("returns false for empty / whitespace / null / undefined / non-string", () => {
@@ -85,7 +85,7 @@ describe("resolveSearchIndexNameForRecord — FR-WIZ-06 chain", () => {
     it("Step 1: returns parent record's sprk_searchindexname when non-empty", async () => {
         const xrm = makeXrm({
             [PARENT_ENTITY]: () => ({
-                sprk_searchindexname: "spaarke-file-index",
+                sprk_searchindexname: "spaarke-files-index",
                 _owningbusinessunit_value: BU_ID,
             }),
             // BU handler intentionally NOT registered — if step 1 short-circuits,
@@ -95,7 +95,7 @@ describe("resolveSearchIndexNameForRecord — FR-WIZ-06 chain", () => {
 
         const result = await resolveSearchIndexNameForRecord(xrm, PARENT_ENTITY, PARENT_ID);
 
-        expect(result).toBe("spaarke-file-index");
+        expect(result).toBe("spaarke-files-index");
     });
 
     // Step 2: parent empty, BU has value
@@ -108,14 +108,14 @@ describe("resolveSearchIndexNameForRecord — FR-WIZ-06 chain", () => {
             businessunit: (id) => {
                 expect(id).toBe(BU_ID); // sanity: we looked up the parent's owning BU
                 return {
-                    sprk_searchindexname: "spaarke-knowledge-index-v2",
+                    sprk_searchindexname: "spaarke-files-index",
                 };
             },
         });
 
         const result = await resolveSearchIndexNameForRecord(xrm, PARENT_ENTITY, PARENT_ID);
 
-        expect(result).toBe("spaarke-knowledge-index-v2");
+        expect(result).toBe("spaarke-files-index");
     });
 
     // Step 3: both empty
@@ -143,13 +143,13 @@ describe("resolveSearchIndexNameForRecord — FR-WIZ-06 chain", () => {
                 _owningbusinessunit_value: BU_ID,
             }),
             businessunit: () => ({
-                sprk_searchindexname: "spaarke-knowledge-index-v2",
+                sprk_searchindexname: "spaarke-files-index",
             }),
         });
 
         const result = await resolveSearchIndexNameForRecord(xrm, PARENT_ENTITY, PARENT_ID);
 
-        expect(result).toBe("spaarke-knowledge-index-v2");
+        expect(result).toBe("spaarke-files-index");
     });
 
     // Brace-stripping on _owningbusinessunit_value (Dataverse OData quirk)
@@ -163,13 +163,13 @@ describe("resolveSearchIndexNameForRecord — FR-WIZ-06 chain", () => {
             businessunit: (id) => {
                 // The resolver must strip braces before passing to retrieveRecord.
                 expect(id).toBe(BU_ID);
-                return { sprk_searchindexname: "spaarke-file-index" };
+                return { sprk_searchindexname: "spaarke-files-index" };
             },
         });
 
         const result = await resolveSearchIndexNameForRecord(xrm, PARENT_ENTITY, PARENT_ID);
 
-        expect(result).toBe("spaarke-file-index");
+        expect(result).toBe("spaarke-files-index");
     });
 
     // Graceful degradation: parent read throws → step 3 (empty)
@@ -223,7 +223,7 @@ describe("resolveSearchIndexNameForRecord — FR-WIZ-06 chain", () => {
         const xrm = makeXrm({
             [PARENT_ENTITY]: (_id, options) => {
                 capturedOptions = options;
-                return { sprk_searchindexname: "spaarke-file-index" };
+                return { sprk_searchindexname: "spaarke-files-index" };
             },
         });
 

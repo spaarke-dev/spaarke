@@ -16,13 +16,17 @@
 
 ## Status Summary
 
-- **Total tasks**: 25
-- **Completed**: 20 of 25 (80%) — Phase 1 + Phase 2 (with reorganization scope adjustments)
-- **In progress**: 0
-- **Blocked**: 0
-- **Not started**: 5 (Phase 3: 070, 071, 075, 076, 077 + wrap-up: 090)
-- **Skipped/cancelled**: 1 (000-preflight; pipeline covered) + 3 (051, 052, 053c — cancelled-no-scope per inventory finding)
-- **Complete-partial / complete-merged**: 1 (050 scaffolded; bulk move deferred) + 2 (053a/b merged into single 053 PR)
+> **Authoritative count**: 39 POML files in `tasks/` (corrected 2026-06-26 — prior "25" / "31" framing was mathematically wrong; original was 33 actual POMLs, scope expansion added 6, total = 39).
+
+- **Total tasks (POML files)**: 39
+- **Resolved** (complete / complete-merged / complete-partial / cancelled-no-scope): **29 of 40 (72.5%)**
+- **Not started**: 11 (Phase 2.5: 082, 083, 084, 085, **086** + Phase 3: 071, 075, 076, 077 + wrap-up: 090 + Phase 0: 000-preflight which was skipped at pipeline pre-flight but POML status remains `not-started` for audit)
+- **Breakdown of resolved (29)**:
+  - 23 `complete` (Phase 1 + Phase 2 implementation tasks + Phase 3 task 070 + Phase 2.5 tasks 080 & 081)
+- **CRITICAL EXCEPTION**: task 040 (build-ci-router-yml) is marked ✅ but the deployed workflow fails with `startup_failure` on every push since merge (`cc305da98`). Workflow disabled via `gh workflow disable CI`. Task 086 remediates per spec FR-A06.
+  - 2 `complete-merged` (053a, 053b — collapsed into single 053 PR per inventory)
+  - 1 `complete-partial` (050 — scaffolded; bulk move deferred per `notes/path-reorganization-design.md`)
+  - 3 `cancelled-no-scope` (051, 052, 053c — no DELETE scope per inventory)
 
 ## Task Registry
 
@@ -95,12 +99,31 @@
 | 061 | update-project-pipeline-skill | FULL | ✅ (Step 2 INDEX.md overlap + Step 3 hot-path-declaration requirement) | **false** (`.claude/` write) | 030 | — |
 | 062 | update-bff-extensions-and-root-CLAUDE | FULL | ✅ (bff-extensions §G + root CLAUDE.md §8 §10 §17) | **false** (`.claude/` + root write) | 030, 031, 060, 061 | — |
 
+### Phase 2.5 — Build-vs-maintain codification + retroactive deep cleanup (ADDED 2026-06-26 per owner-directed scope expansion; spec FR-B08/B09/B10)
+
+> **Rationale**: Phase 2 task 053 narrow deletion (179 tests, 2.4% reduction) did not achieve project's stated intent of "way over-engineered unit testing" remediation. Owner reframed problem as build-vs-maintain (scaffolding vs regression-protecting tests). Industry consensus supports this framing (Beck, Feathers, Google, DHH). Phase 3 cutover (071) is GATED on Phase 2.5 completion — the architecture is only meaningful if the surviving suite IS focused.
+
+| # | Task | Rigor | Status | Parallel-safe | Dependencies | Blocks |
+|---|---|---|---|---|---|---|
+| 080 | codify-build-vs-maintain-criteria | FULL | ✅ | **false** (`.claude/` write) | (Phase 2 complete) | 082 |
+| 086 | fix-ci-router-startup-failure | FULL | 🔲 | **false** (hot-path `.github/workflows/`) | none (can start anytime) | **071** |
+| 081 | build-test-diet-skill | FULL | ✅ | **false** (`.claude/` write — runs in parallel with 080 via main-session sequencing) | (Phase 2 complete) | 090 |
+| 082 | rerun-inventory-broader-criteria | STANDARD | 🔲 | true | 080 | 083 |
+| 083 | deep-cleanup-pr-1 (highest-confidence DELETE bucket) | FULL | 🔲 | **false** (strict serial) | 082 | 084 |
+| 084 | deep-cleanup-pr-2 (medium-confidence DELETE bucket) | FULL | 🔲 | **false** (strict serial) | 083 | 085 |
+| 085 | deep-cleanup-pr-3 (final sweep + dotnet build/test verification) | FULL | 🔲 | **false** (strict serial; unblocks Phase 3) | 084 | 070 → 071 |
+
+> **Parallel Groups added for Phase 2.5**:
+> - **PG-4 codification (main-session sequential)**: 080 → 081 (both `.claude/` writes; serialize per write boundary)
+> - **PG-5 deletion (STRICT SERIAL)**: 082 → 083 → 084 → 085
+> - 071 cutover NOW BLOCKED BY 085 (not 062 as originally planned)
+
 ### Phase 3 — Cutover + monitoring (STRICT SERIAL)
 
 | # | Task | Rigor | Status | Parallel-safe | Dependencies | Blocks |
 |---|---|---|---|---|---|---|
-| 070 | pre-cutover-branch-protection-snapshot | FULL | 🔲 | **false** | 053c, 040, 041, 042, 043, 044, 060, 061, 062 | 071 |
-| 071 | cutover-window | FULL | 🔲 | **false** | 070 | 075 |
+| 070 | pre-cutover-branch-protection-snapshot | FULL | ✅ (2026-06-26 12:55Z; pre-cutover state = DISABLED captured) | **false** | 053c, 040, 041, 042, 043, 044, 060, 061, 062 | 071 |
+| 071 | cutover-window | FULL | 🔲 | **false** | 070, **085** (per Phase 2.5 scope expansion 2026-06-26 — cutover GATED on deep cleanup complete) | 075 |
 | 075 | soak-7day-gate | STANDARD | 🔲 | **false** (gate: cutover+7d) | 071 | 077 |
 | 077 | retire-sdap-ci-yml | STANDARD | 🔲 | **false** (gate: cutover+14d) | 075 | — |
 | 076 | 30day-success-criteria-measurements | STANDARD | 🔲 | **false** (gate: cutover+30d) | 071 | 090 |
@@ -172,7 +195,9 @@ All three lanes run concurrently. The critical path is SERIAL-DEL.
 
 ## Critical Path
 
-`000 → 022 → 050 → 053c → 070 → 071 → 075 → 077 → 076 → 090` ≈ **28 elapsed days**
+**Revised 2026-06-26 to include Phase 2.5**: `000 → 022 → 050 → 053 → 080 → 082 → 085 → 071 → 075 → 077 → 076 → 090` ≈ **~32-35 elapsed days** (was 28 before scope expansion)
+
+070 is no longer on the critical path (it ran before Phase 2.5 was added; the pre-cutover snapshot remains valid because branch protection state has not changed). 071 now waits on 085 (final deep-cleanup PR).
 
 Where:
 - `000`: 0.5d (or skip)

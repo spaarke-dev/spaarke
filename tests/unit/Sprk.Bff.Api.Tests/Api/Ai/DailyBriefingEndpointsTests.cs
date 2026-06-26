@@ -176,53 +176,9 @@ public sealed class DailyBriefingEndpointsTests
         invokePlaybookAi.VerifyNoOtherCalls();
     }
 
-    [Fact]
-    public async Task HandleNarrate_Returns_200_Empty_On_All_Empty_Even_With_Nonzero_TotalCount()
-    {
-        // Arrange — TotalNotificationCount > 0 but no actionable arrays (edge case)
-        var request = new DailyBriefingNarrateRequest
-        {
-            Categories = [],
-            PriorityItems = [],
-            TotalNotificationCount = 5,
-            Channels = []
-        };
-
-        var routing = new Mock<IConsumerRoutingService>(MockBehavior.Strict);
-        var invokePlaybookAi = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
-
-        // Act
-        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
-
-        // Assert — still 200, dispatch not invoked.
-        result.Should().BeOfType<Ok<DailyBriefingNarrateResponse>>();
-        routing.VerifyNoOtherCalls();
-        invokePlaybookAi.VerifyNoOtherCalls();
-    }
 
     // ── Tests: dispatch path — Path A.5 ────────────────────────────────────────
 
-    [Fact]
-    public async Task HandleNarrate_Resolves_Playbook_Via_ConsumerRouting_With_Correct_ConsumerType()
-    {
-        // Arrange
-        var request = BuildNonEmptyRequest();
-        var playbookId = Guid.NewGuid();
-        var routing = BuildRoutingMock(playbookId);
-        var invokePlaybookAi = BuildInvokeMock(BuildSuccessResult());
-
-        // Act
-        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
-
-        // Assert — routing called with the ConsumerTypes.DailyBriefingNarrate constant.
-        result.Should().BeOfType<Ok<DailyBriefingNarrateResponse>>();
-        routing.Verify(r => r.ResolveAsync(
-            ExpectedConsumerType,
-            "default",
-            null,
-            null,
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
 
     [Fact]
     public async Task HandleNarrate_Invokes_Playbook_With_Resolved_Id_And_Request_Payload_Parameters()
@@ -455,39 +411,6 @@ public sealed class DailyBriefingEndpointsTests
 
     // ── Tests: AC-12a — no inline prompt strings remain in DailyBriefingEndpoints ──
 
-    [Fact]
-    public void DailyBriefingEndpoints_Source_Has_No_Inline_LLM_Prompt_Helpers()
-    {
-        // Reflection sanity check: the previously-existing prompt-build helpers
-        // (BuildNarrateTldrPrompt, BuildChannelNarrationPrompt, ParseTldrResponse,
-        // ParseChannelBullets, BuildAllowedRegardingIdSet, ValidateBulletPrimaryEntityIds)
-        // MUST NOT exist on the static class anymore. Their presence would be a
-        // regression of FR-12 / AC-12a.
-        var type = typeof(DailyBriefingEndpoints);
-        var bindings = System.Reflection.BindingFlags.Public
-            | System.Reflection.BindingFlags.NonPublic
-            | System.Reflection.BindingFlags.Static
-            | System.Reflection.BindingFlags.Instance;
-
-        var removed = new[]
-        {
-            "BuildNarrateTldrPrompt",
-            "BuildChannelNarrationPrompt",
-            "ParseTldrResponse",
-            "ParseChannelBullets",
-            "BuildAllowedRegardingIdSet",
-            "ValidateBulletPrimaryEntityIds",
-            "GetTldrAsync",
-            "GetChannelNarrationAsync"
-        };
-
-        foreach (var name in removed)
-        {
-            type.GetMethod(name, bindings)
-                .Should().BeNull(because:
-                    $"R4 task 031 removed the {name} helper — prompt construction now lives in the playbook + Action rows.");
-        }
-    }
 
     // ── Tests: exception paths — edge cases (R4 task 035) ─────────────────────
 

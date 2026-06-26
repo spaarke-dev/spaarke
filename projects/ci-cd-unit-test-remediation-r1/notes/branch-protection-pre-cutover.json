@@ -1,0 +1,24 @@
+{
+  "snapshot_metadata": {
+    "captured_at": "2026-06-26T12:55:00Z",
+    "captured_by": "task CICD-070 (pre-cutover snapshot per spec FR-A06)",
+    "head_sha_at_capture": "be07090bc6ebc57286d26eb439486d203dcfad18",
+    "captured_via": "gh api repos/spaarke-dev/spaarke/branches/master/protection"
+  },
+  "branch_protection_state": "DISABLED",
+  "api_response": {
+    "status": 404,
+    "message": "Branch protection has been disabled on this repository.",
+    "documentation_url": "https://docs.github.com/rest/branches/branch-protection#get-branch-protection"
+  },
+  "branch_metadata_check": {
+    "protected": false
+  },
+  "rulesets_check": {
+    "count": 0,
+    "value": []
+  },
+  "interpretation": "Pre-cutover state on master is 'no protection enabled'. This is the authoritative rollback target per spec §152: in the event of a rollback during the 24-48h post-cutover window, restoring branch protection means restoring it to 'disabled' (the current state), NOT restoring the older Jun-1 baseline. The Jun-1 baseline (projects/github-actions-rationalization-r1/baseline/branch-protection-2026-06-01.json) documents the INTENDED protected configuration that task 071 cutover sets, but that's a forward-looking target, not the rollback target.",
+  "rollback_command": "If rollback is needed within 24-48h post-cutover (per spec §152 triggers: Tier 1 flake >2% sustained 24h; master green rate <90% over 24h; >3 false-positive blocks within 24h; merge queue stalls >2h with >4 PRs), execute: gh api -X DELETE repos/spaarke-dev/spaarke/branches/master/protection (no-op if already disabled). This restores the pre-cutover state.",
+  "forward_target_for_cutover": "Task 071 will enable protection with required_status_checks=[\"CI / Router\"], enforce_admins=true, strict=true, allow_force_pushes=false, allow_deletions=false. This is a CHANGE from the pre-cutover state."
+}

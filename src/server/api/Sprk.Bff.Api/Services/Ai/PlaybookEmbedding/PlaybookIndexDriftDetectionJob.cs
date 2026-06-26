@@ -7,7 +7,7 @@ using Sprk.Bff.Api.Services.Jobs;
 namespace Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 
 /// <summary>
-/// Nightly drift-detection job for the playbook-embeddings AI Search index
+/// Nightly drift-detection job for the spaarke-playbook-embeddings AI Search index
 /// (chat-routing-redesign-r1 FR-13). Iterates active <c>sprk_analysisplaybook</c>
 /// rows, recomputes the canonical embed-input hash via
 /// <see cref="IPlaybookEmbeddingHashCalculator"/>, compares it to the stored

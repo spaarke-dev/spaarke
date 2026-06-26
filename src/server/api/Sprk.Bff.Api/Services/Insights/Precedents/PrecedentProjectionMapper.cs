@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Services.Insights.Precedents;
 /// </para>
 /// <para>
 /// <b>Document shape</b> (matches the deployed <c>spaarke-insights-index</c> schema in
-/// <c>infra/insights/schemas/spaarke-insights-index.index.json</c>):
+/// <c>infrastructure/ai-search/spaarke-insights-index.json</c>):
 /// <list type="bullet">
 ///   <item><c>id</c> — <c>prec:{precedentId-as-N}:v1</c> (deterministic; enables MergeOrUpload idempotency)</item>
 ///   <item><c>tenantId</c> — supplied by caller (D-52 required)</item>
@@ -46,7 +46,7 @@ namespace Sprk.Bff.Api.Services.Insights.Precedents;
 public static class PrecedentProjectionMapper
 {
     // ─────────────────────────────────────────────────────────────────────────
-    // Field name constants — mirror infra/insights/schemas/spaarke-insights-index.index.json
+    // Field name constants — mirror infrastructure/ai-search/spaarke-insights-index.json
     // ─────────────────────────────────────────────────────────────────────────
 
     internal const string FieldId = "id";

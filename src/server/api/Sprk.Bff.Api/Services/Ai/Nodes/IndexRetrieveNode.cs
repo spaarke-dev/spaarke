@@ -55,7 +55,7 @@ public sealed class IndexRetrieveNode : INodeExecutor
     /// <summary>Default top-K when config does not specify one (matches predict-matter-cost cohort size from SPEC).</summary>
     public const int DefaultTopK = 12;
 
-    /// <summary>Vector field name on <c>spaarke-insights-index</c> (per schema in <c>infra/insights/schemas/</c>).</summary>
+    /// <summary>Vector field name on <c>spaarke-insights-index</c> (per schema in <c>infrastructure/ai-search/</c>).</summary>
     public const string VectorFieldName = "contentVector";
 
     /// <summary>Embedding dimensionality (text-embedding-3-large).</summary>
