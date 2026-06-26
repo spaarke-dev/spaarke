@@ -3,7 +3,8 @@
   <metadata>
     <title>Remove hasFetchedRef from useBriefingNarration.ts (FR-15)</title>
     <phase>4: W2 Consumer — /narrate dispatch + cache + fallback (PR 4)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
     <estimated-hours>1</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>035</blocks>
@@ -12,6 +13,9 @@
     <rigor-reason>TypeScript code change in shared widget library affecting React effect dependencies; FULL per CLAUDE.md §8 (modifying .ts).</rigor-reason>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
+    <completion-notes>
+      Removed `hasFetchedRef` declaration (line 111) and the three `hasFetchedRef.current` references (guard + 2 assignments) in `useBriefingNarration.ts` (src/hooks/useBriefingNarration.ts). Dropped unused `useRef` import. The useEffect now refetches whenever `channels` changes (which is downstream of the consumer's `actionsRefresh`-triggered `useBriefingNotifications.refetch()` in DailyBriefingApp.tsx Effect 2, satisfying FR-15 / AC-15). In-flight duplicate calls are guarded by the existing `cancelled` closure flag (no AbortController needed because `fetchBriefingNarration` already maps thrown errors → status 'error'; the closure flag prevents stale writes). Added 9 Jest tests in `test/useBriefingNarration.test.ts` covering: (1) no fetch while loadingState != 'loaded', (2) single fetch on initial render, (3) refetch on channels reference change (the AC-15 regression test), (4) no false-positive fetches on identical-reference re-renders, (5) stale-result cancellation, (6) `isUnavailable` when no successful channels, (7+8) template fallback on 'unavailable' / 'error' service responses. All 9 pass; full package suite 97/97 pass. R3 deliverables (`sprk_briefingstate` handling, Check/Remove/Keep flow) untouched — this change only modifies the cache-gating logic, not the action surface. `npm run build` reports the same 5 pre-existing peer-dep errors (workspace `@spaarke/auth` and `@spaarke/ui-components` not installable in isolation) — baseline-confirmed unchanged. Step 6 of POML steps (AbortController guard) was reduced-scope rationale-documented in the file header: the `cancelled` closure flag is functionally equivalent for this hook's single-network-call shape.
+    </completion-notes>
   </metadata>
   <prompt>Edit `src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingNarration.ts`. Remove `hasFetchedRef.current` cache (lines ~111-131). Ensure refetch fires when `channels` or `actionsRefresh` change. Watch out for R3 PR #451 file overlap — check `notes/risks.md` R1.</prompt>
   <role>SPAARKE platform developer. Follow ADRs strictly. React hooks + effect-dependency refactoring; remove stale-cache bug in narration refetch.</role>
