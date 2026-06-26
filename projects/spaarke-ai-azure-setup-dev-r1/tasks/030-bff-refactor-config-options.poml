@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF refactor: Configuration options classes (AiSearchOptions + AnalysisOptions) (FR-13 + FR-14)</title>
     <phase>4: Code + Config Refactor</phase>
-    <status>not-started</status>
+    <status>completed-partial</status>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>011, 013, 014</dependencies>
     <blocks>031, 032, 033, 034, 035, 036, 037, 045</blocks>
@@ -81,4 +81,34 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>FULL rigor: code-review + adr-check at Step 9.5.</protocol>
   </execution>
+
+  <notes-results>
+    <completed-on>2026-06-26</completed-on>
+    <summary>
+      Two of three POML edits applied verbatim:
+      1. AiSearchOptions.cs:7 — KnowledgeIndexName default `spaarke-knowledge-index-v2` → `spaarke-files-index` ✅
+      2. AnalysisOptions.cs:69 — SharedIndexName default `spaarke-knowledge-index-v2` → `spaarke-files-index` ✅
+      3. AiSearchOptions.cs:8 — DiscoveryIndexName REMOVE → DEFERRED to task 046 (grep cleanup) per coordination strategy below.
+
+      DEFERRED REMOVAL RATIONALE:
+      The POML step 4 ("Build must succeed") + step 5 ("consumers will compile errors") + acceptance criterion #2 ("property no longer exists in source") are internally contradictory — 4 production files (RagService.cs, RagIndexingPipeline.cs, IRagService.cs, KnowledgeBaseEndpoints.cs) and 8 test files reference DiscoveryIndexName. Removing the property here breaks the build between task 030 and the consumer tasks 031-037.
+
+      STRATEGY A (applied):
+      - DiscoveryIndexName marked `[Obsolete(...)]` with explicit FR-14 + task-046 cleanup directive
+      - Default value updated to canonical `spaarke-files-index` so any remaining reader sees the live index (no production behavior change vs. removal — both stop pointing at the retired `discovery-index`)
+      - 5 new CS0618 compiler warnings now flag every consumer site → each task in 031-037 grep-finds its work
+      - Property removal lands cleanly in task 046 grep cleanup after consumers are updated
+
+      Per CLAUDE.md §11 "Component Justification — Default to Reuse": this is a deferral, not new surface — DiscoveryIndexName already exists; the change is removing it. The Obsolete attribute is the canonical .NET deprecation path and matches the established Spaarke pattern (`DemoProvisioningOptions.Environments` line 347 uses the same `[Obsolete]` "Will be removed after X migration" idiom).
+
+      Build verification: `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors, 23 warnings (5 new CS0618 on consumers + 18 pre-existing). No regressions.
+    </summary>
+    <verification>
+      <evidence>AiSearchOptions.cs:7 = `spaarke-files-index` (KnowledgeIndexName default)</evidence>
+      <evidence>AnalysisOptions.cs:69 = `spaarke-files-index` (SharedIndexName default)</evidence>
+      <evidence>AiSearchOptions.cs:8 DiscoveryIndexName has [Obsolete(FR-14...)] + default = `spaarke-files-index`</evidence>
+      <evidence>dotnet build: 0 errors, 5 new CS0618 warnings (RagService.cs ×4, RagIndexingPipeline.cs ×1) — guides Group C consumer-refactor scope</evidence>
+      <evidence>Property removal deferred to task 046 (added to that task's scope)</evidence>
+    </verification>
+  </notes-results>
 </task>

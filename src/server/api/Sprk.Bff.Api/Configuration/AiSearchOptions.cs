@@ -4,8 +4,10 @@ public class AiSearchOptions
 {
     public string Endpoint { get; init; } = string.Empty;
     public string ApiKeySecretName { get; init; } = string.Empty;
-    public string KnowledgeIndexName { get; init; } = "spaarke-knowledge-index-v2";
-    public string DiscoveryIndexName { get; init; } = "discovery-index";
+    public string KnowledgeIndexName { get; init; } = "spaarke-files-index";
+
+    [Obsolete("FR-14: discovery-index retired; consumers will be refactored to use FilesIndexName via tasks 031-037 of spaarke-ai-azure-setup-dev-r1, after which this property will be removed in task 046 grep cleanup. Default updated to canonical 'spaarke-files-index' so any remaining reader sees the live index.")]
+    public string DiscoveryIndexName { get; init; } = "spaarke-files-index";
     public string RagReferencesIndexName { get; init; } = "spaarke-rag-references";
     public string SemanticConfigName { get; init; } = "semantic-config";
 

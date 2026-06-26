@@ -41,7 +41,7 @@
 | 016 | Fix spaarke-rag-references field-name bug | 2 | ✅ | STANDARD | 010 | Group B |
 | 020 | Write Deploy-AllIndexes.ps1 | 3 | ✅ | FULL | 001, 002, 003, 010-016 | — |
 | 021 | Validate Deploy-AllIndexes.ps1 (-DryRun + -VerifyOnly) | 3 | ✅ | STANDARD | 020 | — |
-| 030 | BFF Configuration options classes (AiSearchOptions + AnalysisOptions) | 4 | 🔲 | FULL | 011, 013, 014 | — |
+| 030 | BFF Configuration options classes (AiSearchOptions + AnalysisOptions) | 4 | ✅ | FULL | 011, 013, 014 | — (DiscoveryIndexName removal deferred to 046) |
 | 031 | BFF refactor: RAG pipeline services | 4 | 🔲 | FULL | 030 | Group C |
 | 032 | BFF refactor: file indexing + reference services | 4 | 🔲 | FULL | 030 | Group C |
 | 033 | BFF refactor: PlaybookEmbedding services | 4 | 🔲 | FULL | 013, 030 | Group C |
