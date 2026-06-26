@@ -3,7 +3,7 @@
   <metadata>
     <title>Dev BFF app settings: AI-Search KV-reference migration (FR-15)</title>
     <phase>4: Code + Config Refactor</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>001, 030, 038</dependencies>
     <blocks>046, 050</blocks>
