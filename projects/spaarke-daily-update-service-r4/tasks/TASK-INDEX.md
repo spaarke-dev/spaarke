@@ -68,7 +68,7 @@
 | ID | Title | Status | Dependencies | Blocks | Parallel | Rigor |
 |----|-------|--------|--------------|--------|----------|-------|
 | 030 | Evaluate sprk_playbookconsumer dispatch path; document decision (AC-12c) | ✅ | 001, 029 | 031 | — | STANDARD |
-| 031 | Replace DailyBriefingEndpoints.HandleNarrate body with playbook dispatch wrapper | 🔲 | 011, 030 | 032 | — | FULL |
+| 031 | Replace DailyBriefingEndpoints.HandleNarrate body with playbook dispatch wrapper | ✅ | 011, 030 | 032 | — | FULL |
 | 032 | Verify /narrate response shape backward compat (widget parser unchanged) | 🔲 | 031 | 035 | — | STANDARD |
 | 033 | Remove hasFetchedRef from useBriefingNarration.ts (FR-15) | ✅ | none | 035 | — | FULL |
 | 034 | Implement ActivityNotesSection empty-narrative fallback (FR-16) | ✅ | none | 035 | — | FULL |
