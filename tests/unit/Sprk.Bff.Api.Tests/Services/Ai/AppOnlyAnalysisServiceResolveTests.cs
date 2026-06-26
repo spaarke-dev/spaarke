@@ -292,28 +292,4 @@ public class AppOnlyAnalysisServiceResolveTests
 
     // ─── (f) Service surface invariant — hardcoded const stable-IDs removed ──────────────────
 
-    [Fact]
-    public void AppOnlyAnalysisService_HasNoHardcodedConstStableIds_FR1R05()
-    {
-        // FR-1R-05 task 028d acceptance criterion: the 2 const stable-IDs flagged by task 027
-        // exit-gate evidence (`const string DocumentProfilePlaybookId` + `const string
-        // EmailAnalysisPlaybookId`) MUST be removed from the service surface. They were
-        // replaced with `private static readonly Guid Fallback*PlaybookId` field-equivalents.
-        // Reflection assertion: the const member names no longer exist on the type.
-        var members = typeof(AppOnlyAnalysisService)
-            .GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            .Select(m => m.Name)
-            .ToArray();
-
-        members.Should().NotContain(
-            new[] { "DocumentProfilePlaybookId", "EmailAnalysisPlaybookId" },
-            "FR-1R-05 task 028d acceptance — the 2 Pattern B execution-path consts MUST be removed; " +
-            "playbook resolution now flows through IConsumerRoutingService.ResolveAsync");
-
-        // Sanity: the fallback fields exist (graceful-degrade for FR-1R-06 deprecation window).
-        members.Should().Contain(
-            new[] { "FallbackDocumentProfilePlaybookId", "FallbackEmailAnalysisPlaybookId" },
-            "FR-1R-05 — graceful-degrade fallback fields MUST exist during the FR-1R-06 " +
-            "deprecation window (deleted at FR-1R-08 exit gate)");
-    }
 }

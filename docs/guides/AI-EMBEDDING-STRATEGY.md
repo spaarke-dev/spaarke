@@ -58,15 +58,7 @@ The platform maintains several Azure AI Search indexes, each using the same embe
 
 ### Index Inventory
 
-> **Authoritative source**: Index names are defined as defaults in `src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs` (`KnowledgeIndexName`, `DiscoveryIndexName`, `RagReferencesIndexName`) and overridable via appsettings. The invoice index name is a constant in `Services/Finance/InvoiceSearchService.cs`. If new indexes are added, update this table and the corresponding Options class.
-
-| Index Name | Purpose | Embedding Model | Dimensions | Vector Field(s) | Chunk Size | Estimated Scale |
-|------------|---------|----------------|------------|------------------|------------|-----------------|
-| `spaarke-knowledge-index-v2` | Customer document knowledge (shared tenant) | text-embedding-3-large | 3072 | `contentVector3072`, `documentVector3072` | 512 tokens (2048 chars) | 554+ documents, thousands of chunks |
-| `discovery-index` | Auto-populated discovery chunks for broader context | text-embedding-3-large | 3072 | `contentVector3072`, `documentVector3072` | 1024 tokens (4096 chars) | Mirrors knowledge-v2 document count |
-| `spaarke-rag-references` | Golden reference knowledge (domain terminology, clause libraries) | text-embedding-3-large | 3072 | `contentVector3072` | 512 tokens (100-token overlap) | ~100 chunks from ~10 knowledge sources |
-| `spaarke-invoices-dev` | Invoice semantic search for financial intelligence | text-embedding-3-large | 3072 | `contentVector` (3072-dim) | Full invoice text | Grows with invoice volume |
-| `{tenant}-knowledge` | Dedicated per-tenant indexes (enterprise customers) | text-embedding-3-large | 3072 | Same as knowledge-v2 | 512 tokens | Varies by customer |
+*See [AI-SEARCH-INDEX-CATALOG.md](../architecture/AI-SEARCH-INDEX-CATALOG.md) for the canonical 7-index catalog (per-index purpose, vector configuration, consumers, and post-deploy invariants).*
 
 ### Vector Search Profile
 
@@ -80,14 +72,9 @@ All indexes share the same HNSW vector search configuration:
 | efConstruction | 400 | High build quality for accurate graph structure |
 | efSearch | 500 | High query-time exploration for strong recall |
 
-### Dual-Index Pipeline (Knowledge + Discovery)
+### Indexing Pipeline
 
-The `RagIndexingPipeline` writes every document to two indexes in parallel:
-
-1. **Knowledge Index** (`spaarke-knowledge-index-v2`): 512-token chunks with 50-token overlap. Used for precise RAG retrieval in analysis and chat.
-2. **Discovery Index** (`discovery-index`): 1024-token chunks with 100-token overlap. Used for broader document discovery and semantic search.
-
-Both indexes receive independently generated embeddings appropriate to their chunk boundaries. The pipeline generates embeddings with a semaphore-limited concurrency of 16 simultaneous API calls.
+The `RagIndexingPipeline` writes every document to `spaarke-files-index` (canonical files index per the catalog) using 512-token chunks with 50-token overlap, used for precise RAG retrieval in analysis and chat. The pipeline generates embeddings with a semaphore-limited concurrency of 16 simultaneous API calls. (Historical note: a parallel "discovery-index" with 1024-token chunks was retired during the 7-index canonicalization — see [AI-SEARCH-INDEX-CATALOG.md](../architecture/AI-SEARCH-INDEX-CATALOG.md) "Retired Indexes" appendix.)
 
 ---
 

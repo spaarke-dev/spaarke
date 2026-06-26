@@ -200,7 +200,7 @@ Invoke-WebRequest -Uri "$bffApiUrl/api/ai/rag/enqueue-indexing" -Headers $header
   },
   "Analysis": {
     "Enabled": true,
-    "SharedIndexName": "spaarke-knowledge-index-v2",
+    "SharedIndexName": "spaarke-files-index",
     "DefaultRagModel": "Shared"
   },
   "Redis": {
@@ -250,7 +250,7 @@ az rest --method PUT \
 
 ```json
 {
-  "name": "spaarke-knowledge-index-v2",
+  "name": "spaarke-files-index",
   "fields": [
     { "name": "id", "type": "Edm.String", "key": true },
     { "name": "tenantId", "type": "Edm.String", "filterable": true },

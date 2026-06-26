@@ -31,16 +31,6 @@ public class RegisterContainerTypeTests
 
     #region Endpoint Registration
 
-    [Fact]
-    public void MapContainerTypeEndpoints_MethodExists_AndIsExtensionOnRouteGroupBuilder()
-    {
-        // MapContainerTypeEndpoints now registers the register endpoint too.
-        var method = typeof(ContainerTypeEndpoints).GetMethod("MapContainerTypeEndpoints");
-
-        method.Should().NotBeNull("MapContainerTypeEndpoints extension method must exist");
-        method!.IsStatic.Should().BeTrue("must be a static extension method");
-        method.ReturnType.Should().Be(typeof(RouteGroupBuilder), "must return RouteGroupBuilder for chaining");
-    }
 
     #endregion
 

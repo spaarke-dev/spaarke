@@ -1,8 +1,7 @@
-# Current Task State
+# Current Task State — ci-cd-unit-test-remediation-r1
 
-> **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-26 (Phase 2 complete; Phase 3 cutover next — calendar-gated)
-> **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+> **Last Updated**: 2026-06-26 ~13:30Z (by `/context-handoff` after scope-expansion artifacts written)
+> **Recovery**: Read "Quick Recovery" section first — < 30 seconds reading time
 
 ---
 
@@ -10,110 +9,179 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — Phase 2 complete; Phase 3 next (calendar-gated) |
-| **Step** | — |
-| **Status** | between-phases |
-| **Mode** | 🤖 **AUTONOMOUS** — no approval gates (see CLAUDE.md) |
-| **Next Action** | **Phase 3 = cutover + monitoring**. Task 070 (pre-cutover branch-protection snapshot) is ready to run BUT **branch protection is currently DISABLED on master** (per task 001 finding) — the snapshot will capture an "off" state. Decision needed before 071 cutover: do we (a) restore branch protection from Jun-1 baseline first, then cutover replaces with `CI / Router` only, OR (b) treat the cutover as a fresh setup using the Jun-1 baseline as reference. Both paths achieve the same end-state. **No urgency** — Phase 3 is intentionally gated by shadow-phase observation of the new tier workflows. Recommend: open a draft PR from `work/ci-cd-unit-test-remediation-r1` → master so the new workflows run in shadow against real PRs for 2-3 weeks of data collection before flipping branch protection. |
+| **Task** | 082 (in background sub-agent: test-inventory-broader CSV) + 086 (newly added — CI Router fix, awaiting user-supplied browser error OR explicit "bisect now") |
+| **Step** | 082 sub-agent running; 086 integrated into project artifacts |
+| **Status** | mid-Phase-2.5 (080+081 ✅; 082 dispatched; 086 added but not started) |
+| **Mode** | 🤖 **AUTONOMOUS** — no approval gates between tasks/steps per project CLAUDE.md (EXCEPT 086 which awaits user direction — browser error message OR bisect approval) |
+| **Next Action** | Wait for 082 background notification, then execute 083 (deep-cleanup PR 1) in main session. **For 086**: user can either (a) paste the browser error message from https://github.com/spaarke-dev/spaarke/actions/runs/28244069552 (cheap win), or (b) say "proceed with bisect" to start the systematic bisect on `debug/ci-router-bisect`. 086 can run in parallel with 083-085 since it touches different files (workflow YAML vs test .cs). |
 
-### Files Modified This Session (Phase 2 consolidated)
+### Uncommitted Changes in Working Tree (commit BEFORE compact OR after — user choice; not committed yet per user direction)
 
-**Project artifacts**:
-- All 12 Phase 2 task POMLs — statuses flipped (complete / complete-merged / complete-partial / cancelled-no-scope)
-- `projects/ci-cd-unit-test-remediation-r1/tasks/TASK-INDEX.md` — Phase 2 status markers
-- `projects/ci-cd-unit-test-remediation-r1/current-task.md` — this file
+- `projects/ci-cd-unit-test-remediation-r1/spec.md` — added FR-B08, FR-B09, FR-B10 + SC-11 + owner-directive paragraph
+- `projects/ci-cd-unit-test-remediation-r1/plan.md` — added Phase 2.5 section; revised critical path 28 → ~35 days
+- `projects/ci-cd-unit-test-remediation-r1/README.md` — graduation criteria expanded with 3 new checkboxes; status row updated; changelog v0.3 added
+- `projects/ci-cd-unit-test-remediation-r1/CLAUDE.md` — Decisions section gains 2026-06-26 scope-expansion entry
+- `projects/ci-cd-unit-test-remediation-r1/tasks/TASK-INDEX.md` — Phase 2.5 section added; status summary 25→31; 071 dependency on 085 added; critical path note revised
+- `projects/ci-cd-unit-test-remediation-r1/tasks/080-codify-build-vs-maintain-criteria.poml` — NEW
+- `projects/ci-cd-unit-test-remediation-r1/tasks/081-build-test-diet-skill.poml` — NEW
+- `projects/ci-cd-unit-test-remediation-r1/tasks/082-rerun-inventory-broader-criteria.poml` — NEW
+- `projects/ci-cd-unit-test-remediation-r1/tasks/083-deep-cleanup-pr-1.poml` — NEW
+- `projects/ci-cd-unit-test-remediation-r1/tasks/084-deep-cleanup-pr-2.poml` — NEW
+- `projects/ci-cd-unit-test-remediation-r1/tasks/085-deep-cleanup-pr-3.poml` — NEW
 
-**Notes folder** (Phase 2 outputs):
-- `notes/deploy-bff-api-trigger-audit.md` (task 044 — confirms master-trigger)
-- `notes/path-reorganization-design.md` (task 050 — 3 strategy decisions documented for bulk-move follow-up)
-- `notes/post-deletion-summary.md` (task 053 — what was deleted, path-check verified, build green)
+**Suggested commit**: `docs(ci-cd-unit-test-remediation-r1): scope expansion 2026-06-26 — add Phase 2.5 (FR-B08/B09/B10 + SC-11) per build-vs-maintain framing`
 
-**Persistent artifacts created** (Phase 2):
-- `.github/workflows/ci-router.yml` (task 040 — 244 lines, single composite required check + alls-green aggregator)
-- `.github/workflows/ci-tier1-blocking.yml` (task 041 — 421 lines, 5 jobs, 6-fact MUST-NOT NetArchTest subset)
-- `.github/workflows/ci-tier2-advisory.yml` (task 042 — 612 lines, 8 jobs, PR-comment dedup verbatim)
-- `.github/workflows/deploy-spaarke-ai.yml` (task 044 — Dataverse web resource deploy target)
-- `scripts/validate-markdown-links.ps1` (task 044 — verified exit 0 clean / exit 1 broken)
-- `tests/integration/{auth,regression,data-mutation,tenant,contract}/README.md` (task 050 — 5 path anchors)
-- `tests/unit/domain/README.md` (task 050 — 1 path anchor; newly-created per spec UQ #3)
+### Critical Context (1-3 sentences)
 
-**Persistent files modified** (Phase 2):
-- `.github/workflows/nightly-health.yml` (task 043 — +337 lines for Tier 3 augmentation: full-integration + coverage-observation + trivy-fs + dep-audit)
-- `.claude/skills/task-execute/SKILL.md` (task 060 — Step 0.5 hot-path auto-invoke + Step 9.5 test-PR override)
-- `.claude/skills/project-pipeline/SKILL.md` (task 061 — Step 2 INDEX.md overlap warning + Step 3 hot-path-declaration requirement)
-- `.claude/constraints/bff-extensions.md` (task 062 — §G Hot-Path Declaration added)
-- `CLAUDE.md` (root — task 062 — §8 test-modifying override row + §10 hot-path-declaration cross-ref + §17 three new pointer rows for ADR-038/TEST-ARCHITECTURE.md/INDEX.md)
-
-**Deleted** (task 053):
-- 11 wiring-test files under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` (9 HttpMessageHandler-mock + 2 DI-registration)
-
-### Critical Context
-
-**Phase 2 surfaced 3 findings affecting Phase 3 planning**:
-
-1. **Branch protection currently DISABLED on master** (task 001 Phase 1 finding, re-emphasized here). Task 070 snapshot will capture an "off" state. Decision needed before 071: restore-then-cut-over (a) vs fresh-setup using Jun-1 baseline (b). Both achieve the same end-state (`CI / Router` as sole required check after cutover).
-
-2. **Path reorganization (050) is scaffolded but bulk-moved deferred**. 6 canonical directories + READMEs exist; the path-MUST rules in `.claude/constraints/testing.md` are binding for NEW tests at canonical paths immediately. Existing 481 KEEP files remain at their current locations until a follow-up PR. This does NOT block Phase 3 cutover.
-
-3. **Sub-slicing 053a/b/c collapsed to single 11-file PR**. Build verified green. Tasks 051 + 052 + 053c cancelled-no-scope per inventory finding. Critical path SERIAL-DEL chain shortens significantly.
+Phase 1 (13 tasks) + Phase 2 (12 tasks) shipped to master via PR #459 (merge commit `be07090bc`). Task 070 (pre-cutover snapshot) complete — pre-cutover branch protection state = DISABLED captured. Task 071 cutover was ready to fire, but owner-directed scope expansion 2026-06-26 added Phase 2.5 (codify build-vs-maintain criteria + build `/test-diet` skill + retroactive deep cleanup to reduce BFF unit tests from ~6,700 to ≤3,500) — cutover (071) is now GATED on 085 (final deep-cleanup PR) per spec FR-B10.
 
 ---
 
-## Active Task (Full Details)
+## Full State (Detailed)
+
+### Project status
 
 | Field | Value |
-|-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | Phase 2 → Phase 3 transition |
-| **Phase** | between (Phase 2 complete, Phase 3 calendar-gated) |
-| **Status** | none |
-| **Started** | — |
+|---|---|
+| **Project** | ci-cd-unit-test-remediation-r1 |
+| **Worktree** | `c:\code_files\spaarke-wt-ci-cd-unit-test-remediation-r1\` |
+| **Branch** | `work/ci-cd-unit-test-remediation-r1` (3 commits ahead of master post-merge; nothing pushed since merge) |
+| **Master HEAD synced** | `be07090bc` (PR #459 merge) |
+| **Portfolio Issue** | [#457](https://github.com/spaarke-dev/spaarke/issues/457) (Epic [#429 DEVOPS & CODE QUALITY](https://github.com/spaarke-dev/spaarke/issues/429)) |
+| **Portfolio fields** | Status=In Progress · Task Count=31 · Tasks Completed=20 (updated 2026-06-26) |
+| **Mode** | AUTONOMOUS per project CLAUDE.md |
+
+### Phase progress
+
+| Phase | Tasks | Status |
+|---|---|---|
+| Phase 1 — Diagnose + directive rewrites | 13 | ✅ Complete (commit dae39b18d, merged via PR #459) |
+| Phase 2 — Shadow workflows + deletions + skill directives | 12 of 12 resolved | ✅ Complete (commit cc305da98, merged via PR #459) |
+| Phase 2.5 — Build-vs-maintain codification + deep cleanup (NEW 2026-06-26) | 6 | 🔲 Not started — tasks 080-085 |
+| Phase 3 task 070 — pre-cutover snapshot | 1 | ✅ Complete 2026-06-26 12:55Z |
+| Phase 3 task 071 — cutover | 1 | ⏸ Blocked on 085 (per scope expansion) |
+| Phase 3 tasks 075, 076, 077 — soak + measurements + sdap-ci retirement | 3 | 🔲 Calendar-gated after 071 |
+| Wrap-up (090) | 1 | 🔲 Final |
+
+### Scope expansion summary (2026-06-26)
+
+**What changed**: owner reframed the test problem from "narrow signature-match wiring tests" (original spec FR-B01..B07) to "build-vs-maintain" (scaffolding tests written for design/coverage vs regression-protecting tests with ongoing value). Reframing justified by industry consensus (Beck "delete the scaffolding", Feathers characterization-vs-behavior, Google test-sizes, DHH less-tests).
+
+**Why**: Phase 2 task 053 narrow deletion (9 files, 179 tests, 2.4% reduction) didn't achieve project intent of "way over-engineered unit testing" remediation. The strict signature-match criteria couldn't validate file-by-file the deeper structural debt that judgment-based criteria reveal.
+
+**Effects**:
+- Spec: added FR-B08 (codify ≥10 scaffolding bans), FR-B09 (`/test-diet` skill), FR-B10 (deep cleanup to ≤3,500 tests) + SC-11
+- Plan: added Phase 2.5 with 6 tasks
+- Critical path: 28 → ~35 elapsed days
+- Task count: 25 → 31 (portfolio updated)
+- Phase 3 cutover (071) GATED on 085
+
+### Phase 2.5 task plan (in execution order)
+
+| # | Task | Rigor | Sub-agent safe | Dependencies | Blocks |
+|---|---|---|---|---|---|
+| 080 | codify-build-vs-maintain-criteria | FULL | NO (.claude/ writes) | — | 082 |
+| 081 | build-test-diet-skill | FULL | NO (.claude/ writes) | — | 090 |
+| 082 | rerun-inventory-broader-criteria | STANDARD | YES (sub-agent) | 080 | 083 |
+| 083 | deep-cleanup-pr-1 (highest-confidence) | FULL | NO (strict serial) | 082 | 084 |
+| 084 | deep-cleanup-pr-2 (medium-confidence) | FULL | NO (strict serial) | 083 | 085 |
+| 085 | deep-cleanup-pr-3 (final + full dotnet test) | FULL | NO (strict serial) | 084 | 071 |
+
+**Recommended execution**:
+1. Commit current scope-expansion artifacts
+2. Run 080 in main session (FULL — 3h estimated; codifies criteria in ADR-038 + constraints/testing.md + tests/CLAUDE.md)
+3. Run 081 in main session (FULL — 2.5h; creates `/test-diet` skill + wires into task-execute wrap-up)
+4. Run 082 via sub-agent or main session (STANDARD — 3h; produces broader test inventory CSV)
+5. Run 083 → 084 → 085 strict serial in main session (FULL each; sliced deletion PRs with rebases)
+6. THEN run 071 cutover (after explicit user confirmation per shared-state safety rule)
+
+### Files modified this session (full list, scoped to scope-expansion work)
+
+See "Uncommitted Changes in Working Tree" above. Outside that scope, the session also performed:
+- Phase 1 + Phase 2 implementation (already committed + merged via PR #459)
+- Task 070 snapshot artifacts (committed as part of Phase 2 commits or follow-up — verify with git status if unsure)
+- Router fix commit `bc3403705` (also merged via PR #459)
+- Master merge commit `4e2ac3ced` (merged via PR #459)
+
+### Decisions made (cumulative; key entries)
+
+- **2026-06-25**: ADR-038 standalone (not supersession of ADR-022)
+- **2026-06-25**: Skip pipeline Step 4 (already on work/ worktree branch)
+- **2026-06-25**: INDEX.md scope = last-30-day-active worktrees
+- **2026-06-26**: Sub-slice 053a/b/c collapsed to single 053 PR per inventory finding
+- **2026-06-26**: Branch protection currently DISABLED on master — task 070+071 must RESTORE
+- **2026-06-26**: Router signal model = Model A composite + alls-green aggregator (resolves spec UQ #1)
+- **2026-06-26**: SpaarkeAi deploy target = Dataverse web resource sprk_spaarkeai (not Static Web App)
+- **2026-06-26**: Path reorganization bulk move DEFERRED with documented 3-decision strategy
+- **2026-06-26**: 2 of 11 originally-deleted files came back from master merge (daily-briefing-r4 + redis-cache-remediation added real behavioral tests); effective deletion = 9 files
+- **2026-06-26**: Master had 6 build errors (IDistributedCache→ITenantCache fixture debt from redis-cache-remediation) — non-blocking via continue-on-error:true; this project doesn't fix them (separate scope)
+- **2026-06-26**: Router/Tier2 input contract mismatch fixed (commit bc3403705) — router translates classify outputs to tier2's run-* booleans
+- **2026-06-26 (latest)**: **SCOPE EXPANSION** — Phase 2.5 added with FR-B08/B09/B10 + SC-11; build-vs-maintain framing per owner directive; 071 cutover gated on 085; task count 25→31; critical path 28→~35 days
+
+### Key findings (cumulative)
+
+1. **17 active worktrees** (vs spec's 5-6 estimate) — hot-path coordination more critical than spec assumed
+2. **Test inventory finding**: 481 KEEP / 11 DELETE files via strict signature criteria; ~6,700 BFF unit tests survive — the deeper "build-vs-maintain" framing in Phase 2.5 expects to remove 1,500-3,000 more
+3. **Branch protection DISABLED on master today** — rollback target = re-disable; forward-target = enable with `CI / Router` only
+4. **sdap-ci.yml has continue-on-error:true** since 2026-06-24 ("CI informational-only until test-architecture-reset-r1 lands") — this project IS test-architecture-reset-r1; task 077 retires sdap-ci at cutover+14d
+5. **PR #459 merged successfully** despite Build & Test (Debug) showing fail — that's the IDistributedCache/ITenantCache integration fixture debt, non-blocking
 
 ---
 
-## Progress
+## Next Action — Step by Step
 
-### Completed Steps
+**Step 1: Commit scope-expansion artifacts** (~5 min)
 
-Phase 1 (13 tasks ✅) + Phase 2 (12 of 12 status-resolved):
-- ✅ 12 implementation tasks done (040, 041, 042, 043, 044, 050-scaffolded, 053-collapsed, 060, 061, 062)
-- 🚫 3 tasks cancelled-no-scope per inventory (051, 052, 053c)
-- ✅ 2 tasks complete-merged into 053 PR (053a, 053b)
+```bash
+git add projects/ci-cd-unit-test-remediation-r1/spec.md \
+  projects/ci-cd-unit-test-remediation-r1/plan.md \
+  projects/ci-cd-unit-test-remediation-r1/README.md \
+  projects/ci-cd-unit-test-remediation-r1/CLAUDE.md \
+  projects/ci-cd-unit-test-remediation-r1/current-task.md \
+  projects/ci-cd-unit-test-remediation-r1/tasks/TASK-INDEX.md \
+  projects/ci-cd-unit-test-remediation-r1/tasks/080-codify-build-vs-maintain-criteria.poml \
+  projects/ci-cd-unit-test-remediation-r1/tasks/081-build-test-diet-skill.poml \
+  projects/ci-cd-unit-test-remediation-r1/tasks/082-rerun-inventory-broader-criteria.poml \
+  projects/ci-cd-unit-test-remediation-r1/tasks/083-deep-cleanup-pr-1.poml \
+  projects/ci-cd-unit-test-remediation-r1/tasks/084-deep-cleanup-pr-2.poml \
+  projects/ci-cd-unit-test-remediation-r1/tasks/085-deep-cleanup-pr-3.poml
 
-### Decisions Made (Phase 2)
+git commit -m "docs(ci-cd-unit-test-remediation-r1): scope expansion 2026-06-26 — add Phase 2.5 (FR-B08/B09/B10 + SC-11) per build-vs-maintain framing"
+git push
+```
 
-- **2026-06-26**: Router signal model = Model A composite + `re-actors/alls-green@v1.2.2` aggregator (task 040)
-- **2026-06-26**: Tier 1 NetArchTest MUST-NOT subset = 6 facts (ADR-001, ADR-002, ADR-007×2, ADR-009×2) — see task 041 report
-- **2026-06-26**: Tier 2 dedup marker = `Tier 2 Advisory Report` (unique vs sdap-ci's `ADR Architecture Validation Report`)
-- **2026-06-26**: SpaarkeAi deploy target = Dataverse web resource `sprk_spaarkeai` (NOT Azure Static Web App) — leverages existing `scripts/Deploy-SpaarkeAi.ps1` per ADR-026
-- **2026-06-26**: Path reorganization bulk move DEFERRED with 3 documented strategy decisions (csproj architecture, namespace handling, PR sequencing) — see `notes/path-reorganization-design.md`
-- **2026-06-26**: 053 sub-slicing COLLAPSED to single 11-file PR per inventory finding; 051, 052, 053c cancelled-no-scope
+**Step 2: Start Phase 2.5 task 080** (FULL rigor, main session, ~3h)
 
----
+User prompt to trigger: `"continue with task 080"` or `"work on task 080"` or just `"continue"` (TASK-INDEX has 080 as the next 🔲).
 
-## Next Action
-
-**Phase 3 cutover sequence (calendar-gated)**:
-
-1. **Open draft PR from `work/ci-cd-unit-test-remediation-r1` → master** — lets the new tier workflows run in shadow against real PRs for 2-3 weeks of data collection
-2. **Observe**: confirm Tier 1 p95 < 3 min (NFR-01), Tier 1 flake rate < 1% (NFR-03), Tier 2 p95 < 8 min (NFR-02) via gh API analytics on the shadow runs
-3. **Task 070** (pre-cutover snapshot) — take `notes/branch-protection-pre-cutover.json` immediately before cutover
-4. **Task 071** (cutover ~4h window) — restore Release matrix in sdap-ci.yml; flip branch protection to require only `CI / Router`; enable merge queue (batch=1, no speculative, 30min timeout)
-5. **Task 075** (7-day soak gate) — observe surviving suite green ≥7 consecutive days
-6. **Task 077** (sdap-ci retirement) — at cutover+14d minimum per spec MUST rule; delete sdap-ci.yml
-7. **Task 076** (30-day SC measurements) — measure SC-01..SC-10 via gh API analytics at cutover+30d
-8. **Task 090** (wrap-up) — README → Complete; lessons-learned.md; repo-cleanup
-
-**Why calendar gates matter**: spec MUST rules require 7-day soak before Release matrix lock-in (SC-06) AND 14-day stability before sdap-ci retirement. These are NOT skippable. The cutover window itself is ~4 hours; the monitoring tail is ~30 days.
-
-**Recommended action this session**: open the draft PR (`gh pr create --draft`) and let the new workflows accumulate shadow-mode data. Resume Phase 3 work after 2-3 weeks when there's enough run history to commit to cutover.
+Task 080 codifies ≥10 new scaffolding-test bans into 3 binding documents (ADR-038, `.claude/constraints/testing.md`, `tests/CLAUDE.md`). Output of 080 is the input for 082's broader-criteria classifier.
 
 ---
 
 ## Blockers
 
-**Status**: None blocking. Phase 3 awaits calendar gates (shadow observation period; 7-day soak; 14-day stability) which are by design.
+**Status**: None blocking. Just awaiting commit of scope-expansion artifacts + initiation of task 080.
+
+---
+
+## Session Notes
+
+### Recent activity (this session)
+
+- Updated post-deletion summary (effective count: 9, not 11) after master merge brought 2 conflicted files back
+- Investigated PR #459 CI failures: actionlint fixed (router/tier2 input contract); Build & Test (Debug) fail is pre-existing master debt (IDistributedCache→ITenantCache fixtures), non-blocking
+- Merged PR #459 to master (`be07090bc`); synced worktree + main repo
+- Executed task 070 (pre-cutover branch protection snapshot — captured DISABLED state as authoritative rollback source)
+- Owner directive 2026-06-26: scope expansion to Phase 2.5
+- Wrote scope-expansion artifacts: spec.md FRs, plan.md Phase 2.5, README graduation criteria, CLAUDE.md decisions, TASK-INDEX.md Phase 2.5 section, 6 new task POMLs
+- Updated portfolio Issue #457: Task Count 25 → 31; posted scope-expansion comment
+- Invoked `/context-handoff` to write this file
+
+### Key learnings
+
+- The original FR-B framing (signature-match wiring tests) under-delivered. The build-vs-maintain framing (judgment-based) is the necessary deeper criterion.
+- Phase 2.5 inserted mid-project is unusual but spec is alive (not historical) — the spec gains FRs; phases gain sequencing; tasks gain new POMLs. Critical-path math gets revised.
+- 17 active worktrees mean every `.claude/` skill edit (080, 081) is a high-coordination action — need to watch for other projects modifying same files between rebase + push.
 
 ---
 
@@ -123,19 +191,25 @@ Phase 1 (13 tasks ✅) + Phase 2 (12 of 12 status-resolved):
 - **Project**: ci-cd-unit-test-remediation-r1
 - **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
 - **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
+- **Spec** (now extended): [`spec.md`](./spec.md) — FR-B01..FR-B10 + SC-01..SC-11
+- **Plan** (now extended): [`plan.md`](./plan.md) — includes Phase 2.5
 - **Worktree**: `c:\code_files\spaarke-wt-ci-cd-unit-test-remediation-r1\`
-- **Branch**: `work/ci-cd-unit-test-remediation-r1`
-- **Portfolio Issue**: [#457](https://github.com/spaarke-dev/spaarke/issues/457) (Epic [#429](https://github.com/spaarke-dev/spaarke/issues/429))
+- **Branch**: `work/ci-cd-unit-test-remediation-r1` (3 commits ahead of master post-PR-#459-merge)
+- **Portfolio Issue**: [#457](https://github.com/spaarke-dev/spaarke/issues/457)
 
-### Phase 2 deliverables shipped
-- 5 new workflows: ci-router.yml, ci-tier1-blocking.yml, ci-tier2-advisory.yml, deploy-spaarke-ai.yml + augmented nightly-health.yml
-- 3 skill-directive updates: task-execute, project-pipeline, conflict-check
-- 1 constraint update: bff-extensions.md §G Hot-Path Declaration
-- 1 root CLAUDE.md update: §8 rigor table override row + §10 hot-path cross-ref + §17 pointers
-- 6 KEEP path scaffolds: tests/integration/{auth,regression,data-mutation,tenant,contract}/ + tests/unit/domain/
-- 11-file deletion: wiring-test antipatterns removed from Sprk.Bff.Api.Tests/Services/Ai/
-- 1 script: scripts/validate-markdown-links.ps1
+### Applicable ADRs
+- ADR-028 (Spaarke Auth) — Tier 1 auth smoke aligned
+- ADR-030 (BFF feature flags) — path-aware dispatch
+- ADR-032 (Null-Object kill-switch)
+- **ADR-038 (Testing Strategy)** — STANDALONE; gets extended in task 080 with build-vs-maintain criteria
+- ADR-022 (PCF Platform Libraries) — UNCHANGED; not a testing ADR (misattribution fixed in task 022 Phase 1)
+
+### Recovery commands
+- `/project-continue` — full project context reload + master sync
+- `"continue task 080"` — start Phase 2.5
+- `"where was I?"` — quick context recovery via this file
+- `"show TASK-INDEX"` — see full task registry
 
 ---
 
-*Phase 2 consolidated 2026-06-26. Phase 3 awaits calendar gates.*
+*This file is the primary source of truth for active work state. Phase 2.5 scope expansion baked in 2026-06-26 ~13:30Z via /context-handoff.*

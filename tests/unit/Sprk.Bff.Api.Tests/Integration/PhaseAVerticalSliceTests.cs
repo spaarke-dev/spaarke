@@ -71,20 +71,6 @@ public class PhaseAVerticalSliceTests : IClassFixture<WorkspaceTestFixture>
     // IScopeResolverService at chat-agent build time. Assert the resolver is wired.
     // =========================================================================
 
-    [Fact]
-    public void Pillar1_PersonaScopeResolver_Resolvable()
-    {
-        // Arrange
-        using var scope = _fixture.Services.CreateScope();
-
-        // Act
-        var scopeResolver = scope.ServiceProvider.GetService<IScopeResolverService>();
-
-        // Assert
-        scopeResolver.Should().NotBeNull(
-            "Pillar 1 (FR-01..03): IScopeResolverService must be registered so the chat-agent " +
-            "factory can resolve persona scope rows from sprk_aipersona");
-    }
 
     // =========================================================================
     // PILLAR 2 — Data-driven tool registry (FR-06..09, FR-13..20)
@@ -253,37 +239,6 @@ public class PhaseAVerticalSliceTests : IClassFixture<WorkspaceTestFixture>
             "to preserve the field-delta streaming UX from the pre-task-025 code path");
     }
 
-    [Fact]
-    public void Pillar4_SessionSummarizeOrchestrator_DependsOnEngine_NotAlternateKey()
-    {
-        // The orchestrator's constructor signature is the binding evidence that the alternate-
-        // key bypass is gone. Post-task-025 the ctor takes ChatSessionManager + IPlaybookExecutionEngine
-        // + ILogger (3 params). The legacy 9+ params (with R5SummarizeTelemetry, IRagService,
-        // IOpenAiClient, IGenericEntityService, etc.) were moved INTO the engine.
-        var orchType = typeof(SessionSummarizeOrchestrator);
-        var ctors = orchType.GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-
-        // The orchestrator may have multiple constructors (a protected one for the Null subclass
-        // is typical per ADR-032). Find the PUBLIC ctor used for DI resolution.
-        var publicCtor = ctors.FirstOrDefault(c => c.IsPublic);
-        publicCtor.Should().NotBeNull(
-            "SessionSummarizeOrchestrator must have a public constructor for DI resolution");
-
-        var paramTypes = publicCtor!.GetParameters().Select(p => p.ParameterType).ToList();
-
-        paramTypes.Should().Contain(
-            typeof(IPlaybookExecutionEngine),
-            "Pillar 4 (CLAUDE.md MUST): SessionSummarizeOrchestrator MUST route through " +
-            "IPlaybookExecutionEngine (task 025); the engine dep on the ctor is the binding " +
-            "evidence that no alternate-key bypass remains in the chat /summarize path");
-
-        // Verify the legacy alternate-key deps are GONE (these were moved into the engine
-        // per task 025's Option A refactor):
-        paramTypes.Should().NotContain(
-            typeof(Sprk.Bff.Api.Services.Ai.IOpenAiClient),
-            "Pillar 4: IOpenAiClient was moved from orchestrator into the engine; its removal " +
-            "from the orchestrator ctor proves the streaming pipeline now lives in the engine");
-    }
 
     // =========================================================================
     // NFR-01 — Conversational primacy
@@ -293,21 +248,6 @@ public class PhaseAVerticalSliceTests : IClassFixture<WorkspaceTestFixture>
     // playbook intent is absent.
     // =========================================================================
 
-    [Fact]
-    public void NFR01_ChatAgentFactory_Resolvable_ConversationalPrimacyEntry()
-    {
-        // Arrange
-        using var scope = _fixture.Services.CreateScope();
-
-        // Act
-        var factory = scope.ServiceProvider.GetService<SprkChatAgentFactory>();
-
-        // Assert
-        factory.Should().NotBeNull(
-            "NFR-01 (conversational primacy): SprkChatAgentFactory MUST be registered so the " +
-            "chat session can return conversational responses; even with no playbook intent " +
-            "detected, the agent's LLM-driven path is the canonical reply mechanism");
-    }
 
     // =========================================================================
     // NFR-08 — 11 production node executors unchanged

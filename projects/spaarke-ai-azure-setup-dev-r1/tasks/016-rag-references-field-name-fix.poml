@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Fix spaarke-rag-references field-name bug: domain → documentType (FR-17)</title>
+    <phase>2: Schema Preparation</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>020, 051</blocks>
+    <tags>azure-search, schemas, bug-fix</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Bug fix with explicit per-line acceptance criteria (FR-17); confirmed bug 2026-06-26</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Fix the spaarke-rag-references writer/reader field-name mismatch (bug confirmed 2026-06-26 by pre-pipeline investigation).
+    Canonical field name = `documentType`. Rename `domain` → `documentType` in the schema (field def + semantic config) and PowerShell writer. C# code requires NO change (already targets `documentType`).
+    Phase 5 task 051 verifies via golden-reference roundtrip.
+  </prompt>
+
+  <role>
+    Spaarke platform Azure AI Search bug-fix engineer.
+  </role>
+
+  <goal>
+    Schema field renamed to `documentType`; PowerShell writer writes `documentType`. PS-indexed docs now visible to C# readers.
+  </goal>
+
+  <context>
+    <background>
+      Bug: PowerShell writers populate field `domain`; C# mapper writes property `DocumentType` → field `documentType`; C# reader filters on `documentType`. PowerShell-indexed documents are invisible to C# readers.
+      Fix: rename schema field `domain` → `documentType` + update PS writer. Canonical = `documentType` (matches C#).
+    </background>
+    <relevant-files>
+      <file>infrastructure/ai-search/spaarke-rag-references.json</file>
+      <file>scripts/ai-search/Add-ReferenceToIndex.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-17">Schema: rename field `domain` → `documentType` at line 39; update semantic config field reference at line 151</constraint>
+    <constraint source="FR-17">PS writer: change `domain` → `documentType` at scripts/ai-search/Add-ReferenceToIndex.ps1:456</constraint>
+    <constraint source="FR-17">C# code: NO change (already targets `documentType`)</constraint>
+    <constraint source="NFR-08">Fix lands in Phase 2 schema-patch PR (NOT Phase 5)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>infrastructure/ai-search/spaarke-rag-references.json</file>
+      <file>scripts/ai-search/Add-ReferenceToIndex.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Mappers/KnowledgeDocumentSchemaMapper.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Edit `infrastructure/ai-search/spaarke-rag-references.json:39`: rename field `domain` → `documentType`</step>
+    <step order="2">Edit `infrastructure/ai-search/spaarke-rag-references.json:151`: update semantic config field reference</step>
+    <step order="3">Edit `scripts/ai-search/Add-ReferenceToIndex.ps1:456`: `domain` → `documentType`</step>
+    <step order="4">Verify Index-AllReferences.ps1 delegates to Add-ReferenceToIndex.ps1 (no change needed; per spec)</step>
+    <step order="5">Verify `KnowledgeDocumentSchemaMapper.cs:56` already writes `documentType` (no change)</step>
+    <step order="6">Verify `ReferenceRetrievalService.cs:309` already filters `documentType` (no change)</step>
+    <step order="7">Note: Phase 5 task 051 will reindex any pre-existing PS-written documents that have only `domain`</step>
+    <step order="8">Update TASK-INDEX.md: task 016 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">3 line-targeted edits (schema:39, schema:151, PS:456)</tool>
+    <tool name="Read">Verify C# code unchanged</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">infrastructure/ai-search/spaarke-rag-references.json</output>
+    <output type="script">scripts/ai-search/Add-ReferenceToIndex.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">spaarke-rag-references.json:39 field name = `documentType` (was `domain`)</criterion>
+    <criterion testable="true">spaarke-rag-references.json:151 semantic config field reference updated</criterion>
+    <criterion testable="true">Add-ReferenceToIndex.ps1:456 writes `documentType`</criterion>
+    <criterion testable="true">No C# code changes</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+
+  <notes-results completed="2026-06-26" rigor="STANDARD">
+    <change file="infrastructure/ai-search/spaarke-rag-references.json" line="45">Field renamed `domain` → `documentType` (field def block, was line 39 per spec; actual line 45 due to comment lines)</change>
+    <change file="infrastructure/ai-search/spaarke-rag-references.json" line="172">Semantic config `prioritizedKeywordsFields[0].fieldName`: `domain` → `documentType` (was line 151 per spec; actual line 172)</change>
+    <change file="scripts/ai-search/Add-ReferenceToIndex.ps1" line="456">PS writer property `domain` → `documentType` (value still `$sourceDomain` — only key renamed)</change>
+    <verified file="src/server/api/Sprk.Bff.Api/Services/Ai/Indexing/KnowledgeDocumentSchemaMapper.cs" line="56">Already writes `DocumentType = domain;` C# property `DocumentType` → JSON `documentType` via `[JsonPropertyName("documentType")]` in KnowledgeDocument.cs:118. NO CHANGE.</verified>
+    <verified file="src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs" line="313">Already filters `documentType eq '...'`. NO CHANGE.</verified>
+    <verified file="scripts/ai-search/Index-AllReferences.ps1">No direct `domain` references — delegates to Add-ReferenceToIndex.ps1. NO CHANGE.</verified>
+    <build>dotnet build src/server/api/Sprk.Bff.Api/ — 0 Error(s), 18 Warning(s) (all pre-existing: CS0618 DemoExpirationService obsolete usage, CS8604/CS1998 ChatEndpoints + NullSessionSummarizeOrchestrator).</build>
+    <verification-grep>`grep "domain"` in scripts/ai-search/ + spaarke-rag-references.json — zero hits.</verification-grep>
+    <out-of-scope>TASK-INDEX.md update + git commit deferred to main session per task brief.</out-of-scope>
+  </notes-results>
+</task>

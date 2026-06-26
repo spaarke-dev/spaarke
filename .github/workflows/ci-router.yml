@@ -57,7 +57,14 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read   # required by dorny/paths-filter on pull_request to read changed-file list
+  # pull-requests: write — bumped from `read` to `write` per CICD-086 bisect (2026-06-26).
+  # Root cause: ci-tier2-advisory.yml declares `permissions: pull-requests: write` (for
+  # the tier2-pr-comment job that posts ONE deduplicated comment). GitHub rejects reusable
+  # workflow calls when the callee requests MORE permissions than the caller granted,
+  # pre-job-creation, with no logs (conclusion=startup_failure). `read` was sufficient
+  # for dorny/paths-filter but insufficient for tier2's PR-comment. `write` covers both.
+  # Bisect proof: step 5 (router + tier2 + read) → startup_failure; step 6 (+ write) → parses.
+  pull-requests: write
 
 concurrency:
   # NOTE: `cancel-in-progress` MUST be a literal boolean — GitHub Actions
@@ -198,12 +205,15 @@ jobs:
       # Map router classification → tier2's `run-*` toggles per its workflow_call contract.
       # docs_only diffs never reach here (see `if:` above). For everything else, default-on.
       # Skip client-side lint when no client files changed (no spaarke_ai/bff client paths).
+      # All run-* are tier2's string-typed inputs (CICD-086). Literals are quoted
+      # to satisfy actionlint's stricter-than-runtime type check; expressions are
+      # already string-returning per `== 'true'` comparison.
       run-lint: ${{ needs.classify.outputs.spaarke_ai == 'true' || needs.classify.outputs.bff == 'true' }}
-      run-format: true
+      run-format: 'true'
       run-unit-tests: ${{ needs.classify.outputs.bff == 'true' }}
-      run-adr-compliance: true
-      run-markdown: true
-      run-last-reviewed: true
+      run-adr-compliance: 'true'
+      run-markdown: 'true'
+      run-last-reviewed: 'true'
       run-plugin-size: ${{ needs.classify.outputs.bff == 'true' }}
 
   # ==========================================================================

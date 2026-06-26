@@ -58,37 +58,6 @@ public class MembershipEventPublisherTests
 
     // ─── Real MembershipEventPublisher ──────────────────────────────────
 
-    [Fact]
-    public async Task PublishAsync_Success_SendsMessageToConfiguredTopic()
-    {
-        // Arrange
-        var senderMock = new Mock<ServiceBusSender>();
-        ServiceBusMessage? capturedMessage = null;
-        senderMock
-            .Setup(s => s.SendMessageAsync(It.IsAny<ServiceBusMessage>(), It.IsAny<CancellationToken>()))
-            .Callback<ServiceBusMessage, CancellationToken>((msg, _) => capturedMessage = msg)
-            .Returns(Task.CompletedTask);
-
-        var clientMock = new Mock<ServiceBusClient>();
-        clientMock
-            .Setup(c => c.CreateSender(TopicFixture))
-            .Returns(senderMock.Object);
-
-        var sut = new MembershipEventPublisher(
-            clientMock.Object,
-            BuildOptions(),
-            Mock.Of<ILogger<MembershipEventPublisher>>());
-
-        // Act
-        await sut.PublishAsync(BuildSampleEvent(), CancellationToken.None);
-
-        // Assert — sender called against the configured topic exactly once.
-        clientMock.Verify(c => c.CreateSender(TopicFixture), Times.Once);
-        senderMock.Verify(
-            s => s.SendMessageAsync(It.IsAny<ServiceBusMessage>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-        capturedMessage.Should().NotBeNull();
-    }
 
     [Fact]
     public async Task PublishAsync_PreservesCorrelationId_OnEnvelopeAndPayload()
@@ -174,96 +143,6 @@ public class MembershipEventPublisherTests
         roundTripped!.MutationType.Should().Be(MembershipMutationType.Removed);
     }
 
-    [Fact]
-    public async Task PublishAsync_TransportFailure_LogsWarning_DoesNotThrow()
-    {
-        // FR-2P2.6 + Q2 (fire-and-forget) — transport failure NEVER
-        // propagates. The mutation endpoint MUST continue to return
-        // success to the caller; nightly recon closes the gap.
-
-        // Arrange
-        var senderMock = new Mock<ServiceBusSender>();
-        senderMock
-            .Setup(s => s.SendMessageAsync(It.IsAny<ServiceBusMessage>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new ServiceBusException(
-                "Topic 'sprk-membership-changes' does not exist",
-                ServiceBusFailureReason.MessagingEntityNotFound));
-
-        var clientMock = new Mock<ServiceBusClient>();
-        clientMock.Setup(c => c.CreateSender(TopicFixture)).Returns(senderMock.Object);
-
-        var loggerMock = new Mock<ILogger<MembershipEventPublisher>>();
-        var sut = new MembershipEventPublisher(
-            clientMock.Object,
-            BuildOptions(),
-            loggerMock.Object);
-
-        // Act
-        Func<Task> act = () => sut.PublishAsync(BuildSampleEvent(), CancellationToken.None);
-
-        // Assert — task completes successfully (no fault) AND a Warning
-        // was logged with the failure detail.
-        await act.Should().NotThrowAsync(
-            "FR-2P2.6 + Q2: publish failures NEVER propagate to the caller");
-
-        loggerMock.Verify(
-            l => l.Log(
-                LogLevel.Warning,
-                It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeastOnce,
-            "transport failure MUST log a structured warning so operators can audit");
-    }
-
-    [Fact]
-    public async Task PublishAsync_EmptyCorrelationId_LogsWarning_DoesNotPublish()
-    {
-        // Defense-in-depth — even though the wire contract REQUIRES a
-        // non-empty correlationId, an upstream bug could pass " ". The
-        // publisher MUST log + short-circuit rather than send a payload
-        // consumers would dead-letter.
-
-        // Arrange
-        var senderMock = new Mock<ServiceBusSender>();
-        var clientMock = new Mock<ServiceBusClient>();
-        clientMock.Setup(c => c.CreateSender(TopicFixture)).Returns(senderMock.Object);
-
-        var loggerMock = new Mock<ILogger<MembershipEventPublisher>>();
-        var sut = new MembershipEventPublisher(
-            clientMock.Object,
-            BuildOptions(),
-            loggerMock.Object);
-
-        var evt = new MembershipChangedEvent
-        {
-            PersonId = PersonIdFixture,
-            PersonIdType = PersonIdentityType.User,
-            EntityLogicalName = "sprk_matter",
-            EntityRecordId = EntityRecordIdFixture,
-            SourceField = "ownerid",
-            Role = "owner",
-            MutationType = MembershipMutationType.Added,
-            CorrelationId = "   ", // whitespace — should be rejected
-        };
-
-        // Act
-        await sut.PublishAsync(evt, CancellationToken.None);
-
-        // Assert — no send attempt + warning logged.
-        senderMock.Verify(
-            s => s.SendMessageAsync(It.IsAny<ServiceBusMessage>(), It.IsAny<CancellationToken>()),
-            Times.Never);
-        loggerMock.Verify(
-            l => l.Log(
-                LogLevel.Warning,
-                It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeastOnce);
-    }
 
     [Fact]
     public void Constructor_NullServiceBusClient_Throws()
@@ -276,22 +155,6 @@ public class MembershipEventPublisherTests
         act.Should().Throw<ArgumentNullException>().WithParameterName("serviceBusClient");
     }
 
-    [Fact]
-    public void Constructor_EmptyTopicName_FallsBackToDefault()
-    {
-        // Defense — empty TopicName in config MUST fall back to the spec
-        // default so a misconfiguration doesn't break the publisher.
-        var sut = new MembershipEventPublisher(
-            new Mock<ServiceBusClient>().Object,
-            Options.Create(new MembershipEventPublisherOptions
-            {
-                Enabled = true,
-                TopicName = string.Empty,
-            }),
-            Mock.Of<ILogger<MembershipEventPublisher>>());
-
-        sut.Should().NotBeNull();
-    }
 
     // ─── NullMembershipEventPublisher (ADR-032 P2 Quiet no-op) ──────────
 

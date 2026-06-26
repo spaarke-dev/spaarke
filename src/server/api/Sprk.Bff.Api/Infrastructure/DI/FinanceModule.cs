@@ -60,7 +60,7 @@ public static class FinanceModule
         // Scoped: performs semantic search across invoices using Azure AI Search
         // Generates embeddings via IOpenAiClient (text-embedding-3-large)
         // Hybrid search: vector + semantic reranking for best results
-        // Uses SearchIndexClient for accessing spaarke-invoices-dev index
+        // Uses SearchIndexClient for accessing spaarke-invoices-index
         //
         // Depends on IOpenAiClient + SearchIndexClient — both gated on DocumentIntelligence:Enabled.
         if (documentIntelligenceEnabled)
@@ -174,7 +174,7 @@ public static class FinanceModule
         // ============================================================================
         // Scoped: generates embeddings and indexes invoice documents for semantic search
         // IdempotencyKey: invoice-index-{invoiceId}
-        // Index: spaarke-invoices-dev (per-tenant in production: spaarke-invoices-{tenantId})
+        // Index: spaarke-invoices-index (MVP single index; per-tenant fan-out is a future extension)
         // Embeddings: text-embedding-3-large (3072 dimensions)
         //
         // Depends on IOpenAiClient + SearchIndexClient — both gated on DocumentIntelligence:Enabled.

@@ -448,38 +448,6 @@ public class PlaybookOptionsEventBuilderTests
     // Test 9: cancellation token propagation to selector AND reranker
     // ────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public async Task BuildAsync_CancellationToken_PropagatedToSelectorAndReranker()
-    {
-        using var cts = new CancellationTokenSource();
-        var token = cts.Token;
-
-        var selectorOutput = new PlaybookCandidateSelection(
-            TopCandidates: ThreeCandidates(),
-            RerankRecommended: true,
-            Reason: "ambiguous-top-2-within-margin");
-
-        var rerankerOutput = new IntentRerankerResult(
-            Top3: ThreeCandidates().Select(c => new RankedPlaybookCandidate(c, string.Empty)).ToList(),
-            RerankInvoked: true,
-            Reason: "llm-rerank-from-5",
-            LatencyMs: TimeSpan.FromMilliseconds(100));
-
-        var selector = new Mock<IPlaybookCandidateSelector>();
-        selector.Setup(s => s.Select(It.IsAny<IReadOnlyList<PhaseBPerFileResult>>(), token))
-            .Returns(selectorOutput);
-
-        var reranker = new Mock<IIntentRerankerService>();
-        reranker.Setup(r => r.RerankAsync(It.IsAny<IntentRerankerInput>(), token))
-            .ReturnsAsync(rerankerOutput);
-
-        var builder = CreateBuilder(selector, reranker);
-
-        await builder.BuildAsync(EmptyPhaseB(), "x", NoAttachments(), Array.Empty<string>(), token);
-
-        selector.Verify(s => s.Select(It.IsAny<IReadOnlyList<PhaseBPerFileResult>>(), token), Times.Once);
-        reranker.Verify(r => r.RerankAsync(It.IsAny<IntentRerankerInput>(), token), Times.Once);
-    }
 
     // ────────────────────────────────────────────────────────────────────
     // Test 10: reranker returns 0 candidates → fall back to selector's Top

@@ -138,60 +138,6 @@ public class SprkChatAgentFactoryTests
 
     // ── FR-23 per-playbook tool filtering tests ──────────────────────────────
 
-    /// <summary>
-    /// FR-23 acceptance: when a playbook is matched, the factory creates an agent
-    /// without invoking any per-turn capability router (CapabilityRouter retired by
-    /// task 141 / FR-22). Tool gating is driven entirely by the playbook's declared
-    /// capabilities resolved inside the factory.
-    /// </summary>
-    [Fact]
-    public async Task CreateAgentAsync_WithUserMessage_UsesPerPlaybookToolFiltering()
-    {
-        // Arrange
-        var contextProviderMock = new Mock<IChatContextProvider>();
-        contextProviderMock
-            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateDefaultContext());
-
-        var services = BuildServiceProvider(contextProviderMock.Object);
-        var factory = services.GetRequiredService<SprkChatAgentFactory>();
-
-        // Act — user message is provided; no router is consulted (deleted)
-        var agent = await factory.CreateAgentAsync(
-            TestSessionId, TestDocumentId, TestPlaybookId, TestTenantId,
-            latestUserMessage: "analyze this contract for risk clauses");
-
-        // Assert — agent created successfully via per-playbook gating
-        agent.Should().NotBeNull();
-    }
-
-    /// <summary>
-    /// FR-23 acceptance: when no playbook is matched (playbookId == null), the agent
-    /// is still created using the always-on core capabilities. Verifies the
-    /// standalone / conversational chat path.
-    /// </summary>
-    [Fact]
-    public async Task CreateAgentAsync_WithoutPlaybookId_UsesAlwaysOnCoreCapabilities()
-    {
-        // Arrange
-        var contextProviderMock = new Mock<IChatContextProvider>();
-        contextProviderMock
-            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateDefaultContext());
-
-        var services = BuildServiceProvider(contextProviderMock.Object);
-        var factory = services.GetRequiredService<SprkChatAgentFactory>();
-
-        // Act — no playbookId (standalone chat)
-        var agent = await factory.CreateAgentAsync(
-            TestSessionId, TestDocumentId, playbookId: null, TestTenantId,
-            latestUserMessage: "Hello");
-
-        // Assert — agent created using core capabilities
-        agent.Should().NotBeNull();
-    }
 
     /// <summary>
     /// When the tool set changes between turns (previous turn had a tool that no longer

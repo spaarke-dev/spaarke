@@ -10,9 +10,13 @@
 
 ## Overview
 
-The RAG subsystem provides document-grounded AI responses by indexing document content into Azure AI Search and retrieving relevant chunks at query time. The architecture uses a **dual-index strategy** (knowledge index at 512 tokens, discovery index at 1024 tokens), **hybrid search** combining keyword, vector, and semantic ranking, and a **Redis-based embedding cache** to reduce Azure OpenAI API costs.
+The RAG subsystem provides document-grounded AI responses by indexing document content into Azure AI Search and retrieving relevant chunks at query time. The platform now operates a **canonical 7-index landscape** (see [AI-SEARCH-INDEX-CATALOG.md](AI-SEARCH-INDEX-CATALOG.md) for per-index purpose, vector configuration, and consumers) including `spaarke-files-index` (primary file RAG), `spaarke-rag-references` (golden references), `spaarke-records-index`, `spaarke-session-files`, `spaarke-invoices-index`, `spaarke-playbook-embeddings`, and `spaarke-insights-index`. Retrieval uses **hybrid search** combining keyword, vector, and semantic ranking, and a **Redis-based embedding cache** to reduce Azure OpenAI API costs.
 
-The key design decision is **idempotent re-indexing** (ADR-004): re-indexing the same document always replaces previous chunks rather than accumulating duplicates. All index documents carry a `tenantId` field for query-time multi-tenant isolation (ADR-014).
+The key design decision is **idempotent re-indexing** (per general handler-idempotency principle in ADR-004 *Async Job Contract*): re-indexing the same document always replaces previous chunks rather than accumulating duplicates. All index documents carry a `tenantId` field for query-time multi-tenant isolation. *(Note: ADR-014 was previously cited here for tenant isolation but is scoped to AI caching key conventions, not index-document tenancy — citation removed per FR-06; see [pending owner decision](#fr-06-pending-owner-decision-on-adr-pointer-drift) below.)*
+
+### FR-06 pending owner decision on ADR pointer drift
+
+The tenant-isolation principle (every index document carries `tenantId`) and the document-level idempotent re-indexing principle (delete-then-upload per `documentId`) are currently NOT covered by their own ADRs. ADR-014 is about AI caching (and was incorrectly cited above for tenant isolation); ADR-004 is the generic async job contract (idempotent handlers in general, not re-indexing specifically). Per spec FR-06, default treatment is option **(b) inline citation correction** (cheaper, fewer ADRs to maintain) — that's what this doc now applies. Owner may alternatively request option **(a)** rename + write new ADRs (e.g., `ADR-XXX-index-document-tenant-isolation`, `ADR-XXX-idempotent-reindexing`) if these principles warrant first-class architectural decisions.
 
 ## Component Structure
 
@@ -30,8 +34,8 @@ The key design decision is **idempotent re-indexing** (ADR-004): re-indexing the
 | RagIndexingJobHandler | `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs` | Service Bus job handler for single-document RAG indexing |
 | BulkRagIndexingJobHandler | `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/BulkRagIndexingJobHandler.cs` | Service Bus job handler for batch RAG indexing |
 | RagTelemetry | `src/server/api/Sprk.Bff.Api/Telemetry/RagTelemetry.cs` | OpenTelemetry-compatible metrics for RAG operations |
-| PlaybookEmbeddingService | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs` | Vector search for playbook dispatch (separate index: `playbook-embeddings`) |
-| PlaybookIndexingService | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexingService.cs` | Indexes playbook metadata into the playbook-embeddings index |
+| PlaybookEmbeddingService | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs` | Vector search for playbook dispatch (separate index: `spaarke-playbook-embeddings`) |
+| PlaybookIndexingService | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexingService.cs` | Indexes playbook metadata into the spaarke-playbook-embeddings index |
 | DocumentSearchTools | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs` | AI function tool: entity-scoped document search for SprkChat |
 | KnowledgeRetrievalTools | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/KnowledgeRetrievalTools.cs` | AI function tool: knowledge-source-scoped retrieval for SprkChat |
 
@@ -44,7 +48,7 @@ The key design decision is **idempotent re-indexing** (ADR-004): re-indexing the
 3. **Dual chunking**: `ITextChunkingService` chunks text at two granularities:
    - Knowledge index: 512 tokens (2048 chars), 50-token overlap (200 chars), sentence-boundary-preserving
    - Discovery index: 1024 tokens (4096 chars), 100-token overlap (400 chars), sentence-boundary-preserving
-4. **Stale chunk deletion**: Existing chunks for the document are deleted from both indexes (ADR-004 idempotency)
+4. **Stale chunk deletion**: Existing chunks for the document are deleted from both indexes (handler-idempotency principle, per ADR-004 general contract)
 5. **Embedding generation**: All chunks are embedded in parallel batches (max 16 concurrent) via Azure OpenAI `text-embedding-3-large` (3072 dimensions)
 6. **Index upload**: Chunks uploaded to both knowledge and discovery indexes in parallel
 7. **Metadata stamping**: Each indexed document carries `tenantId`, `knowledgeSourceId`, `fileName`, `documentType`, `tags`, and `parentEntityType`/`parentEntityId`
@@ -106,17 +110,17 @@ The key design decision is **idempotent re-indexing** (ADR-004): re-indexing the
 | Decision | Choice | Rationale | ADR |
 |----------|--------|-----------|-----|
 | Dual-index strategy | Knowledge (512-token) + Discovery (1024-token) | Fine-grained retrieval for chat; broader context for discovery | -- |
-| Idempotent re-indexing | Delete-then-upload per documentId | Same document always produces consistent index state | ADR-004 |
+| Idempotent re-indexing | Delete-then-upload per documentId | Same document always produces consistent index state | ADR-004 (general idempotency principle) |
 | SHA256 content hashing for cache | Base64-encoded SHA256 | Consistent key length, safe for any content, deterministic | ADR-009 |
 | Hybrid search (keyword + vector + semantic) | Three-way combination | Best relevance: keyword for exact matches, vector for semantic similarity, semantic ranking for re-ordering | -- |
-| Tenant-scoped index documents | tenantId field on every document | Query-time multi-tenant isolation without separate indexes per tenant | ADR-014 |
+| Tenant-scoped index documents | tenantId field on every document | Query-time multi-tenant isolation without separate indexes per tenant | -- (no ADR; see FR-06 pending decision) |
 | Embedding cache not used during indexing | Direct-to-index, no Redis for chunk embeddings | Indexing is write-once; caching benefits queries not writes | ADR-009 |
 | Bounded concurrency for AI calls | SemaphoreSlim limits | Prevents rate-limit errors and Azure AI Search overload | ADR-013 |
 
 ## Constraints
 
-- **MUST**: Every AI Search document carries `tenantId` for query-time isolation (ADR-014)
-- **MUST**: Re-indexing deletes stale chunks before uploading new ones (ADR-004)
+- **MUST**: Every AI Search document carries `tenantId` for query-time isolation *(principle stands on its own; ADR-014 citation removed per FR-06 — see top of doc)*
+- **MUST**: Re-indexing deletes stale chunks before uploading new ones (handler-idempotency per ADR-004)
 - **MUST**: Concurrency for embedding generation is bounded to 16 (pipeline) and 5 (search) to avoid rate limits
 - **MUST**: Indexing is triggered via Service Bus jobs, not inline in API requests (ADR-001)
 - **MUST NOT**: Cache chunk embeddings in Redis during indexing -- index directly to AI Search (ADR-009)

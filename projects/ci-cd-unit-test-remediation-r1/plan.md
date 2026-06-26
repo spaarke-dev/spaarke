@@ -104,7 +104,7 @@ Wrap-up (0.5d)
 - Phase 3 sdap-ci retirement (`077`) GATED by cutover+14d (MUST rule)
 - Phase 3 Release matrix restoration GATED by surviving suite green ≥7 days (`075`)
 
-**Critical path** (longest chain): `000 → 022 → 060 → 050 → 053c → 070 → 071 → 075 → 077 → 076 → 090` ≈ 28 elapsed days
+**Critical path** (revised 2026-06-26 twice — once for Phase 2.5 scope expansion, once for CI Router discovery): `000 → 022 → 060 → 050 → 053(collapsed) → 080 → 082 → 085 → 070 → 086 → 071 → 075 → 077 → 076 → 090` ≈ **~33-37 elapsed days** (was 28 pre-expansion; 32-35 post-expansion; 086 adds 1-2 days for fix + 2-push stability proof). **086 can run in parallel with 083-085** (touches `.github/workflows/` not `tests/`), so its calendar impact compresses if parallelized. **Hard gate**: 071 cutover requires BOTH 085 (deep cleanup) AND 086 (CI Router stability) green.
 
 **High-Risk Items**:
 - Tier 1 flake rate stays >1% after migration — Mitigation: shadow phase measures BEFORE cutover; if >1%, pause cutover and re-triage
@@ -196,6 +196,50 @@ Wrap-up (0.5d)
 PG-2, PG-3, and SERIAL-DEL run **concurrently across streams** (no file overlap between streams).
 
 **Dev impact**: Soft constraint on test additions — should follow new policy from Phase 1 directive rewrites.
+
+---
+
+### Phase 2.5: Build-vs-maintain codification + retroactive deep cleanup (added 2026-06-26)
+
+**Objectives** (per spec FR-B08/B09/B10 — owner-directed scope expansion):
+
+1. Codify build-vs-maintain criteria as a binding standard (Deliverable A, FR-B08) — extend ADR-038 + `.claude/constraints/testing.md` + `tests/CLAUDE.md` with ≥10 new scaffolding-test bans beyond the current 3
+2. Build a project-close test-diet workflow (Deliverable B, FR-B09) — new `/test-diet` skill wired into `/repo-cleanup` and `090-wrapup-*` task
+3. Execute retroactive deep cleanup (Deliverable C, FR-B10) — re-inventory with broader criteria, then sliced deletion PRs to reduce BFF unit tests from ~6,700 to ≤3,500
+
+**Why this phase was added mid-project**:
+
+The original Phase 2 Stream B deletion (task 053) removed only 9 files (179 tests, 2.4% reduction) because the inventory used strict signature-match criteria ("doubt = KEEP" per spec §38). Post-execution review identified that the spec's "we have ~7,900 tests, ~60% are wiring" intuition was directionally correct but the strict-criteria inventory couldn't validate it file-by-file. The owner's "build-vs-maintain" reframing (2026-06-26) provides the judgment-based criteria needed to do a deeper cleanup. Without this phase, the cutover (071) ships an architectural change but the test suite remains over-engineered by ~3,000-4,000 unit tests.
+
+**Deliverables**:
+
+- [ ] `docs/adr/ADR-038-testing-strategy.md` extended (or new sibling ADR) with §"Build-vs-Maintain Criteria" listing 10+ scaffolding signatures, each with concrete C# example + rationale
+- [ ] `.claude/constraints/testing.md` MUST NOT rules extended with the new ban list
+- [ ] `tests/CLAUDE.md` Banned Antipatterns section extended; new "expect to defend at project close" framing added
+- [ ] `.claude/skills/test-diet/SKILL.md` new skill (or extension to `/repo-cleanup`) — invokable as `/test-diet`
+- [ ] `task-execute` skill 090 wrap-up step modified to require `/test-diet` invocation
+- [ ] `projects/ci-cd-unit-test-remediation-r1/notes/test-inventory-broader.csv` — re-inventory with new criteria
+- [ ] `projects/ci-cd-unit-test-remediation-r1/notes/test-inventory-broader-summary.md` — bucket sizes + slicing recommendation
+- [ ] 3-5 sliced DELETE PRs reducing BFF unit test count from ~6,700 to ≤3,500
+- [ ] Final `dotnet build` + `dotnet test` verification on surviving suite
+
+**Critical Tasks (strict serial within Phase 2.5)**:
+
+- `080-codify-build-vs-maintain-criteria.poml` — MUST complete before 082 inventory (criteria drives the classifier)
+- `081-build-test-diet-skill.poml` — can run in parallel with 080; gates 090 wrap-up update
+- `082-rerun-inventory-broader-criteria.poml` — depends on 080; gates deletion PRs
+- `083` / `084` / `085` — strict serial; each rebases on master after prior merges; final 085 unblocks 070→071 cutover
+- **`086-fix-ci-router-startup-failure.poml`** (added 2026-06-26 after parallel-session discovery) — independent of 082-085 chain (touches workflow YAML, not test .cs); BLOCKS 071. Awaits user-supplied browser error message OR explicit bisect approval before execution.
+
+**Parallel Groups**:
+
+- **PG-4 (Phase 2.5 codification, parallel)**: 080 + 081 (different file domains; 080 = constraint/ADR/tests/CLAUDE; 081 = new skill SKILL.md). Both modify `.claude/` — main-session sequential per write boundary.
+- **PG-5 (Phase 2.5 deletion, STRICT SERIAL)**: 082 → 083 → 084 → 085 → unblocks 070
+- **PG-6 (Phase 2.5 CI remediation, parallel with PG-5)**: 086 runs in main session concurrently with PG-5 chain. Different file domain (`.github/workflows/` vs `tests/`); no collision. 086 + 085 both must complete before 071 fires.
+
+**Calendar impact**: adds ~3-5 elapsed days of active work; +1-2 days if 086 must serialize (parallel saves the days). Phase 3 cutover (071) shifts ~1 week. Total project: ~3-3.5 weeks elapsed (vs spec's original ~2-week framing).
+
+**Rigor levels**: All Phase 2.5 tasks are FULL rigor per spec FR-B07 (test-modifying override). Code-review + adr-check unconditional at Step 9.5.
 
 ---
 
