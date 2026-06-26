@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Security.Claims;
-using Microsoft.Extensions.Caching.Memory;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Caching;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 
@@ -399,7 +399,7 @@ public static class PlaybookEndpoints
     private static async Task<IResult> GetPlaybookById(
         string id,
         IPlaybookLookupService playbookLookup,
-        IMemoryCache memoryCache,
+        IEndpointResponseCache cache,
         HttpContext httpContext,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -431,12 +431,13 @@ public static class PlaybookEndpoints
 
         try
         {
-            var playbook = await memoryCache.GetOrCreateAsync(cacheKey, async entry =>
-            {
-                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
-                entry.Size = 1; // PlaybookResponse ~1KB
-                return await playbookLookup.GetByIdAsync(id, cancellationToken);
-            });
+            // Cache wrapper (ADR-009 / CICD-087) preserves GetOrCreateAsync semantics
+            // including the Size=1 cache-entry hint for size-limited MemoryCache configs.
+            var playbook = await cache.GetOrCreateAsync<PlaybookResponse>(
+                cacheKey,
+                TimeSpan.FromMinutes(5),
+                async ct => await playbookLookup.GetByIdAsync(id, ct),
+                cancellationToken);
 
             if (playbook is null)
             {
