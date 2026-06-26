@@ -103,12 +103,47 @@ These constraints were introduced after the dev environment drifted (Redis delet
 
 ### 9. Observability mandate (App Insights)
 
-- Redis dependency telemetry MUST appear in Application Insights Live Metrics within 5 min of post-cutover traffic. Standard ApplicationInsights SDK auto-captures Redis deps once `APPLICATIONINSIGHTS_CONNECTION_STRING` is set.
-- Custom metrics emitted from `TenantCache` wrapper: `cache.hits`, `cache.misses` (counters), `cache.redis_call_duration_ms` (histogram), all with `resource` dimension. Hit-rate derived downstream.
-- Minimum 3 alert rules defined (documented in `docs/guides/redis-cache-azure-setup.md` §8 Troubleshooting):
-  - hit_rate <80% / 15min → "cache key/version drift; investigate"
-  - P95 >100ms / 5min → "network issue or SKU undersize"
-  - usedmemorypercentage >80 / 15min → "scale to next SKU"
+**Pipeline wiring (R7-S7 closure 2026-06-26 — required for any of this to actually reach App Insights):**
+
+The classic `AddApplicationInsightsTelemetry()` SDK does NOT auto-instrument StackExchange.Redis AND has no exporter for OpenTelemetry-emitted custom Meters. Both gaps must be closed:
+
+1. `Program.cs` — `builder.Services.AddOpenTelemetry().UseAzureMonitor()` (replaces the classic SDK). Package: `Azure.Monitor.OpenTelemetry.AspNetCore 1.4.0`. Guard on `APPLICATIONINSIGHTS_CONNECTION_STRING` presence so test hosts continue to start.
+2. `TelemetryModule.cs` — `tracing.AddRedisInstrumentation()` in the `WithTracing` block. Package: `OpenTelemetry.Instrumentation.StackExchangeRedis 1.12.0-beta.1`.
+3. `CacheModule.cs` — `RedisCacheOptions.ConnectionMultiplexerFactory = () => Task.FromResult(connectionMultiplexer)`. Without this, `Microsoft.Extensions.Caching.StackExchangeRedis` builds its own internal multiplexer and the instrumented DI-registered one is idle in the cache hot path. Verified empirically: omitting this returns zero Redis dep spans even with full instrumentation registered.
+
+**Verification (must run after every deploy that touches CacheModule / TelemetryModule / Program.cs):**
+
+```kql
+// Redis dependency telemetry (expect HMGET/UNLINK/CLIENT after 10 min of traffic)
+dependencies
+| where timestamp > ago(10m)
+| where type contains 'Redis'
+| summarize count() by type, name
+```
+
+**Custom cache metrics (R7-S7 sub-gap #2 closure):**
+
+Emission is at the `IDistributedCache` decorator layer (`MetricsDistributedCache`), NOT at the `TenantCache` wrapper. Rationale: ~11 system-cache call sites (`CommunicationAccountService`, MSAL token cache, membership refresh) inject `IDistributedCache` directly per the `SystemCacheKeys.cs` allow-list and bypass `TenantCache`. Emitting at the `TenantCache` layer left those sites invisible; emitting at the decorator catches every cache I/O exactly once.
+
+- `cache.hits`, `cache.misses` (counters)
+- `cache.redis_call_duration_ms` (histogram)
+
+All on the `Sprk.Bff.Api.Cache` Meter (registered in `TelemetryModule.cs:25`). Tag dimensions kept bounded: `op` (get/set/refresh/remove) and `tier` (raw — placeholder for future wrapper-layer re-emission with `resource` tag if needed). Hit-rate derived downstream.
+
+```kql
+customMetrics
+| where timestamp > ago(10m)
+| where name startswith 'cache.'
+| summarize total=sum(value), records=count() by name
+```
+
+**Alerts (3 minimum) MUST be Bicep-deployed:**
+
+- Hit_rate <80% / 15min → "cache key/version drift; investigate"
+- P95 >100ms / 5min → "network issue or SKU undersize"
+- `usedmemorypercentage` >80 / 15min → "scale to next SKU"
+
+Markdown-only alert documentation (`docs/guides/redis-cache-azure-setup.md` §8) is NOT sufficient — alerts must be deployed via `infrastructure/bicep/alerts.bicep` and verified firing in a test condition. Markdown-only fails the operational MUST.
 
 ## Exceptions
 

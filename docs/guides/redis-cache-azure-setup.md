@@ -166,6 +166,27 @@ After a deploy completes, verify each of the following before declaring success.
 
    Runs [`tests/manual/RedisValidationTests.ps1`](../../tests/manual/RedisValidationTests.ps1), which includes `Test-TenantPrefixInvariant` and `Test-FailFastBehavior` (added in task 026). Non-zero exit = a key invariant is violated.
 
+8. **App Insights telemetry pipeline verification** (R7-S7 closure 2026-06-26 — REQUIRED). After 10 min of post-deploy traffic, both queries below MUST return non-empty results. If either is empty, the telemetry pipeline is broken — see ADR-009 §9 for the required wiring (`UseAzureMonitor()` + `AddRedisInstrumentation()` + `RedisCacheOptions.ConnectionMultiplexerFactory`).
+
+   ```bash
+   # Custom cache metrics — expect cache.hits, cache.misses, cache.redis_call_duration_ms
+   az monitor app-insights query \
+     --app spe-insights-dev-67e2xz \
+     --resource-group spe-infrastructure-westus2 \
+     --analytics-query "customMetrics | where timestamp > ago(10m) | where name startswith 'cache.' | summarize total=sum(value), records=count() by name"
+
+   # Redis dependency telemetry — expect HMGET / UNLINK / CLIENT / GET / SET
+   az monitor app-insights query \
+     --app spe-insights-dev-67e2xz \
+     --resource-group spe-infrastructure-westus2 \
+     --analytics-query "dependencies | where timestamp > ago(10m) | where type contains 'Redis' | summarize count() by type, name"
+   ```
+
+   **Common failure modes**:
+   - `customMetrics` query empty → `UseAzureMonitor()` not wired in `Program.cs` (still using classic `AddApplicationInsightsTelemetry()`)
+   - `dependencies` query empty even though custom metrics flow → `RedisCacheOptions.ConnectionMultiplexerFactory` not wired in `CacheModule.cs` (DI-registered multiplexer is idle; `Microsoft.Extensions.Caching.StackExchangeRedis` built its own internal one)
+   - Both queries empty → either `APPLICATIONINSIGHTS_CONNECTION_STRING` not set on the BFF App Service, or the exporter package (`Azure.Monitor.OpenTelemetry.AspNetCore`) is missing from `Sprk.Bff.Api.csproj`
+
 ---
 
 ## 4. Cutover Protocol
