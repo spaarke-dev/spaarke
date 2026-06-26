@@ -1,7 +1,7 @@
 # Project Plan: Spaarke Redis Cache Remediation (R1)
 
-> **Last Updated**: 2026-06-25
-> **Status**: Ready for Tasks
+> **Last Updated**: 2026-06-26
+> **Status**: Phase 1 + 2 + 5 — **COMPLETE** (code, IaC, docs, ADR amendments). Phase 3 (dev cutover) + Phase 4 (live App Insights verification) — **DEFERRED to Azure operator** (require Azure CLI access).
 > **Spec**: [spec.md](spec.md)
 
 ---
@@ -413,8 +413,26 @@ Phase 5: Docs + ADR amendments + lessons + R7 backlog (tasks 050–065)
 
 ---
 
-**Status**: Ready for `task-create`.
-**Next Action**: Invoke `task-create` to decompose this plan into executable POML task files.
+**Status**: Phase 1 + 2 + 5 COMPLETE. Phase 3 + Phase 4 live-verification DEFERRED.
+**Next Action**: Azure operator runs `pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev -KeyVaultName <kv-name> -CutoverBffSettings` — follows the runbook at `docs/guides/redis-cache-azure-setup.md`.
+
+### Deferred-task summary (for the Azure operator)
+
+| Task | Description | Trigger |
+|---|---|---|
+| 030 | Capture App Settings baseline + verify dev KV name + confirm MI roles | `notes/dev-cutover-baseline.md` |
+| 031 | Provision `spaarke-bff-redis-dev` (Basic C0) | `Deploy-RedisCache.ps1` |
+| 032 | KV `Redis-ConnectionString` upsert | `Deploy-RedisCache.ps1` (auto when `-KeyVaultName`) |
+| 033 | Update `spaarke-bff-dev` App Settings | `Deploy-RedisCache.ps1 -CutoverBffSettings` |
+| 034 | Restart BFF + verify startup log line (**Success Criterion #1 — gate signal**) | manual + `az webapp log tail` |
+| 035 | Smoke test — chat session key format | exercise chat-session endpoint + `redis-cli KEYS spaarke:tenant:*` |
+| 036 | 24-hr verification window | wait + App Insights query for errors / in-memory warnings |
+| 037 | Decommission legacy `spe-redis-dev-67e2xz` | `az redis delete` OR `az resource tag --tags decommission=YYYY-MM-DD` |
+| 038 | Sister-project handoff signal | append to `projects/spaarke-ai-azure-setup-dev-r1/notes/handoffs/` |
+| 039 | Phase 3 retro | document deviations for future runbook iteration |
+| 040 | Verify App Insights Redis dependency telemetry in Live Metrics | code complete (auto-captured); manual visual confirm |
+| 042 | Verify custom metrics visible in App Insights | code complete (task 041); manual metrics-explorer confirm |
+| 044 | (subsumed by task 041 measurement: −2.0 MB delta) | — |
 
 ---
 

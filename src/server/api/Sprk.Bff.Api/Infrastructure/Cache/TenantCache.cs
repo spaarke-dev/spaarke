@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
 
@@ -19,6 +21,15 @@ internal sealed class TenantCache : ITenantCache
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
+    // FR-16: Custom cache metrics. Hit-rate is computed downstream from hits/(hits+misses).
+    // The "Spaarke.Cache" meter is published via System.Diagnostics.Metrics and picked up
+    // by the OpenTelemetry pipeline (and from there, Application Insights).
+    internal static readonly Meter Meter = new("Spaarke.Cache", "1.0.0");
+    private static readonly Counter<long> HitsCounter = Meter.CreateCounter<long>("cache.hits");
+    private static readonly Counter<long> MissesCounter = Meter.CreateCounter<long>("cache.misses");
+    private static readonly Histogram<double> CallDurationHistogram =
+        Meter.CreateHistogram<double>("cache.redis_call_duration_ms");
+
     private readonly IDistributedCache _cache;
     private readonly ILogger<TenantCache> _logger;
 
@@ -39,11 +50,21 @@ internal sealed class TenantCache : ITenantCache
         ValidateArguments(tenantId, resource, id, cacheInstance);
 
         var key = BuildKey(tenantId, resource, id, version);
+        var sw = Stopwatch.StartNew();
         var bytes = await _cache.GetAsync(key, ct).ConfigureAwait(false);
+        sw.Stop();
+        CallDurationHistogram.Record(
+            sw.Elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>("resource", resource),
+            new KeyValuePair<string, object?>("op", "get"));
+
         if (bytes is null || bytes.Length == 0)
         {
+            MissesCounter.Add(1, new KeyValuePair<string, object?>("resource", resource));
             return default;
         }
+
+        HitsCounter.Add(1, new KeyValuePair<string, object?>("resource", resource));
 
         try
         {
@@ -84,10 +105,16 @@ internal sealed class TenantCache : ITenantCache
             options.AbsoluteExpirationRelativeToNow = ttl.Value;
         }
 
+        var sw = Stopwatch.StartNew();
         await _cache.SetAsync(key, bytes, options, ct).ConfigureAwait(false);
+        sw.Stop();
+        CallDurationHistogram.Record(
+            sw.Elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>("resource", resource),
+            new KeyValuePair<string, object?>("op", "set"));
     }
 
-    public Task RemoveAsync(
+    public async Task RemoveAsync(
         string tenantId,
         string resource,
         string id,
@@ -98,7 +125,13 @@ internal sealed class TenantCache : ITenantCache
         ValidateArguments(tenantId, resource, id, cacheInstance);
 
         var key = BuildKey(tenantId, resource, id, version);
-        return _cache.RemoveAsync(key, ct);
+        var sw = Stopwatch.StartNew();
+        await _cache.RemoveAsync(key, ct).ConfigureAwait(false);
+        sw.Stop();
+        CallDurationHistogram.Record(
+            sw.Elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>("resource", resource),
+            new KeyValuePair<string, object?>("op", "remove"));
     }
 
     public async Task<T> GetOrCreateAsync<T>(
@@ -127,6 +160,123 @@ internal sealed class TenantCache : ITenantCache
         }
 
         return produced!;
+    }
+
+    public async Task<string?> GetStringAsync(
+        string tenantId,
+        string resource,
+        string id,
+        int version,
+        string cacheInstance = "default",
+        CancellationToken ct = default)
+    {
+        ValidateArguments(tenantId, resource, id, cacheInstance);
+
+        var key = BuildKey(tenantId, resource, id, version);
+        var sw = Stopwatch.StartNew();
+        var value = await _cache.GetStringAsync(key, ct).ConfigureAwait(false);
+        sw.Stop();
+        CallDurationHistogram.Record(
+            sw.Elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>("resource", resource),
+            new KeyValuePair<string, object?>("op", "get"));
+
+        if (value is null)
+        {
+            MissesCounter.Add(1, new KeyValuePair<string, object?>("resource", resource));
+        }
+        else
+        {
+            HitsCounter.Add(1, new KeyValuePair<string, object?>("resource", resource));
+        }
+
+        return value;
+    }
+
+    public async Task SetStringAsync(
+        string tenantId,
+        string resource,
+        string id,
+        int version,
+        string value,
+        TimeSpan? ttl = null,
+        TimeSpan? slidingExpiration = null,
+        string cacheInstance = "default",
+        CancellationToken ct = default)
+    {
+        ValidateArguments(tenantId, resource, id, cacheInstance);
+        ArgumentNullException.ThrowIfNull(value);
+
+        var key = BuildKey(tenantId, resource, id, version);
+        var options = new DistributedCacheEntryOptions();
+        if (ttl.HasValue)
+        {
+            options.AbsoluteExpirationRelativeToNow = ttl.Value;
+        }
+        if (slidingExpiration.HasValue)
+        {
+            options.SlidingExpiration = slidingExpiration.Value;
+        }
+
+        var sw = Stopwatch.StartNew();
+        await _cache.SetStringAsync(key, value, options, ct).ConfigureAwait(false);
+        sw.Stop();
+        CallDurationHistogram.Record(
+            sw.Elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>("resource", resource),
+            new KeyValuePair<string, object?>("op", "set"));
+    }
+
+    public async Task RefreshAsync(
+        string tenantId,
+        string resource,
+        string id,
+        int version,
+        string cacheInstance = "default",
+        CancellationToken ct = default)
+    {
+        ValidateArguments(tenantId, resource, id, cacheInstance);
+
+        var key = BuildKey(tenantId, resource, id, version);
+        var sw = Stopwatch.StartNew();
+        await _cache.RefreshAsync(key, ct).ConfigureAwait(false);
+        sw.Stop();
+        CallDurationHistogram.Record(
+            sw.Elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>("resource", resource),
+            new KeyValuePair<string, object?>("op", "refresh"));
+    }
+
+    public async Task SetSlidingAsync<T>(
+        string tenantId,
+        string resource,
+        string id,
+        int version,
+        T value,
+        TimeSpan slidingExpiration,
+        string cacheInstance = "default",
+        CancellationToken ct = default)
+    {
+        ValidateArguments(tenantId, resource, id, cacheInstance);
+
+        var key = BuildKey(tenantId, resource, id, version);
+
+        using var stream = new MemoryStream();
+        await JsonSerializer.SerializeAsync(stream, value, SerializerOptions, ct).ConfigureAwait(false);
+        var bytes = stream.ToArray();
+
+        var options = new DistributedCacheEntryOptions
+        {
+            SlidingExpiration = slidingExpiration
+        };
+
+        var sw = Stopwatch.StartNew();
+        await _cache.SetAsync(key, bytes, options, ct).ConfigureAwait(false);
+        sw.Stop();
+        CallDurationHistogram.Record(
+            sw.Elapsed.TotalMilliseconds,
+            new KeyValuePair<string, object?>("resource", resource),
+            new KeyValuePair<string, object?>("op", "set"));
     }
 
     private static string BuildKey(string tenantId, string resource, string id, int version)

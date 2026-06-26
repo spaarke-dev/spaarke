@@ -85,6 +85,7 @@ public sealed class CommunicationAccountService
         // Check Redis cache first
         try
         {
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): sprk_communicationaccount records are org-wide Dataverse configuration (one set per org/BFF); per ADR-029 single Redis instance per BFF org, cache is intrinsically system-level.
             var cached = await _cache.GetStringAsync(cacheKey, ct);
             if (cached is not null)
             {
@@ -123,6 +124,7 @@ public sealed class CommunicationAccountService
             {
                 AbsoluteExpirationRelativeToNow = CacheTtl
             };
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): sprk_communicationaccount records are org-wide Dataverse configuration (one set per org/BFF); per ADR-029 single Redis instance per BFF org, cache is intrinsically system-level.
             await _cache.SetStringAsync(cacheKey, serialized, cacheOptions, ct);
             _logger.LogDebug("Cached {Count} communication accounts ({Key}) with {Ttl} TTL", accounts.Length, cacheKey, CacheTtl);
         }
@@ -250,6 +252,7 @@ public sealed class CommunicationAccountService
     {
         try
         {
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): send-enabled flag cache is org-wide configuration; invalidation must match set-path tenant scoping (none).
             await _cache.RemoveAsync(SendEnabledCacheKey, ct);
         }
         catch (Exception ex)

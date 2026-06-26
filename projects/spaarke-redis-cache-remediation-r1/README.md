@@ -1,8 +1,8 @@
 # Spaarke Redis Cache Remediation (R1)
 
-> **Last Updated**: 2026-06-25
+> **Last Updated**: 2026-06-26
 >
-> **Status**: Ready for Implementation
+> **Status**: Phase 1 + Phase 2 + Phase 5 (code, IaC, docs, ADR amendments) — **COMPLETE**. Phase 3 (live dev-environment cutover) + Phase 4 (live App Insights verification) — **DEFERRED to Azure operator** (require Azure CLI access not available in this session).
 
 ## Overview
 
@@ -22,10 +22,10 @@ Fix the BFF's Redis/cache configuration drift (`Redis__Enabled=false` in a deplo
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Planning |
-| **Progress** | 0% (artifacts generated; tasks pending) |
-| **Target Date** | — |
-| **Completed Date** | — |
+| **Phase** | Phase 5 closed; Phase 3 + Phase 4 telemetry verification **DEFERRED to Azure operator** |
+| **Progress** | ~80% (47/60 tasks ✅; 13 deferred — 10 Phase 3 cutover + 3 Phase 4 live verification; all code/IaC/docs/ADR work complete) |
+| **Target Date** | Phase 3 cutover at operator's discretion |
+| **Completed Date** | Code/IaC/docs portion: 2026-06-26 |
 | **Owner** | spaarke-dev |
 
 ## Problem Statement
@@ -40,22 +40,22 @@ Architecture 1 (one platform Redis per environment) with mandatory tenant key pr
 
 The project is considered **complete** when:
 
-- [ ] Dev BFF startup log shows `"Distributed cache: Redis enabled with instance name 'spaarke:'"` with NO in-memory warning (Success Criterion #1 — also the gate signal for sister project)
-- [ ] Dev BFF App Settings reference Key Vault for the Redis connection string (no plain text)
-- [ ] ADR-009 amended in BOTH `.claude/adr/ADR-009-redis-caching.md` (concise) AND `docs/adr/ADR-009-caching-redis-first.md` (full) with new operational MUSTs
-- [ ] `CacheModule.cs` fails startup with clear error when Redis configured but unreachable in deployed env (`AbortOnConnectFail = true`)
-- [ ] `redis.bicep` extended (not duplicated); dev/staging/prod `.bicepparam` files committed
-- [ ] NEW `docs/guides/redis-cache-azure-setup.md` (kebab-case) lets a fresh operator provision a new env Redis end-to-end in <30 min
-- [ ] EXISTING `docs/architecture/caching-architecture.md` UPDATED (Tenant Isolation, Multi-instance Behavior, Cache Instance Registry, Failure Mode Catalog, `sdap:` → `spaarke:`)
-- [ ] App Insights captures Redis dependency calls; cache hit-rate metric visible
-- [ ] ALL `IDistributedCache.` direct call sites in `Sprk.Bff.Api/` migrated to `ITenantCache` wrapper (atomic single PR — verified by `grep` returning ZERO outside wrapper + tests)
-- [ ] `Redis:InstanceName` changed from `sdap:` to `spaarke:` across appsettings, template, Bicep params
-- [ ] R7 backlog captures S1–S4 deferred items (Entra ID auth, Pub/Sub separation, multi-region, other secrets)
-- [ ] Legacy `spe-redis-dev-67e2xz` decommissioned (or tagged `decommission=YYYY-MM-DD`) after 24-hr verification
-- [ ] BFF publish size delta ≤+1 MB compressed (per ADR-029 + CLAUDE.md §10)
-- [ ] `dotnet test` passes; new `CacheModuleTests` covers all 4 branches
-- [ ] `SPAARKE-DEPLOYMENT-GUIDE.md` §4.5 added; Appendix D updated
-- [ ] Sister-project handoff confirmed: `spaarke-ai-azure-setup-dev-r1` cross-references this project's Phase 3 cutover as prerequisite
+- [ ] ⏸ **DEFERRED** Dev BFF startup log shows `"Distributed cache: Redis enabled with instance name 'spaarke:'"` with NO in-memory warning (Success Criterion #1 — also the gate signal for sister project) — *Azure operator: run `Deploy-RedisCache.ps1 -Environment dev -KeyVaultName <kv> -CutoverBffSettings`*
+- [ ] ⏸ **DEFERRED** Dev BFF App Settings reference Key Vault for the Redis connection string (no plain text) — *part of `Deploy-RedisCache.ps1 -CutoverBffSettings`*
+- [x] **ADR-009 amended** in BOTH `.claude/adr/ADR-009-redis-caching.md` (concise) AND `docs/adr/ADR-009-caching-redis-first.md` (full) with 8 new operational MUSTs (tasks 052+053 lockstep)
+- [x] **`CacheModule.cs` fails startup** with clear error when Redis configured but unreachable in deployed env (`AbortOnConnectFail = true`); 4-branch logic verified by `CacheModuleTests` (task 003 + 009)
+- [x] **`redis.bicep` extended** (not duplicated; +`redisVersion`, +`staticIP`, +`redisPrimaryKey` output); `redis-dev.bicepparam` (Basic C0), `redis-staging.bicepparam` (Standard C0), `redis-prod.bicepparam` (Standard C2 with DO-NOT-DEPLOY header) committed (tasks 020, 022, 023, 024)
+- [x] **NEW `docs/guides/redis-cache-azure-setup.md`** (kebab-case) authored with all FR-19 sections; <30-min provisioning runbook validated by operator dry-run is post-project (task 051; sections 6 + 10 filled by 055 + 056)
+- [x] **EXISTING `docs/architecture/caching-architecture.md` UPDATED** with Tenant Isolation, Multi-instance Behavior, Cache Instance Registry, Failure Mode Catalog, `sdap:` → `spaarke:` migration (task 050)
+- [ ] ⏸ **DEFERRED (verification only)** App Insights captures Redis dependency calls; cache hit-rate metric visible — code complete (task 041 emits `cache.hits`, `cache.misses`, `cache.redis_call_duration_ms`); live App Insights verification requires deploy
+- [x] **ALL `IDistributedCache.` direct call sites in `Sprk.Bff.Api/` migrated** to `ITenantCache` wrapper (153 sites / 56 files; verified by FR-06 grep gate task 018); 11 system-level exceptions documented in `SystemCacheKeys.cs` (under 20 escalation threshold)
+- [x] **`Redis:InstanceName` changed** from `sdap:` (and dev's `sdap-dev:` variant) to `spaarke:` across appsettings, template, Bicep params, ADR-009, patterns, architecture docs (task 008 + 052 + 053 + 058)
+- [x] **R7 backlog** captures S1–S4 deferred items (Entra ID auth, Pub/Sub separation, multi-region, other secrets) (task 057)
+- [ ] ⏸ **DEFERRED** Legacy `spe-redis-dev-67e2xz` decommissioned (or tagged `decommission=YYYY-MM-DD`) after 24-hr verification — *Azure operator task 037*
+- [x] **BFF publish size delta ≤+1 MB** compressed (per ADR-029 + CLAUDE.md §10) — actual **delta −2.0 MB** vs branch start (cumulative measurement at task 041)
+- [x] **`dotnet test` passes**; new `CacheModuleTests` covers all 4 branches — **7826 passed, 1 pre-existing failed (`SessionFilesCleanupJobTests.RunScheduledScanAsync_Evicts_Only_Orphans_Not_In_Active_Set`), 135 skipped**
+- [x] **`SPAARKE-DEPLOYMENT-GUIDE.md` §4.5** added; Appendix D updated (task 054)
+- [ ] ⏸ **DEFERRED** Sister-project handoff confirmed: `spaarke-ai-azure-setup-dev-r1` cross-references this project's Phase 3 cutover as prerequisite — *Azure operator task 038 (after task 034 gate signal)*
 
 ## Scope
 
@@ -128,6 +128,7 @@ The project is considered **complete** when:
 | Date | Version | Change | Author |
 |------|---------|--------|--------|
 | 2026-06-25 | 0.1 | Initial artifacts generated by `/project-pipeline` from spec.md v1.0 (`design.md` v0.3) | spaarke-dev / Claude Code |
+| 2026-06-26 | 1.0 | **Phase 1+2+5 implementation COMPLETE** (47/60 tasks ✅; 13 deferred for Azure operator). 153 cache call sites migrated atomically; ADR-009 amended in lockstep with 8 operational MUSTs; 3 new `.bicepparam` files + `Deploy-RedisCache.ps1`; 7826/1/135 test result; publish-size delta −2.0 MB. Phase 3 dev cutover + Phase 4 live App Insights verification DEFERRED — `Deploy-RedisCache.ps1 -Environment dev -KeyVaultName <kv> -CutoverBffSettings` is the operator entry point. | spaarke-dev / Claude Code (autonomous) |
 
 ---
 

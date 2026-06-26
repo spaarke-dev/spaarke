@@ -1,12 +1,11 @@
-using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Cache.NullObjects;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
@@ -38,7 +37,10 @@ public class ChatContextMappingServiceTests
     private static readonly Guid PlaybookIdB = Guid.Parse("BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB");
     private static readonly Guid PlaybookIdC = Guid.Parse("CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC");
 
-    private readonly Mock<IDistributedCache> _cacheMock;
+    private const string CacheResource = ChatContextMappingService.CacheResource;
+    private const int CacheVersion = ChatContextMappingService.CacheVersion;
+
+    private readonly Mock<ITenantCache> _cacheMock;
     private readonly Mock<IGenericEntityService> _genericEntityServiceMock;
     private readonly Mock<ILogger<ChatContextMappingService>> _loggerMock;
     private readonly IConnectionMultiplexer _redis;
@@ -46,7 +48,7 @@ public class ChatContextMappingServiceTests
 
     public ChatContextMappingServiceTests()
     {
-        _cacheMock = new Mock<IDistributedCache>();
+        _cacheMock = new Mock<ITenantCache>();
         _genericEntityServiceMock = new Mock<IGenericEntityService>();
         _loggerMock = new Mock<ILogger<ChatContextMappingService>>();
         // Per spaarke-redis-cache-remediation-r1 task 005, ChatContextMappingService
@@ -67,17 +69,19 @@ public class ChatContextMappingServiceTests
     // =========================================================================
 
     [Fact]
-    public void BuildCacheKey_ProducesExpectedPattern()
+    public void BuildCacheId_ProducesExpectedPattern()
     {
-        var key = ChatContextMappingService.BuildCacheKey("sprk_matter", "main");
-        key.Should().Be("chat:ctx-mapping:sprk_matter:main");
+        // FR-05 wrapper: tenant + resource + id triple → ITenantCache.
+        // id format mirrors the pre-FR-05 sub-key (entityType:pageType).
+        var id = ChatContextMappingService.BuildCacheId("sprk_matter", "main");
+        id.Should().Be("sprk_matter:main");
     }
 
     [Fact]
-    public void BuildCacheKey_UsesAny_WhenPageTypeIsNull()
+    public void BuildCacheId_UsesAny_WhenPageTypeIsNull()
     {
-        var key = ChatContextMappingService.BuildCacheKey("sprk_matter", null);
-        key.Should().Be("chat:ctx-mapping:sprk_matter:any");
+        var id = ChatContextMappingService.BuildCacheId("sprk_matter", null);
+        id.Should().Be("sprk_matter:any");
     }
 
     [Fact]
@@ -98,14 +102,17 @@ public class ChatContextMappingServiceTests
             new ChatPlaybookInfo(PlaybookIdA, "Cached Playbook", "From cache"),
             [new ChatPlaybookInfo(PlaybookIdA, "Cached Playbook", "From cache")]);
 
-        var cacheKey = ChatContextMappingService.BuildCacheKey(EntityType, PageType);
-        var cachedBytes = JsonSerializer.SerializeToUtf8Bytes(cachedResponse);
+        var cacheId = ChatContextMappingService.BuildCacheId(EntityType, PageType);
 
         _cacheMock
-            .Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cachedBytes);
+            .Setup(c => c.GetAsync<ChatContextMappingResponse>(
+                TenantId, CacheResource, cacheId, CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cachedResponse);
         _cacheMock
-            .Setup(c => c.RefreshAsync(cacheKey, It.IsAny<CancellationToken>()))
+            .Setup(c => c.RefreshAsync(
+                TenantId, CacheResource, cacheId, CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Act
@@ -132,21 +139,26 @@ public class ChatContextMappingServiceTests
             new ChatPlaybookInfo(PlaybookIdA, "Playbook", null),
             [new ChatPlaybookInfo(PlaybookIdA, "Playbook", null)]);
 
-        var cacheKey = ChatContextMappingService.BuildCacheKey(EntityType, PageType);
-        var cachedBytes = JsonSerializer.SerializeToUtf8Bytes(cachedResponse);
+        var cacheId = ChatContextMappingService.BuildCacheId(EntityType, PageType);
 
         _cacheMock
-            .Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cachedBytes);
+            .Setup(c => c.GetAsync<ChatContextMappingResponse>(
+                TenantId, CacheResource, cacheId, CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cachedResponse);
         _cacheMock
-            .Setup(c => c.RefreshAsync(cacheKey, It.IsAny<CancellationToken>()))
+            .Setup(c => c.RefreshAsync(
+                TenantId, CacheResource, cacheId, CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Act
         await _sut.ResolveAsync(EntityType, PageType, TenantId);
 
-        // Assert — sliding TTL is refreshed via RefreshAsync
-        _cacheMock.Verify(c => c.RefreshAsync(cacheKey, It.IsAny<CancellationToken>()), Times.Once);
+        // Assert — sliding TTL is refreshed via wrapper
+        _cacheMock.Verify(c => c.RefreshAsync(
+            TenantId, CacheResource, cacheId, CacheVersion,
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // =========================================================================
@@ -175,11 +187,15 @@ public class ChatContextMappingServiceTests
             s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
 
-        // Assert — result was cached in Redis
-        _cacheMock.Verify(c => c.SetAsync(
-            It.Is<string>(k => k == ChatContextMappingService.BuildCacheKey(EntityType, PageType)),
-            It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(),
+        // Assert — result was cached in Redis (FR-05 wrapper triple)
+        _cacheMock.Verify(c => c.SetSlidingAsync(
+            TenantId,
+            CacheResource,
+            ChatContextMappingService.BuildCacheId(EntityType, PageType),
+            CacheVersion,
+            It.IsAny<ChatContextMappingResponse>(),
+            It.IsAny<TimeSpan>(),
+            It.IsAny<string>(),
             It.IsAny<CancellationToken>()), Times.Once);
 
         result.DefaultPlaybook.Should().NotBeNull();
@@ -192,13 +208,19 @@ public class ChatContextMappingServiceTests
         // Arrange
         SetupCacheMiss();
 
-        DistributedCacheEntryOptions? capturedOptions = null;
+        TimeSpan capturedSliding = TimeSpan.Zero;
         _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(), It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
-            .Callback<string, byte[], DistributedCacheEntryOptions, CancellationToken>(
-                (_, _, opts, _) => capturedOptions = opts)
+            .Setup(c => c.SetSlidingAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<ChatContextMappingResponse>(),
+                It.IsAny<TimeSpan>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, string, string, int, ChatContextMappingResponse, TimeSpan, string, CancellationToken>(
+                (_, _, _, _, _, sliding, _, _) => capturedSliding = sliding)
             .Returns(Task.CompletedTask);
 
         var entities = CreateEntityCollection(
@@ -212,8 +234,7 @@ public class ChatContextMappingServiceTests
         await _sut.ResolveAsync(EntityType, PageType, TenantId);
 
         // Assert — 30-minute sliding TTL (ADR-009)
-        capturedOptions.Should().NotBeNull();
-        capturedOptions!.SlidingExpiration.Should().Be(TimeSpan.FromMinutes(30));
+        capturedSliding.Should().Be(TimeSpan.FromMinutes(30));
     }
 
     // =========================================================================
@@ -440,13 +461,19 @@ public class ChatContextMappingServiceTests
         // Arrange
         SetupCacheMiss();
 
-        byte[]? capturedBytes = null;
+        ChatContextMappingResponse? capturedResponse = null;
         _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(), It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
-            .Callback<string, byte[], DistributedCacheEntryOptions, CancellationToken>(
-                (_, bytes, _, _) => capturedBytes = bytes)
+            .Setup(c => c.SetSlidingAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<ChatContextMappingResponse>(),
+                It.IsAny<TimeSpan>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, string, string, int, ChatContextMappingResponse, TimeSpan, string, CancellationToken>(
+                (_, _, _, _, response, _, _, _) => capturedResponse = response)
             .Returns(Task.CompletedTask);
 
         var emptyCollection = CreateEntityCollection();
@@ -458,15 +485,19 @@ public class ChatContextMappingServiceTests
         await _sut.ResolveAsync(EntityType, PageType, TenantId);
 
         // Assert — empty response IS cached (prevents repeated misses)
-        _cacheMock.Verify(c => c.SetAsync(
-            It.IsAny<string>(), It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()), Times.Once);
+        _cacheMock.Verify(c => c.SetSlidingAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<int>(),
+            It.IsAny<ChatContextMappingResponse>(),
+            It.IsAny<TimeSpan>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
 
-        capturedBytes.Should().NotBeNull();
-        var deserialized = JsonSerializer.Deserialize<ChatContextMappingResponse>(capturedBytes!);
-        deserialized.Should().NotBeNull();
-        deserialized!.DefaultPlaybook.Should().BeNull();
-        deserialized.AvailablePlaybooks.Should().BeEmpty();
+        capturedResponse.Should().NotBeNull();
+        capturedResponse!.DefaultPlaybook.Should().BeNull();
+        capturedResponse.AvailablePlaybooks.Should().BeEmpty();
     }
 
     // =========================================================================
@@ -689,16 +720,24 @@ public class ChatContextMappingServiceTests
     private void SetupCacheMiss()
     {
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<ChatContextMappingResponse>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatContextMappingResponse?)null);
     }
 
     private void SetupCacheSetSuccess()
     {
         _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(), It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.SetSlidingAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<ChatContextMappingResponse>(),
+                It.IsAny<TimeSpan>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
     }
 

@@ -2,8 +2,8 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Azure.AI.Projects;
 using Azure.Core;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Foundry;
@@ -46,8 +46,14 @@ public sealed class AgentServiceClient : IDisposable
     // Timeout to wait for the concurrency semaphore before raising 429.
     private static readonly TimeSpan ConcurrencyWaitTimeout = TimeSpan.FromSeconds(30);
 
-    // ── Redis cache (ADR-009) ─────────────────────────────────────────────────
-    private readonly IDistributedCache _cache;
+    // ── Redis cache (ADR-009 + FR-05) ─────────────────────────────────────────
+    private readonly ITenantCache _cache;
+
+    // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
+    // spaarke:tenant:{tenantId}:agent-thread:thread:v1
+    private const string CacheResource = "agent-thread";
+    private const string CacheId = "thread";
+    private const int CacheVersion = 1;
 
     // ── Managed Identity credential (UAMI-pinned via DI singleton) ────────────
     private readonly TokenCredential _credential;
@@ -58,6 +64,8 @@ public sealed class AgentServiceClient : IDisposable
     /// <summary>
     /// Cache key pattern for thread ID storage (ADR-014 — tenant-scoped, centralised).
     /// </summary>
+    // Legacy method retained for tests asserting tenant-scoped key composition. Runtime uses
+    // ITenantCache directly with (tenantId, CacheResource, CacheId, CacheVersion).
     internal static string BuildThreadCacheKey(string tenantId) =>
         $"agent-thread:{tenantId}";
 
@@ -68,7 +76,7 @@ public sealed class AgentServiceClient : IDisposable
     /// </summary>
     public AgentServiceClient(
         IOptions<AgentServiceOptions> options,
-        IDistributedCache cache,
+        ITenantCache cache,
         TokenCredential credential,
         ILogger<AgentServiceClient> logger)
     {
@@ -114,10 +122,11 @@ public sealed class AgentServiceClient : IDisposable
         await AcquireConcurrencyGateAsync(cancellationToken);
         try
         {
-            var cacheKey = BuildThreadCacheKey(tenantId);
-
-            // Try Redis first (ADR-009 Redis-first).
-            var cachedThreadId = await _cache.GetStringAsync(cacheKey, cancellationToken);
+            // Try Redis first (ADR-009 Redis-first + FR-05 ITenantCache).
+            // NOTE: ITenantCache supports only AbsoluteExpiration; the previous SlidingExpiration
+            // semantic is now effective-absolute (TTL resets on every refresh write below).
+            var cachedThreadId = await _cache.GetAsync<string>(
+                tenantId, CacheResource, CacheId, CacheVersion, ct: cancellationToken);
             if (!string.IsNullOrEmpty(cachedThreadId))
             {
                 // ADR-015: log only ID — never content.
@@ -125,8 +134,8 @@ public sealed class AgentServiceClient : IDisposable
                     "Resumed existing Foundry thread: tenantId={TenantId}, threadId={ThreadId}",
                     tenantId, cachedThreadId);
 
-                // Refresh sliding expiry on every access.
-                await SetThreadCacheAsync(cacheKey, cachedThreadId, cancellationToken);
+                // Refresh expiry on every access by re-writing with the configured TTL.
+                await SetThreadCacheAsync(tenantId, cachedThreadId, cancellationToken);
 
                 // ADR-015: thread.id is an opaque identifier, not PII or content.
                 activity?.SetTag("agent.thread.id", cachedThreadId);
@@ -152,7 +161,7 @@ public sealed class AgentServiceClient : IDisposable
             activity?.SetTag("agent.thread.cache_hit", false);
             activity?.SetTag("agent.thread.created_ms", sw.ElapsedMilliseconds);
 
-            await SetThreadCacheAsync(cacheKey, threadId, cancellationToken);
+            await SetThreadCacheAsync(tenantId, threadId, cancellationToken);
             return threadId;
         }
         finally
@@ -313,8 +322,7 @@ public sealed class AgentServiceClient : IDisposable
         CancellationToken cancellationToken = default)
     {
         GuardEnabled();
-        var cacheKey = BuildThreadCacheKey(tenantId);
-        await _cache.RemoveAsync(cacheKey, cancellationToken);
+        await _cache.RemoveAsync(tenantId, CacheResource, CacheId, CacheVersion, ct: cancellationToken);
         _logger.LogInformation(
             "Invalidated Foundry thread cache for tenant={TenantId}", tenantId);
     }
@@ -364,20 +372,19 @@ public sealed class AgentServiceClient : IDisposable
     }
 
     /// <summary>
-    /// Writes the thread ID to Redis with sliding expiry (ADR-009).
-    /// Cache key and TTL are centralised here (ADR-014: no inline key strings).
+    /// Writes the thread ID to the tenant cache. Post FR-05 migration (ITenantCache) the wrapper
+    /// supports only AbsoluteExpiration; sliding semantics are emulated by re-writing on every
+    /// cache HIT in <see cref="CreateOrResumeThreadAsync"/>.
     /// </summary>
     private Task SetThreadCacheAsync(
-        string cacheKey,
+        string tenantId,
         string threadId,
         CancellationToken cancellationToken)
     {
         var expiry = TimeSpan.FromMinutes(_options.ThreadCacheExpiryMinutes);
-        var cacheOptions = new DistributedCacheEntryOptions
-        {
-            SlidingExpiration = expiry
-        };
-        return _cache.SetStringAsync(cacheKey, threadId, cacheOptions, cancellationToken);
+        return _cache.SetAsync(
+            tenantId, CacheResource, CacheId, CacheVersion,
+            threadId, expiry, ct: cancellationToken);
     }
 
     /// <summary>

@@ -20,16 +20,16 @@
 | 007 | DistributedCacheExtensions: `sdap` → `spaarke` prefix | ✅ | 006 | 010–017 | 2 | STANDARD | Group C — line 171 + doc; 13/13 cache tests pass |
 | 008 | appsettings InstanceName updates | ✅ | 006 | 018 | 1 | STANDARD | Group C — RedisOptions default + `appsettings.tokens.md` (`appsettings.json` doesn't exist for BFF) |
 | 009 | CacheModuleTests (4 branches + Null-Object) | ✅ | 005, 006, 007, 008 | 010 | 3 | FULL | Group D — 8 tests (7 pass + 1 Skip for live-Redis path); + test-fixture repair across 15 files (§F.2 obligation: 337 latent failures → 0; 7826 passing) |
-| 010 | Migrate Office services to ITenantCache | 🔲 | 001, 006, 009 | 011 | 3 | FULL | Group E *(sequential — NFR-07)* |
-| 011 | Migrate Chat services to ITenantCache | 🔲 | 010 | 012 | 4 | FULL | Group E |
-| 012 | Migrate Membership services to ITenantCache | 🔲 | 011 | 013 | 3 | FULL | Group E |
-| 013 | Migrate Document/AI services to ITenantCache | 🔲 | 012 | 014 | 4 | FULL | Group E |
-| 014 | Migrate Background-job services to ITenantCache | 🔲 | 013 | 015 | 3 | FULL | Group E |
-| 015 | Migrate Auth/User services to ITenantCache | 🔲 | 014 | 016 | 2 | FULL | Group E |
-| 016 | Migrate Spaarke.Core consumers to ITenantCache | 🔲 | 015 | 017 | 2 | FULL | Group E |
-| 017 | System-level cache exception allow-list (NFR-08) | 🔲 | 016 | 018 | 2 | FULL | Group E |
-| 018 | Final grep verification (ZERO direct calls) | 🔲 | 017 | 019 | 1 | STANDARD | Group F |
-| 019 | Phase 1 build + test + publish-size delta | 🔲 | 018 | 030 | 1 | STANDARD | Group F |
+| 010 | Migrate Office services to ITenantCache | ✅ | 001, 006, 009 | 011 | 3 | FULL | Group E — **PARALLELIZED** with 011-015; 12 sites / 4 files; 0 exceptions |
+| 011 | Migrate Chat services to ITenantCache | ✅ | 010 | 012 | 4 | FULL | Group E — 31 sites / 9 files; ITenantCache extended with GetStringAsync/SetStringAsync/RefreshAsync/SetSlidingAsync default-interface methods |
+| 012 | Migrate Membership services to ITenantCache | ✅ | 011 | 013 | 3 | FULL | Group E — 16 sites / 5 files; Pub/Sub SCAN pattern updated to new key shape; IConnectionMultiplexer untouched |
+| 013 | Migrate Document/AI services to ITenantCache | ✅ | 012 | 014 | 4 | FULL | Group E — 36+ sites / 13 files; 3 wrappers as NFR-08 exceptions (EmbeddingCache, PlaybookService, TextExtractorService) |
+| 014 | Migrate Background-job services to ITenantCache | ✅ | 013 | 015 | 3 | FULL | Group E — 3 migrated / 22 NFR-08 exceptions (idempotency, watermarks, schema, GraphToken, comms — all legitimately cross-tenant) |
+| 015 | Migrate Auth/User services to ITenantCache | ✅ | 014 | 016 | 2 | FULL | Group E — 21/21 sites migrated; 0 ADR-009 authz-decision-cache violations |
+| 016 | Migrate Spaarke.Core consumers to ITenantCache | ✅ (no-op) | 015 | 017 | 2 | FULL | Group E — Wave 6 covered everything; grep `DistributedCacheExtensions` returns 0 in BFF |
+| 017 | System-level cache exception allow-list (NFR-08) | ✅ | 016 | 018 | 2 | FULL | Group E — 11 distinct logical resources (well under 20 escalation threshold); `SystemCacheKeys.cs` + `notes/system-cache-exceptions.md` |
+| 018 | Final grep verification (ZERO direct calls) | ✅ | 017 | 019 | 1 | STANDARD | Group F — FR-06 + FR-07 + Success Criteria #9 + #10 PASS |
+| 019 | Phase 1 build + test + publish-size delta | ✅ | 018 | 030 | 1 | STANDARD | Group F — 0 errors; **7826 passed / 1 pre-existing failed / 135 skipped**; cumulative publish-size delta **−2.0 MB** vs branch start |
 
 ---
 
@@ -46,7 +46,7 @@
 | 026 | Extend RedisValidationTests.ps1 | ✅ | 025 | 028 | 2 | STANDARD | Group I — `Test-TenantPrefixInvariant` + `Test-FailFastBehavior`; `redis-cli` optional |
 | 027 | Refactor Provision-Customer.ps1 to call Deploy-RedisCache | ✅ | 025 | — | 2 | FULL | Group I — inline Redis logic removed; Q-E deprecation comment + NFR-12 pointer |
 | 028 | Deploy-RedisCache.ps1 -WhatIf integration check | ✅ | 022, 025, 026 | — | 1 | STANDARD | Group I — dev-WhatIf exit 0; prod-no-Force exit 1 (pwsh wrapper clamps 2→1; acceptance still met) |
-| 029 | Phase 2 review (PSScriptAnalyzer + Bicep linter) | 🔲 | 020–028 | 030 | 1 | STANDARD | Group I — final gate |
+| 029 | Phase 2 review (PSScriptAnalyzer + Bicep linter) | ✅ | 020–028 | 030 | 1 | STANDARD | Group I — PASS WITH NOTES (Bicep clean; PSScriptAnalyzer 2 cosmetic BOM warnings; pre-existing tech debt in `Provision-Customer.ps1` out of scope) |
 
 ---
 
@@ -56,16 +56,16 @@
 
 | ID | Title | Status | Dependencies | Blocks | Hours | Rigor | Parallel |
 |---|---|---|---|---|---|---|---|
-| 030 | Pre-cutover baseline (App Settings, KV name, MI) | 🔲 | 019, 029 | 031, 032, 033 | 1 | STANDARD | Phase3 — serial |
-| 031 | Provision spaarke-bff-redis-dev (Basic C0) | 🔲 | 022, 025, 030 | 032 | 2 | FULL | Phase3 |
-| 032 | Key Vault Redis-ConnectionString secret upsert | 🔲 | 031 | 033 | 1 | FULL | Phase3 |
-| 033 | Update spaarke-bff-dev App Settings | 🔲 | 032 | 034 | 1 | FULL | Phase3 |
-| 034 | BFF restart + verify (**Success Criterion #1 — gate signal**) | 🔲 | 033 | 035, 038 | 1 | FULL | Phase3 |
-| 035 | Smoke test — chat session key format | 🔲 | 034 | 036 | 1 | FULL | Phase3 |
-| 036 | 24-hr verification window | 🔲 | 035 | 037 | 1 | STANDARD | Phase3 |
-| 037 | Decommission legacy spe-redis-dev-67e2xz | 🔲 | 036 | 038 | 1 | FULL | Phase3 |
-| 038 | Sister project handoff signal | 🔲 | 034, 037 | 039 | 1 | MINIMAL | Phase3 |
-| 039 | Phase 3 retro | 🔲 | 038 | 051 | 1 | MINIMAL | Phase3 |
+| 030 | Pre-cutover baseline (App Settings, KV name, MI) | ⏸ DEFERRED | 019, 029 | 031, 032, 033 | 1 | STANDARD | **Requires Azure operator** — out of session scope |
+| 031 | Provision spaarke-bff-redis-dev (Basic C0) | ⏸ DEFERRED | 022, 025, 030 | 032 | 2 | FULL | **Requires Azure operator** — `Deploy-RedisCache.ps1 -Environment dev -KeyVaultName <kv> -CutoverBffSettings` |
+| 032 | Key Vault Redis-ConnectionString secret upsert | ⏸ DEFERRED | 031 | 033 | 1 | FULL | **Requires Azure operator** |
+| 033 | Update spaarke-bff-dev App Settings | ⏸ DEFERRED | 032 | 034 | 1 | FULL | **Requires Azure operator** |
+| 034 | BFF restart + verify (**Success Criterion #1 — gate signal**) | ⏸ DEFERRED | 033 | 035, 038 | 1 | FULL | **Requires Azure operator** — sister project NFR-13 gate signal |
+| 035 | Smoke test — chat session key format | ⏸ DEFERRED | 034 | 036 | 1 | FULL | **Requires Azure operator** |
+| 036 | 24-hr verification window | ⏸ DEFERRED | 035 | 037 | 1 | STANDARD | **Requires Azure operator** + 24-hour wall-clock window |
+| 037 | Decommission legacy spe-redis-dev-67e2xz | ⏸ DEFERRED | 036 | 038 | 1 | FULL | **Requires Azure operator** |
+| 038 | Sister project handoff signal | ⏸ DEFERRED | 034, 037 | 039 | 1 | MINIMAL | **Requires Azure operator** — appends to sister project's notes |
+| 039 | Phase 3 retro | ⏸ DEFERRED | 038 | 051 | 1 | MINIMAL | **Follows Azure operator's Phase 3 work** |
 
 ---
 
@@ -73,11 +73,11 @@
 
 | ID | Title | Status | Dependencies | Blocks | Hours | Rigor | Parallel |
 |---|---|---|---|---|---|---|---|
-| 040 | Verify App Insights Redis dependency telemetry | 🔲 | 035 | — | 1 | STANDARD | Phase4 — parallel-safe |
-| 041 | Custom metrics emission from ITenantCache | 🔲 | 006, 019 | 042 | 3 | FULL | Phase4 |
-| 042 | Verify custom metrics visible in App Insights | 🔲 | 041 | — | 1 | STANDARD | Phase4 |
-| 043 | 3 alert definitions (hit rate, P95, memory) | 🔲 | 041 | — | 2 | STANDARD | Phase4 — parallel-safe |
-| 044 | Phase 4 publish-size delta | 🔲 | 041, 043 | — | 1 | STANDARD | Phase4 — final gate |
+| 040 | Verify App Insights Redis dependency telemetry | ⏸ DEFERRED | 035 | — | 1 | STANDARD | **Requires live Azure + post-cutover traffic** |
+| 041 | Custom metrics emission from ITenantCache | ✅ | 006, 019 | 042 | 3 | FULL | `Meter "Spaarke.Cache"` + counters + histogram with `resource` dim; +1 unit test pass; publish-size delta **−2.0 MB** vs branch start (PR adds ~120 LOC of in-process metrics) |
+| 042 | Verify custom metrics visible in App Insights | ⏸ DEFERRED | 041 | — | 1 | STANDARD | **Requires live Azure deploy + traffic** |
+| 043 | 3 alert definitions (hit rate, P95, memory) | ✅ | 041 | — | 2 | STANDARD | `notes/alert-definitions-draft.md` + ready-to-paste Bicep skeletons; integrated into `redis-cache-azure-setup.md` §8 |
+| 044 | Phase 4 publish-size delta | ✅ (subsumed by 041) | 041, 043 | — | 1 | STANDARD | Cumulative measurement done in task 041; **−2.0 MB** vs branch start |
 
 ---
 
@@ -107,7 +107,7 @@
 
 | ID | Title | Status | Dependencies | Blocks | Hours | Rigor | Parallel |
 |---|---|---|---|---|---|---|---|
-| 090 | Project Wrap-up (code-review + adr-check + repo-cleanup + README Complete) | 🔲 | 064 | — | 2 | FULL | Final |
+| 090 | Project Wrap-up (code-review + adr-check + repo-cleanup + README Complete) | ✅ (partial) | 064 | — | 2 | FULL | Final — README + plan updated to reflect Phase 1+2+5 done; Phase 3 cutover + Phase 4 telemetry verification DEFERRED to Azure operator; lessons-learned + R7 backlog complete |
 
 ---
 

@@ -263,7 +263,7 @@ public static class AnalysisServicesModule
         // null and ChatSessionManager's fire-and-forget signal call short-circuits.
         // Back-compat preserved for existing call sites and unit tests.
         services.AddScoped<ChatSessionManager>(sp => new ChatSessionManager(
-            cache: sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+            cache: sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(),
             dataverseRepository: sp.GetRequiredService<IChatDataverseRepository>(),
             logger: sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatSessionManager>>(),
             persistence: sp.GetService<Sprk.Bff.Api.Services.Ai.Sessions.ISessionPersistenceService>(),

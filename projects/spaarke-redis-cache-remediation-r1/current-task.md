@@ -12,10 +12,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave 1 ✅ complete (001, 020, 021, 050, 057) · Wave 2 dispatching (002, 003, 004, 022, 023, 024) |
-| **Step** | Wave 2: 6 parallel agents |
-| **Status** | wave-in-progress |
-| **Next Action** | Wait for Wave 2 completion; main session runs `dotnet build src/server/api/Sprk.Bff.Api/` between waves (mandatory build-verification per CLAUDE.md §10); then dispatch Wave 3 (005). |
+| **Task** | none — Phase 1+2+5 COMPLETE; Phase 3 + Phase 4 live verification DEFERRED to Azure operator |
+| **Step** | n/a |
+| **Status** | implementation-complete |
+| **Next Action** | **Azure operator**: run `pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev -KeyVaultName <kv-name> -CutoverBffSettings`. Follow the runbook at `docs/guides/redis-cache-azure-setup.md`. After Success Criterion #1 (startup log shows `"Distributed cache: Redis enabled with instance name 'spaarke:'"`), notify sister project `spaarke-ai-azure-setup-dev-r1` that gate signal is cleared. |
 
 ### Files Modified This Session
 

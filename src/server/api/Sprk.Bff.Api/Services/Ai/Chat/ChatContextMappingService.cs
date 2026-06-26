@@ -1,8 +1,7 @@
-using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using StackExchange.Redis;
 
@@ -18,11 +17,14 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///   3. Wildcard + pageType: "*" + pageType
 ///   4. Global fallback: "*" + "any"
 ///
-/// Caching (ADR-009): Redis-first with 30-minute sliding TTL.
-/// Cache key pattern: <c>"chat:ctx-mapping:{entityType}:{pageType}"</c>
+/// Caching (ADR-009; spaarke-redis-cache-remediation-r1 FR-05): Redis-first with 30-minute
+/// sliding TTL. Tenant-scoped via <see cref="ITenantCache"/>; resource = <c>"chat-context-mapping"</c>;
+/// id = <c>"{entityType}:{pageType}"</c>; version = 1. Despite mappings being environment-global
+/// in shape, tenant scoping is mandatory per FR-05 and aligned with NFR-08 — same record values
+/// resolve per-tenant via independent cache entries.
 ///
 /// Lifetime: Scoped — depends on <see cref="IGenericEntityService"/> (singleton)
-/// and <see cref="IDistributedCache"/> (singleton). Scoped limits per-request visibility.
+/// and <see cref="ITenantCache"/> (singleton). Scoped limits per-request visibility.
 /// </summary>
 public class ChatContextMappingService
 {
@@ -31,25 +33,33 @@ public class ChatContextMappingService
 
     private const string MappingEntityName = "sprk_aichatcontextmapping";
 
-    /// <summary>
-    /// Cache key prefix used by <see cref="BuildCacheKey"/>. Must match the pattern
-    /// used in <see cref="EvictAllCachedMappingsAsync"/> for SCAN-based eviction.
-    /// </summary>
-    private const string CacheKeyPrefix = "chat:ctx-mapping:";
+    /// <summary>Tenant-cache resource name for context mapping payloads (FR-05).</summary>
+    internal const string CacheResource = "chat-context-mapping";
 
-    private readonly IDistributedCache _cache;
+    /// <summary>Tenant-cache schema version for context mapping payloads.</summary>
+    internal const int CacheVersion = 1;
+
+    /// <summary>
+    /// Legacy on-wire key prefix retained for the SCAN-based eviction in
+    /// <see cref="EvictAllCachedMappingsAsync"/>. The wrapper now writes keys under
+    /// <c>tenant:*:chat-context-mapping:*:v1</c>; the SCAN pattern is updated to match.
+    /// </summary>
+    private const string CacheKeyScanPattern = "tenant:*:chat-context-mapping:*";
+
+    private readonly ITenantCache _cache;
     private readonly IConnectionMultiplexer _redis;
     private readonly IGenericEntityService _genericEntityService;
     private readonly ILogger<ChatContextMappingService> _logger;
 
     /// <summary>
-    /// Builds the Redis cache key for a context mapping lookup.
+    /// Builds the tenant-cache <c>id</c> component for a context mapping lookup.
+    /// Combined with the tenant and resource by <see cref="ITenantCache"/>.
     /// </summary>
-    internal static string BuildCacheKey(string entityType, string? pageType)
-        => $"{CacheKeyPrefix}{entityType}:{pageType ?? "any"}";
+    internal static string BuildCacheId(string entityType, string? pageType)
+        => $"{entityType}:{pageType ?? "any"}";
 
     public ChatContextMappingService(
-        IDistributedCache cache,
+        ITenantCache cache,
         IGenericEntityService genericEntityService,
         ILogger<ChatContextMappingService> logger,
         IConnectionMultiplexer redis)
@@ -77,22 +87,18 @@ public class ChatContextMappingService
         string tenantId,
         CancellationToken ct = default)
     {
-        var cacheKey = BuildCacheKey(entityType, pageType);
+        var cacheId = BuildCacheId(entityType, pageType);
 
-        // Hot path: Redis cache (ADR-009 — Redis first)
-        var cachedBytes = await _cache.GetAsync(cacheKey, ct);
-        if (cachedBytes is not null)
+        // Hot path: Redis cache (ADR-009 — Redis first). Tenant-scoped via ITenantCache (FR-05).
+        var cached = await _cache.GetAsync<ChatContextMappingResponse>(
+            tenantId, CacheResource, cacheId, CacheVersion, ct: ct);
+        if (cached is not null)
         {
             _logger.LogDebug(
                 "Cache HIT for context mapping {EntityType}:{PageType} (tenant={TenantId})",
                 entityType, pageType ?? "any", tenantId);
-
-            var cached = JsonSerializer.Deserialize<ChatContextMappingResponse>(cachedBytes);
-            if (cached is not null)
-            {
-                await _cache.RefreshAsync(cacheKey, ct);
-                return cached;
-            }
+            await _cache.RefreshAsync(tenantId, CacheResource, cacheId, CacheVersion, ct: ct);
+            return cached;
         }
 
         // Cold path: query Dataverse with four-tier resolution
@@ -103,7 +109,7 @@ public class ChatContextMappingService
         var response = await ResolveFromDataverseAsync(entityType, pageType, ct);
 
         // Cache the result (including empty responses to avoid repeated misses)
-        await CacheMappingAsync(cacheKey, response, ct);
+        await CacheMappingAsync(tenantId, cacheId, response, ct);
 
         return response;
     }
@@ -136,11 +142,19 @@ public class ChatContextMappingService
             return 0;
         }
 
-        // The StackExchangeRedisCache prepends the instance name (e.g. "sdap:") to all keys.
-        // We need to scan for the full Redis key pattern including that prefix.
-        // IDistributedCache.RemoveAsync expects the key WITHOUT the instance prefix.
+        // spaarke-redis-cache-remediation-r1 FR-05/FR-07: keys now live under the
+        // "spaarke:" instance-name prefix with the FR-05 wrapper layout
+        // "tenant:{tenantId}:chat-context-mapping:{entityType}:{pageType}:v1".
+        // We SCAN the on-wire form (instance prefix + wrapper key), then call straight
+        // through to StackExchange.Redis.IDatabase.KeyDeleteAsync for each match —
+        // ITenantCache.RemoveAsync requires a tenantId/resource/id triple we no longer
+        // have for a pattern delete, so a raw-multiplexer SCAN+DELETE preserves the
+        // pre-migration eviction semantics. Tenant-scoping is enforced on the WRITE side
+        // (FR-05) so a wholesale evict-all sweep is acceptable here.
         var endpoints = _redis.GetEndPoints();
         var evicted = 0;
+        var db = _redis.GetDatabase();
+        const string InstanceNamePrefix = "spaarke:";
 
         foreach (var endpoint in endpoints)
         {
@@ -148,22 +162,21 @@ public class ChatContextMappingService
             if (server.IsReplica)
                 continue;
 
-            // SCAN for keys matching the pattern (non-blocking, cursor-based)
-            // The instance name prefix "sdap:" is prepended by StackExchangeRedisCache
-            var pattern = $"sdap:{CacheKeyPrefix}*";
+            // SCAN for keys matching the pattern (non-blocking, cursor-based).
+            // Pattern matches the on-wire shape produced by StackExchangeRedisCache
+            // (InstanceName + ITenantCache wrapper key) per FR-05.
+            var pattern = $"{InstanceNamePrefix}{CacheKeyScanPattern}*";
 
             await foreach (var key in server.KeysAsync(pattern: pattern).WithCancellation(ct))
             {
-                // IDistributedCache expects the key without the instance prefix
-                var cacheKey = ((string)key!).Replace("sdap:", "", StringComparison.Ordinal);
-                await _cache.RemoveAsync(cacheKey, ct);
+                await db.KeyDeleteAsync(key);
                 evicted++;
             }
         }
 
         _logger.LogInformation(
             "EvictAllCachedMappings: evicted {Count} cache entries matching pattern '{Pattern}'",
-            evicted, $"{CacheKeyPrefix}*");
+            evicted, $"{CacheKeyScanPattern}*");
 
         return evicted;
     }
@@ -320,15 +333,22 @@ public class ChatContextMappingService
 
     /// <summary>
     /// Serialises the mapping response to JSON and stores it in Redis with a 30-minute sliding TTL.
+    /// Tenant-scoped via <see cref="ITenantCache"/> per FR-05.
     /// </summary>
-    private async Task CacheMappingAsync(string cacheKey, ChatContextMappingResponse response, CancellationToken ct)
+    private Task CacheMappingAsync(
+        string tenantId,
+        string cacheId,
+        ChatContextMappingResponse response,
+        CancellationToken ct)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(response);
-        var options = new DistributedCacheEntryOptions
-        {
-            SlidingExpiration = MappingCacheTtl
-        };
-        await _cache.SetAsync(cacheKey, bytes, options, ct);
+        return _cache.SetSlidingAsync(
+            tenantId,
+            CacheResource,
+            cacheId,
+            CacheVersion,
+            response,
+            MappingCacheTtl,
+            ct: ct);
     }
 
     /// <summary>

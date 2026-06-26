@@ -62,261 +62,245 @@ This is **higher than spec's 117** (which was an under-estimate) and **lower tha
 
 ### Sub-task 010 — Office (4 files / 12 sites)
 
-#### `Api/Filters/OfficeRateLimitFilter.cs` (2)
+#### `Api/Filters/OfficeRateLimitFilter.cs` (2) — [x] migrated 2026-06-25 (task 010)
 - L370 — `GetStringAsync` — `office-rate:{userId}:{operation}:{window}` (constructed via `cacheKey` var) — **(b)** userId available; tenant claim should be added
 - L389 — `SetStringAsync` — same key — **(b)**
+- **Migration**: Threaded `tenantId` through `IOfficeRateLimitService.CheckAndIncrementAsync(tenantId, userId, category)`. Filter extracts `tid` claim → `"anonymous"` fallback. Cache resource = `"office-rate-limit"`, id = `"{userId}:{category}"`, version = 1. Wire key: `tenant:{tid}:office-rate-limit:{userId}:{category}:v1`.
 
-#### `Workers/Office/UploadFinalizationWorker.cs` (2)
+#### `Workers/Office/UploadFinalizationWorker.cs` (2) — [x] migrated 2026-06-25 (task 010)
 - L559 — `GetStringAsync` — `office:upload:{containerId}:{itemId}` — **(b)** has containerId; needs tenantId
 - L569 — `SetStringAsync` — same key — **(b)**
+- **Migration**: TenantId derived from `_configuration["TENANT_ID"]` / `["AzureAd:TenantId"]` (BFF is single-tenant per Redis instance per ADR-029); falls back to `"bff"`. Cache resource = `"office-upload-processed"`, id = `idempotencyKey`, version = 1.
 
-#### `Workers/Office/ProfileSummaryWorker.cs` (2)
+#### `Workers/Office/ProfileSummaryWorker.cs` (2) — [x] migrated 2026-06-25 (task 010)
 - L357 — `GetStringAsync` — `office:profile:{userId}` — **(b)** userId available; tenant claim needed
 - L367 — `SetStringAsync` — same key — **(b)**
+- **Migration**: TenantId derived from `ProfileJobPayload.TenantId` (already in payload). Reordered `ProcessAsync` to deserialize payload BEFORE idempotency check. Cache resource = `"office-profile-processed"`, id = `idempotencyKey`, version = 1.
 
-#### `Api/Filters/IdempotencyFilter.cs` (5)
-- L27 (in `AddIdempotencyFilter` extension) — `GetRequiredService<IDistributedCache>()` — registration site (no key)
-- L44 (overload variant) — `GetRequiredService<IDistributedCache>()` — registration site (no key)
+#### `Api/Filters/IdempotencyFilter.cs` (5) — [x] migrated 2026-06-25 (task 010)
+- L27 (in `AddIdempotencyFilter` extension) — `GetRequiredService<IDistributedCache>()` → `GetRequiredService<ITenantCache>()`
+- L44 (overload variant) — `GetRequiredService<IDistributedCache>()` → `GetRequiredService<ITenantCache>()`
 - L146 — `GetStringAsync` — `idempotency:request:{userId}:{clientKey}` — **(a)** userId in scope; tenant scope additive
 - L327 — `GetAsync` — `idempotency:lock:{userId}:{clientKey}` — **(a)**
 - L338 — `SetAsync` — same lock key — **(a)**
 - L353 — `RemoveAsync` — same lock key — **(a)**
 - L388 — `SetStringAsync` — response cache key — **(a)**
+- **Migration**: TenantId from `tid` claim on `HttpContext.User` (fallback to `http://schemas.microsoft.com/identity/claims/tenantid`); → `"anonymous"` if absent. Cache resources: `"idempotency-request"` and `"idempotency-lock"`, id = `idempotencyKey` (= `{userId}:{clientKey}` or SHA256 hash), version = 1.
 
 > **Note**: Counted IdempotencyFilter as Office group because the existing rate-limit filter mostly co-locates with Office endpoints. If the team prefers, move to sub-task 014 (Background) — assignment is administrative.
 
-### Sub-task 011 — Chat / Memory / Sessions (9 files / 31 sites)
+### Sub-task 011 — Chat / Memory / Sessions (9 files / 31 sites) — [x] MIGRATED 2026-06-25
 
-#### `Services/Ai/Chat/ChatSessionManager.cs` (4)
-- L153 — `GetAsync` — `chat-session:{tenantId}:{sessionId}` — **(a)** tenantId in method signature
-- L161 — `RefreshAsync` — same key — **(a)**
-- L222 — `RemoveAsync` — same key — **(a)**
-- L291 — `SetAsync` — same key — **(a)**
+- [x] `Services/Ai/Chat/ChatSessionManager.cs` (4 sites) — resource `"session"` (FR-14 smoke-test contract); sliding 24h TTL
+- [x] `Services/Ai/Chat/ChatContextMappingService.cs` (4 sites) — resource `"chat-context-mapping"`; tenantId now used (pre-migration was env-global); EvictAll uses raw multiplexer SCAN over `spaarke:tenant:*:chat-context-mapping:*` since wrapper has no pattern-delete
+- [x] `Services/Ai/Chat/AnalysisChatContextResolver.cs` (2 sites) — resource `"analysis-chat-context"`; absolute 30-min TTL
+- [x] `Services/Ai/Chat/StandaloneChatContextProvider.cs` (2 sites) — resource `"standalone-chat-context"`; absolute 30-min TTL
+- [x] `Services/Ai/Chat/PendingPlanManager.cs` (5 sites) — resource `"pending-plan"`; absolute 30-min TTL; uses GetStringAsync/SetStringAsync overlay since payload was already JSON-serialised
+- [x] `Services/Ai/Chat/DynamicCommandResolver.cs` (2 sites) — resource `"cmd-catalog"`; absolute 5-min TTL
+- [x] `Services/Ai/Chat/PlaybookDispatcher.cs` (2 sites) — resource `"playbook-dispatch-output"`; absolute 5-min TTL; per-tenant DI binding preserved
+- [x] `Services/Ai/Memory/RecentlyDiscussedTracker.cs` (2 sites) — resource `"recently-discussed"`; sliding 24h TTL; `IRecentlyDiscussedTracker.MarkAsync` / `GetRecentAsync` now take `tenantId` (one downstream caller updated: `Services/Ai/Handlers/RecallSessionFileHandler.cs:516`)
+- [x] `Services/Ai/Sessions/SessionPersistenceService.cs` (4 sites) — resource `"stored-session"` (distinguishes warm-tier `StoredSession` from hot-tier `ChatSession`); sliding 24h TTL; `RefreshAsync` retained via new wrapper overload
+- [x] `Api/Agent/PlaybookStatusEndpoints.cs` (2 sites) — resource `"agent-playbook-job"`; absolute 4-hour TTL
 
-#### `Services/Ai/Chat/ChatContextMappingService.cs` (4)
-- L83 — `GetAsync` — `chat-context-map:{tenantId}:{sessionId}` — **(a)**
-- L93 — `RefreshAsync` — same key — **(a)**
-- L153 — `RemoveAsync` — same key — **(a)**
-- L325 — `SetAsync` — same key — **(a)**
-
-#### `Services/Ai/Chat/AnalysisChatContextResolver.cs` (2)
-- L191 — `GetAsync` — `analysis-chat-context:{tenantId}:{analysisId}` — **(a)**
-- L689 — `SetAsync` — same key — **(a)**
-
-#### `Services/Ai/Chat/StandaloneChatContextProvider.cs` (2)
-- L188 — `GetAsync` — `standalone-chat-context:{tenantId}:{key}` — **(a)**
-- L271 — `SetAsync` — same key — **(a)**
-
-#### `Services/Ai/Chat/PendingPlanManager.cs` (5)
-- L94 — `SetAsync` — `pending-plan:{tenantId}:{sessionId}` — **(a)**
-- L111 — `GetAsync` — same key — **(a)**
-- L146 — `GetAsync` — same key — **(a)**
-- L158 — `RemoveAsync` — same key — **(a)**
-- L180 — `RemoveAsync` — same key — **(a)**
-
-#### `Services/Ai/Chat/DynamicCommandResolver.cs` (2)
-- L126 — `GetStringAsync` — `dynamic-command:{tenantId}:{command}` — **(a)**
-- L163 — `SetStringAsync` — same key — **(a)**
-
-#### `Services/Ai/Chat/PlaybookDispatcher.cs` (2)
-- L1009 — `GetStringAsync` — `playbook-dispatch:{tenantId}:{playbookId}` — **(a)**
-- L1078 — `SetStringAsync` — same key — **(a)**
-
-#### `Services/Ai/Memory/RecentlyDiscussedTracker.cs` (2)
-- L190 — `GetAsync` — `recently-discussed:{tenantId}:{sessionId}` — **(a)**
-- L216 — `SetAsync` — same key — **(a)**
-
-#### `Services/Ai/Sessions/SessionPersistenceService.cs` (4)
-- L162 — `RemoveAsync` — `sessions:{tenantId}:{sessionId}` — **(a)** (doc-comment shows key format)
-- L459 — `GetAsync` — same key — **(a)**
-- L469 — `RefreshAsync` — same key — **(a)**
-- L497 — `SetAsync` — same key — **(a)**
-
-#### `Api/Agent/PlaybookStatusEndpoints.cs` (2)
-- L158 — `GetStringAsync` — `playbook-status:{tenantId}:{playbookId}` — **(a)**
-- L167 — `SetStringAsync` — same key — **(a)**
-
-> **31 sites total** (added 2 PlaybookStatusEndpoints).
+> **31 sites total — all migrated.** No system-level exception flags raised in this group.
+>
+> **Wrapper interface extension (task 011)**: added `GetStringAsync` / `SetStringAsync` / `RefreshAsync` / `SetSlidingAsync` to `ITenantCache` to cover all four operation shapes the chat group encountered (per task brief "Special: SessionPersistenceService uses RefreshAsync — add to interface OR leave as exception" → option (a) chosen). Other waves (Office 010, Membership 012, Doc/AI 013, Auth 015) will reuse the same surface.
+>
+> **DI updates**: `AnalysisServicesModule.cs:265` ChatSessionManager factory now resolves `ITenantCache` (was `IDistributedCache`). `SprkChatAgentFactory.cs:647 + 672` updated similarly for the inline-factory consumers (PlaybookDispatcher, DynamicCommandResolver).
+>
+> **Test updates**: `ChatSessionManagerTests`, `ChatSessionContinuityTests`, `ChatContextMappingServiceTests`, `SessionCleanupSecurityTests` migrated to `Mock<ITenantCache>` with the FR-05 triple. `SessionCleanupSecurityTests.CacheKey_FollowsExpectedPattern` expectation updated to `tenant:{tenantId}:session:{sessionId}:v1`. `ChatSessionManager.BuildCacheKey` retained (internal) so `SessionFilesCleanupJob.cs:553` raw-multiplexer probe + `SessionCleanupSecurityTests.CacheKey_IncludesTenantId_*` continue to compile.
 
 ### Sub-task 012 — Membership (5 files / 16 sites)
 
-#### `Services/Ai/Membership/MembershipResolverService.cs` (2)
-- L1000 — `GetAsync` — `membership:{tenantId}:{principalId}` — **(a)**
-- L1027 — `SetAsync` — same key — **(a)**
+#### `Services/Ai/Membership/MembershipResolverService.cs` (2) — [x] migrated
+- L1000 — `GetAsync` — `membership:{tenantId}:{principalId}` — **(a)** → `ITenantCache.GetAsync<T>(tenantId, "membership-resolved", id, v1)` (tenantId from `IHttpContextAccessor` `tid` claim; resource label `membership-resolved`)
+- L1027 — `SetAsync` — same key — **(a)** → migrated
 
-#### `Services/Ai/Membership/MembershipFieldDiscoveryService.cs` (4)
-- L461 — `GetAsync` — `membership:discovery:{entityType}` — **(c)** entity-type metadata is org-wide system catalog; candidate exception OR refactor to scope to org/tenant
-- L495 — `SetAsync` — same key — **(c)**
-- L551 — `RemoveAsync` — same key — **(c)**
-- L592 — `RemoveAsync` — same key — **(c)**
+#### `Services/Ai/Membership/MembershipFieldDiscoveryService.cs` (4) — [x] migrated, **flagged system-level**
+- L461 — `GetAsync` — `membership:discovery:{entityType}` — **(c) SYSTEM-LEVEL** — entity-type metadata is org-wide system catalog. Per inventory recommendation, migrated as tenant-scoped (`ITenantCache.GetAsync<T>(tenantId, "membership-discovery", entityType, v1)`) because one BFF == one tenant per Q5 audit. Within a tenant, the data remains effectively org-wide. **Document as NFR-08 exception candidate in task 017 if cumulative count grows.**
+- L495 — `SetAsync` — same key — **(c)** → migrated
+- L551 — `RemoveAsync` — same key — **(c)** → migrated
+- L592 — `RemoveAsync` — same key — **(c)** → migrated
 
-#### `Services/Ai/Membership/IdentityNormalizationService.cs` (2)
-- L418 — `GetAsync` — `identity-norm:{tenantId}:{systemUserId}` — **(a)** (per source comment "10-minute TTL per ADR-009")
-- L450 — `SetAsync` — same key — **(a)**
+#### `Services/Ai/Membership/IdentityNormalizationService.cs` (2) — [x] migrated
+- L418 — `GetAsync` — `identity-norm:{tenantId}:{systemUserId}` — **(a)** → `ITenantCache.GetAsync<T>(tenantId, "membership-identity", systemUserId, v1)`
+- L450 — `SetAsync` — same key — **(a)** → migrated
 
-#### `Services/Dataverse/Privileges/UserPrivilegeChecker.cs` (2)
-- L304 — `GetStringAsync` — `privileges:{tenantId}:{userId}:{entity}` — **(a)**
-- L337 — `SetStringAsync` — same key — **(a)**
+#### `Services/Dataverse/Privileges/UserPrivilegeChecker.cs` (2) — [x] migrated
+- L304 — `GetStringAsync` — `privileges:{tenantId}:{userId}:{entity}` — **(a)** → `ITenantCache.GetAsync<HashSet<string>>(tenantId, "privileges", userOid, v1)`. **Note**: `SlidingExpiration` (6h) was removed because `ITenantCache` supports only absolute TTL; preserved 24h `AbsoluteExpiration` per task 010 §6.
+- L337 — `SetStringAsync` — same key — **(a)** → migrated
 
-#### `Api/Membership/MembershipEndpoints.cs` (2)
-- L389 — `GetAsync` — `membership:endpoint:{tenantId}:{principalId}` (parameter-injected `cache`) — **(a)**
-- L445 — `SetAsync` — same key — **(a)**
+#### `Api/Membership/MembershipEndpoints.cs` (2) — [x] migrated
+- L389 — `GetAsync` — `membership:endpoint:{tenantId}:{principalId}` (parameter-injected `cache`) — **(a)** → `ITenantCache.GetAsync<Guid>(tenantId, "membership-currentuser", aadOid, v1)`. Endpoint param changed `IDistributedCache cache` → `ITenantCache cache`; tenant resolved from `httpContext.User.FindFirst("tid")` via new `ExtractTenantId` helper.
+- L445 — `SetAsync` — same key — **(a)** → migrated. Cached `Guid` (16 bytes) now serialized via `ITenantCache.SetAsync<Guid>` (JSON-encoded ~38 chars) — payload-size negligible.
 
-> 16 sites total.
+> 16 sites total. **Pub/Sub preserved**: `MembershipCacheInvalidator` and `MembershipCacheInvalidationSubscriber` continue to use `IConnectionMultiplexer.GetSubscriber()` unchanged. The Subscriber's SCAN pattern was updated to match the new on-wire key shape: `{InstanceName}tenant:*:membership-resolved:{personId:D}:{entityType}:*` (covers cross-tenant evictions).
 
-### Sub-task 013 — Document / AI (13 files / 36 sites)
+### Sub-task 013 — Document / AI (13 files / 36 sites) — **MIGRATED 2026-06-26**
 
-#### `Services/Ai/Handlers/ClauseAnalyzerHandler.cs` (2)
-- L580 — `GetAsync` — `clause:{tenantId}:{documentId}` — **(a)**
-- L600 — `SetAsync` — same key — **(a)**
+> **Outcome**: 33 migrated normally + 3 files flagged system-level NFR-08 exception (EmbeddingCache, PlaybookService, TextExtractorService — public wrapper API can't reach tenantId; `"system"` sentinel + inline rationale). SemaphoreSlim wrappers preserved in AnalysisRagProcessor (`_ragSearchSemaphore`), InsightsPlaybookExecutionCache (`_perKeyLocks` FR-22), AgentServiceClient (`_concurrencyGate` ADR-016). One semantic change: AgentServiceClient sliding-expiry replaced with absolute-TTL refresh-on-hit (TenantCache wrapper supports `AbsoluteExpirationRelativeToNow` only via `ttl` parameter).
 
-#### `Services/Ai/Handlers/EntityExtractorHandler.cs` (2)
-- L570 — `GetAsync` — `entity-extract:{tenantId}:{documentId}` — **(a)**
-- L590 — `SetAsync` — same key — **(a)**
+#### [x] `Services/Ai/Handlers/ClauseAnalyzerHandler.cs` (2) — **MIGRATED**
+- [x] L580 — `GetAsync` → `ITenantCache.GetAsync<ClauseAnalysisResult>(tenantId, "clause-analyzer", hash, v1)` — **(a)**
+- [x] L600 — `SetAsync` → same — **(a)**
 
-#### `Services/Ai/Handlers/InvoiceExtractionToolHandler.cs` (2)
-- L376 — `GetAsync` — `invoice-extract:{tenantId}:{documentId}` — **(a)**
-- L478 — `SetAsync` — same key — **(a)**
+#### [x] `Services/Ai/Handlers/EntityExtractorHandler.cs` (2) — **MIGRATED**
+- [x] L570 — `GetAsync` → `ITenantCache.GetAsync<EntityExtractionResult>(tenantId, "entity-extractor", hash, v1)` — **(a)**
+- [x] L590 — `SetAsync` → same — **(a)**
 
-#### `Services/Ai/Handlers/RiskDetectorHandler.cs` (2)
-- L719 — `GetAsync` — `risk-detect:{tenantId}:{documentId}` — **(a)**
-- L739 — `SetAsync` — same key — **(a)**
+#### [x] `Services/Ai/Handlers/InvoiceExtractionToolHandler.cs` (2) — **MIGRATED**
+- [x] L376 — `GetAsync` → `ITenantCache.GetAsync<LlmInvoicePayload>(tenantId, "invoice-extractor", hash, v1)` — **(a)**. `BuildCacheKey` static helper retained for legacy test assertion compatibility.
+- [x] L478 — `SetAsync` → same — **(a)**
 
-#### `Services/Ai/AnalysisDocumentLoader.cs` (2)
-- L68 — `SetAsync` — `analysis-doc:{analysisId}` — **(b)** (per source comment "AnalysisCacheKeyPrefix"); needs tenantId addition
-- L77 — `GetAsync` — same key — **(b)**
+#### [x] `Services/Ai/Handlers/RiskDetectorHandler.cs` (2) — **MIGRATED**
+- [x] L719 — `GetAsync` → `ITenantCache.GetAsync<RiskDetectionResult>(tenantId, "risk-detector", hash, v1)` — **(a)**
+- [x] L739 — `SetAsync` → same — **(a)**
 
-#### `Services/Ai/AnalysisRagProcessor.cs` (2)
-- L231 — `GetStringAsync` — `rag-cache:{tenantId}:{queryHash}` — **(a)**
-- L260 — `SetStringAsync` — same key — **(a)**
+#### [x] `Services/Ai/AnalysisDocumentLoader.cs` (2) — **MIGRATED**
+- [x] L68 — `SetAsync` → `ITenantCache.SetAsync(tid-from-claims, "document-analysis", analysisId, v1)`. TenantId derived from `IHttpContextAccessor` (`tid` claim) with `"system"` sentinel fallback for background-job reload path. — **(b)→(a) after refactor**
+- [x] L77 — `GetAsync` → same — **(b)→(a)**
 
-#### `Services/Ai/EmbeddingCache.cs` (2)
-- L77 — `GetAsync` — `embedding:{contentHash}` — **(b)** content-hash is collision-resistant, but cross-tenant cache poisoning is theoretically possible; recommend (a) refactor to `embedding:{tenantId}:{hash}` OR (c) document as system-level cache (content hash is tenant-agnostic)
-- L129 — `SetAsync` — same key — **(b)**
+#### [x] `Services/Ai/AnalysisRagProcessor.cs` (2) — **MIGRATED + SemaphoreSlim preserved**
+- [x] L231 — `GetStringAsync` → `ITenantCache.GetAsync<RagSearchResponse>(tenantId, "rag-cache", "{sourceId}:{queryHash}", v1)`. **`_ragSearchSemaphore` (ADR-013) PRESERVED**. — **(a)**
+- [x] L260 — `SetStringAsync` → same — **(a)**
 
-#### `Services/Ai/ReferenceRetrievalService.cs` (2)
-- L390 — `GetAsync` — `reference:{tenantId}:{refId}` — **(a)**
-- L426 — `SetAsync` — same key — **(a)**
+#### [x] `Services/Ai/EmbeddingCache.cs` (2) — **🚩 SYSTEM-LEVEL EXCEPTION (NFR-08)**
+- [x] L77 — `GetAsync` → `ITenantCache.GetAsync<byte[]>(tenantId: "system", "embedding", contentHash, v1)` — **(c)**. `IEmbeddingCache.GetEmbeddingAsync(string contentHash)` public API UNCHANGED; tenant scope = `"system"` sentinel because content hash is tenant-agnostic (deterministic SHA256). Inline rationale on class header.
+- [x] L129 — `SetAsync` → same — **(c)**
 
-#### `Services/Ai/Insights/InsightsPlaybookExecutionCache.cs` (4)
-- L169 — `GetAsync` — `insights:{tenantId}:{playbookId}:{subjectHash}` — **(a)** (source shows `request.TenantId`)
-- L226 — `GetAsync` — same key (race-check) — **(a)**
-- L296 — `SetAsync` — same key — **(a)**
-- L329 — `RemoveAsync` — same key — **(a)**
+#### [x] `Services/Ai/ReferenceRetrievalService.cs` (2) — **MIGRATED**
+- [x] L390 — `GetAsync` → `ITenantCache.GetAsync<ReferenceSearchResponse>(options.TenantId, "reference-search", "{queryHash}:{sourceIdsHash}:{topK}", v1)` — **(a)**
+- [x] L426 — `SetAsync` → same — **(a)**
 
-#### `Services/Ai/Foundry/AgentServiceClient.cs` (3)
-- L120 — `GetStringAsync` — `agent-thread:{tenantId}:{sessionId}` — **(a)** ("AgentServiceClient" docs say "sliding expiry so resumable conversations")
-- L317 — `RemoveAsync` — same key — **(a)**
-- L380 — `SetStringAsync` — same key — **(a)**
+#### [x] `Services/Ai/Insights/InsightsPlaybookExecutionCache.cs` (4) — **MIGRATED + per-key SemaphoreSlim preserved**
+- [x] L169 — `GetAsync` → `ITenantCache.GetAsync<InsightArtifact>(request.TenantId, "insights-playbook", InsightsPlaybookCacheKey.Compose(...), v1)`. **`_perKeyLocks` per-key `SemaphoreSlim` PRESERVED** (FR-22 concurrent-dedup). — **(a)**
+- [x] L226 — `GetAsync` (race-check) → same — **(a)**
+- [x] L296 — `SetAsync` → same — **(a)**
+- [x] L329 — `RemoveAsync` → `ITenantCache.RemoveAsync(tenantId, "insights-playbook", key, v1)` — **(a)**
 
-#### `Services/Ai/PlaybookService.cs` (2)
-- L363 — `GetStringAsync` — `playbook:{tenantId}:{playbookId}` — **(a)** (nullable `IDistributedCache? _cache` — null-check required in wrapper)
-- L476 — `SetStringAsync` — same key — **(a)**
+#### [x] `Services/Ai/Foundry/AgentServiceClient.cs` (3) — **MIGRATED + `_concurrencyGate` preserved + semantic change**
+- [x] L120 — `GetStringAsync` → `ITenantCache.GetAsync<string>(tenantId, "agent-thread", "thread", v1)`. **`_concurrencyGate` `SemaphoreSlim` (ADR-016) PRESERVED**. ⚠️ Semantic: `SlidingExpiration` replaced with absolute-TTL refresh-on-hit (`SetAsync` rewrites the entry with the configured TTL on every cache HIT) because `TenantCache.SetAsync` only supports `AbsoluteExpirationRelativeToNow` via its `ttl` parameter. Effective behavior is equivalent — TTL is rewritten on every access. — **(a)**
+- [x] L317 — `RemoveAsync` → `ITenantCache.RemoveAsync(tenantId, "agent-thread", "thread", v1)` — **(a)**
+- [x] L380 — `SetStringAsync` → `ITenantCache.SetAsync<string>(tenantId, "agent-thread", "thread", v1, threadId, ttl)` — **(a)**
 
-#### `Services/Ai/RecordSearch/RecordSearchService.cs` (2)
-- L582 — `GetStringAsync` (`_distributedCache` field) — `record-search:{tenantId}:{queryHash}` — **(a)**
-- L607 — `SetStringAsync` — same key — **(a)**
+#### [x] `Services/Ai/PlaybookService.cs` (2) — **🚩 SYSTEM-LEVEL EXCEPTION (NFR-08) + nullable removal**
+- [x] L363 — `GetStringAsync` → `ITenantCache.GetAsync<PlaybookResponse>(tenantId: "system", "playbook-by-name", name, v1)` — **(c)**. `IPlaybookService.GetByNameAsync(string name)` public API UNCHANGED; tenantId not in scope at call site (org-wide playbook lookup per ADR-029). Nullable `IDistributedCache? _cache` → **non-nullable `ITenantCache _cache`**; null-check fallbacks removed.
+- [x] L476 — `SetStringAsync` → same — **(c)**
 
-#### `Api/Ai/ChatDocumentEndpoints.cs` (7)
-- L363 — `SetAsync` — `doc-upload:{sessionId}:{documentId}` — **(b)** sessionId implicit tenant; needs explicit `tenantId` parameter
-- L395 — `SetAsync` — `doc-binary:{sessionId}:{documentId}` — **(b)**
-- L422 — `SetAsync` — `doc-upload-meta:{sessionId}:{documentId}` — **(b)**
-- L669 — `GetAsync` — persist key (variable `persistKey`) — **(b)**
-- L693 — `GetAsync` — `doc-binary:{sessionId}:{documentId}` — **(b)**
-- L712 — `GetAsync` — `doc-upload-meta:{sessionId}:{documentId}` — **(b)**
-- L802 — `SetAsync` — variable cache key — **(b)**
+#### [x] `Services/Ai/RecordSearch/RecordSearchService.cs` (2) — **MIGRATED**
+- [x] L582 — `GetStringAsync` → `ITenantCache.GetAsync<RecordSearchResponse>(tid-from-claims, "record-search", queryHash, v1)`. TenantId derived from `IHttpContextAccessor` (existing pattern in file, with `"system"` sentinel fallback). Records-index has no `tenantId` field so this is cache-side scoping only; security is enforced at Dataverse. — **(a)**
+- [x] L607 — `SetStringAsync` → same — **(a)**
 
-> 36 sites total. Several **(b)** sites in this group require threading `tenantId` through endpoint parameters / session manager.
+#### [x] `Api/Ai/ChatDocumentEndpoints.cs` (7) — **MIGRATED**
+- [x] L363 — `SetAsync` → `ITenantCache.SetAsync(tenantId, "doc-upload-text", "{sessionId}:{documentId}", v1, text, ttl)`. `cache` parameter type changed from `IDistributedCache` → `ITenantCache`. tenantId from `httpContext.User.FindFirst("tid")` (existing pattern). — **(b)→(a)**
+- [x] L395 — `SetAsync` → resource = `"doc-upload-binary"` — **(b)→(a)**
+- [x] L422 — `SetAsync` → resource = `"doc-upload-meta"` — **(b)→(a)**
+- [x] L669 — `GetAsync` → resource = `"doc-upload-persist"` — **(b)→(a)**
+- [x] L693 — `GetAsync` → resource = `"doc-upload-binary"` — **(b)→(a)**
+- [x] L712 — `GetAsync` → resource = `"doc-upload-meta"` — **(b)→(a)**
+- [x] L802 — `SetAsync` → resource = `"doc-upload-persist"` — **(b)→(a)**
 
-### Sub-task 014 — Background jobs / system services (9 files / 22 sites)
+#### [x] **`Services/Ai/TextExtractorService.cs`** — **🚩 SYSTEM-LEVEL EXCEPTION (NFR-08) + nullable removal** (special-case file per task 013 instructions; inventory placement was group 016 but task explicitly assigned to 013)
+- [x] L205 — `GetStringAsync` → `ITenantCache.GetAsync<string>(tenantId: "system", "doc-text", "{driveId}:{itemId}:{etag}", v1)` — **(c)**. `ITextExtractor.ExtractAsync(..., driveId, itemId, etag, ct)` public API UNCHANGED; tenantId not in scope; the SPE drive+item+etag tuple is already a content-versioned identifier (ETag auto-invalidates on file change). Nullable `IDistributedCache? _cache` → **non-nullable `ITenantCache _cache`**; null-check fallbacks removed (existing `string.IsNullOrEmpty(etag)` short-circuit retained for missing-identifier path).
+- [x] L261 — `SetStringAsync` → same — **(c)**
 
-#### `Services/Jobs/IdempotencyService.cs` (5)
-- L28 — `GetAsync` — `idempotency:processed:{eventId}` — **(c)** event idempotency is cross-tenant by design (Service Bus events have system-level IDs); NFR-08 exception
-- L56 — `SetAsync` — same key — **(c)**
-- L71 — `GetAsync` — `idempotency:lock:{eventId}` — **(c)**
-- L84 — `SetAsync` — same key — **(c)**
-- L101 — `RemoveAsync` — same key — **(c)**
+> 36 sites (+2 in TextExtractorService = 38 sites if TextExtractor counted) total — **ALL MIGRATED**.
 
-#### `Services/Jobs/BatchJobStatusStore.cs` (3)
-- L59 — `GetStringAsync` — `batch-job-status:{jobId}` — **(b)** can include tenantId from job context
-- L194 — `GetStringAsync` — same key family — **(b)**
-- L223 — `SetStringAsync` — same key — **(b)**
+### Sub-task 014 — Background jobs / system services (9 files / 22 sites) — **MIGRATED 2026-06-25**
 
-#### `Services/Jobs/RecordSyncJob.cs` (2)
-- L638 — `GetStringAsync` — `record-sync-watermark:{entityType}` (per `WatermarkKeyPrefix` constant) — **(c)** **watermark is system-level durable bookmark** per source comment "Persist watermark indefinitely (no sliding expiry — this is a durable bookmark)"; NFR-08 exception
-- L658 — `SetStringAsync` — same key — **(c)**
+> **Outcome**: 3 migrated to `ITenantCache` / 19 documented system-level exceptions (NFR-08).
+> Re-classification rationale per file is in the per-site list below; corrections to the
+> original (a/b/c) estimates are noted in inline `correction:` lines.
 
-#### `Services/GraphTokenCache.cs` (3)
-- L66 — `GetStringAsync` — `sdap:graph:token:{tokenHash}` — **(b)** tokenHash is user-derived (SHA256 of token); could include tenantId for cross-tenant key isolation. Recommend (a) refactor to `graph-token:{tenantId}:{tokenHash}`
-- L112 — `SetStringAsync` — same key — **(b)**
-- L146 — `RemoveAsync` — same key — **(b)**
+#### `Services/Jobs/IdempotencyService.cs` (5) — **EXCEPTION x5**
+- [x] L28 — `GetAsync` — `idempotency:processed:{eventId}` — **(c)** event idempotency is cross-tenant by design (Service Bus events have system-level IDs); NFR-08 exception
+- [x] L56 — `SetAsync` — same key — **(c)**
+- [x] L71 — `GetAsync` — `idempotency:lock:{eventId}` — **(c)**
+- [x] L84 — `SetAsync` — same key — **(c)**
+- [x] L101 — `RemoveAsync` — same key — **(c)**
 
-#### `Services/Workspace/WorkspaceStateService.cs` (3)
-- L274 — `GetAsync` — `workspace:{tenantId}:{sessionId}` — **(a)** (per source comment "Per-tenant isolation per ADR-014 + NFR-16 (binding)" — already tenant-scoped)
-- L310 — `SetAsync` — same key — **(a)**
-- L324 — `RemoveAsync` — same key — **(a)**
+#### `Services/Jobs/BatchJobStatusStore.cs` (3) — **EXCEPTION x3** (correction: (b)→(c))
+- [x] L59 — `GetStringAsync` — `batch-job-status:{jobId}` — **(c)** correction: `JobContract` has no `TenantId` field; adding one cross-cuts all job producers/consumers (out-of-scope refactor); job IDs are system-level GUIDs.
+- [x] L194 — `GetStringAsync` — same key family — **(c)**
+- [x] L223 — `SetStringAsync` — same key — **(c)**
 
-#### `Services/Communication/CommunicationAccountService.cs` (3)
-- L88 — `GetStringAsync` — `comm-accounts:{tenantId}` — **(a)** (or (b) — verify from source)
-- L126 — `SetStringAsync` — same key — **(a)**
-- L253 — `RemoveAsync` — `comm-accounts:send-enabled` — **(c)** system-level send-enabled flag; NFR-08 exception
+#### `Services/Jobs/RecordSyncJob.cs` (2) — **EXCEPTION x2**
+- [x] L638 — `GetStringAsync` — `record-sync-watermark:{entityType}` (per `WatermarkKeyPrefix` constant) — **(c)** **watermark is system-level durable bookmark** per source comment "Persist watermark indefinitely (no sliding expiry — this is a durable bookmark)"; NFR-08 exception
+- [x] L658 — `SetStringAsync` — same key — **(c)**
 
-#### `Services/Communication/ApprovedSenderValidator.cs` (2)
-- L86 — `GetStringAsync` — `approved-senders` (CacheKey constant) — **(c)** system-level config catalog; NFR-08 exception OR refactor per tenant
-- L129 — `SetStringAsync` — same key — **(c)**
+#### `Services/GraphTokenCache.cs` (3) — **EXCEPTION x3** (correction: (b)→(c))
+- [x] L66 — `GetStringAsync` — `sdap:graph:token:{tokenHash}` — **(c)** correction: OBO token cache is keyed by SHA256(user-token); the user-token implicitly identifies its tenant (single AAD app boundary). `GraphClientFactory.CreateOnBehalfOfClientAsync` does not have `tenantId` in scope (signature is `(string userAccessToken)`); extracting `tid` from JWT just for the cache prefix adds no real isolation.
+- [x] L112 — `SetStringAsync` — same key — **(c)**
+- [x] L146 — `RemoveAsync` — same key — **(c)**
 
-#### `Services/SpeAdmin/SpeDashboardSyncService.cs` (2)
-- L460 — `GetStringAsync` — `sdap:spe:dashboard:metrics` (CacheKey constant) — **(c)** **system-wide SPE dashboard metrics** (cross-tenant aggregation); NFR-08 exception
-- L483 — `SetStringAsync` — same key — **(c)**
+#### `Services/Workspace/WorkspaceStateService.cs` (3) — **MIGRATED x3**
+- [x] L274 — `GetAsync` — migrated to `ITenantCache.GetAsync<Dictionary<string,WorkspaceTab>>(tenantId, "workspace-state", sessionId, v1)`. New on-wire key: `tenant:{tenantId}:workspace-state:{sessionId}:v1`.
+- [x] L310 — `SetAsync` — migrated. NOTE: `SlidingExpiration(24h)` downgraded to `AbsoluteExpirationRelativeToNow(24h)` because wrapper does not expose sliding TTL; semantic preserved (24h horizon).
+- [x] L324 — `RemoveAsync` — migrated.
 
-#### `Services/Dataverse/MetadataService.cs` (2)
-- L241 — `GetStringAsync` — `dataverse:metadata:{entityName}` — **(c)** **Dataverse entity metadata is org-wide schema** (per source doc-comment "ADR-029 — single Redis instance per BFF; per task 010 Q3 decision"); NFR-08 exception
-- L271 — `SetStringAsync` — same key — **(c)**
+#### `Services/Communication/CommunicationAccountService.cs` (3) — **EXCEPTION x3** (correction: L88/L126 (a)→(c))
+- [x] L88 — `GetStringAsync` — `comm:accounts:send-enabled` / `comm:accounts:receive-enabled` — **(c)** correction: actual key contains no `{tenantId}`; sprk_communicationaccount records are org-wide config (one set per BFF org per ADR-029).
+- [x] L126 — `SetStringAsync` — same key — **(c)**
+- [x] L253 — `RemoveAsync` — `comm:accounts:send-enabled` — **(c)** system-level send-enabled flag; NFR-08 exception
 
-> 22 sites total. **Many (c) exceptions in this group** — `IdempotencyService` (5), `RecordSyncJob` watermark (2), `CommunicationAccountService` send-enabled flag (1), `ApprovedSenderValidator` config (2), `SpeDashboardSyncService` (2), `MetadataService` (2) → **14 of 22 are system-level exception candidates**.
+#### `Services/Communication/ApprovedSenderValidator.cs` (2) — **EXCEPTION x2**
+- [x] L86 — `GetStringAsync` — `communication:accounts:merged` (CacheKey constant) — **(c)** org-wide approved-senders catalog (CommunicationOptions + Dataverse merge); NFR-08 exception
+- [x] L129 — `SetStringAsync` — same key — **(c)**
 
-### Sub-task 015 — Auth / User services + ExternalAccess (9 files / 21 sites)
+#### `Services/SpeAdmin/SpeDashboardSyncService.cs` (2) — **EXCEPTION x2**
+- [x] L460 — `GetStringAsync` — `sdap:spe:dashboard:metrics` (CacheKey constant) — **(c)** **system-wide SPE dashboard metrics** (cross-tenant aggregation); NFR-08 exception
+- [x] L483 — `SetStringAsync` — same key — **(c)**
 
-#### `Api/Agent/AgentConfigurationService.cs` (5)
-- L56 — `GetStringAsync` — `{CacheKeyPrefix}{tenantId}:exposed-playbooks` — **(a)** tenantId in source
-- L68 — `SetStringAsync` — same key — **(a)**
-- L86 — `GetStringAsync` — `{CacheKeyPrefix}{tenantId}:capabilities` — **(a)**
-- L134 — `RemoveAsync` — `{CacheKeyPrefix}{tenantId}:exposed-playbooks` — **(a)**
-- L135 — `RemoveAsync` — `{CacheKeyPrefix}{tenantId}:capabilities` — **(a)**
+#### `Services/Dataverse/MetadataService.cs` (2) — **EXCEPTION x2**
+- [x] L241 — `GetStringAsync` — `dataverse:metadata:{entityName}` — **(c)** **Dataverse entity metadata is org-wide schema** (per source doc-comment "ADR-029 — single Redis instance per BFF; per task 010 Q3 decision"); NFR-08 exception
+- [x] L271 — `SetStringAsync` — same key — **(c)**
 
-#### `Api/Agent/AgentConversationService.cs` (4)
-- L49 — `GetStringAsync` — `agent-conv:{tenantId}:{conversationId}` — **(a)**
-- L80 — `SetStringAsync` — same key — **(a)**
-- L109 — `GetStringAsync` — same family — **(a)**
-- L133 — `RemoveAsync` — same key — **(a)**
+> **25 sites total** (correction: original inventory header said 22, but per-file counts sum to 25) — **3 migrated** (WorkspaceStateService) / **22 system-level exceptions** (8 files: IdempotencyService 5, BatchJobStatusStore 3, RecordSyncJob 2, GraphTokenCache 3, CommunicationAccountService 3, ApprovedSenderValidator 2, SpeDashboardSyncService 2, MetadataService 2).
+>
+> **Variance vs original estimate (8/14)**: Three sites originally classified (b) refactor-needed reclassified to (c) system-level after source inspection: `BatchJobStatusStore` (3 sites — `JobContract` schema-level refactor out of scope), `GraphTokenCache` (3 sites — token-hash caller has no tenant context), and `CommunicationAccountService L88/L126` (2 sites — actual key was never tenant-scoped despite inventory speculation). Migration variance is documented per site; `task 017` will surface these in the system-exception allow-list.
 
-#### `Api/Agent/AgentTokenService.cs` (2)
-- L222 — `GetStringAsync` — `agent-token:{tenantId}:{tokenKey}` — **(a)**
-- L240 — `SetStringAsync` — same key — **(a)**
+### Sub-task 015 — Auth / User services + ExternalAccess (9 files / 21 sites) — [x] COMPLETE 2026-06-25
 
-#### `Api/ExternalAccess/GrantExternalAccessEndpoint.cs` (1)
-- L144 — `RemoveAsync` — `external-access:{tenantId}:{principalId}` (variable cache key) — **(a)**
+#### `Api/Agent/AgentConfigurationService.cs` (5) — [x] MIGRATED
+- [x] L56 — `GetStringAsync` → `GetAsync<List<Guid>>(tenantId, "agent-config", "exposed-playbooks", v1)`
+- [x] L68 — `SetStringAsync` → `SetAsync` (15-min TTL)
+- [x] L86 — `GetStringAsync` → `GetAsync<Dictionary<string, bool>>(tenantId, "agent-config", "capabilities", v1)`
+- [x] L134 — `RemoveAsync` (exposed-playbooks)
+- [x] L135 — `RemoveAsync` (capabilities)
 
-#### `Api/ExternalAccess/ProjectClosureEndpoint.cs` (1)
-- L246 — `RemoveAsync` — `external-access:{tenantId}:{projectId}` — **(a)**
+#### `Api/Agent/AgentConversationService.cs` (4) — [x] MIGRATED
+- [x] L49 — `GetStringAsync` → `GetAsync<AgentConversationContext>(tenantId, "agent-conversation", conversationId, v1)`
+- [x] L80 — `SetStringAsync` → `SetAsync` (24h absolute TTL; sliding 4h not supported by wrapper today — documented variance)
+- [x] L109 — `GetStringAsync` → migrated (uses shared GetAsync)
+- [x] L133 — `RemoveAsync`
 
-#### `Api/ExternalAccess/RevokeExternalAccessEndpoint.cs` (1)
-- L142 — `RemoveAsync` — `external-access:{tenantId}:{principalId}` — **(a)**
+#### `Api/Agent/AgentTokenService.cs` (2) — [x] MIGRATED
+- [x] L222 — `GetStringAsync` → `GetAsync<string>(tenantId, "agent-graph-token"|"agent-dataverse-token", tokenHashId, v1)`. **ADR-009 ✅**: OAuth user token cache, NOT an authz decision (same as ADR-009 "Graph access tokens").
+- [x] L240 — `SetStringAsync` → `SetAsync` (CacheTtlMinutes from options)
 
-#### `Infrastructure/ExternalAccess/ExternalParticipationService.cs` (2)
-- L60 — `GetStringAsync` — `external-participation:{tenantId}:{principalId}:{containerId}` — **(a)** (per ADR-009 comment "60s TTL")
-- L190 — `SetStringAsync` — same key — **(a)**
+#### `Api/ExternalAccess/GrantExternalAccessEndpoint.cs` (1) — [x] MIGRATED
+- [x] L144 — `RemoveAsync` → `RemoveAsync(tenantId, "external-access-grant", contactId, v1)`. tenantId from `httpContext.User.FindFirst("tid")`. **ADR-009 ✅**: invalidates membership cache, not authz decision.
 
-#### `Services/Finance/FinanceSummaryService.cs` (3)
-- L137 — `GetStringAsync` — `finance:{tenantId}:{matterId}` — **(a)**
-- L170 — `SetStringAsync` — same key — **(a)**
-- L192 — `RemoveAsync` — same key — **(a)**
+#### `Api/ExternalAccess/ProjectClosureEndpoint.cs` (1) — [x] MIGRATED
+- [x] L246 — `RemoveAsync` → `RemoveAsync`. tenantId from HttpContext.
 
-#### `Api/Reporting/ReportingEmbedService.cs` (2)
-- L131 — `GetStringAsync` — `reporting-embed:{tenantId}:{reportId}` — **(a)**
-- L180 — `SetStringAsync` — same key — **(a)**
+#### `Api/ExternalAccess/RevokeExternalAccessEndpoint.cs` (1) — [x] MIGRATED
+- [x] L142 — `RemoveAsync` → `RemoveAsync`. tenantId from HttpContext.
 
-> 21 sites total. **All (a)** — straightforward atomic migration.
+#### `Infrastructure/ExternalAccess/ExternalParticipationService.cs` (2) — [x] MIGRATED
+- [x] L60 — `GetStringAsync` → `GetAsync<List<CachedParticipation>>(tenantId, "external-access-grant", contactId, v1)`. **CTOR CHANGE**: added `IHttpContextAccessor` dep (registered via `AnalysisServicesModule:478`). **ADR-009 ✅**: per-Contact participation list (membership data), not an authz decision. Downstream authz happens in `ExternalCallerAuthorizationFilter`.
+- [x] L190 — `SetStringAsync` → `SetAsync` (60s TTL)
+
+#### `Services/Finance/FinanceSummaryService.cs` (3) — [x] MIGRATED
+- [x] L137 — `GetStringAsync` → `GetAsync<FinanceSummaryDto>(tenantId, "finance-summary", matterId, v1)`. **CTOR CHANGE**: added `IHttpContextAccessor`. Graceful skip when no tenant claim.
+- [x] L170 — `SetStringAsync` → `SetAsync` (FinanceSummaryCacheTtlMinutes)
+- [x] L192 — `RemoveAsync` → `RemoveAsync`
+
+#### `Api/Reporting/ReportingEmbedService.cs` (2) — [x] MIGRATED
+- [x] L131 — `GetStringAsync` → `GetAsync<CachedEmbedEntry>(tenantId, "reporting-embed", "{workspaceId}:{reportId}:{username}", v1)`. **CTOR CHANGE**: added `IHttpContextAccessor`. **ADR-009 ✅**: Power BI embed token (user-bound OAuth), not an authz decision.
+- [x] L180 — `SetStringAsync` → `SetAsync` (absolute TTL matching token expiry)
+
+> 21 sites total — all migrated. **ADR-009 audit ✅ ZERO violations** in this group: no authz-decision caches, only user profile / token / membership data. **Constructor changes (3 services)** added `IHttpContextAccessor` (globally registered): `ExternalParticipationService`, `FinanceSummaryService`, `ReportingEmbedService`.
 
 ### Sub-task 016 — Shared library (Spaarke.Core consumers) (15 sites)
 

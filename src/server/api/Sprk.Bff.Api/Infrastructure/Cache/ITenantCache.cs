@@ -102,4 +102,107 @@ public interface ITenantCache
         TimeSpan? ttl = null,
         string cacheInstance = "default",
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets a cached UTF-8 string value by tenant-scoped key. Direct overlay over
+    /// <see cref="Microsoft.Extensions.Caching.Distributed.IDistributedCache.GetStringAsync"/>
+    /// used by call sites that already serialize/deserialize their own payloads (e.g., JSON
+    /// or opaque tokens). Returns <c>null</c> when the key is absent.
+    /// </summary>
+    /// <param name="tenantId">Tenant ID. Required; must be non-empty.</param>
+    /// <param name="resource">Resource type. Required; must be non-empty.</param>
+    /// <param name="id">Resource identifier. Required; must be non-empty.</param>
+    /// <param name="version">Schema version of the cached payload.</param>
+    /// <param name="cacheInstance">Reserved for multi-instance routing per NFR-12. Only <c>"default"</c> is registered today.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<string?> GetStringAsync(
+        string tenantId,
+        string resource,
+        string id,
+        int version,
+        string cacheInstance = "default",
+        CancellationToken ct = default) =>
+        throw new NotImplementedException(
+            "GetStringAsync is not implemented by this ITenantCache adapter. " +
+            "Default interface method provided so legacy test doubles compile; production " +
+            "TenantCache (the canonical implementation) overrides it. Override in your fake " +
+            "if your test exercises the string-overlay path.");
+
+    /// <summary>
+    /// Sets a tenant-scoped UTF-8 string value. Direct overlay over
+    /// <see cref="Microsoft.Extensions.Caching.Distributed.IDistributedCache.SetStringAsync"/>
+    /// for sites that pre-serialize their payload.
+    /// </summary>
+    /// <param name="tenantId">Tenant ID. Required; must be non-empty.</param>
+    /// <param name="resource">Resource type. Required; must be non-empty.</param>
+    /// <param name="id">Resource identifier. Required; must be non-empty.</param>
+    /// <param name="version">Schema version of the cached payload.</param>
+    /// <param name="value">String value to store. Required.</param>
+    /// <param name="ttl">Optional absolute expiration; when null, the provider's default expiration applies.</param>
+    /// <param name="slidingExpiration">Optional sliding expiration; when null, no sliding refresh applies.</param>
+    /// <param name="cacheInstance">Reserved for multi-instance routing per NFR-12. Only <c>"default"</c> is registered today.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task SetStringAsync(
+        string tenantId,
+        string resource,
+        string id,
+        int version,
+        string value,
+        TimeSpan? ttl = null,
+        TimeSpan? slidingExpiration = null,
+        string cacheInstance = "default",
+        CancellationToken ct = default) =>
+        throw new NotImplementedException(
+            "SetStringAsync is not implemented by this ITenantCache adapter. " +
+            "Production TenantCache overrides it; override in test doubles when needed.");
+
+    /// <summary>
+    /// Refreshes a tenant-scoped sliding-TTL entry without reading or returning its value.
+    /// Direct overlay over <see cref="Microsoft.Extensions.Caching.Distributed.IDistributedCache.RefreshAsync"/>
+    /// used by sliding-TTL session caches that want to extend the entry's lifetime on access
+    /// without paying the deserialization cost.
+    /// </summary>
+    /// <param name="tenantId">Tenant ID. Required; must be non-empty.</param>
+    /// <param name="resource">Resource type. Required; must be non-empty.</param>
+    /// <param name="id">Resource identifier. Required; must be non-empty.</param>
+    /// <param name="version">Schema version of the cached payload.</param>
+    /// <param name="cacheInstance">Reserved for multi-instance routing per NFR-12. Only <c>"default"</c> is registered today.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task RefreshAsync(
+        string tenantId,
+        string resource,
+        string id,
+        int version,
+        string cacheInstance = "default",
+        CancellationToken ct = default) =>
+        throw new NotImplementedException(
+            "RefreshAsync is not implemented by this ITenantCache adapter. " +
+            "Production TenantCache overrides it; override in test doubles when needed.");
+
+    /// <summary>
+    /// Variant of <see cref="SetAsync{T}(string,string,string,int,T,TimeSpan?,string,CancellationToken)"/> that
+    /// applies a sliding expiration instead of an absolute one. Used by call sites that
+    /// previously set <c>SlidingExpiration</c> on <c>DistributedCacheEntryOptions</c> (e.g.,
+    /// 24-hour idle session caches per NFR-07).
+    /// </summary>
+    /// <param name="tenantId">Tenant ID. Required; must be non-empty.</param>
+    /// <param name="resource">Resource type. Required; must be non-empty.</param>
+    /// <param name="id">Resource identifier. Required; must be non-empty.</param>
+    /// <param name="version">Schema version of the cached payload.</param>
+    /// <param name="value">Value to cache. JSON-serialized via <c>System.Text.Json</c>.</param>
+    /// <param name="slidingExpiration">Sliding TTL applied on every access. Required when calling this overload.</param>
+    /// <param name="cacheInstance">Reserved for multi-instance routing per NFR-12. Only <c>"default"</c> is registered today.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task SetSlidingAsync<T>(
+        string tenantId,
+        string resource,
+        string id,
+        int version,
+        T value,
+        TimeSpan slidingExpiration,
+        string cacheInstance = "default",
+        CancellationToken ct = default) =>
+        throw new NotImplementedException(
+            "SetSlidingAsync is not implemented by this ITenantCache adapter. " +
+            "Production TenantCache overrides it; override in test doubles when needed.");
 }

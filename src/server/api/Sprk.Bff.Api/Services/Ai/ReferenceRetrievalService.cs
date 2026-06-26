@@ -6,9 +6,9 @@ using Azure;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -44,9 +44,14 @@ public sealed partial class ReferenceRetrievalService
     private readonly SearchIndexClient _searchIndexClient;
     private readonly IOpenAiClient _openAiClient;
     private readonly IEmbeddingCache _embeddingCache;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly AiSearchOptions _aiSearchOptions;
     private readonly ILogger<ReferenceRetrievalService> _logger;
+
+    // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
+    // spaarke:tenant:{tenantId}:reference-search:{queryHash}:{sourceIdsHash}:{topK}:v1
+    private const string CacheResource = "reference-search";
+    private const int CacheVersion = 1;
 
     // Semantic configuration name — matches the reference index definition.
     // Uses the same config name as the knowledge index (both created with the same schema).
@@ -65,10 +70,9 @@ public sealed partial class ReferenceRetrievalService
     // calls when multiple action nodes in a playbook query the same knowledge sources.
     private static readonly TimeSpan ResultCacheTtl = TimeSpan.FromMinutes(10);
 
-    // Cache key prefix following SDAP naming convention
-    private const string ResultCacheKeyPrefix = "sdap:rag-ref:";
-
     // JSON serializer options for cache serialization (camelCase to match API conventions)
+    // ResultCacheKeyPrefix removed — tenant scoping + on-wire key construction now lives in
+    // ITenantCache wrapper (FR-05 redis remediation r1).
     private static readonly JsonSerializerOptions CacheJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -81,7 +85,7 @@ public sealed partial class ReferenceRetrievalService
         SearchIndexClient searchIndexClient,
         IOpenAiClient openAiClient,
         IEmbeddingCache embeddingCache,
-        IDistributedCache cache,
+        ITenantCache cache,
         IOptions<AiSearchOptions> aiSearchOptions,
         ILogger<ReferenceRetrievalService> logger)
     {
@@ -114,8 +118,8 @@ public sealed partial class ReferenceRetrievalService
         var totalStopwatch = Stopwatch.StartNew();
 
         // Step 0: Check Redis result cache (prevents duplicate embedding + search calls)
-        var cacheKey = BuildResultCacheKey(query, options);
-        var cachedResponse = await TryGetCachedResultAsync(cacheKey, cancellationToken);
+        var cacheId = BuildResultCacheId(query, options);
+        var cachedResponse = await TryGetCachedResultAsync(options.TenantId, cacheId, cancellationToken);
         if (cachedResponse != null)
         {
             totalStopwatch.Stop();
@@ -232,7 +236,7 @@ public sealed partial class ReferenceRetrievalService
             };
 
             // Cache the response for subsequent action nodes that query the same knowledge
-            await TryCacheResultAsync(cacheKey, response, cancellationToken);
+            await TryCacheResultAsync(options.TenantId, cacheId, response, cancellationToken);
 
             return response;
         }
@@ -348,10 +352,10 @@ public sealed partial class ReferenceRetrievalService
     }
 
     /// <summary>
-    /// Builds a tenant-scoped cache key for a reference search query.
-    /// Format: sdap:rag-ref:{tenantId}:{queryHash}:{sourceIdsHash}:{topK}
+    /// Builds the cache "id" component (query/source/topK hash) consumed by ITenantCache.
+    /// ITenantCache prepends `tenant:{tenantId}:reference-search:` and appends `:v{version}`.
     /// </summary>
-    private static string BuildResultCacheKey(string query, ReferenceSearchOptions options)
+    private static string BuildResultCacheId(string query, ReferenceSearchOptions options)
     {
         // Hash the query text for a fixed-length, safe cache key component
         var queryHash = ComputeShortHash(query);
@@ -362,7 +366,7 @@ public sealed partial class ReferenceRetrievalService
             : "none";
         var sourceIdsHash = ComputeShortHash(sourceIdsInput);
 
-        return $"{ResultCacheKeyPrefix}{options.TenantId}:{queryHash}:{sourceIdsHash}:{options.TopK}";
+        return $"{queryHash}:{sourceIdsHash}:{options.TopK}";
     }
 
     /// <summary>
@@ -382,18 +386,14 @@ public sealed partial class ReferenceRetrievalService
     /// Returns null on cache miss or any error (fail-open).
     /// </summary>
     private async Task<ReferenceSearchResponse?> TryGetCachedResultAsync(
-        string cacheKey,
+        string tenantId,
+        string cacheId,
         CancellationToken cancellationToken)
     {
         try
         {
-            var cachedData = await _cache.GetAsync(cacheKey, cancellationToken);
-            if (cachedData == null)
-            {
-                return null;
-            }
-
-            var response = JsonSerializer.Deserialize<ReferenceSearchResponse>(cachedData, CacheJsonOptions);
+            var response = await _cache.GetAsync<ReferenceSearchResponse>(
+                tenantId, CacheResource, cacheId, CacheVersion, ct: cancellationToken);
             if (response == null)
             {
                 return null;
@@ -405,8 +405,8 @@ public sealed partial class ReferenceRetrievalService
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "Error retrieving reference search result from cache (key={CacheKey}), proceeding with live search",
-                cacheKey);
+                "Error retrieving reference search result from cache (id={CacheId}), proceeding with live search",
+                cacheId);
             return null; // Fail-open: cache errors should never block search
         }
     }
@@ -416,31 +416,30 @@ public sealed partial class ReferenceRetrievalService
     /// Errors are logged and swallowed (caching is an optimisation, not a requirement).
     /// </summary>
     private async Task TryCacheResultAsync(
-        string cacheKey,
+        string tenantId,
+        string cacheId,
         ReferenceSearchResponse response,
         CancellationToken cancellationToken)
     {
         try
         {
-            var serialized = JsonSerializer.SerializeToUtf8Bytes(response, CacheJsonOptions);
             await _cache.SetAsync(
-                cacheKey,
-                serialized,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = ResultCacheTtl
-                },
-                cancellationToken);
+                tenantId, CacheResource, cacheId, CacheVersion,
+                response, ResultCacheTtl, ct: cancellationToken);
 
             _logger.LogDebug(
-                "Cached reference search result (key={CacheKey}, results={ResultCount}, TTL={TtlMinutes}min)",
-                cacheKey, response.Results.Count, ResultCacheTtl.TotalMinutes);
+                "Cached reference search result (id={CacheId}, results={ResultCount}, TTL={TtlMinutes}min)",
+                cacheId, response.Results.Count, ResultCacheTtl.TotalMinutes);
         }
         catch (Exception ex)
         {
+            // spaarke-redis-cache-remediation-r1 task 011 build-unblock: task 013 (Doc/AI)
+            // migration rebranded the parameter from `cacheKey` to `cacheId` but missed
+            // this catch-block reference. Aligning with the new parameter name; task 013
+            // owner should review during their close-out pass.
             _logger.LogWarning(ex,
-                "Error caching reference search result (key={CacheKey}), result will not be cached",
-                cacheKey);
+                "Error caching reference search result (id={CacheId}), result will not be cached",
+                cacheId);
             // Don't throw — caching is an optimisation
         }
     }

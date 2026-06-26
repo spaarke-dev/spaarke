@@ -3,7 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -16,12 +16,16 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 public class ExternalParticipationService
 {
     private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
-    private const string CacheKeyPrefix = "sdap:external:access:";
+    // Resource identifier for ITenantCache (FR-05). Cached value is per-Contact participation
+    // data (project list), not an authorization decision per ADR-009.
+    private const string ExternalAccessResource = "external-access-grant";
+    private const int CacheVersion = 1;
 
     private readonly HttpClient _httpClient;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly IConfiguration _configuration;
     private readonly TokenCredential _credential;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<ExternalParticipationService> _logger;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
@@ -33,15 +37,17 @@ public class ExternalParticipationService
 
     public ExternalParticipationService(
         HttpClient httpClient,
-        IDistributedCache cache,
+        ITenantCache cache,
         IConfiguration configuration,
         TokenCredential credential,
+        IHttpContextAccessor httpContextAccessor,
         ILogger<ExternalParticipationService> logger)
     {
         _httpClient = httpClient;
         _cache = cache;
         _configuration = configuration;
         _credential = credential;
+        _httpContextAccessor = httpContextAccessor;
         _logger = logger;
     }
 
@@ -52,15 +58,16 @@ public class ExternalParticipationService
         Guid contactId,
         CancellationToken ct = default)
     {
-        var cacheKey = $"{CacheKeyPrefix}{contactId}";
+        var tenantId = ExtractTenantId();
+        var idComponent = contactId.ToString();
 
-        // Try cache first
-        try
+        // Try cache first (only if tenantId is available — otherwise fall through to Dataverse)
+        if (!string.IsNullOrEmpty(tenantId))
         {
-            var cachedJson = await _cache.GetStringAsync(cacheKey, ct);
-            if (cachedJson != null)
+            try
             {
-                var cached = JsonSerializer.Deserialize<List<CachedParticipation>>(cachedJson, JsonOptions);
+                var cached = await _cache.GetAsync<List<CachedParticipation>>(
+                    tenantId, ExternalAccessResource, idComponent, CacheVersion, ct: ct);
                 if (cached != null)
                 {
                     _logger.LogDebug("[EXT-ACCESS] Cache HIT for Contact {ContactId}: {Count} participations",
@@ -68,19 +75,34 @@ public class ExternalParticipationService
                     return cached.Select(c => c.ToParticipation()).ToList();
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[EXT-ACCESS] Cache read error for Contact {ContactId}. Falling through to Dataverse.", contactId);
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[EXT-ACCESS] Cache read error for Contact {ContactId}. Falling through to Dataverse.", contactId);
+            }
         }
 
         // Cache miss — query Dataverse
         var participations = await QueryDataverseAsync(contactId, ct);
 
-        // Cache result (fire-and-forget — don't block response)
-        _ = CacheParticipationsAsync(cacheKey, participations);
+        // Cache result (fire-and-forget — don't block response). Skip when no tenant claim.
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            _ = CacheParticipationsAsync(tenantId, idComponent, participations);
+        }
 
         return participations;
+    }
+
+    /// <summary>
+    /// Extracts the Azure AD tenant ID ('tid' claim) from the current HttpContext.
+    /// Returns null when no claim is present (in which case caching is skipped).
+    /// </summary>
+    private string? ExtractTenantId()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user is null) return null;
+        return user.FindFirst("tid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
     }
 
     /// <summary>
@@ -176,7 +198,10 @@ public class ExternalParticipationService
         }
     }
 
-    private async Task CacheParticipationsAsync(string cacheKey, IReadOnlyList<ExternalParticipation> participations)
+    private async Task CacheParticipationsAsync(
+        string tenantId,
+        string idComponent,
+        IReadOnlyList<ExternalParticipation> participations)
     {
         try
         {
@@ -186,18 +211,16 @@ public class ExternalParticipationService
                 AccessLevel = (int)p.AccessLevel
             }).ToList();
 
-            var json = JsonSerializer.Serialize(cached, JsonOptions);
-            await _cache.SetStringAsync(cacheKey, json, new DistributedCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = CacheTtl
-            });
+            await _cache.SetAsync(
+                tenantId, ExternalAccessResource, idComponent, CacheVersion,
+                cached, CacheTtl);
 
-            _logger.LogDebug("[EXT-ACCESS] Cached {Count} participations for key {Key} (TTL: {Ttl}s)",
-                participations.Count, cacheKey, CacheTtl.TotalSeconds);
+            _logger.LogDebug("[EXT-ACCESS] Cached {Count} participations for Contact {ContactId} (TTL: {Ttl}s)",
+                participations.Count, idComponent, CacheTtl.TotalSeconds);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[EXT-ACCESS] Error caching participations for key {Key}. Non-critical.", cacheKey);
+            _logger.LogWarning(ex, "[EXT-ACCESS] Error caching participations for Contact {ContactId}. Non-critical.", idComponent);
         }
     }
 

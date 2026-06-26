@@ -13,10 +13,13 @@ namespace Sprk.Bff.Api.Services.Ai.Memory;
 /// session-files search.
 /// </para>
 /// <para>
-/// <strong>ADR-014 isolation</strong>: storage keys are scoped per session
-/// (<c>session:{sessionId}:recent-files</c>) so cross-session reads are structurally
-/// impossible. The tenant filter is enforced upstream by ChatSessionManager (the only
-/// caller that can supply a session id) — this layer trusts the session id is authentic.
+/// <strong>ADR-014 / FR-05 isolation</strong>: storage keys are tenant-scoped via
+/// <c>ITenantCache</c> as
+/// <c>tenant:{tenantId}:recently-discussed:{sessionId}:v1</c>. Cross-session reads
+/// remain structurally impossible (session id is unique within a tenant) and the
+/// tenant prefix satisfies spaarke-redis-cache-remediation-r1 FR-05 mandatory tenant
+/// scoping. The session id supplied by the caller is trusted to be authentic per the
+/// upstream ChatSessionManager contract.
 /// </para>
 /// <para>
 /// <strong>ADR-015 telemetry</strong>: implementations MUST log only sessionId + fileId +
@@ -32,21 +35,24 @@ public interface IRecentlyDiscussedTracker
 {
     /// <summary>
     /// Marks a file as discussed in the given session at the current UTC time.
-    /// Idempotent: repeated calls with the same (sessionId, fileId) overwrite the timestamp.
+    /// Idempotent: repeated calls with the same (tenantId, sessionId, fileId) overwrite the timestamp.
     /// </summary>
+    /// <param name="tenantId">Tenant identifier (FR-05 mandatory tenant scoping).</param>
     /// <param name="sessionId">Session identifier (chat session GUID "N" format).</param>
     /// <param name="fileId">Stable file identifier from the session manifest.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task MarkAsync(string sessionId, string fileId, CancellationToken cancellationToken = default);
+    Task MarkAsync(string tenantId, string sessionId, string fileId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Returns the most recently-discussed file ids for the given session, ordered by most-recent first.
     /// Empty list if no files discussed yet. Bound by <paramref name="maxCount"/> (default 5).
     /// </summary>
+    /// <param name="tenantId">Tenant identifier (FR-05 mandatory tenant scoping).</param>
     /// <param name="sessionId">Session identifier (chat session GUID "N" format).</param>
     /// <param name="maxCount">Maximum number of fileIds to return (default 5).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task<IReadOnlyList<string>> GetRecentAsync(
+        string tenantId,
         string sessionId,
         int maxCount = 5,
         CancellationToken cancellationToken = default);
