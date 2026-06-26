@@ -153,7 +153,7 @@ export function useSemanticSearch(
       try {
         // multi-container-multi-index-r1 (post-Phase D UAT): single source-of-truth
         // is now the AI Search index. The wizard pipeline + "Send to Index" ribbon
-        // reliably populate `spaarke-file-index` with parentEntityType/parentEntityId
+        // reliably populate `spaarke-files-index` with parentEntityType/parentEntityId
         // on every chunk, so the semantic search (filtered by parent) returns the
         // complete set. The previous `searchUnion` (semantic + Dataverse-associated
         // merged client-side) was an indexing-reliability workaround and is retired
