@@ -22,10 +22,10 @@ Fix the BFF's Redis/cache configuration drift (`Redis__Enabled=false` in a deplo
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Phase 5 closed; Phase 3 + Phase 4 telemetry verification **DEFERRED to Azure operator** |
-| **Progress** | ~80% (47/60 tasks ✅; 13 deferred — 10 Phase 3 cutover + 3 Phase 4 live verification; all code/IaC/docs/ADR work complete) |
-| **Target Date** | Phase 3 cutover at operator's discretion |
-| **Completed Date** | Code/IaC/docs portion: 2026-06-26 |
+| **Phase** | Phase 1+2+3+5 complete (infrastructure level); Phase 4 partial — live metric/dependency verification awaits PR merge + `bff-deploy` |
+| **Progress** | ~92% (55/60 tasks ✅; 5 partial: tasks 035, 036, 040, 042 + 044 subsumed — all blocked on new BFF code deployment, not infrastructure) |
+| **Target Date** | Code-level smoke tests (035, 040, 042) post-PR-merge |
+| **Completed Date** | 2026-06-26 (code, IaC, docs, ADRs, dev infrastructure cutover including legacy tag + sister handoff) |
 | **Owner** | spaarke-dev |
 
 ## Problem Statement
@@ -40,8 +40,8 @@ Architecture 1 (one platform Redis per environment) with mandatory tenant key pr
 
 The project is considered **complete** when:
 
-- [ ] ⏸ **DEFERRED** Dev BFF startup log shows `"Distributed cache: Redis enabled with instance name 'spaarke:'"` with NO in-memory warning (Success Criterion #1 — also the gate signal for sister project) — *Azure operator: run `Deploy-RedisCache.ps1 -Environment dev -KeyVaultName <kv> -CutoverBffSettings`*
-- [ ] ⏸ **DEFERRED** Dev BFF App Settings reference Key Vault for the Redis connection string (no plain text) — *part of `Deploy-RedisCache.ps1 -CutoverBffSettings`*
+- [x] **Dev BFF startup log** shows `"Distributed cache: Redis enabled with instance name 'spaarke:'"` with NO in-memory warning — **verified 2026-06-26T11:21:39 UTC** (Success Criterion #1; sister-project gate signal cleared)
+- [x] **Dev BFF App Settings reference Key Vault** for the Redis connection string (no plain text) — `ConnectionStrings__Redis=@Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=Redis-ConnectionString)`; KV-reference resolution verified "Resolved"
 - [x] **ADR-009 amended** in BOTH `.claude/adr/ADR-009-redis-caching.md` (concise) AND `docs/adr/ADR-009-caching-redis-first.md` (full) with 8 new operational MUSTs (tasks 052+053 lockstep)
 - [x] **`CacheModule.cs` fails startup** with clear error when Redis configured but unreachable in deployed env (`AbortOnConnectFail = true`); 4-branch logic verified by `CacheModuleTests` (task 003 + 009)
 - [x] **`redis.bicep` extended** (not duplicated; +`redisVersion`, +`staticIP`, +`redisPrimaryKey` output); `redis-dev.bicepparam` (Basic C0), `redis-staging.bicepparam` (Standard C0), `redis-prod.bicepparam` (Standard C2 with DO-NOT-DEPLOY header) committed (tasks 020, 022, 023, 024)
@@ -51,11 +51,11 @@ The project is considered **complete** when:
 - [x] **ALL `IDistributedCache.` direct call sites in `Sprk.Bff.Api/` migrated** to `ITenantCache` wrapper (153 sites / 56 files; verified by FR-06 grep gate task 018); 11 system-level exceptions documented in `SystemCacheKeys.cs` (under 20 escalation threshold)
 - [x] **`Redis:InstanceName` changed** from `sdap:` (and dev's `sdap-dev:` variant) to `spaarke:` across appsettings, template, Bicep params, ADR-009, patterns, architecture docs (task 008 + 052 + 053 + 058)
 - [x] **R7 backlog** captures S1–S4 deferred items (Entra ID auth, Pub/Sub separation, multi-region, other secrets) (task 057)
-- [ ] ⏸ **DEFERRED** Legacy `spe-redis-dev-67e2xz` decommissioned (or tagged `decommission=YYYY-MM-DD`) after 24-hr verification — *Azure operator task 037*
+- [x] **Legacy `spe-redis-dev-67e2xz`** TAGGED for decommission (`decommission=2026-06-26`, `decommission-reason=replaced-by-spaarke-bff-redis-dev`) — kept 7–14 days for reversibility; operator can delete after 24-hr verification window
 - [x] **BFF publish size delta ≤+1 MB** compressed (per ADR-029 + CLAUDE.md §10) — actual **delta −2.0 MB** vs branch start (cumulative measurement at task 041)
 - [x] **`dotnet test` passes**; new `CacheModuleTests` covers all 4 branches — **7826 passed, 1 pre-existing failed (`SessionFilesCleanupJobTests.RunScheduledScanAsync_Evicts_Only_Orphans_Not_In_Active_Set`), 135 skipped**
 - [x] **`SPAARKE-DEPLOYMENT-GUIDE.md` §4.5** added; Appendix D updated (task 054)
-- [ ] ⏸ **DEFERRED** Sister-project handoff confirmed: `spaarke-ai-azure-setup-dev-r1` cross-references this project's Phase 3 cutover as prerequisite — *Azure operator task 038 (after task 034 gate signal)*
+- [x] **Sister-project handoff** confirmed: `projects/spaarke-ai-azure-setup-dev-r1/notes/handoffs/redis-cache-remediation-r1-phase3-cleared.md` written 2026-06-26; sister project unblocked
 
 ## Scope
 

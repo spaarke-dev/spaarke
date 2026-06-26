@@ -120,6 +120,80 @@ Per spec "Out of Scope": `DocumentIntelligence__AiSearchKey` plain-text key migr
 
 ---
 
+## S5 — Evaluate Azure Managed Redis (`Microsoft.Cache/redisEnterprise`) for Prod
+
+### Summary
+
+This project provisioned dev on **Azure Cache for Redis** (`Microsoft.Cache/Redis`, legacy product, Basic C0 at ~$15/mo) — the right product for dev cost-wise. Microsoft has since launched **Azure Managed Redis** (`Microsoft.Cache/redisEnterprise`, Redis Enterprise under the hood, GA mid-2025) as the recommended path forward for production workloads. Before any prod provisioning happens, evaluate Managed Redis vs Azure Cache for Redis Premium tier.
+
+### Why this matters now
+
+The recommendation surfaced during dev cutover (2026-06-26). Spec was written assuming Azure Cache for Redis throughout. Switching mid-project for dev was rejected on cost (~4× higher minimum) and rework grounds — but the prod decision is genuinely open and should be made deliberately.
+
+### Comparison
+
+| Aspect | Azure Cache for Redis (current) | Azure Managed Redis (candidate) |
+|---|---|---|
+| Resource provider | `Microsoft.Cache/Redis` | `Microsoft.Cache/redisEnterprise` |
+| Engine | Open-source Redis 6.0 / 7.0 / 7.2 | Redis Enterprise (Redis 7.4+) |
+| Smallest non-dev SKU | Standard C0 (~$50/mo) | Balanced B0 (~$60+/mo) |
+| Prod sizing baseline | Premium P1 (~$500/mo) for HA + VNet | Balanced B3+ (~$500-1000/mo) — comparable price at scale |
+| SLA | 99.9% Standard / 99.95% Premium ZR | 99.999% (Enterprise) |
+| Active-active geo-replication | Premium only (passive, manual failover) | Built-in across all Enterprise tiers — collapses S3 multi-region work |
+| Modules (RedisJSON / RediSearch / RedisBloom) | None | Built-in (unlocks future RediSearch use cases) |
+| StackExchange.Redis compatibility | Native | Native (identical connection string format) |
+| Entra ID auth | Premium only (S1 dependency) | All tiers (de-risks S1 prod path) |
+| Microsoft positioning | Legacy — still GA + maintained | The recommended forward path |
+
+### What survives unchanged on switch
+
+The architectural patterns laid down by this project work on either product:
+- `ITenantCache` wrapper + key format `spaarke:tenant:{tid}:{res}:{id}:v{n}`
+- Symmetric DI registration of `IConnectionMultiplexer` (StackExchange.Redis client)
+- `SystemCacheKeys.cs` allow-list
+- Custom metrics emission (`cache.hits`, `cache.misses`, `cache.redis_call_duration_ms`)
+- Observability + alerting strategy
+- Operational runbook (provision command + cutover protocol)
+
+### What needs rework
+
+- `infrastructure/bicep/modules/redis.bicep` — new module for `Microsoft.Cache/redisEnterprise`
+- `infrastructure/bicep/parameters/redis-prod.bicepparam` — new param schema (Managed Redis SKU shape)
+- `scripts/Deploy-RedisCache.ps1` — accept either provider; or split into `Deploy-CacheForRedis.ps1` + `Deploy-ManagedRedis.ps1`
+- `tests/manual/RedisValidationTests.ps1` — verify on either provider (connection-string-level identical, but Pub/Sub semantics differ slightly)
+- ADR-009 amendment — note Managed Redis as the prod path; revise SKU table
+
+### Combined leverage with S1, S2, S3
+
+- **S1** (Entra ID auth) is a Premium-tier feature on Azure Cache for Redis, but is **all-tier** on Managed Redis. Going Managed for prod **de-risks S1**.
+- **S2** (Pub/Sub separation) is still applicable. Managed Redis has slightly better cluster-aware Pub/Sub semantics but the architecture is the same: provision a second instance + use `cacheInstance` named registration.
+- **S3** (multi-region geo-replication) is **dramatically simpler** on Managed Redis — active-active is built-in. On Azure Cache for Redis it requires Premium tier + manual failover orchestration.
+
+### Entry-Point
+
+- Spike: provision a `Microsoft.Cache/redisEnterprise` Balanced B0 instance in a sandbox subscription; exercise the BFF against it via `Deploy-RedisCache.ps1` adapted for the new provider.
+- Decision memo: cost-perf comparison at projected prod traffic + SLA-vs-cost analysis + S1/S3 leverage analysis.
+- If chosen: prod provisioning project (`spaarke-managed-redis-prod-r1` or similar) authoring new Bicep module + revising R1 scripts.
+
+### Estimated Effort
+
+- **Spike + decision memo**: 2-3 days
+- **If Managed Redis chosen for prod**: ~2 weeks (Bicep module rewrite + script split + ADR-009 revision + prod cutover with finance + security review)
+
+### How to Start
+
+1. **Entry file**: this entry. Open a tracked issue in the team's backlog referencing this S5 + the article links in the project conversation log.
+2. **First PR action**: branch `work/spaarke-managed-redis-evaluation`; sandbox provisioning + cost analysis.
+3. **Decision deadline**: before any prod-tier Redis provisioning happens (sister project + future BFF prod cutovers all depend on this call).
+
+### Reference
+
+- Azure Managed Redis overview: https://learn.microsoft.com/en-us/azure/redis/overview
+- Azure Managed Redis pricing: https://azure.microsoft.com/en-us/products/managed-redis
+- This decision recorded by main session on 2026-06-26 during Phase 3 dev cutover (with the operator electing to keep dev on Azure Cache for Redis Basic C0 for cost reasons + project-mid-flight rework cost).
+
+---
+
 ## Cross-References
 
 - **Spec source**: [`spec.md`](../spec.md) FR-22 (fifth bullet) + Out of Scope section
