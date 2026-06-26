@@ -22,12 +22,13 @@ internal sealed class TenantCache : ITenantCache
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
     // FR-16: Custom cache metrics. Hit-rate is computed downstream from hits/(hits+misses).
-    // The "Spaarke.Cache" meter is published via System.Diagnostics.Metrics and picked up
-    // by the OpenTelemetry pipeline (and from there, Application Insights).
-    internal static readonly Meter Meter = new("Spaarke.Cache", "1.0.0");
-    private static readonly Counter<long> HitsCounter = Meter.CreateCounter<long>("cache.hits");
-    private static readonly Counter<long> MissesCounter = Meter.CreateCounter<long>("cache.misses");
-    private static readonly Histogram<double> CallDurationHistogram =
+    // Meter name follows the BFF's "Sprk.Bff.Api.*" convention (matches the existing
+    // `metrics.AddMeter("Sprk.Bff.Api.Cache")` registration in `TelemetryModule.cs` so
+    // metrics flow to App Insights via OpenTelemetry without additional registration).
+    internal static readonly Meter Meter = new("Sprk.Bff.Api.Cache", "1.0.0");
+    internal static readonly Counter<long> HitsCounter = Meter.CreateCounter<long>("cache.hits");
+    internal static readonly Counter<long> MissesCounter = Meter.CreateCounter<long>("cache.misses");
+    internal static readonly Histogram<double> CallDurationHistogram =
         Meter.CreateHistogram<double>("cache.redis_call_duration_ms");
 
     private readonly IDistributedCache _cache;
@@ -50,21 +51,15 @@ internal sealed class TenantCache : ITenantCache
         ValidateArguments(tenantId, resource, id, cacheInstance);
 
         var key = BuildKey(tenantId, resource, id, version);
-        var sw = Stopwatch.StartNew();
+        // Metrics (hits/misses/duration) are emitted by MetricsDistributedCache decorator
+        // at the IDistributedCache layer so all cache I/O — including the system-cache
+        // exception path — is counted exactly once. R7-S7 sub-gap #2 closure (2026-06-26).
         var bytes = await _cache.GetAsync(key, ct).ConfigureAwait(false);
-        sw.Stop();
-        CallDurationHistogram.Record(
-            sw.Elapsed.TotalMilliseconds,
-            new KeyValuePair<string, object?>("resource", resource),
-            new KeyValuePair<string, object?>("op", "get"));
 
         if (bytes is null || bytes.Length == 0)
         {
-            MissesCounter.Add(1, new KeyValuePair<string, object?>("resource", resource));
             return default;
         }
-
-        HitsCounter.Add(1, new KeyValuePair<string, object?>("resource", resource));
 
         try
         {
@@ -105,13 +100,8 @@ internal sealed class TenantCache : ITenantCache
             options.AbsoluteExpirationRelativeToNow = ttl.Value;
         }
 
-        var sw = Stopwatch.StartNew();
+        // Metrics emitted at IDistributedCache decorator layer (see GetAsync comment).
         await _cache.SetAsync(key, bytes, options, ct).ConfigureAwait(false);
-        sw.Stop();
-        CallDurationHistogram.Record(
-            sw.Elapsed.TotalMilliseconds,
-            new KeyValuePair<string, object?>("resource", resource),
-            new KeyValuePair<string, object?>("op", "set"));
     }
 
     public async Task RemoveAsync(
@@ -125,13 +115,8 @@ internal sealed class TenantCache : ITenantCache
         ValidateArguments(tenantId, resource, id, cacheInstance);
 
         var key = BuildKey(tenantId, resource, id, version);
-        var sw = Stopwatch.StartNew();
+        // Metrics emitted at IDistributedCache decorator layer (see GetAsync comment).
         await _cache.RemoveAsync(key, ct).ConfigureAwait(false);
-        sw.Stop();
-        CallDurationHistogram.Record(
-            sw.Elapsed.TotalMilliseconds,
-            new KeyValuePair<string, object?>("resource", resource),
-            new KeyValuePair<string, object?>("op", "remove"));
     }
 
     public async Task<T> GetOrCreateAsync<T>(
@@ -173,24 +158,8 @@ internal sealed class TenantCache : ITenantCache
         ValidateArguments(tenantId, resource, id, cacheInstance);
 
         var key = BuildKey(tenantId, resource, id, version);
-        var sw = Stopwatch.StartNew();
-        var value = await _cache.GetStringAsync(key, ct).ConfigureAwait(false);
-        sw.Stop();
-        CallDurationHistogram.Record(
-            sw.Elapsed.TotalMilliseconds,
-            new KeyValuePair<string, object?>("resource", resource),
-            new KeyValuePair<string, object?>("op", "get"));
-
-        if (value is null)
-        {
-            MissesCounter.Add(1, new KeyValuePair<string, object?>("resource", resource));
-        }
-        else
-        {
-            HitsCounter.Add(1, new KeyValuePair<string, object?>("resource", resource));
-        }
-
-        return value;
+        // Metrics emitted at IDistributedCache decorator layer (see GetAsync comment).
+        return await _cache.GetStringAsync(key, ct).ConfigureAwait(false);
     }
 
     public async Task SetStringAsync(
@@ -218,13 +187,8 @@ internal sealed class TenantCache : ITenantCache
             options.SlidingExpiration = slidingExpiration.Value;
         }
 
-        var sw = Stopwatch.StartNew();
+        // Metrics emitted at IDistributedCache decorator layer (see GetAsync comment).
         await _cache.SetStringAsync(key, value, options, ct).ConfigureAwait(false);
-        sw.Stop();
-        CallDurationHistogram.Record(
-            sw.Elapsed.TotalMilliseconds,
-            new KeyValuePair<string, object?>("resource", resource),
-            new KeyValuePair<string, object?>("op", "set"));
     }
 
     public async Task RefreshAsync(
@@ -238,13 +202,8 @@ internal sealed class TenantCache : ITenantCache
         ValidateArguments(tenantId, resource, id, cacheInstance);
 
         var key = BuildKey(tenantId, resource, id, version);
-        var sw = Stopwatch.StartNew();
+        // Metrics emitted at IDistributedCache decorator layer (see GetAsync comment).
         await _cache.RefreshAsync(key, ct).ConfigureAwait(false);
-        sw.Stop();
-        CallDurationHistogram.Record(
-            sw.Elapsed.TotalMilliseconds,
-            new KeyValuePair<string, object?>("resource", resource),
-            new KeyValuePair<string, object?>("op", "refresh"));
     }
 
     public async Task SetSlidingAsync<T>(
@@ -270,13 +229,8 @@ internal sealed class TenantCache : ITenantCache
             SlidingExpiration = slidingExpiration
         };
 
-        var sw = Stopwatch.StartNew();
+        // Metrics emitted at IDistributedCache decorator layer (see GetAsync comment).
         await _cache.SetAsync(key, bytes, options, ct).ConfigureAwait(false);
-        sw.Stop();
-        CallDurationHistogram.Record(
-            sw.Elapsed.TotalMilliseconds,
-            new KeyValuePair<string, object?>("resource", resource),
-            new KeyValuePair<string, object?>("op", "set"));
     }
 
     private static string BuildKey(string tenantId, string resource, string id, int version)

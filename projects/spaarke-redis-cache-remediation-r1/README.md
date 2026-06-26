@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-06-26
 >
-> **Status**: Phase 1 + Phase 2 + Phase 5 (code, IaC, docs, ADR amendments) — **COMPLETE**. Phase 3 (live dev-environment cutover) + Phase 4 (live App Insights verification) — **DEFERRED to Azure operator** (require Azure CLI access not available in this session).
+> **Status**: ✅ **COMPLETE** — all 5 phases + R7-S7 telemetry pipeline closure shipped. Six future-round items (DEF-001..DEF-006) are filed as GitHub Issues #462–#467 and tracked in [`notes/defer-issues.md`](notes/defer-issues.md).
 
 ## Overview
 
@@ -22,11 +22,26 @@ Fix the BFF's Redis/cache configuration drift (`Redis__Enabled=false` in a deplo
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Phase 1+2+3+5 complete (infrastructure level); Phase 4 partial — live metric/dependency verification awaits PR merge + `bff-deploy` |
-| **Progress** | ~92% (55/60 tasks ✅; 5 partial: tasks 035, 036, 040, 042 + 044 subsumed — all blocked on new BFF code deployment, not infrastructure) |
-| **Target Date** | Code-level smoke tests (035, 040, 042) post-PR-merge |
-| **Completed Date** | 2026-06-26 (code, IaC, docs, ADRs, dev infrastructure cutover including legacy tag + sister handoff) |
+| **Phase** | All 5 phases + R7-S7 (telemetry pipeline closure including Redis dep telemetry + cache.* custom metrics) complete |
+| **Progress** | 100% (project deliverables) |
+| **PRs** | #458 (Phase 1+2+3+5, merged) + #460 (AI-Search handoff + R7-S7 OTel exporter, merged) + R7-S7 sub-gap closure PR (filed via this session) |
+| **Completed Date** | 2026-06-26 |
 | **Owner** | spaarke-dev |
+
+### Tracked follow-up work (next round)
+
+Six items filed as GitHub Issues + tracked in [`notes/defer-issues.md`](notes/defer-issues.md) via the new `/project-defer-issue-tracking` skill:
+
+| ID | Title | Issue |
+|---|---|---|
+| DEF-001 | Entra ID auth via Managed Identity + "Redis Data Owner" role | [#462](https://github.com/spaarke-dev/spaarke/issues/462) |
+| DEF-002 | Pub/Sub separation in prod (dedicated Redis instance) | [#463](https://github.com/spaarke-dev/spaarke/issues/463) |
+| DEF-003 | Multi-region Redis (geo-replication) | [#464](https://github.com/spaarke-dev/spaarke/issues/464) |
+| DEF-004 | Plain-text secret remediation (non-Redis) | [#465](https://github.com/spaarke-dev/spaarke/issues/465) |
+| DEF-005 | Evaluate Azure Managed Redis for prod | [#466](https://github.com/spaarke-dev/spaarke/issues/466) |
+| DEF-006 | Rename App Insights `spe-insights-dev-67e2xz` → canonical | [#467](https://github.com/spaarke-dev/spaarke/issues/467) |
+
+Each entry has a paired GitHub Issue so the work is visible to anyone, not just whoever stumbles into this folder. `notes/r7-backlog.md` is retained as a historical decision record (initial backlog organized by R7 round); `notes/defer-issues.md` is the canonical tracker going forward.
 
 ## Problem Statement
 

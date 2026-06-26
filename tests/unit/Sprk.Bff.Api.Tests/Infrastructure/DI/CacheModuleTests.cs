@@ -148,9 +148,10 @@ public class CacheModuleTests
         var memCache = provider.GetRequiredService<IMemoryCache>();
         var tenantCache = provider.GetRequiredService<ITenantCache>();
 
-        // Assert — in-memory distributed cache, Null-Object multiplexer, and
+        // Assert — IDistributedCache is the MetricsDistributedCache decorator wrapping the
+        // in-memory cache (R7-S7 sub-gap #2 closure 2026-06-26); Null-Object multiplexer;
         // companion IMemoryCache + ITenantCache all resolve symmetrically.
-        distCache.Should().BeOfType<MemoryDistributedCache>();
+        distCache.Should().BeOfType<MetricsDistributedCache>();
         multiplexer.Should().BeOfType<NullConnectionMultiplexer>();
         memCache.Should().NotBeNull();
         tenantCache.Should().BeOfType<TenantCache>();
