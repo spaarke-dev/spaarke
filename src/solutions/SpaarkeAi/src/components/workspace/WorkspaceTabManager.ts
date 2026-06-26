@@ -158,6 +158,15 @@ export interface WorkspaceTab {
   isLoading: boolean;
   /** Human-readable display label (falls back to widgetType if registry lacks displayName). */
   displayName: string;
+  /**
+   * R6 Pillar 9 visibility contract — when true, the tab's contents appear
+   * in the per-turn agent prompt snapshot; when false, the tab is private
+   * to the user. Defaults to `false` (user-created tabs); agent-created
+   * tabs may default to `true`. Mutated by `setTabVisibility` (UI affordance
+   * via AddToAssistantToggle).
+   * @see Pillar 9 / FR-31 / task 098
+   */
+  visibleToAssistant: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -322,6 +331,8 @@ export class WorkspaceTabManager {
       Component,
       isLoading: Component == null,
       displayName: displayName ?? "Home",
+      // R6 Pillar 9 — Home is a default canvas tab; private by default.
+      visibleToAssistant: false,
     };
 
     // Home always sits at index 0 by convention.
@@ -372,6 +383,9 @@ export class WorkspaceTabManager {
       Component: null,
       isLoading: true,
       displayName: displayName ?? widgetType,
+      // R6 Pillar 9 default: user-created tabs are private by default.
+      // The agent toggles to true via the "Add to Assistant" affordance.
+      visibleToAssistant: false,
     };
 
     this._tabs = [...this._tabs, newTab];
@@ -430,6 +444,9 @@ export class WorkspaceTabManager {
       Component: null,
       isLoading: true,
       displayName: displayName ?? widgetType,
+      // R6 Pillar 9 default: user-created tabs are private by default.
+      // The agent toggles to true via the "Add to Assistant" affordance.
+      visibleToAssistant: false,
     };
 
     // Insert AFTER any Home tab (which by convention sits at index 0) so the
@@ -488,6 +505,27 @@ export class WorkspaceTabManager {
   updateTab(tabId: string, widgetData: unknown): void {
     this._tabs = this._tabs.map((t) =>
       t.id === tabId ? { ...t, widgetData } : t
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // setTabVisibility (R6 Pillar 9 / task 098 — user "Add to Assistant" toggle)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Flip a tab's `visibleToAssistant` flag. Used by the per-tab
+   * `AddToAssistantToggle` UI affordance + by future server-driven
+   * visibility updates (workspace state restore).
+   *
+   * No-op if the tab id is not found — callers do not need to guard against
+   * stale updates.
+   *
+   * @param tabId             - The id of the tab to update.
+   * @param visibleToAssistant - New visibility value.
+   */
+  setTabVisibility(tabId: string, visibleToAssistant: boolean): void {
+    this._tabs = this._tabs.map((t) =>
+      t.id === tabId ? { ...t, visibleToAssistant } : t
     );
   }
 
@@ -709,6 +747,9 @@ export class WorkspaceTabManager {
         Component,
         isLoading: false,
         displayName: t.displayName,
+        // R6 Pillar 9 default: restored tabs default to private. Server-side
+        // visibility state is reconciled by the workspace-state fetch path.
+        visibleToAssistant: false,
       });
     }
 
