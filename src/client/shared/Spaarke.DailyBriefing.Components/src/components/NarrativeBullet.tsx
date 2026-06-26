@@ -1,13 +1,27 @@
 /**
- * NarrativeBullet -- renders a single AI-narrated bullet with action buttons.
+ * NarrativeBullet -- renders a single AI-narrated bullet with a three-dot
+ * overflow action menu.
  *
- * Each bullet shows the narrative text, a clickable record link that opens
- * the entity in a Dataverse dialog, and two action buttons: "Add to To Do"
- * and "Dismiss".
+ * Each bullet shows the narrative text, a clickable regarding-name link that
+ * opens the entity in a Dataverse dialog, and a Fluent v9 three-dot overflow
+ * `Menu` (FR-18) replacing the prior inline 5-icon action row.
+ *
+ * Overflow menu items (canonical order per spec FR-18 / AC-18a):
+ *   1. Mark as read                  → onCheck(primaryItemId)        (R3 FR-4)
+ *   2. Remove from briefing          → onRemove(primaryItemId)       (R3 FR-5)
+ *   3. Keep on briefing for 7 more days → onKeep(primaryItemId, ttl) (R3 FR-6)
+ *   4. Add to To Do                  → onAddToTodo(itemIds)          (ADR-024)
+ *   5. Dismiss                       → onDismiss(itemIds)            (FR-14a)
+ *   6. Open record                   → onOpenRecord(type, id)        (FR-18 new)
+ *
+ * The inline 5-icon row is REMOVED per FR-18 ("MUST NOT preserve inline 5-icon
+ * row"). The R3 actions (Check, Remove, Keep) are PRESERVED — they migrate
+ * into the overflow menu unchanged in behavior. The R2 ADR-024 `Add to To Do`
+ * + Dismiss callbacks are PRESERVED via the same Menu surface.
  *
  * Aggregation UX (FR-11): when `itemIds.length > 1` and the optional `items`
  * prop is supplied, an indented per-item sub-list is rendered beneath the
- * narrative line. Each sub-row composes three slot sub-components:
+ * narrative line — UNCHANGED from R2.
  *
  *   - <SubRowLink />    -- per-item entity link (task 021, FR-12)
  *   - <SubRowTodo />    -- per-item Add-to-To-Do (task 022, FR-13)
@@ -18,21 +32,39 @@
  *
  * Constraints:
  *   - ADR-021: Fluent v9 tokens only, dark mode via semantic tokens
- *   - Opens records via Xrm.Navigation.navigateTo
+ *   - ADR-024: `useInlineTodoCreate` + `TODO_REGARDING_CATALOG` preserved (the
+ *     menu invokes the existing `onAddToTodo` callback unchanged)
+ *   - WCAG: trigger has aria-label="More actions"; MenuItem touch targets meet
+ *     ≥44×44px via Fluent v9 defaults; keyboard nav (Tab, Enter, arrows, Esc)
+ *     handled by the Menu primitive out-of-box
+ *   - Visual pattern: matches `DocumentRowMenu` (the canonical Spaarke
+ *     three-dot pattern) and the semantic-search PCF ResultCard convention
  *
- * Hoisted into `@spaarke/daily-briefing-components/components` by R2 task 011
- * (Wave 3 / Group A). Source of truth; the original-location file at
- * `src/solutions/DailyBriefing/src/components/NarrativeBullet.tsx` is now a
- * re-export shim pending full cleanup in R2 task 017.
- *
- * Task 020 (Wave 8): adds sub-list rendering skeleton + slot wiring. The 3
- * per-row controls (link, To-Do, Dismiss) are real-implemented by tasks
- * 021/022/023 (Wave 9, parallel-safe -- each task edits its own slot file).
+ * Component hoisted into `@spaarke/daily-briefing-components/components` by R2
+ * task 011 (Wave 3 / Group A). Task 045 (R4) refactors the inline action row
+ * into the overflow menu.
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, Text, Button, Tooltip, Spinner } from '@fluentui/react-components';
-import { CalendarAddRegular, CheckmarkRegular, DismissRegular } from '@fluentui/react-icons';
+import {
+  makeStyles,
+  tokens,
+  Text,
+  Menu,
+  MenuTrigger,
+  MenuButton,
+  MenuPopover,
+  MenuList,
+  MenuItem,
+} from '@fluentui/react-components';
+import {
+  MoreHorizontalRegular,
+  CheckmarkRegular,
+  DismissRegular,
+  CalendarAddRegular,
+  AddRegular,
+  OpenRegular,
+} from '@fluentui/react-icons';
 import { MicrosoftToDoIcon } from '@spaarke/ui-components';
 import type { NotificationItem } from '../types/notifications';
 import { formatDueDate } from '../utils/formatDueDate';
@@ -88,11 +120,8 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
   },
-  todoIconDefault: {
-    color: tokens.colorNeutralForeground3,
-  },
-  todoIconActive: {
-    color: tokens.colorBrandForeground1,
+  todoMenuIcon: {
+    color: tokens.colorNeutralForeground1,
   },
   // FR-11: per-item sub-list (rendered only when itemIds.length > 1).
   subList: {
@@ -141,68 +170,52 @@ export interface NarrativeBulletProps {
    * sub-list is rendered beneath the narrative line. When omitted or when
    * `itemIds.length === 1`, the sub-list is NOT rendered (existing UX
    * preserved).
-   *
-   * Items SHOULD be passed in the same order as `itemIds`. Each sub-row's
-   * 3 slot sub-components (link / To-Do / Dismiss) use the `NotificationItem`
-   * verbatim per FR-12/FR-13/FR-14 -- no AI involvement on the sub-row data.
-   *
-   * Wired by tasks 021/022/023 (Wave 9) into the slot components.
    */
   items?: NotificationItem[];
   /**
-   * Optional per-item Add-to-To-Do callback (FR-13, task 022).
-   *
-   * Distinct from `onAddToTodo` (the aggregated callback). When provided,
-   * each sub-row's To-Do slot becomes active; task 022 wires
-   * `useInlineTodoCreate` with the specific underlying `NotificationItem`.
+   * Optional per-item Add-to-To-Do callback (FR-13, task 022). Distinct from
+   * `onAddToTodo` (the aggregated callback). When provided, each sub-row's
+   * To-Do slot becomes active.
    */
   onAddToTodoItem?: (itemId: string) => void;
   /**
-   * Optional per-item Dismiss callback (FR-14, task 023).
-   *
-   * Distinct from `onDismiss` (the aggregated callback, which cascades per
-   * FR-14a). When provided, each sub-row's Dismiss slot becomes active and
-   * marks only the specific `appnotification` row as read.
+   * Optional per-item Dismiss callback (FR-14, task 023). Distinct from
+   * `onDismiss` (the aggregated callback, which cascades per FR-14a).
    */
   onDismissItem?: (itemId: string) => void;
   /**
    * R3 task 031 / FR-4 — "Mark as read" action.
    *
-   * When supplied, a Check button (`CheckmarkRegular`) renders FIRST in the
-   * action row. Clicking invokes `onCheck(firstItemId)`. The parent wraps
-   * the `markChecked` hook handler with an optimistic-update + toast callback.
-   *
-   * Defensive default: when undefined, the button is hidden (the existing
-   * NarrativeBullet remains backward-compatible with consumers that have not
-   * yet wired the new action layer).
+   * Migrated into the FR-18 overflow menu as item 1. When undefined, the menu
+   * item is hidden (defensive default; back-compat with consumers that have
+   * not yet wired the new action layer).
    */
   onCheck?: (itemId: string) => void;
   /**
    * R3 task 031 / FR-5 — "Remove from briefing" action.
    *
-   * When supplied, a Remove button (`DismissRegular`) renders SECOND in the
-   * action row. Clicking invokes `onRemove(firstItemId)`. The parent wraps
-   * the `markRemoved` hook handler with optimistic UI + toast callback.
-   *
-   * Defensive default: hidden when undefined.
+   * Migrated into the FR-18 overflow menu as item 2. Hidden when undefined.
    */
   onRemove?: (itemId: string) => void;
   /**
    * R3 task 031 / FR-6 — "Keep on briefing for 7 more days" action.
    *
-   * When supplied, a Keep button (`CalendarAddRegular`) renders THIRD in the
-   * action row. Clicking invokes `onKeep(firstItemId, currentTtlSeconds)`.
-   * The parent wraps the `extendTtl` hook handler with optimistic UI + toast
-   * callback (the toast renders the new effective expiry date).
-   *
-   * `currentTtlSeconds` reflects the item's current `ttlinseconds` value; the
-   * service computes `newTtl = currentTtlSeconds + 604800`. If the consumer
-   * cannot resolve a value (e.g., not selected on the query), pass `0` —
-   * the service interprets this as "extend by 7 days from now".
-   *
-   * Defensive default: hidden when undefined.
+   * Migrated into the FR-18 overflow menu as item 3. `currentTtlSeconds`
+   * reflects the item's current `ttlinseconds` value; the service computes
+   * `newTtl = currentTtlSeconds + 604800`. Hidden when undefined.
    */
   onKeep?: (itemId: string, currentTtlSeconds: number) => void;
+  /**
+   * FR-18 / AC-18a — "Open record" action (new in R4).
+   *
+   * Migrated into the FR-18 overflow menu as item 6. When supplied, the menu
+   * item invokes `onOpenRecord(primaryEntityType, primaryEntityId)`. When
+   * undefined, the menu item falls back to the same Xrm.Navigation.navigateTo
+   * invocation that the inline regarding-name link uses (i.e., the action
+   * is always available so long as primaryEntityType + primaryEntityId are
+   * supplied — matching the inline link's existing precondition).
+   */
+  onOpenRecord?: (entityType: string, entityId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +239,7 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   onCheck,
   onRemove,
   onKeep,
+  onOpenRecord,
 }) => {
   const styles = useStyles();
 
@@ -243,76 +257,93 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
     !showSubList && Array.isArray(items) && items.length === 1 ? formatDueDate(items[0].dueDate) : null;
   const isSingleItemOverdue = singleItemDueDate?.startsWith('Overdue') ?? false;
 
-  const handleLinkClick = () => {
-    if (!primaryEntityType || !primaryEntityId) return;
-    const xrm =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any)?.Xrm ??
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window.parent as any)?.Xrm ??
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window.top as any)?.Xrm;
+  // Resolve the Xrm globals once (used by both the inline regarding-name link
+  // and the fallback "Open record" overflow-menu handler).
+  const resolveXrm = (): { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } } | undefined => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (window as any)?.Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+  };
+
+  const openRecordViaXrm = (entityType: string, entityId: string): void => {
+    if (!entityType || !entityId) return;
+    const xrm = resolveXrm();
     if (!xrm?.Navigation?.navigateTo) return;
-    xrm.Navigation.navigateTo(
-      {
-        pageType: 'entityrecord',
-        entityName: primaryEntityType,
-        entityId: primaryEntityId,
-      },
-      { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
-    ).catch(() => {
-      /* user closed dialog */
-    });
+    xrm.Navigation
+      .navigateTo(
+        {
+          pageType: 'entityrecord',
+          entityName: entityType,
+          entityId: entityId,
+        },
+        { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
+      )
+      .catch(() => {
+        /* user closed dialog */
+      });
   };
 
-  const handleAddToTodo = () => {
-    if (!isTodoCreated && !isTodoPending) {
-      onAddToTodo(itemIds);
-    }
+  const handleLinkClick = (): void => {
+    openRecordViaXrm(primaryEntityType, primaryEntityId);
   };
 
-  const handleDismiss = () => {
-    onDismiss(itemIds);
-  };
-
-  // R3 task 031 — per-item action handlers (FR-4 / FR-5 / FR-6).
+  // ---------------------------------------------------------------------------
+  // FR-18 overflow-menu action handlers.
   //
-  // The 3 new actions operate at single-item granularity (`appnotificationid`
-  // GUID), matching the underlying hook signatures `markChecked(id) /
-  // markRemoved(id) / extendTtl(id, currentTtl)`. The primary subject of the
-  // bullet is `itemIds[0]` — for aggregated bullets, the parent supplies the
-  // bullet's lead item; the per-row Sub-list owns its own (future) controls.
+  // R3 task 031 — per-item action handlers (FR-4 / FR-5 / FR-6). The 3 R3
+  // actions operate at single-item granularity (`appnotificationid` GUID),
+  // matching the underlying hook signatures. The primary subject of the bullet
+  // is `itemIds[0]` — for aggregated bullets, the parent supplies the bullet's
+  // lead item; the per-row sub-list owns its own controls.
+  // ---------------------------------------------------------------------------
   const primaryItemId = itemIds[0] ?? '';
 
   // R3 FR-6: `currentTtlSeconds` is sourced from the corresponding
-  // NotificationItem. The service-layer FR-6 follow-up adds `ttlinseconds`
-  // to NOTIFICATION_SELECT + toNotificationItem mapping so items carry their
-  // current TTL. Coalesce to 0 for pre-rollout rows with no stored TTL
-  // (those fall back to tenant default 14d at Dataverse; Keep writes an
-  // explicit 604800 = 7d, which may shorten them — acceptable per spec
-  // for the legacy-row edge case; post-task-010 producer-written rows have
-  // explicit ttlinseconds = 604800 so Keep correctly extends to 1209600).
+  // NotificationItem. Coalesce to 0 for pre-rollout rows with no stored TTL.
   const primaryItemTtlSeconds = items?.find(item => item.id === primaryItemId)?.ttlinseconds ?? 0;
 
-  const handleCheck = () => {
+  const handleMenuMarkAsRead = (): void => {
     if (!primaryItemId) return;
     onCheck?.(primaryItemId);
   };
 
-  const handleRemove = () => {
+  const handleMenuRemoveFromBriefing = (): void => {
     if (!primaryItemId) return;
     onRemove?.(primaryItemId);
   };
 
-  const handleKeep = () => {
+  const handleMenuKeepSevenMoreDays = (): void => {
     if (!primaryItemId) return;
     onKeep?.(primaryItemId, primaryItemTtlSeconds);
   };
 
-  // Determine To Do button tooltip
-  let todoTooltip = 'Add to To Do';
-  if (isTodoCreated) todoTooltip = 'Added to To Do';
-  if (todoError) todoTooltip = todoError;
+  const handleMenuAddToTodo = (): void => {
+    if (isTodoCreated || isTodoPending) return;
+    onAddToTodo(itemIds);
+  };
+
+  const handleMenuDismiss = (): void => {
+    onDismiss(itemIds);
+  };
+
+  const handleMenuOpenRecord = (): void => {
+    if (!primaryEntityType || !primaryEntityId) return;
+    if (onOpenRecord) {
+      onOpenRecord(primaryEntityType, primaryEntityId);
+    } else {
+      openRecordViaXrm(primaryEntityType, primaryEntityId);
+    }
+  };
+
+  // The "Add to To Do" menu item label reflects the same state the prior
+  // inline button surfaced via Tooltip: created / pending / error / default.
+  let addToDoLabel = 'Add to To Do';
+  if (isTodoCreated) addToDoLabel = 'Added to To Do';
+  else if (isTodoPending) addToDoLabel = 'Adding to To Do…';
+  else if (todoError) addToDoLabel = todoError;
+
+  // "Open record" is hidden when there is no primary entity to open (matches
+  // the inline regarding-name link's precondition).
+  const canOpenRecord = Boolean(primaryEntityType && primaryEntityId);
 
   return (
     <div className={styles.root}>
@@ -359,76 +390,73 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
       </div>
       <div className={styles.actions}>
         {/*
-          R3 task 031 — 3 new per-item actions (FR-4 / FR-5 / FR-6).
-          Each renders only when its callback prop is wired by the parent
-          (defensive default per task POML step 5). Owner-specified icon set:
-          CheckmarkRegular / DismissRegular / CalendarAddRegular. Owner-specified
-          tooltips per spec.md. Order: Check → Remove → Keep → (existing) Add to
-          To Do → (existing) Dismiss. Existing "Add to To Do" button is preserved
-          unchanged to satisfy ADR-024 regression-free invariant.
+          FR-18 / AC-18a — Three-dot overflow menu replacing the prior inline
+          5-icon action row. Fluent v9 Menu primitive handles keyboard nav
+          (Tab/Enter to open, arrows to move, Enter to select, Esc to close)
+          and ARIA roles out-of-box. MenuButton meets WCAG ≥44×44px touch
+          target at the Fluent v9 default size.
+
+          The 6 items render in canonical order per FR-18:
+            1. Mark as read                 (R3 onCheck)
+            2. Remove from briefing         (R3 onRemove)
+            3. Keep on briefing for 7 more days (R3 onKeep)
+            4. Add to To Do                 (ADR-024 onAddToTodo)
+            5. Dismiss                      (FR-14a onDismiss)
+            6. Open record                  (FR-18 onOpenRecord)
+
+          Items 1/2/3 hide when their callback is undefined (defensive default,
+          back-compat). Item 6 hides when primaryEntityType/Id are missing.
         */}
-        {onCheck && (
-          <Tooltip content="Mark as read" relationship="label">
-            <Button
+        <Menu>
+          <MenuTrigger disableButtonEnhancement>
+            <MenuButton
               appearance="subtle"
               size="small"
-              icon={<CheckmarkRegular />}
-              onClick={handleCheck}
-              aria-label="Mark as read"
+              icon={<MoreHorizontalRegular />}
+              aria-label="More actions"
             />
-          </Tooltip>
-        )}
-        {onRemove && (
-          <Tooltip content="Remove from briefing" relationship="label">
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<DismissRegular />}
-              onClick={handleRemove}
-              aria-label="Remove from briefing"
-            />
-          </Tooltip>
-        )}
-        {onKeep && (
-          <Tooltip content="Keep on briefing for 7 more days" relationship="label">
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<CalendarAddRegular />}
-              onClick={handleKeep}
-              aria-label="Keep on briefing for 7 more days"
-            />
-          </Tooltip>
-        )}
-        <Tooltip content={todoTooltip} relationship="label">
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={
-              isTodoPending ? (
-                <Spinner size="tiny" />
-              ) : (
-                <MicrosoftToDoIcon
-                  size={16}
-                  active={isTodoCreated}
-                  className={isTodoCreated ? styles.todoIconActive : styles.todoIconDefault}
-                />
-              )
-            }
-            onClick={handleAddToTodo}
-            disabled={isTodoCreated || isTodoPending}
-            aria-label={todoTooltip}
-          />
-        </Tooltip>
-        <Tooltip content="Dismiss" relationship="label">
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<DismissRegular />}
-            onClick={handleDismiss}
-            aria-label="Dismiss"
-          />
-        </Tooltip>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              {onCheck && (
+                <MenuItem icon={<CheckmarkRegular />} onClick={handleMenuMarkAsRead}>
+                  Mark as read
+                </MenuItem>
+              )}
+              {onRemove && (
+                <MenuItem icon={<DismissRegular />} onClick={handleMenuRemoveFromBriefing}>
+                  Remove from briefing
+                </MenuItem>
+              )}
+              {onKeep && (
+                <MenuItem icon={<CalendarAddRegular />} onClick={handleMenuKeepSevenMoreDays}>
+                  Keep on briefing for 7 more days
+                </MenuItem>
+              )}
+              <MenuItem
+                icon={
+                  isTodoCreated || isTodoPending ? (
+                    <MicrosoftToDoIcon size={16} active={isTodoCreated} className={styles.todoMenuIcon} />
+                  ) : (
+                    <AddRegular />
+                  )
+                }
+                onClick={handleMenuAddToTodo}
+                disabled={isTodoCreated || isTodoPending}
+              >
+                {addToDoLabel}
+              </MenuItem>
+              <MenuItem icon={<DismissRegular />} onClick={handleMenuDismiss}>
+                Dismiss
+              </MenuItem>
+              {canOpenRecord && (
+                <MenuItem icon={<OpenRegular />} onClick={handleMenuOpenRecord}>
+                  Open record
+                </MenuItem>
+              )}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
       </div>
     </div>
   );

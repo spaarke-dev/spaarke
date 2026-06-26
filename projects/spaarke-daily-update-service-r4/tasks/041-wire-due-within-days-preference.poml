@@ -3,7 +3,9 @@
   <metadata>
     <title>Wire dueWithinDays preference to fetchNotifications filter (FR-17b)</title>
     <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>Wired dueWithinDays preference (FR-17b) as post-fetch client filter since Dataverse OData cannot filter on nested customData.dueDate. Items with null dueDate kept. Test coverage in notificationService.test.ts. Agent execution timed out mid-stream; work recovered from git stash and verified — 41 Jest tests pass.</completion-notes>
     <estimated-hours>1</estimated-hours>
     <dependencies>036</dependencies>
     <blocks>049</blocks>
