@@ -1,0 +1,64 @@
+<task id="CICD-042" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Build .github/workflows/ci-tier2-advisory.yml (format + lint + full unit tests + ADR + markdown + Last Reviewed + plugin size; PR-comment dedup)</title>
+    <status>not-started</status>
+    <estimated-effort>2.5 hours</estimated-effort>
+    <phase>2 - Stream A</phase>
+    <stream>A - CI tiering</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>ci, workflow, tier2, advisory, pr-comment</tags>
+  </metadata>
+
+  <prompt>
+    Per spec FR-A03: ship `ci-tier2-advisory.yml` in shadow. Contents (advisory, non-blocking, p95 ≤ 8 min): format, lint, full unit tests, ADR compliance, markdown link validator, Last Reviewed stamp, plugin size. Posts deduplicated PR comment using the pattern from `sdap-ci.yml` lines 591-619 (job `adr-pr-comment` — `body.includes('ADR Architecture Validation Report')` ownership detection). Not a required status check.
+  </prompt>
+
+  <role>CI/CD engineer authoring the advisory-tier workflow.</role>
+
+  <goal>`ci-tier2-advisory.yml` exists, runs in shadow, posts a single deduplicated PR comment.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+    <file purpose="pattern-source">.github/workflows/sdap-ci.yml (lines 591-619 PR-comment dedup)</file>
+    <file purpose="markdown-validator">scripts/validate-markdown-links.ps1 (created in task 044; if not yet shipped when 042 runs, mark as a follow-up)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-A03">Strict scope list. Advisory, never required.</constraint>
+    <constraint source="spec NFR-02">Tier 2 p95 ≤ 8 min over 30-day window.</constraint>
+    <constraint source="reuse-pattern">PR-comment dedup pattern from sdap-ci.yml lines 591-619 — copy verbatim, retitle output marker.</constraint>
+    <constraint source="project autonomous">FULL rigor — Step 9.5 code-review + adr-check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Tier 2 advisory CI + PR-comment dedup</topic>
+    <files>
+      <file>.github/workflows/sdap-ci.yml lines 591-619 (PR-comment dedup pattern to reuse)</file>
+      <file>scripts/validate-markdown-links.ps1 (from task 044)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `sdap-ci.yml` lines 591-619 to extract dedup pattern (`github.rest.issues.listComments()` + `find()`)</step>
+    <step order="2">Author jobs in `ci-tier2-advisory.yml`: format (dotnet format --verify-no-changes), lint (eslint or equivalent), full unit tests (Debug, no Release per Phase 2 MUST), ADR-compliance (NetArchTest full suite or `adr-check` skill), markdown validator (calls validate-markdown-links.ps1), Last Reviewed stamp (existing pattern), plugin size (existing pattern)</step>
+    <step order="3">Author final PR-comment job using copied dedup pattern; output marker e.g. `Tier 2 Advisory Report`</step>
+    <step order="4">Mark workflow as `workflow_call`-compatible for router dispatch</step>
+    <step order="5">Validate with actionlint</step>
+    <step order="6">Step 9.5</step>
+  </steps>
+
+  <outputs>
+    <output type="workflow">.github/workflows/ci-tier2-advisory.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File passes actionlint</criterion>
+    <criterion testable="true">All 7 spec-listed jobs present (format, lint, full unit tests, ADR, markdown, Last Reviewed, plugin size)</criterion>
+    <criterion testable="true">PR-comment dedup pattern present and references unique marker text</criterion>
+    <criterion testable="true">Workflow is non-blocking (not in required checks)</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+  </acceptance-criteria>
+</task>

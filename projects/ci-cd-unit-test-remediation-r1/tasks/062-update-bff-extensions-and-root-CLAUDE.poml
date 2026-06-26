@@ -1,0 +1,70 @@
+<task id="CICD-062" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Update .claude/constraints/bff-extensions.md (Hot-Path Declaration section) + root CLAUDE.md §8/§10/§17</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>2 - Stream C</phase>
+    <stream>C - Hot-path coordination</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>030, 031, 060, 061</dependencies>
+    <tags>skill-directive, bff-extensions, root-CLAUDE, hot-path-declaration</tags>
+    <execution-note>Modifies .claude/ and root CLAUDE.md — MUST run in main session</execution-note>
+  </metadata>
+
+  <prompt>
+    Three edits in one task per spec FR-B07 + FR-C04 + FR-C03 + FR-C04. (1) `.claude/constraints/bff-extensions.md`: add new "Hot-Path Declaration" section (after MUST Rules block, before Decision Criteria) — declares that any BFF-touching project must include <hot-path-declaration> in design.md. (2) Root `CLAUDE.md` §8 rigor table: update STANDARD row to clarify test-modifying tasks become FULL (override). (3) Root `CLAUDE.md` §10 BFF Hygiene: add new bullet referencing the bff-extensions Hot-Path Declaration section. (4) Root `CLAUDE.md` §17 Pointers: add rows for `docs/standards/TEST-ARCHITECTURE.md`, `docs/adr/ADR-038-testing-strategy.md`, `projects/INDEX.md`.
+  </prompt>
+
+  <role>Skill author updating cross-cutting directives.</role>
+
+  <goal>bff-extensions.md has Hot-Path Declaration section; root CLAUDE.md §8/§10/§17 updated.</goal>
+
+  <inputs>
+    <file purpose="pre-update-source">.claude/constraints/bff-extensions.md (current; sections A-F in MUST Rules block)</file>
+    <file purpose="pre-update-source">CLAUDE.md (root, §8 lines 132-155; §10 lines 168-195; §17 lines 300-341)</file>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="root-CLAUDE-3">Modifies .claude/ AND root CLAUDE.md — MUST run in main session.</constraint>
+    <constraint source="spec FR-B07">§8 rigor table override for test-modifying tasks.</constraint>
+    <constraint source="spec FR-C04">bff-extensions Hot-Path Declaration section + root §10 cross-reference.</constraint>
+    <constraint source="spec MUST">All changes binding for ≥6 months minimum.</constraint>
+    <constraint source="project autonomous">FULL rigor — load-bearing directive changes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Spaarke directive editing</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md (current sections A-F)</file>
+      <file>CLAUDE.md (root §8, §10, §17)</file>
+      <file>projects/INDEX.md (referenced by new content)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md (referenced by §17)</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md (referenced by §17)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `.claude/constraints/bff-extensions.md` end-to-end. Identify insertion point (after MUST Rules block, before Decision Criteria)</step>
+    <step order="2">Author "Hot-Path Declaration" section: requires BFF-touching projects to include <hot-path-declaration> in design.md with BFF/SpaarkeAi/ci-workflows/skill-directives Y/N tags; cross-reference projects/INDEX.md; cite the rule's origin (FR-C04)</step>
+    <step order="3">Edit root CLAUDE.md §8 rigor table: in STANDARD row, add note "EXCEPT test-modifying tasks → FULL (override per ci-cd-unit-test-remediation-r1 spec FR-B07; binding for ≥6 months from 2026-06-26)". OR add a new row in the table for "Test-modifying tasks" with rigor=FULL.</step>
+    <step order="4">Edit root CLAUDE.md §10: append new bullet "Hot-path declaration required in design.md — see `.claude/constraints/bff-extensions.md` Hot-Path Declaration section"</step>
+    <step order="5">Edit root CLAUDE.md §17: add 3 rows — `docs/standards/TEST-ARCHITECTURE.md` (test architecture standard), `docs/adr/ADR-038-testing-strategy.md` (testing strategy ADR; standalone, NOT supersession), `projects/INDEX.md` (active-project registry with hot-path declarations)</step>
+    <step order="6">Step 9.5: code-review + adr-check on all 3 files</step>
+  </steps>
+
+  <outputs>
+    <output type="constraint">.claude/constraints/bff-extensions.md (extended)</output>
+    <output type="root-directive">CLAUDE.md (§8, §10, §17 updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">bff-extensions.md contains "Hot-Path Declaration" section between MUST Rules and Decision Criteria</criterion>
+    <criterion testable="true">Root CLAUDE.md §8 rigor table reflects test-modifying override (either inline note or new row)</criterion>
+    <criterion testable="true">Root CLAUDE.md §10 contains bullet pointing to bff-extensions Hot-Path Declaration</criterion>
+    <criterion testable="true">Root CLAUDE.md §17 contains 3 new pointer rows (TEST-ARCHITECTURE.md, ADR-038, INDEX.md)</criterion>
+    <criterion testable="true">Step 9.5 pass on all 3 files</criterion>
+  </acceptance-criteria>
+</task>

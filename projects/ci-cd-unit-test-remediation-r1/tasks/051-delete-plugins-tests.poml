@@ -1,0 +1,54 @@
+<task id="CICD-051" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>DELETE PR 1/3: tests/unit/Spaarke.Plugins.Tests/ DELETE category (~2 files, lowest-risk first)</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>2 - Stream B</phase>
+    <stream>B - Test reset</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>050</dependencies>
+    <blocks>052</blocks>
+    <tags>testing, deletion, sliced-PR, plugins</tags>
+  </metadata>
+
+  <prompt>
+    First sliced-deletion PR per spec FR-B06. Delete DELETE-categorized files from `tests/unit/Spaarke.Plugins.Tests/` (smallest project — 2 files). Lowest-risk first as forcing pattern for subsequent slices.
+  </prompt>
+
+  <role>Test architecture engineer executing a small deletion as forcing example.</role>
+
+  <goal>DELETE-categorized files removed from Spaarke.Plugins.Tests; `dotnet test` still passes for the remaining tests; no regression in production code coverage of KEEP path categories 1-4 (regression/auth/data-mutation/tenant) without same-PR replacement.</goal>
+
+  <inputs>
+    <file purpose="inventory">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory.csv (DELETE rows for Spaarke.Plugins.Tests)</file>
+    <file purpose="new-constraint">.claude/constraints/testing.md (rewritten in 022 — has the 6 KEEP path MUST rules)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B06">Deletion-safety enforced at Step 9.5 by path check. Any deletion under tests/integration/auth/**, regression/**, data-mutation/**, tenant/** requires same-PR replacement.</constraint>
+    <constraint source="spec MUST NOT">MUST NOT restore Release matrix before this and subsequent slices land + 7-day soak.</constraint>
+    <constraint source="project autonomous">FULL rigor — Step 9.5 binding.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Load inventory CSV; filter DELETE rows for `tests/unit/Spaarke.Plugins.Tests/`</step>
+    <step order="2">Verify NONE of the files to delete are now under the 4 protected KEEP paths (or, if so, that a same-PR replacement exists)</step>
+    <step order="3">`git rm` each file; update `Spaarke.Plugins.Tests.csproj` if explicit Compile globs reference deleted files</step>
+    <step order="4">Run `dotnet build` and `dotnet test` for the project; verify remaining tests still pass</step>
+    <step order="5">Step 9.5: code-review + adr-check; verify path-check enforcement</step>
+    <step order="6">Commit + push as single PR (title: "test(b-phase2): delete DELETE-category wiring tests from Spaarke.Plugins.Tests per FR-B06 [slice 1/3]")</step>
+  </steps>
+
+  <outputs>
+    <output type="test-deletion">~2 .cs files removed from tests/unit/Spaarke.Plugins.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Only files marked DELETE in inventory CSV are removed</criterion>
+    <criterion testable="true">No file under any of the 4 protected KEEP paths is removed without same-PR replacement</criterion>
+    <criterion testable="true">`dotnet test tests/unit/Spaarke.Plugins.Tests/` passes (remaining tests intact)</criterion>
+    <criterion testable="true">Step 9.5 pass with path-check enforcement</criterion>
+  </acceptance-criteria>
+</task>

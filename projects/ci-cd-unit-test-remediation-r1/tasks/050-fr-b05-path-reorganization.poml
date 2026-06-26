@@ -1,0 +1,70 @@
+<task id="CICD-050" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>FR-B05: reorganize existing tests into 6 KEEP path conventions (move-and-rename; create tests/unit/domain from scratch)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>2 - Stream B</phase>
+    <stream>B - Test reset</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>020, 022</dependencies>
+    <blocks>051, 052, 053a, 053b, 053c</blocks>
+    <tags>testing, path-reorganization, git-mv</tags>
+  </metadata>
+
+  <prompt>
+    Per spec FR-B05: reorganize existing tests into 6 KEEP path conventions. Mechanical move-and-rename (git mv); no semantic changes. The 6 target paths: `tests/integration/auth/**`, `tests/integration/regression/**`, `tests/integration/data-mutation/**`, `tests/integration/tenant/**`, `tests/integration/contract/**`, `tests/unit/domain/**`. NONE exist today; create from scratch. Use the inventory CSV from task 020 to drive the source→target mapping.
+  </prompt>
+
+  <role>Test architecture engineer doing a mechanical reorganization.</role>
+
+  <goal>Tests under all 6 KEEP paths; `dotnet test` passes (no semantic regressions); inventory CSV's KEEP rows all moved.</goal>
+
+  <inputs>
+    <file purpose="inventory">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory.csv (from task 020)</file>
+    <file purpose="new-directive">tests/CLAUDE.md (rewritten in 021)</file>
+    <file purpose="new-constraint">.claude/constraints/testing.md (rewritten in 022)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B05">Mechanical move-and-rename only. No semantic changes.</constraint>
+    <constraint source="spec UQ#3">`tests/unit/domain/**` confirmed NOT to exist today; create from scratch.</constraint>
+    <constraint source="project autonomous">FULL rigor — Step 9.5 code-review + adr-check; large-file-count change.</constraint>
+    <constraint source="csproj-discipline">When moving .cs files, update parent .csproj `<Compile Include>` if explicit (Spaarke uses implicit globbing; usually no-op).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Sliced test reorganization</topic>
+    <files>
+      <file>projects/ci-cd-unit-test-remediation-r1/notes/test-inventory.csv</file>
+      <file>tests/integration/Spe.Integration.Tests/ (existing integration project — likely target for sub-categorization)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (largest unit test project)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load `notes/test-inventory.csv`. Filter to KEEP rows. Group by suggested_target_path.</step>
+    <step order="2">Create the 6 target directories: `tests/integration/auth/`, `tests/integration/regression/`, `tests/integration/data-mutation/`, `tests/integration/tenant/`, `tests/integration/contract/`, `tests/unit/domain/`</step>
+    <step order="3">Decide whether each target needs its own .csproj or whether they all share one. Spec implies shared; lean toward keeping `tests/integration/Spe.Integration.Tests/` as the umbrella but with subdirectories matching the 6 paths.</step>
+    <step order="4">For each KEEP file: `git mv source target` to the suggested path. Preserve namespace (or update if path-namespace coupling exists).</step>
+    <step order="5">Update any `<ProjectReference>` or `<Compile Include>` entries in test .csproj files if explicit globs are used (Spaarke uses implicit globbing by default; verify).</step>
+    <step order="6">Run `dotnet build` on solution; resolve any namespace or reference errors</step>
+    <step order="7">Run `dotnet test` on the moved tests; verify pass count matches pre-move pass count (no semantic regression)</step>
+    <step order="8">Step 9.5: code-review + adr-check; verify path-convention compliance per constraints/testing.md</step>
+    <step order="9">Commit + push as a single PR (large file count is expected; PR title: "test: reorganize KEEP tests into 6 canonical path conventions per FR-B05")</step>
+  </steps>
+
+  <outputs>
+    <output type="test-tree">tests/integration/auth/**, tests/integration/regression/**, tests/integration/data-mutation/**, tests/integration/tenant/**, tests/integration/contract/**, tests/unit/domain/**</output>
+    <output type="docs">notes/path-reorganization-summary.md (file counts per target, any namespace updates)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 target paths exist and contain at least one test file</criterion>
+    <criterion testable="true">`dotnet build` succeeds</criterion>
+    <criterion testable="true">`dotnet test --no-build` pass count matches pre-move baseline (recorded before move; no behavioral regression)</criterion>
+    <criterion testable="true">PR review: only `git mv` style changes (no semantic edits to test bodies)</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+  </acceptance-criteria>
+</task>

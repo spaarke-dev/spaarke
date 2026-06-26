@@ -1,0 +1,66 @@
+<task id="CICD-044" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Build .github/workflows/deploy-spaarke-ai.yml (mirror of deploy-bff-api.yml) + audit deploy-bff-api.yml master-trigger + ship scripts/validate-markdown-links.ps1</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2 - Stream A</phase>
+    <stream>A - CI tiering</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>ci, workflow, cd, deploy, spaarke-ai, markdown-validator</tags>
+  </metadata>
+
+  <prompt>
+    Three deliverables in one task: (1) Per spec FR-C05, build `deploy-spaarke-ai.yml` as a mirror of `deploy-bff-api.yml` pattern (CD from master, staging slot, /healthz, swap, rollback) for the SpaarkeAi code page at `src/solutions/SpaarkeAi/`. (2) Audit `deploy-bff-api.yml` to CONFIRM it triggers from master (exploration confirms it does on `src/server/api/**`) — document the confirmation. (3) Ship `scripts/validate-markdown-links.ps1` for Tier 2 markdown link validation.
+  </prompt>
+
+  <role>CI/CD engineer building CD plumbing for a second deployment target.</role>
+
+  <goal>`deploy-spaarke-ai.yml` exists; `deploy-bff-api.yml` trigger audit documented; `scripts/validate-markdown-links.ps1` exists and is callable from ci-tier2-advisory.yml.</goal>
+
+  <inputs>
+    <file purpose="pattern-source">.github/workflows/deploy-bff-api.yml</file>
+    <file purpose="target-solution">src/solutions/SpaarkeAi/ (Vite single-file build to dist/spaarkeai.html)</file>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-C05">Mirror deploy-bff-api.yml pattern. CD from master. Audit + fix deploy-bff-api.yml if not master-triggered.</constraint>
+    <constraint source="spec MUST">MUST keep deploy-promote.yml, deploy-infrastructure.yml, deploy-office-addins.yml unchanged.</constraint>
+    <constraint source="project autonomous">FULL rigor — Step 9.5. CD-related = highest-stakes workflow.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure App Service deployment slots</topic>
+    <files>
+      <file>.github/workflows/deploy-bff-api.yml (pattern source)</file>
+      <file>src/solutions/SpaarkeAi/package.json (build script: vite build → rename to spaarkeai.html)</file>
+      <file>src/solutions/SpaarkeAi/vite.config.ts (single-file bundle config)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Audit deploy-bff-api.yml: confirm `on: push: branches: [master], paths: src/server/api/**` and document in `notes/deploy-bff-api-trigger-audit.md`. Fix if not master-triggered.</step>
+    <step order="2">Identify SpaarkeAi deployment target (Azure Static Web App? App Service? Power Pages?). Confirm via spec or design.md.</step>
+    <step order="3">Author `deploy-spaarke-ai.yml`: trigger on `push: branches: [master], paths: [src/solutions/SpaarkeAi/**]`; build (`npm run build` in SpaarkeAi dir); deploy to staging; /healthz or equivalent verify; swap to production; rollback on failure</step>
+    <step order="4">Ship `scripts/validate-markdown-links.ps1`: takes a directory, scans .md files for broken local file links and external link patterns; returns exit 1 on broken links; output a summary</step>
+    <step order="5">Validate workflows with actionlint; test PowerShell script with `Invoke-ScriptAnalyzer` or pwsh test run</step>
+    <step order="6">Step 9.5 code-review + adr-check on all 3 deliverables</step>
+  </steps>
+
+  <outputs>
+    <output type="workflow">.github/workflows/deploy-spaarke-ai.yml</output>
+    <output type="script">scripts/validate-markdown-links.ps1</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/deploy-bff-api-trigger-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">deploy-spaarke-ai.yml exists, passes actionlint, triggers on master push to SpaarkeAi/ paths</criterion>
+    <criterion testable="true">scripts/validate-markdown-links.ps1 exists and exits 0 on a clean .md file, exit 1 on a file with a broken link</criterion>
+    <criterion testable="true">notes/deploy-bff-api-trigger-audit.md confirms master-trigger (or documents fix if needed)</criterion>
+    <criterion testable="true">deploy-promote.yml, deploy-infrastructure.yml, deploy-office-addins.yml unchanged (verify via git diff)</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+  </acceptance-criteria>
+</task>

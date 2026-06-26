@@ -1,0 +1,68 @@
+<task id="CICD-040" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Build .github/workflows/ci-router.yml (always reports single required status check; path-aware dispatch)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2 - Stream A</phase>
+    <stream>A - CI tiering</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>012</dependencies>
+    <tags>ci, workflow, router, branch-protection-adjacent</tags>
+  </metadata>
+
+  <prompt>
+    Per spec FR-A01, FR-A05: ship `.github/workflows/ci-router.yml` in shadow mode (not yet required). Router runs on every PR + master push; always reports a single required status check `CI / Router`; dispatches Tier 1 + Tier 2 conditionally based on path-aware diff classification (BFF-only / SpaarkeAi-only / docs-only / full). NO commit-marker skip mechanism — path detection is the only relief. Signal model per task 012's decision.
+  </prompt>
+
+  <role>CI/CD engineer authoring a new tiered-router workflow.</role>
+
+  <goal>`ci-router.yml` exists, runs in shadow (not required for branch protection yet), and consistently emits `CI / Router` status check.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+    <file purpose="router-signal-decision">projects/ci-cd-unit-test-remediation-r1/notes/router-signal-model-decision.md (from task 012)</file>
+    <file purpose="existing-pattern">.github/workflows/sdap-ci.yml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-A01">Single required status check `CI / Router`. Never stuck pending.</constraint>
+    <constraint source="spec FR-A05">No commit-marker skip mechanism. Path-aware dispatch is the only relief.</constraint>
+    <constraint source="spec MUST">MUST keep `sdap-ci.yml` running in parallel through Phase 2.</constraint>
+    <constraint source="task-012">Use signal model resolved in task 012 (single composite vs neutral conclusion).</constraint>
+    <constraint source="project autonomous">FULL rigor — Step 9.5 code-review + adr-check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>GitHub Actions tiered CI</topic>
+    <files>
+      <file>.github/workflows/sdap-ci.yml (current monolithic; reference + parallel-run target)</file>
+      <file>.github/workflows/sdap-ci-docs-only.yml (existing no-op fallback pattern)</file>
+      <file>projects/ci-cd-unit-test-remediation-r1/notes/router-signal-model-decision.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 012's decision document for the chosen signal model</step>
+    <step order="2">Read existing `sdap-ci.yml` and `sdap-ci-docs-only.yml` for patterns to follow/avoid</step>
+    <step order="3">Author `ci-router.yml`: triggers (`pull_request`, `push` to master); diff classifier job (BFF-only / SpaarkeAi-only / docs-only / full); conditional dispatch via `workflow_call` or `needs:` chain to Tier 1 + Tier 2; final job that always reports `CI / Router` status using signal model from task 012</step>
+    <step order="4">Validate with `actionlint` locally (or via existing `workflows-validate.yml`)</step>
+    <step order="5">Commit; ship in shadow (do NOT update branch protection yet)</step>
+    <step order="6">Step 9.5: code-review + adr-check; verify the single-required-check semantics</step>
+  </steps>
+
+  <outputs>
+    <output type="workflow">.github/workflows/ci-router.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File exists and passes `actionlint`</criterion>
+    <criterion testable="true">Triggers include both PR and push-to-master</criterion>
+    <criterion testable="true">Reports single status check named `CI / Router`</criterion>
+    <criterion testable="true">No commit-marker skip mechanism present</criterion>
+    <criterion testable="true">Path-aware dispatch classifier present (BFF, SpaarkeAi, docs-only, full)</criterion>
+    <criterion testable="true">Runs in shadow (sdap-ci.yml still required; ci-router.yml NOT yet required)</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+  </acceptance-criteria>
+</task>

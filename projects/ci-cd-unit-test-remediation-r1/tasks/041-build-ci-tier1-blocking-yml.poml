@@ -1,0 +1,68 @@
+<task id="CICD-041" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Build .github/workflows/ci-tier1-blocking.yml (compile + arch MUST-NOT + changed-surface integration smoke + auth smoke)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2 - Stream A</phase>
+    <stream>A - CI tiering</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>012</dependencies>
+    <tags>ci, workflow, tier1, blocking, auth-smoke, arch-tests</tags>
+  </metadata>
+
+  <prompt>
+    Per spec FR-A02: ship `ci-tier1-blocking.yml` in shadow. Contents (blocking, p95 ≤ 3 min): compile (Debug only, no `-warnaserror`); critical NetArchTest MUST-NOT subset; changed-surface integration smoke (~60-90s budget); auth smoke when diff touches `Infrastructure/Auth/` or claims handling. NOT in Tier 1: format, lint, markdown validator, dependency audit, Trivy, full unit/integration tests.
+  </prompt>
+
+  <role>CI/CD engineer authoring the narrow blocking-tier workflow.</role>
+
+  <goal>`ci-tier1-blocking.yml` exists, runs in shadow, contents match spec FR-A02 exactly.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+    <file purpose="existing-pattern">.github/workflows/sdap-ci.yml (extract Debug compile + arch test patterns)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-A02">Strict scope list. Do NOT include anything not listed.</constraint>
+    <constraint source="spec NFR-01">Tier 1 p95 ≤ 3 min over 30-day window.</constraint>
+    <constraint source="spec NFR-03">Tier 1 flake rate &lt; 1%.</constraint>
+    <constraint source="ADR-028">Auth smoke must align with Spaarke Auth v2 (OBO + app-only Graph).</constraint>
+    <constraint source="project autonomous">FULL rigor — Step 9.5 code-review + adr-check; auth-adjacent.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Tier 1 blocking CI</topic>
+    <files>
+      <file>.github/workflows/sdap-ci.yml (Debug compile job, NetArchTest setup)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ (auth smoke target paths)</file>
+      <file>tests/integration/ (changed-surface smoke source)</file>
+      <file>docs/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Extract Debug-only compile pattern from sdap-ci.yml</step>
+    <step order="2">Extract critical NetArchTest MUST-NOT subset (read existing NetArchTest project; identify the 3-5 most load-bearing tests)</step>
+    <step order="3">Author changed-surface integration smoke job: detect changed src/ paths, run only matching integration tests with 60-90s budget</step>
+    <step order="4">Author auth smoke job (conditional `if: contains(github.event.pull_request.changed_files, 'Infrastructure/Auth/')` or equivalent)</step>
+    <step order="5">Write `ci-tier1-blocking.yml` with all 4 jobs and `workflow_call` interface (so router can dispatch)</step>
+    <step order="6">Validate with actionlint</step>
+    <step order="7">Step 9.5: code-review + adr-check</step>
+  </steps>
+
+  <outputs>
+    <output type="workflow">.github/workflows/ci-tier1-blocking.yml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File passes actionlint</criterion>
+    <criterion testable="true">Exactly the 4 spec-listed jobs present (compile, arch MUST-NOT, changed-surface smoke, auth smoke)</criterion>
+    <criterion testable="true">NO format/lint/markdown/Trivy/dep-audit/full-tests jobs</criterion>
+    <criterion testable="true">`workflow_call` callable from ci-router.yml</criterion>
+    <criterion testable="true">Shadow mode (not required by branch protection)</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+  </acceptance-criteria>
+</task>

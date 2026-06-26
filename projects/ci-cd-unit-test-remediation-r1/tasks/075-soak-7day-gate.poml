@@ -1,0 +1,52 @@
+<task id="CICD-075" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>7-day soak gate: verify surviving suite green ≥7 consecutive days before Release matrix lock-in (SC-06)</title>
+    <status>not-started</status>
+    <estimated-effort>0.5 hours (passive monitoring + 1 active gate task at cutover+7d)</estimated-effort>
+    <phase>3 - Monitoring</phase>
+    <stream>A+B - Monitoring</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>071</dependencies>
+    <blocks>077</blocks>
+    <tags>monitoring, soak, gate, SC-06</tags>
+    <gate-condition>cutover+7d minimum</gate-condition>
+  </metadata>
+
+  <prompt>
+    Per spec FR-B07 + SC-06: after cutover, the surviving test suite must be green ≥7 consecutive days before Release matrix restoration is considered "locked in" (vs reversible). This task is a passive monitoring + gate task that completes only when the 7-day green soak is met. If a failure interrupts the soak, the counter resets.
+  </prompt>
+
+  <role>Monitoring engineer observing post-cutover stability.</role>
+
+  <goal>`notes/soak-monitoring.md` records 7 consecutive days of green Build & Test (Release+Debug) on master.</goal>
+
+  <inputs>
+    <file purpose="cutover-success">projects/ci-cd-unit-test-remediation-r1/notes/cutover-success.md (from 071)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B07">Restore Release to matrix only after 7 consecutive green days.</constraint>
+    <constraint source="spec MUST NOT">MUST NOT restore Release matrix before this gate passes.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">At cutover+1d (T+24h): `gh run list --workflow=sdap-ci.yml --branch=master --created &gt;={cutover-timestamp} --json conclusion,createdAt` — verify all runs green. Append to `notes/soak-monitoring.md`.</step>
+    <step order="2">Repeat at T+2d, T+3d, T+4d, T+5d, T+6d, T+7d</step>
+    <step order="3">If a failure occurs: classify (legitimate / flake / infra). If legitimate failure → fix + reset counter to T+0d. If flake → document, do NOT reset counter (per spec NFR-03 &lt;1% flake tolerance).</step>
+    <step order="4">At T+7d with 7 consecutive green days: declare soak passed; commit `notes/soak-passed.md` with run IDs</step>
+    <step order="5">Unblock task 077 (sdap-ci retirement)</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/soak-monitoring.md (running log)</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/soak-passed.md (final declaration with evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">7 consecutive green daily check-ins recorded in soak-monitoring.md</criterion>
+    <criterion testable="true">Soak-passed declaration includes run IDs as evidence</criterion>
+    <criterion testable="true">Any failures during soak documented with classification</criterion>
+  </acceptance-criteria>
+</task>

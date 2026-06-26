@@ -1,0 +1,56 @@
+<task id="CICD-053b" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>DELETE PR 3b/3c: BFF.Api.Tests DI-registration tests + constructor null-check tests (~150-180 files)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2 - Stream B</phase>
+    <stream>B - Test reset</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>053a</dependencies>
+    <blocks>053c</blocks>
+    <tags>testing, deletion, sliced-PR, bff-api, di-registration, null-checks</tags>
+  </metadata>
+
+  <prompt>
+    Second BFF sub-slice. Delete BFF.Api.Tests files testing DI container registration (e.g., "Service X is registered as singleton") and constructor argument null-check tests (e.g., `ctor(null)` throws ArgumentNullException). Per spec FR-B01 these are banned antipatterns. Estimated ~150-180 files.
+  </prompt>
+
+  <role>Test architecture engineer executing the DI/null-check slice.</role>
+
+  <goal>All DI-registration tests and constructor null-check tests removed from BFF.Api.Tests.</goal>
+
+  <inputs>
+    <file purpose="inventory">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory.csv (DELETE rows tagged DI-registration or constructor-null-check)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B01">DI-registration tests and constructor null-checks are banned. This slice REMOVES.</constraint>
+    <constraint source="spec FR-B06">Path-check at Step 9.5.</constraint>
+    <constraint source="project autonomous">FULL rigor.</constraint>
+    <constraint source="sub-slice-flexibility">If 020 inventory shows distribution wildly different from estimate, adjust slice boundaries before executing.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Rebase on master (53a should have merged)</step>
+    <step order="2">Load inventory CSV; filter DELETE rows tagged DI-registration OR constructor-null-check for BFF.Api.Tests</step>
+    <step order="3">Verify count matches estimate (~150-180); if very different, document and proceed (slice is per-criterion, not per-count)</step>
+    <step order="4">No protected-path violations check</step>
+    <step order="5">`git rm` files; update .csproj if needed</step>
+    <step order="6">Run `dotnet build` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`</step>
+    <step order="7">Step 9.5; commit + PR (title: "test(b-phase2): delete BFF.Api.Tests DI-registration + null-check tests per FR-B01 [slice 3b/3c]")</step>
+  </steps>
+
+  <outputs>
+    <output type="test-deletion">~150-180 files from tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No remaining DI-registration tests (grep for ServiceProvider in fact bodies)</criterion>
+    <criterion testable="true">No remaining null-argument ctor tests (grep for `new X(null)` patterns)</criterion>
+    <criterion testable="true">No protected-path violations</criterion>
+    <criterion testable="true">Surviving tests pass</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+  </acceptance-criteria>
+</task>
