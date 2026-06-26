@@ -85,6 +85,393 @@ The policy is enforced at three layers:
 2. **`nightly-health.yml` Tier 3 coverage job** — observation only; surfaces drift in nightly issue.
 3. **Path-check deletion safety** — any deletion under the 6 KEEP paths requires same-PR replacement (Step 9.5 enforces by path inspection, not CSV).
 
+### 7. Build-vs-Maintain Criteria (Scaffolding-Test Bans — added 2026-06-26 per spec FR-B08)
+
+The 5 bans in §4 (B1-B5) attack symptoms. The 12 bans below (B6-B17) attack the deeper structural debt: scaffolding-class tests written during development to drive design, validate construction, or lift coverage %, with no ongoing regression-protecting role. Industry consensus supports the distinction:
+
+- **Kent Beck** — "delete the scaffolding once the building stands" (TDD by Example, ch. 12 retrospective)
+- **Michael Feathers** — characterization-tests-vs-behavior-tests distinction (Working Effectively with Legacy Code, ch. 13)
+- **Google test-sizes taxonomy** — small (unit) tests have intentional short-half-life when they test internals; medium/large tests carry long-term contract value
+- **DHH / 37signals** — "less tests, written more carefully" (Rails Doctrine; HEY codebase ratio shifts post-launch)
+
+The 17 total bans (B1-B17) are MUST NOT for new tests AND DELETE candidates for existing ones. Each ban: signature + concrete C# BAD example + acceptable GOOD alternative + one-line rationale.
+
+---
+
+#### B6. Mirror tests (test code 1:1 with production code)
+
+A test method per production method, asserting the implementation does what it does.
+
+```csharp
+// BAD — mirror test
+[Fact]
+public void GetName_ReturnsName()
+{
+    var sut = new UserDto { Name = "Alice" };
+    sut.GetName().Should().Be("Alice");  // tests `=> Name;`
+}
+```
+
+**Why scaffolding**: The test fails only if the implementation diverges from itself. Production change to `Name` field flows automatically to test; no behavior is protected.
+
+```csharp
+// GOOD — test the behavior the field participates in (integration contract)
+[Fact]
+public async Task GetUserByEmail_WhenFound_ReturnsCanonicalCase()
+{
+    var response = await client.GetAsync("/api/users?email=alice@example.com");
+    var user = await response.Content.ReadFromJsonAsync<UserResponse>();
+    user.Name.Should().Be("Alice Smith");  // tests case-canonicalization behavior, not field plumbing
+}
+```
+
+#### B7. Tests-with-all-mocks-and-trivial-assertion (assertion count ≤ 2, every collaborator mocked)
+
+```csharp
+// BAD
+[Fact]
+public async Task ProcessOrder_CallsAllCollaborators()
+{
+    var pricing = new Mock<IPricingService>();
+    var inventory = new Mock<IInventoryService>();
+    var notifier = new Mock<INotifier>();
+    var sut = new OrderProcessor(pricing.Object, inventory.Object, notifier.Object);
+    await sut.ProcessAsync(new Order());
+    pricing.Verify(p => p.CalculateAsync(It.IsAny<Order>()), Times.Once);
+    inventory.Verify(i => i.ReserveAsync(It.IsAny<Order>()), Times.Once);
+}
+```
+
+**Why scaffolding**: Mocks specify what the implementation calls; the test reverses on every internal-flow refactor. Tests *interaction shape*, not behavior.
+
+```csharp
+// GOOD — integration test against real collaborators (or delete entirely)
+[Fact]
+public async Task PostOrder_WithValidPayment_PersistsConfirmedOrder()
+{
+    var response = await client.PostAsJsonAsync("/api/orders", validOrder);
+    response.StatusCode.Should().Be(HttpStatusCode.Created);
+    (await db.Orders.FindAsync(orderId)).Status.Should().Be(OrderStatus.Confirmed);
+}
+```
+
+#### B8. Internal/private method tests (via `InternalsVisibleTo` or reflection)
+
+```csharp
+// BAD
+[Fact]
+public void NormalizeFilename_HandlesUnicode()
+{
+    var method = typeof(FileUploader).GetMethod("NormalizeFilename",
+        BindingFlags.NonPublic | BindingFlags.Instance);
+    var result = method.Invoke(new FileUploader(), new object[] { "fileé.pdf" });
+    result.Should().Be("file_.pdf");
+}
+```
+
+**Why scaffolding**: Locks the implementation; "private" no longer means "free to refactor." Behavior should be tested via the public surface.
+
+```csharp
+// GOOD — test through the public endpoint
+[Fact]
+public async Task Upload_WithUnicodeFilename_PersistsNormalizedName()
+{
+    using var content = new MultipartFormDataContent { /* file with unicode name */ };
+    var response = await client.PostAsync("/api/files", content);
+    var saved = await db.Files.OrderByDescending(f => f.Id).FirstAsync();
+    saved.NormalizedName.Should().NotContain("é");
+}
+```
+
+#### B9. Pass-through wrapper tests (testing trivial delegation)
+
+Tests of methods that do nothing except delegate to a single collaborator: `=> _service.DoIt(x)`.
+
+```csharp
+// BAD
+[Fact]
+public void GetUser_DelegatesToRepository()
+{
+    var repo = new Mock<IUserRepository>();
+    repo.Setup(r => r.GetById("1")).Returns(new User());
+    var sut = new UserFacade(repo.Object);
+    sut.GetUser("1");
+    repo.Verify(r => r.GetById("1"), Times.Once);  // tests one line: `=> _repo.GetById(id);`
+}
+```
+
+**Why scaffolding**: Verifies one line of code. If the wrapper grows logic later, write a test then — for the logic, not the delegation.
+
+```csharp
+// GOOD — delete the test; OR if wrapper aggregates value, test the aggregation
+[Fact]
+public async Task GetUserWithTenantScope_AppliesTenantFilter()
+{
+    var user = await sut.GetUserAsync(userId: "1", tenantId: "t1");
+    user.TenantId.Should().Be("t1");  // aggregation behavior, not delegation
+}
+```
+
+#### B10. Coverage-fillers (tests authored to push coverage % up)
+
+Tests with no clear scenario, often `[Theory]` with trivially-different inputs and weak assertions like `NotThrow()` or `NotNull()`.
+
+```csharp
+// BAD
+[Theory]
+[InlineData(1)]
+[InlineData(2)]
+[InlineData(3)]
+public void Add_AnyInteger_DoesNotThrow(int x)
+{
+    var act = () => new Calculator().Add(x, x);
+    act.Should().NotThrow();  // covers `return a + b;` without asserting the result
+}
+```
+
+**Why scaffolding**: ADR-038 §3 makes coverage observation only, never gate. Tests authored for coverage are by construction not authored for behavior.
+
+```csharp
+// GOOD — assert the result
+[Theory]
+[InlineData(1, 1, 2)]
+[InlineData(2, 3, 5)]
+public void Add_GivenInputs_ReturnsSum(int a, int b, int expected)
+{
+    new Calculator().Add(a, b).Should().Be(expected);
+}
+```
+
+#### B11. Language-feature redundancy tests (testing what the compiler enforces)
+
+```csharp
+// BAD — tests `required` keyword
+[Fact]
+public void RequiredProperty_WhenMissing_FailsToConstruct()
+{
+    var act = () => new Document();  // 'required' is enforced at compile time / init
+    act.Should().Throw<InvalidOperationException>();
+}
+
+// BAD — tests record-equality generated code
+[Fact]
+public void Point_TwoIdenticalInstances_AreEqual()
+{
+    new Point(1, 2).Should().Be(new Point(1, 2));  // records get Equals/GetHashCode free
+}
+```
+
+**Why scaffolding**: The C# language/runtime already enforces this. Tests fail when the language semantics change — which never happens.
+
+```csharp
+// GOOD — delete; OR test the semantic that DEPENDS on the feature (e.g., dedup behavior)
+[Fact]
+public void OrderProcessor_DedupesIdenticalLineItems()
+{
+    sut.Add(new LineItem("A", qty: 10));
+    sut.Add(new LineItem("A", qty: 10));
+    sut.LineItems.Should().HaveCount(1);  // tests dedup, not record equality
+}
+```
+
+#### B12. Snapshot tests of trivial output (JSON round-trip, `ToString()`, default equality)
+
+```csharp
+// BAD
+[Fact]
+public void Person_SerializesToExpectedJson()
+{
+    var p = new Person { Name = "Alice", Age = 30 };
+    JsonSerializer.Serialize(p)
+        .Should().Be("""{"Name":"Alice","Age":30}""");  // tests System.Text.Json
+}
+```
+
+**Why scaffolding**: Tests the framework, not your code. Property reorder/rename triggers failure with no behavior impact.
+
+```csharp
+// GOOD — test the contract that flows through serialization
+[Fact]
+public async Task GetPerson_ResponseHasNameAndAgeFields()
+{
+    var response = await client.GetAsync("/api/people/1");
+    using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    doc.RootElement.GetProperty("name").GetString().Should().Be("Alice");
+    doc.RootElement.GetProperty("age").GetInt32().Should().Be(30);
+}
+```
+
+#### B13. Tests whose name doesn't describe behavior
+
+Test methods named `Test1`, `Foo_Works`, `Method_TestCase_Bug417`. Per the naming convention `{Method}_{Scenario}_{ExpectedResult}`, tests without scenario+expected in the name typically lack a clear behavior to defend.
+
+```csharp
+// BAD
+[Fact] public void Test1() { /* what scenario? what's expected? */ }
+[Fact] public void Foo_Works() { /* "works" is not a behavior */ }
+[Fact] public void DoIt_Bug417() { /* bug numbers belong in regression file names */ }
+```
+
+**Why scaffolding**: Reader cannot tell what's being protected. Test was added for coverage or pasted from a template; it doesn't survive a "what would break if this test were deleted?" question.
+
+```csharp
+// GOOD
+[Fact] public async Task GetDocument_WhenNotFound_ReturnsNotFound() { ... }
+[Fact] public async Task UploadFile_WhenSizeExceedsLimit_Returns413PayloadTooLarge() { ... }
+```
+
+#### B14. Tests of types the type system enforces (exhaustive switch, sealed-hierarchy coverage)
+
+C# 12 exhaustive switch generates compile-time warnings/errors when a case is missed; tests asserting "all cases handled" add CI cost with zero signal.
+
+```csharp
+// BAD
+[Theory]
+[InlineData(OrderStatus.Pending)]
+[InlineData(OrderStatus.Shipped)]
+[InlineData(OrderStatus.Delivered)]
+public void Process_AnyStatus_DoesNotThrowSwitchException(OrderStatus s)
+{
+    var act = () => sut.Process(s);
+    act.Should().NotThrow();  // compiler error if a case is missed
+}
+```
+
+**Why scaffolding**: Compiler already prevents the failure mode.
+
+```csharp
+// GOOD — test the behavior of each branch
+[Theory]
+[InlineData(OrderStatus.Pending, "queued")]
+[InlineData(OrderStatus.Shipped, "in-transit")]
+[InlineData(OrderStatus.Delivered, "received")]
+public void StatusToShippingLabel_GivenStatus_ReturnsExpectedLabel(OrderStatus s, string expected)
+{
+    sut.ToShippingLabel(s).Should().Be(expected);
+}
+```
+
+#### B15. Tests where assertion count is dwarfed by setup (setup-to-assertion ratio > 10:1)
+
+50+ lines of arrange/mock/setup with 1-2 trivial assertions. The setup contains the test's reasoning; behavior signal is buried.
+
+```csharp
+// BAD — 60 lines of setup, 1 weak assertion
+[Fact]
+public async Task ProcessOrder_Succeeds()
+{
+    var mock1 = new Mock<IServiceA>(); mock1.Setup(...).Returns(...);
+    var mock2 = new Mock<IServiceB>(); mock2.Setup(...).Returns(...);
+    // ... 50 more lines of mock configuration ...
+
+    var result = await sut.ProcessAsync(order);
+
+    result.Should().NotBeNull();  // 1 assertion of trivial property
+}
+```
+
+**Why scaffolding**: A reader can't determine what's being tested without reading every mock setup. Setup is the test logic; the test as a whole expresses configuration of a fake world, not behavior of the real one.
+
+```csharp
+// GOOD — refactor to integration test where setup is amortized in WebApplicationFactory
+[Fact]
+public async Task PostOrder_WithValidPayment_ReturnsConfirmation()
+{
+    var response = await client.PostAsJsonAsync("/api/orders", validOrder);
+    response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+    var order = await db.Orders.FindAsync(orderId);
+    order.Status.Should().Be(OrderStatus.Confirmed);
+}
+```
+
+#### B16. Tests of pure getters/setters/auto-properties (no logic)
+
+```csharp
+// BAD
+[Fact]
+public void Name_AfterSet_ReturnsSetValue()
+{
+    var sut = new Document();
+    sut.Name = "test.pdf";
+    sut.Name.Should().Be("test.pdf");  // tests `{ get; set; }`
+}
+```
+
+**Why scaffolding**: Auto-properties have no behavior. The C# language guarantees the round-trip.
+
+```csharp
+// GOOD — delete; OR if the property has validation/computation, test that
+[Fact]
+public void SetEmail_WithInvalidFormat_ThrowsArgumentException()
+{
+    var sut = new User();
+    var act = () => sut.Email = "not-an-email";
+    act.Should().Throw<ArgumentException>();  // actual validation
+}
+```
+
+#### B17. Tests of generated code (record equality, AutoMapper field-by-field, EF projection shape)
+
+```csharp
+// BAD — field-by-field AutoMapper test
+[Fact]
+public void UserDto_MapsAllFieldsFromUser()
+{
+    var user = new User { Id = "1", Name = "Alice", Email = "a@b" };
+    var dto = mapper.Map<UserDto>(user);
+    dto.Id.Should().Be(user.Id);
+    dto.Name.Should().Be(user.Name);
+    dto.Email.Should().Be(user.Email);  // tests the AutoMapper profile generator
+}
+```
+
+**Why scaffolding**: Validates what the generator was configured to produce. Configuration drift is caught by AutoMapper's `AssertConfigurationIsValid()` in one test, not field-by-field.
+
+```csharp
+// GOOD — single config-validity assertion + behavior tests on output shape
+[Fact]
+public void MapperConfiguration_IsValid() =>
+    mapper.ConfigurationProvider.AssertConfigurationIsValid();
+
+[Fact]
+public async Task GetUserDto_InPublicContext_StripsPii()
+{
+    var response = await client.GetAsync("/api/users/1?context=public");
+    var dto = await response.Content.ReadFromJsonAsync<UserDto>();
+    dto.Email.Should().BeNull();  // public context strips PII — actual behavior
+}
+```
+
+---
+
+### Summary table of all 17 bans
+
+| # | Pattern | Why scaffolding | Acceptable replacement |
+|---|---|---|---|
+| B1 | `Mock<HttpMessageHandler>` | Wire-format coupling | Real test double via `WebApplicationFactory` |
+| B2 | `Mock<IServiceClient>` typed HttpClient wrappers | Same as B1 hidden | Integration boundary |
+| B3 | DI-registration tests | App start verifies wiring | Behavior assertions on the registered service |
+| B4 | Constructor null-check tests | `ArgumentNullException.ThrowIfNull` in production code | Delete; trust the throw helper |
+| B5 | Mocking the SUT's collaborators when in-memory is honest | Implementation-shape lock-in | Integration test |
+| B6 | Mirror tests | Implementation == implementation | Test the behavior the field participates in |
+| B7 | All-mocks + trivial assertion | Interaction-shape lock-in | Integration test or delete |
+| B8 | Internal/private method tests via reflection | Implementation lock-in | Public-surface test |
+| B9 | Pass-through wrapper tests | Tests one line of code | Delete or test the aggregation |
+| B10 | Coverage-fillers | Coverage ≠ behavior | Assert the result, not "doesn't throw" |
+| B11 | Language-feature redundancy | Compiler/runtime enforces it | Test the dependent semantic |
+| B12 | Snapshot of trivial output | Tests the framework | Test the contract through the framework |
+| B13 | Test names without scenario+expected | Reader can't defend the test | Rename per convention or delete |
+| B14 | Exhaustive-switch / sealed-hierarchy coverage tests | Compiler enforces exhaustiveness | Test the per-branch behavior |
+| B15 | Setup-to-assertion ratio > 10:1 | Setup is the test logic | Integration test with amortized setup |
+| B16 | Getter/setter/auto-property tests | C# guarantees the round-trip | Delete or test the validation logic |
+| B17 | Generated-code tests (records, AutoMapper, EF projections) | Tests the generator | One config-validity assertion + behavior tests on output |
+
+### How this list is used
+
+1. **At authoring time** — `tests/CLAUDE.md` and `.claude/constraints/testing.md` cite this section; future Claude sessions reading the directives reject these patterns.
+2. **At project close** — `/test-diet` skill (added by spec FR-B09 / task CICD-081) uses this list as the classifier for build-vs-maintain reconciliation.
+3. **At retroactive cleanup** — Phase 2.5 tasks CICD-082..085 (spec FR-B10) inventory and delete existing instances against this list, targeting BFF unit test count ≤3,500.
+
 ## Consequences
 
 ### Positive

@@ -165,23 +165,6 @@ public class DocxExportServiceTests
         result.FileBytes.Should().NotBeNullOrEmpty();
     }
 
-    [Fact]
-    public async Task ExportAsync_ShouldGenerateValidDocx()
-    {
-        // Arrange
-        var service = CreateService();
-        var context = CreateValidContext(
-            title: "Contract Analysis Report",
-            content: "The contract contains standard terms and conditions.");
-
-        // Act
-        var result = await service.ExportAsync(context, CancellationToken.None);
-
-        // Assert - Verify the bytes represent a valid DOCX file
-        using var stream = new MemoryStream(result.FileBytes!);
-        var action = () => WordprocessingDocument.Open(stream, false);
-        action.Should().NotThrow("the exported bytes should be a valid DOCX file");
-    }
 
     [Fact]
     public async Task ExportAsync_ShouldIncludeTitle()

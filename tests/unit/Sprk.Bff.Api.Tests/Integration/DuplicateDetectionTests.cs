@@ -313,21 +313,6 @@ public class DuplicateDetectionTests : IDisposable
 
     #region Test: Idempotency key expires after 24h
 
-    [Fact]
-    public void IdempotencyKey_HasCorrectTtl_24Hours()
-    {
-        // Arrange
-        var expectedTtl = TimeSpan.FromHours(24);
-
-        // Create filter with default TTL
-        var filter = new IdempotencyFilter(_cache, _loggerMock.Object);
-
-        // The default TTL is internal, but we can verify the caching behavior
-        // by checking that SetAsync is called with correct options
-
-        // Assert - verify the filter was created (TTL is validated via integration)
-        filter.Should().NotBeNull();
-    }
 
     [Fact]
     public void IdempotencyKey_WhenExpired_CreatesNewJob()
@@ -345,16 +330,6 @@ public class DuplicateDetectionTests : IDisposable
         CacheContainsKey(cacheKey).Should().BeFalse();
     }
 
-    [Fact]
-    public void IdempotencyKey_WithCustomTtl_UsesProvidedValue()
-    {
-        // Arrange
-        var customTtl = TimeSpan.FromMinutes(30);
-        var filterWithCustomTtl = new IdempotencyFilter(_cache, _loggerMock.Object, customTtl);
-
-        // Assert - filter created successfully with custom TTL
-        filterWithCustomTtl.Should().NotBeNull();
-    }
 
     #endregion
 
@@ -710,24 +685,6 @@ public class DuplicateDetectionTests : IDisposable
 
     #region Test: Cache failure behavior
 
-    [Fact]
-    public void CacheUnavailable_ProceedsWithoutIdempotency()
-    {
-        // Per implementation, cache failures result in "fail open" - request proceeds
-
-        // Arrange — wrap a failing IDistributedCache in TenantCache to match new filter ctor signature.
-        var failingCacheMock = new Mock<IDistributedCache>();
-        failingCacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Redis unavailable"));
-        var failingTenantCache = new TenantCache(failingCacheMock.Object, Mock.Of<ILogger<TenantCache>>());
-
-        // Create filter with failing cache
-        var filterWithFailingCache = new IdempotencyFilter(failingTenantCache, _loggerMock.Object);
-
-        // Assert - filter should be created (fail-open behavior verified via integration)
-        filterWithFailingCache.Should().NotBeNull();
-    }
 
     #endregion
 

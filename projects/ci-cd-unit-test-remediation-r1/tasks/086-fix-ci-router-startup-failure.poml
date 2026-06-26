@@ -1,0 +1,107 @@
+<task id="CICD-086" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Fix CI Router startup_failure — re-enable workflow + achieve ≥2 consecutive successful master pushes (BLOCKS 071 cutover)</title>
+    <status>not-started</status>
+    <estimated-effort>4-6 hours (bisect + targeted fix + 2 master pushes for stability proof)</estimated-effort>
+    <phase>2.5 - Pre-cutover remediation (parallel with deep cleanup)</phase>
+    <stream>A - CI tiering remediation</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>false</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies></dependencies>
+    <blocks>071</blocks>
+    <tags>ci, workflow, hot-path, ci-workflows, debugging, remediation, FR-A06</tags>
+    <execution-note>Modifies .github/workflows/ci-*.yml — hot-path. Coordinate with active worktrees (none currently doing CI work per 2026-06-26 INDEX.md). NOT autonomous — first step requires user-supplied browser error message OR explicit confirmation to proceed with bisect.</execution-note>
+  </metadata>
+
+  <prompt>
+    Per spec FR-A06 (added 2026-06-26 after parallel-session discovery): `ci-router.yml` (workflow name `CI`, the FR-A01 deliverable) has been failing with `conclusion: startup_failure` on every push since cc305da98 merged to master. Two attempted fixes (fd451d39d, 0f9922ea9) did not resolve. Workflow is currently disabled via `gh workflow disable CI`. This task re-enables and proves ≥2 consecutive successful master pushes before Phase 3 cutover (071) can flip branch protection.
+
+    Browser error message is the cheap win — `gh` API shows zero check-runs because rejection happens pre-job-creation. First action: user opens https://github.com/spaarke-dev/spaarke/actions/runs/28244069552 and supplies the error sentence GitHub shows at the top of the run page. If that resolves it, execute fix + 2-push proof. If not, run the deterministic bisect on a `debug/ci-router-bisect` branch.
+  </prompt>
+
+  <role>CI/CD engineer debugging a pre-job-creation workflow rejection that produces no logs.</role>
+
+  <goal>CI Router workflow re-enabled; ≥2 consecutive master pushes show `conclusion=success`; `CI / Router` status check appears in commit checks list; latest_check_runs_count ≥ 1.</goal>
+
+  <inputs>
+    <file purpose="broken-workflow">.github/workflows/ci-router.yml (the FR-A01 deliverable from task CICD-040)</file>
+    <file purpose="callee-1">.github/workflows/ci-tier1-blocking.yml (Tier 1 reusable workflow)</file>
+    <file purpose="callee-2">.github/workflows/ci-tier2-advisory.yml (Tier 2 reusable workflow — likely input contract mismatch site)</file>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md FR-A01 / FR-A05 / FR-A06 / FR-C01</file>
+    <file purpose="prior-decision">projects/ci-cd-unit-test-remediation-r1/notes/router-signal-model-decision.md (Model A composite + alls-green choice)</file>
+    <file purpose="prior-fixes">git log: bc3403705 (router/tier2 input contract translation), fd451d39d (merge_group: branches: removal), 0f9922ea9 (cancel-in-progress literal)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-A06 (new 2026-06-26)">CI Router MUST achieve ≥2 consecutive successful master pushes before task 071 cutover. If router cannot be stabilized, cutover is BLOCKED indefinitely and rollback rule applies.</constraint>
+    <constraint source="spec FR-A05">MUST NOT add commit-marker skip mechanism. Path-aware dispatch only.</constraint>
+    <constraint source="hot-path">Modifies `.github/workflows/ci-*.yml` — hot-path. Pre-flight check with /conflict-check before editing.</constraint>
+    <constraint source="proof-bar">"It works on debug branch" is insufficient — REQUIRES 2 consecutive master pushes with `gh run list --workflow=CI --branch=master --limit=2 --json conclusion --jq '[.[]] | all(.conclusion == "success")'` returning true.</constraint>
+    <constraint source="root CLAUDE.md §10">If fix touches BFF/SpaarkeAi unrelatedly: STOP — that's a separate task. Scope is workflow files only.</constraint>
+  </constraints>
+
+  <suspects ranked-by-likelihood="true">
+    <suspect rank="1" likelihood="high">**String-to-boolean coercion at reusable-workflow boundary**. `ci-tier2-advisory.yml` declares inputs as `type: boolean` (e.g., `run-lint: { type: boolean }`). Router commit bc3403705 passes them as expressions: `run-lint: ${{ needs.classify.outputs.frontend == 'true' }}`. The evaluated expression value is a STRING `"true"`/`"false"`, not a boolean. GitHub's strict reusable-workflow input validation may reject. Fix options: (A) change tier2 inputs to `type: string`; (B) wrap router-side values in `fromJSON()`: `run-lint: ${{ fromJSON(needs.classify.outputs.frontend == 'true') }}`.</suspect>
+    <suspect rank="2" likelihood="medium">**`if:` on reusable workflow call combined with dynamic `with:` expressions**. Router uses `if: needs.classify.outputs.docs_only != 'true'` on a `uses:`-style job with dynamic `with:` block. Known-fragile area in GitHub Actions parser.</suspect>
+    <suspect rank="3" likelihood="medium">**`re-actors/alls-green@v1.2.2` input validation**. Third-party. Combination `allowed-failures: tier2` + `allowed-skips: tier1,tier2` may be invalid for that pinned version. Test by temporarily replacing alls-green with an inline bash gate against `needs.*.result`.</suspect>
+    <suspect rank="4" likelihood="low">**`secrets: inherit` interaction with public-fork ruleset**. Low probability given SDAP CI succeeds on the same commits.</suspect>
+  </suspects>
+
+  <steps>
+    <step order="1">**User-supplied data first** (cheap win): user opens https://github.com/spaarke-dev/spaarke/actions/runs/28244069552 in browser, copies the exact error sentence GitHub shows at top of run page. Paste to operator. If error sentence is conclusive (e.g., "Invalid value type X for input Y"), skip to Step 4 with that as the smoking gun.</step>
+    <step order="2">**If browser error unavailable or inconclusive**: pull master + rebase this worktree. Branch off `debug/ci-router-bisect`.</step>
+    <step order="3">**Deterministic bisect** on `debug/ci-router-bisect`:
+      (a) Strip ci-router.yml to minimal: `name: CI`, `on: { push: { branches: [master] } }`, single trivial job with `runs-on: ubuntu-latest` + one `echo` step. Push. Expect: ✅.
+      (b) Re-add `pull_request:` + `merge_group:` triggers. Push. Check.
+      (c) Re-add `concurrency:` block. Push. Check.
+      (d) Re-add `classify:` job with `dorny/paths-filter@v3`. Push. Check.
+      (e) Re-add `tier1:` reusable workflow call (uses: ./.github/workflows/ci-tier1-blocking.yml, secrets: inherit, with: block, if: gate). Push. Check.
+      (f) Re-add `tier2:` reusable workflow call with the SAME input contract translation as `bc3403705`. Push. Check. **Suspect 1 fires here if it's the root cause.**
+      (g) Re-add `router-result:` job with `re-actors/alls-green@v1.2.2` and `${{ toJSON(needs) }}`. Push. Check.
+      The first step that flips ✅ → startup_failure isolates the bug.</step>
+    <step order="4">**Apply fix** based on browser error OR bisect finding. Likely candidates per suspects:
+      - Suspect 1 fix A: change `run-lint`, `run-format`, `run-unit-tests`, `run-format-yaml`, etc. in ci-tier2-advisory.yml from `type: boolean` to `type: string`; update guards to `if: inputs.run-lint == 'true'`.
+      - Suspect 1 fix B: keep tier2 inputs as boolean, change router to pass `fromJSON()`-wrapped values.
+      - Suspect 2 fix: combine `if:` predicate into `with:` block as a conditional (e.g., `with: { run-lint: ${{ needs.classify.outputs.docs_only != 'true' && needs.classify.outputs.frontend == 'true' }} }`) and remove the top-level `if:` on the reusable-workflow job.
+      - Suspect 3 fix: replace alls-green with inline bash gate, e.g., `if [[ "${{ needs.tier1.result }}" == "success" ]]; then exit 0; fi`.
+      Prefer Suspect 1 fix A (simpler, more debuggable downstream — string inputs are visible in run UI).</step>
+    <step order="5">**Local validation**: `actionlint .github/workflows/ci-*.yml` (must pass). YAML parse via PyYAML or `gh workflow view ci-router.yml` for syntax sanity.</step>
+    <step order="6">**Land fix on master**: open PR with title `fix(ci-router): resolve startup_failure — <root cause one-liner>`. Reference suspect+evidence in PR description.</step>
+    <step order="7">**Re-enable workflow + prove stability**:
+      ```bash
+      gh workflow enable CI
+      # Trigger first push (any trivial commit, e.g., updating notes/ci-router-stability-proof.md)
+      git commit --allow-empty -m "ci-router: stability proof push 1/2"
+      git push origin master
+      # Wait for CI run to complete (gh run watch); verify conclusion=success
+      # Trigger second push
+      git commit --allow-empty -m "ci-router: stability proof push 2/2"
+      git push origin master
+      # Wait + verify
+      gh run list --workflow=CI --branch=master --limit=2 --json conclusion,headSha,createdAt
+      # Acceptance gate: both conclusion=success
+      ```
+    </step>
+    <step order="8">**Write notes/ci-router-stability-proof.md**: link to both PR runs; list root cause + applied fix + evidence; close out FR-A06.</step>
+    <step order="9">**Cleanup**: delete `debug/ci-router-bisect` branch (`git push origin --delete debug/ci-router-bisect`). Confirm both fd451d39d and 0f9922ea9 cleanups (still on master, defensible) are documented as "kept — non-bug-related cleanup" in the PR description.</step>
+    <step order="10">**Step 9.5**: code-review + adr-check on modified workflow files (FULL rigor binding; hot-path).</step>
+    <step order="11">**Update spec/plan/INDEX**: mark FR-A06 satisfied; unblock 071 (085 still blocks 071 from the other side).</step>
+  </steps>
+
+  <outputs>
+    <output type="workflow-fix">.github/workflows/ci-router.yml (and possibly ci-tier2-advisory.yml) — corrected input contract</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/ci-router-stability-proof.md (root cause + 2-push proof links)</output>
+    <output type="PR">PR titled `fix(ci-router): resolve startup_failure — &lt;root cause&gt;`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`gh workflow enable CI` succeeded</criterion>
+    <criterion testable="true">≥2 consecutive master pushes show `conclusion=success` for workflow `CI`</criterion>
+    <criterion testable="true">`CI / Router` status check appears in commit checks list (visible in `gh pr checks` or `gh api repos/spaarke-dev/spaarke/commits/&lt;sha&gt;/check-runs`)</criterion>
+    <criterion testable="true">`latest_check_runs_count` for the run is ≥ 1 (jobs were created)</criterion>
+    <criterion testable="true">notes/ci-router-stability-proof.md exists with root cause + evidence</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check pass on modified workflow files</criterion>
+    <criterion testable="true">Spec FR-A06 marked satisfied; 071 unblocked from CI-Router side (085 still blocks from cleanup side)</criterion>
+  </acceptance-criteria>
+</task>

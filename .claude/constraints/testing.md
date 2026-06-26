@@ -65,13 +65,32 @@ Tests under these six paths are **KEEP-protected**. Deleting a file under any of
 
 ## MUST NOT Rules
 
-### Banned wiring-test antipatterns (5)
+### Banned scaffolding-test antipatterns (17 — extended 2026-06-26 per spec FR-B08)
+
+The first 5 (B1-B5) attack wiring antipatterns; B6-B17 attack the deeper scaffolding-class debt (tests written to drive design or lift coverage % rather than to protect regressions). Full ADR-038 §7 has concrete BAD + GOOD C# examples for each. Industry consensus (Beck "delete the scaffolding"; Feathers characterization-vs-behavior; Google test-sizes; DHH less-tests) anchors the framing.
+
+**B1-B5 — Wiring antipatterns** (existing):
 
 1. ❌ **MUST NOT** use `Mock<HttpMessageHandler>` — transport-level mock encodes wire format into the test; breaks on production refactors without catching real bugs. **Use a fake `HttpClient` via test-double + integration boundary instead.**
 2. ❌ **MUST NOT** use `Mock<IServiceClient>` or other typed HttpClient wrappers as test doubles when they hide the HttpMessageHandler antipattern.
 3. ❌ **MUST NOT** write DI-registration tests (`Assert.NotNull(services.GetRequiredService<X>())` or similar container-introspection assertions). DI wiring is verified by the app actually starting; tests should assert behavior.
 4. ❌ **MUST NOT** write constructor null-argument tests (`Assert.Throws<ArgumentNullException>(() => new X(null))`). Add `ArgumentNullException.ThrowIfNull(x)` in production code if needed; do not test it.
 5. ❌ **MUST NOT** mock the class-under-test's collaborators when an in-memory test double + a real integration boundary is cheaper and more honest.
+
+**B6-B17 — Scaffolding-class debt** (new 2026-06-26; see [ADR-038 §7](../adr/INDEX.md) for full BAD/GOOD examples):
+
+6. ❌ **MUST NOT** write **mirror tests** — test methods that assert the implementation does what it does (`GetName_ReturnsName` → `=> Name;`). Test the behavior the field participates in.
+7. ❌ **MUST NOT** write **tests-with-all-mocks-and-trivial-assertion** — every collaborator mocked, ≤2 assertions, often just `Verify.Once()`. Tests interaction shape, not behavior.
+8. ❌ **MUST NOT** test **internal/private methods** via `[InternalsVisibleTo]` or reflection. Locks implementation; test through the public surface instead.
+9. ❌ **MUST NOT** write **pass-through wrapper tests** — methods that delegate `=> _service.DoIt(x)` need no test; if the wrapper grows logic later, test the logic then.
+10. ❌ **MUST NOT** write **coverage-fillers** — tests with `NotThrow()` / `NotNull()` assertions added solely to push coverage %. Coverage is observation (§3), never gate; assert the result.
+11. ❌ **MUST NOT** write **language-feature redundancy tests** — tests of `required` keyword, record equality, sealed hierarchies, exhaustive switch. The C# compiler/runtime enforces these.
+12. ❌ **MUST NOT** write **snapshot tests of trivial output** — JSON round-trips, default `ToString()`, default `Equals`. Tests the framework, not your code.
+13. ❌ **MUST NOT** name test methods without scenario+expected — `Test1`, `Foo_Works`, `DoIt_Bug417` violate the `{Method}_{Scenario}_{ExpectedResult}` convention and typically lack a clear behavior to defend.
+14. ❌ **MUST NOT** write **exhaustive-switch/sealed-hierarchy coverage tests** — C# 12 compile-time exhaustive switch makes "all cases handled" a compiler concern, not a runtime test concern.
+15. ❌ **MUST NOT** write tests with **setup-to-assertion ratio > 10:1** — 50+ lines of mock setup with 1-2 trivial assertions buries behavior signal in plumbing. Refactor to integration test.
+16. ❌ **MUST NOT** test **pure getters/setters/auto-properties** — the C# language guarantees the round-trip; test the validation/computation if it exists.
+17. ❌ **MUST NOT** test **generated code field-by-field** — record equality, AutoMapper profiles, EF projections. Use `AssertConfigurationIsValid()` once, then test the behavior of the output type.
 
 ### General anti-patterns
 

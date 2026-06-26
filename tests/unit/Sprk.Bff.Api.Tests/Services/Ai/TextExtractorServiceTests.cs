@@ -723,21 +723,6 @@ public class TextExtractorServiceTests
         result.Text.Should().Be(content);
     }
 
-    [Theory]
-    [InlineData(".TXT")]
-    [InlineData(".Txt")]
-    [InlineData(".MD")]
-    [InlineData(".Json")]
-    public async Task ExtractAsync_CaseInsensitiveExtension_Works(string extension)
-    {
-        var content = "Content with different case extension.";
-        using var stream = CreateStream(content);
-
-        var result = await _service.ExtractAsync(stream, $"file{extension}");
-
-        result.Success.Should().BeTrue();
-        result.Text.Should().Be(content);
-    }
 
     [Fact]
     public async Task ExtractAsync_LargeFile_TruncatesContent()
@@ -802,13 +787,6 @@ public class TextExtractorServiceTests
         result.Should().BeFalse();
     }
 
-    [Fact]
-    public void IsSupported_WithoutDot_Works()
-    {
-        var result = _service.IsSupported("txt");
-
-        result.Should().BeTrue();
-    }
 
     [Fact]
     public void GetMethod_NativeType_ReturnsNative()

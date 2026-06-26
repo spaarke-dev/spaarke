@@ -117,16 +117,6 @@ public class WorkingDocumentToolsTests
         action.Should().Throw<ArgumentNullException>().WithParameterName("logger");
     }
 
-    [Fact]
-    public void Constructor_AcceptsNullAnalysisId()
-    {
-        // Act — analysisId is optional, null should not throw
-        var action = () => new WorkingDocumentTools(
-            _chatClient, _writeSSE, _analysisService, _workingDocumentService, _logger, analysisId: null);
-
-        // Assert
-        action.Should().NotThrow();
-    }
 
     // ====================================================================
     // EditWorkingDocumentAsync — Happy Path

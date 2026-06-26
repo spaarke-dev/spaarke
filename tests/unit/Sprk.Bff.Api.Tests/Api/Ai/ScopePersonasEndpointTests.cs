@@ -43,17 +43,6 @@ public class ScopePersonasEndpointTests : IClassFixture<CustomWebAppFactory>
     // Endpoint Registration (ADR-001 — Minimal API)
     // =========================================================================
 
-    [Fact]
-    public void MapScopeEndpoints_MethodExists_AndIsStatic()
-    {
-        // Arrange
-        var method = typeof(ScopeEndpoints).GetMethod(nameof(ScopeEndpoints.MapScopeEndpoints));
-
-        // Assert
-        method.Should().NotBeNull("endpoint registration extension method must exist");
-        method!.IsStatic.Should().BeTrue("Minimal API extension methods are static (ADR-001)");
-        method.ReturnType.Should().Be(typeof(IEndpointRouteBuilder));
-    }
 
     [Fact]
     public async Task GetPersonas_EndpointExists_AcceptsGet()

@@ -342,18 +342,6 @@ public class DataverseEntitySchemaTests
         ((OptionSetValue)entity["sprk_filesummarystatus"]).Value.Should().Be(AnalysisStatusValues.Completed);
     }
 
-    [Fact]
-    public void BuildEntity_WithDocumentType_UsesOptionSetValue()
-    {
-        var request = new UpdateDocumentRequest
-        {
-            DocumentType = 100000001 // Some document type value
-        };
-
-        var entity = BuildEntityFromRequest(Guid.NewGuid(), request);
-
-        entity["sprk_documenttype"].Should().BeOfType<OptionSetValue>();
-    }
 
     [Fact]
     public void BuildEntity_WithParentDocumentLookup_UsesEntityReference()
