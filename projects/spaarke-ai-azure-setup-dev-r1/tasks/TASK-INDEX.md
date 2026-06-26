@@ -32,7 +32,7 @@
 | 005 | Stale doc cleanup (FR-04) | 1 | ✅ | MINIMAL | 001, 002 | Group A |
 | 006 | Append §4.6 to SPAARKE-DEPLOYMENT-GUIDE.md | 1 | ✅ | MINIMAL | 001, 002, 003 | Group A |
 | 007 | ADR pointer drift fix (FR-06) | 1 | ✅ | MINIMAL | 001 | — (touches .claude/) |
-| 010 | Schema property policy patches (7 schemas) | 2 | 🔲 | STANDARD | 002 | — |
+| 010 | Schema property policy patches (7 schemas) | 2 | ✅ | STANDARD | 002 | — |
 | 011 | Atomic rename: spaarke-file-index → spaarke-files-index | 2 | 🔲 | STANDARD | 002, 010 | — (NFR-07 atomic) |
 | 012 | Consolidate schema files to infrastructure/ai-search/ | 2 | 🔲 | STANDARD | 011 | — |
 | 013 | Atomic rename: playbook-embeddings → spaarke-playbook-embeddings | 2 | 🔲 | STANDARD | 002, 010 | — (NFR-07 atomic) |

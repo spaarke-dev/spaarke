@@ -3,6 +3,7 @@
   "name": "spaarke-insights-index",
   "fields": [
     {
+      "// override-sortable-facetable": "key field: Azure forbids sortable/facetable on the key",
       "name": "id",
       "type": "Edm.String",
       "key": true,
@@ -18,7 +19,7 @@
       "searchable": false,
       "filterable": true,
       "retrievable": true,
-      "sortable": false,
+      "sortable": true,
       "facetable": true
     },
     {
@@ -27,7 +28,7 @@
       "searchable": false,
       "filterable": true,
       "retrievable": true,
-      "sortable": false,
+      "sortable": true,
       "facetable": true
     },
     {
@@ -36,7 +37,7 @@
       "searchable": false,
       "filterable": true,
       "retrievable": true,
-      "sortable": false,
+      "sortable": true,
       "facetable": true
     },
     {
@@ -45,14 +46,16 @@
       "searchable": false,
       "filterable": true,
       "retrievable": true,
-      "sortable": false,
+      "sortable": true,
       "facetable": true
     },
     {
+      "// complex-parent": "ComplexType parent: flags apply to inner scalar leaves, not the container",
       "name": "value",
       "type": "Edm.ComplexType",
       "fields": [
         {
+          "// complex-parent": "ComplexType parent: flags apply to inner scalar leaves, not the container",
           "name": "raw",
           "type": "Edm.ComplexType",
           "fields": [
@@ -62,7 +65,7 @@
               "searchable": false,
               "filterable": true,
               "retrievable": true,
-              "sortable": false,
+              "sortable": true,
               "facetable": true
             },
             {
@@ -71,10 +74,11 @@
               "searchable": false,
               "filterable": true,
               "retrievable": true,
-              "sortable": false,
+              "sortable": true,
               "facetable": true
             },
             {
+              "// complex-parent": "ComplexType parent: flags apply to inner scalar leaves, not the container",
               "name": "scope",
               "type": "Edm.ComplexType",
               "fields": [
@@ -84,7 +88,7 @@
                   "searchable": false,
                   "filterable": true,
                   "retrievable": true,
-                  "sortable": false,
+                  "sortable": true,
                   "facetable": true
                 },
                 {
@@ -93,7 +97,7 @@
                   "searchable": false,
                   "filterable": true,
                   "retrievable": true,
-                  "sortable": false,
+                  "sortable": true,
                   "facetable": true
                 }
               ]
@@ -101,6 +105,7 @@
           ]
         },
         {
+          "// override-filter-sort-facet": "displayHint is presentation metadata: not meaningful to filter/sort/facet; retrievable for client-side parsing",
           "name": "displayHint",
           "type": "Edm.String",
           "searchable": false,
@@ -112,6 +117,7 @@
       ]
     },
     {
+      "// override-filter-sort-facet": "opaque JSON value blob — not meaningful to filter/sort/facet; retrievable for client-side parsing",
       "name": "valueJson",
       "type": "Edm.String",
       "searchable": false,
@@ -121,6 +127,7 @@
       "facetable": false
     },
     {
+      "// override-facetable": "Edm.Double confidence is a continuous numeric (high cardinality) — faceting not useful",
       "name": "confidence",
       "type": "Edm.Double",
       "searchable": false,
@@ -130,6 +137,7 @@
       "facetable": false
     },
     {
+      "// complex-parent": "Collection(Edm.ComplexType) parent: flags apply to inner scalar leaves, not the container",
       "name": "evidence",
       "type": "Collection(Edm.ComplexType)",
       "fields": [
@@ -139,10 +147,11 @@
           "searchable": false,
           "filterable": true,
           "retrievable": true,
-          "sortable": false,
+          "sortable": true,
           "facetable": true
         },
         {
+          "// override-sortable-facetable": "ref is a high-cardinality identifier (per-evidence opaque); sortable/facetable not useful",
           "name": "ref",
           "type": "Edm.String",
           "searchable": false,
@@ -152,6 +161,7 @@
           "facetable": false
         },
         {
+          "// searchable=true": "long-form quote text used for full-text query; sortable/facetable=false: long-text fields cannot be sort/facet keys",
           "name": "quote",
           "type": "Edm.String",
           "searchable": true,
@@ -164,6 +174,7 @@
       ]
     },
     {
+      "// override-facetable": "datetime faceting is rarely useful (per catalog policy table)",
       "name": "asOf",
       "type": "Edm.DateTimeOffset",
       "searchable": false,
@@ -178,10 +189,11 @@
       "searchable": false,
       "filterable": true,
       "retrievable": true,
-      "sortable": false,
+      "sortable": true,
       "facetable": true
     },
     {
+      "// searchable=true": "long-form content text used for full-text query; sortable/facetable=false: long-text fields cannot be sort/facet keys",
       "name": "content",
       "type": "Edm.String",
       "searchable": true,
@@ -192,6 +204,7 @@
       "analyzer": "standard.lucene"
     },
     {
+      "// vector-field": "3072-dim HNSW cosine; retrievable=false (vector payload is heavy, excluded from $select); stored=true retains for reranking; searchable=true enables vector search",
       "name": "contentVector",
       "type": "Collection(Edm.Single)",
       "searchable": true,
@@ -209,11 +222,12 @@
       "searchable": false,
       "filterable": true,
       "retrievable": true,
-      "sortable": false,
+      "sortable": true,
       "facetable": true
     },
     {
       "_comment_": "Wave D6 (task 035) — top-level scope ComplexType for multi-entity subjects per design-a6 §4. Hybrid backward-compat: scope.matterId is kept for Phase 1 matter-subject queries (NFR-08); scope.entityType + scope.entityId are the canonical generalized fields for matter, project, invoice, and future schemes. Reader dual-read filter (design-a6 §4.5): for matter subjects, OR-filter scope/matterId OR (scope/entityType eq 'matter' and scope/entityId eq ...). All three fields are filterable strings; nullable (Phase 1 Observations omit them entirely and remain queryable via tenantId + subject).",
+      "// complex-parent": "ComplexType parent: flags apply to inner scalar leaves, not the container",
       "name": "scope",
       "type": "Edm.ComplexType",
       "fields": [
@@ -223,7 +237,7 @@
           "searchable": false,
           "filterable": true,
           "retrievable": true,
-          "sortable": false,
+          "sortable": true,
           "facetable": true
         },
         {
@@ -232,16 +246,17 @@
           "searchable": false,
           "filterable": true,
           "retrievable": true,
-          "sortable": false,
+          "sortable": true,
           "facetable": true
         },
         {
+          "// override-facetable": "entityId is a high-cardinality opaque identifier — faceting not useful",
           "name": "entityId",
           "type": "Edm.String",
           "searchable": false,
           "filterable": true,
           "retrievable": true,
-          "sortable": false,
+          "sortable": true,
           "facetable": false
         },
         {
@@ -250,8 +265,8 @@
           "searchable": false,
           "filterable": true,
           "retrievable": true,
-          "sortable": false,
-          "facetable": false
+          "sortable": true,
+          "facetable": true
         },
         {
           "name": "practiceArea",
@@ -259,7 +274,7 @@
           "searchable": false,
           "filterable": true,
           "retrievable": true,
-          "sortable": false,
+          "sortable": true,
           "facetable": true
         }
       ]

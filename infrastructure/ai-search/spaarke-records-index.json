@@ -2,11 +2,13 @@
   "name": "spaarke-records-index",
   "fields": [
     {
+      "// override-sortable-facetable": "key field: Azure forbids sortable/facetable on the key",
       "name": "id",
       "type": "Edm.String",
       "key": true,
       "searchable": false,
-      "filterable": false,
+      "filterable": true,
+      "retrievable": true,
       "sortable": false,
       "facetable": false
     },
@@ -15,78 +17,96 @@
       "type": "Edm.String",
       "searchable": false,
       "filterable": true,
+      "retrievable": true,
       "sortable": true,
       "facetable": true
     },
     {
+      "// searchable=true": "text-content field (record display name) used for full-text query; sortable/facetable=true per policy",
       "name": "recordName",
       "type": "Edm.String",
       "searchable": true,
-      "filterable": false,
+      "filterable": true,
+      "retrievable": true,
       "sortable": true,
-      "facetable": false,
+      "facetable": true,
       "analyzer": "standard.lucene"
     },
     {
+      "// searchable=true": "long-form description text used for full-text query; sortable/facetable=false: long-text fields cannot be sort/facet keys",
       "name": "recordDescription",
       "type": "Edm.String",
       "searchable": true,
       "filterable": false,
+      "retrievable": true,
       "sortable": false,
       "facetable": false,
       "analyzer": "standard.lucene"
     },
     {
+      "// override-sortable": "Collection(Edm.String): Azure forbids sortable on collections; searchable=true for tokenized name lookup",
       "name": "organizations",
       "type": "Collection(Edm.String)",
       "searchable": true,
       "filterable": true,
+      "retrievable": true,
       "sortable": false,
       "facetable": true,
       "analyzer": "standard.lucene"
     },
     {
+      "// override-sortable": "Collection(Edm.String): Azure forbids sortable on collections; searchable=true for tokenized name lookup",
       "name": "people",
       "type": "Collection(Edm.String)",
       "searchable": true,
       "filterable": true,
+      "retrievable": true,
       "sortable": false,
       "facetable": true,
       "analyzer": "standard.lucene"
     },
     {
+      "// override-sortable-facetable": "Collection(Edm.String): Azure forbids sortable on collections; facetable=false because reference numbers are high-cardinality identifiers (not categorical)",
       "name": "referenceNumbers",
       "type": "Collection(Edm.String)",
       "searchable": true,
       "filterable": true,
+      "retrievable": true,
       "sortable": false,
       "facetable": false,
       "analyzer": "keyword"
     },
     {
+      "// searchable=true": "long-form keyword text used for full-text query; sortable/facetable=false: long-text fields cannot be sort/facet keys",
       "name": "keywords",
       "type": "Edm.String",
       "searchable": true,
       "filterable": false,
+      "retrievable": true,
       "sortable": false,
       "facetable": false,
       "analyzer": "standard.lucene"
     },
     {
+      "// vector-field": "3072-dim HNSW cosine; retrievable=false (vector payload is heavy, excluded from $select); stored=true retains for reranking; searchable=true enables vector search",
       "name": "contentVector",
       "type": "Collection(Edm.Single)",
       "searchable": true,
       "filterable": false,
+      "retrievable": false,
+      "stored": true,
       "sortable": false,
       "facetable": false,
       "dimensions": 3072,
       "vectorSearchProfile": "default-vector-profile"
     },
     {
+      "// override-facetable": "datetime faceting is rarely useful (per catalog policy table)",
       "name": "lastModified",
       "type": "Edm.DateTimeOffset",
       "searchable": false,
       "filterable": true,
+      "retrievable": true,
       "sortable": true,
       "facetable": false
     },
@@ -95,25 +115,28 @@
       "type": "Edm.String",
       "searchable": false,
       "filterable": true,
-      "sortable": false,
-      "facetable": false
+      "retrievable": true,
+      "sortable": true,
+      "facetable": true
     },
     {
       "name": "dataverseEntityName",
       "type": "Edm.String",
       "searchable": false,
       "filterable": true,
-      "sortable": false,
+      "retrievable": true,
+      "sortable": true,
       "facetable": true
     },
     {
+      "// override-sortable": "Collection(Edm.String): Azure forbids sortable on collections",
       "name": "privilege_group_ids",
       "type": "Collection(Edm.String)",
       "searchable": false,
       "filterable": true,
       "retrievable": true,
       "sortable": false,
-      "facetable": false
+      "facetable": true
     }
   ],
   "vectorSearch": {
