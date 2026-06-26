@@ -3,7 +3,7 @@
   <metadata>
     <title>Create ai-search-azure-setup.md (operational guide)</title>
     <phase>1: Documentation Foundation + Pre-Flight Verification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>001, 002</dependencies>
     <blocks>020</blocks>
@@ -85,4 +85,25 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load knowledge files before drafting. Follow task-execute pre-execution checklist.</protocol>
   </execution>
+
+  <notes-results>
+    <completed-on>2026-06-26</completed-on>
+    <deliverable>docs/guides/ai-search-azure-setup.md (created — 358 lines, 7-section TOC)</deliverable>
+    <sections-present>
+      <section>1. Prerequisites (tooling, Azure resources, RBAC table for operator + BFF MI, pre-flight verification link)</section>
+      <section>2. Step-by-Step Setup Procedure (2.1 provision service + Bicep alt; 2.2 KV secret with canonical AiSearch--AdminKey + VaultName=...;SecretName=... syntax; 2.3 grant BFF MI Search Index Data Contributor; 2.4 Deploy-AllIndexes.ps1 invocation + Phase 1 note; 2.5 -VerifyOnly invariant check)</section>
+      <section>3. Per-Index Deploy + Ingestion Reference (7-index table with deploy command + ingestion script + notes; cross-link to catalog §4)</section>
+      <section>4. Troubleshooting (4.1 401 KV admin-key drift; 4.2 missing MI role assignment; 4.3 vector dim mismatch; 4.4 Service Bus queue missing; 4.5 empty index post-deploy)</section>
+      <section>5. Post-Deploy Verification Commands (5.1 list indexes REST; 5.2 per-index field-flag verification; 5.3 vector profile + dim verification; 5.4 semantic config; 5.5 doc count; 5.6 BFF functional verification)</section>
+      <section>6. Environment-Specific Variables (dev/staging/prod/demo table with 2-tier naming policy callout + per-customer link)</section>
+    </sections-present>
+    <key-decisions>
+      <decision>Canonical KV secret name AiSearch--AdminKey used throughout (per 2026-06-26 Option C); legacy aliases noted but discouraged</decision>
+      <decision>Canonical KV-ref syntax @Microsoft.KeyVault(VaultName=...;SecretName=...) per Redis project handoff §4 — NOT SecretUri= form</decision>
+      <decision>2-tier naming policy (top-level env-suffixed; sub-resources env-agnostic) documented in §6 with link to catalog §1</decision>
+      <decision>Phase 1 note on Deploy-AllIndexes.ps1 being a Phase 3 deliverable (task 020) — guide is forward-compatible with the Phase 3 script</decision>
+      <decision>Cross-links to AI-SEARCH-INDEX-CATALOG.md + SPAARKE-DEPLOYMENT-GUIDE.md §4.6 in TOC opener and §7</decision>
+    </key-decisions>
+    <acceptance-gate-result>All FR-02 acceptance criteria met: file exists at lowercase path; all 6 sections present; reads as operator-ready end-to-end runbook; cross-links to catalog + deployment guide; canonical KV-ref syntax + secret name; 2-tier naming policy documented</acceptance-gate-result>
+  </notes-results>
 </task>

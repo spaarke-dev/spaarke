@@ -64,8 +64,8 @@ The binding **invariants (INV-1..INV-8)** that govern these scenarios live in [`
 
 | Business Unit | `sprk_containerid` (verified via MCP) | `sprk_searchindexname` (set this) |
 |---|---|---|
-| Spaarke Demo | `b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50` | `spaarke-knowledge-index-v2` |
-| Spaarke | `b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh` | `spaarke-file-index` |
+| Spaarke Demo | `b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50` | `spaarke-files-index` |
+| Spaarke | `b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh` | `spaarke-files-index` |
 | Spaarke Dev 1 | (NULL today) | operator-determined (R1: leave NULL → tenant default applies) |
 | Spaarke Test 1 | (NULL today) | operator-determined (R1: leave NULL → tenant default applies) |
 

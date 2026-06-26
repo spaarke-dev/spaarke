@@ -3,7 +3,7 @@
   <metadata>
     <title>Append §4.6 to SPAARKE-DEPLOYMENT-GUIDE.md + Appendix D update (FR-05)</title>
     <phase>1: Documentation Foundation + Pre-Flight Verification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>001, 002, 003</dependencies>
     <blocks>none</blocks>

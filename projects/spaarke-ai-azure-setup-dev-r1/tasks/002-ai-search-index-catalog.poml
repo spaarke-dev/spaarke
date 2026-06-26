@@ -3,7 +3,7 @@
   <metadata>
     <title>Create AI-SEARCH-INDEX-CATALOG.md (canonical doc)</title>
     <phase>1: Documentation Foundation + Pre-Flight Verification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>010, 011, 012, 020</blocks>
@@ -94,4 +94,24 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load knowledge files before drafting. Follow task-execute pre-execution checklist.</protocol>
   </execution>
+
+  <notes-results>
+    <completed-on>2026-06-26</completed-on>
+    <deliverable>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</deliverable>
+    <sections-present>
+      1. Naming Convention (two-tier rule: top-level env-suffixed vs sub-resource env-agnostic);
+      2. Schema Property Policy (table + rationale + rag-references domain/documentType past-bug reference + override discipline);
+      3. Vector + Embedding Configuration (3072 dim + text-embedding-3-large + HNSW cosine + appsettings dimensionality match per NFR-11 + FR-20);
+      4. Active Index Catalog (7-index table with canonical name, purpose, schema file, scope, ingestion, consumers, post-deploy invariants + restoration matrix);
+      5. Retired Indexes Appendix (5 indexes with replacement notes + grep verification commands);
+      6. Cross-Links (operational + architecture + project context).
+    </sections-present>
+    <acceptance-gates-pass>all 7 (file exists; 6 sections per FR-01; top-level-vs-sub-resource naming rule; past-bug reference; 7 active indexes in canonical table; 5 retired indexes with replacement notes; all cross-links resolve to existing files)</acceptance-gates-pass>
+    <decisions>
+      Used both PowerShell- and grep-style verification examples in §5 retired appendix for tooling neutrality.
+      Bicep-vs-PowerShell split for insights index noted in §4 deploy procedure paragraph.
+      RAG-CONFIGURATION.md confirmed present at docs/guides/RAG-CONFIGURATION.md (cross-link target).
+    </decisions>
+    <omissions>None — all FR-01 required sections and cross-links present.</omissions>
+  </notes-results>
 </task>

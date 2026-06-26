@@ -3,7 +3,7 @@
   <metadata>
     <title>Resolve ADR pointer drift: ADR-014 + ADR-004 (FR-06)</title>
     <phase>1: Documentation Foundation + Pre-Flight Verification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>none</blocks>
@@ -88,4 +88,14 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load knowledge files. Sub-agents may grep but NOT write to .claude/. Main session applies edits.</protocol>
   </execution>
+
+  <notes-results date="2026-06-26">
+    Option (b) inline citation correction applied. Changes in `docs/architecture/rag-architecture.md`:
+    - Top intro: removed misattributed ADR-014 cite for tenant isolation; added FR-06 pending-decision callout section explaining drift + owner's optional path-(a) alternative.
+    - ADR-004 cites for idempotent re-indexing: KEPT but qualified ("general idempotency principle" / "handler-idempotency principle"). ADR-004 establishes general handler idempotency; applying to re-indexing is a reasonable extension.
+    - ADR-014 cites for tenant isolation (4 sites): all REMOVED or replaced with "no ADR; see FR-06 pending decision" pointer. ADR-014 is scoped to AI caching key conventions, not index-document tenancy.
+    - CLAUDE.md (root): no ADR-014/ADR-004 cites found — no change needed.
+    - Out-of-scope drift noted: `docs/architecture/AI-ARCHITECTURE.md:177,481` cite ADR-014 in non-caching contexts (SSE no-buffering, dual output paths). These are separate drift issues, NOT in FR-06 scope (which targets tenant-isolation + idempotent-reindexing pair).
+    Owner action: confirm option (b) is acceptable, OR direct creation of new ADRs (option a) for tenant-isolation and idempotent-reindexing principles.
+  </notes-results>
 </task>
