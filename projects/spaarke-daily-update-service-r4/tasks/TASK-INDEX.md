@@ -41,7 +41,7 @@
 | 010 | Author DAILY-BRIEFING-NARRATE playbook sprk_configjson node graph | ✅ | 009 | 011 | — | FULL |
 | 011 | Deploy + validate DAILY-BRIEFING-NARRATE playbook to spaarkedev1 | ✅ | 005, 006, 007, 010 | 017 | — | STANDARD |
 | 012 | Audit deployed sprk_configjson for PB-016, PB-018, PB-019 | 🔲 | 011 | 015 | Group C | STANDARD |
-| 013 | Audit PB-020, PB-021 (need W1 membership migration) | 🔲 | 011 | 015 | Group C | STANDARD |
+| 013 | Audit PB-020, PB-021 (need W1 membership migration) | ✅ | 011 | 015 | Group C | STANDARD |
 | 014 | Audit PB-017, PB-022 stub playbooks | 🔲 | 011 | 015 | Group C | STANDARD |
 | 015 | Reconcile + redeploy divergent playbook configs | 🔲 | 012, 013, 014 | 016 | — | STANDARD |
 | 016 | Run jps-scope-refresh after PR 2 deployments | 🔲 | 015 | 017 | — | MINIMAL |

@@ -3,7 +3,9 @@
   <metadata>
     <title>Audit PB-020, PB-021 (need W1 membership migration)</title>
     <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Audit complete. Both PB-020 (Tasks Due Soon, GUID 77f77aa5-5f2d-f111-88b5-7ced8d1dc988) and PB-021 (Tasks Overdue, GUID 4369cab2-5f2d-f111-88b5-7ced8d1dc988) verdict: PRE-MIGRATION (expected). LookupUserMembership (ActionType 52) ABSENT in both deployed playbooks — confirms W1 PR 3 tasks 022/023 migration is required (not redundant). Substantive deployed-vs-repo divergence noted: deployed targets `sprk_event` custom entity with __actionType 51, repo JSON targets OOB `task` activity with __actionType 22; schedule frequency deployed=hourly vs repo=daily. Out of scope for task 015 — W1 owns the rewrite + redeploy. Task 015 MUST SKIP PB-020 + PB-021. Audit report: projects/spaarke-daily-update-service-r4/notes/audit/013-pb-020-021.md.</completion-notes>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>011</dependencies>
     <blocks>015</blocks>
