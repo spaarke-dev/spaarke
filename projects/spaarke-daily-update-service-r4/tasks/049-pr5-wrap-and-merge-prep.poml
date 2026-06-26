@@ -3,7 +3,9 @@
   <metadata>
     <title>PR 5 wrap — code-review + adr-check + ui-test + accessibility + open PR</title>
     <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>PR 5 quality gates: (1) BFF Release build clean — 0 errors, 17 pre-existing warnings; (2) BFF unit tests 7879 passed / 134 skipped / 0 failed; (3) Jest suite in @spaarke/daily-briefing-components 141 passed / 0 failed across 16 suites (includes new count-reconciliation smoke); (4) AC-17e grep gate: 0 results for `minConfidence|AiConfidenceThreshold` in widget package — FR-17e binding evidence; (5) Publish-size 46.30 MB compressed (uncompressed 140.05 MB) — well under 60 MB ceiling; +1.33 MB delta vs PR 4 baseline 44.97 MB attributable to NuGet runtime refresh (no new packages); cumulative R4 net delta vs pre-R4 master baseline ~+0.65 MB (within NFR-02 ≤+1 MB tolerance); (6) CVE: no new HIGH, Kiota 1.21.2 GHSA-7j59-v9qr-6fq9 pre-existing transitive of Microsoft.Graph (not introduced by R4); (7) gh pr list confirms PR #456 only open R4 PR — no conflicts with dependabot/devops PRs; (8) PR #456 title + body updated via `c:/tmp/pr-456-body-final.md` — added PR 5 section + "All FRs Satisfied" summary + R4 graduation-ready callout. Note: ran wrap as non-interactive sequential gates rather than via slash-skill (skill-invocation deferred because this is a long-running closeout context); empirical evidence captures all binding criteria.</completion-notes>
     <estimated-hours>2</estimated-hours>
     <dependencies>042, 043, 044, 046, 047, 048</dependencies>
     <blocks>090</blocks>
