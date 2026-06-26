@@ -3,7 +3,21 @@
   <metadata>
     <title>Author EntityNameValidatorForm.tsx PlaybookBuilder property panel</title>
     <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>
+      Authored `src/client/code-pages/PlaybookBuilder/src/components/properties/EntityNameValidatorForm.tsx` strictly mirroring `LookupUserMembershipForm.tsx`: Griffel `useStyles` at module scope, semantic tokens only (no raw hex — grep verified 0 matches), `NodeFormProps` contract (configJson + onConfigChange), `memo` wrapper, `parseConfig`/`serializeConfig` helpers. Form surfaces 4 fields: candidateText (required, variable-reference input), allowList (required, variable-reference input), scrubStrategy (`RadioGroup` — sentence default / phrase), outputVariable (required). Per-strategy hint text explains executor behavior + hallucination_detected logging.
+
+      Registry integration: added `EntityNameValidator = 'entityNameValidator'` to canonical `PlaybookNodeType` (canvas.ts + playbook.ts enums), `ActionType.EntityNameValidator = 141` to playbook.ts ActionType enum, mapped to `DataverseNodeType.Workflow` + `ActionType.EntityNameValidator` in NodeTypeToDataverse/NodeTypeToActionType maps, added node color (magenta — text-transform tool) to BaseNode.tsx, added `NODE_TYPE_INFO.entityNameValidator` to ai-assistant/commands.ts. Wired into BOTH `NodePropertiesForm.tsx` and `NodePropertiesDialog.tsx` dispatch (NODE_TYPE_LABELS + hasTypeForm allow-list + form render block).
+
+      Build status: `npm run build` (webpack production) — single remaining error in `Spaarke.UI.Components/src/services/EntityCreationService.ts` missing `@spaarke/sdap-client` package (pre-existing shared-lib infrastructure debt, unrelated to task 004 changes; not caused by my work — sibling lib needs separate install of optional peer). My new EntityNameValidatorForm module compiles cleanly + is bundled with no errors. Sibling test suite `LookupUserMembershipForm.test.tsx` still passes 8/8 (no regression).
+
+      ADR-021 compliance: semantic tokens only verified (`grep '#[0-9a-fA-F]{3,8}'` returned 0 matches in new file). Component uses `tokens.spacingVerticalM`, `tokens.colorNeutralForeground3`, `tokens.fontSizeBase100`, `tokens.fontSizeBase200`, `tokens.spacingVerticalXS` — all dark-mode-safe.
+
+      Lint: PlaybookBuilder package.json declares `lint` script but no eslint dependency is installed; lint check skipped (lint not in task POML acceptance criteria — build success + dark-mode token compliance is the binding gate).
+
+      Files modified (8): EntityNameValidatorForm.tsx (NEW), index.ts barrel, canvas.ts PlaybookNodeType union, playbook.ts (PlaybookNodeType + ActionType enums + 2 maps), NodePropertiesForm.tsx (dispatch + label), NodePropertiesDialog.tsx (dispatch + hasTypeForm), BaseNode.tsx (color), commands.ts (NODE_TYPE_INFO).
+    </completion-notes>
     <estimated-hours>2.5</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>007</blocks>

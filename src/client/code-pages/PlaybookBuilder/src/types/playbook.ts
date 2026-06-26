@@ -30,6 +30,11 @@ export enum PlaybookNodeType {
   // server-side ActionType.LookupUserMembership = 52 and the
   // LookupUserMembershipNodeExecutor (task 041).
   LookupUserMembership = 'lookupUserMembership',
+  // R4 PR 1 (task 004): Tool that scrubs LLM-emitted entity names not present
+  // in a maker-supplied allow-list. Pairs with server-side
+  // ActionType.EntityNameValidator = 141 and the EntityNameValidatorNodeExecutor
+  // (task 003). FR-3 / AC-3c.
+  EntityNameValidator = 'entityNameValidator',
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +97,10 @@ export const NodeTypeToDataverse: Record<PlaybookNodeType, DataverseNodeType> = 
   // LookupUserMembership is a data-ops Workflow node — invokes the membership
   // resolver service in-process and binds the resolved IDs to OutputVariable.
   [PlaybookNodeType.LookupUserMembership]: DataverseNodeType.Workflow,
+  // EntityNameValidator is a post-LLM Tool — operates purely on text + an
+  // allow-list and emits a scrubbed string. Classified as Workflow because it
+  // mutates a data value bound to OutputVariable (no scopes required).
+  [PlaybookNodeType.EntityNameValidator]: DataverseNodeType.Workflow,
 };
 
 // ---------------------------------------------------------------------------
@@ -125,6 +134,10 @@ export enum ActionType {
   // Slot 52 sits alongside QueryDataverse (51, server-only, not yet exposed in the
   // canvas) in the Dataverse-data-ops group.
   LookupUserMembership = 52,
+  // R4 PR 1 (task 002 enum / task 003 executor / task 004 form): mirrors server
+  // INodeExecutor.cs ActionType.EntityNameValidator. Slot 141 sits in the
+  // post-LLM cluster alongside Sanitization (130) and ObservationEmit (140).
+  EntityNameValidator = 141,
 }
 
 /**
@@ -143,6 +156,7 @@ export const NodeTypeToActionType: Record<PlaybookNodeType, ActionType> = {
   [PlaybookNodeType.CreateNotification]: ActionType.CreateNotification,
   [PlaybookNodeType.Wait]: ActionType.Wait,
   [PlaybookNodeType.LookupUserMembership]: ActionType.LookupUserMembership,
+  [PlaybookNodeType.EntityNameValidator]: ActionType.EntityNameValidator,
 };
 
 // ---------------------------------------------------------------------------

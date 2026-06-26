@@ -3,7 +3,7 @@
   <metadata>
     <title>Author EntityNameValidatorNodeExecutor.cs + xUnit tests</title>
     <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>007</blocks>
@@ -12,6 +12,10 @@
     <rigor-reason>New C# NodeExecutor file + new xUnit test file in BFF API. Tags include bff-api + ai. Modifying .cs source. FULL rigor mandatory per CLAUDE.md §8.</rigor-reason>
     <parallel-group>A</parallel-group>
     <parallel-safe>true</parallel-safe>
+    <completed>2026-06-25</completed>
+    <completion-notes>
+      Authored `EntityNameValidatorNodeExecutor.cs` (~430 LOC; sibling pattern from `LookupUserMembershipNodeExecutor.cs`; pure-function — ILogger only, no IServiceScopeFactory needed) and `EntityNameValidatorNodeExecutorTests.cs` (~320 LOC; 12 tests, 8 mandatory + 4 additional Validate edge cases). Unconditional Singleton DI registration added to `AnalysisServicesModule.AddNodeExecutors` per §F.1 (no feature gate). Build: 0 errors. Tests: 12/12 pass (44 ms). Spec AC-3b satisfied — `ExecuteAsync_ScrubsHallucination_Johnson_Lee_LLP` removes "Johnson &amp; Lee LLP" sentence AND verifies the structured `hallucination_detected` warning event is emitted via Mock&lt;ILogger&gt; capture (uses the canonical event-name constant `EntityNameValidatorNodeExecutor.HallucinationDetectedEvent` so the literal token survives App Insights queries). Publish-size: 44.98 MB compressed (delta -1.32 MB vs Wave 1 baseline 46.30 MB; within +5 MB rule + 60 MB ceiling). CVE: no NEW HIGH; pre-existing Kiota 1.21.2 HIGH carried forward (documented). Implementation notes: sentence-level scrubbing on terminal punctuation; Proper-Noun span detection via word-boundary Regex tolerant of "&amp;", "of", "and", and case-citation markers ("v."); case-insensitive allow-list matching with two-strategy ranking (substring either-direction + per-token coverage); stop-word filter for sentence starters, calendar/temporal words (Friday, Monday, January, etc.), and common pronouns to prevent false positives. Per-removal log event uses literal "hallucination_detected" key in the message template (NOT just structured property) so App Insights `traces | where message contains "hallucination_detected"` queries return matches. See `notes/debug/003-publish-size.md`.
+    </completion-notes>
   </metadata>
 
   <prompt>Author a NEW `EntityNameValidatorNodeExecutor.cs` in `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/`, mirroring the pattern of the sibling `LookupUserMembershipNodeExecutor.cs`. Inputs: `{candidateText, allowList[]}`. Outputs: `{scrubbedText, removedTerms[]}`. Per-removal, log a structured `hallucination_detected` event via ILogger. Then author `EntityNameValidatorNodeExecutorTests.cs` at `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/`, mirroring `LookupUserMembershipNodeExecutorTests.cs`, with the 5 required tests below.</prompt>

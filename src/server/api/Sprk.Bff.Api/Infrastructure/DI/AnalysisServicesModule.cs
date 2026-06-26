@@ -879,6 +879,16 @@ public static class AnalysisServicesModule
         // IMembershipResolverService per execution. In-process call (NOT HTTP round-trip).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.LookupUserMembershipNodeExecutor>();
 
+        // EntityNameValidatorNodeExecutor — ActionType.EntityNameValidator = 141
+        // (R4 spaarke-daily-update-service-r4 / FR-3, task 003).
+        // Singleton: pure string analysis, no external deps beyond ILogger; matches the
+        // SanitizerNodeExecutor / GroundingVerifyNode shape. Post-LLM scrubber that strips
+        // hallucinated entity names not present in the input-derived allow-list and emits
+        // a structured `hallucination_detected` warning per removal (App Insights query
+        // target per docs/guides/AI-MONITORING-DASHBOARD.md). UNCONDITIONAL registration
+        // per CLAUDE.md §F.1 asymmetric-registration governance (no feature gate).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.EntityNameValidatorNodeExecutor>();
+
         // CodeInterpreterBridge — thin wrapper around AgentServiceClient for Code Interpreter sandbox
         // invocations (AIPU-070). Singleton: stateless, thread-safe. Kill switch: CodeInterpreter:Enabled.
         // CodeInterpreterTools are NOT registered here — they are factory-instantiated by SprkChatAgentFactory

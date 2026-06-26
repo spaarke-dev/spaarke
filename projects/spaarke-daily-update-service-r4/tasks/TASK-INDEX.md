@@ -26,8 +26,8 @@
 |----|-------|--------|--------------|--------|----------|-------|
 | 001 | Project setup + investigate sprk_playbookconsumer dispatch path | ✅ | none | 002, 030 | — | STANDARD |
 | 002 | Add ExecutorActionType 141 = EntityNameValidator to INodeExecutor enum | ✅ | 001 | 003, 007 | Group A | FULL |
-| 003 | Author EntityNameValidatorNodeExecutor.cs + xUnit tests | 🔲 | 002 | 007 | Group A | FULL |
-| 004 | Author EntityNameValidatorForm.tsx PlaybookBuilder property panel | 🔲 | 002 | 007 | Group A | FULL |
+| 003 | Author EntityNameValidatorNodeExecutor.cs + xUnit tests | ✅ | 002 | 007 | Group A | FULL |
+| 004 | Author EntityNameValidatorForm.tsx PlaybookBuilder property panel | ✅ | 002 | 007 | Group A | FULL |
 | 005 | Deploy SYS-LOOKUP-MEMBERSHIP sprk_analysisaction row (ActionType 52) | ✅ | 001 | 011 | Group B | STANDARD |
 | 006 | Deploy BRIEF-NARRATE-TLDR + BRIEF-NARRATE-CHANNEL action rows | ✅ | 001 | 011 | Group B | STANDARD |
 | 007 | Deploy BRIEF-VALIDATE-ENTITY-NAMES action row (ActionType 141) | 🔲 | 002, 003, 004 | 011 | — | STANDARD |
