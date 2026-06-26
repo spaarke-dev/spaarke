@@ -1,281 +1,300 @@
 # spaarke-redis-cache-remediation-r2 — Design
 
-> **Last Updated**: 2026-06-26
+> **Last Updated**: 2026-06-26 (revised)
 > **Status**: Draft (design)
 > **Owner**: spaarke-dev
-> **Predecessor**: [`spaarke-redis-cache-remediation-r1`](../spaarke-redis-cache-remediation-r1/) (R7-S7 closure shipped; 6 items filed as GitHub Issues #462–#467)
-> **Supplement**: [`notes/managed-redis-ai-research.md`](notes/managed-redis-ai-research.md) — Managed Redis research + Spaarke AI service audit (drives the Phase 2 decision)
+> **Predecessor**: [`spaarke-redis-cache-remediation-r1`](../spaarke-redis-cache-remediation-r1/) (R7-S7 closure shipped; 6 items filed as GitHub Issues #462–#467; #466 DEF-005 Managed Redis closed Won't Fix per [`notes/managed-redis-decision.md`](notes/managed-redis-decision.md))
+> **Background research** (informational): [`notes/managed-redis-ai-research.md`](notes/managed-redis-ai-research.md)
 
 ---
 
 ## TL;DR
 
-R2 ships two independent things:
+R2 is a **closure project** — finishes the R1 work properly without re-architecting. Three coherent themes:
 
-1. **Cache observability hardening** (Phase 1, ~3 days) — fixes real gaps the R1 senior review surfaced. Ships without waiting on any decision.
-2. **Managed Redis decision gate** (Phase 2, ~3 days) — quantitative audit of whether Spaarke's prompt distribution makes `EmbeddingCache` semantic dedup economic. **If yes**, Phase 3 migrates dev to Azure Managed Redis with RediSearch + folds in Entra ID auth (DEF-001). **If no**, Phase 3 ships Entra ID auth on Azure Cache for Redis Premium only (DEF-001 standalone) or defers DEF-001.
-
-Items deliberately CUT from R2 scope: multi-region (DEF-003), Pub/Sub separation (DEF-002), non-Redis cleanup (DEF-004, DEF-006), `customer.bicep` per-customer Redis call cleanup. See §6 for rationale.
-
----
-
-## 1. Why R2
-
-The R1 senior review uncovered four cache/Redis items that have **concrete failure modes** in production and need fixing before Spaarke leans on the new cache layer for incident response:
-
-| # | Issue | Concrete failure mode |
+| Theme | Scope | Effort |
 |---|---|---|
-| C-1 | `MetricsDistributedCache` doesn't track failures | Redis timeout / connection drop / auth failure produces **zero telemetry**. Operators see "no traffic" not "high failures" during outage. Incident MTTR longer. |
-| I-1 | `resource` dimension silently disappeared | Any pre-existing dashboard or alert filtering `cache.hits` by `resource` is broken since R7-S7 moved emission to the decorator layer. |
-| I-2 | Two `Meter("Sprk.Bff.Api.Cache")` instances claim the same name | Discovered during this audit: `TenantCache` static fields + `CacheMetrics` class both create `cache.hits` / `cache.misses` instruments on the same Meter. App Insights may merge or duplicate counts. Currently producing ambiguous data. |
-| I-3 | Three alerts documented as markdown only | Hit-rate <80% / P95 >100ms / memory >80% — designed in R1 but NOT deployed via Bicep. The new metrics are dashboards-only, not actionable. |
+| **A. Cache observability hardening** | Six concrete fixes from the R1 senior review. Closes DEF-007 + DEF-008. | 2-3 days |
+| **B. Redis key rotation automation** | Replaces the historically-slipping manual 90-day procedure with a scheduled GitHub Actions workflow. Closes DEF-001 without paying +$485/mo for ACR Premium. | 1-2 days |
+| **C. R1 implementation gap closure** | Removes `customer.bicep:181` per-customer Redis (R1 deprecated this in `Provision-Customer.ps1` but the Bicep template was left untouched). | 0.5 day |
 
-Separately, the research findings on Azure Managed Redis raise a strategic question: **before any prod-tier Redis provisioning happens**, evaluate whether Spaarke should migrate from `Microsoft.Cache/Redis` (legacy product) to `Microsoft.Cache/redisEnterprise` (Managed Redis, GA mid-2025). The honest answer depends on whether `EmbeddingCache` semantic dedup is economic at Spaarke's scale — quantifiable via a half-day audit before any migration cost is incurred.
+**Total**: 3-5 days end-to-end. One PR per theme (preferred — atomic review) or one combined PR (acceptable — they don't conflict).
 
-R2 ships the four observability fixes unconditionally and gates the Managed Redis decision on the audit.
-
----
-
-## 2. Phase 1 — Cache observability hardening (in scope, no decision dependency)
-
-All five items below ship in **one PR** to keep the cache observability surface coherent. Estimated effort: 2-3 days end-to-end including test + deploy + KQL re-verification.
-
-### 1.1 `cache.failures` counter + try/finally on every op
-
-**Source**: senior review C-1 (would be DEF-007). [`MetricsDistributedCache.cs:49-56`](../../src/server/api/Sprk.Bff.Api/Infrastructure/Cache/MetricsDistributedCache.cs#L49-L56) and 7 other op methods. Today an exception from the inner cache skips `sw.Stop()` and the metric record entirely.
-
-**Change**: wrap every op in `try/finally`. Add a `cache.failures` Counter on the same Meter with `outcome` dimension (`timeout` / `canceled` / `connection` / `other`). Classify exceptions in a small `ClassifyException` helper. Verify via KQL after deploy.
-
-### 1.2 Meter ownership consolidation
-
-**Source**: senior review I-2 (expanded). Two independent `Meter("Sprk.Bff.Api.Cache")` instances exist in the codebase:
-- [`TenantCache.cs:28-32`](../../src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs#L28-L32) — static fields, used by `MetricsDistributedCache`
-- [`Telemetry/CacheMetrics.cs:25-40`](../../src/server/api/Sprk.Bff.Api/Telemetry/CacheMetrics.cs#L25-L40) — instance class, injected into `EmbeddingCache`, `GraphTokenCache`
-
-Both create `cache.hits` / `cache.misses` on the same Meter name. App Insights may merge or double-count.
-
-**Change**: collapse to a single `Sprk.Bff.Api.Telemetry.CacheMetrics` static class that owns the Meter + instruments. `MetricsDistributedCache` and any AI-service that wants additional dimensions emit via it. Remove the static fields from `TenantCache`. Verify only one Meter instance exists at runtime.
-
-### 1.3 `resource` dimension restoration (wrapper-layer)
-
-**Source**: senior review I-1. The R7-S7 decorator emission lost the `resource` tag because keys are opaque at the decorator layer. Wrapper-layer code knows the resource.
-
-**Change**: have `TenantCache` re-emit a *secondary* `cache.hits.by_resource` / `cache.misses.by_resource` counter set with `resource` dimension (bounded to ~10-20 known resources). Keep the primary `cache.hits` / `cache.misses` from the decorator as the canonical raw count. This avoids the duplicate-emission problem because the new instruments have different names.
-
-Alternative considered: parse `resource` from the key prefix in the decorator (e.g., `spaarke:tenant:{tid}:{resource}:...`). Rejected — fails on system-cache exceptions (`comm:accounts:*`, MSAL `appcache-{appId}`) without an allow-list, and the allow-list is the same dev cost as wrapper-layer emission with cleaner cardinality.
-
-### 1.4 Bicep-deployed alerts (3 minimum)
-
-**Source**: senior review I-3 (would be DEF-008). R1 task 043 marked ✅ with "ready-to-paste Bicep skeletons" — but the alerts are markdown only. Without Bicep deploy, hit-rate <80% / P95 >100ms / memory >80% all fail silently.
-
-**Change**: new `infrastructure/bicep/alerts.bicep` with the 3 alert rules. Bicep deploy via `Deploy-RedisCache.ps1 -DeployAlerts`. Smoke test by manually triggering each condition (e.g., scale Redis to evict all keys → confirm hit-rate alert fires). KQL verify alert state in `azureActivity`.
-
-### 1.5 Decorator regression integration test
-
-**Source**: senior review N-1. The `CacheModule.DecorateDistributedCacheWithMetrics` does `services.Remove(...) + AddSingleton(...)`. If Microsoft changes the `IDistributedCache` registration shape in a future package version (e.g., keyed singleton, different lifetime), the decorator wiring silently fails OR double-registers.
-
-**Change**: new `tests/integration/Sprk.Bff.Api.Tests.Integration/Cache/MetricsDistributedCacheRegistrationTests.cs` — spins up full DI graph, resolves `IDistributedCache`, asserts it's a `MetricsDistributedCache` wrapping the expected inner type. Runs in CI.
-
-### Phase 1 acceptance criteria
-
-- [ ] `dotnet build` clean; `dotnet test` matches baseline (~7885 pass)
-- [ ] `Deploy-BffApi.ps1` clean — 4/4 critical DLLs hash-verified
-- [ ] `customMetrics | where name == 'cache.failures'` returns ≥1 row within 10 min of a forced Redis disconnect
-- [ ] `customMetrics | where name == 'cache.hits.by_resource'` returns ≥1 row with `resource` tag populated
-- [ ] `gh api repos/spaarke-dev/spaarke/branches/master/protection` — all required checks passing
-- [ ] At least one alert rule visible via `az monitor metrics alert list -g rg-spaarke-dev` referencing the new metrics
-- [ ] Decorator integration test passes; runs in CI
+**Explicit non-goals**: Managed Redis migration (decision: NO — see `notes/managed-redis-decision.md`). Multi-region. Pub/Sub separation. Semantic embedding cache. These are all valid future considerations but none have a concrete failure mode today.
 
 ---
 
-## 3. Phase 2 — Managed Redis decision gate (3 days)
+## 1. Theme A — Cache observability hardening (closes DEF-007 + DEF-008)
 
-Five pre-decision audits MUST complete before any Managed Redis migration cost is incurred. Each is short and concrete.
+All six items below ship in **one PR** to keep the cache observability surface coherent.
 
-### 2.1 EmbeddingCache semantic dedup economic audit (the pivot)
+### A.1 `cache.failures` counter + try/finally on every op
 
-Per [`notes/managed-redis-ai-research.md`](notes/managed-redis-ai-research.md) §EmbeddingCache opportunity — answer the question "does Spaarke's prompt distribution benefit from semantic dedup?"
+**Concrete failure mode**: today, a Redis timeout / connection drop / auth failure produces **zero telemetry** because the `MetricsDistributedCache` decorator's `sw.Stop()` and metric record are AFTER the `await`. Exception throws skip them. Operators see "no traffic" not "high failures" during outage.
 
-**Method**:
-1. Export 7 days of prompts (anonymized via SHA256) that produced embedding cache misses from `App Insights`
-2. Re-embed via `text-embedding-3-small` (cost: ~$0.01 for 7 days of misses at current scale)
-3. Pairwise cosine similarity in a Jupyter notebook (`projects/spaarke-redis-cache-remediation-r2/notes/embedding-audit/`)
-4. Compute %-of-misses with cosine ≥ 0.95 to a recent hit
+**Fix**: [`MetricsDistributedCache.cs:40-108`](../../src/server/api/Sprk.Bff.Api/Infrastructure/Cache/MetricsDistributedCache.cs#L40-L108) — wrap every op in `try/finally`. Add a new `cache.failures` Counter on the same Meter with `outcome` dimension. Small `ClassifyException` helper maps to bounded values: `timeout` / `canceled` / `connection` / `serialization` / `other`.
 
-**Decision rule**:
-- If ≥ 30% near-matches → **GO** on Managed Redis (Phase 3 fires)
-- If 10-30% near-matches → defer; revisit at next scale milestone
-- If < 10% near-matches → **NO-GO** on Managed Redis; defer DEF-001 to ACR Premium upgrade or wait
+```csharp
+public async Task<byte[]?> GetAsync(string key, CancellationToken token = default)
+{
+    var sw = Stopwatch.StartNew();
+    string outcome = "ok";
+    byte[]? bytes = null;
+    try
+    {
+        bytes = await _inner.GetAsync(key, token).ConfigureAwait(false);
+        return bytes;
+    }
+    catch (Exception ex)
+    {
+        outcome = ClassifyException(ex);
+        throw;
+    }
+    finally
+    {
+        sw.Stop();
+        RecordGet(bytes, sw.Elapsed.TotalMilliseconds, outcome);
+    }
+}
+```
 
-### 2.2 StackExchange.Redis compatibility audit
+**Verify**: KQL `customMetrics | where name == 'cache.failures' | summarize sum(value) by tostring(customDimensions.outcome)` returns ≥1 row after a forced Redis disconnect.
 
-**Method**: grep for `ConfigurationOptions`, `ConnectionMultiplexer`, `IDatabase.SelectDatabase`, `,defaultDatabase=`. Confirm:
-- `Microsoft.Extensions.Caching.StackExchangeRedis 10.0.1` is compatible with `Microsoft.Azure.StackExchangeRedis` (the Entra ID extension)
-- No code uses logical DB indexes 1-15 (Managed Redis has 1 DB only)
-- All Redis connections use TLS (Managed Redis is TLS-or-not exclusive)
+### A.2 Meter consolidation — collapse two `Meter("Sprk.Bff.Api.Cache")` instances
 
-### 2.3 Non-TLS callers audit
+**Concrete failure mode**: today, two independent `Meter("Sprk.Bff.Api.Cache")` instances exist:
+- [`TenantCache.cs:28-32`](../../src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs#L28-L32) — static fields owned by `TenantCache`, used by `MetricsDistributedCache`
+- [`Telemetry/CacheMetrics.cs:25-40`](../../src/server/api/Sprk.Bff.Api/Telemetry/CacheMetrics.cs#L25-L40) — instance class injected into `EmbeddingCache`, `GraphTokenCache`, and others
 
-**Method**: grep for `:6379` (non-TLS Redis port) across `src/`, `tests/`, `scripts/`, `infrastructure/`. Each hit must be either upgraded to `:6380` (TLS) or explicitly documented as out-of-band.
+Both create `cache.hits` / `cache.misses` instruments on the same Meter NAME. App Insights may merge or duplicate counts. The earlier R7-S7 verification numbers (`cache.hits=20`) may have been mixing both sources without us knowing.
 
-### 2.4 Region availability + pricing confirmation
+**Fix**: collapse to one canonical static `Sprk.Bff.Api.Telemetry.CacheMetrics` static class that owns the Meter + instruments. `MetricsDistributedCache` decorator and any AI-service that records additional dimensions emit via the static class. Delete the static fields from `TenantCache` (keep the static initializer for `JsonSerializerOptions` only). Existing consumers of injected `CacheMetrics?` either move to the static class OR are deleted if redundant.
 
-**Method**: Portal check (not Microsoft Learn — it's not authoritative for region availability or current pricing):
-- Managed Redis available in West US 2 / East US 2?
-- B0 (0.5 GB) actual monthly price for West US 2 (researcher cited ~$13/mo — verify)
-- B3 (HA prod baseline) actual monthly price for the target prod region
+**Migration**: ~7 files touched (TenantCache + CacheMetrics + the decorator + 4-5 AI consumers). Carefully ordered to keep tests green.
 
-Output: spreadsheet `notes/managed-redis-cost-vs-acr.md`.
+**Verify**: integration test asserts `Meter`-named-Sprk.Bff.Api.Cache count is exactly 1 at runtime via `MeterListener` enumeration.
 
-### 2.5 Modules required-at-create-time decision
+### A.3 `resource` dimension restoration (wrapper layer)
 
-If Phase 3 fires, decide BEFORE provisioning which modules to enable:
-- **RediSearch** (required for EmbeddingCache semantic dedup)
-- **RedisJSON** (optional — chat session storage opportunity)
-- **RedisBloom** (optional — speculative use cases)
+**Concrete failure mode**: R7-S7 moved emission to the `IDistributedCache` decorator layer, which can't see the resource name (cache keys are opaque strings at that layer). Any pre-existing dashboard or alert that filters `cache.hits` by `resource` is silently broken.
 
-Modules cannot be added post-create. The conservative call is "RediSearch only" — minimize attack surface, avoid Pyrrhic unused-module cost. RedisJSON / RedisBloom can be added in R3 by creating a parallel instance.
+**Fix**: have `TenantCache` emit a SECONDARY metric set with names `cache.hits.by_resource` / `cache.misses.by_resource` carrying the `resource` dimension. Keep the primary `cache.hits` / `cache.misses` from the decorator as the canonical raw count. Different names = no double-counting. Bounded cardinality (~10-20 resources).
 
-### Phase 2 acceptance criteria
+**Why not parse `resource` from the key prefix in the decorator?** Considered. Rejected because system-cache exception keys (`comm:accounts:*`, MSAL `appcache-{appId}`) don't follow the `spaarke:tenant:{tid}:{resource}:...` pattern, and an allow-list is the same dev cost as wrapper-layer emission with cleaner cardinality.
 
-- [ ] Audit notebook produces a definitive number for "% of embedding misses with semantic near-match"
-- [ ] Decision memo at `notes/managed-redis-go-no-go.md` cites the audit + decision rule + outcome
-- [ ] StackExchange.Redis / non-TLS / logical-DB audits all green OR have explicit remediation items
-- [ ] Region + pricing confirmed in writing
+**Verify**: KQL `customMetrics | where name == 'cache.hits.by_resource' | summarize sum(value) by tostring(customDimensions.resource)` returns rows with bounded values.
 
----
+### A.4 Bicep-deployed alerts (3 minimum)
 
-## 4. Phase 3 — Conditional: Managed Redis migration + EmbeddingCache semantic refactor (GO path only, 2 weeks)
+**Concrete failure mode**: R1 task 043 marked ✅ with "ready-to-paste Bicep skeletons" — but the alerts are markdown-only in `redis-cache-azure-setup.md` §8. Hit-rate <80% / P95 >100ms / memory >80% all fail silently with no page. The new metrics are dashboards-only, not actionable.
 
-**Fires only if Phase 2.1 decision rule says GO.**
+**Fix**: new `infrastructure/bicep/alerts.bicep` with:
+1. **Hit-rate <80% / 15min** → action group: on-call email
+2. **P95 latency >100ms / 5min** → action group: on-call email
+3. **Memory >80% of SKU / 15min** → action group: on-call email
 
-### 3.1 Provision Managed Redis with RediSearch enabled
-- New `infrastructure/bicep/managed-redis.bicep` (parallel to `redis.bicep`)
-- Modules enabled at create: `RediSearch` (+ `RedisJSON` if 2.5 decided to include)
-- Cluster policy: Enterprise (required for RediSearch)
-- Tier: Balanced B0 for dev, B3+ for prod
+Action groups parameterized via `.bicepparam` (different recipients per environment). `Deploy-RedisCache.ps1 -DeployAlerts` flag triggers Bicep deploy of alerts only.
 
-### 3.2 EmbeddingCache refactor to vector similarity
-- New `IEmbeddingCache` API: `Task<ReadOnlyMemory<float>?> GetSemanticAsync(string prompt, double minSimilarity = 0.95)`
-- HNSW index on the `embedding` field; cosine distance metric
-- Tunable threshold via `appsettings.json` (`EmbeddingCache:SemanticThreshold`)
-- Backwards-compat: `GetEmbeddingAsync(contentHash)` still works (exact-key path)
-- Add `cache.semantic_hits` Meter instrument with `threshold` tag
+**Verify**: `az monitor metrics alert list -g rg-spaarke-dev` shows 3 rules. Manually trigger each (e.g., scale Redis to evict all keys → hit-rate alert fires within 15 min).
 
-### 3.3 Entra ID auth via Managed Identity (folds in DEF-001)
-- Add `Microsoft.Azure.StackExchangeRedis` package
-- `CacheModule.cs` — replace connection-string password parsing with `await opts.ConfigureForAzureWithTokenCredentialAsync(new DefaultAzureCredential())`
-- Drop `Redis-ConnectionString` KV secret (no longer needed for auth)
-- Role assignment: BFF MI gets "Redis Data Owner" role on Managed Redis instance
-- **Closes [#462 DEF-001](https://github.com/spaarke-dev/spaarke/issues/462)**
+### A.5 Decorator regression integration test
 
-### 3.4 Dev cutover
-- Provision `spaarke-bff-managed-redis-dev`
-- Optional: RDB export from `spaarke-bff-redis-dev` → import into Managed Redis (only if dev data has value; cleaner to start fresh)
-- Update App Settings: `Redis__ConnectionString` → Managed Redis hostname (TLS port 6380)
-- Restart BFF; verify `/healthz` 200 + startup log
-- Re-run Phase 1's KQL verification queries
+**Concrete failure mode**: `CacheModule.DecorateDistributedCacheWithMetrics` does `services.Remove(...) + AddSingleton(...)`. If Microsoft changes the `IDistributedCache` registration shape in a future package version (e.g., keyed singleton, different lifetime), the decorator wiring silently fails or double-registers. Today there is no regression net.
 
-### 3.5 Telemetry pipeline verification (R7-S7 invariants still hold)
-- `dependencies | where type contains 'Redis'` shows new Managed Redis hostname
-- `customMetrics | where name startswith 'cache.'` shows steady-state hits/misses/failures
-- New: `customMetrics | where name == 'cache.semantic_hits'` shows hits when semantic threshold is met
+**Fix**: new `tests/integration/Sprk.Bff.Api.Tests.Integration/Cache/MetricsDistributedCacheRegistrationTests.cs` — spins up the full DI graph via `WebApplicationFactory`, resolves `IDistributedCache`, asserts it's a `MetricsDistributedCache` wrapping the expected inner type. Runs in CI alongside unit tests.
 
-### 3.6 Decommission ACR dev (after 7-day reversibility window)
-- Tag `spaarke-bff-redis-dev` with `decommission=YYYY-MM-DD`
-- Delete after window closes
+### A.6 `UseAzureMonitor()` fails-open guard tightening
 
-### 3.7 Prod migration runbook
-- Author runbook in `docs/guides/managed-redis-cutover.md` (parallel to existing `redis-cache-azure-setup.md`)
-- Prod migration NOT in R2 — deferred to a Phase 4 prod project after dev runs cleanly for 30+ days
+**Concrete failure mode**: [`Program.cs:21-30`](../../src/server/api/Sprk.Bff.Api/Program.cs#L21-L30) silently skips OTel registration if `APPLICATIONINSIGHTS_CONNECTION_STRING` is missing or empty. This was the right call for tests but in production a missing/empty conn string means we silently ship a BFF with no telemetry.
 
-### Phase 3 acceptance criteria (GO path only)
+**Fix**: throw in non-Development environments, skip in Development. Mirrors the existing `CacheModule` 4-branch pattern.
 
-- [ ] Managed Redis instance provisioned with RediSearch
-- [ ] `EmbeddingCache.GetSemanticAsync` returns non-null for prompts within cosine threshold of cached embeddings
-- [ ] `cache.semantic_hits` metric non-empty
-- [ ] BFF MI authenticates via Entra ID; `Redis-ConnectionString` KV secret rotated to a sentinel (NOT deleted yet — kept as fallback for 30 days)
-- [ ] All Phase 1 KQL verification queries still pass
-- [ ] Sister project handoff signal if AI-Search relies on the embedding cache
+```csharp
+var aiConnString = builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]
+    ?? Environment.GetEnvironmentVariable("APPLICATIONINSIGHTS_CONNECTION_STRING");
+if (!string.IsNullOrWhiteSpace(aiConnString))
+{
+    builder.Services.AddOpenTelemetry().UseAzureMonitor();
+}
+else if (!builder.Environment.IsDevelopment())
+{
+    throw new InvalidOperationException(
+        "APPLICATIONINSIGHTS_CONNECTION_STRING is required in non-Development environments. " +
+        "Set the App Setting or environment variable.");
+}
+```
 
----
+### Theme A acceptance criteria
 
-## 5. Phase 3-Alt — Conditional: Entra ID auth on Azure Cache for Redis Premium (NO-GO path, 2-3 days)
-
-**Fires only if Phase 2.1 decision rule says NO-GO but operator still wants DEF-001.**
-
-- Upgrade `spaarke-bff-redis-dev` SKU from Basic C0 to Premium P1 (Entra ID is Premium-tier-only on ACR)
-- Wire `Microsoft.Azure.StackExchangeRedis` extension
-- Same DEF-001 closure semantics as 3.3, but at +$485/mo cost
-- Closes [#462 DEF-001](https://github.com/spaarke-dev/spaarke/issues/462)
-
-**Default**: if NO-GO on Managed Redis, also DEFER DEF-001 to next round rather than pay +$485/mo for key-rotation elimination alone. Acknowledge the 90-day key rotation as accepted operational cost.
+- [ ] All 6 changes in one PR
+- [ ] `dotnet build` clean; `dotnet test` ≥7885 pass (matches baseline)
+- [ ] `Deploy-BffApi.ps1` clean — 4/4 critical DLLs hash-verified; `/healthz` 200
+- [ ] `customMetrics | where name == 'cache.failures'` returns ≥1 row within 10 min of a forced Redis disconnect (use `az redis force-reboot` against dev)
+- [ ] `customMetrics | where name == 'cache.hits.by_resource'` returns ≥1 row with `resource` dimension
+- [ ] `az monitor metrics alert list -g rg-spaarke-dev` shows 3 alerts referencing the cache metrics
+- [ ] Integration test passes in CI
 
 ---
 
-## 6. Explicitly out of scope (with rationale)
+## 2. Theme B — Redis key rotation automation (closes [#462 DEF-001](https://github.com/spaarke-dev/spaarke/issues/462) without Premium SKU)
+
+### Why this approach instead of Entra ID auth
+
+Entra ID auth via Managed Identity (DEF-001) eliminates the rotation procedure entirely, but on Azure Cache for Redis it's a **Premium-tier feature only** (+$485/mo over Basic C0). Project owner decision (2026-06-26): not worth +$485/mo for rotation elimination alone.
+
+The alternative: **automate the rotation procedure** so the historical slippage problem (operators forgetting / deferring rotation past the 90-day target) is solved by a scheduled job, not by human reliability. Stays on Basic/Standard SKU.
+
+### B.1 `scripts/Rotate-RedisKey.ps1`
+
+Idempotent script parameterized by environment:
+
+```powershell
+Rotate-RedisKey.ps1 -Environment dev [-WhatIf]
+```
+
+**Algorithm** (designed to be safe under partial failure):
+
+1. Verify Redis instance + KV exist and operator has permission
+2. Read current connection string from KV (call it CONN_OLD)
+3. Call `az redis regenerate-key --key-type Secondary` (rotates the SECONDARY key only; primary still works — this is the "safe window" property)
+4. Construct new connection string using the SECONDARY key (call it CONN_NEW)
+5. Update KV secret `Redis-ConnectionString` with CONN_NEW (new secret version; old version retained per KV's default retention policy)
+6. Restart BFF App Service (`az webapp restart`)
+7. Poll `/healthz` for HTTP 200 with timeout (default 120s — same as `Deploy-BffApi.ps1`)
+8. **If healthz succeeds**: call `az redis regenerate-key --key-type Primary` (so the new key is the ONLY key — eliminates the now-unused primary)
+9. **If healthz fails**: rollback — update KV secret back to CONN_OLD (use KV secret version history), restart BFF, exit non-zero with detailed error
+
+Log every step to App Insights as a custom event (`RedisKeyRotation`) with `outcome`, `environment`, `duration_ms` fields.
+
+### B.2 Scheduled trigger — GitHub Actions workflow
+
+New `.github/workflows/redis-key-rotation.yml` running on cron:
+
+```yaml
+on:
+  schedule:
+    - cron: '0 6 1 */3 *'  # 06:00 UTC on the 1st of every 3rd month (quarterly)
+  workflow_dispatch:  # Allow manual trigger for testing
+```
+
+Uses existing OIDC auth pattern (already in use for other workflows). Invokes `Rotate-RedisKey.ps1 -Environment dev` (initially dev-only; expand to staging/prod after 2 successful dev runs).
+
+### B.3 Operational runbook update
+
+Update `docs/guides/redis-cache-azure-setup.md` §6 (Secret Rotation Procedure) — replace the manual 5-step procedure with:
+- The automated workflow runs quarterly without operator action
+- Manual fallback procedure (existing 5 steps) retained for emergency rotation (e.g., suspected key compromise)
+- Verification queries:
+
+```kql
+// Verify last rotation succeeded
+customEvents
+| where name == 'RedisKeyRotation'
+| where customDimensions.environment == 'dev'
+| top 1 by timestamp desc
+| project timestamp, outcome=customDimensions.outcome, duration_ms=customDimensions.duration_ms
+```
+
+### B.4 Alert — rotation hasn't run in 100 days
+
+New alert in `infrastructure/bicep/alerts.bicep` (added in Theme A.4):
+- Query App Insights for `customEvents | where name == 'RedisKeyRotation' AND outcome == 'success'` over the last 100 days
+- If count = 0, alert on-call (automation has stopped, manual rotation needed)
+
+### Theme B acceptance criteria
+
+- [ ] `Rotate-RedisKey.ps1 -Environment dev -WhatIf` plans correctly without making changes
+- [ ] Dry-run actual rotation: KV secret has TWO versions (old + new); BFF restart succeeds; `/healthz` 200; App Insights logs `RedisKeyRotation` event with `outcome=success`
+- [ ] GitHub Actions workflow runs successfully via `workflow_dispatch`
+- [ ] Manual fallback procedure still works (operator unfamiliar with automation can still rotate)
+- [ ] Alert fires if `RedisKeyRotation` event missing for >100 days (test by faking timestamp in App Insights)
+
+---
+
+## 3. Theme C — R1 implementation gap closure
+
+### C.1 Remove `customer.bicep:181` per-customer Redis call
+
+**Concrete failure mode**: R1 FR-12 / Q-E Architecture 1 deprecated per-customer Redis. `Provision-Customer.ps1` was correctly updated (line 421 has the deprecation comment block). But `infrastructure/bicep/customer.bicep:181` still has the `module redis 'modules/redis.bicep' = { ... }` call. If anyone runs `customer.bicep` directly (not through `Provision-Customer.ps1`), they'd still provision a per-customer Redis — silently violating the architectural rule.
+
+**Fix**:
+- Delete the `redis` module call in [`customer.bicep`](../../infrastructure/bicep/customer.bicep) (lines ~181-195) plus the `redisSku` / `redisCapacity` parameters (lines ~62-67) plus the `redisName` variable (line ~99) plus any outputs that reference `redis.outputs.*`
+- Update [`infrastructure/bicep/parameters/customer-template.bicepparam`](../../infrastructure/bicep/parameters/customer-template.bicepparam) — drop `redisSku` / `redisCapacity` params
+- Update any test fixture that uses `customer.bicep` directly (grep `infrastructure/bicep/customer.bicep` in `tests/`, `scripts/`)
+- Re-verify [`docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md`](../../docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md) §4.6 — the strikethrough row + footnote can stay as-is or be cleaned up (the gap will be closed)
+
+### Theme C acceptance criteria
+
+- [ ] `customer.bicep` lints + builds cleanly
+- [ ] `az deployment group what-if` on `customer.bicep` for a fresh customer ID shows NO Redis resource in the plan
+- [ ] All existing customer environments unaffected (no resource deletion — Bicep template only governs new deployments)
+
+---
+
+## 4. Explicitly out of scope (with rationale)
 
 | Item | Why deferred / cut |
 |---|---|
-| **DEF-002** Pub/Sub separation in prod | No measured contention. Phase 1 cache observability gives us the data to know if/when this becomes real. Re-evaluate after Phase 1 ships + 30 days. |
-| **DEF-003** Multi-region Redis (geo-replication) | Spaarke BFF is single-region today. Active-active is dramatically simpler on Managed Redis, so this naturally folds into a future round IF Phase 3 GO landed AND Spaarke goes multi-region. |
-| **DEF-004** Plain-text secret remediation (non-Redis) | Cross-cutting App Settings hygiene; not Redis. Belongs in a separate hardening project or sister project. |
-| **DEF-006** Rename App Insights `spe-insights-dev-67e2xz` | Not Redis. Belongs in `spaarke-ai-azure-setup-dev-r1` continuation. |
-| **`customer.bicep:181` per-customer Redis call cleanup** | R1 implementation gap — `Provision-Customer.ps1` properly deprecated per-customer Redis but the underlying Bicep template still has the `modules/redis.bicep` call. Real bug, but tiny scope (1-line Bicep delete + customer-template.bicepparam update). File as a separate small-scope issue ; NOT R2. |
-| **N-3** ConnectionMultiplexerFactory hot-rotation lifecycle | Theoretical concern; no observed failure. Watch for it in Phase 3 if migration happens. |
-| **M-1 / M-3 / M-4** non-cache hygiene items | Bundle into a "BFF telemetry hygiene" project; not Redis-specific. |
+| **DEF-002** Pub/Sub separation in prod | No measured contention. Theme A's `cache.failures` + `resource`-tagged hits give us the data to know if/when this becomes real. Re-evaluate after Theme A ships + 30 days of prod data. |
+| **DEF-003** Multi-region Redis | Spaarke BFF is single-region today. No DR commitment that requires geo-rep. Re-evaluate when (if) Spaarke commits to multi-region. |
+| **DEF-004** Plain-text secret remediation (non-Redis) | Cross-cutting App Settings hygiene; not Redis. Belongs in a separate hardening project. |
+| **DEF-005** Managed Redis migration | Decision: NO. See [`notes/managed-redis-decision.md`](notes/managed-redis-decision.md). Managed Redis is a high-throughput enterprise solution; Spaarke is below the scale where its bundled modules (RediSearch vector / RedisJSON / Bloom) pay off. Revisit if Spaarke crosses ~500K embedding calls/day OR commits to multi-region active-active. |
+| **DEF-006** Rename App Insights `spe-insights-dev-67e2xz` | Not Redis. Fold into `spaarke-ai-azure-setup-dev-r1` continuation (sister project is already doing canonicalization for AI Search + KV). |
+| **N-2** Hot-path performance baseline | Theoretical concern; no observed regression. Hardening in Theme A doesn't change per-call cost materially. Bundle into a future "BFF perf baseline" project if any cache regression is suspected. |
+| **N-3** ConnectionMultiplexerFactory hot-rotation lifecycle | Theoretical concern; no observed failure. StackExchange.Redis auto-reconnects. Re-examine if rotation automation in Theme B surfaces issues. |
+| **M-1** dead `Microsoft.ApplicationInsights.AspNetCore` package | Pure cleanup; not cache-specific. Bundle into a future "BFF dep hygiene" project. |
+| **M-4** `CacheModule` bootstrap logger leak | Cosmetic. Pre-existing. Defer. |
 
 ---
 
-## 7. Risks
+## 5. Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Phase 2.1 audit shows < 10% near-matches → Managed Redis investment NOT economic | Medium | Low (we save money) | Path C — defer DEF-001 to next round; ship only Phase 1 |
-| Phase 3 cutover surfaces an undetected StackExchange.Redis incompatibility | Low | Medium | Phase 2.2 audit + Phase 3.4 dev cutover BEFORE prod |
-| `cache.failures` counter reveals high transient failure rate previously masked | High (this is the POINT) | Operational — paged for actual problems | Tune alert thresholds in Phase 1.4 to balance signal-to-noise; expect 1-2 weeks of threshold-tuning |
-| `MetricsDistributedCache` decorator + Meter consolidation breaks an undetected dashboard | Medium | Low (rebuild dashboards in App Insights) | Phase 1.3's `resource` tag restoration is the primary mitigation |
-| RDB import from ACR → Managed Redis fails or loses data | Low | Low (dev only; re-warming acceptable) | Phase 3 doesn't migrate data unless explicitly required; start fresh is cleaner |
-| Modules locked at create time → wrong module choice forces re-provision | Medium | Medium | Phase 2.5 makes the modules decision before provisioning; default RediSearch-only is conservative |
+| Theme A.2 Meter consolidation breaks a pre-existing dashboard | Medium | Low (rebuild dashboards in App Insights) | Theme A.3 wrapper-layer `resource` tag restoration is the primary mitigation. Run KQL diff before/after to spot dashboards depending on removed instruments. |
+| Theme A.1 `cache.failures` reveals high transient failure rate previously masked | High (this IS the point) | Operational — paged for actual problems | Tune alert thresholds in Theme A.4 to balance signal-to-noise; expect 1-2 weeks of threshold-tuning post-deploy. |
+| Theme B rotation script fails mid-rotation, leaving BFF unable to connect | Low | High | Algorithm rotates SECONDARY first (primary still works during transition), updates KV, restarts BFF, verifies `/healthz`, ONLY THEN rotates primary. Rollback path retains old KV secret version. |
+| Theme B GitHub Actions OIDC auth misconfigured for KV write | Medium | Low (caught at first scheduled run) | `workflow_dispatch` test before reliance on cron; Theme B.4 alert catches silent failure (>100 days no rotation event). |
+| Theme C `customer.bicep` change breaks existing customer-onboarding scripts | Low | Medium | `what-if` deployment validates the plan; smoke-test against demo-customer before merge. Existing customers unaffected (Bicep governs new deployments only). |
 
 ---
 
-## 8. Success criteria
+## 6. Success criteria
 
-- [ ] Phase 1 ships: all 5 sub-items merged; KQL verifies `cache.failures` + `cache.hits.by_resource` flowing; alerts deployed via Bicep
-- [ ] Phase 2 produces a written decision memo at `notes/managed-redis-go-no-go.md`
-- [ ] If Phase 2 = GO: Phase 3 ships; Managed Redis dev cutover clean; semantic embedding cache measurably reduces OpenAI API calls
-- [ ] If Phase 2 = NO-GO: decision memo published with audit data; Path C or Path A documented as the chosen direction
-- [ ] DEF-007 (cache failures), DEF-008 (alerts) created and closed by Phase 1 PR
-- [ ] [#462 DEF-001 Entra ID auth](https://github.com/spaarke-dev/spaarke/issues/462) — either closed (Phase 3 GO) or explicitly deferred with rationale (Phase 3 NO-GO)
+- [ ] Theme A: all 6 hardening items shipped; KQL verifies `cache.failures` + `cache.hits.by_resource` flowing; 3 Bicep alerts live in dev; CI test prevents decorator regression
+- [ ] Theme B: rotation script committed; GitHub Actions workflow ran successfully at least once (via `workflow_dispatch`); operational runbook updated; key rotation alert deployed
+- [ ] Theme C: `customer.bicep` Redis call deleted; verified via what-if against a fresh customer ID; deployment guide §4.6 cleanup
+- [ ] [#462 DEF-001 Entra ID auth](https://github.com/spaarke-dev/spaarke/issues/462) closed with link to Theme B automation
+- [ ] [#466 DEF-005 Managed Redis](https://github.com/spaarke-dev/spaarke/issues/466) closed Won't Fix with link to `notes/managed-redis-decision.md`
+- [ ] DEF-007 (cache.failures) + DEF-008 (Bicep alerts) created and closed by Theme A PR
+- [ ] DEF-009 (customer.bicep cleanup) created and closed by Theme C PR
 
 ---
 
-## 9. Estimated effort
+## 7. Estimated effort
 
-| Phase | Best case | Worst case |
+| Theme | Best case | Worst case |
 |---|---|---|
-| Phase 1 (always ships) | 2 days | 4 days (alert threshold tuning) |
-| Phase 2 (audit) | 1 day | 3 days (if EmbeddingCache audit requires more data) |
-| Phase 3 GO | 8 days (1.5 wk) | 14 days (2.5 wk) |
-| Phase 3-Alt NO-GO | 2 days | 3 days |
+| A. Observability hardening (6 items, 1 PR) | 2 days | 3 days (alert threshold tuning) |
+| B. Key rotation automation (script + workflow + runbook) | 1 day | 2 days (OIDC auth troubleshooting) |
+| C. R1 gap closure (Bicep edit) | 0.5 day | 1 day (test fixture surprises) |
 
-**Total**: 3-7 days if NO-GO; 11-21 days if GO. Phase 1 ships first regardless and de-risks everything that follows.
+**Total**: 3-5 days. Themes can ship independently (each is its own PR) — A first (largest, most foundational), then B + C in parallel.
 
 ---
 
-## 10. Open questions for project owner before spec lock
+## 8. Open questions for project owner before spec lock
 
-1. Is Spaarke's projected prod scale (500K+ embedding calls/day) close enough that the GO threshold should be lower (e.g., ≥ 15% near-matches instead of 30%)?
-2. If Phase 2 = GO, do we also enable RedisJSON (chat session storage opportunity) at create time, or stay RediSearch-only? Locking modules at create is a real constraint.
-3. Is the +$485/mo cost of ACR Premium acceptable for DEF-001 standalone (Path C), or is the 90-day key rotation acceptable as ongoing operational cost?
-4. Phase 3 prod migration timing — fold into R2, or carve out as a separate prod project after dev runs cleanly for N days?
+1. **Cron cadence for key rotation** — quarterly (`0 6 1 */3 *`) is the spec assumption. Acceptable, or do you want a different cadence (monthly is more conservative; semi-annual is closer to the 90-day target)?
+2. **Initial environment coverage for Theme B** — dev only (safest), or dev + staging + prod from day 1?
+3. **Theme A.3 `resource` dimension cardinality cap** — how many distinct resources to allow before tagging as `other`? Default in the design is "unbounded but expected ≤20".
+4. **PR sequencing** — A then B+C in parallel (recommended), or one combined PR (faster review but harder to revert one piece)?
 
 ---
 
 ## See also
 
-- [`notes/managed-redis-ai-research.md`](notes/managed-redis-ai-research.md) — full research + sources
+- [`notes/managed-redis-decision.md`](notes/managed-redis-decision.md) — informal decision record (no formal ADR amendment)
+- [`notes/managed-redis-ai-research.md`](notes/managed-redis-ai-research.md) — research that informed the Managed Redis decision (retained for future reference)
 - R1 retrospective: [`projects/spaarke-redis-cache-remediation-r1/`](../spaarke-redis-cache-remediation-r1/)
-- [Microsoft Learn — Azure Managed Redis](https://learn.microsoft.com/en-us/azure/redis/overview)
-- ADR-009 (concise): [`.claude/adr/ADR-009-redis-caching.md`](../../.claude/adr/ADR-009-redis-caching.md) — R1 amended; R2 may add to "Operational MUSTs" section
+- ADR-009 (concise): [`.claude/adr/ADR-009-redis-caching.md`](../../.claude/adr/ADR-009-redis-caching.md) — no R2 amendment required (R2 doesn't change architecture; only operationalizes what R1 amended)
