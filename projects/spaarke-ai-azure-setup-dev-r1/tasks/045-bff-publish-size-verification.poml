@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF publish-size delta verification (NFR-04 / CLAUDE.md §10)</title>
     <phase>4: Code + Config Refactor</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>0.5</estimated-hours>
     <dependencies>030, 031, 032, 033, 034, 035, 036, 037, 038, 041, 042</dependencies>
     <blocks>046</blocks>
