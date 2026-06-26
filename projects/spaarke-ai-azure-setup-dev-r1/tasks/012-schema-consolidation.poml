@@ -3,7 +3,7 @@
   <metadata>
     <title>Consolidate schema files to infrastructure/ai-search/ (FR-11)</title>
     <phase>2: Schema Preparation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>011</dependencies>
     <blocks>020</blocks>

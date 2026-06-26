@@ -34,7 +34,7 @@
 | 007 | ADR pointer drift fix (FR-06) | 1 | ✅ | MINIMAL | 001 | — (touches .claude/) |
 | 010 | Schema property policy patches (7 schemas) | 2 | ✅ | STANDARD | 002 | — |
 | 011 | Atomic rename: spaarke-file-index → spaarke-files-index | 2 | ✅ | STANDARD | 002, 010 | — (NFR-07 atomic) |
-| 012 | Consolidate schema files to infrastructure/ai-search/ | 2 | 🔲 | STANDARD | 011 | — |
+| 012 | Consolidate schema files to infrastructure/ai-search/ | 2 | ✅ | STANDARD | 011 | — |
 | 013 | Atomic rename: playbook-embeddings → spaarke-playbook-embeddings | 2 | 🔲 | STANDARD | 002, 010 | — (NFR-07 atomic) |
 | 014 | Atomic rename: spaarke-invoices-dev → spaarke-invoices-index | 2 | 🔲 | STANDARD | 002, 010 | — (NFR-07 atomic) |
 | 015 | Add tenantId field to spaarke-records-index | 2 | 🔲 | STANDARD | 010 | Group B |
