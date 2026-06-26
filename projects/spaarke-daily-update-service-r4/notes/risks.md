@@ -6,11 +6,17 @@
 
 ---
 
-## R1: R3 PR #451 File Overlap (11 files in `Spaarke.DailyBriefing.Components/`)
+## R1: R3 PR #451 File Overlap (11 files in `Spaarke.DailyBriefing.Components/`) — ✅ RESOLVED 2026-06-25
 
-### Summary
+### Resolution
 
-The R3 sibling project's PR (`#451`, branch `work/spaarke-daily-update-service-r3`) is OPEN and unmerged as of 2026-06-25. It modifies 11 files inside `src/client/shared/Spaarke.DailyBriefing.Components/` that R4 will also modify. R4 develops in parallel per spec line 305 ("R3 PR #451 stays in draft and merges separately (R4 is independent; can be developed in parallel and merged in any order)"), accepting a conflict-resolution pass when whichever PR lands second is rebased.
+R3 PR #451 **MERGED to master** at commit `fa788dcaf` (observed 2026-06-25). The merge was subsequently pulled into this R4 worktree at commit `3e586c1b0` ("Merge remote-tracking branch 'origin/master' into work/spaarke-daily-update-service-r4"). The 11-file overlap risk no longer applies: R3's changes are the new baseline this branch builds on. Future R4 W2 PRs (PR 4, PR 5) modify R3-baseline files cleanly — no rebase pass required for R3 reasons.
+
+**W2 task conflict-check steps (tasks 036, 049) should still run** — but they're now checking against any OTHER active PRs touching the daily-briefing surface, not against R3 specifically. The `notes/risks.md R1` clauses in PR 4/5 task descriptions remain useful as routine PR hygiene.
+
+### Original summary (preserved for audit trail)
+
+The R3 sibling project's PR (`#451`, branch `work/spaarke-daily-update-service-r3`) was OPEN and unmerged at R4 scaffold time. It modified 11 files inside `src/client/shared/Spaarke.DailyBriefing.Components/` that R4 will also modify. R4 was scaffolded to develop in parallel per spec line 305 ("R3 PR #451 stays in draft and merges separately"). R3 in fact merged before R4 PR 1 was opened, so the parallelism never had to be exercised.
 
 ### Overlapping Files (R3 PR #451 ∩ R4 W2 surface)
 
@@ -111,6 +117,6 @@ R4 FR-12 (PR 4, task 030) explicitly defers the `/narrate` dispatch path decisio
 
 | Risk | Status | Resolved When |
 |------|--------|---------------|
-| R1: R3 PR #451 overlap | Active | Either PR lands first + the other rebases |
+| R1: R3 PR #451 overlap | ✅ Resolved 2026-06-25 | R3 PR #451 merged at `fa788dcaf`; pulled into R4 at `3e586c1b0` — R4 builds on R3 baseline |
 | R2: NotificationService.cs path | Resolved (documentation) | Captured in CLAUDE.md + this file |
 | R3: `sprk_playbookconsumer` dispatch | Active | Task 030 decision recorded |
