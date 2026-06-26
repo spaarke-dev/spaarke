@@ -493,7 +493,7 @@ describe('buildDisabledChannelsFilter — FR-17c clause builder', () => {
     );
   });
 
-  it("doubles single-quotes in category strings (OData literal escape) — defensive even though current enum has none", () => {
+  it('doubles single-quotes in category strings (OData literal escape) — defensive even though current enum has none', () => {
     // Cast through unknown so we can stress the escape with a synthetic value.
     const synthetic = ["it's-fine"] as unknown as Parameters<typeof buildDisabledChannelsFilter>[0];
     expect(buildDisabledChannelsFilter(synthetic)).toBe("sprk_category ne 'it''s-fine'");
@@ -551,7 +551,7 @@ describe('fetchNotifications — FR-17c disabledChannels server filter', () => {
     expect(query).toContain(' and ');
   });
 
-  it("fetchNotifications_DisabledChannels_OdataIn_OrFallback — uses AND-of-`ne` syntax (spec line 361 fallback), NOT `not in`", async () => {
+  it('fetchNotifications_DisabledChannels_OdataIn_OrFallback — uses AND-of-`ne` syntax (spec line 361 fallback), NOT `not in`', async () => {
     const webApi = makeWebApi();
     (webApi.retrieveMultipleRecords as jest.Mock).mockResolvedValue(makeMultiResult([]));
 
