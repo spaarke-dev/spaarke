@@ -3,7 +3,9 @@
   <metadata>
     <title>Author DAILY-BRIEFING-NARRATE playbook sprk_configjson node graph</title>
     <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Authored canonical playbook JSON at projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json (6 nodes / 6 edges: Start → LoadKnowledge → [GenerateTldr ‖ GenerateChannelNarratives] → ValidateEntityNames → ReturnResponse). Header fields verified: sprk_playbookcode=BRIEF-NARRATE, sprk_playbooktype=0 (AiAnalysis), sprk_playbookmode=1 (NodeBased), sprk_triggertype=0 (Manual), sprk_capabilities=100000006 (Summarize). All 3 Action GUIDs cross-referenced against PR 1 deployment catalog (BRIEF-NARRATE-TLDR, BRIEF-NARRATE-CHANNEL, BRIEF-VALIDATE-ENTITY-NAMES; SYS-LOOKUP-MEMBERSHIP recorded for catalog but NOT used by this playbook — daily-briefing payload is structured, not Dataverse-queried). Companion design notes at projects/spaarke-daily-update-service-r4/notes/design/010-daily-briefing-narrate-node-graph.md document parallel-branch rationale, allow-list construction logic, LoadKnowledge R5 deferral, anti-hallucination posture (FR-13+FR-14 defense-in-depth), and Component Justification (CLAUDE.md §11). JSON parses; no baked legal-genre example names (grep clean for Acme/Johnson/Lee/Davis/LLP/etc.). Deployment deferred to task 011.</completion-notes>
     <estimated-hours>4</estimated-hours>
     <dependencies>009</dependencies>
     <blocks>011</blocks>

@@ -1,0 +1,261 @@
+{
+  "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "$comment": "Canonical source-of-truth for the DAILY-BRIEFING-NARRATE sprk_analysisplaybook row. R4 task 010 (PR 2) authors; task 011 deploys via dataverse-deploy / Deploy-Playbook.ps1. This playbook is the AiAnalysis grounded-narration playbook the new /narrate wrapper dispatches to via IConsumerRoutingService (Path A.5 — see projects/spaarke-daily-update-service-r4/notes/decisions/030-dispatch-path.md). NOT a Notification playbook (sprk_playbooktype = 0 AiAnalysis, NOT 2 Notification).",
+  "_dataverseRow": {
+    "_comment": "Maps this document onto the sprk_analysisplaybook Dataverse row. Fields below populate the row at deploy time. The 'sprk_configjson' nested object below is serialized as JSON text into the sprk_configjson Memo column. The 'nodes' + 'edges' arrays below are CONSUMED BY Deploy-Playbook.ps1 to create the associated sprk_analysisnode rows + sprk_playbooknodeconnection rows. Lookup key for upsert is sprk_playbookcode.",
+    "dataverseEntity": "sprk_analysisplaybook",
+    "deploymentMode": "upsert",
+    "lookupKey": "sprk_playbookcode",
+    "fields": {
+      "sprk_playbookcode": "BRIEF-NARRATE",
+      "sprk_name": "Daily Briefing Narrate",
+      "sprk_description": "Grounded LLM narration of the user's daily notification briefing. Composes a TL;DR + per-channel narrative bullets from a structured DailyBriefingNarrateRequest payload, then scrubs LLM output via EntityNameValidator (ActionType 141) to defeat firm/case-name hallucination. Dispatched by /api/ai/daily-briefing/narrate via IConsumerRoutingService (R4 FR-12 Path A.5).",
+      "sprk_playbooktype": 0,
+      "sprk_playbookmode": 1,
+      "sprk_triggertype": 0,
+      "sprk_capabilities": 100000006,
+      "statecode": 0,
+      "statuscode": 1
+    }
+  },
+  "playbook": {
+    "id": "BRIEF-NARRATE",
+    "name": "Daily Briefing Narrate",
+    "description": "Grounded LLM narration of the user's daily notification briefing. Composes a TL;DR + per-channel narrative bullets from a structured DailyBriefingNarrateRequest payload, then scrubs LLM output via EntityNameValidator (ActionType 141) to defeat firm/case-name hallucination.",
+    "sprk_playbooktype": 0,
+    "sprk_playbookmode": 1,
+    "sprk_triggertype": 0,
+    "sprk_capabilities": 100000006,
+    "isPublic": true,
+    "isSystemPlaybook": true,
+    "sprk_configjson": {
+      "category": "daily-briefing-narrate",
+      "channelLabel": "Daily Briefing Narration",
+      "channelIcon": "sparkle",
+      "outputBinding": {
+        "_comment": "Maps the playbook's final node outputs to the DailyBriefingNarrateResponse contract at src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs lines 859-901. The new payload-execution method on AnalysisOrchestrationService (task 031) reads these binding hints to project the node graph's terminal output into the response DTO.",
+        "responseShape": "DailyBriefingNarrateResponse",
+        "fields": {
+          "tldr": "tldrResult",
+          "channelNarratives": "channelNarrationResults",
+          "generatedAtUtc": "{{run.completedAtUtc}}"
+        }
+      },
+      "composeStrategy": {
+        "_comment": "ADR-037 multinode output composition — the parallel GenerateTldr ‖ GenerateChannelNarratives branches fan out from LoadKnowledge then merge at ValidateEntityNames. Per ADR-037 §When-composite, this playbook does NOT use DeliverComposite (ActionType 42 / NodeType 100_000_004) because the response shape is a fixed-arity JSON DTO consumed by the widget — not section-keyed SSE streamed to a widget. Compose semantics: GenerateChannelNarratives is fan-out per channel (one Skill invocation per element of input.channels); outputs are aggregated into an array keyed by the input channel name (preserving input order). GenerateTldr is a single Skill invocation. ValidateEntityNames receives a concatenated candidateText assembled deterministically (tldrResult.summary + tldrResult.keyTakeaways.join + tldrResult.topAction + channelNarrationResults[*].narrative.join) and the merged allow-list. The scrubber's output (scrubbedText) is NOT used to rewrite the response — the response carries the pre-scrub structured fields PLUS scrubbedText metadata for client-side reconciliation. This preserves the structured shape the widget already consumes (TldrResult{summary, keyTakeaways, topAction, ...} + ChannelNarrationResult[]) while ensuring the scrubber's deterministic in-process verification ran (hallucination_detected warnings logged per FR-14).",
+        "fanOut": {
+          "nodeName": "GenerateChannelNarratives",
+          "iterateOver": "{{start.channels}}",
+          "iterateItemAlias": "channel",
+          "merge": {
+            "strategy": "array-preserve-input-order",
+            "outputVariable": "channelNarrationResults"
+          }
+        }
+      },
+      "parameters": {
+        "_comment": "Runtime-overridable parameters surfaced to the dispatcher (BFF /narrate wrapper). None required for v1 — payload carries all per-run state."
+      }
+    },
+    "scopes": {
+      "actions": ["BRIEF-NARRATE-TLDR", "BRIEF-NARRATE-CHANNEL", "BRIEF-VALIDATE-ENTITY-NAMES"],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    },
+    "componentJustification": {
+      "_comment": "Required by CLAUDE.md §11 (Component Justification — Default to Reuse) for every new component. Documented here in the canonical playbook JSON so it travels with the artifact.",
+      "existing": "No existing playbook performs grounded narration of an arbitrary structured-notification payload. The 7 notification-* playbooks (PB-016 through PB-022) PRODUCE notifications via CreateNotification node; they do not CONSUME a payload for narration. The chat-summarize playbooks consume document content, not structured notification arrays.",
+      "extension": "No. Existing playbooks are notification producers (sprk_playbooktype = 2); this is an AiAnalysis playbook (sprk_playbooktype = 0) consumed by the daily-briefing widget via /narrate. They serve orthogonal consumer-types and cannot share a node graph.",
+      "costOfDoingNothing": "Spec FR-12 (line 159) is binding: the /narrate endpoint must dispatch to JPS, not run hardcoded prompt strings. Without this playbook the new wrapper has no target to dispatch to — the entire R4 W2 Consumer workstream is blocked (PR 4 tasks 030-036 all depend on this playbook existing in spaarkedev1). The R3 UAT-observed firm/case-name hallucination defect (FR-13 / FR-14 evidence) cannot be remediated end-to-end without this playbook composing the grounded prompt with the scrubber Tool."
+    }
+  },
+  "nodes": [
+    {
+      "name": "Start",
+      "nodeType": "Control",
+      "actionType": null,
+      "canvasType": "start",
+      "outputVariable": "start",
+      "positionX": 100,
+      "positionY": 300,
+      "dependsOn": [],
+      "configJson": {
+        "scope": "user-briefing-payload",
+        "description": "Ingest the DailyBriefingNarrateRequest payload from the dispatching wrapper. Shape: { categories: [{category, count, items[]}], priorityItems: [{regardingName, regardingEntityType, viaMatter?, source?, ...}], channels: [{channel, items[]}], totalNotificationCount, // R4-enrichment-fields from FR-6: items[].viaMatter, items[].regardingName, items[].source }. The payload becomes the 'start' scope variable; downstream nodes reference fields via {{start.channels}} / {{start.priorityItems}} / etc.",
+        "inputContract": {
+          "categories": "Array<{ category: string, count: number, items: NotificationItem[] }>",
+          "priorityItems": "NotificationItem[]",
+          "channels": "Array<{ channel: string, items: NotificationItem[] }>",
+          "totalNotificationCount": "number"
+        }
+      }
+    },
+    {
+      "name": "LoadKnowledge",
+      "nodeType": "Control",
+      "actionType": null,
+      "canvasType": "loadKnowledge",
+      "outputVariable": "channelRegistry",
+      "positionX": 300,
+      "positionY": 300,
+      "dependsOn": ["Start"],
+      "configJson": {
+        "_comment": "PLACEHOLDER — R5 will bind this to an AI Search 'matter context' knowledge source per spec line 58 ('AI Search matter context knowledge node deferred to R5'). For R4 this node is a no-op pass-through that exposes the input.channels array as channelRegistry.channels for the downstream fan-out. Once R5 wires the AI Search binding, this node will additionally retrieve channel display labels + per-channel category metadata from the registry knowledge source.",
+        "kind": "pass-through-placeholder",
+        "passthroughBinding": {
+          "channels": "{{start.channels}}"
+        },
+        "r5BindingPlan": {
+          "knowledgeSourceCode": "TBD-CHANNEL-REGISTRY",
+          "_comment": "R5 will populate this with the actual sprk_knowledge code once the channel-registry knowledge source is authored + indexed."
+        }
+      }
+    },
+    {
+      "name": "GenerateTldr",
+      "nodeType": "AiAnalysis",
+      "actionType": 0,
+      "canvasType": "skillNode",
+      "outputVariable": "tldrResult",
+      "positionX": 550,
+      "positionY": 200,
+      "dependsOn": ["LoadKnowledge"],
+      "configJson": {
+        "__actionType": 0,
+        "actionCode": "BRIEF-NARRATE-TLDR",
+        "actionId": "BRIEF-NARRATE-TLDR",
+        "modelSelection": {
+          "_comment": "Temperature 0 + grounded prompt per FR-13. Action row carries the model assignment + sprk_temperature = 0; this node does not override.",
+          "useActionDefaults": true
+        },
+        "inputBinding": {
+          "_comment": "Action's 'payload' input (single-string maxLength=50000) receives a JSON-serialized projection of the DailyBriefingNarrateRequest. The payload-execution method serializes start.* fields into the placeholder {{briefing.payload}}. The Action's prompt instructs the LLM to use ONLY entity names present in this payload.",
+          "payload": "{{json start}}"
+        },
+        "outputBinding": {
+          "tldrResult": "{{output}}"
+        },
+        "description": "Generate TL;DR (summary + keyTakeaways + topAction + categoryCount + priorityItemCount) from the briefing payload. Runs in parallel with GenerateChannelNarratives. Output schema matches TldrResult contract (DailyBriefingEndpoints.cs:880)."
+      }
+    },
+    {
+      "name": "GenerateChannelNarratives",
+      "nodeType": "AiAnalysis",
+      "actionType": 0,
+      "canvasType": "skillNode",
+      "outputVariable": "channelNarrationResults",
+      "positionX": 550,
+      "positionY": 400,
+      "dependsOn": ["LoadKnowledge"],
+      "configJson": {
+        "__actionType": 0,
+        "actionCode": "BRIEF-NARRATE-CHANNEL",
+        "actionId": "BRIEF-NARRATE-CHANNEL",
+        "modelSelection": {
+          "useActionDefaults": true
+        },
+        "iteration": {
+          "_comment": "ADR-037 fan-out semantics per sprk_configjson.composeStrategy.fanOut above — one Skill invocation per element of channelRegistry.channels (which forwards from start.channels via the LoadKnowledge pass-through). Per-iteration the 'channel' alias binds the current iteration item ({channel: string, items: NotificationItem[]}) and is serialized into the Action's 'payload' input (placeholder {{briefing.channel}}).",
+          "iterateOver": "{{channelRegistry.channels}}",
+          "itemAlias": "channel"
+        },
+        "inputBinding": {
+          "payload": "{{json channel}}"
+        },
+        "outputBinding": {
+          "_comment": "Per-iteration output is appended to the channelNarrationResults array preserving input order. Each element matches the ChannelNarrationResult contract (DailyBriefingEndpoints.cs:906). For R4 the Action emits { channel, narrative[], itemCount, bulletCount }; the response-composition layer (task 031) maps channel→category and narrative[]→bullets[].narrative to bridge the slight shape difference vs DailyBriefingEndpoints.ChannelNarrationResult (category, bullets[]).",
+          "channelNarrationResults": "{{output}}"
+        },
+        "description": "Generate per-channel narrative bullets, one Skill invocation per input channel. Runs in parallel with GenerateTldr. Parallel fan-out per ADR-037. Output is an ordered array of per-channel result objects."
+      }
+    },
+    {
+      "name": "ValidateEntityNames",
+      "nodeType": "Tool",
+      "actionType": 141,
+      "canvasType": "entityNameValidator",
+      "outputVariable": "validationResult",
+      "positionX": 850,
+      "positionY": 300,
+      "dependsOn": ["GenerateTldr", "GenerateChannelNarratives"],
+      "configJson": {
+        "__actionType": 141,
+        "actionCode": "BRIEF-VALIDATE-ENTITY-NAMES",
+        "actionId": "BRIEF-VALIDATE-ENTITY-NAMES",
+        "_comment": "Post-LLM defense-in-depth scrubber per FR-14. Concatenates all narration text (TL;DR + per-channel) into candidateText; builds allowList from input payload entity-name fields (deduplicated, empty-allowed). MUST execute AFTER both GenerateTldr and GenerateChannelNarratives — the merge of the two parallel branches happens here (per ADR-037 §When-composite + sprk_configjson.composeStrategy above).",
+        "inputBinding": {
+          "candidateText": "{{join '\\n\\n' tldrResult.summary tldrResult.keyTakeaways tldrResult.topAction (map channelNarrationResults 'narrative' | flatten | join '\\n')}}",
+          "allowList": "{{distinct (concat (map start.priorityItems 'regardingName') (map start.priorityItems 'viaMatter.name') (map start.priorityItems 'source.owningUser') (flatten (map start.categories (lambda c (map c.items 'regardingName')))) (flatten (map start.categories (lambda c (map c.items 'viaMatter.name')))) (flatten (map start.categories (lambda c (map c.items 'source.owningUser')))) (flatten (map start.channels (lambda ch (map ch.items 'regardingName')))) (flatten (map start.channels (lambda ch (map ch.items 'viaMatter.name')))) (flatten (map start.channels (lambda ch (map ch.items 'source.owningUser')))))}}"
+        },
+        "outputBinding": {
+          "validationResult": "{{output}}"
+        },
+        "description": "Scrub LLM output. Allow-list = every regardingName + viaMatter.name + source.owningUser appearing in priorityItems, categories[].items, channels[].items (deduplicated; empty-allowed). Removed terms emit 'hallucination_detected' warning per FR-14 / AC-14a. validationResult.scrubbedText carries the post-scrub merged text; validationResult.removedTerms enumerates every removed proper-noun span. Per the playbook's composeStrategy (sprk_configjson above), the response carries pre-scrub structured fields AND the scrubber's metadata — this preserves the widget's structured-shape contract while still emitting hallucination_detected for monitoring."
+      }
+    },
+    {
+      "name": "ReturnResponse",
+      "nodeType": "Control",
+      "actionType": null,
+      "canvasType": "returnResponse",
+      "outputVariable": "response",
+      "positionX": 1100,
+      "positionY": 300,
+      "dependsOn": ["ValidateEntityNames"],
+      "configJson": {
+        "_comment": "Terminal node — binds final outputs to the playbook-execution method's return value. The payload-execution method on AnalysisOrchestrationService (task 031) reads this binding to project node outputs into DailyBriefingNarrateResponse { Tldr, ChannelNarratives, GeneratedAtUtc } (contract: src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs:859-872).",
+        "responseBinding": {
+          "tldr": "{{tldrResult}}",
+          "channelNarratives": "{{channelNarrationResults}}",
+          "generatedAtUtc": "{{run.completedAtUtc}}",
+          "_validationMetadata": {
+            "_comment": "Optional sidecar surfaced for observability / debugging. The widget does NOT consume these fields today; they are emitted to the response payload for App Insights correlation + future client-side reconciliation per FR-14. Field names use the underscore prefix to mark them as non-contract metadata.",
+            "scrubbedText": "{{validationResult.scrubbedText}}",
+            "removedTerms": "{{validationResult.removedTerms}}"
+          }
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "source": "Start", "target": "LoadKnowledge" },
+    { "source": "LoadKnowledge", "target": "GenerateTldr" },
+    { "source": "LoadKnowledge", "target": "GenerateChannelNarratives" },
+    { "source": "GenerateTldr", "target": "ValidateEntityNames" },
+    { "source": "GenerateChannelNarratives", "target": "ValidateEntityNames" },
+    { "source": "ValidateEntityNames", "target": "ReturnResponse" }
+  ],
+  "metadata": {
+    "author": "spaarke-daily-update-service-r4 task 010",
+    "authorLevel": 0,
+    "createdAt": "2026-06-25T00:00:00Z",
+    "description": "DAILY-BRIEFING-NARRATE playbook — grounded LLM narration of a structured notification briefing payload, with post-LLM EntityNameValidator scrub. Authors the canonical repo source-of-truth JSON; task 011 deploys via dataverse-deploy. Dispatched by /narrate via IConsumerRoutingService (Path A.5 — see notes/decisions/030-dispatch-path.md). Companion design notes at projects/spaarke-daily-update-service-r4/notes/design/010-daily-briefing-narrate-node-graph.md.",
+    "tags": ["daily-briefing", "narrate", "ai-analysis", "grounded", "playbook", "r4", "fr-4", "fr-12", "fr-13", "fr-14"],
+    "specReferences": {
+      "FR-4": "Author + deploy DAILY-BRIEFING-NARRATE playbook (lines 123-125)",
+      "FR-12": "/narrate dispatches to this playbook (lines 159-164)",
+      "FR-13": "Grounded prompt content lives in Action rows (lines 166-168)",
+      "FR-14": "Entity-name validator wired into the playbook downstream of both narrate Skills (lines 170-172)"
+    },
+    "sourceReferences": {
+      "tldrAction": "projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-tldr.action.json",
+      "channelAction": "projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-channel.action.json",
+      "validatorAction": "projects/spaarke-daily-update-service/notes/playbooks/actions/brief-validate-entity-names.action.json",
+      "membershipAction": "projects/spaarke-daily-update-service/notes/playbooks/actions/sys-lookup-membership.action.json",
+      "responseContract": "src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs#L859-L901",
+      "dispatchDecision": "projects/spaarke-daily-update-service-r4/notes/decisions/030-dispatch-path.md",
+      "designNotes": "projects/spaarke-daily-update-service-r4/notes/design/010-daily-briefing-narrate-node-graph.md",
+      "referencePlaybook": "projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json",
+      "adr": ".claude/adr/ADR-037-multinode-output-composition.md",
+      "taskPOML": "projects/spaarke-daily-update-service-r4/tasks/010-author-daily-briefing-narrate-playbook.poml"
+    },
+    "actionGuidsDeployed": {
+      "_comment": "Action row GUIDs from PR 1 deployment to spaarkedev1 (tasks 005/006/007). Recorded here for cross-reference during task 011 deploy.",
+      "SYS-LOOKUP-MEMBERSHIP": "ca44b7aa-fc70-f111-ab0e-7ced8ddc4cc6",
+      "BRIEF-NARRATE-TLDR": "ce299eb4-fc70-f111-ab0e-7ced8ddc4cc6",
+      "BRIEF-NARRATE-CHANNEL": "dc3533c0-fc70-f111-ab0e-7ced8ddc4cc6",
+      "BRIEF-VALIDATE-ENTITY-NAMES": "290e786c-ff70-f111-ab0e-7ced8ddc4cc6"
+    }
+  }
+}
