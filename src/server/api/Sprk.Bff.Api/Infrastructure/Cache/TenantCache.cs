@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Diagnostics.Metrics;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
 
@@ -15,28 +13,18 @@ namespace Sprk.Bff.Api.Infrastructure.Cache;
 /// <c>InstanceName</c> (currently <c>spaarke:</c>) is prepended by
 /// <c>StackExchangeRedisCache</c>, not by this wrapper.
 /// </remarks>
+/// <remarks>
+/// Cache metrics (cache.hits / cache.misses / cache.failures / cache.redis_call_duration_ms)
+/// are owned by <see cref="Sprk.Bff.Api.Telemetry.CacheMetrics"/> and emitted by
+/// <see cref="MetricsDistributedCache"/> at the <see cref="IDistributedCache"/> decorator
+/// layer (FR-02 of <c>spaarke-redis-cache-remediation-r2</c>). This wrapper deliberately
+/// owns no Meter or instruments.
+/// </remarks>
 internal sealed class TenantCache : ITenantCache
 {
     private const string DefaultCacheInstance = "default";
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-
-    // FR-16: Custom cache metrics. Hit-rate is computed downstream from hits/(hits+misses).
-    // Meter name follows the BFF's "Sprk.Bff.Api.*" convention (matches the existing
-    // `metrics.AddMeter("Sprk.Bff.Api.Cache")` registration in `TelemetryModule.cs` so
-    // metrics flow to App Insights via OpenTelemetry without additional registration).
-    internal static readonly Meter Meter = new("Sprk.Bff.Api.Cache", "1.0.0");
-    internal static readonly Counter<long> HitsCounter = Meter.CreateCounter<long>("cache.hits");
-    internal static readonly Counter<long> MissesCounter = Meter.CreateCounter<long>("cache.misses");
-    internal static readonly Histogram<double> CallDurationHistogram =
-        Meter.CreateHistogram<double>("cache.redis_call_duration_ms");
-    // FR-01 (spaarke-redis-cache-remediation-r2 task 001): cache.failures Counter
-    // dimensioned by outcome (timeout/canceled/connection/serialization/other) and op.
-    // Emitted by MetricsDistributedCache try/catch wrapper so Redis outages are observable.
-    internal static readonly Counter<long> FailuresCounter = Meter.CreateCounter<long>(
-        "cache.failures",
-        unit: "{failure}",
-        description: "Count of cache operation failures by outcome and op.");
 
     private readonly IDistributedCache _cache;
     private readonly ILogger<TenantCache> _logger;

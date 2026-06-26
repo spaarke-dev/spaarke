@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Telemetry;
 using StackExchange.Redis;
 
 namespace Sprk.Bff.Api.Infrastructure.Cache;
@@ -174,24 +175,24 @@ internal sealed class MetricsDistributedCache : IDistributedCache
 
     private static void RecordGet(byte[]? bytes, double elapsedMs)
     {
-        TenantCache.CallDurationHistogram.Record(
+        CacheMetrics.CallDurationHistogram.Record(
             elapsedMs,
             RawTierTag,
             new KeyValuePair<string, object?>("op", "get"));
 
         if (bytes is null || bytes.Length == 0)
         {
-            TenantCache.MissesCounter.Add(1, RawTierTag);
+            CacheMetrics.MissesCounter.Add(1, RawTierTag);
         }
         else
         {
-            TenantCache.HitsCounter.Add(1, RawTierTag);
+            CacheMetrics.HitsCounter.Add(1, RawTierTag);
         }
     }
 
     private static void RecordOp(string op, double elapsedMs)
     {
-        TenantCache.CallDurationHistogram.Record(
+        CacheMetrics.CallDurationHistogram.Record(
             elapsedMs,
             RawTierTag,
             new KeyValuePair<string, object?>("op", op));
@@ -199,7 +200,7 @@ internal sealed class MetricsDistributedCache : IDistributedCache
 
     private static void RecordFailure(string op, Exception ex)
     {
-        TenantCache.FailuresCounter.Add(
+        CacheMetrics.FailuresCounter.Add(
             1,
             RawTierTag,
             new KeyValuePair<string, object?>("op", op),

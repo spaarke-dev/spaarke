@@ -14,11 +14,11 @@ All BFF code (`bff-api` tag) → **FULL rigor**.
 | ID | Title | Status | Dependencies | Blocks | Hours | Rigor | Parallel |
 |---|---|---|---|---|---|---|---|
 | 001 | `cache.failures` Counter + try/catch + `ClassifyException` | ✅ | — | 030 | 2 | FULL | Group 0 — foundational, serial. **Done 2026-06-26**: Added `FailuresCounter` to TenantCache.cs (same Meter); added try/catch + `RecordFailure` + `ClassifyException` switch (5 outcomes) to MetricsDistributedCache.cs all 8 public methods. Build clean (0 errors, 0 new warnings). RedisTimeoutException covered by TimeoutException arm (derives from it). |
-| 002 | Meter consolidation — single canonical `CacheMetrics` static class | 🔲 | — | 003, 005 | 3 | FULL | Group A — independent of 001 (different concern, different file scope) |
-| 003 | `cache.hits.by_resource` + `cache.misses.by_resource` at TenantCache | 🔲 | 002 | 030 | 2 | FULL | Group B — depends on 002 (uses canonical static class) |
-| 004 | NEW `infrastructure/bicep/alerts.bicep` (3 cache alerts) | 🔲 | — | 014, 030 | 3 | STANDARD | Group A — Bicep file; no BFF code change |
-| 005 | Decorator regression integration test (`MetricsDistributedCacheRegistrationTests`) | 🔲 | 002 | 030 | 2 | FULL (TEST-MODIFYING override) | Group B — depends on 002 (asserts Meter count = 1) |
-| 006 | `UseAzureMonitor()` fails-open guard in `Program.cs` | 🔲 | — | 030 | 1 | FULL | Group A — independent file scope (Program.cs) |
+| 002 | Meter consolidation — single canonical `CacheMetrics` static class | ✅ | — | 003, 005 | 3 | FULL | Group A — **Done 2026-06-26**: promoted CacheMetrics to static class owning the single Meter + 5 instruments; removed Meter+Counter fields from TenantCache; switched MetricsDistributedCache + 6 consumers (EmbeddingCache, GraphTokenCache, GraphMetadataCache, CachedAccessDataSource, AnalysisRagProcessor, TextExtractorService) from instance ctor injection to static method calls; removed `AddSingleton<CacheMetrics>` from DocumentsModule; updated 2 test files. Build clean. |
+| 003 | `cache.hits.by_resource` + `cache.misses.by_resource` at TenantCache | 🔲 | 002 | 030 | 2 | FULL | Group B — depends on 002 ✅ (uses canonical static class) |
+| 004 | NEW `infrastructure/bicep/alerts.bicep` (3 cache alerts) | ✅ | — | 014, 030 | 3 | STANDARD | Group A — **Done 2026-06-26**: NEW alerts.bicep with 3 resources (memory metricAlert + hit-rate scheduledQueryRules + P95 scheduledQueryRules); EXTENDED Deploy-RedisCache.ps1 with -DeployAlerts/-AppInsightsName/-ActionGroupResourceId params + env-default App Insights name. `bicep build` succeeds; `-WhatIf` plan shows 3 alerts. |
+| 005 | Decorator regression integration test (`MetricsDistributedCacheRegistrationTests`) | 🔲 | 002 | 030 | 2 | FULL (TEST-MODIFYING override) | Group B — depends on 002 ✅ (asserts Meter count = 1) |
+| 006 | `UseAzureMonitor()` fails-open guard in `Program.cs` | ✅ | — | 030 | 1 | FULL | Group A — **Done 2026-06-26**: extracted to `Infrastructure/Startup/AzureMonitorGuard.cs` (4-branch shape mirroring CacheModule); Program.cs uses `AzureMonitorGuard.ShouldWireExporter()`; 9 unit tests (Production-throw + Development-pass + case-insensitive env name). Build clean. |
 
 ---
 

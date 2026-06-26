@@ -1,7 +1,7 @@
 # Current Task State — spaarke-redis-cache-remediation-r2
 
 > **Last Updated**: 2026-06-26
-> **Status**: ✅ Task 001 complete · 🔲 Next: Task 002 (Meter consolidation) — Group A wave
+> **Status**: ✅ Group 0 + Group A done (4 of 17 tasks) · 🔲 Next: Group B (003 + 005)
 
 ---
 
@@ -10,38 +10,37 @@
 | Field | Value |
 |-------|-------|
 | **Project** | spaarke-redis-cache-remediation-r2 |
-| **Active task** | Group A wave (002 + 004 + 006 — parallel-safe) |
-| **Status** | Group 0 ✅ done; Group A ready to dispatch |
-| **Next action** | Dispatch tasks 002, 004, 006 in parallel via 3 task-execute invocations in ONE message |
+| **Active task** | Group B wave (003 + 005 — parallel-safe) |
+| **Status** | Group A ✅ done; Group B ready to dispatch |
+| **Next action** | Dispatch tasks 003, 005 in parallel via 2 sub-agents |
 
 ---
 
-## Task 001 — Completed 2026-06-26
+## Completed Tasks (4 of 17)
 
-- **Title**: `cache.failures` Counter + try/catch + `ClassifyException` (FR-01)
-- **Rigor**: FULL
-- **Files modified**:
-  - `src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs` — added `FailuresCounter` static field (uses same Meter `Sprk.Bff.Api.Cache`; no new Meter instance)
-  - `src/server/api/Sprk.Bff.Api/Infrastructure/Cache/MetricsDistributedCache.cs` — wrapped all 8 public methods (Get, GetAsync, Set, SetAsync, Refresh, RefreshAsync, Remove, RemoveAsync) in try/catch; added `RecordFailure` + `ClassifyException` (switch over 5 outcomes: canceled, timeout, connection, serialization, other)
-- **Build verification**: `dotnet build src/server/api/Sprk.Bff.Api/` returned 0 errors, 18 pre-existing warnings (0 new)
-- **Note**: `RedisTimeoutException` derives from `TimeoutException` so the `RedisTimeoutException` arm was unreachable; `RedisServerException` similarly redundant — both removed with inline comment.
-- **Deferred verification**:
-  - KQL `customMetrics | where name == 'cache.failures'` — verified post-deploy in task 030
-  - Integration test asserting Meter count = 1 — explicit verification in task 005 after task 002 lands
+| # | Task | Files | Commit |
+|---|---|---|---|
+| 001 | `cache.failures` Counter + try/catch + ClassifyException (FR-01) | TenantCache.cs (Counter add) + MetricsDistributedCache.cs (try/catch + ClassifyException) | `73b79857c` |
+| 002 | Meter consolidation — canonical static CacheMetrics class (FR-02) | CacheMetrics.cs (static) + TenantCache.cs (fields removed) + MetricsDistributedCache.cs (refs switched) + 6 consumers (EmbeddingCache, GraphTokenCache, GraphMetadataCache, CachedAccessDataSource, AnalysisRagProcessor, TextExtractorService) + DocumentsModule.cs (DI removal) + SpaarkeCore.cs (factory cleanup) + 2 test files | Group A commit (pending) |
+| 004 | NEW alerts.bicep + Deploy-RedisCache.ps1 `-DeployAlerts` flag (FR-04) | infrastructure/bicep/alerts.bicep (NEW) + scripts/Deploy-RedisCache.ps1 (extended) | Group A commit (pending) |
+| 006 | UseAzureMonitor() fails-open guard (FR-06) | Infrastructure/Startup/AzureMonitorGuard.cs (NEW) + Program.cs (call site) + tests/Startup/AzureMonitorGuardTests.cs (9 tests) | Group A commit (pending) |
+
+**Build state after Group A**: `dotnet build src/server/api/Sprk.Bff.Api/` returns 0 errors, 18 pre-existing warnings (0 new). Test project also builds clean.
 
 ---
 
-## Active Group — Group A (tasks 002, 004, 006)
+## Active Group — Group B (tasks 003 + 005)
 
-All three are parallel-safe (distinct files: Telemetry/CacheMetrics.cs + TenantCache.cs vs alerts.bicep vs Program.cs).
+Both depend on task 002 ✅. Parallel-safe (distinct files: TenantCache.cs vs new integration test file).
 
 | Task | Title | Files | Rigor |
 |---|---|---|---|
-| 002 | Meter consolidation — promote CacheMetrics to static; remove TenantCache static fields | Telemetry/CacheMetrics.cs, Infrastructure/Cache/TenantCache.cs, EmbeddingCache, GraphTokenCache, CacheModule.cs | FULL |
-| 004 | NEW infrastructure/bicep/alerts.bicep (3 cache alerts) + Deploy-RedisCache.ps1 `-DeployAlerts` flag | infrastructure/bicep/alerts.bicep (NEW), scripts/Deploy-RedisCache.ps1 | STANDARD |
-| 006 | UseAzureMonitor() fails-open guard in Program.cs | src/server/api/Sprk.Bff.Api/Program.cs + new unit test | FULL |
+| 003 | `cache.hits.by_resource` + `cache.misses.by_resource` Counters at TenantCache layer | Infrastructure/Cache/TenantCache.cs + Telemetry/CacheMetrics.cs (extend with 2 new Counters) | FULL |
+| 005 | Decorator regression integration test (`MetricsDistributedCacheRegistrationTests`) | tests/integration/Sprk.Bff.Api.Tests.Integration/Cache/MetricsDistributedCacheRegistrationTests.cs (NEW) | FULL (TEST-MODIFYING) |
 
-**Note for task 002**: my task 001 added `FailuresCounter` to TenantCache. When task 002 promotes CacheMetrics to canonical static class, that Counter should move with the Hits/Misses/Histogram instruments.
+**Coordination note for task 003**: CacheMetrics is now a static class (post task 002). Add 2 new Counters as static fields/properties on CacheMetrics: `HitsByResourceCounter` + `MissesByResourceCounter`. TenantCache calls them with the `resource` parameter as a dimension on every Get/Set/Remove path.
+
+**Coordination note for task 005**: locate the integration test project (find via `glob tests/integration/**/CustomWebAppFactory*` or similar). The test asserts (a) `IDistributedCache` resolves to `MetricsDistributedCache` wrapping the expected inner type; (b) exactly one `Meter("Sprk.Bff.Api.Cache")` instance exists at runtime via `MeterListener` enumeration.
 
 ---
 
@@ -50,4 +49,4 @@ All three are parallel-safe (distinct files: Telemetry/CacheMetrics.cs + TenantC
 If context is reset / new session:
 1. Read this file
 2. Read `tasks/TASK-INDEX.md` for overall status
-3. Dispatch Group A: ONE message with 3 Skill tool invocations (task-execute, one per POML)
+3. Dispatch Group B: ONE message with 2 Agent tool calls (or run sequentially if context tight)

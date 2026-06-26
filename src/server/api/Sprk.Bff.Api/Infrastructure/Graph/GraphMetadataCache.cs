@@ -25,7 +25,6 @@ public class GraphMetadataCache
 {
     private readonly IDistributedCache _cache;
     private readonly ILogger<GraphMetadataCache> _logger;
-    private readonly CacheMetrics? _metrics;
 
     // Cache TTLs per task spec
     private static readonly TimeSpan MetadataTtl = TimeSpan.FromMinutes(5);
@@ -40,12 +39,10 @@ public class GraphMetadataCache
 
     public GraphMetadataCache(
         IDistributedCache cache,
-        ILogger<GraphMetadataCache> logger,
-        CacheMetrics? metrics = null)
+        ILogger<GraphMetadataCache> logger)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _metrics = metrics; // Optional: metrics can be null if not configured
     }
 
     // =========================================================================
@@ -176,19 +173,19 @@ public class GraphMetadataCache
             if (cached != null)
             {
                 _logger.LogDebug("Cache HIT for {CacheType} key {Key}", cacheType, cacheKey);
-                _metrics?.RecordHit(sw.Elapsed.TotalMilliseconds, $"graph-{cacheType}");
+                CacheMetrics.RecordHit(sw.Elapsed.TotalMilliseconds, $"graph-{cacheType}");
                 return JsonSerializer.Deserialize<T>(cached, JsonOptions);
             }
 
             _logger.LogDebug("Cache MISS for {CacheType} key {Key}", cacheType, cacheKey);
-            _metrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, $"graph-{cacheType}");
+            CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, $"graph-{cacheType}");
             return null;
         }
         catch (Exception ex)
         {
             sw.Stop();
             _logger.LogWarning(ex, "Error reading {CacheType} from cache for key {Key}", cacheType, cacheKey);
-            _metrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, $"graph-{cacheType}");
+            CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, $"graph-{cacheType}");
             return null; // Fail gracefully — cache failures don't break Graph operations
         }
     }

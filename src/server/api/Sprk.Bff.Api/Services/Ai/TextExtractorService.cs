@@ -28,7 +28,6 @@ public class TextExtractorService : ITextExtractor
     private readonly ILogger<TextExtractorService> _logger;
     private readonly ICircuitBreakerRegistry? _circuitRegistry;
     private readonly ITenantCache _cache;
-    private readonly CacheMetrics? _cacheMetrics;
     private readonly AsyncCircuitBreakerPolicy _docIntelCircuitBreaker;
 
     // NFR-08 system-level cache allow-listed (FR-05 redis remediation r1):
@@ -62,14 +61,12 @@ public class TextExtractorService : ITextExtractor
         IOptions<DocumentIntelligenceOptions> options,
         ILogger<TextExtractorService> logger,
         ITenantCache cache,
-        ICircuitBreakerRegistry? circuitRegistry = null,
-        CacheMetrics? cacheMetrics = null)
+        ICircuitBreakerRegistry? circuitRegistry = null)
     {
         _options = options.Value;
         _logger = logger;
         _circuitRegistry = circuitRegistry;
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-        _cacheMetrics = cacheMetrics;
 
         // Register circuit breaker for Document Intelligence
         _circuitRegistry?.RegisterCircuit(CircuitBreakerRegistry.DocumentIntelligence);
@@ -218,7 +215,7 @@ public class TextExtractorService : ITextExtractor
                 _logger.LogDebug(
                     "Text extraction cache HIT for id {CacheId} ({CharCount} chars, {LatencyMs:F1}ms)",
                     cacheId, cachedText.Length, sw.Elapsed.TotalMilliseconds);
-                _cacheMetrics?.RecordHit(sw.Elapsed.TotalMilliseconds, CacheType);
+                CacheMetrics.RecordHit(sw.Elapsed.TotalMilliseconds, CacheType);
 
                 // Reconstruct a successful result from cached text.
                 // We don't cache EmailMetadata — email extraction is fast and metadata is rarely reused.
@@ -228,7 +225,7 @@ public class TextExtractorService : ITextExtractor
             _logger.LogDebug(
                 "Text extraction cache MISS for id {CacheId} ({LatencyMs:F1}ms)",
                 cacheId, sw.Elapsed.TotalMilliseconds);
-            _cacheMetrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, CacheType);
+            CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, CacheType);
             return null;
         }
         catch (Exception ex)
@@ -237,7 +234,7 @@ public class TextExtractorService : ITextExtractor
             _logger.LogWarning(ex,
                 "Error reading text extraction cache for id {CacheId}, proceeding with extraction",
                 cacheId);
-            _cacheMetrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, CacheType);
+            CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, CacheType);
             return null; // Graceful degradation — cache failure should not block extraction
         }
     }

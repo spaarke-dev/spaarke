@@ -27,7 +27,6 @@ public class EmbeddingCache : IEmbeddingCache
 {
     private readonly ITenantCache _cache;
     private readonly ILogger<EmbeddingCache> _logger;
-    private readonly CacheMetrics? _metrics;
 
     // Cache TTL: 7 days - embeddings are deterministic for same content + model
     // Balance between freshness (model updates) and cost savings
@@ -49,12 +48,10 @@ public class EmbeddingCache : IEmbeddingCache
 
     public EmbeddingCache(
         ITenantCache cache,
-        ILogger<EmbeddingCache> logger,
-        CacheMetrics? metrics = null)
+        ILogger<EmbeddingCache> logger)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _metrics = metrics; // Optional: metrics can be null if not configured
     }
 
     /// <inheritdoc />
@@ -93,7 +90,7 @@ public class EmbeddingCache : IEmbeddingCache
                     "Embedding cache HIT for hash {Hash}..., vector length={Length}",
                     contentHash[..Math.Min(8, contentHash.Length)],
                     embedding.Length);
-                _metrics?.RecordHit(sw.Elapsed.TotalMilliseconds, CacheType);
+                CacheMetrics.RecordHit(sw.Elapsed.TotalMilliseconds, CacheType);
                 return embedding;
             }
             else
@@ -102,7 +99,7 @@ public class EmbeddingCache : IEmbeddingCache
                 _logger.LogDebug(
                     "Embedding cache MISS for hash {Hash}...",
                     contentHash[..Math.Min(8, contentHash.Length)]);
-                _metrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, CacheType);
+                CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, CacheType);
                 return null;
             }
         }
@@ -112,7 +109,7 @@ public class EmbeddingCache : IEmbeddingCache
             _logger.LogWarning(ex,
                 "Error retrieving embedding from cache for hash {Hash}..., will generate new embedding",
                 contentHash[..Math.Min(8, contentHash.Length)]);
-            _metrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, CacheType); // Treat errors as misses
+            CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, CacheType); // Treat errors as misses
             return null; // Fail gracefully, will generate new embedding
         }
     }

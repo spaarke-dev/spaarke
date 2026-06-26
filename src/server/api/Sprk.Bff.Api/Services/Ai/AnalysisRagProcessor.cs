@@ -22,7 +22,6 @@ public class AnalysisRagProcessor
     private readonly IRagService _ragService;
     private readonly RagQueryBuilder _ragQueryBuilder;
     private readonly ITenantCache _cache;
-    private readonly CacheMetrics? _cacheMetrics;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly AnalysisOptions _options;
     private readonly ILogger<AnalysisRagProcessor> _logger;
@@ -49,8 +48,7 @@ public class AnalysisRagProcessor
         ITenantCache cache,
         IHttpContextAccessor httpContextAccessor,
         IOptions<AnalysisOptions> options,
-        ILogger<AnalysisRagProcessor> logger,
-        CacheMetrics? cacheMetrics = null)
+        ILogger<AnalysisRagProcessor> logger)
     {
         _ragService = ragService;
         _ragQueryBuilder = ragQueryBuilder;
@@ -58,7 +56,6 @@ public class AnalysisRagProcessor
         _httpContextAccessor = httpContextAccessor;
         _options = options.Value;
         _logger = logger;
-        _cacheMetrics = cacheMetrics;
     }
 
     /// <summary>
@@ -240,7 +237,7 @@ public class AnalysisRagProcessor
             if (cachedResult is not null)
             {
                 sw.Stop();
-                _cacheMetrics?.RecordHit(sw.Elapsed.TotalMilliseconds, "rag");
+                CacheMetrics.RecordHit(sw.Elapsed.TotalMilliseconds, "rag");
                 _logger.LogDebug("RAG cache HIT for id {CacheId} in {ElapsedMs}ms",
                     cacheId, sw.ElapsedMilliseconds);
                 return cachedResult;
@@ -252,7 +249,7 @@ public class AnalysisRagProcessor
         }
 
         sw.Stop();
-        _cacheMetrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, "rag");
+        CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, "rag");
 
         // Step 2: Cache miss -- execute live search
         var searchResult = await _ragService.SearchAsync(searchText, searchOptions, cancellationToken);

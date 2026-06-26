@@ -20,16 +20,13 @@ public class GraphTokenCache
 {
     private readonly IDistributedCache _cache;
     private readonly ILogger<GraphTokenCache> _logger;
-    private readonly CacheMetrics? _metrics;
 
     public GraphTokenCache(
         IDistributedCache cache,
-        ILogger<GraphTokenCache> logger,
-        CacheMetrics? metrics = null)
+        ILogger<GraphTokenCache> logger)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _metrics = metrics; // Optional: metrics can be null if not configured
     }
 
     /// <summary>
@@ -71,13 +68,13 @@ public class GraphTokenCache
             {
                 // Cache HIT
                 _logger.LogDebug("Cache HIT for token hash {Hash}...", tokenHash[..Math.Min(8, tokenHash.Length)]);
-                _metrics?.RecordHit(sw.Elapsed.TotalMilliseconds);
+                CacheMetrics.RecordHit(sw.Elapsed.TotalMilliseconds);
             }
             else
             {
                 // Cache MISS
                 _logger.LogDebug("Cache MISS for token hash {Hash}...", tokenHash[..Math.Min(8, tokenHash.Length)]);
-                _metrics?.RecordMiss(sw.Elapsed.TotalMilliseconds);
+                CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds);
             }
 
             return cachedToken;
@@ -87,7 +84,7 @@ public class GraphTokenCache
             sw.Stop();
             _logger.LogWarning(ex, "Error retrieving token from cache for hash {Hash}..., will perform OBO exchange",
                 tokenHash[..Math.Min(8, tokenHash.Length)]);
-            _metrics?.RecordMiss(sw.Elapsed.TotalMilliseconds); // Treat errors as misses
+            CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds); // Treat errors as misses
             return null; // Fail gracefully, will perform OBO exchange
         }
     }

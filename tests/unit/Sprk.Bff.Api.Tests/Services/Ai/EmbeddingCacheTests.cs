@@ -7,7 +7,6 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Telemetry;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai;
@@ -45,12 +44,13 @@ public class EmbeddingCacheTests
         return new TenantCache(dc, NullLogger<TenantCache>.Instance);
     }
 
-    private EmbeddingCache CreateCache(CacheMetrics? metrics = null, ITenantCache? tenantCache = null)
+    // FR-02 (spaarke-redis-cache-remediation-r2 task 002): CacheMetrics is now a static class.
+    // The optional `metrics` parameter is gone — EmbeddingCache calls CacheMetrics.RecordHit / RecordMiss directly.
+    private EmbeddingCache CreateCache(ITenantCache? tenantCache = null)
     {
         return new EmbeddingCache(
             tenantCache ?? CreateTenantCache(),
-            _loggerMock.Object,
-            metrics);
+            _loggerMock.Object);
     }
 
     #region ComputeContentHash Tests
