@@ -71,7 +71,11 @@ public static class GraphModule
         services.AddSingleton<IProcessingJobService>(sp => sp.GetRequiredService<IDataverseService>());
         // Events use DataverseWebApiService (real implementation) instead of DataverseServiceClientImpl (stub).
         services.AddSingleton<IEventDataverseService>(sp => sp.GetRequiredService<DataverseWebApiService>());
-        services.AddSingleton<IFieldMappingDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
+        // Fix: IFieldMappingDataverseService routes to DataverseWebApiService (real impl)
+        // because QueryChildRecordIdsAsync is implemented there, not in DataverseServiceClientImpl (stub).
+        // Mirrors line 73's IEventDataverseService pattern. Asymmetric-registration anti-pattern fix
+        // (CLAUDE.md §10 F.1). Bug came in via daily-update-service-r4 master merge.
+        services.AddSingleton<IFieldMappingDataverseService>(sp => sp.GetRequiredService<DataverseWebApiService>());
         services.AddSingleton<IKpiDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
         services.AddSingleton<ICommunicationDataverseService>(sp => sp.GetRequiredService<IDataverseService>());
         services.AddSingleton<IDataverseHealthService>(sp => sp.GetRequiredService<IDataverseService>());
