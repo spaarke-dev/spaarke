@@ -102,8 +102,11 @@ public sealed class NotificationService
                 entity["data"] = JsonSerializer.Serialize(actionData, JsonOptions);
             }
 
-            // TTL in seconds (default: 7 days)
-            entity["ttlindays"] = 7;
+            // TTL in seconds (default: 7 days = 7 * 86400 = 604800).
+            // Canonical writable field per Microsoft Learn `appnotification` table reference;
+            // matches CreateNotificationNodeExecutor.cs (R3 task 010 — `ttlindays` was non-existent,
+            // causing silent fallback to tenant-default 14d TTL).
+            entity["ttlinseconds"] = 604800;
 
             var notificationId = await _entityService.CreateAsync(entity, cancellationToken);
 

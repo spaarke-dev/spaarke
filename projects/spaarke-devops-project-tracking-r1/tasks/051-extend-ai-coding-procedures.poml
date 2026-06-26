@@ -1,0 +1,67 @@
+<task id="DEVOPS-051" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Extend AI-CODING-PROCEDURES-GUIDE.md with 7 portfolio scenarios</title>
+    <status>completed</status>
+    <phase>6</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>documentation, ai-coding-procedures, additive-only</tags>
+    <dependencies>019, 042</dependencies>
+    <parallel-group>P6-docs</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Extend `docs/procedures/AI-CODING-PROCEDURES-GUIDE.md` per FR-30. Add 7 new scenarios in the existing "what to say / what happens automatically / what to check" pattern:
+1. "Capture an idea before it's a real project"
+2. "Promote ideas into a project (with packaging)"
+3. "Update a project's status"
+4. "Close (complete or cancel) a project"
+5. "See what's running across all projects"
+6. "Package multiple ideas into one project"
+7. "I'm a stakeholder — where do I look?"
+
+NFR-08: PRESERVE existing structure. Each scenario follows existing doc's tri-section pattern.
+  </prompt>
+
+  <role>Technical writer who knows the doc's voice. You match existing scenario formatting precisely.</role>
+
+  <goal>
+All 7 scenarios present with code blocks for the skills/commands + explanations of automatic behavior. Reader can find each by Ctrl-F on a key phrase.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-08">PRESERVE existing structure</constraint>
+    <constraint source="spec FR-30">7 specific scenarios; existing tri-section pattern</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>docs/procedures/AI-CODING-PROCEDURES-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Read current 525-line doc. Match scenario pattern.</step>
+    <step order="1" name="Identify insertion section">Add new "Portfolio Scenarios" parent section near end of doc (after existing scenarios, before appendix if any).</step>
+    <step order="2" name="Author 7 scenarios">Each follows tri-section pattern: (a) What to say (the user phrase), (b) What happens automatically (which skills fire, hook chain), (c) What to check (commands to verify outcome).</step>
+    <step order="3" name="Verify NFR-08">No existing scenario renumbered. Existing examples unchanged.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">docs/procedures/AI-CODING-PROCEDURES-GUIDE.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/procedures/AI-CODING-PROCEDURES-GUIDE.md (extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 scenarios present with tri-section pattern</criterion>
+    <criterion testable="true">Each scenario has code block for the skill/command</criterion>
+    <criterion testable="true">Existing 525-line structure preserved</criterion>
+    <criterion testable="true">grep for each key phrase (e.g., "Capture an idea") returns 1</criterion>
+  </acceptance-criteria>
+</task>

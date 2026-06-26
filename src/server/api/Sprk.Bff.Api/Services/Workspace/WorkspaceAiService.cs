@@ -63,6 +63,7 @@ public sealed class WorkspaceAiService
     private readonly IDocumentDataverseService _documentService;
     private readonly ILogger<WorkspaceAiService> _logger;
     private readonly IPlaybookLookupService _playbookLookup;
+    private readonly IConsumerRoutingService _consumerRouting;
     private readonly IOptions<WorkspaceOptions> _workspaceOptions;
 
     private static readonly HashSet<string> SupportedEntityTypes =
@@ -82,6 +83,7 @@ public sealed class WorkspaceAiService
         IDocumentDataverseService documentService,
         ILogger<WorkspaceAiService> logger,
         IPlaybookLookupService playbookLookup,
+        IConsumerRoutingService consumerRouting,
         IOptions<WorkspaceOptions> workspaceOptions,
         IWorkspacePrefillAi? prefillAi = null)
     {
@@ -89,6 +91,7 @@ public sealed class WorkspaceAiService
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
+        _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
         _workspaceOptions = workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions));
         _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
@@ -336,23 +339,38 @@ public sealed class WorkspaceAiService
         HttpContext httpContext,
         CancellationToken ct)
     {
-        // FR-02 stable-ID resolution (chat-routing-redesign-r1 task 018, Wave 1-E
-        // Pattern A): resolve the AI summary playbook GUID at runtime via the
-        // stable-ID alternate key (sprk_playbookid) per Q&A 2026-06-22 Q1,
-        // replacing the prior hardcoded 18cf3cc8-02ec-f011-8406-7c1e520aa4df
-        // DEV "Document Profile" GUID. The lookup service caches results for
-        // 1 hour (ADR-014); per-environment values come from WorkspaceOptions.
-        // Unlike the chat /summarize convergence point in SessionSummarizeOrchestrator
-        // (FR-26), workspace AI summaries gracefully degrade to a template response
-        // when config is missing or lookup fails — the tile must still render
-        // rather than 500 (BuildFallbackResponse contract preserved).
-        var configuredPlaybookId = _workspaceOptions.Value.AiSummaryPlaybookId;
+        // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c / Pattern A):
+        // Primary lookup is now IConsumerRoutingService.ResolveAsync(ConsumerTypes.AiSummary)
+        // which queries sprk_playbookconsumer with 5-min TTL (ADR-014). When the table has no
+        // matching row, ResolveAsync returns null and we fall back to the legacy
+        // WorkspaceOptions.AiSummaryPlaybookId env-var (typed-options per ADR-018) for the
+        // FR-1R-06 deprecation window. Hardening (code-review S-5): use the
+        // ConsumerTypes.AiSummary compile-time constant — never a literal string.
+        //
+        // Graceful-degrade contract preserved (per Phase 1 task 018 evidence): unlike the
+        // chat /summarize convergence point in SessionSummarizeOrchestrator (FR-26),
+        // workspace AI summaries gracefully degrade to a template response when no playbook
+        // can be resolved AND when lookup fails — the tile must still render rather than 500
+        // (BuildFallbackResponse contract preserved).
+        Guid? routedPlaybookId = await _consumerRouting
+            .ResolveAsync(ConsumerTypes.AiSummary, cancellationToken: ct)
+            .ConfigureAwait(false);
+
+        string? configuredPlaybookId = routedPlaybookId?.ToString();
+        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+        {
+            // Fallback to legacy env var during the FR-1R-06 deprecation window.
+            configuredPlaybookId = _workspaceOptions.Value.AiSummaryPlaybookId;
+        }
+
         if (string.IsNullOrWhiteSpace(configuredPlaybookId))
         {
             _logger.LogWarning(
-                "Workspace:AiSummaryPlaybookId is not configured. Falling back to template " +
-                "response. EntityType={EntityType}, EntityId={EntityId}",
-                request.EntityType, request.EntityId);
+                "AI summary playbook is not configured. Neither sprk_playbookconsumer " +
+                "(consumerType='{ConsumerType}') nor Workspace:AiSummaryPlaybookId returned a " +
+                "playbook id. Falling back to template response. EntityType={EntityType}, " +
+                "EntityId={EntityId}",
+                ConsumerTypes.AiSummary, request.EntityType, request.EntityId);
             return BuildFallbackResponse(request);
         }
 

@@ -37,7 +37,7 @@ import {
   ErrorCircleRegular,
   RecordRegular,
 } from '@fluentui/react-icons';
-import type { CitationSourceType } from './types';
+import type { CitationSourceType, IPlaybookOptionCandidate } from './types';
 import { renderMarkdown as renderMarkdownHtml, SPRK_MARKDOWN_CSS } from '../../services/renderMarkdown';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -136,13 +136,35 @@ export interface IActionConfirmationResponse {
   summary: string;
 }
 
+/**
+ * Response data for playbook_options card type (chat-routing-redesign-r1
+ * task 117b — FR-50 + FR-51). Mirrors the BFF SSE payload shape verbatim.
+ *
+ * Click handlers are passed as separate props on the renderer (not embedded in
+ * data) so the data shape remains JSON-serializable + maps 1:1 to the SSE wire
+ * format.
+ */
+export interface IPlaybookOptionsResponse {
+  /** Top-N candidates (highest confidence first). May be empty (no-match case). */
+  candidates: IPlaybookOptionCandidate[];
+  /** When true, render the "Open Library" link alongside (or in place of) candidates. */
+  libraryModalCta: boolean;
+  /** Opaque session attachment IDs forwarded to the click handlers. */
+  sessionAttachmentIds: string[];
+  /** Whether the upstream reranker ran. Surfaced only for diagnostics; not displayed. */
+  rerankInvoked?: boolean;
+  /** Controlled-vocabulary tag (`top-confidence`, `llm-rerank-from-5`, etc.). Not displayed. */
+  rerankReason?: string | null;
+}
+
 /** Union of all structured response data types. */
 export type StructuredResponseData =
   | IMarkdownResponse
   | ICitationsResponse
   | IDiffResponse
   | IEntityCardResponse
-  | IActionConfirmationResponse;
+  | IActionConfirmationResponse
+  | IPlaybookOptionsResponse;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component Props
@@ -151,7 +173,7 @@ export type StructuredResponseData =
 /** Props for the SprkChatMessageRenderer component. */
 export interface ISprkChatMessageRendererProps {
   /** Discriminates which card renderer to use */
-  responseType: 'markdown' | 'citations' | 'diff' | 'entity_card' | 'action_confirmation' | string;
+  responseType: 'markdown' | 'citations' | 'diff' | 'entity_card' | 'action_confirmation' | 'playbook_options' | string;
   /** Structured data for the selected card renderer */
   data: StructuredResponseData;
   /**
@@ -161,6 +183,19 @@ export interface ISprkChatMessageRendererProps {
   onNavigate?: (entityType: string, entityId: string) => void;
   /** Callback for diff card — receives the proposed text to open in diff viewer */
   onOpenDiff?: (proposedText: string) => void;
+
+  /**
+   * chat-routing-redesign-r1 task 117b (FR-50). Called when the user clicks a
+   * candidate-playbook link button on a `playbook_options` card.
+   * When omitted, buttons render disabled (defensive UX).
+   */
+  onSelectPlaybook?: (playbookId: string, sessionAttachmentIds: string[]) => void;
+  /**
+   * chat-routing-redesign-r1 task 117b (FR-51). Called when the user clicks the
+   * "Open Library" link on a `playbook_options` card.
+   * When omitted, link renders disabled (defensive UX).
+   */
+  onOpenLibraryModal?: (sessionAttachmentIds: string[]) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -322,6 +357,41 @@ const useStyles = makeStyles({
   },
   failureIcon: {
     color: tokens.colorStatusDangerForeground1,
+  },
+
+  // ── Playbook options renderer (chat-routing-redesign-r1 task 117b) ──────────
+  // Inline link-button card — NOT a "card" surface per user direction.
+  // Fluent v9 semantic tokens only (ADR-021 dark-mode compliance).
+  playbookOptionsRoot: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  playbookOptionsPrompt: {
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase300,
+    color: tokens.colorNeutralForeground1,
+  },
+  playbookOptionsButtons: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalS,
+    rowGap: tokens.spacingVerticalXS,
+  },
+  playbookOptionsLibraryRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+  },
+  playbookOptionsLink: {
+    cursor: 'pointer',
+  },
+  playbookOptionsEmpty: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    fontStyle: 'italic',
   },
 });
 
@@ -486,6 +556,91 @@ function renderEntityCard(
   );
 }
 
+/**
+ * Render the `playbook_options` card (chat-routing-redesign-r1 task 117b — FR-50 + FR-51).
+ *
+ * UX shape:
+ *   - Intro line: "Which playbook would you like me to use?"
+ *   - Inline `Button appearance="primary"` per candidate (label = displayName).
+ *     Buttons are stacked horizontally and wrap on narrow chat bubbles.
+ *   - "Open Library" link rendered below the buttons whenever
+ *     `libraryModalCta === true`.
+ *   - No "cards" surface — per user direction (chat link buttons only).
+ *
+ * Empty candidates (no-match graceful path): the intro changes to a short
+ * "I couldn't find a confident match" message and only the library link renders.
+ *
+ * ADR-021 dark-mode: all colors via Fluent v9 semantic tokens.
+ * ADR-015: no candidate values are logged here — display only.
+ */
+function renderPlaybookOptions(
+  data: IPlaybookOptionsResponse,
+  styles: ReturnType<typeof useStyles>,
+  onSelectPlaybook?: (playbookId: string, sessionAttachmentIds: string[]) => void,
+  onOpenLibraryModal?: (sessionAttachmentIds: string[]) => void
+): React.ReactElement {
+  const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+  const showLibraryLink = data.libraryModalCta !== false;
+  const sessionAttachmentIds = Array.isArray(data.sessionAttachmentIds) ? data.sessionAttachmentIds : [];
+  const hasCandidates = candidates.length > 0;
+
+  return (
+    <div className={styles.playbookOptionsRoot} role="group" aria-label="Suggested playbooks">
+      <Text className={styles.playbookOptionsPrompt}>
+        {hasCandidates
+          ? 'Which playbook would you like me to use?'
+          : "I couldn't find a confident match for your files. You can pick a playbook from the library."}
+      </Text>
+
+      {hasCandidates && (
+        <div className={styles.playbookOptionsButtons}>
+          {candidates.map((c: IPlaybookOptionCandidate) => (
+            <Button
+              key={c.playbookId}
+              appearance="primary"
+              size="small"
+              disabled={!onSelectPlaybook}
+              onClick={() => {
+                if (onSelectPlaybook) {
+                  onSelectPlaybook(c.playbookId, sessionAttachmentIds);
+                }
+              }}
+              // Tier-1 safe — displayName is admin config, NOT user content.
+              title={c.displayName}
+              aria-label={`Use playbook: ${c.displayName}`}
+            >
+              {c.displayName}
+            </Button>
+          ))}
+        </div>
+      )}
+
+      {showLibraryLink && (
+        <div className={styles.playbookOptionsLibraryRow}>
+          <Link
+            as="button"
+            type="button"
+            className={styles.playbookOptionsLink}
+            disabled={!onOpenLibraryModal}
+            onClick={() => {
+              if (onOpenLibraryModal) {
+                onOpenLibraryModal(sessionAttachmentIds);
+              }
+            }}
+            aria-label="Open the playbook library"
+          >
+            Open Library
+          </Link>
+        </div>
+      )}
+
+      {!hasCandidates && !showLibraryLink && (
+        <Text className={styles.playbookOptionsEmpty}>No playbook options available.</Text>
+      )}
+    </div>
+  );
+}
+
 function renderActionConfirmation(
   data: IActionConfirmationResponse,
   styles: ReturnType<typeof useStyles>
@@ -551,6 +706,8 @@ export const SprkChatMessageRenderer: React.FC<ISprkChatMessageRendererProps> = 
   data,
   onNavigate,
   onOpenDiff,
+  onSelectPlaybook,
+  onOpenLibraryModal,
 }) => {
   const styles = useStyles();
 
@@ -572,6 +729,10 @@ export const SprkChatMessageRenderer: React.FC<ISprkChatMessageRendererProps> = 
 
     case 'action_confirmation':
       return renderActionConfirmation(data as IActionConfirmationResponse, styles);
+
+    case 'playbook_options':
+      // chat-routing-redesign-r1 task 117b — file-aware playbook routing card.
+      return renderPlaybookOptions(data as IPlaybookOptionsResponse, styles, onSelectPlaybook, onOpenLibraryModal);
 
     case 'markdown':
     default:

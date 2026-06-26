@@ -31,8 +31,12 @@ export {
   fetchNotifications,
   fetchAndGroupNotifications,
   groupByCategory,
-  markNotificationRead,
-  markAllNotificationsRead,
+  // R3 task 020 canonical names (FR-4/5/6); task 020's transitional aliases
+  // (markNotificationRead / markAllNotificationsRead) were removed by task 030.
+  markBriefingChecked,
+  markAllBriefingsChecked,
+  markBriefingRemoved,
+  extendBriefingTtl,
 } from './notificationService';
 
 export { fetchDigestPreferences, saveDigestPreferences } from './preferencesService';

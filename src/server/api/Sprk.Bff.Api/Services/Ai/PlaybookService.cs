@@ -708,11 +708,9 @@ public class PlaybookService : IPlaybookService
 
     /// <summary>
     /// Detects whether a non-success Dataverse response indicates the queried entity
-    /// (table) does not exist in this environment. Mirrors the helper in
-    /// <see cref="Sprk.Bff.Api.Services.Ai.Capabilities.DataverseCapabilityManifestLoader"/>.
-    /// Treated as a graceful "no results" condition rather than an error so the chat
-    /// pipeline and Daily Briefing can degrade gracefully when fresh environments lack
-    /// schema.
+    /// (table) does not exist in this environment. Treated as a graceful "no results"
+    /// condition rather than an error so the chat pipeline and Daily Briefing can
+    /// degrade gracefully when fresh environments lack schema.
     /// </summary>
     internal static bool IsMissingEntityResponse(System.Net.HttpStatusCode statusCode, string body)
     {

@@ -202,6 +202,16 @@ $RowFiles = @{
     # write_session_memory / retrieve_matter_memory / promote_to_matter_memory /
     # get_user_preferences / get_org_templates) are DEFERRED.
     "RECALL-SESSION-FILE"              = "$RepoRoot/infra/dataverse/sprk_analysistool-recall-session-file-row.json"
+    # chat-routing-redesign-r1 / Phase 5R / task 118b / FR-57 — GetWorkspaceTabContentHandler:
+    # single row exposing the get_workspace_tab_content(tabId, sectionName?) chat tool. Closes
+    # the T2 workspace-output → AI-memory round-trip per architecture §6.5 + §11.1: composed
+    # widget state (sections + values) for an existing workspace tab becomes AI-readable on
+    # subsequent chat turns. READ-ONLY projection over the existing Pillar 6b plumbing
+    # (IWorkspaceStateService.GetTabsAsync) — NO new state storage; NO mutation. Sibling write
+    # tool is UPDATE-WORKSPACE-TAB (task 055). sprk_requiredcapability = null (intentional —
+    # default user affordance available in every chat session). sprk_availableincontexts =
+    # Chat (100000001) — playbook nodes do not read from chat-session workspace tabs.
+    "GET-WORKSPACE-TAB-CONTENT"        = "$RepoRoot/infra/dataverse/sprk_analysistool-get-workspace-tab-content-row.json"
 }
 
 # -----------------------------------------------------------------------------

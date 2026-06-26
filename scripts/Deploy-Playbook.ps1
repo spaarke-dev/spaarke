@@ -256,9 +256,11 @@ function Associate-NtoN {
 # Node type mapping
 # ---------------------------------------------------------------------------
 $NodeTypeMap = @{
-    'AIAnalysis' = 100000000
-    'Output'     = 100000001
-    'Control'    = 100000002
+    'AIAnalysis'        = 100000000
+    'Output'            = 100000001
+    'Control'           = 100000002
+    'Workflow'          = 100000003
+    'DeliverComposite'  = 100000004  # chat-routing-redesign-r1 FR-52 — multi-section composite output (ADR-037)
 }
 
 # ===========================================================================
@@ -320,8 +322,15 @@ if (-not $definition.nodes -or $definition.nodes.Count -eq 0) {
 # UI on save (D-01 §2.4). The actionCode binding is the load-bearing dispatch
 # mechanism for Insights playbooks per D-01 + owner direction 2026-06-02.
 
+# DeliverComposite nodes (NodeType 100000004 / ActionType 42, ADR-037) are
+# code-registered executors — they dispatch via ActionType lookup in
+# AnalysisServicesModule.cs, NOT via actionCode → sprk_actionid lookup. The
+# Designer-clobbering risk that the linter guards against does not apply
+# because the configjson "sections" array has no Designer UI to be edited.
+# Skip DeliverComposite nodes from the actionCode requirement.
 $nodesMissingActionCode = @()
 foreach ($lintNode in $definition.nodes) {
+    if ($lintNode.nodeType -eq 'DeliverComposite') { continue }
     if (-not $lintNode.actionCode) {
         $nodesMissingActionCode += $lintNode.name
     }
@@ -335,15 +344,17 @@ if ($nodesMissingActionCode.Count -gt 0) {
     }
     Write-Host ''
     Write-Host 'Why this matters:' -ForegroundColor Yellow
-    Write-Host '  Every node MUST reference a sprk_analysisaction row via `actionCode`.' -ForegroundColor Yellow
+    Write-Host '  Every dispatchable node MUST reference a sprk_analysisaction row via `actionCode`.' -ForegroundColor Yellow
     Write-Host '  Without it, this script cannot set sprk_playbooknode.sprk_actionid,' -ForegroundColor Yellow
     Write-Host '  and the orchestrator dispatch falls back to canvas-Designer configjson' -ForegroundColor Yellow
     Write-Host '  (which gets clobbered if the playbook is opened in the Designer).' -ForegroundColor Yellow
     Write-Host ''
+    Write-Host '  Exception: DeliverComposite nodes (ADR-037) are code-registered and exempt.' -ForegroundColor Gray
+    Write-Host ''
     Write-Host 'Reference: projects/ai-spaarke-insights-engine-r2/decisions/D-01-wave-b-root-cause-corrected.md' -ForegroundColor Gray
     throw "Playbook lint failed: $($nodesMissingActionCode.Count) of $($definition.nodes.Count) nodes missing actionCode."
 }
-Write-Host "  Lint    : ✅ all $($definition.nodes.Count) nodes have actionCode wiring" -ForegroundColor Green
+Write-Host "  Lint    : ✅ all dispatchable nodes have actionCode wiring (DeliverComposite nodes exempt)" -ForegroundColor Green
 
 $playbookName = $definition.playbook.name
 $playbookDescription = if ($definition.playbook.description) { $definition.playbook.description } else { '' }

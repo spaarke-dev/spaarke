@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Workspace;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Workspace;
@@ -132,6 +133,64 @@ public class WorkspaceFileEndpointsTests
 
     #endregion
 
+    #region FR-1R-05 Task 028c — Consumer Routing Migration
+
+    [Fact]
+    public void HandleSummarize_AcceptsIConsumerRoutingServiceParameter_FR1R05()
+    {
+        // FR-1R-05 task 028c: the workspace /summarize endpoint MUST primarily resolve its
+        // playbook via IConsumerRoutingService.ResolveAsync(ConsumerTypes.SummarizeFile, …)
+        // querying sprk_playbookconsumer. When the table returns null, the endpoint falls
+        // back to the legacy WorkspaceOptions.SummarizePlaybookId env var (FR-1R-06
+        // deprecation window). The routing service is wired into the static handler's
+        // parameter list, so its presence on the delegate signature pins the binding.
+        var handler = GetPrivateStaticMethod("HandleSummarize");
+        handler.Should().NotBeNull(
+            "the workspace summarize handler must exist on WorkspaceFileEndpoints");
+
+        var parameterTypes = handler!.GetParameters().Select(p => p.ParameterType).ToList();
+        parameterTypes.Should().Contain(typeof(IConsumerRoutingService),
+            "FR-1R-05 task 028c — HandleSummarize MUST accept IConsumerRoutingService so the " +
+            "endpoint can resolve the summarize playbook via the sprk_playbookconsumer routing " +
+            "table (with the MIME type passed through RoutingContext for content-aware routing).");
+    }
+
+    [Fact]
+    public void WorkspaceFileEndpoints_Source_CallsConsumerRoutingResolveAsyncWithMimeType_FR1R05()
+    {
+        // FR-1R-05 task 028c + FR-1R-04 task 028c: the endpoint MUST call
+        // IConsumerRoutingService.ResolveAsync with the ConsumerTypes.SummarizeFile
+        // compile-time constant AND pass a RoutingContext carrying the uploaded file's
+        // MIME type so future sprk_matchconditions JSON predicates can route per content
+        // type (NDA PDF → specialized playbook, etc.). Hardening per code-review S-5:
+        // ConsumerTypes constant rather than literal string.
+        var source = File.ReadAllText(LocateWorkspaceFileEndpointsSource());
+        source.Should().Contain("ConsumerTypes.SummarizeFile",
+            "code-review S-5 — endpoint MUST use the ConsumerTypes.SummarizeFile constant, " +
+            "not a literal string");
+        source.Should().Contain(".ResolveAsync(",
+            "FR-1R-05 — endpoint MUST call IConsumerRoutingService.ResolveAsync");
+        source.Should().Contain("RoutingContext",
+            "FR-1R-04 — endpoint MUST construct a RoutingContext so MIME-aware routing works");
+        source.Should().Contain("MimeType",
+            "FR-1R-04 — RoutingContext.MimeType MUST be populated for content-aware routing");
+        source.Should().Contain("workspaceOptions.Value.SummarizePlaybookId",
+            "FR-1R-06 — env-var fallback MUST remain readable during the deprecation window");
+    }
+
+    [Fact]
+    public void WorkspaceFileEndpoints_Source_PreservesFailFastOnMissingConfig_FR04()
+    {
+        // FR-04 / NFR-02 fail-fast contract preserved: when BOTH the routing table and the
+        // env var are empty, the endpoint MUST throw InvalidOperationException so the SSE
+        // stream surfaces an error chunk (not a silent no-op).
+        var source = File.ReadAllText(LocateWorkspaceFileEndpointsSource());
+        source.Should().Contain("throw new InvalidOperationException(",
+            "FR-04 — fail-fast on missing playbook config MUST be preserved");
+    }
+
+    #endregion
+
     #region WorkspaceOptions Binding (regression — task 012 invariant preserved)
 
     [Fact]
@@ -157,4 +216,23 @@ public class WorkspaceFileEndpointsTests
         typeof(WorkspaceFileEndpoints).GetMethod(
             name,
             BindingFlags.NonPublic | BindingFlags.Static);
+
+    private static string LocateWorkspaceFileEndpointsSource()
+    {
+        var assemblyPath = typeof(WorkspaceFileEndpointsTests).Assembly.Location;
+        var dir = new DirectoryInfo(Path.GetDirectoryName(assemblyPath)!);
+
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "server")))
+        {
+            dir = dir.Parent;
+        }
+
+        dir.Should().NotBeNull("repo root must be locatable from the test assembly path");
+        var source = Path.Combine(
+            dir!.FullName,
+            "src", "server", "api", "Sprk.Bff.Api",
+            "Api", "Workspace", "WorkspaceFileEndpoints.cs");
+        File.Exists(source).Should().BeTrue($"WorkspaceFileEndpoints.cs must exist at '{source}'");
+        return source;
+    }
 }

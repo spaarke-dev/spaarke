@@ -138,6 +138,15 @@ public sealed class PlaybookEmbeddingService
             document.PlaybookId = playbookId;
             document.ContentVector3072 = embedding;
 
+            // chat-routing-redesign-r1 task 112 (FR-17 v2): populate the filterable
+            // `documentTypes` collection on the index document from the tolerantly
+            // parsed JPS matching metadata so that the Hybrid C primary path can apply
+            // a structured pre-filter at query time. When JPS metadata is absent or
+            // malformed the collection is left empty; that is the intended graceful
+            // degradation that makes the filter a no-match (caller falls back to the
+            // per-file vector path).
+            document.DocumentTypes = jpsParse.DocumentTypes.ToList();
+
             // Step 4: Upsert into AI Search index
             var searchClient = _searchIndexClient.GetSearchClient(IndexName);
             var batch = IndexDocumentsBatch.MergeOrUpload(new[] { document });
@@ -182,9 +191,44 @@ public sealed class PlaybookEmbeddingService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Array of playbook search results ordered by similarity score (descending).</returns>
     /// <exception cref="RequestFailedException">Thrown when Azure AI Search query fails.</exception>
-    public async Task<PlaybookSearchResult[]> SearchPlaybooksAsync(
+    public Task<PlaybookSearchResult[]> SearchPlaybooksAsync(
         string query,
         string? recordTypeFilter = null,
+        int topK = 5,
+        CancellationToken cancellationToken = default)
+    {
+        return SearchPlaybooksAsync(
+            query,
+            recordTypeFilter,
+            documentTypeFilter: null,
+            topK,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Performs a vector similarity search against the playbook-embeddings index with an
+    /// optional <c>documentTypes</c> pre-filter. This overload is the entry point for the
+    /// Hybrid C primary path (chat-routing-redesign-r1 FR-17 v2, task 112): when the
+    /// per-file classifier has produced a <see cref="ChatSessionFile.ClassifiedDocType"/>
+    /// label the dispatcher passes it here so the search is narrowed to playbooks whose
+    /// <c>sprk_jpsmatchingmetadata.documentTypes</c> contains that label.
+    /// </summary>
+    /// <param name="query">Natural language query to match against playbooks.</param>
+    /// <param name="recordTypeFilter">Optional filter on <c>recordType</c>.</param>
+    /// <param name="documentTypeFilter">
+    /// Optional classifier document-type label (e.g. <c>"NDA"</c>). When non-null and
+    /// non-empty, the search restricts results to documents whose <c>documentTypes</c>
+    /// collection contains the label. Combined with <paramref name="recordTypeFilter"/>
+    /// via OData <c>and</c>.
+    /// </param>
+    /// <param name="topK">Maximum number of results to return. Defaults to 5.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Array of playbook search results ordered by similarity score (descending).</returns>
+    /// <exception cref="RequestFailedException">Thrown when Azure AI Search query fails.</exception>
+    public async Task<PlaybookSearchResult[]> SearchPlaybooksAsync(
+        string query,
+        string? recordTypeFilter,
+        string? documentTypeFilter,
         int topK = 5,
         CancellationToken cancellationToken = default)
     {
@@ -193,8 +237,9 @@ public sealed class PlaybookEmbeddingService
         var stopwatch = Stopwatch.StartNew();
 
         _logger.LogDebug(
-            "Searching playbooks: query length={QueryLength}, recordType={RecordType}, topK={TopK}",
-            query.Length, recordTypeFilter ?? "(none)", topK);
+            "Searching playbooks: query length={QueryLength}, recordType={RecordType}, documentType={DocumentType}, topK={TopK}",
+            query.Length, recordTypeFilter ?? "(none)",
+            documentTypeFilter ?? "(none)", topK);
 
         try
         {
@@ -219,10 +264,26 @@ public sealed class PlaybookEmbeddingService
                 }
             };
 
-            // Step 3: Apply optional recordType filter
+            // Step 3: Compose OData filter. recordType + documentTypes combine with `and`.
+            // FR-17 v2: documentTypes pre-filter targets `documentTypes/any(t: t eq '<label>')`.
+            // We use search.in() for forward-compat (caller may eventually pass multiple labels).
+            var filterParts = new List<string>(capacity: 2);
             if (!string.IsNullOrWhiteSpace(recordTypeFilter))
             {
-                searchOptions.Filter = $"recordType eq '{EscapeODataValue(recordTypeFilter)}'";
+                filterParts.Add($"recordType eq '{EscapeODataValue(recordTypeFilter)}'");
+            }
+            if (!string.IsNullOrWhiteSpace(documentTypeFilter))
+            {
+                // OData lambda over a Collection(Edm.String) filterable field.
+                // search.in(t, '<csv>') is the canonical bag-of-strings membership test;
+                // works with a single value as well (CSV with one entry).
+                var escaped = EscapeODataValue(documentTypeFilter);
+                filterParts.Add($"documentTypes/any(t: search.in(t, '{escaped}'))");
+            }
+
+            if (filterParts.Count > 0)
+            {
+                searchOptions.Filter = string.Join(" and ", filterParts);
             }
 
             // Step 4: Execute vector search
@@ -255,9 +316,10 @@ public sealed class PlaybookEmbeddingService
 
             _logger.LogInformation(
                 "Playbook search completed: {ResultCount} results in {ElapsedMs}ms " +
-                "(query length={QueryLength}, filter={Filter})",
+                "(query length={QueryLength}, recordType={RecordType}, documentType={DocumentType})",
                 results.Count, stopwatch.ElapsedMilliseconds,
-                query.Length, recordTypeFilter ?? "(none)");
+                query.Length, recordTypeFilter ?? "(none)",
+                documentTypeFilter ?? "(none)");
 
             return results.ToArray();
         }

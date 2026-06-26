@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="117a" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>playbook_options SSE event contract + emission</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>113R</dependencies>
+    <blocks>117b</blocks>
+    <tags>bff-api, streaming, contract, ADR-015</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF SSE contract change + ADR-015 tier-1 audit governance; FULL per task-execute Step 0.5 (tags include `bff-api` + `ADR-015`; new public streaming contract).</rigor-reason>
+    <parallel-group>5-D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Emit a new SSE event `playbook_options` from the BFF carrying the top-N candidate playbooks produced by `PlaybookDispatcher` (per spec FR-49). Payload shape is locked: `{ candidates: [{ playbookId, playbookCode, displayName, confidence, reason }], libraryModalCta: true, sessionAttachmentIds: string[] }`. ADR-015 tier-1 audit safety is binding: NO user message text, NO file content, NO descriptions beyond `displayName`, no PII. Wire from `PlaybookDispatcher` outcome to the SSE writer; integration test locks the event shape and a tier-1 audit reviewer verifies no content leakage.
+  </prompt>
+
+  <role>SPAARKE BFF developer. Expert in the chat-routing pipeline, SSE streaming, and ADR-015 tier-1 audit governance.</role>
+
+  <goal>
+    `PlaybookDispatcher` outcome is mapped to a new `playbook_options` SSE event with the exact payload shape above and emitted via the existing SSE writer. Integration test asserts shape lock + tier-1 safety (deterministic IDs + `displayName` only; no message text or file content). Downstream task 117b can subscribe to this event and render link buttons.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-49 + FR-48. After Phase 5R, `PlaybookDispatcher.DispatchAsync` (file-aware path) NEVER auto-executes; it always emits `playbook_options` with the top-N candidates and the front-end renders them as inline chat link buttons (FR-50). The locked payload shape is:
+
+      ```json
+      {
+        "candidates": [
+          { "playbookId": "string (Guid)", "playbookCode": "string", "displayName": "string", "confidence": 0.87, "reason": "string (short label, not free-form)" }
+        ],
+        "libraryModalCta": true,
+        "sessionAttachmentIds": ["string"]
+      }
+      ```
+
+      Tier-1 safety rules (ADR-015):
+      - NO user message text in the payload.
+      - NO file content / extracted text / previews.
+      - NO candidate descriptions beyond `displayName`.
+      - `reason` is a short controlled-vocabulary label (e.g. `"top-confidence"`, `"attachment-type-match"`), not free-form NL.
+      - `sessionAttachmentIds` are deterministic session IDs only (no filenames, no MIME, no sizes).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (SSE writer / streaming pipeline)</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ (existing SSE event DTOs)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ (integration test surface)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-49">Exact payload shape: `{ candidates: [{ playbookId, playbookCode, displayName, confidence, reason }], libraryModalCta, sessionAttachmentIds }`. No other fields.</constraint>
+    <constraint source="ADR-015">Tier-1 audit safety: deterministic IDs + 80-char previews only; NO user message text / file content / candidate descriptions in event payloads or logs.</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary; no CRUD-code violations; routed through the existing SSE writer.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs current baseline (~45.65 MB).</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — add integration test for the new SSE event in `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookDispatcher.cs` outcome shape (post-113R) and locate the existing SSE writer / streaming pipeline.</step>
+    <step order="2">Add a new DTO `PlaybookOptionsEvent` in `Models/Ai/Chat/` matching the locked payload shape (Guid `PlaybookId`, string `PlaybookCode`, string `DisplayName`, double `Confidence`, string `Reason`; list of candidates; `LibraryModalCta = true`; `SessionAttachmentIds`).</step>
+    <step order="3">Wire `PlaybookDispatcher` outcome → `PlaybookOptionsEvent` mapper. Strip any fields outside the locked shape (whitelist the five candidate fields; reject everything else with a unit test).</step>
+    <step order="4">Emit the event via the existing SSE writer with event name `playbook_options`.</step>
+    <step order="5">Add an integration test asserting: (a) event name is `playbook_options`; (b) payload contains exactly the five candidate fields + `libraryModalCta` + `sessionAttachmentIds`; (c) NO user message text, file content, or extended description present; (d) `reason` matches a controlled-vocabulary label.</step>
+    <step order="6">Add a tier-1 audit fixture test asserting payload + logs contain no PII / message text / file content for a representative dispatch with 3 candidates.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`.</step>
+    <step order="8">Measure BFF publish size; report delta vs ~45.65 MB baseline in handoff doc.</step>
+    <step order="9">code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="10">Update TASK-INDEX.md: 117a → ✅; unblocks 117b.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookDispatcher + existing SSE writer + event DTOs</tool>
+    <tool name="Edit">New DTO + mapper + emission wiring + integration tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/PlaybookOptionsEvent.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (mapper + SSE emission wiring)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ (shape-lock + tier-1 audit tests)</output>
+    <output type="docs">notes/handoffs/117a-playbook-options-sse-contract.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SSE event `playbook_options` is emitted with the locked payload shape (5 candidate fields + libraryModalCta + sessionAttachmentIds; no others).</criterion>
+    <criterion testable="true">Integration test asserts shape lock and fails if any extra field is added.</criterion>
+    <criterion testable="true">Tier-1 audit test confirms no user message text, file content, or PII in payload or logs.</criterion>
+    <criterion testable="true">`reason` is a controlled-vocabulary label, not free-form NL.</criterion>
+    <criterion testable="true">BFF publish-size delta reported vs ~45.65 MB baseline; within NFR-01 ceiling.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Blocks 117b. Wave 5-D entry point for the link-buttons UX. Lock payload via test so downstream FE can consume a stable contract.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

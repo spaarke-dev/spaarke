@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="114a" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Per-section SSE streaming (section_started/data/completed)</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>completed</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>114R</dependencies>
+    <blocks>114b,114c,118R</blocks>
+    <tags>bff-api, streaming, ADR-033</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api` + `streaming` + `ADR-033`; modifies SSE contract surface; backward-compat invariant for `FieldDelta`; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add three new SSE events to the playbook streaming surface: `section_started`, `section_data` (incremental), and `section_completed` — all keyed by section name (NOT schema position). Wire them to the composite Output node executor introduced in 114R so that each upstream Action's output is streamed as one logical section. Backward-compat invariant: existing schema-position playbooks continue to emit `FieldDelta` events unchanged until migrated by 118R. Per FR-53, section events MUST be ordered by completion (not declaration).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in the SSE streaming surface for AI playbook execution + ADR-033 streaming-chat-tool side channel.</role>
+
+  <goal>
+    SSE event types `section_started`, `section_data`, `section_completed` defined with stable payload schema (section name + state); composite Output nodes emit them as upstream Action outputs complete; legacy schema-position playbooks continue to emit `FieldDelta` unmodified. Integration test asserts a 3-section composite playbook emits section events ordered by completion (not declaration order); a second integration test confirms an unmigrated schema-position playbook still emits `FieldDelta` only.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-53 + Phase 5R "Multi-node Output composition" cluster. The current streaming model emits `FieldDelta` events keyed by schema position — tight-coupled to the schema-on-action + schema-aware widget pattern (5 coordination points). Section-name-keyed events drop that to 2. This task formalizes the SSE contract that 114b (FE widget rework) and 118R (per-playbook migration) consume. ADR-033 streaming-chat-tool side channel constrains Path 3 chat-summarize behavior — that path remains untouched here.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Streaming/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Ai/PlaybookStreamingEndpoint.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Streaming/</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/PlaybookStreamingTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-53">Section events ordered by completion (NOT declaration); legacy `FieldDelta` continues for unmigrated playbooks.</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary; no CRUD-code violations.</constraint>
+    <constraint source="ADR-015">No file content in event payloads; metadata-only.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs current baseline (~45.65 MB).</constraint>
+    <constraint source="ADR-033">Streaming preservation — Path 3 chat-summarize streaming behavior unchanged; new section events MUST coexist with the existing tool-side-channel events without colliding on event-type names.</constraint>
+    <constraint source="project">Backward-compat invariant: existing schema-position playbooks continue to work via `FieldDelta` until migrated by 118R.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing streaming surface — locate the SSE writer / event emitter for `FieldDelta` and any ADR-033 tool-side-channel events; confirm event-type namespace conventions.</step>
+    <step order="2">Define payload schemas: `section_started { sectionName, nodeId }`, `section_data { sectionName, contentDelta, isFinal=false }`, `section_completed { sectionName, finalContent }`. Strictly metadata-only (no file binary; text content is the Action's structured output, which is allowed per ADR-015).</step>
+    <step order="3">Implement the SSE event writers in `Services/Ai/Streaming/` (or extend the existing streaming emitter). Add unit-test-friendly seams so tests can assert event order without spinning up the full endpoint.</step>
+    <step order="4">Wire the composite Output node executor (from 114R) to emit `section_started` when an upstream Action begins, `section_data` on incremental progress (chunked), `section_completed` when the upstream Action completes — ordered by COMPLETION time, not declaration order.</step>
+    <step order="5">Add backward-compat guard: if the executing playbook does NOT contain a `NodeType.DeliverComposite` node, the streaming surface MUST emit `FieldDelta` events only — no `section_*` events leak. Detect via playbook DAG inspection at execution start.</step>
+    <step order="6">Verify Path 3 chat-summarize (ADR-033) streaming is untouched — grep its emitter sites and confirm no overlap with the new section events. Document in handoff notes.</step>
+    <step order="7">Add integration test (`PlaybookStreamingTests.cs`): composite playbook with 3 Actions, where Action B completes before Action A; assert SSE event order shows `section_completed{B}` before `section_completed{A}` — proving completion-order (not declaration-order).</step>
+    <step order="8">Add a second integration test: unmigrated schema-position playbook executes; assert ONLY `FieldDelta` events emitted; NO `section_*` events present in stream.</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test`. All existing streaming tests pass unmodified; both new tests pass.</step>
+    <step order="10">Measure BFF publish size; report delta vs current baseline (~45.65 MB) in `notes/handoffs/114a-bff-publish-delta.md`.</step>
+    <step order="11">code-review + adr-check (Step 9.5 quality gates) — explicit ADR-033 conformance check.</step>
+    <step order="12">Update TASK-INDEX.md: 114a → ✅; current-task.md → ready for 114b (FE contract is now LOCKED).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Existing streaming emitter, PlaybookStreamingEndpoint.cs, integration test harness</tool>
+    <tool name="Grep">Enumerate ADR-033 event emitter sites; verify no collision</tool>
+    <tool name="Edit">SSE event writers, composite-node wire-up, backward-compat guard, integration tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Streaming/ (new section event writers)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs (SSE wire-up for composite nodes)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/PlaybookStreamingTests.cs (2 new tests)</output>
+    <output type="docs">notes/handoffs/114a-bff-publish-delta.md (includes ADR-033 non-collision evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SSE events `section_started`, `section_data`, `section_completed` defined with stable payload schema keyed by section name.</criterion>
+    <criterion testable="true">Composite Output node emits section events ordered by completion (not declaration) — verified by integration test.</criterion>
+    <criterion testable="true">Backward-compat: unmigrated schema-position playbooks emit `FieldDelta` only (no `section_*` events leak) — verified by integration test.</criterion>
+    <criterion testable="true">ADR-033 Path 3 chat-summarize streaming behavior unchanged (no event-name collision; grep evidence in handoff).</criterion>
+    <criterion testable="true">All existing streaming tests pass without modification.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative within NFR-01 ceiling.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 5-C, depends on 114R, blocks 114b/114c/118R. This task LOCKS the SSE contract that 114b (FE widget rework) consumes — once merged, 114b is parallel-safe. Backward-compat guard is binding per spec: NO `section_*` events may leak when an unmigrated playbook runs. Event-name choice (`section_*`) deliberately avoids ADR-033 tool-side-channel namespace; verify with grep before merging.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

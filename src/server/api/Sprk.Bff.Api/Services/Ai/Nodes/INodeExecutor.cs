@@ -68,7 +68,26 @@ public enum NodeType
     Control = 100_000_002,
 
     /// <summary>Workflow action node (create task, send email, etc.). Future — scope TBD.</summary>
-    Workflow = 100_000_003
+    Workflow = 100_000_003,
+
+    /// <summary>
+    /// Multi-section composite delivery node (FR-52 / Phase 5R Wave 5-C). Accepts N upstream
+    /// Action node outputs keyed by declared <c>sectionName</c> (in <c>sprk_configjson</c>) and
+    /// composes them into a single section map for the consumer (workspace widget, form prefill,
+    /// or chat). Replaces the 5-coordination-point schema-on-action + schema-aware widget pattern
+    /// with a 2-coordination-point (section name + section state) composition.
+    /// <para>
+    /// Backward-compat invariant: existing single-action <see cref="Output"/> nodes are UNCHANGED.
+    /// This is a NEW node type; legacy playbooks with <see cref="Output"/> nodes continue to use
+    /// <see cref="ActionType.DeliverOutput"/> and <c>DeliverOutputNodeExecutor</c>.
+    /// </para>
+    /// <para>
+    /// Per-section SSE streaming (<c>section_started</c> / <c>section_data</c> / <c>section_completed</c>)
+    /// is task 114a's territory; 114R (this addition) emits one composite output in-process and
+    /// leaves a TODO for the per-section streaming integration point.
+    /// </para>
+    /// </summary>
+    DeliverComposite = 100_000_004
 }
 
 /// <summary>
@@ -127,6 +146,16 @@ public enum ActionType
 
     /// <summary>Queue document for RAG semantic indexing.</summary>
     DeliverToIndex = 41,
+
+    /// <summary>
+    /// Composite delivery (FR-52 / Phase 5R Wave 5-C task 114R). Gathers N upstream Action node
+    /// outputs keyed by <c>sectionName</c> declared in the node's <c>sprk_configjson</c> and
+    /// emits one composite output containing a section map plus destination + widget routing.
+    /// Pairs with <see cref="NodeType.DeliverComposite"/> and
+    /// <c>DeliverCompositeNodeExecutor</c>. Existing <see cref="DeliverOutput"/> behavior is
+    /// UNCHANGED — this is a separate executor on a separate ActionType.
+    /// </summary>
+    DeliverComposite = 42,
 
     /// <summary>Create an in-app notification via the Dataverse appnotification entity.</summary>
     CreateNotification = 50,

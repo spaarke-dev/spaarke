@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.Schemas;
@@ -1116,6 +1118,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     NodeType.Output => ActionType.DeliverOutput,
                     NodeType.Control => ActionType.Condition,
                     NodeType.Workflow => ActionType.CreateTask,
+                    // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery node maps to a
+                    // SEPARATE ActionType so the legacy Output → DeliverOutput dispatch is
+                    // UNCHANGED (backward-compat invariant). The DeliverCompositeNodeExecutor
+                    // is the only executor for DeliverComposite.
+                    NodeType.DeliverComposite => ActionType.DeliverComposite,
                     _ => ActionType.DeliverOutput
                 };
                 action = new AnalysisAction
@@ -1250,6 +1257,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
                 await writer.WriteAsync(PlaybookStreamEvent.NodeCompleted(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, output), cancellationToken);
+
+                // FR-53 / chat-routing-redesign-r1 task 114a — per-section SSE streaming.
+                // When the completed node is a DeliverComposite node, re-iterate the composed
+                // section list and emit `section_started` → `section_data` → `section_completed`
+                // for each section, keyed by section name (NOT schema position). The emission
+                // is APPENDED to (not REPLACING) the standard `NodeCompleted` event — so all
+                // existing consumers see unchanged behavior.
+                //
+                // Backward-compat invariant: emits ONLY for actionType == DeliverComposite.
+                // Existing NodeType.Output → DeliverOutput path emits ZERO section events; its
+                // `FieldDelta` stream (via PlaybookExecutionEngine.ExecuteChatSummarizeAsync)
+                // continues UNCHANGED until migrated by FR-58 (task 118R).
+                if (actionType == ActionType.DeliverComposite)
+                {
+                    await EmitDeliverCompositeSectionEventsAsync(
+                        runContext, node, output, writer, cancellationToken).ConfigureAwait(false);
+                }
             }
             else
             {
@@ -1376,6 +1400,144 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// HttpContext.TraceIdentifier is also logged when present.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Emits per-section SSE stream events for a completed
+    /// <see cref="NodeType.DeliverComposite"/> node (FR-53 /
+    /// chat-routing-redesign-r1 task 114a). For each
+    /// <see cref="CompositeSectionResult"/> in the composite payload (in completion
+    /// order), emits three events: <c>section_started</c> → <c>section_data</c> →
+    /// <c>section_completed</c>, all keyed by the section's name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Approach A (orchestrator-emits)</b>: keeps the executor
+    /// (<see cref="DeliverCompositeNodeExecutor"/>) pure (returns structured data) and
+    /// localizes streaming concern to the orchestrator (ADR-013 separation of concerns).
+    /// </para>
+    /// <para>
+    /// <b>Phase A emission</b>: composite sections today are non-streaming (the upstream
+    /// executor produces consolidated content). One emission per section per lifecycle
+    /// stage — total of 3*N events for an N-section composite payload. A future
+    /// incremental-streaming phase (when individual composite-feeding nodes start
+    /// emitting partial outputs) emits multiple <c>section_data</c> events per section,
+    /// all sharing the same <c>SectionName</c>.
+    /// </para>
+    /// <para>
+    /// <b>Empty-sections safety</b>: when the composite produces zero sections (per
+    /// FR-52 "a partial composite is still a valid composite"), no <c>section_*</c>
+    /// events are emitted — the <c>NodeCompleted</c> event already in the stream is
+    /// sufficient. The frontend handles a composite payload with zero sections.
+    /// </para>
+    /// <para>
+    /// <b>ADR-015 tier-1 telemetry</b>: logs <c>(sectionCount, sectionNames=[...],
+    /// totalLatencyMs)</c> — section names are deterministic configuration identifiers
+    /// (safe). Section <i>content</i> is NEVER logged — it flows on the SSE wire which
+    /// is the canonical record.
+    /// </para>
+    /// <para>
+    /// <b>Malformed-payload safety</b>: if <see cref="NodeOutput.StructuredData"/>
+    /// cannot be deserialized to a <see cref="CompositeOutputPayload"/>, logs a warning
+    /// and returns (no events emitted). Emission is best-effort; downstream consumers
+    /// rely on the <c>NodeCompleted</c> event for canonical success signaling.
+    /// </para>
+    /// </remarks>
+    private async Task EmitDeliverCompositeSectionEventsAsync(
+        PlaybookRunContext runContext,
+        PlaybookNodeDto node,
+        NodeOutput output,
+        ChannelWriter<PlaybookStreamEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        // Deserialize the composite payload from NodeOutput.StructuredData.
+        // The executor (DeliverCompositeNodeExecutor) places a CompositeOutputPayload here.
+        CompositeOutputPayload? payload;
+        try
+        {
+            payload = output.GetData<CompositeOutputPayload>();
+        }
+        catch (JsonException ex)
+        {
+            // Defensive: if a future change produces malformed StructuredData, surface a
+            // warning + skip emission rather than aborting the run. The NodeCompleted
+            // event is already on the stream — consumers can still proceed.
+            _logger.LogWarning(ex,
+                "DeliverComposite node {NodeId} ({NodeName}): failed to deserialize CompositeOutputPayload " +
+                "from NodeOutput.StructuredData — skipping per-section SSE emission. RunId={RunId}",
+                node.Id, node.Name, runContext.RunId);
+            return;
+        }
+
+        if (payload is null || payload.Sections is null || payload.Sections.Count == 0)
+        {
+            // Empty composite per FR-52 is valid — no section events to emit. NodeCompleted
+            // already signals overall success.
+            _logger.LogDebug(
+                "DeliverComposite node {NodeId} ({NodeName}): composite payload has zero sections — " +
+                "no per-section SSE events to emit. RunId={RunId}",
+                node.Id, node.Name, runContext.RunId);
+            return;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var totalSections = payload.Sections.Count;
+        var sectionNames = new List<string>(totalSections);
+
+        for (var i = 0; i < totalSections; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var section = payload.Sections[i];
+            sectionNames.Add(section.SectionName);
+
+            // section_started — announce the section's start with position metadata.
+            var startedData = new SectionStartedSseEventData(
+                SectionName: section.SectionName,
+                DisplayLabel: section.DisplayLabel,
+                SectionIndex: i,
+                TotalSections: totalSections);
+
+            await writer.WriteAsync(PlaybookStreamEvent.SectionStarted(
+                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, startedData),
+                cancellationToken).ConfigureAwait(false);
+
+            // section_data — emit one consolidated content event for Phase A. Future
+            // incremental phases emit multiple deltas per section, all sharing the same
+            // SectionName.
+            var dataData = new SectionDataSseEventData(
+                SectionName: section.SectionName,
+                TextDelta: section.TextContent,
+                StructuredData: section.StructuredData);
+
+            await writer.WriteAsync(PlaybookStreamEvent.SectionData(
+                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, dataData),
+                cancellationToken).ConfigureAwait(false);
+
+            // section_completed — finalize with idempotent re-emission of the section's
+            // final state so frontends that drop the intermediate section_data event still
+            // render correctly.
+            var completedData = new SectionCompletedSseEventData(
+                SectionName: section.SectionName,
+                FinalText: section.TextContent,
+                FinalStructuredData: section.StructuredData,
+                SourceNodeId: section.SourceNodeId == Guid.Empty ? null : section.SourceNodeId);
+
+            await writer.WriteAsync(PlaybookStreamEvent.SectionCompleted(
+                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, completedData),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        stopwatch.Stop();
+
+        // ADR-015 tier-1 telemetry: section names are deterministic configuration identifiers
+        // (safe to log); section content is NOT duplicated into logs (SSE wire is canonical).
+        _logger.LogInformation(
+            "DeliverComposite node {NodeId} ({NodeName}) per-section SSE emission completed: " +
+            "sectionCount={SectionCount}, sectionNames=[{SectionNames}], totalLatencyMs={LatencyMs}, " +
+            "RunId={RunId}",
+            node.Id, node.Name, totalSections, string.Join(",", sectionNames),
+            stopwatch.ElapsedMilliseconds, runContext.RunId);
+    }
+
     private async Task ScanForUnrenderedTemplatesAsync(
         PlaybookRunContext runContext,
         PlaybookNodeDto node,

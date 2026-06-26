@@ -121,9 +121,37 @@ public static class ConfigurationModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // PlaybookSelector options (chat-routing-redesign-r1 task 113R / FR-47) —
+        // confidence thresholds + delta margin + max-N for the file-aware top-N
+        // candidate selector. All properties have spec-defined defaults so binding
+        // succeeds when the "PlaybookSelector" section is absent. ValidateOnStart
+        // is wired so misconfigured ranges (e.g., ConfidenceThreshold > 1.0 from
+        // env-var typo) fail fast at app start rather than at first selection call.
+        services
+            .AddOptions<PlaybookSelectorOptions>()
+            .Bind(configuration.GetSection(PlaybookSelectorOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // IntentReranker options (chat-routing-redesign-r1 task 111R / FR-46) —
+        // hybrid LLM intent reranker tuning knobs (model deployment, FR-46 timeout
+        // budget, sampling temperature). All properties have spec-defined defaults
+        // so binding succeeds when the "IntentReranker" section is absent.
+        // ValidateOnStart fails fast on misconfigured ranges (e.g., negative timeout
+        // or out-of-range temperature) at app start rather than at first rerank call.
+        services
+            .AddOptions<IntentRerankerOptions>()
+            .Bind(configuration.GetSection(IntentRerankerOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
         services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
+        // Phase 1R FR-1R-06: deprecation warning when any Workspace__*PlaybookId env var
+        // is set (routing now lives in sprk_playbookconsumer Dataverse table; env vars
+        // are graceful-degrade fallback only during the deprecation window).
+        services.AddSingleton<IValidateOptions<WorkspaceOptions>, WorkspaceOptionsValidator>();
 
         // Startup health check to validate configuration
         services.AddHostedService<StartupValidationService>();
