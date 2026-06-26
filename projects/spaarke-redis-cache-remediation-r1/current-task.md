@@ -12,7 +12,7 @@
 | **Project** | spaarke-redis-cache-remediation-r1 |
 | **Active task** | none — project closed |
 | **Status** | ✅ Complete (all 5 phases shipped via PR #458 + PR #460) |
-| **Next action** | Nothing here. R8 backlog has follow-ups documented in [`notes/r7-backlog.md`](notes/r7-backlog.md) §S5/S6/S7 — pick up in a future R8 project. |
+| **Next action** | Nothing here. Follow-on work scoped as [`spaarke-redis-cache-remediation-r2`](../spaarke-redis-cache-remediation-r2/) (3-5 days: cache observability hardening + key rotation automation + R1 implementation gap closure). |
 
 ---
 
@@ -30,18 +30,29 @@
 - ✅ App Insights OTel pipeline live: HTTP server/client histograms + custom `circuit_breaker.open_count` counter both visible in `customMetrics` (proves Sprk.Bff.Api.* Meter pipeline works)
 - ✅ Sister project unblocked: `projects/spaarke-ai-azure-setup-dev-r1/notes/handoffs/redis-cache-remediation-r1-phase3-cleared.md` written + verified
 
-## R8 follow-up backlog (documented, deliberately deferred)
+## Follow-on work — `spaarke-redis-cache-remediation-r2`
 
-See [`notes/r7-backlog.md`](notes/r7-backlog.md) for full detail. Three items surfaced during this project:
+R7-S7 was fully closed inline (both sub-gaps fixed and KQL-verified). Remaining items surfaced during execution are scoped into the R2 project:
 
-- **S5** — Evaluate Azure Managed Redis (`Microsoft.Cache/redisEnterprise`) for prod
-- **S6** — Rename App Insights `spe-insights-dev-67e2xz` → `spaarke-bff-insights-dev` (canonical naming)
-- **S7** — Two specific Redis observability sub-gaps remaining post-OTel-exporter-wiring:
-  - (1) `AddRedisInstrumentation()` not surfacing Redis dep spans — fix: wire `RedisCacheOptions.ConnectionMultiplexerFactory` so cache + telemetry share the same multiplexer
-  - (2) `cache.hits/misses/redis_call_duration_ms` Meter measurements not appearing — needs static-init-vs-MeterProvider ordering audit + call-site coverage audit
+- **R2 Theme A** — Cache observability hardening (6 items from senior review): `cache.failures` Counter, Meter consolidation, `resource` tag restoration, Bicep-deployed alerts, decorator regression test, `UseAzureMonitor` fails-open guard
+- **R2 Theme B** — Redis key rotation automation (replaces DEF-001 Entra ID auth without paying +$485/mo for ACR Premium)
+- **R2 Theme C** — `customer.bicep` per-customer Redis cleanup (R1 implementation gap)
 
-None of these block the project's success criteria or the sister project's unblock signal. All are documented for future planning rounds.
+R2 spec + design landed via PRs #477, #478, #479. R2 worktree at `C:\code_files\spaarke-wt-spaarke-redis-cache-remediation-r2` on branch `work/spaarke-redis-cache-remediation-r2`.
+
+## Defer/issue tracking
+
+All 6 R1-surfaced items are filed as GitHub Issues:
+
+- [#462](https://github.com/spaarke-dev/spaarke/issues/462) DEF-001 Entra ID auth → **Superseded** by R2 Theme B
+- [#463](https://github.com/spaarke-dev/spaarke/issues/463) DEF-002 Pub/Sub separation → Out of R2 scope; re-evaluate after 30 days of post-R2 data
+- [#464](https://github.com/spaarke-dev/spaarke/issues/464) DEF-003 Multi-region → Open (single-region today)
+- [#465](https://github.com/spaarke-dev/spaarke/issues/465) DEF-004 Plain-text secrets (non-Redis) → Open (cross-cutting)
+- [#466](https://github.com/spaarke-dev/spaarke/issues/466) DEF-005 Managed Redis → **Closed Won't Fix** (decision: enterprise solution; Spaarke below scale)
+- [#467](https://github.com/spaarke-dev/spaarke/issues/467) DEF-006 App Insights rename → Open (fold into sister project)
+
+See [`notes/defer-issues.md`](notes/defer-issues.md) for full context. The legacy [`notes/r7-backlog.md`](notes/r7-backlog.md) is preserved as the historical R7-round-organized backlog (superseded by the canonical defer-issues.md tracker).
 
 ---
 
-*Project closed 2026-06-26. To resume work on any of S5/S6/S7, create a new project per `/design-to-spec` and reference `notes/r7-backlog.md` for the entry-points.*
+*Project closed 2026-06-26. Code review sign-off ✅ (R7-S7 closure clean; no blocking issues). R2 follow-on already scoped and worktree-ready.*

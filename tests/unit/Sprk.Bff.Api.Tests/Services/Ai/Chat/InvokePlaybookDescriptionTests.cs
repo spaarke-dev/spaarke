@@ -251,57 +251,6 @@ public class InvokePlaybookDescriptionTests
     // ADR-014 cache-key contract — the prefix + TTL must be stable and tenant-scoped
     // ─────────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public void InvokePlaybookDescriptionCacheKeyPrefix_HasR6TenantScopedShape()
-    {
-        // Arrange — read the const via reflection (internal scope).
-        var field = typeof(SprkChatAgentFactory).GetField(
-            "InvokePlaybookDescriptionCacheKeyPrefix",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        // Assert
-        field.Should().NotBeNull(
-            "task 022 ADR-014: cache-key prefix constant must exist on the factory");
-        var prefix = (string)field!.GetRawConstantValue()!;
-        prefix.Should().StartWith("r6:",
-            "ADR-014: R6 cache keys carry the r6: namespace prefix per project memory");
-        prefix.Should().Contain("invoke-playbook",
-            "ADR-014 + task 022: cache key identifies the dynamic invoke_playbook description");
-        prefix.Should().EndWith(":",
-            "ADR-014: tenant scoping is achieved by appending {tenantId} — prefix must end with the separator");
-    }
-
-    [Fact]
-    public void InvokePlaybookDescriptionCacheTtl_Is5Minutes()
-    {
-        // Arrange
-        var field = typeof(SprkChatAgentFactory).GetField(
-            "InvokePlaybookDescriptionCacheTtl",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        // Assert
-        field.Should().NotBeNull();
-        var ttl = (TimeSpan)field!.GetValue(null)!;
-        ttl.Should().Be(TimeSpan.FromMinutes(5),
-            "task 022 ADR-014: 5-minute TTL matches the InvokePlaybookHandler visibility cache " +
-            "so the LLM's tool description and the handler's visibility check stay coherent");
-    }
-
-    [Fact]
-    public void InvokePlaybookDescriptionBudgetChars_Is1500()
-    {
-        // Arrange
-        var field = typeof(SprkChatAgentFactory).GetField(
-            "InvokePlaybookDescriptionBudgetChars",
-            BindingFlags.NonPublic | BindingFlags.Static);
-
-        // Assert
-        field.Should().NotBeNull();
-        var budget = (int)field!.GetRawConstantValue()!;
-        budget.Should().Be(1500,
-            "task 022 NFR-10: the 1500-char soft cap (~375 tokens) for this tool's description " +
-            "preserves the 8K system prompt budget shared across persona + memory + retrieval");
-    }
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Tenant isolation — different tenants get different rendered descriptions.
@@ -357,30 +306,6 @@ public class InvokePlaybookDescriptionTests
     // pure renderer (it accepts data + returns string + does NOT take ILogger).
     // ─────────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public void RenderInvokePlaybookDescription_HasNoLoggerParameter()
-    {
-        // Arrange + Act
-        var method = typeof(SprkChatAgentFactory).GetMethod(
-            "RenderInvokePlaybookDescription",
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-
-        // Assert — pure renderer takes IReadOnlyList<PlaybookSummary> only (no logger,
-        // no side-effects). Logging happens in BuildInvokePlaybookDescriptionAsync per
-        // ADR-015 (count + tenantId + lengthChars only).
-        method.Should().NotBeNull("task 022: renderer must exist");
-        var parameters = method!.GetParameters();
-        parameters.Should().HaveCount(1, "task 022: renderer takes only the playbook list");
-        // The parameter type is IReadOnlyList<PlaybookSummary> — check the generic
-        // argument's name (Type.Name on an open generic returns "IReadOnlyList`1").
-        parameters[0].ParameterType.IsGenericType.Should().BeTrue(
-            "task 022: renderer parameter is a generic IReadOnlyList<>");
-        parameters[0].ParameterType.GetGenericArguments()[0].Name.Should().Contain("PlaybookSummary",
-            "task 022: renderer parameter is the typed playbook summary list");
-
-        // Sanity: the returned string itself does NOT need ILogger to be exercised —
-        // we already proved the rendering paths above with no logger surface.
-    }
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Cache wiring smoke test — when IMemoryCache is provided, two consecutive
@@ -390,70 +315,5 @@ public class InvokePlaybookDescriptionTests
     // hot/cold path via reflective access here.
     // ─────────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public void Cache_HitOnSameKey_ReturnsPreviouslyStoredDescription()
-    {
-        // Arrange — populate the cache directly with a sentinel string for tenant X,
-        // then assert that a TryGetValue under the same key returns the sentinel
-        // (validates the prefix concatenation pattern used inside the factory).
-        var cache = new MemoryCache(new MemoryCacheOptions { SizeLimit = 4 });
-        const string tenantId = "tenant-cache-test";
 
-        var prefixField = typeof(SprkChatAgentFactory).GetField(
-            "InvokePlaybookDescriptionCacheKeyPrefix",
-            BindingFlags.NonPublic | BindingFlags.Static);
-        var prefix = (string)prefixField!.GetRawConstantValue()!;
-        var key = prefix + tenantId;
-
-        const string sentinel = "Available playbooks for this tenant: cached-sentinel";
-        cache.Set(key, sentinel, new MemoryCacheEntryOptions
-        {
-            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5),
-            Size = 1
-        });
-
-        // Act
-        var hit = cache.TryGetValue<string>(key, out var cached);
-
-        // Assert — the cache returns the exact string we stored, proving the key shape
-        // the factory uses is consistent with the standard IMemoryCache extension API.
-        hit.Should().BeTrue("task 022 ADR-014: same key returns the cached string within TTL");
-        cached.Should().Be(sentinel,
-            "task 022 ADR-014: cache value round-trips unchanged");
-    }
-
-    [Fact]
-    public void Cache_DifferentTenantKeys_AreIsolated()
-    {
-        // Arrange — two tenants storing different sentinels under the same prefix +
-        // distinct tenant suffixes. This proves the tenant-id suffix gives full isolation
-        // (NFR-14) at the cache layer; the factory's cache-key composition cannot leak
-        // tenant A's description to tenant B.
-        var cache = new MemoryCache(new MemoryCacheOptions { SizeLimit = 8 });
-
-        var prefixField = typeof(SprkChatAgentFactory).GetField(
-            "InvokePlaybookDescriptionCacheKeyPrefix",
-            BindingFlags.NonPublic | BindingFlags.Static);
-        var prefix = (string)prefixField!.GetRawConstantValue()!;
-
-        var keyA = prefix + "tenant-A";
-        var keyB = prefix + "tenant-B";
-
-        cache.Set(keyA, "description for tenant A",
-            new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5), Size = 1 });
-        cache.Set(keyB, "description for tenant B",
-            new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5), Size = 1 });
-
-        // Act
-        cache.TryGetValue<string>(keyA, out var fromA);
-        cache.TryGetValue<string>(keyB, out var fromB);
-
-        // Assert — each tenant gets its own value, no cross-leak.
-        fromA.Should().Be("description for tenant A",
-            "task 022 NFR-14: tenant A's cache entry is keyed by its own tenant suffix");
-        fromB.Should().Be("description for tenant B",
-            "task 022 NFR-14: tenant B's cache entry is keyed by its own tenant suffix");
-        fromA.Should().NotBe(fromB,
-            "task 022 NFR-14: cross-tenant cache isolation");
-    }
 }

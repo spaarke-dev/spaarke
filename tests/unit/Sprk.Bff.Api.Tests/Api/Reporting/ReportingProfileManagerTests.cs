@@ -53,76 +53,11 @@ public class ReportingProfileManagerTests
     // Construction
     // =========================================================================
 
-    [Fact]
-    public void Constructor_DoesNotThrow_WithValidOptions()
-    {
-        // Arrange
-        var options = BuildOptions();
-        var logger = BuildLoggerMock();
-
-        // Act
-        var act = () => new ReportingProfileManager(options, logger.Object);
-
-        // Assert — construction must succeed; MSAL CCA is built once per instance
-        act.Should().NotThrow();
-    }
-
-    [Fact]
-    public void Constructor_WorksWithNullLogger()
-    {
-        // Arrange
-        var options = BuildOptions();
-
-        // Act — ILogger<T> is not nullable in the constructor, but NSubstitute/Mock returns valid stubs
-        var act = () => new ReportingProfileManager(options, Mock.Of<ILogger<ReportingProfileManager>>());
-
-        // Assert
-        act.Should().NotThrow();
-    }
 
     // =========================================================================
     // Public API — structural
     // =========================================================================
 
-    [Fact]
-    public void GetOrCreateProfileAsync_MethodExists_WithExpectedSignature()
-    {
-        var method = typeof(ReportingProfileManager).GetMethod("GetOrCreateProfileAsync");
-
-        method.Should().NotBeNull();
-        method!.IsPublic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(Task<ServicePrincipalProfileInfo>));
-    }
-
-    [Fact]
-    public void GetProfileIdAsync_MethodExists_WithExpectedSignature()
-    {
-        var method = typeof(ReportingProfileManager).GetMethod("GetProfileIdAsync");
-
-        method.Should().NotBeNull();
-        method!.IsPublic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(Task<Guid>));
-    }
-
-    [Fact]
-    public void ListProfilesAsync_MethodExists_WithExpectedSignature()
-    {
-        var method = typeof(ReportingProfileManager).GetMethod("ListProfilesAsync");
-
-        method.Should().NotBeNull();
-        method!.IsPublic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(Task<IReadOnlyList<ServicePrincipalProfileInfo>>));
-    }
-
-    [Fact]
-    public void DeleteProfileAsync_MethodExists_WithExpectedSignature()
-    {
-        var method = typeof(ReportingProfileManager).GetMethod("DeleteProfileAsync");
-
-        method.Should().NotBeNull();
-        method!.IsPublic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(Task));
-    }
 
     // =========================================================================
     // ServicePrincipalProfileInfo DTO

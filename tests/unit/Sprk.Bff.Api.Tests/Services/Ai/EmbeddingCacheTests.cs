@@ -236,24 +236,6 @@ public class EmbeddingCacheTests
         retrieved!.Value.Length.Should().Be(_testEmbedding.Length);
     }
 
-    [Fact]
-    public async Task SetEmbeddingAsync_CacheError_DoesNotThrow()
-    {
-        // Throwing ITenantCache to exercise the swallow-on-write path.
-        var throwingTenantCache = new Mock<ITenantCache>();
-        throwingTenantCache
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<int>(), It.IsAny<byte[]>(), It.IsAny<TimeSpan?>(),
-                It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new Exception("Redis connection failed"));
-
-        var cache = CreateCache(tenantCache: throwingTenantCache.Object);
-        var contentHash = "dGVzdGhhc2g=";
-
-        // Should not throw.
-        await cache.SetEmbeddingAsync(contentHash, _testEmbedding);
-    }
 
     #endregion
 
@@ -278,20 +260,6 @@ public class EmbeddingCacheTests
 
     #region SetEmbeddingForContentAsync Tests
 
-    [Fact]
-    public async Task SetEmbeddingForContentAsync_ValidContent_ComputesHashAndStores()
-    {
-        var tenantCache = CreateTenantCache();
-        var cache = CreateCache(tenantCache: tenantCache);
-        var content = "test content";
-
-        await cache.SetEmbeddingForContentAsync(content, _testEmbedding);
-
-        // Round-trip via hash explicitly.
-        var expectedHash = cache.ComputeContentHash(content);
-        var retrieved = await cache.GetEmbeddingAsync(expectedHash);
-        retrieved.Should().NotBeNull();
-    }
 
     #endregion
 

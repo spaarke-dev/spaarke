@@ -1,0 +1,59 @@
+<task id="CICD-084" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Deep cleanup PR 2/3 — medium-confidence DELETE bucket (coverage-fillers + pass-through + internal-method tests; ~500-1000 tests expected)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2.5 - Deep cleanup</phase>
+    <stream>B - Test reset (extended)</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>083</dependencies>
+    <blocks>085</blocks>
+    <tags>testing, deletion, deep-cleanup, sliced-PR, build-vs-maintain</tags>
+  </metadata>
+
+  <prompt>
+    Second deep-cleanup PR per spec FR-B10. Delete medium-confidence DELETE bucket — typically coverage-fillers (tests that exist solely to push coverage % up), pass-through wrapper tests (testing trivial delegation), and internal/private method tests (via InternalsVisibleTo or reflection). Bucket boundaries finalized at task start based on 082 + 083 outcomes.
+  </prompt>
+
+  <role>Test architecture engineer executing second deep-cleanup slice.</role>
+
+  <goal>Medium-confidence bucket removed; dotnet build green; cumulative deletion progress on track for ≤3,500 final count.</goal>
+
+  <inputs>
+    <file purpose="inventory">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory-broader.csv (from 082)</file>
+    <file purpose="prior-pr">projects/ci-cd-unit-test-remediation-r1/notes/deep-cleanup-pr-1-summary.md (from 083)</file>
+    <file purpose="criteria">docs/adr/ADR-038-testing-strategy.md §Build-vs-Maintain (from 080)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B06">Path-check at Step 9.5.</constraint>
+    <constraint source="spec FR-B07">FULL rigor binding.</constraint>
+    <constraint source="practical">Rebase on master after 083 merges.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Rebase worktree branch on origin/master (083 should have merged)</step>
+    <step order="2">Compute remaining DELETE inventory: subtract 083's deletions from broader inventory</step>
+    <step order="3">Identify this PR's bucket (medium-confidence): coverage-fillers, pass-through tests, internal-method tests, language-feature-redundancy tests</step>
+    <step order="4">Per-file: whole-delete or partial-delete as appropriate</step>
+    <step order="5">Path-check + dotnet build verify</step>
+    <step order="6">Sample dotnet test run on a few passing test classes</step>
+    <step order="7">Step 9.5: code-review + adr-check</step>
+    <step order="8">Commit + PR: title "test(b-phase2.5)(deep-cleanup-2): delete coverage-fillers + pass-through + internal-method tests per FR-B10"</step>
+  </steps>
+
+  <outputs>
+    <output type="test-deletion">~500-1000 additional test methods removed</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/deep-cleanup-pr-2-summary.md (cumulative count)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Medium-confidence bucket removed per inventory</criterion>
+    <criterion testable="true">dotnet build passes</criterion>
+    <criterion testable="true">Cumulative deletion (083 + 084) tracking toward ≤3,500 final count</criterion>
+    <criterion testable="true">No KEEP-protected-path violations</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+  </acceptance-criteria>
+</task>

@@ -424,27 +424,6 @@ public sealed class InvokePlaybookAiTests
         ex.Message.Should().Contain("Playbook invocation");
     }
 
-    [Fact]
-    public async Task Null_InvokePlaybookAsync_ExceptionConvertsToProblemDetails503()
-    {
-        var sut = new NullInvokePlaybookAi(NullLogger<NullInvokePlaybookAi>.Instance);
-
-        try
-        {
-            await sut.InvokePlaybookAsync(
-                Guid.NewGuid(),
-                parameters: null,
-                new PlaybookInvocationContext { TenantId = "tenant-a", HttpContext = new DefaultHttpContext() },
-                CancellationToken.None);
-            throw new InvalidOperationException("Expected FeatureDisabledException not thrown");
-        }
-        catch (FeatureDisabledException ex)
-        {
-            var result = ex.AsFeatureDisabled503();
-            result.Should().NotBeNull(
-                "FeatureDisabledResults.AsFeatureDisabled503 must accept the facade's exception unchanged");
-        }
-    }
 
     [Fact]
     public void Null_Constructor_NullLogger_Throws()

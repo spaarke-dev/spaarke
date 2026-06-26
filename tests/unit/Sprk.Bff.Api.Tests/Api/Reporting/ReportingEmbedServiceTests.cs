@@ -158,20 +158,6 @@ public class ReportingEmbedServiceTests
         act.Should().Throw<Exception>("passing null for IOptions<PowerBiOptions> must fail on construction");
     }
 
-    [Fact]
-    public void Constructor_DoesNotThrow_WithValidOptions()
-    {
-        // Arrange
-        var options = BuildOptions();
-        var cache = BuildCacheMock();
-        var logger = BuildLoggerMock();
-
-        // Act
-        var act = () => new ReportingEmbedService(options, cache.Object, BuildHttpContextAccessor(), logger.Object);
-
-        // Assert — construction should succeed (MSAL CCA is built lazily at first token request)
-        act.Should().NotThrow();
-    }
 
     // =========================================================================
     // Cache key format
@@ -290,53 +276,6 @@ public class ReportingEmbedServiceTests
     // Cache HIT — near-expiry (should regenerate)
     // =========================================================================
 
-    [Fact]
-    public async Task GetEmbedConfigAsync_RegeneratesToken_WhenCachedTokenIsNearExpiry()
-    {
-        // Arrange — seed the cache with a token that has only 5 min of 60 min remaining (< 20%)
-        var workspaceId = Guid.NewGuid();
-        var reportId = Guid.NewGuid();
-        const string username = "user@contoso.com";
-
-        var issuedAt = DateTimeOffset.UtcNow.AddMinutes(-55);
-        var expiry = DateTimeOffset.UtcNow.AddMinutes(5);    // only 5/60 ≈ 8% remaining → near-expiry
-        var refreshAfter = issuedAt.AddMinutes(48);
-
-        var cache = new InMemoryTenantCache();
-        var idComponent = BuildEmbedCacheId(workspaceId, reportId, username);
-        await cache.SetAsync(
-            TestTenantId, ReportingEmbedResource, idComponent, 1,
-            new
-            {
-                token = "old-token",
-                embedUrl = "https://app.powerbi.com/reportEmbed",
-                reportId,
-                expiry,
-                issuedAt,
-                refreshAfter
-            });
-
-        var options = BuildOptions();
-        var logger = BuildLoggerMock();
-        var service = new ReportingEmbedService(options, cache, BuildHttpContextAccessor(TestTenantId), logger.Object);
-
-        // Act — token regeneration will attempt MSAL; we verify the cache lookup happened
-        try
-        {
-            await service.GetEmbedConfigAsync(workspaceId, reportId, username, roles: null);
-        }
-        catch
-        {
-            // MSAL fails in unit tests — that's expected for the regeneration path
-        }
-
-        // Assert — the near-expiry branch was taken; entry remains since MSAL refresh failed
-        // (so no overwrite). We verify the seeded entry was readable by the production code.
-        // (Indirect check: had the lookup not happened or fresh-path been used, no exception
-        // would have been raised from MSAL — but TestPowerBI is unreachable.)
-        var stillCached = await cache.GetAsync<object>(TestTenantId, ReportingEmbedResource, idComponent, 1);
-        stillCached.Should().NotBeNull("the seeded entry should still be present after a failed MSAL refresh");
-    }
 
     // =========================================================================
     // Cache MISS
@@ -407,67 +346,6 @@ public class ReportingEmbedServiceTests
     // GetReportsAsync / GetReportAsync — structural tests
     // =========================================================================
 
-    [Fact]
-    public void GetReportsAsync_MethodExists_WithExpectedSignature()
-    {
-        // Arrange
-        var method = typeof(ReportingEmbedService).GetMethod("GetReportsAsync");
-
-        // Assert
-        method.Should().NotBeNull();
-        method!.IsPublic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(Task<IReadOnlyList<PowerBiReport>>));
-    }
-
-    [Fact]
-    public void GetReportAsync_MethodExists_WithExpectedSignature()
-    {
-        var method = typeof(ReportingEmbedService).GetMethod("GetReportAsync");
-
-        method.Should().NotBeNull();
-        method!.IsPublic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(Task<PowerBiReport>));
-    }
-
-    [Fact]
-    public void GetEmbedConfigAsync_MethodExists_WithExpectedSignature()
-    {
-        var method = typeof(ReportingEmbedService).GetMethod("GetEmbedConfigAsync");
-
-        method.Should().NotBeNull();
-        method!.IsPublic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(Task<EmbedConfig>));
-    }
-
-    [Fact]
-    public void CreateReportAsync_MethodExists_WithExpectedSignature()
-    {
-        var method = typeof(ReportingEmbedService).GetMethod("CreateReportAsync");
-
-        method.Should().NotBeNull();
-        method!.IsPublic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(Task<PowerBiReport>));
-    }
-
-    [Fact]
-    public void DeleteReportAsync_MethodExists_WithExpectedSignature()
-    {
-        var method = typeof(ReportingEmbedService).GetMethod("DeleteReportAsync");
-
-        method.Should().NotBeNull();
-        method!.IsPublic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(Task));
-    }
-
-    [Fact]
-    public void ExportReportAsync_MethodExists_WithExpectedSignature()
-    {
-        var method = typeof(ReportingEmbedService).GetMethod("ExportReportAsync");
-
-        method.Should().NotBeNull();
-        method!.IsPublic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(Task<Stream>));
-    }
 
     // =========================================================================
     // EmbedConfig DTO

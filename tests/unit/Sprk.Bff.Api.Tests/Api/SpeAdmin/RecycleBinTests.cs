@@ -143,104 +143,11 @@ public class RecycleBinTests
     // Endpoint Registration Shape Tests
     // =========================================================================
 
-    [Fact]
-    public void MapRecycleBinEndpoints_MethodExists_IsStatic()
-    {
-        // Assert — endpoint group registration method must exist and be static
-        var method = typeof(RecycleBinEndpoints).GetMethod("MapRecycleBinEndpoints");
-
-        method.Should().NotBeNull("MapRecycleBinEndpoints must be a public static method");
-        method!.IsStatic.Should().BeTrue();
-    }
-
-    [Fact]
-    public void MapRecycleBinEndpoints_AcceptsRouteGroupBuilder_Parameter()
-    {
-        // Assert — method must accept a RouteGroupBuilder (not IEndpointRouteBuilder)
-        // so it can be registered on the /api/spe group (ADR-001 pattern)
-        var method = typeof(RecycleBinEndpoints).GetMethod("MapRecycleBinEndpoints");
-
-        method.Should().NotBeNull();
-        var parameters = method!.GetParameters();
-        parameters.Should().HaveCount(1);
-        parameters[0].ParameterType.Should().Be(typeof(RouteGroupBuilder));
-    }
 
     // =========================================================================
     // SpeAdminGraphService — Recycle Bin Method Contract Tests
     // =========================================================================
 
-    [Fact]
-    public void SpeAdminGraphService_HasListDeletedContainersAsync_Method()
-    {
-        // Assert — method exists with the correct signature
-        var method = typeof(SpeAdminGraphService).GetMethod("ListDeletedContainersAsync");
-
-        method.Should().NotBeNull("ListDeletedContainersAsync must be a public method on SpeAdminGraphService");
-        method!.IsPublic.Should().BeTrue();
-    }
-
-    [Fact]
-    public void SpeAdminGraphService_HasRestoreContainerAsync_Method()
-    {
-        // Assert
-        var method = typeof(SpeAdminGraphService).GetMethod("RestoreContainerAsync");
-
-        method.Should().NotBeNull("RestoreContainerAsync must be a public method on SpeAdminGraphService");
-        method!.IsPublic.Should().BeTrue();
-    }
-
-    [Fact]
-    public void SpeAdminGraphService_HasPermanentDeleteContainerAsync_Method()
-    {
-        // Assert
-        var method = typeof(SpeAdminGraphService).GetMethod("PermanentDeleteContainerAsync");
-
-        method.Should().NotBeNull("PermanentDeleteContainerAsync must be a public method on SpeAdminGraphService");
-        method!.IsPublic.Should().BeTrue();
-    }
-
-    [Fact]
-    public void SpeAdminGraphService_ListDeletedContainersAsync_ReturnsReadOnlyListTask()
-    {
-        // Arrange
-        var method = typeof(SpeAdminGraphService).GetMethod("ListDeletedContainersAsync");
-
-        // Assert — return type must be Task<IReadOnlyList<DeletedContainerSummary>>
-        method.Should().NotBeNull();
-        var returnType = method!.ReturnType;
-        returnType.IsGenericType.Should().BeTrue();
-        returnType.GetGenericTypeDefinition().Should().Be(typeof(Task<>));
-
-        var innerType = returnType.GetGenericArguments()[0];
-        innerType.IsGenericType.Should().BeTrue();
-        innerType.GetGenericTypeDefinition().Should().Be(typeof(IReadOnlyList<>));
-        innerType.GetGenericArguments()[0].Should().Be(typeof(SpeAdminGraphService.DeletedContainerSummary));
-    }
-
-    [Fact]
-    public void SpeAdminGraphService_RestoreContainerAsync_ReturnsBoolTask()
-    {
-        // Arrange
-        var method = typeof(SpeAdminGraphService).GetMethod("RestoreContainerAsync");
-
-        // Assert — return type must be Task<bool>
-        method.Should().NotBeNull();
-        var returnType = method!.ReturnType;
-        returnType.Should().Be(typeof(Task<bool>));
-    }
-
-    [Fact]
-    public void SpeAdminGraphService_PermanentDeleteContainerAsync_ReturnsBoolTask()
-    {
-        // Arrange
-        var method = typeof(SpeAdminGraphService).GetMethod("PermanentDeleteContainerAsync");
-
-        // Assert — return type must be Task<bool>
-        method.Should().NotBeNull();
-        var returnType = method!.ReturnType;
-        returnType.Should().Be(typeof(Task<bool>));
-    }
 
     // =========================================================================
     // DeletedContainerDto Mapping Tests

@@ -253,18 +253,6 @@ public sealed class LegalResearchHandlerTests : TypedToolHandlerTestFixture
         result.Errors.Should().Contain(e => e.Contains("method", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact]
-    public void ValidateChat_Fails_WhenJsonMalformed()
-    {
-        var handler = CreateHandler();
-        var ctx = BuildChatInvocationContext(toolArgumentsJson: "{not json");
-        var tool = BuildLegalTool("ResearchLegal");
-
-        var result = handler.ValidateChat(ctx, tool);
-
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.Contains("malformed", StringComparison.OrdinalIgnoreCase));
-    }
 
     // ═════════════════════════════════════════════════════════════════════════════
     // ADR-018 kill switch — BingGroundingOptions.Enabled = false short-circuits

@@ -21,42 +21,49 @@ name: CI Tier 2 (Advisory)
 
 on:
   workflow_call:
+    # All run-* inputs are `type: string` with default 'true' per CICD-086 (2026-06-26).
+    # Rationale: when `ci-router.yml` passes a `${{ expression }}` value, GitHub Actions
+    # string-coerces the result across the workflow_call boundary. Strict `type: boolean`
+    # validation then rejects the string value pre-job-creation -> conclusion=startup_failure
+    # with no visible logs. Using `type: string` accepts the coerced value; guards compare
+    # against 'false' (string) instead of `false` (boolean). Callers may pass literal `true`
+    # (YAML boolean) and it will coerce to "true" string at call site -- both work.
     inputs:
       run-format:
         description: 'Run dotnet format check'
         required: false
-        type: boolean
-        default: true
+        type: string
+        default: 'true'
       run-lint:
         description: 'Run ESLint + Prettier on src/client/**'
         required: false
-        type: boolean
-        default: true
+        type: string
+        default: 'true'
       run-unit-tests:
         description: 'Run full unit-test suite (Debug only — Release blocked until 7-day soak per CICD-075)'
         required: false
-        type: boolean
-        default: true
+        type: string
+        default: 'true'
       run-adr-compliance:
         description: 'Run full NetArchTest ADR suite'
         required: false
-        type: boolean
-        default: true
+        type: string
+        default: 'true'
       run-markdown:
         description: 'Run markdown link validator'
         required: false
-        type: boolean
-        default: true
+        type: string
+        default: 'true'
       run-last-reviewed:
         description: 'Run Last Reviewed stamp check on .claude/ + docs/standards/'
         required: false
-        type: boolean
-        default: true
+        type: string
+        default: 'true'
       run-plugin-size:
         description: 'Run plugin size validation'
         required: false
-        type: boolean
-        default: true
+        type: string
+        default: 'true'
   pull_request:
     paths-ignore:
       - 'projects/_backlog/**'
@@ -82,7 +89,7 @@ jobs:
   format:
     name: Format (dotnet format)
     runs-on: ubuntu-latest
-    if: ${{ inputs.run-format != false }}
+    if: ${{ inputs.run-format != 'false' }}
     continue-on-error: true   # Advisory — never blocking
     timeout-minutes: 3
     outputs:
@@ -124,7 +131,7 @@ jobs:
   lint:
     name: Lint (ESLint + Prettier)
     runs-on: ubuntu-latest
-    if: ${{ inputs.run-lint != false }}
+    if: ${{ inputs.run-lint != 'false' }}
     continue-on-error: true
     timeout-minutes: 3
     outputs:
@@ -186,7 +193,7 @@ jobs:
   full-unit-tests:
     name: Full Unit Tests (Debug)
     runs-on: windows-latest
-    if: ${{ inputs.run-unit-tests != false }}
+    if: ${{ inputs.run-unit-tests != 'false' }}
     continue-on-error: true
     timeout-minutes: 6
     outputs:
@@ -259,7 +266,7 @@ jobs:
   adr-compliance:
     name: ADR Compliance (NetArchTest)
     runs-on: ubuntu-latest
-    if: ${{ inputs.run-adr-compliance != false }}
+    if: ${{ inputs.run-adr-compliance != 'false' }}
     continue-on-error: true
     timeout-minutes: 3
     outputs:
@@ -314,7 +321,7 @@ jobs:
   markdown-link-validator:
     name: Markdown Link Validator
     runs-on: ubuntu-latest
-    if: ${{ inputs.run-markdown != false }}
+    if: ${{ inputs.run-markdown != 'false' }}
     continue-on-error: true
     timeout-minutes: 2
     outputs:
@@ -361,7 +368,7 @@ jobs:
   last-reviewed-stamp:
     name: Last Reviewed Stamp
     runs-on: ubuntu-latest
-    if: ${{ inputs.run-last-reviewed != false }}
+    if: ${{ inputs.run-last-reviewed != 'false' }}
     continue-on-error: true
     timeout-minutes: 2
     outputs:
@@ -442,7 +449,7 @@ jobs:
   plugin-size:
     name: Plugin Size (ADR-002)
     runs-on: windows-latest
-    if: ${{ inputs.run-plugin-size != false }}
+    if: ${{ inputs.run-plugin-size != 'false' }}
     continue-on-error: true
     timeout-minutes: 5
     outputs:

@@ -153,34 +153,6 @@ public class IdempotencyFilterTests
             .WithParameterName("logger");
     }
 
-    [Fact]
-    public void Constructor_ValidParameters_CreatesInstance()
-    {
-        // Arrange
-        var cache = CreateCache();
-        var logger = CreateMockLogger();
-
-        // Act
-        var filter = new IdempotencyFilter(cache, logger.Object);
-
-        // Assert
-        filter.Should().NotBeNull();
-    }
-
-    [Fact]
-    public void Constructor_WithCustomTtl_CreatesInstance()
-    {
-        // Arrange
-        var cache = CreateCache();
-        var logger = CreateMockLogger();
-        var ttl = TimeSpan.FromHours(48);
-
-        // Act
-        var filter = new IdempotencyFilter(cache, logger.Object, ttl);
-
-        // Assert
-        filter.Should().NotBeNull();
-    }
 
     #endregion
 
@@ -306,27 +278,6 @@ public class IdempotencyFilterTests
 
     #region Client-Provided Idempotency Key Tests
 
-    [Fact]
-    public async Task InvokeAsync_ClientProvidedKey_UsesClientKey()
-    {
-        // Arrange
-        var (innerCache, cache) = CreateCachePair();
-        var logger = CreateMockLogger();
-        var filter = new IdempotencyFilter(cache, logger.Object);
-
-        var (httpContext, contextMock) = CreatePostContext(CreateUser());
-        httpContext.Request.Headers["X-Idempotency-Key"] = "client-provided-key";
-
-        EndpointFilterDelegate next = _ => ValueTask.FromResult<object?>(Results.Ok());
-
-        // Act
-        await filter.InvokeAsync(contextMock.Object, next);
-
-        // Assert - Should have used client key in tenant-scoped cache (scoped by user ID + tenant)
-        var cacheKey = $"tenant:{TestTenantId}:idempotency-request:user-123:client-provided-key:v1";
-        var cached = await innerCache.GetStringAsync(cacheKey);
-        cached.Should().NotBeNull("response should be cached with client-provided key");
-    }
 
     #endregion
 

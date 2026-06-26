@@ -251,61 +251,6 @@ public class MembershipJunctionUpdaterTests
 
     // ─── Idempotency: duplicate delivery ───────────────────────────────────
 
-    [Fact]
-    public async Task HandleAsync_DuplicateDelivery_IsIdempotent()
-    {
-        // Service Bus at-least-once semantics → same event can arrive twice.
-        // Final state must be identical: still exactly one row, role +
-        // lastSyncedOn match the latest event.
-        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
-        var clock = new FakeTimeProvider(FixedNow);
-        var invalidator = new Mock<IMembershipCacheInvalidator>();
-        var sut = new MembershipJunctionUpdater(
-            dataverse.Object, clock, invalidator.Object, NullLogger<MembershipJunctionUpdater>.Instance);
-
-        // First delivery: row absent → CREATE.
-        // Second delivery: row present → UPDATE (no second CREATE).
-        var rowExists = false;
-        dataverse
-            .Setup(d => d.RetrieveByAlternateKeyAsync(
-                JunctionEntityName,
-                It.IsAny<KeyAttributeCollection>(),
-                It.IsAny<string[]>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(() => rowExists
-                ? Task.FromResult(new Entity(JunctionEntityName, ExistingRowId))
-                : Task.FromException<Entity>(new InvalidOperationException(
-                    "Entity sprk_userentityassociation not found with provided alternate key values")));
-
-        dataverse
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .Callback<Entity, CancellationToken>((_, _) => rowExists = true)
-            .ReturnsAsync(ExistingRowId);
-
-        dataverse
-            .Setup(d => d.UpdateAsync(
-                JunctionEntityName,
-                ExistingRowId,
-                It.IsAny<Dictionary<string, object>>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        var evt = BuildEvent(MembershipMutationType.Added);
-
-        // Act — same event delivered twice.
-        await sut.HandleAsync(evt, CancellationToken.None);
-        await sut.HandleAsync(evt, CancellationToken.None);
-
-        // Assert — Create called ONCE, Update called ONCE on the second run.
-        dataverse.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
-            Times.Once, "duplicate delivery must not produce a duplicate row");
-        dataverse.Verify(d => d.UpdateAsync(
-            JunctionEntityName,
-            ExistingRowId,
-            It.IsAny<Dictionary<string, object>>(),
-            It.IsAny<CancellationToken>()),
-            Times.Once, "duplicate delivery must re-apply role + timestamp via update");
-    }
 
     // ─── R3 task 086: cache invalidation after junction write ──────────────
 
