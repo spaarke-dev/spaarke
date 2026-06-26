@@ -379,9 +379,7 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
     const rawChannelGroups = channels
       .filter(
         (ch): ch is Extract<ChannelFetchResult, { status: 'success' }> =>
-          ch.status === 'success' &&
-          ch.group.meta.category !== 'system' &&
-          ch.group.items.length > 0
+          ch.status === 'success' && ch.group.meta.category !== 'system' && ch.group.items.length > 0
       )
       .map(ch => ch.group);
 

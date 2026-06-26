@@ -19,11 +19,7 @@
 
 import * as React from 'react';
 import { render, screen } from '@testing-library/react';
-import {
-  FluentProvider,
-  webLightTheme,
-  webDarkTheme,
-} from '@fluentui/react-components';
+import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { ActivityNotesSection } from '../src/components/ActivityNotesSection';
 import type { ChannelFetchResult, NotificationItem } from '../src/types/notifications';
 

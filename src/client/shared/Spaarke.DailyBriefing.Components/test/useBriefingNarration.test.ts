@@ -27,11 +27,7 @@
 
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { useBriefingNarration } from '../src/hooks/useBriefingNarration';
-import type {
-  ChannelFetchResult,
-  LoadingState,
-  NotificationItem,
-} from '../src/types/notifications';
+import type { ChannelFetchResult, LoadingState, NotificationItem } from '../src/types/notifications';
 
 // Mock the briefingService module so the hook's network boundary is isolated.
 jest.mock('../src/services/briefingService', () => ({
@@ -131,9 +127,7 @@ describe('useBriefingNarration', () => {
     (fetchBriefingNarration as jest.Mock).mockResolvedValue(makeSuccessResult('first'));
 
     const channels = makeChannels(['a']);
-    const { result } = renderHook(() =>
-      useBriefingNarration(channels, 'loaded' as LoadingState)
-    );
+    const { result } = renderHook(() => useBriefingNarration(channels, 'loaded' as LoadingState));
 
     await waitFor(() => {
       expect(fetchBriefingNarration).toHaveBeenCalledTimes(1);
@@ -144,9 +138,7 @@ describe('useBriefingNarration', () => {
   });
 
   it('sets isUnavailable and does NOT call fetch when no successful channels are present', () => {
-    const { result } = renderHook(() =>
-      useBriefingNarration(makeNoDataChannels(), 'loaded' as LoadingState)
-    );
+    const { result } = renderHook(() => useBriefingNarration(makeNoDataChannels(), 'loaded' as LoadingState));
     expect(fetchBriefingNarration).not.toHaveBeenCalled();
     expect(result.current.isUnavailable).toBe(true);
     expect(result.current.unavailableReason).toBe('No notification data to narrate.');
@@ -163,8 +155,7 @@ describe('useBriefingNarration', () => {
 
     let channels = makeChannels(['a']);
     const { result, rerender } = renderHook(
-      ({ ch, ls }: { ch: ChannelFetchResult[]; ls: LoadingState }) =>
-        useBriefingNarration(ch, ls),
+      ({ ch, ls }: { ch: ChannelFetchResult[]; ls: LoadingState }) => useBriefingNarration(ch, ls),
       { initialProps: { ch: channels, ls: 'loaded' as LoadingState } }
     );
 
@@ -194,8 +185,7 @@ describe('useBriefingNarration', () => {
 
     const channels = makeChannels(['a']);
     const { rerender } = renderHook(
-      ({ ch, ls }: { ch: ChannelFetchResult[]; ls: LoadingState }) =>
-        useBriefingNarration(ch, ls),
+      ({ ch, ls }: { ch: ChannelFetchResult[]; ls: LoadingState }) => useBriefingNarration(ch, ls),
       { initialProps: { ch: channels, ls: 'loaded' as LoadingState } }
     );
 
@@ -221,13 +211,17 @@ describe('useBriefingNarration', () => {
     // Second call: resolves with 'second'.
     let resolveFirst: (value: unknown) => void = () => {};
     (fetchBriefingNarration as jest.Mock)
-      .mockImplementationOnce(() => new Promise(res => { resolveFirst = res; }))
+      .mockImplementationOnce(
+        () =>
+          new Promise(res => {
+            resolveFirst = res;
+          })
+      )
       .mockResolvedValueOnce(makeSuccessResult('second'));
 
     let channels = makeChannels(['a']);
     const { result, rerender } = renderHook(
-      ({ ch, ls }: { ch: ChannelFetchResult[]; ls: LoadingState }) =>
-        useBriefingNarration(ch, ls),
+      ({ ch, ls }: { ch: ChannelFetchResult[]; ls: LoadingState }) => useBriefingNarration(ch, ls),
       { initialProps: { ch: channels, ls: 'loaded' as LoadingState } }
     );
 
@@ -268,9 +262,7 @@ describe('useBriefingNarration', () => {
     });
 
     const channels = makeChannels(['a']);
-    const { result } = renderHook(() =>
-      useBriefingNarration(channels, 'loaded' as LoadingState)
-    );
+    const { result } = renderHook(() => useBriefingNarration(channels, 'loaded' as LoadingState));
 
     await waitFor(() => {
       expect(result.current.isUnavailable).toBe(true);
@@ -286,9 +278,7 @@ describe('useBriefingNarration', () => {
     });
 
     const channels = makeChannels(['a']);
-    const { result } = renderHook(() =>
-      useBriefingNarration(channels, 'loaded' as LoadingState)
-    );
+    const { result } = renderHook(() => useBriefingNarration(channels, 'loaded' as LoadingState));
 
     await waitFor(() => {
       expect(result.current.error).toBe('boom');
