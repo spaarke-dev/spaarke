@@ -927,6 +927,132 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
+    /// Detects whether a Control node is a deployed-LoadKnowledge node — the canvas-only
+    /// pass-through placeholder for the R5 AI Search knowledge-source binding.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// R4 (2026-06-26, daily-update-service-r4 follow-on after StartNodeExecutor):
+    /// same failure class as Start — Deploy-Playbook.ps1 does NOT inject
+    /// <c>__actionType=142</c> for the LoadKnowledge row, so without this detection
+    /// the structural fallback would route Control → ActionType.Condition →
+    /// ConditionNodeExecutor → "Condition expression is required" validation failure.
+    /// </para>
+    /// <para>
+    /// Detection signals (any one is sufficient):
+    /// </para>
+    /// <list type="number">
+    /// <item><description>Node name equals "LoadKnowledge" (case-insensitive).</description></item>
+    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
+    ///   property with value "loadKnowledge".</description></item>
+    /// <item><description>ConfigJson contains a <c>passthroughBinding</c> object
+    ///   (R4 placeholder marker) OR an <c>r5BindingPlan</c> object (forward-compat
+    ///   marker).</description></item>
+    /// </list>
+    /// </remarks>
+    private static bool IsDeployedLoadKnowledgeNode(PlaybookNodeDto node)
+    {
+        if (node.NodeType != NodeType.Control)
+            return false;
+
+        if (string.Equals(node.Name, "LoadKnowledge", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (string.IsNullOrWhiteSpace(node.ConfigJson))
+            return false;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
+                return false;
+
+            if (root.TryGetProperty("canvasType", out var canvas)
+                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(canvas.GetString(), "loadKnowledge", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("__canvasType", out var underscored)
+                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(underscored.GetString(), "loadKnowledge", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("passthroughBinding", out _))
+                return true;
+
+            if (root.TryGetProperty("r5BindingPlan", out _))
+                return true;
+        }
+        catch
+        {
+            // Malformed JSON — not LoadKnowledge; executor lookup will surface the error.
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Detects whether a Control node is a deployed-ReturnResponse node — the canvas-only
+    /// terminal node that binds upstream node outputs into the playbook run's return value.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// R4 (2026-06-26, daily-update-service-r4 follow-on after StartNodeExecutor):
+    /// same failure class as Start + LoadKnowledge — Deploy-Playbook.ps1 does NOT inject
+    /// <c>__actionType=143</c> for the ReturnResponse row.
+    /// </para>
+    /// <para>
+    /// Detection signals (any one is sufficient):
+    /// </para>
+    /// <list type="number">
+    /// <item><description>Node name equals "ReturnResponse" (case-insensitive).</description></item>
+    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
+    ///   property with value "returnResponse".</description></item>
+    /// <item><description>ConfigJson contains a <c>responseBinding</c> object
+    ///   (terminal-node marker per the R4 playbook authoring convention).</description></item>
+    /// </list>
+    /// </remarks>
+    private static bool IsDeployedReturnResponseNode(PlaybookNodeDto node)
+    {
+        if (node.NodeType != NodeType.Control)
+            return false;
+
+        if (string.Equals(node.Name, "ReturnResponse", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (string.IsNullOrWhiteSpace(node.ConfigJson))
+            return false;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
+                return false;
+
+            if (root.TryGetProperty("canvasType", out var canvas)
+                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(canvas.GetString(), "returnResponse", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("__canvasType", out var underscored)
+                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(underscored.GetString(), "returnResponse", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("responseBinding", out _))
+                return true;
+        }
+        catch
+        {
+            // Malformed JSON — not ReturnResponse; executor lookup will surface the error.
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Extracts the __actionType value from a node's ConfigJson.
     /// Returns null if ConfigJson is missing or doesn't contain the field.
     /// </summary>
@@ -1179,8 +1305,18 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 // this branch the deployed Start row falls into ConditionNodeExecutor
                 // and fails validation. Detection logic is centralised in
                 // IsDeployedStartNode for reuse + clarity.
+                // R4 (2026-06-26, daily-update-service-r4 follow-on): extended deployed-Start
+                // detection to cover all three canvas-only Control nodes that the R4
+                // DAILY-BRIEFING-NARRATE playbook deploys without __actionType injection.
+                // Each helper centralises the per-shape detection (see IsDeployedStartNode /
+                // IsDeployedLoadKnowledgeNode / IsDeployedReturnResponseNode). Without these
+                // branches the Condition default fires and rejects the node with "Condition
+                // expression is required" — the same UAT class that StartNodeExecutor closed
+                // on 2026-06-25.
                 actionType = configActionType
                     ?? (IsDeployedStartNode(node) ? ActionType.Start : (ActionType?)null)
+                    ?? (IsDeployedLoadKnowledgeNode(node) ? ActionType.LoadKnowledge : (ActionType?)null)
+                    ?? (IsDeployedReturnResponseNode(node) ? ActionType.ReturnResponse : (ActionType?)null)
                     ?? node.NodeType switch
                     {
                         NodeType.Output => ActionType.DeliverOutput,

@@ -898,6 +898,23 @@ public static class AnalysisServicesModule
         // registration per CLAUDE.md §10 BFF Hygiene §F.1.
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.StartNodeExecutor>();
 
+        // LoadKnowledgeNodeExecutor — ActionType.LoadKnowledge = 142 (R4 spaarke-daily-update-service-r4,
+        // UAT 2026-06-26 same failure class as Start). Pass-through placeholder for the
+        // R5 AI Search knowledge-source binding. Reads configJson.passthroughBinding
+        // (optional name→template map), renders templates against scope, binds resolved
+        // object to node.OutputVariable (default "channelRegistry"). Singleton: pure
+        // ConfigJson + scope read via ITemplateEngine + ILogger; no Scoped deps.
+        // UNCONDITIONAL registration per CLAUDE.md §10 BFF Hygiene §F.1.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.LoadKnowledgeNodeExecutor>();
+
+        // ReturnResponseNodeExecutor — ActionType.ReturnResponse = 143 (R4 spaarke-daily-update-service-r4,
+        // UAT 2026-06-26 same failure class as Start). Terminal node — projects upstream
+        // node outputs into the run's return value via configJson.responseBinding (optional
+        // _validationMetadata sidecar). Bound to node.OutputVariable (default "response").
+        // Singleton: pure ConfigJson + scope read via ITemplateEngine + ILogger; no Scoped
+        // deps. UNCONDITIONAL registration per CLAUDE.md §10 BFF Hygiene §F.1.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.ReturnResponseNodeExecutor>();
+
         // CodeInterpreterBridge — thin wrapper around AgentServiceClient for Code Interpreter sandbox
         // invocations (AIPU-070). Singleton: stateless, thread-safe. Kill switch: CodeInterpreter:Enabled.
         // CodeInterpreterTools are NOT registered here — they are factory-instantiated by SprkChatAgentFactory
