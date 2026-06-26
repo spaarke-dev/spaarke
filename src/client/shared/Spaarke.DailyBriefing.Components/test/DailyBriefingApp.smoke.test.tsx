@@ -299,9 +299,7 @@ describe('DailyBriefingApp (smoke)', () => {
     //   3. "Keep on briefing for 7 more days"      (CalendarAddRegular)
     expect(screen.getByRole('menuitem', { name: /^Mark as read$/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /^Remove from briefing$/i })).toBeInTheDocument();
-    expect(
-      screen.getByRole('menuitem', { name: /^Keep on briefing for 7 more days$/i })
-    ).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Keep on briefing for 7 more days$/i })).toBeInTheDocument();
 
     // ADR-024 regression-free: existing "Add to To Do" menu item still renders.
     expect(screen.getByRole('menuitem', { name: /^Add to To Do$/i })).toBeInTheDocument();

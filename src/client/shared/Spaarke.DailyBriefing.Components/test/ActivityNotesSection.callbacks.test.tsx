@@ -141,9 +141,7 @@ describe('ActivityNotesSection — FR-18 + FR-19 callback wiring (R4 tasks 046+0
     renderSection();
     openOverflowMenu();
 
-    const labels = screen
-      .getAllByRole('menuitem')
-      .map(el => (el.textContent ?? '').trim());
+    const labels = screen.getAllByRole('menuitem').map(el => (el.textContent ?? '').trim());
     // Canonical FR-18 order: 6 actions — proves all 6 callback props were
     // received by NarrativeBullet (because NarrativeBullet hides items 1/2/3
     // when their callback prop is undefined, and hides item 6 when
@@ -184,9 +182,7 @@ describe('ActivityNotesSection — FR-18 + FR-19 callback wiring (R4 tasks 046+0
     const { callbacks } = renderSection();
     openOverflowMenu();
     act(() => {
-      fireEvent.click(
-        screen.getByRole('menuitem', { name: /^Keep on briefing for 7 more days$/i })
-      );
+      fireEvent.click(screen.getByRole('menuitem', { name: /^Keep on briefing for 7 more days$/i }));
     });
     expect(callbacks.onKeep).toHaveBeenCalledTimes(1);
     // ttl flows through from NotificationItem.ttlinseconds = 604800 (fixture).
