@@ -28,6 +28,7 @@ import {
   markAllBriefingsChecked,
   markBriefingRemoved,
   extendBriefingTtl,
+  buildDisabledChannelsFilter,
 } from '../src/services/notificationService';
 import type { IWebApi, RetrieveMultipleResult, WebApiEntity } from '../src/types/notifications';
 
@@ -467,5 +468,112 @@ describe('extendBriefingTtl — FR-6 AC-6', () => {
       expect(result.error.code).toBe('BRIEFING_EXTEND_TTL_ERROR');
       expect(result.error.message).toBe('throttled');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-17c: disabledChannels server-side $filter on sprk_category
+// (R4 task 042)
+// ---------------------------------------------------------------------------
+
+describe('buildDisabledChannelsFilter — FR-17c clause builder', () => {
+  it('returns null for undefined / null / empty array (no clause)', () => {
+    expect(buildDisabledChannelsFilter(undefined)).toBeNull();
+    expect(buildDisabledChannelsFilter(null)).toBeNull();
+    expect(buildDisabledChannelsFilter([])).toBeNull();
+  });
+
+  it('emits a single `sprk_category ne` clause (no parens) for one disabled channel', () => {
+    expect(buildDisabledChannelsFilter(['new-emails'])).toBe("sprk_category ne 'new-emails'");
+  });
+
+  it('AND-joins `sprk_category ne` clauses wrapped in parens for multiple disabled channels (no OData v4 `not in`)', () => {
+    expect(buildDisabledChannelsFilter(['new-emails', 'tasks-overdue'])).toBe(
+      "(sprk_category ne 'new-emails' and sprk_category ne 'tasks-overdue')"
+    );
+  });
+
+  it('doubles single-quotes in category strings (OData literal escape) — defensive even though current enum has none', () => {
+    // Cast through unknown so we can stress the escape with a synthetic value.
+    const synthetic = ["it's-fine"] as unknown as Parameters<typeof buildDisabledChannelsFilter>[0];
+    expect(buildDisabledChannelsFilter(synthetic)).toBe("sprk_category ne 'it''s-fine'");
+  });
+});
+
+describe('fetchNotifications — FR-17c disabledChannels server filter', () => {
+  it('fetchNotifications_AppliesDisabledChannelsFilter — $filter includes `sprk_category ne` clause when disabledChannels is provided', async () => {
+    const webApi = makeWebApi();
+    (webApi.retrieveMultipleRecords as jest.Mock).mockResolvedValue(makeMultiResult([]));
+
+    await fetchNotifications(webApi, { disabledChannels: ['new-emails'] });
+
+    const [, query] = (webApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];
+    expect(query).toContain('$filter=');
+    expect(query).toContain("sprk_category ne 'new-emails'");
+  });
+
+  it('fetchNotifications_DisabledChannelsEmpty_NoFilterClause — no `sprk_category` clause when disabledChannels is empty', async () => {
+    const webApi = makeWebApi();
+    (webApi.retrieveMultipleRecords as jest.Mock).mockResolvedValue(makeMultiResult([]));
+
+    await fetchNotifications(webApi, { disabledChannels: [] });
+
+    const [, query] = (webApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];
+    expect(query).not.toContain('sprk_category');
+  });
+
+  it('fetchNotifications_DisabledChannelsEmpty_NoFilterClause — no `sprk_category` clause when disabledChannels is undefined (default)', async () => {
+    const webApi = makeWebApi();
+    (webApi.retrieveMultipleRecords as jest.Mock).mockResolvedValue(makeMultiResult([]));
+
+    await fetchNotifications(webApi);
+
+    const [, query] = (webApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];
+    expect(query).not.toContain('sprk_category');
+  });
+
+  it('fetchNotifications_DisabledChannelsCombinedWithOtherFilters — timeWindow + disabledChannels both present, AND-joined', async () => {
+    const webApi = makeWebApi();
+    (webApi.retrieveMultipleRecords as jest.Mock).mockResolvedValue(makeMultiResult([]));
+
+    await fetchNotifications(webApi, {
+      timeWindow: '48h',
+      disabledChannels: ['new-emails', 'tasks-overdue'],
+    });
+
+    const [, query] = (webApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];
+    // Removed-exclusion (always), createdon (timeWindow), and disabled-channels clauses all present
+    expect(query).toContain('(sprk_briefingstate ne 2 or sprk_briefingstate eq null)');
+    expect(query).toContain('createdon ge ');
+    expect(query).toContain("sprk_category ne 'new-emails'");
+    expect(query).toContain("sprk_category ne 'tasks-overdue'");
+    // AND-joined into the $filter — every adjacent pair of predicates joined by ` and `
+    expect(query).toContain(' and ');
+  });
+
+  it('fetchNotifications_DisabledChannels_OdataIn_OrFallback — uses AND-of-`ne` syntax (spec line 361 fallback), NOT `not in`', async () => {
+    const webApi = makeWebApi();
+    (webApi.retrieveMultipleRecords as jest.Mock).mockResolvedValue(makeMultiResult([]));
+
+    await fetchNotifications(webApi, { disabledChannels: ['new-emails', 'new-events'] });
+
+    const [, query] = (webApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];
+    // Spec line 361 documents: if `in` is not supported, fall back to AND-of-`ne`.
+    // OData v4 has no `not in` operator → we always use the fallback form.
+    expect(query).not.toMatch(/not\s*\(/);
+    expect(query).not.toContain(' in (');
+    expect(query).toContain("sprk_category ne 'new-emails'");
+    expect(query).toContain("sprk_category ne 'new-events'");
+  });
+
+  it('FR-17c MUST: $filter does NOT reference nested customData.category (Dataverse OData unsupported)', async () => {
+    const webApi = makeWebApi();
+    (webApi.retrieveMultipleRecords as jest.Mock).mockResolvedValue(makeMultiResult([]));
+
+    await fetchNotifications(webApi, { disabledChannels: ['new-emails'] });
+
+    const [, query] = (webApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];
+    expect(query).not.toContain('customData.category');
+    expect(query).not.toContain('customData/category');
   });
 });

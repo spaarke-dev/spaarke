@@ -51,9 +51,9 @@
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 
@@ -67,11 +67,15 @@ namespace Sprk.Bff.Api.Api.Membership;
 /// </summary>
 public static class MembershipEndpoints
 {
-    /// <summary>Cache key prefix for AAD-oid → systemuserid lookups. Sibling
-    /// namespace to <see cref="IdentityNormalizationService"/>'s
-    /// <c>membership:identity:*</c> namespace so future invalidation via
-    /// <c>membership:*</c> wipes both.</summary>
-    internal const string CurrentUserCacheKeyPrefix = "membership:currentuser:";
+    /// <summary>Cache resource label for AAD-oid → systemuserid lookups.
+    /// On-wire key: <c>tenant:{tenantId}:membership-currentuser:{aadOid:D}:v1</c>.
+    /// Sibling namespace to <see cref="IdentityNormalizationService"/>'s
+    /// <c>membership-identity</c> resource so future invalidation via
+    /// <c>membership-*</c> wipes both.</summary>
+    internal const string CurrentUserCacheResource = "membership-currentuser";
+
+    /// <summary>Cache schema version per ADR-009.</summary>
+    private const int CurrentUserCacheVersion = 1;
 
     /// <summary>TTL for AAD-oid → systemuserid cache entries. Matches the
     /// identity-normalization cache TTL (10 min) — a freshly disabled user
@@ -140,7 +144,7 @@ public static class MembershipEndpoints
         HttpContext httpContext,
         IMembershipResolverService resolver,
         IDataverseService dataverse,
-        IDistributedCache cache,
+        ITenantCache cache,
         ILoggerFactory loggerFactory,
         CancellationToken ct,
         [FromQuery] string? roles = null,
@@ -200,7 +204,13 @@ public static class MembershipEndpoints
         Guid systemUserId;
         try
         {
-            var resolved = await ResolveSystemUserIdAsync(callerOid.Value, dataverse, cache, logger, ct)
+            var resolved = await ResolveSystemUserIdAsync(
+                    callerOid.Value,
+                    ExtractTenantId(httpContext.User),
+                    dataverse,
+                    cache,
+                    logger,
+                    ct)
                 .ConfigureAwait(false);
             if (resolved is null)
             {
@@ -358,11 +368,23 @@ public static class MembershipEndpoints
     }
 
     /// <summary>
+    /// Extracts the AAD tenant id (<c>tid</c> claim) from the supplied
+    /// <see cref="ClaimsPrincipal"/>. Falls back to the long-form Microsoft schema
+    /// URI and finally to <c>"anonymous"</c> when no usable claim is present.
+    /// Mirrors the precedent established by RecordSearchService + ChatEndpoints
+    /// for tenant-scoped Redis cache keys (FR-05).
+    /// </summary>
+    internal static string ExtractTenantId(ClaimsPrincipal user)
+        => user.FindFirst("tid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? "anonymous";
+
+    /// <summary>
     /// Resolves an Entra ID <c>oid</c> (AAD object id) to a Dataverse
     /// <c>systemuserid</c> by querying the <c>systemuser</c> entity's
     /// <c>azureactivedirectoryobjectid</c> column (per ADR-028). Result is
-    /// cached in <see cref="IDistributedCache"/> for 10 min per
-    /// <see cref="CurrentUserCacheTtl"/>.
+    /// cached in <see cref="ITenantCache"/> for 10 min per
+    /// <see cref="CurrentUserCacheTtl"/> using tenant-scoped keys (FR-05).
     /// </summary>
     /// <returns>
     /// The resolved <c>systemuserid</c>, or <c>null</c> when the AAD principal
@@ -376,24 +398,26 @@ public static class MembershipEndpoints
     /// </remarks>
     internal static async Task<Guid?> ResolveSystemUserIdAsync(
         Guid aadObjectId,
+        string tenantId,
         IDataverseService dataverse,
-        IDistributedCache cache,
+        ITenantCache cache,
         ILogger logger,
         CancellationToken ct)
     {
-        var cacheKey = CurrentUserCacheKeyPrefix + aadObjectId.ToString("D");
+        var cacheId = aadObjectId.ToString("D");
 
         // ── Cache lookup ────────────────────────────────────────────────────
         try
         {
-            var cached = await cache.GetAsync(cacheKey, ct).ConfigureAwait(false);
-            if (cached is not null && cached.Length == 16)
+            var cachedGuid = await cache.GetAsync<Guid>(
+                tenantId,
+                CurrentUserCacheResource,
+                cacheId,
+                CurrentUserCacheVersion,
+                ct: ct).ConfigureAwait(false);
+            if (cachedGuid != Guid.Empty)
             {
-                var cachedGuid = new Guid(cached);
-                if (cachedGuid != Guid.Empty)
-                {
-                    return cachedGuid;
-                }
+                return cachedGuid;
             }
         }
         catch (OperationCanceledException)
@@ -403,8 +427,8 @@ public static class MembershipEndpoints
         catch (Exception ex)
         {
             logger.LogWarning(ex,
-                "Membership endpoint: cache read failed for {CacheKey}; falling through to live resolve",
-                cacheKey);
+                "Membership endpoint: cache read failed for tenant={TenantId} id={CacheId}; falling through to live resolve",
+                tenantId, cacheId);
         }
 
         // ── Live cross-ref via systemuser.azureactivedirectoryobjectid ──────
@@ -443,10 +467,13 @@ public static class MembershipEndpoints
         try
         {
             await cache.SetAsync(
-                cacheKey,
-                systemUserId.ToByteArray(),
-                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CurrentUserCacheTtl },
-                ct).ConfigureAwait(false);
+                tenantId,
+                CurrentUserCacheResource,
+                cacheId,
+                CurrentUserCacheVersion,
+                systemUserId,
+                CurrentUserCacheTtl,
+                ct: ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -455,8 +482,8 @@ public static class MembershipEndpoints
         catch (Exception ex)
         {
             logger.LogWarning(ex,
-                "Membership endpoint: cache write failed for {CacheKey}; next call will re-resolve",
-                cacheKey);
+                "Membership endpoint: cache write failed for tenant={TenantId} id={CacheId}; next call will re-resolve",
+                tenantId, cacheId);
         }
 
         return systemUserId;

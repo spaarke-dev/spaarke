@@ -2,13 +2,14 @@ using System.Net;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Azure.Cosmos;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Sessions;
@@ -42,7 +43,7 @@ public class SessionPersistenceServiceUploadedFilesTests
     private const string DatabaseName = "spaarke-ai";
     private const string CosmosEndpoint = "https://spaarke-cosmos-dev.documents.azure.com:443/";
 
-    private readonly Mock<IDistributedCache> _cacheMock;
+    private readonly TrackingTenantCache _cache;
     private readonly Mock<CosmosClient> _cosmosClientMock;
     private readonly Mock<Container> _containerMock;
     private readonly Mock<ILogger<SessionPersistenceService>> _loggerMock;
@@ -52,7 +53,7 @@ public class SessionPersistenceServiceUploadedFilesTests
 
     public SessionPersistenceServiceUploadedFilesTests()
     {
-        _cacheMock = new Mock<IDistributedCache>();
+        _cache = new TrackingTenantCache();
         _cosmosClientMock = new Mock<CosmosClient>();
         _containerMock = new Mock<Container>();
         _loggerMock = new Mock<ILogger<SessionPersistenceService>>();
@@ -74,7 +75,7 @@ public class SessionPersistenceServiceUploadedFilesTests
             .Returns(_containerMock.Object);
 
         _sut = new SessionPersistenceService(
-            _cacheMock.Object,
+            _cache,
             _cosmosClientMock.Object,
             _configuration,
             _loggerMock.Object,
@@ -90,11 +91,7 @@ public class SessionPersistenceServiceUploadedFilesTests
     {
         // Arrange — existing session in Redis with no UploadedFiles
         var existing = BuildStoredSession();
-        var existingBytes = JsonSerializer.SerializeToUtf8Bytes(existing);
-        _cacheMock
-            .Setup(c => c.GetAsync(SessionPersistenceService.BuildRedisKey(TenantId, SessionId), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(existingBytes);
-        SetupCacheSetSuccess();
+        await SeedSession(existing);
 
         StoredSession? capturedSession = null;
         _containerMock
@@ -196,11 +193,7 @@ public class SessionPersistenceServiceUploadedFilesTests
     {
         // Arrange — existing session in Redis
         var existing = BuildStoredSession();
-        var existingBytes = JsonSerializer.SerializeToUtf8Bytes(existing);
-        _cacheMock
-            .Setup(c => c.GetAsync(SessionPersistenceService.BuildRedisKey(TenantId, SessionId), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(existingBytes);
-        SetupCacheSetSuccess();
+        await SeedSession(existing);
         _containerMock
             .Setup(c => c.UpsertItemAsync(
                 It.IsAny<StoredSession>(),
@@ -267,11 +260,7 @@ public class SessionPersistenceServiceUploadedFilesTests
     {
         // Arrange — Redis returns the session immediately
         var existing = BuildStoredSession();
-        var existingBytes = JsonSerializer.SerializeToUtf8Bytes(existing);
-        _cacheMock
-            .Setup(c => c.GetAsync(SessionPersistenceService.BuildRedisKey(TenantId, SessionId), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(existingBytes);
-        SetupCacheSetSuccess();
+        await SeedSession(existing);
         _containerMock
             .Setup(c => c.UpsertItemAsync(
                 It.IsAny<StoredSession>(),
@@ -305,8 +294,7 @@ public class SessionPersistenceServiceUploadedFilesTests
     public async Task UpdateUploadedFilesAsync_RedisMiss_FallsBackToCosmos()
     {
         // Arrange — Redis MISS, Cosmos returns the session
-        SetupCacheMiss();
-        SetupCacheSetSuccess();
+        // TrackingTenantCache: empty by default → Redis miss; SetAsync succeeds.
 
         var fromCosmos = BuildStoredSession();
         var readResponseMock = new Mock<ItemResponse<StoredSession>>();
@@ -360,11 +348,7 @@ public class SessionPersistenceServiceUploadedFilesTests
     {
         // Arrange — existing session in Redis; Cosmos upsert throws PreconditionFailed
         var existing = BuildStoredSession();
-        var existingBytes = JsonSerializer.SerializeToUtf8Bytes(existing);
-        _cacheMock
-            .Setup(c => c.GetAsync(SessionPersistenceService.BuildRedisKey(TenantId, SessionId), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(existingBytes);
-        SetupCacheSetSuccess();
+        await SeedSession(existing);
 
         _containerMock
             .Setup(c => c.UpsertItemAsync(
@@ -394,8 +378,7 @@ public class SessionPersistenceServiceUploadedFilesTests
     [Fact]
     public async Task UpdateUploadedFilesAsync_NoExistingSession_ReturnsFalse()
     {
-        // Arrange — Redis miss + Cosmos 404
-        SetupCacheMiss();
+        // Arrange — Redis miss (empty TrackingTenantCache) + Cosmos 404
         _containerMock
             .Setup(c => c.ReadItemAsync<StoredSession>(
                 It.IsAny<string>(),
@@ -410,35 +393,22 @@ public class SessionPersistenceServiceUploadedFilesTests
         // Assert
         result.Should().BeFalse("UpdateUploadedFilesAsync must return false when no session exists in either store");
 
-        _cacheMock.Verify(c => c.SetAsync(
-            It.IsAny<string>(),
-            It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(),
-            It.IsAny<CancellationToken>()),
-            Times.Never,
-            "Redis must not be written when the session does not exist");
+        _cache.SetCount.Should().Be(0, "Redis must not be written when the session does not exist");
     }
 
     // =========================================================================
     // Helpers — mirror SessionPersistenceServiceTabsTests
     // =========================================================================
 
-    private void SetupCacheMiss()
+    /// <summary>
+    /// Seeds the TrackingTenantCache with a serialised StoredSession at the FR-05
+    /// (resource, id) coordinates the production code probes.
+    /// </summary>
+    private async Task SeedSession(StoredSession session)
     {
-        _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-    }
-
-    private void SetupCacheSetSuccess()
-    {
-        _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        await _cache.SetAsync<StoredSession>(
+            TenantId, "stored-session", SessionId, 1, session);
+        _cache.SetCount = 0; // reset write counter so test assertions exclude the seed write
     }
 
     private static IReadOnlyList<ChatSessionFile> BuildEnrichedFiles(int count)

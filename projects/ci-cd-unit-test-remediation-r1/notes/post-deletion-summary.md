@@ -3,9 +3,18 @@
 > **Date**: 2026-06-26
 > **Authority**: spec FR-B06 + ADR-038 + inventory finding from task CICD-020
 
-## What was actually deleted
+## Update 2026-06-26 (post master-merge)
 
-**11 files removed** from `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/`:
+After merging `origin/master` (59 commits ahead, mostly daily-briefing-r4 + redis-cache-remediation-r1), **2 of the 11 originally-deleted files came back** because master modified them with behavioral additions (NOT wiring antipatterns):
+
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateNotificationNodeExecutorTests.cs` — daily-briefing-r4 task 020 (FR enrichment) + task 021 (xUnit invariant lock); both real behavioral tests
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookServiceTests.cs` — redis-cache-remediation Phase 1+2+5 (likely cache API refactor)
+
+Resolution at merge: took master's version. **Effective deletion count: 9 files**, not 11. The two re-included files may still contain mixed antipatterns + real tests — flagged for re-audit in a follow-up cleanup PR (do NOT delete blindly; manual inspection required to separate the two parts).
+
+## What was actually deleted (final)
+
+**9 files removed** from `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/`:
 
 ### HttpMessageHandler-mock antipattern (9 files)
 - `Services/Ai/Handlers/WebSearchHandlerTests.cs`

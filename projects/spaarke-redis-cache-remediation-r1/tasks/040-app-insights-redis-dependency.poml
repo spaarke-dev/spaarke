@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Verify App Insights Redis dependency telemetry</title>
+    <phase>4: Observability</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>035</dependencies>
+    <blocks>none</blocks>
+    <tags>azure, monitoring, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Telemetry verification</rigor-reason>
+    <parallel-group>Phase4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Verify App Insights Live Metrics shows Redis dependency calls within 5 min of post-cutover traffic. Per FR-16.</prompt>
+  <role>Spaarke operator; observability check.</role>
+  <goal>Screenshot or query result captured in `notes/app-insights-dependency-verification.md` showing Redis dependency calls.</goal>
+  <context><background>Standard ApplicationInsights SDK captures Redis dep calls automatically once `APPLICATIONINSIGHTS_CONNECTION_STRING` is configured.</background><relevant-files><file>App Insights instance for spaarke-bff-dev</file></relevant-files></context>
+  <constraints><constraint source="spec">FR-16.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cutover-deploy-log.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Generate some traffic against dev BFF (any cached endpoint).</step>
+    <step order="2">Open App Insights Live Metrics; filter Dependencies = "Redis"; confirm presence within 5 min.</step>
+    <step order="3">Document result.</step>
+    <step order="4">If APPLICATIONINSIGHTS_CONNECTION_STRING missing: provision App Insights (per spec Assumption — small additive).</step>
+    <step order="5">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">curl + Azure Portal screenshot or KQL</tool><tool name="Write">notes</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/app-insights-dependency-verification.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">App Insights Live Metrics shows Redis dependency calls within 5 min of post-cutover traffic.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

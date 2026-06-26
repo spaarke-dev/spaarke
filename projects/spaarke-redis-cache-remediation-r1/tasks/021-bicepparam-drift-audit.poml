@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>infrastructure/bicep/parameters drift audit (FR-10)</title>
+    <phase>2: Bicep + provisioning artifacts</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>022,023,024</blocks>
+    <tags>azure, bicep, infrastructure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Audit existing param files; small surface; fix detected drift</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Audit all 7 `.bicepparam` files in `infrastructure/bicep/parameters/` for drift relevant to Redis or naming conventions: `customer-template`, `demo-customer`, `dev`, `model2-customer-template`, `platform-prod`, `prod`, `staging`. Document inconsistencies and fix.</prompt>
+  <role>Spaarke infrastructure developer.</role>
+  <goal>`notes/bicepparam-drift-audit.md` lists each `.bicepparam` file, its current Redis-related parameter values, and any detected inconsistencies. Fix in-place where consistent fix is obvious; flag for review where not.</goal>
+  <context><background>Spec FR-10 expects drift may exist across env-specific param files. Audit before adding three new redis-specific files (tasks 022-024).</background><relevant-files><file>infrastructure/bicep/parameters/</file></relevant-files></context>
+  <constraints><constraint source="spec">FR-10 — audit + fix inconsistencies.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>infrastructure/bicep/modules/redis.bicep</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read all 7 `.bicepparam` files. Tabulate Redis-related settings + naming conventions used.</step>
+    <step order="2">Identify drift: inconsistent SKU per env, mismatched naming (e.g., some use `spe-`, others `spaarke-`), inconsistent KV secret references.</step>
+    <step order="3">For each drift item: decide (a) fix in-place (if consistent fix is obvious + scope-allowed), (b) document for follow-up.</step>
+    <step order="4">Write `notes/bicepparam-drift-audit.md` — table of findings + fixes applied.</step>
+    <step order="5">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">All param files</tool><tool name="Edit">Fix drift</tool><tool name="Write">Audit notes</tool></tools>
+  <outputs>
+    <output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/bicepparam-drift-audit.md (NEW)</output>
+    <output type="config">Any modified `.bicepparam` files</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Audit notes file exists with table of drift items + fixes.</criterion>
+    <criterion testable="true">Any fixed `.bicepparam` files still compile (`bicep build`).</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

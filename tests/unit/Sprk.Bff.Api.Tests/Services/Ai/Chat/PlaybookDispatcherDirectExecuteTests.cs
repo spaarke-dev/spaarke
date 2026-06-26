@@ -2,15 +2,16 @@ using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -50,7 +51,7 @@ public class PlaybookDispatcherDirectExecuteTests
 
     private readonly Mock<IChatClient> _executionClientMock = new();
     private readonly Mock<INodeService> _nodeServiceMock = new();
-    private readonly Mock<IDistributedCache> _cacheMock = new();
+    private readonly InMemoryTenantCache _cache = new();
     private readonly Mock<ILogger<PlaybookDispatcher>> _loggerMock = new();
     private readonly Mock<IOpenAiClient> _openAiClientMock = new();
     private readonly Mock<SearchIndexClient> _searchIndexClientMock = new(MockBehavior.Loose);
@@ -58,9 +59,7 @@ public class PlaybookDispatcherDirectExecuteTests
 
     public PlaybookDispatcherDirectExecuteTests()
     {
-        _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+        // InMemoryTenantCache returns default (null) for any uncached key — no setup needed.
     }
 
     private PlaybookDispatcher CreateDispatcher()
@@ -74,7 +73,7 @@ public class PlaybookDispatcherDirectExecuteTests
             embeddingService,
             _executionClientMock.Object,
             _nodeServiceMock.Object,
-            _cacheMock.Object,
+            _cache,
             TestTenantId,
             _loggerMock.Object);
     }

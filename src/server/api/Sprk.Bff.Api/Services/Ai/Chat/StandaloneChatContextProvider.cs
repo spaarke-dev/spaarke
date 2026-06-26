@@ -1,5 +1,4 @@
-using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -35,8 +34,21 @@ public class StandaloneChatContextProvider
     /// <summary>Absolute TTL for standalone context cache entries (ADR-009 — matches analysis context TTL).</summary>
     internal static readonly TimeSpan ContextCacheTtl = TimeSpan.FromMinutes(30);
 
-    /// <summary>Cache key prefix. Must match the pattern expected by any eviction logic.</summary>
-    internal const string CacheKeyPrefix = "chat-context:";
+    /// <summary>Tenant-cache resource name for standalone context payloads (FR-05).</summary>
+    internal const string CacheResource = "standalone-chat-context";
+
+    /// <summary>Tenant-cache schema version for standalone context payloads.</summary>
+    internal const int CacheVersion = 1;
+
+    /// <summary>Legacy alias retained for tests that referenced the pre-FR-05 prefix constant.</summary>
+    internal const string CacheKeyPrefix = "tenant:";
+
+    /// <summary>
+    /// Reproduces the on-wire cache key produced by <see cref="ITenantCache"/> for legacy
+    /// test consumers. Format: <c>tenant:{tenantId}:standalone-chat-context:{entityType}:{entityId}:v1</c>.
+    /// </summary>
+    internal static string BuildCacheKey(string tenantId, string entityType, string entityId)
+        => $"tenant:{tenantId}:{CacheResource}:{entityType}:{entityId}:v{CacheVersion}";
 
     /// <summary>
     /// Allowlist of supported Dataverse entity logical names.
@@ -130,18 +142,18 @@ public class StandaloneChatContextProvider
             ],
         };
 
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ILogger<StandaloneChatContextProvider> _logger;
 
     /// <summary>
-    /// Builds the Redis cache key for a standalone context lookup.
-    /// Key format: <c>chat-context:{tenantId}:standalone:{entityType}:{entityId}</c> (ADR-014 — tenant-scoped).
+    /// Builds the tenant-cache <c>id</c> component for a standalone context lookup.
+    /// Combined with the tenant and resource by <see cref="ITenantCache"/>.
     /// </summary>
-    internal static string BuildCacheKey(string tenantId, string entityType, string entityId)
-        => $"{CacheKeyPrefix}{tenantId}:standalone:{entityType}:{entityId}";
+    internal static string BuildCacheId(string entityType, string entityId)
+        => $"{entityType}:{entityId}";
 
     public StandaloneChatContextProvider(
-        IDistributedCache cache,
+        ITenantCache cache,
         ILogger<StandaloneChatContextProvider> logger)
     {
         _cache = cache;
@@ -180,23 +192,19 @@ public class StandaloneChatContextProvider
             return null;
         }
 
-        var cacheKey = BuildCacheKey(tenantId, entityType, entityId);
+        var cacheId = BuildCacheId(entityType, entityId);
 
-        // Hot path: Redis cache (ADR-009 — Redis first)
+        // Hot path: Redis cache (ADR-009 — Redis first). Tenant-scoped via ITenantCache (FR-05).
         try
         {
-            var cachedBytes = await _cache.GetAsync(cacheKey, ct);
-            if (cachedBytes is not null)
+            var cached = await _cache.GetAsync<StandaloneChatContextResponse>(
+                tenantId, CacheResource, cacheId, CacheVersion, ct: ct);
+            if (cached is not null)
             {
                 _logger.LogDebug(
                     "Cache HIT for standalone context (tenant={TenantId}, entityType={EntityType}, entityId={EntityId})",
                     tenantId, entityType, entityId);
-
-                var cached = JsonSerializer.Deserialize<StandaloneChatContextResponse>(cachedBytes);
-                if (cached is not null)
-                {
-                    return cached;
-                }
+                return cached;
             }
         }
         catch (Exception ex)
@@ -215,7 +223,7 @@ public class StandaloneChatContextProvider
         var response = BuildFromCatalog(entityType, entityId);
 
         // Cache the result with a 30-minute absolute TTL (ADR-009)
-        await CacheContextAsync(cacheKey, response, ct);
+        await CacheContextAsync(tenantId, cacheId, response, ct);
 
         return response;
     }
@@ -255,27 +263,31 @@ public class StandaloneChatContextProvider
     /// <summary>
     /// Serialises the context response to JSON and stores it in Redis with a 30-minute
     /// absolute TTL (ADR-009 — no sliding expiration to prevent stale data accumulation).
+    /// Tenant-scoped via <see cref="ITenantCache"/> per FR-05.
     /// </summary>
     private async Task CacheContextAsync(
-        string cacheKey,
+        string tenantId,
+        string cacheId,
         StandaloneChatContextResponse response,
         CancellationToken ct)
     {
         try
         {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(response);
-            var options = new DistributedCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = ContextCacheTtl
-            };
-            await _cache.SetAsync(cacheKey, bytes, options, ct);
+            await _cache.SetAsync(
+                tenantId,
+                CacheResource,
+                cacheId,
+                CacheVersion,
+                response,
+                ContextCacheTtl,
+                ct: ct);
         }
         catch (Exception ex)
         {
             // Redis failure should not block context resolution — degrade gracefully
             _logger.LogWarning(ex,
-                "Redis cache write failed for standalone context (key={CacheKey}); result will not be cached",
-                cacheKey);
+                "Redis cache write failed for standalone context (tenant={TenantId}, id={CacheId}); result will not be cached",
+                tenantId, cacheId);
         }
     }
 }

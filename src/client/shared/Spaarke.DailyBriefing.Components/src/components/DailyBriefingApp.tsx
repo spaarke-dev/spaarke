@@ -441,6 +441,67 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   );
 
   /**
+   * R4 task 046+047 / FR-18 + FR-19 — open a Dataverse record in a modal dialog.
+   *
+   * Single code path for both entry points (regarding-name link click in
+   * NarrativeBullet AND the "Open record" overflow menu item):
+   *
+   *   - Calls `Xrm.Navigation.navigateTo({pageType: 'entityrecord', entityName,
+   *     entityId}, {target: 2, width: {value: 80, unit: '%'}, height: {value: 80,
+   *     unit: '%'}})`. `target: 2` opens a dialog overlay; 80%×80% sizing matches
+   *     the FR-19 spec.
+   *
+   *   - On `.catch(err)` dispatches a non-blocking Fluent v9 Toaster toast with
+   *     intent `'warning'` and message "Cannot open record — you may not have
+   *     access." (AC-19b). This covers Dataverse 403 (no read privilege) AND
+   *     all other navigation rejections (record not found, model-driven app
+   *     missing form, etc.). The toast surfaces a graceful degradation cue
+   *     instead of an error overlay or silent failure.
+   *
+   * The Toaster instance is mounted once at app root (line ~545); this handler
+   * uses the shared `dispatchToast` controller obtained via `useToastController`.
+   *
+   * Xrm is resolved via the polled `xrm` state (welcome-screen timing). If
+   * `Xrm.Navigation.navigateTo` is unavailable (e.g., outside a model-driven app
+   * host), the toast is dispatched directly so the user still gets a cue.
+   */
+  const handleOpenRecord = React.useCallback(
+    (entityType: string, entityId: string) => {
+      if (!entityType || !entityId) return;
+      const dispatchAccessToast = (): void => {
+        dispatchToast(
+          <Toast>
+            <ToastTitle>Cannot open record</ToastTitle>
+            <ToastBody>You may not have access.</ToastBody>
+          </Toast>,
+          { intent: 'warning', timeout: 5000 }
+        );
+      };
+      const navigateTo: ((page: object, options?: object) => Promise<unknown>) | undefined =
+        xrm?.Navigation?.navigateTo;
+      if (typeof navigateTo !== 'function') {
+        dispatchAccessToast();
+        return;
+      }
+      navigateTo(
+        {
+          pageType: 'entityrecord',
+          entityName: entityType,
+          entityId: entityId,
+        },
+        { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
+      ).catch(() => {
+        // FR-19 / AC-19b — 403 (and any other navigation rejection) surfaces a
+        // non-blocking toast. We do not differentiate error codes because the
+        // Xrm.Navigation contract does not guarantee structured error info; the
+        // user-facing message is the same regardless.
+        dispatchAccessToast();
+      });
+    },
+    [xrm, dispatchToast]
+  );
+
+  /**
    * R3 FR-6 — extend a single briefing item's TTL by 7 calendar days. The
    * `onSuccess(newTtlSeconds)` callback receives the new TTL value so the toast
    * can render the effective expiry date. The expiry is computed from
@@ -574,6 +635,11 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
             onCheck={handleCheck}
             onRemove={handleRemove}
             onKeep={handleKeep}
+            // R4 task 046+047 / FR-18 + FR-19 — single Open record path. The
+            // handler dispatches the navigation modal AND surfaces a Toaster
+            // toast on 403 (or any other rejection) via the app-root Toaster
+            // instance mounted below.
+            onOpenRecord={handleOpenRecord}
           />
         </div>
         <CaughtUpFooter channelLabels={caughtUpLabels} />

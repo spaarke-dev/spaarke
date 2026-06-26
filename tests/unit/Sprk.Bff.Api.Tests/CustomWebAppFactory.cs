@@ -84,6 +84,11 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
 
                 // Redis options (disabled for tests)
                 ["Redis:Enabled"] = "false",
+                // spaarke-redis-cache-remediation-r1 task 003 (FR-02 fail-fast): CacheModule now
+                // throws unless either Redis is enabled OR AllowInMemoryFallback is set AND env
+                // is Development. Opt the test host into the in-memory fallback branch so the
+                // host can build. See bff-extensions.md §F.2 (Fixture-Config-FIRST).
+                ["Redis:AllowInMemoryFallback"] = "true",
 
                 // ModelSelector options
                 ["ModelSelector:DefaultModel"] = "gpt-4o",
@@ -137,15 +142,33 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        // Use Testing environment (consistent with other test fixtures)
-        // This disables ValidateScopes which catches pre-existing singleton→scoped
-        // DI lifetime issues in the production codebase (not introduced by this PR)
-        builder.UseEnvironment("Testing");
+        // spaarke-redis-cache-remediation-r1 task 003 (FR-02): CacheModule's in-memory fallback
+        // branch requires IHostEnvironment.IsDevelopment(). "Testing" environment trips Branch (c)
+        // and throws at startup. Switch to "Development" so the fallback path runs, then
+        // explicitly disable ValidateScopes (previously implicit under "Testing") to preserve
+        // the pre-existing behavior — the production codebase has known singleton→scoped DI
+        // lifetime issues unrelated to this PR.
+        builder.UseEnvironment("Development");
+        builder.UseDefaultServiceProvider(options =>
+        {
+            options.ValidateScopes = false;
+            options.ValidateOnBuild = false;
+        });
 
         // Use ConfigureTestServices to replace services AFTER the app's services are registered.
         // This ensures our fakes override the real implementations registered in Program.cs.
         builder.ConfigureTestServices(services =>
         {
+            // spaarke-redis-cache-remediation-r1 task 003 follow-up: under "Development" the
+            // minimal-API binder defaults to ThrowOnBadRequest=true (vs false in other envs);
+            // missing-required-query-param then surfaces as BadHttpRequestException → our
+            // global exception handler maps it to 500 instead of the framework's built-in 400.
+            // Restore the production-equivalent contract for tests by forcing ThrowOnBadRequest=false.
+            services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
+            {
+                options.ThrowOnBadRequest = false;
+            });
+
             // ---------------------------------------------------------------
             // AUTHENTICATION: Replace JWT/OIDC with a fake handler that
             // injects a known test identity when an Authorization header is

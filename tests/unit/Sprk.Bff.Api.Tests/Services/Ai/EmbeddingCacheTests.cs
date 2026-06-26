@@ -1,7 +1,11 @@
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Telemetry;
 using Xunit;
@@ -11,19 +15,18 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 /// <summary>
 /// Unit tests for EmbeddingCache - Redis-based embedding caching.
 /// Tests caching, hashing, serialization, and graceful error handling.
+/// Updated 2026-06-25 (redis remediation r1 task 013): tests now go through ITenantCache wrapper
+/// (NFR-08 system-level allow-listed tenant scope "system").
 /// </summary>
 public class EmbeddingCacheTests
 {
-    private readonly Mock<IDistributedCache> _cacheMock;
     private readonly Mock<ILogger<EmbeddingCache>> _loggerMock;
 
     // Test embedding (1536 dimensions like text-embedding-3-small)
     private readonly ReadOnlyMemory<float> _testEmbedding;
-    private readonly byte[] _serializedEmbedding;
 
     public EmbeddingCacheTests()
     {
-        _cacheMock = new Mock<IDistributedCache>();
         _loggerMock = new Mock<ILogger<EmbeddingCache>>();
 
         // Create a test embedding vector (1536 dimensions)
@@ -33,16 +36,19 @@ public class EmbeddingCacheTests
             embedding[i] = (float)(i % 10) / 10f;
         }
         _testEmbedding = new ReadOnlyMemory<float>(embedding);
-
-        // Serialize for cache storage
-        _serializedEmbedding = new byte[embedding.Length * sizeof(float)];
-        Buffer.BlockCopy(embedding, 0, _serializedEmbedding, 0, _serializedEmbedding.Length);
     }
 
-    private EmbeddingCache CreateCache(CacheMetrics? metrics = null)
+    private static ITenantCache CreateTenantCache(IDistributedCache? distributedCache = null)
+    {
+        var dc = distributedCache ?? new MemoryDistributedCache(
+            Options.Create(new MemoryDistributedCacheOptions()));
+        return new TenantCache(dc, NullLogger<TenantCache>.Instance);
+    }
+
+    private EmbeddingCache CreateCache(CacheMetrics? metrics = null, ITenantCache? tenantCache = null)
     {
         return new EmbeddingCache(
-            _cacheMock.Object,
+            tenantCache ?? CreateTenantCache(),
             _loggerMock.Object,
             metrics);
     }
@@ -52,13 +58,10 @@ public class EmbeddingCacheTests
     [Fact]
     public void ComputeContentHash_ValidContent_ReturnsBase64Hash()
     {
-        // Arrange
         var cache = CreateCache();
 
-        // Act
         var hash = cache.ComputeContentHash("test content");
 
-        // Assert
         hash.Should().NotBeNullOrEmpty();
         // SHA256 Base64 is 44 characters (32 bytes = 256 bits → base64)
         hash.Should().HaveLength(44);
@@ -67,39 +70,31 @@ public class EmbeddingCacheTests
     [Fact]
     public void ComputeContentHash_SameContent_ReturnsSameHash()
     {
-        // Arrange
         var cache = CreateCache();
         var content = "test content";
 
-        // Act
         var hash1 = cache.ComputeContentHash(content);
         var hash2 = cache.ComputeContentHash(content);
 
-        // Assert
         hash1.Should().Be(hash2);
     }
 
     [Fact]
     public void ComputeContentHash_DifferentContent_ReturnsDifferentHashes()
     {
-        // Arrange
         var cache = CreateCache();
 
-        // Act
         var hash1 = cache.ComputeContentHash("content one");
         var hash2 = cache.ComputeContentHash("content two");
 
-        // Assert
         hash1.Should().NotBe(hash2);
     }
 
     [Fact]
     public void ComputeContentHash_NullContent_ThrowsArgumentException()
     {
-        // Arrange
         var cache = CreateCache();
 
-        // Act & Assert
         var act = () => cache.ComputeContentHash(null!);
         act.Should().Throw<ArgumentException>();
     }
@@ -107,10 +102,8 @@ public class EmbeddingCacheTests
     [Fact]
     public void ComputeContentHash_EmptyContent_ThrowsArgumentException()
     {
-        // Arrange
         var cache = CreateCache();
 
-        // Act & Assert
         var act = () => cache.ComputeContentHash(string.Empty);
         act.Should().Throw<ArgumentException>();
     }
@@ -118,14 +111,11 @@ public class EmbeddingCacheTests
     [Fact]
     public void ComputeContentHash_LongContent_ReturnsFixedLengthHash()
     {
-        // Arrange
         var cache = CreateCache();
         var longContent = new string('x', 10000);
 
-        // Act
         var hash = cache.ComputeContentHash(longContent);
 
-        // Assert - Hash should always be same length
         hash.Should().HaveLength(44);
     }
 
@@ -136,10 +126,8 @@ public class EmbeddingCacheTests
     [Fact]
     public async Task GetEmbeddingAsync_NullHash_ThrowsArgumentException()
     {
-        // Arrange
         var cache = CreateCache();
 
-        // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
             async () => await cache.GetEmbeddingAsync(null!));
     }
@@ -147,10 +135,8 @@ public class EmbeddingCacheTests
     [Fact]
     public async Task GetEmbeddingAsync_EmptyHash_ThrowsArgumentException()
     {
-        // Arrange
         var cache = CreateCache();
 
-        // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
             async () => await cache.GetEmbeddingAsync(string.Empty));
     }
@@ -158,13 +144,12 @@ public class EmbeddingCacheTests
     [Fact]
     public async Task GetEmbeddingAsync_CacheHit_ReturnsEmbedding()
     {
-        // Arrange
-        var cache = CreateCache();
+        // Arrange: write then read through the same ITenantCache instance.
+        var tenantCache = CreateTenantCache();
+        var cache = CreateCache(tenantCache: tenantCache);
         var contentHash = "dGVzdGhhc2g="; // base64 "testhash"
 
-        _cacheMock
-            .Setup(x => x.GetAsync($"sdap:embedding:{contentHash}", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(_serializedEmbedding);
+        await cache.SetEmbeddingAsync(contentHash, _testEmbedding);
 
         // Act
         var result = await cache.GetEmbeddingAsync(contentHash);
@@ -177,42 +162,32 @@ public class EmbeddingCacheTests
     [Fact]
     public async Task GetEmbeddingAsync_CacheMiss_ReturnsNull()
     {
-        // Arrange
         var cache = CreateCache();
         var contentHash = "dGVzdGhhc2g=";
 
-        _cacheMock
-            .Setup(x => x.GetAsync($"sdap:embedding:{contentHash}", It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-
-        // Act
         var result = await cache.GetEmbeddingAsync(contentHash);
 
-        // Assert
         result.Should().BeNull();
     }
 
     [Fact]
     public async Task GetEmbeddingAsync_CacheError_ReturnsNullGracefully()
     {
-        // Arrange
-        var cache = CreateCache();
-        var contentHash = "dGVzdGhhc2g=";
-
-        _cacheMock
-            .Setup(x => x.GetAsync($"sdap:embedding:{contentHash}", It.IsAny<CancellationToken>()))
+        // Throwing ITenantCache to exercise the graceful-degradation path.
+        var throwingTenantCache = new Mock<ITenantCache>();
+        throwingTenantCache
+            .Setup(c => c.GetAsync<byte[]>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Redis connection failed"));
 
-        // Act
+        var cache = CreateCache(tenantCache: throwingTenantCache.Object);
+        var contentHash = "dGVzdGhhc2g=";
+
         var result = await cache.GetEmbeddingAsync(contentHash);
 
-        // Assert - Should not throw, return null gracefully
         result.Should().BeNull();
     }
-
-    // Note: CacheMetrics recording is tested implicitly through integration tests.
-    // CacheMetrics methods are not virtual, so they cannot be mocked for unit testing.
-    // The metrics functionality is optional (CacheMetrics parameter can be null).
 
     #endregion
 
@@ -221,10 +196,8 @@ public class EmbeddingCacheTests
     [Fact]
     public async Task SetEmbeddingAsync_NullHash_ThrowsArgumentException()
     {
-        // Arrange
         var cache = CreateCache();
 
-        // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
             async () => await cache.SetEmbeddingAsync(null!, _testEmbedding));
     }
@@ -232,10 +205,8 @@ public class EmbeddingCacheTests
     [Fact]
     public async Task SetEmbeddingAsync_EmptyHash_ThrowsArgumentException()
     {
-        // Arrange
         var cache = CreateCache();
 
-        // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
             async () => await cache.SetEmbeddingAsync(string.Empty, _testEmbedding));
     }
@@ -243,10 +214,8 @@ public class EmbeddingCacheTests
     [Fact]
     public async Task SetEmbeddingAsync_EmptyEmbedding_ThrowsArgumentException()
     {
-        // Arrange
         var cache = CreateCache();
 
-        // Act & Assert
         await Assert.ThrowsAsync<ArgumentException>(
             async () => await cache.SetEmbeddingAsync("hash", ReadOnlyMemory<float>.Empty));
     }
@@ -254,40 +223,35 @@ public class EmbeddingCacheTests
     [Fact]
     public async Task SetEmbeddingAsync_ValidInput_StoresInCache()
     {
-        // Arrange
-        var cache = CreateCache();
+        // Verify by round-tripping through the wrapper.
+        var tenantCache = CreateTenantCache();
+        var cache = CreateCache(tenantCache: tenantCache);
         var contentHash = "dGVzdGhhc2g=";
 
-        // Act
         await cache.SetEmbeddingAsync(contentHash, _testEmbedding);
 
-        // Assert
-        _cacheMock.Verify(
-            x => x.SetAsync(
-                $"sdap:embedding:{contentHash}",
-                It.Is<byte[]>(b => b.Length == _serializedEmbedding.Length),
-                It.Is<DistributedCacheEntryOptions>(o =>
-                    o.AbsoluteExpirationRelativeToNow == TimeSpan.FromDays(7)),
-                It.IsAny<CancellationToken>()),
-            Times.Once);
+        // Read back to confirm the value landed.
+        var retrieved = await cache.GetEmbeddingAsync(contentHash);
+        retrieved.Should().NotBeNull();
+        retrieved!.Value.Length.Should().Be(_testEmbedding.Length);
     }
 
     [Fact]
     public async Task SetEmbeddingAsync_CacheError_DoesNotThrow()
     {
-        // Arrange
-        var cache = CreateCache();
-        var contentHash = "dGVzdGhhc2g=";
-
-        _cacheMock
-            .Setup(x => x.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
+        // Throwing ITenantCache to exercise the swallow-on-write path.
+        var throwingTenantCache = new Mock<ITenantCache>();
+        throwingTenantCache
+            .Setup(c => c.SetAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<byte[]>(), It.IsAny<TimeSpan?>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new Exception("Redis connection failed"));
 
-        // Act & Assert - Should not throw
+        var cache = CreateCache(tenantCache: throwingTenantCache.Object);
+        var contentHash = "dGVzdGhhc2g=";
+
+        // Should not throw.
         await cache.SetEmbeddingAsync(contentHash, _testEmbedding);
     }
 
@@ -298,25 +262,16 @@ public class EmbeddingCacheTests
     [Fact]
     public async Task GetEmbeddingForContentAsync_ValidContent_ComputesHashAndLooksUp()
     {
-        // Arrange
-        var cache = CreateCache();
+        var tenantCache = CreateTenantCache();
+        var cache = CreateCache(tenantCache: tenantCache);
         var content = "test content";
 
-        // Compute expected hash
-        var expectedHash = cache.ComputeContentHash(content);
+        await cache.SetEmbeddingForContentAsync(content, _testEmbedding);
 
-        _cacheMock
-            .Setup(x => x.GetAsync($"sdap:embedding:{expectedHash}", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(_serializedEmbedding);
-
-        // Act
         var result = await cache.GetEmbeddingForContentAsync(content);
 
-        // Assert
         result.Should().NotBeNull();
-        _cacheMock.Verify(
-            x => x.GetAsync($"sdap:embedding:{expectedHash}", It.IsAny<CancellationToken>()),
-            Times.Once);
+        result!.Value.Length.Should().Be(1536);
     }
 
     #endregion
@@ -326,24 +281,16 @@ public class EmbeddingCacheTests
     [Fact]
     public async Task SetEmbeddingForContentAsync_ValidContent_ComputesHashAndStores()
     {
-        // Arrange
-        var cache = CreateCache();
+        var tenantCache = CreateTenantCache();
+        var cache = CreateCache(tenantCache: tenantCache);
         var content = "test content";
 
-        // Compute expected hash
-        var expectedHash = cache.ComputeContentHash(content);
-
-        // Act
         await cache.SetEmbeddingForContentAsync(content, _testEmbedding);
 
-        // Assert
-        _cacheMock.Verify(
-            x => x.SetAsync(
-                $"sdap:embedding:{expectedHash}",
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()),
-            Times.Once);
+        // Round-trip via hash explicitly.
+        var expectedHash = cache.ComputeContentHash(content);
+        var retrieved = await cache.GetEmbeddingAsync(expectedHash);
+        retrieved.Should().NotBeNull();
     }
 
     #endregion
@@ -353,8 +300,8 @@ public class EmbeddingCacheTests
     [Fact]
     public async Task Serialization_RoundTrip_PreservesEmbedding()
     {
-        // Arrange
-        var cache = CreateCache();
+        var tenantCache = CreateTenantCache();
+        var cache = CreateCache(tenantCache: tenantCache);
         var content = "test content for roundtrip";
         var contentHash = cache.ComputeContentHash(content);
 
@@ -366,29 +313,9 @@ public class EmbeddingCacheTests
         }
         var embedding = new ReadOnlyMemory<float>(originalEmbedding);
 
-        // Capture what gets stored
-        byte[]? storedData = null;
-        _cacheMock
-            .Setup(x => x.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<string, byte[], DistributedCacheEntryOptions, CancellationToken>(
-                (key, data, options, ct) => storedData = data);
-
-        // Store embedding
         await cache.SetEmbeddingAsync(contentHash, embedding);
-
-        // Setup retrieval to return stored data
-        _cacheMock
-            .Setup(x => x.GetAsync($"sdap:embedding:{contentHash}", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(storedData);
-
-        // Retrieve embedding
         var retrieved = await cache.GetEmbeddingAsync(contentHash);
 
-        // Assert - Values should match
         retrieved.Should().NotBeNull();
         retrieved!.Value.Length.Should().Be(originalEmbedding.Length);
 

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Implement notification-matter-activity playbook (stub → full)</title>
+    <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Deployed PB-017 sprk_configjson via MCP update_record (whole-doc replace). Pre-deploy state was 1-block stub (schedule + channel only, no nodes/edges). Post-deploy verified all 5 nodes (Start, Lookup My Matters, Query Matter Activity, Has Activity?, Create Notification) and 4 edges. ActionType 52 LookupUserMembership for sprk_matter entity present; QueryDataverse targets Spaarke custom sprk_event with link-entity sprk_matter and membership-scope union (sprk_regardingmatter IN myMatters.ids OR record-owner OR matter-owner = current user); CreateNotification regardingType=sprk_event with deduplication key matter-activity:{userId}:{eventId}:{modifiedon}; statecode=Active preserved. Component Justification: existing=PB-017 stub (no real query); extension=Yes (stub → full promotion of same row); cost-of-doing-nothing=users get zero matter-activity notifications, AC-8 fails by construction. Smoke notes: projects/spaarke-daily-update-service-r4/notes/smoke/024-matter-activity-deploy.md.</completion-notes>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020, 021</dependencies>
+    <blocks>026</blocks>
+    <tags>jps, dataverse, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Promotes stub playbook (PB-017) to full implementation. Independent JSON file — parallel-safe with 022/023/025. Component Justification (CLAUDE.md §11) required because we are materially extending an existing stub into a functioning playbook.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Edit `projects/spaarke-daily-update-service/notes/playbooks/notification-matter-activity.json` (PB-017). Replace the stub with a full node graph: Start → `LookupUserMembership(sprk_matter)` → `QueryDataverse` (union of `sprk_matter`, `sprk_project`, `sprk_workassignment` records modified within last 24h where the record's ID is in the membership matter set) → `CreateNotification` (one per modified record). Redeploy via MCP `update_record` on PB-017. Include Component Justification block (was-stub → now-functional).</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS playbook designer + Dataverse query author (FetchXml multi-entity union).</role>
+
+  <goal>`notification-matter-activity.json` is a fully functional playbook (no longer a stub). Deployed PB-017 row reflects the full graph. `jps-validate` passes. AC-8 satisfied (when a matter the user is a member of is modified within last 24h, an appnotification row appears in this category).</goal>
+
+  <context>
+    <background>R4 spec FR-8 (line 145) replaces the PB-017 stub with a working implementation. The stub currently does nothing — users get zero matter-activity notifications. Full graph: LookupUserMembership resolves user's matters, QueryDataverse fetches sprk_matter / sprk_project / sprk_workassignment records modified in last 24h where ID IN membership matters, CreateNotification emits one notification per modified record. Component Justification (CLAUDE.md §11): existing=stub PB-017 (no real query), extension=Yes (promoting stub to functional), cost-of-doing-nothing=users get zero matter-activity notifications.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-matter-activity.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-034">Membership resolution via ActionType 52 LookupUserMembership for sprk_matter target.</constraint>
+    <constraint source="ADR-013">Playbook composes JPS primitives only — no new endpoints or services.</constraint>
+    <constraint source="ADR-037">Multinode output composition — fan-out membership → multi-entity query → notification.</constraint>
+    <constraint source="CLAUDE.md §11">Component Justification block REQUIRED: existing=stub PB-017, extension=Yes (functional promotion), cost-of-doing-nothing=users get zero matter-activity notifications.</constraint>
+    <constraint source="project">Modified-within-24h window relative to playbook execution time (UTC). Repo JSON = source-of-truth.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership-resolution.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/skills/jps-playbook-design/SKILL.md</file>
+      <file>.claude/skills/jps-playbook-audit/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load knowledge files. Read spec FR-8 + AC-8.</step>
+    <step order="2">Read PB-016 reference (`notification-new-documents.json`) and the current stub `notification-matter-activity.json` to understand starting state.</step>
+    <step order="3">Author Component Justification block (CLAUDE.md §11): 3-question template with concrete failure mode.</step>
+    <step order="4">Design the full node graph: Start → LookupUserMembership(sprk_matter) → QueryDataverse (3 separate sub-queries unioned: sprk_matter modifiedon&gt;=now-24h AND matterid IN membership, sprk_project regarding-matter IN membership AND modifiedon&gt;=now-24h, sprk_workassignment regarding-matter IN membership AND modifiedon&gt;=now-24h) → CreateNotification (one per row).</step>
+    <step order="5">Replace stub JSON with full graph. Include Component Justification in JSON top-level metadata.</step>
+    <step order="6">Validate via `jps-validate` skill.</step>
+    <step order="7">Audit via `jps-playbook-audit` skill against deployed Action codes.</step>
+    <step order="8">Redeploy via `mcp__dataverse__update_record` on PB-017 — set `sprk_configjson`.</step>
+    <step order="9">Verify deployment via `mcp__dataverse__read_query`.</step>
+    <step order="10">Run `dotnet build src/server/api/Sprk.Bff.Api/`.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md`: change task 024 status to ✅.</step>
+    <step order="12">Document UAT script + Component Justification rationale in `projects/spaarke-daily-update-service-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">update_record — redeploy PB-017 sprk_configjson; read_query — verify; describe — confirm sprk_matter / sprk_project / sprk_workassignment metadata for the FetchXml query author.</tool>
+    <tool name="jps-validate">Schema validation</tool>
+    <tool name="jps-playbook-audit">Audit against Action catalog</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">projects/spaarke-daily-update-service/notes/playbooks/notification-matter-activity.json</output>
+    <output type="data">sprk_analysisplaybook PB-017 row sprk_configjson updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notification-matter-activity.json contains a functional node graph (no longer a stub).</criterion>
+    <criterion testable="true">Graph includes LookupUserMembership(sprk_matter) + QueryDataverse (3 entity union: matter/project/workassignment) + CreateNotification.</criterion>
+    <criterion testable="true">Component Justification block present (3-question template).</criterion>
+    <criterion testable="true">jps-validate passes.</criterion>
+    <criterion testable="true">Deployed PB-017 sprk_configjson matches repo file.</criterion>
+    <criterion testable="true">UAT scenario documented for AC-8.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-8 line 145; AC-8 line 146. Hint: the 3-entity union may be expressed as a single FetchXml `&lt;fetch&gt;` with multiple `&lt;entity&gt;` blocks OR as 3 sequential QueryDataverse nodes with output composition per ADR-037 — pick whichever the JPS schema supports cleanly. Verify with PB-016 reference. Hint: parallel-safe with 022/023/025.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

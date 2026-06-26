@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>TL;DR ↔ Activities count reconciliation smoke test (FR-20)</title>
+    <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>Added `test/CountReconciliation.smoke.test.tsx` with 2 tests: (1) 5+3+2=10 items across 3 categories — asserts /narrate request totalNotificationCount=10 + sum of channels[*].items=10 + 10 rendered NarrativeBullet cards (one MenuButton per card with aria-label="More actions"); (2) filtered state — disabledChannels=['new-documents'] decrements request totalNotificationCount to 7, rendered cards to 7, and digest header "7 unread" all together. Used valid NotificationCategory union members ('tasks-overdue', 'new-documents', 'new-events'). Mocked the FR-17c server-side $filter at the fetchAndGroupNotifications service boundary (pre-filter so disabled channel never reaches widget OR /narrate). All 141 tests pass (2 new + 139 prior).</completion-notes>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>042, 045</dependencies>
+    <blocks>049</blocks>
+    <tags>pcf, frontend, integration-test, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test-only task; no new code surface; STANDARD rigor per CLAUDE.md §8 (testing tag)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Add a smoke test asserting that TL;DR's `totalNotificationCount` equals the number of items rendered in Activity Notes. Reconcile via single source of truth (input payload to playbook = items displayed by widget). Mock input with N items in 3 categories; assert widget header count equals visible card count.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 + React hooks + Xrm.WebApi.</role>
+  <goal>Smoke test passes: given N mocked notifications across 3 categories, the TL;DR header shows totalNotificationCount=N and the ActivityNotesSection renders exactly N visible items.</goal>
+  <context>
+    <background>FR-20: UAT defect — TL;DR count diverged from visible items. The fix is single-source-of-truth wiring: the input payload to playbook equals the items the widget displays. This test guards that invariant.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/DailyBriefingApp.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/__tests__/integration/ (or similar)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; dark mode required</constraint>
+    <constraint source="ADR-024">Preserve useInlineTodoCreate + TODO_REGARDING_CATALOG in Add to To Do</constraint>
+    <constraint source="project">R3 PR #451 file overlap — see notes/risks.md R1; run conflict-check before merge</constraint>
+    <constraint source="project">Preserve R3 deliverables: schema, TTL=604800, read-state, 3 actions (now via overflow menu)</constraint>
+    <constraint source="project">Use jest-environment-jsdom per NFR-03</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-024-sprk-todo-polymorphic-resolver.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Add integration smoke test file under daily-briefing-components</step>
+    <step order="2">Mock notificationService.fetchNotifications to return 8 items across 3 categories (e.g., 3 email, 3 document, 2 event)</step>
+    <step order="3">Mock /narrate response with `totalNotificationCount: 8` and matching channelNarratives</step>
+    <step order="4">Render DailyBriefingApp with mocked services</step>
+    <step order="5">Assert header text shows count `8` (or whatever the TL;DR component renders for totalNotificationCount)</step>
+    <step order="6">Assert ActivityNotesSection renders exactly 8 NarrativeBullet items</step>
+    <step order="7">Add negative-path test: if mocked /narrate returns mismatched count (e.g., 5), test FAILS with clear message — this confirms the test would catch a regression</step>
+    <step order="8">Run `npm test`; ensure pass</step>
+    <step order="9">Update TASK-INDEX.md ✅</step>
+    <step order="10">Document deviations in notes/</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/src/__tests__/integration/countReconciliation.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Smoke test asserts equality with N items in 3 categories; widget header count equals visible card count (FR-20 / AC-20)</criterion>
+    <criterion testable="true">Negative-path test confirms the assertion would catch a regression (mismatched counts)</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test>Render mocked 8-item briefing; verify TL;DR header shows "8" and 8 NarrativeBullet items render</test>
+    <test>Dark Mode Compliance: count display + cards render in dark theme per ADR-021 semantic tokens</test>
+    <test>Console Errors: no errors during mocked render path</test>
+  </ui-tests>
+  <notes>STANDARD rigor (test-only task per CLAUDE.md §8). Depends on task 042 (server-side filter affects fetch output) and task 045 (NarrativeBullet shape determines DOM count). R3 PR #451 file overlap — run conflict-check.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

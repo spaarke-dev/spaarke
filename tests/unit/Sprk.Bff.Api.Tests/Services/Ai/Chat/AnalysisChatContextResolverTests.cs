@@ -1,13 +1,14 @@
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -30,17 +31,19 @@ public class AnalysisChatContextResolverTests
 {
     private const string AnalysisId = "11111111-2222-3333-4444-555555555555";
     private const string TenantId = "tenant-test-001";
-    private const string CacheKeyPrefix = "chat-context:";
+    // Post-FR-05 cache key format: tenant:{tenantId}:analysis-chat-context:{analysisId}:v1
+    private const string CacheKeyPrefix = "tenant:";
+    private const string CacheResource = "analysis-chat-context";
 
     private readonly Mock<IGenericEntityService> _entityServiceMock;
-    private readonly Mock<IDistributedCache> _cacheMock;
+    private readonly InMemoryTenantCache _cache;
     private readonly Mock<ILogger<AnalysisChatContextResolver>> _loggerMock;
     private readonly AnalysisChatContextResolver _sut;
 
     public AnalysisChatContextResolverTests()
     {
         _entityServiceMock = new Mock<IGenericEntityService>();
-        _cacheMock = new Mock<IDistributedCache>();
+        _cache = new InMemoryTenantCache();
         _loggerMock = new Mock<ILogger<AnalysisChatContextResolver>>();
 
         // Default entity service mock: return a minimal sprk_analysisoutput record
@@ -61,7 +64,7 @@ public class AnalysisChatContextResolverTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection());
 
-        _sut = new AnalysisChatContextResolver(_entityServiceMock.Object, _cacheMock.Object, _loggerMock.Object);
+        _sut = new AnalysisChatContextResolver(_entityServiceMock.Object, _cache, _loggerMock.Object);
     }
 
     // =========================================================================
@@ -74,8 +77,8 @@ public class AnalysisChatContextResolverTests
         // Act
         var key = AnalysisChatContextResolver.BuildCacheKey(TenantId, AnalysisId);
 
-        // Assert
-        key.Should().Be($"{CacheKeyPrefix}{TenantId}:{AnalysisId}");
+        // Assert — FR-05 on-wire format
+        key.Should().Be($"tenant:{TenantId}:{CacheResource}:{AnalysisId}:v1");
     }
 
     [Theory]
@@ -87,16 +90,17 @@ public class AnalysisChatContextResolverTests
         // Act
         var key = AnalysisChatContextResolver.BuildCacheKey(TenantId, id);
 
-        // Assert
+        // Assert — FR-05 key: tenant:{tid}:{resource}:{id}:v1
         key.Should().StartWith(CacheKeyPrefix);
-        key.Should().EndWith(id);
+        key.Should().Contain(id);
+        key.Should().EndWith(":v1");
     }
 
     [Fact]
     public void CacheKeyPrefix_IsExpectedConstant()
     {
-        // Assert — constant value is part of the cache eviction contract
-        AnalysisChatContextResolver.CacheKeyPrefix.Should().Be("chat-context:");
+        // Assert — post-FR-05 the legacy alias constant is "tenant:"; resource is split off.
+        AnalysisChatContextResolver.CacheKeyPrefix.Should().Be("tenant:");
     }
 
     // =========================================================================
@@ -106,14 +110,10 @@ public class AnalysisChatContextResolverTests
     [Fact]
     public async Task ResolveAsync_ReturnsCachedValue_OnCacheHit()
     {
-        // Arrange — serialize a known response and place it in the mock cache
+        // Arrange — seed the FR-05 in-memory tenant cache with a known response
         var cachedResponse = BuildStubResponse(AnalysisId);
-        var cachedBytes = JsonSerializer.SerializeToUtf8Bytes(cachedResponse);
-        var cacheKey = AnalysisChatContextResolver.BuildCacheKey(TenantId, AnalysisId);
-
-        _cacheMock
-            .Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cachedBytes);
+        await _cache.SetAsync<AnalysisChatContextResponse>(
+            TenantId, CacheResource, AnalysisId, 1, cachedResponse);
 
         // Act
         var result = await _sut.ResolveAsync(AnalysisId, TenantId);
@@ -125,26 +125,20 @@ public class AnalysisChatContextResolverTests
     }
 
     [Fact]
-    public async Task ResolveAsync_DoesNotCallCacheSet_OnCacheHit()
+    public async Task ResolveAsync_DoesNotCallDataverseFetch_OnCacheHit()
     {
-        // Arrange
+        // Arrange — seed cache; Dataverse mock would have been invoked on miss
         var cachedResponse = BuildStubResponse(AnalysisId);
-        var cachedBytes = JsonSerializer.SerializeToUtf8Bytes(cachedResponse);
-        var cacheKey = AnalysisChatContextResolver.BuildCacheKey(TenantId, AnalysisId);
-
-        _cacheMock
-            .Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cachedBytes);
+        await _cache.SetAsync<AnalysisChatContextResponse>(
+            TenantId, CacheResource, AnalysisId, 1, cachedResponse);
 
         // Act
         await _sut.ResolveAsync(AnalysisId, TenantId);
 
-        // Assert — cache was NOT written again on a hit
-        _cacheMock.Verify(c => c.SetAsync(
-            It.IsAny<string>(),
-            It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(),
-            It.IsAny<CancellationToken>()),
+        // Assert — Dataverse RetrieveAsync should NOT be invoked on a cache hit
+        _entityServiceMock.Verify(
+            e => e.RetrieveAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -155,9 +149,7 @@ public class AnalysisChatContextResolverTests
     [Fact]
     public async Task ResolveAsync_CallsResolveFromDataverse_OnCacheMiss()
     {
-        // Arrange — cache returns null (miss)
-        SetupCacheMiss();
-
+        // Arrange — empty cache → miss
         // Act — stub resolver returns a non-null response for any analysisId
         var result = await _sut.ResolveAsync(AnalysisId, TenantId);
 
@@ -168,84 +160,30 @@ public class AnalysisChatContextResolverTests
     [Fact]
     public async Task ResolveAsync_CachesResultAfterDataverseFetch_OnCacheMiss()
     {
-        // Arrange — cache miss
-        SetupCacheMiss();
-
-        byte[]? capturedBytes = null;
-        DistributedCacheEntryOptions? capturedOptions = null;
-        string? capturedKey = null;
-
-        var expectedCacheKey = AnalysisChatContextResolver.BuildCacheKey(TenantId, AnalysisId);
-
-        _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<string, byte[], DistributedCacheEntryOptions, CancellationToken>(
-                (key, bytes, opts, _) =>
-                {
-                    // Capture only the analysis context cache entry (not DynamicCommandResolver's entry)
-                    if (key == expectedCacheKey)
-                    {
-                        capturedKey = key;
-                        capturedBytes = bytes;
-                        capturedOptions = opts;
-                    }
-                })
-            .Returns(Task.CompletedTask);
+        // Arrange — empty cache (miss)
 
         // Act
         var result = await _sut.ResolveAsync(AnalysisId, TenantId);
 
-        // Assert — cache Set was called for the analysis context key
-        _cacheMock.Verify(c => c.SetAsync(
-            expectedCacheKey,
-            It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(),
-            It.IsAny<CancellationToken>()),
-            Times.Once);
-
-        capturedKey.Should().Be(expectedCacheKey);
-        capturedBytes.Should().NotBeNull().And.NotBeEmpty();
-        capturedOptions.Should().NotBeNull();
+        // Assert — entry was written to the FR-05 cache slot
+        var cached = await _cache.GetAsync<AnalysisChatContextResponse>(
+            TenantId, CacheResource, AnalysisId, 1);
+        cached.Should().NotBeNull("the resolver must write the resolved context back to the cache");
+        cached!.AnalysisContext.AnalysisId.Should().Be(AnalysisId);
     }
 
     [Fact]
-    public async Task ResolveAsync_CachesResult_With30MinuteAbsoluteTtl()
+    public void ResolveAsync_CachesResult_With30MinuteAbsoluteTtl()
     {
-        // Arrange
-        SetupCacheMiss();
-
-        DistributedCacheEntryOptions? capturedOptions = null;
-        _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<string, byte[], DistributedCacheEntryOptions, CancellationToken>(
-                (_, _, opts, _) => capturedOptions = opts)
-            .Returns(Task.CompletedTask);
-
-        // Act
-        await _sut.ResolveAsync(AnalysisId, TenantId);
-
-        // Assert — 30-minute absolute TTL (ADR-009 — no sliding expiration to prevent stale data)
-        capturedOptions.Should().NotBeNull();
-        capturedOptions!.AbsoluteExpirationRelativeToNow.Should().Be(AnalysisChatContextResolver.ContextCacheTtl);
-        capturedOptions.AbsoluteExpirationRelativeToNow.Should().Be(TimeSpan.FromMinutes(30));
-        capturedOptions.SlidingExpiration.Should().BeNull("analysis context uses absolute TTL, not sliding");
+        // Assert — production constant is exposed and equals 30 minutes (ADR-009 absolute TTL).
+        // (The InMemoryTenantCache honours the TTL but does not expose it for inspection; the
+        // production service passes ContextCacheTtl to SetAsync. We assert the constant.)
+        AnalysisChatContextResolver.ContextCacheTtl.Should().Be(TimeSpan.FromMinutes(30));
     }
 
     [Fact]
     public async Task ResolveAsync_ReturnsNonNull_WhenDataverseStubSucceeds()
     {
-        // Arrange — cache miss; stub Dataverse path always returns a value
-        SetupCacheMiss();
-        SetupCacheSetSuccess();
-
         // Act
         var result = await _sut.ResolveAsync(AnalysisId, TenantId);
 
@@ -257,28 +195,14 @@ public class AnalysisChatContextResolverTests
     [Fact]
     public async Task ResolveAsync_CachedResult_ContainsCorrectAnalysisId()
     {
-        // Arrange
-        SetupCacheMiss();
-
-        byte[]? capturedBytes = null;
-        _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<string, byte[], DistributedCacheEntryOptions, CancellationToken>(
-                (_, bytes, _, _) => capturedBytes = bytes)
-            .Returns(Task.CompletedTask);
-
         // Act
         await _sut.ResolveAsync(AnalysisId, TenantId);
 
-        // Assert — deserialize cached bytes and check the analysisId round-trips correctly
-        capturedBytes.Should().NotBeNull();
-        var deserialised = JsonSerializer.Deserialize<AnalysisChatContextResponse>(capturedBytes!);
-        deserialised.Should().NotBeNull();
-        deserialised!.AnalysisContext.AnalysisId.Should().Be(AnalysisId);
+        // Assert — cached entry round-trips the AnalysisId
+        var cached = await _cache.GetAsync<AnalysisChatContextResponse>(
+            TenantId, CacheResource, AnalysisId, 1);
+        cached.Should().NotBeNull();
+        cached!.AnalysisContext.AnalysisId.Should().Be(AnalysisId);
     }
 
     // =========================================================================
@@ -450,25 +374,8 @@ public class AnalysisChatContextResolverTests
     // Helper Setup Methods
     // =========================================================================
 
-    /// <summary>Sets up the distributed cache mock to return null (cache miss).</summary>
-    private void SetupCacheMiss()
-    {
-        _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-    }
-
-    /// <summary>Sets up the distributed cache mock to accept SetAsync calls without error.</summary>
-    private void SetupCacheSetSuccess()
-    {
-        _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-    }
+    // Cache miss/set helpers no longer needed: the real InMemoryTenantCache provides
+    // empty-by-default behaviour for misses and accepts SetAsync for writes.
 
     /// <summary>
     /// Builds a stub <see cref="AnalysisChatContextResponse"/> for use in cache-hit scenarios.

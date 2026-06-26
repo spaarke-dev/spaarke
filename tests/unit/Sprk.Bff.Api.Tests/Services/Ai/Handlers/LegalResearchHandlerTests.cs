@@ -76,11 +76,15 @@ public sealed class LegalResearchHandlerTests : TypedToolHandlerTestFixture
         // The dummy options have Enabled=false so any accidental call to the underlying
         // SDK would throw FeatureDisabledException quickly.
         var options = Options.Create(new AgentServiceOptions { Enabled = false, AgentId = "test", Endpoint = new Uri("https://test.invalid") });
-        var cache = new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
+        // FR-05 redis remediation r1: AgentServiceClient now takes ITenantCache.
+        var dc = new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
             Options.Create(new Microsoft.Extensions.Caching.Memory.MemoryDistributedCacheOptions()));
+        var tenantCache = new Sprk.Bff.Api.Infrastructure.Cache.TenantCache(
+            dc,
+            new Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Infrastructure.Cache.TenantCache>());
         var credential = new Azure.Identity.DefaultAzureCredential();
         var logger = new Microsoft.Extensions.Logging.Abstractions.NullLogger<AgentServiceClient>();
-        return new AgentServiceClient(options, cache, credential, logger);
+        return new AgentServiceClient(options, tenantCache, credential, logger);
     }
 
     private TestableLegalResearchHandler CreateHandler(

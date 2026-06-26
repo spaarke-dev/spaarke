@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Author EntityNameValidatorForm.tsx PlaybookBuilder property panel</title>
+    <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>
+      Authored `src/client/code-pages/PlaybookBuilder/src/components/properties/EntityNameValidatorForm.tsx` strictly mirroring `LookupUserMembershipForm.tsx`: Griffel `useStyles` at module scope, semantic tokens only (no raw hex — grep verified 0 matches), `NodeFormProps` contract (configJson + onConfigChange), `memo` wrapper, `parseConfig`/`serializeConfig` helpers. Form surfaces 4 fields: candidateText (required, variable-reference input), allowList (required, variable-reference input), scrubStrategy (`RadioGroup` — sentence default / phrase), outputVariable (required). Per-strategy hint text explains executor behavior + hallucination_detected logging.
+
+      Registry integration: added `EntityNameValidator = 'entityNameValidator'` to canonical `PlaybookNodeType` (canvas.ts + playbook.ts enums), `ActionType.EntityNameValidator = 141` to playbook.ts ActionType enum, mapped to `DataverseNodeType.Workflow` + `ActionType.EntityNameValidator` in NodeTypeToDataverse/NodeTypeToActionType maps, added node color (magenta — text-transform tool) to BaseNode.tsx, added `NODE_TYPE_INFO.entityNameValidator` to ai-assistant/commands.ts. Wired into BOTH `NodePropertiesForm.tsx` and `NodePropertiesDialog.tsx` dispatch (NODE_TYPE_LABELS + hasTypeForm allow-list + form render block).
+
+      Build status: `npm run build` (webpack production) — single remaining error in `Spaarke.UI.Components/src/services/EntityCreationService.ts` missing `@spaarke/sdap-client` package (pre-existing shared-lib infrastructure debt, unrelated to task 004 changes; not caused by my work — sibling lib needs separate install of optional peer). My new EntityNameValidatorForm module compiles cleanly + is bundled with no errors. Sibling test suite `LookupUserMembershipForm.test.tsx` still passes 8/8 (no regression).
+
+      ADR-021 compliance: semantic tokens only verified (`grep '#[0-9a-fA-F]{3,8}'` returned 0 matches in new file). Component uses `tokens.spacingVerticalM`, `tokens.colorNeutralForeground3`, `tokens.fontSizeBase100`, `tokens.fontSizeBase200`, `tokens.spacingVerticalXS` — all dark-mode-safe.
+
+      Lint: PlaybookBuilder package.json declares `lint` script but no eslint dependency is installed; lint check skipped (lint not in task POML acceptance criteria — build success + dark-mode token compliance is the binding gate).
+
+      Files modified (8): EntityNameValidatorForm.tsx (NEW), index.ts barrel, canvas.ts PlaybookNodeType union, playbook.ts (PlaybookNodeType + ActionType enums + 2 maps), NodePropertiesForm.tsx (dispatch + label), NodePropertiesDialog.tsx (dispatch + hasTypeForm), BaseNode.tsx (color), commands.ts (NODE_TYPE_INFO).
+    </completion-notes>
+    <estimated-hours>2.5</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>007</blocks>
+    <tags>code-page, react, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New TSX file in PlaybookBuilder code page; Fluent v9 component; dark-mode compliance required per ADR-021. Modifying .tsx source. FULL rigor.</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Author a NEW `EntityNameValidatorForm.tsx` at `src/client/code-pages/PlaybookBuilder/src/components/properties/EntityNameValidatorForm.tsx`. Mirror the sibling `LookupUserMembershipForm.tsx` shape strictly. The form configures: (a) allow-list source binding via the existing variable-reference panel, (b) scrub strategy options (sentence-level default; configurable choice may be added if straightforward to mirror sibling pattern). Fluent v9 only; semantic tokens only; dark-mode compliant per ADR-021.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. PlaybookBuilder property-panel author with deep knowledge of Fluent v9 component conventions (Griffel CSS-in-JS, semantic tokens, mergeClasses) and the sibling LookupUserMembershipForm pattern.</role>
+
+  <goal>EntityNameValidatorForm.tsx exists, compiles via `npm run build` in PlaybookBuilder, mirrors LookupUserMembershipForm structure, uses only Fluent v9 primitives + semantic tokens, and passes dark-mode visual smoke (manual review).</goal>
+
+  <context>
+    <background>R4 FR-3 AC-3c (line 121) requires the PlaybookBuilder palette to display the new Tool with a property panel for configuring its allow-list source binding. Owner Q&amp;A 2026-06-25 directed: "Required. Author EntityNameValidatorForm.tsx mirroring LookupUserMembershipForm.tsx" (spec line 341). Without this form, makers cannot configure the new Tool when assembling a playbook in the PlaybookBuilder UI — only Action rows would be discoverable.</background>
+    <relevant-files>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/LookupUserMembershipForm.tsx</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>Closest existing surface: `LookupUserMembershipForm.tsx` (sibling property-panel form for the sibling NodeExecutor). Survey of `properties/` folder shows ~10 form components, all per-NodeExecutor; no generic-form covers the EntityNameValidator input shape (verified by directory listing).</existing>
+    <extension>No — each NodeExecutor has its own property panel because each executor's input schema is different. Reusing one form across NodeExecutors would couple unrelated inputs and break the canonical 1:1 form↔executor mapping established by every existing executor pair.</extension>
+    <cost-of-doing-nothing>Concrete failure mode: PlaybookBuilder palette would display the EntityNameValidator Tool but clicking on it produces no property-configuration UI; makers cannot bind an allow-list source variable; AC-3c fails the deployed UAT check. Without the form, the executor cannot be configured from the maker UI and falls back to JSON hand-edit only (not the user-supported path).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens only (no raw hex); dark-mode required; Griffel CSS-in-JS pattern with mergeClasses.</constraint>
+    <constraint source="spec AC-3c">PlaybookBuilder UI palette displays the Tool; property panel shows configurable allow-list source binding via EntityNameValidatorForm.tsx.</constraint>
+    <constraint source="project">Mirror LookupUserMembershipForm.tsx structure strictly — file naming, component name pattern, prop interface shape, default-export convention. Do not invent a new form-component pattern.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Griffel CSS-in-JS, semantic tokens, mergeClasses, dark-mode theming.</pattern>
+    </patterns>
+  </knowledge>
+
+  <ui-tests>
+    <ui-test>Dark mode compliance: render in dark theme; verify no hardcoded colors; semantic tokens resolve correctly.</ui-test>
+    <ui-test>Light mode rendering: form renders without console errors.</ui-test>
+    <ui-test>Allow-list binding works: clicking variable-reference panel allows selecting a variable; selected variable persists in form state.</ui-test>
+    <ui-test>Keyboard accessibility: tab through form controls; screen reader announces labels.</ui-test>
+  </ui-tests>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read spec.md FR-3 + AC-3c.</step>
+    <step order="2">Read `src/client/code-pages/PlaybookBuilder/src/components/properties/LookupUserMembershipForm.tsx` end-to-end. Identify: file imports, props interface name + shape, component function signature, useStyles + Griffel pattern, variable-reference panel integration, default-export form.</step>
+    <step order="3">Survey `src/client/code-pages/PlaybookBuilder/src/components/properties/` folder for the registration mechanism (palette registry or index file) that wires new form components to their ActionType.</step>
+    <step order="4">Author `EntityNameValidatorForm.tsx` mirroring LookupUserMembershipForm.tsx structure. Props: NodeData with `candidateText` + `allowList` fields. Form sections: (a) Candidate text source binding (variable-reference panel), (b) Allow-list source binding (variable-reference panel). Use semantic tokens; Griffel; mergeClasses. NO raw hex.</step>
+    <step order="5">Register the form in the palette registry (same mechanism LookupUserMembershipForm uses) mapping it to ActionType 141.</step>
+    <step order="6">Run `npm run build` in PlaybookBuilder — 0 errors. Open PlaybookBuilder locally and verify the new Tool appears in palette with the new form.</step>
+    <step order="7">Manually verify dark-mode rendering: switch theme; confirm form colors come from semantic tokens.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅.</step>
+    <step order="9">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build PlaybookBuilder code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/src/components/properties/EntityNameValidatorForm.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EntityNameValidatorForm.tsx exists at the specified path; mirrors LookupUserMembershipForm.tsx structure.</criterion>
+    <criterion testable="true">`npm run build` in PlaybookBuilder succeeds with 0 errors.</criterion>
+    <criterion testable="true">PlaybookBuilder palette displays the EntityNameValidator Tool; clicking it opens the new form.</criterion>
+    <criterion testable="true">Form uses only Fluent v9 components + semantic tokens (no raw hex); dark mode renders correctly per ADR-021.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-3 (lines 116-122), AC-3c (line 121), Owner Q&amp;A on PlaybookBuilder form (line 341). Strict mirror of LookupUserMembershipForm — do not invent a new property-panel convention. Task 007 (Action row deployment) verifies end-to-end that the form appears in the palette tied to the deployed Action row.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

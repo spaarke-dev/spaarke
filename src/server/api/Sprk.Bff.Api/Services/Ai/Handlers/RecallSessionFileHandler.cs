@@ -513,7 +513,7 @@ public sealed class RecallSessionFileHandler : IToolHandler
                 && payload.TruncationReason != TruncationReasonNotFound)
             {
                 await _recentlyDiscussedTracker
-                    .MarkAsync(sessionIdString, args.FileId, cancellationToken)
+                    .MarkAsync(context.TenantId, sessionIdString, args.FileId, cancellationToken)
                     .ConfigureAwait(false);
             }
 

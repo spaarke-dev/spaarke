@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Deploy BRIEF-VALIDATE-ENTITY-NAMES action row (ActionType 141)</title>
+    <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Deployed sprk_analysisaction row 290e786c-ff70-f111-ab0e-7ced8ddc4cc6 to spaarkedev1 via MCP create_record. sprk_executoractiontype=141, statecode=0 (Active), statuscode=1 (Active). Canonical repo JSON authored at projects/spaarke-daily-update-service/notes/playbooks/actions/brief-validate-entity-names.action.json — mirrors EntityNameValidatorNodeExecutor (task 003) contract verbatim (candidateText + allowList input; scrubbedText + removedTerms output). Closes EntityNameValidator triplet (002 enum + 003 executor + 004 form + 007 row). Smoke notes at projects/spaarke-daily-update-service-r4/notes/smoke/007-brief-validate-entity-names-deploy.md. AC-3a verified; AC-3c (PlaybookBuilder palette display) deferred to task 008 PR 1 smoke after jps-scope-refresh.</completion-notes>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002, 003, 004</dependencies>
+    <blocks>011</blocks>
+    <tags>jps, dataverse, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Data deployment via MCP. Depends on the executor (003) + form (004) being in place so the deployed Action row resolves correctly in BFF + PlaybookBuilder palette.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Follow the `jps-action-create` skill. Author + deploy `sprk_analysisaction` row to spaarkedev1 with `sprk_executoractiontype = 141`, `sprk_actioncode = "BRIEF-VALIDATE-ENTITY-NAMES"`, referencing the EntityNameValidatorNodeExecutor (deployed in task 003). Verify via MCP `read_query` returns the row; verify PlaybookBuilder palette displays the Tool with the new EntityNameValidatorForm (task 004).</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS Action-row author closing the loop on the EntityNameValidator triplet (enum + executor + form + row).</role>
+
+  <goal>One `sprk_analysisaction` row in spaarkedev1 with sprk_executoractiontype = 141, code BRIEF-VALIDATE-ENTITY-NAMES, statecode Active; canonical JSON source committed; PlaybookBuilder palette shows the new Tool wired to the new form.</goal>
+
+  <context>
+    <background>R4 FR-3 (lines 116-122) AC-3a (line 119) + AC-3c (line 121) require the deployed Action row to: (a) reference ActionType 141 (deployed via task 002 enum + task 003 executor), (b) appear in the PlaybookBuilder palette wired to the EntityNameValidatorForm (task 004). This task closes the loop on the EntityNameValidator triplet started in tasks 002-004. The DAILY-BRIEFING-NARRATE playbook (PR 2 task 011) will then reference this Action row by code.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/EntityNameValidatorForm.tsx</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec MUST">MUST follow `jps-action-create` skill; MUST validate via `jps-validate` before deployment.</constraint>
+    <constraint source="spec AC-3a">sprk_executoractiontype = 141 (no conflicts with existing values).</constraint>
+    <constraint source="spec AC-3c">PlaybookBuilder UI palette displays the Tool; property panel shows configurable allow-list source binding via EntityNameValidatorForm.tsx.</constraint>
+    <constraint source="project">Upsert pattern (Owner Q&amp;A spec line 343) — idempotent.</constraint>
+    <constraint source="project">Verify task 002 enum and task 003 executor are deployed before this task runs (BFF must respond to ActionType 141).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="jps-action-create" location=".claude/skills/jps-action-create/SKILL.md">Author + validate + deploy sprk_analysisaction row referencing custom NodeExecutor ActionType.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read spec.md FR-3 (lines 116-122) + AC-3a + AC-3c. Confirm tasks 002, 003, 004 complete (TASK-INDEX shows ✅ for each).</step>
+    <step order="2">Invoke `jps-action-create` skill to scaffold the BRIEF-VALIDATE-ENTITY-NAMES Action JSON. sprk_executoractiontype = 141; sprk_actioncode = "BRIEF-VALIDATE-ENTITY-NAMES"; sprk_systemprompt with input schema (candidateText + allowList) matching the EntityNameValidatorNodeExecutor contract; sprk_outputschemajson with scrubbedText + removedTerms.</step>
+    <step order="3">Author the canonical JSON at `projects/spaarke-daily-update-service/notes/playbooks/actions/brief-validate-entity-names.action.json`.</step>
+    <step order="4">Run `jps-validate` against the JSON — fix any errors.</step>
+    <step order="5">Check spaarkedev1 for an existing row via `mcp__dataverse__read_query` filtered to sprk_executoractiontype = 141 (idempotency check); upsert via `mcp__dataverse__create_record` or `mcp__dataverse__update_record`.</step>
+    <step order="6">Verify via `mcp__dataverse__read_query` SELECT … WHERE sprk_executoractiontype = 141 — returns 1 row, statecode Active.</step>
+    <step order="7">Verify PlaybookBuilder palette displays the new Tool (open code page; confirm "Validate Entity Names" or equivalent palette entry visible); clicking the palette entry opens the EntityNameValidatorForm from task 004.</step>
+    <step order="8">Update TASK-INDEX.md: change this task's status to ✅.</step>
+    <step order="9">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">read_query / create_record / update_record for sprk_analysisaction upsert</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">spaarkedev1: sprk_analysisaction row sprk_executoractiontype = 141, code BRIEF-VALIDATE-ENTITY-NAMES, Active</output>
+    <output type="source">projects/spaarke-daily-update-service/notes/playbooks/actions/brief-validate-entity-names.action.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">mcp__dataverse__read_query WHERE sprk_executoractiontype = 141 returns 1 Active row.</criterion>
+    <criterion testable="true">jps-validate passes against canonical JSON source.</criterion>
+    <criterion testable="true">AC-3c: PlaybookBuilder palette displays the Tool; clicking it opens EntityNameValidatorForm.tsx.</criterion>
+    <criterion testable="true">JSON source committed at projects/spaarke-daily-update-service/notes/playbooks/actions/brief-validate-entity-names.action.json.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-3 (lines 116-122), AC-3a + AC-3c (lines 119, 121), Owner Q&amp;A on 141 confirmation (line 342). Depends on tasks 002 (enum), 003 (executor + tests), 004 (form). If any of those are not ✅ in TASK-INDEX, escalate before deploying — a deployed row referencing a non-existent ActionType in BFF will fail at playbook-engine resolution.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

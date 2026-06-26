@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Add Redis:AllowInMemoryFallback option</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>003</blocks>
+    <tags>bff-api, cache, redis, config, options</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Adds a new config property; modifies existing file; not core code path but consumed by Phase 1 code paths</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add `AllowInMemoryFallback` (bool, default false) to `RedisOptions`. Update `appsettings.template.json` schema/example to document the option. This property is consumed by the CacheModule 4-branch logic introduced in task 003.
+  </prompt>
+
+  <role>
+    Spaarke .NET developer. Modify `Configuration/RedisOptions.cs` and `appsettings.template.json`. Preserve existing properties.
+  </role>
+
+  <goal>
+    `RedisOptions.AllowInMemoryFallback` exists as a bool property with XML doc comment explaining: "Only honored in Development environment when `Enabled=false`. In deployed environments (Staging/Prod) the CacheModule throws at startup regardless." Template configuration file documents the option with a non-binding example value.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-03, the BFF needs explicit opt-in for in-memory fallback with an environment guard. The option defaults to false so that any deployed env with `Enabled=false` and no opt-in throws fail-fast at startup (rather than silently falling back to in-memory, which is what caused the drift in the first place).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/RedisOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.template.json</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-03 — AllowInMemoryFallback is opt-in, defaults to false, env-guarded.</constraint>
+    <constraint source="ADR-009">Caching architecture — see amended ADR-009 operational MUSTs.</constraint>
+    <constraint source="project">No new packages; modify existing files only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `Configuration/RedisOptions.cs`. Add property `public bool AllowInMemoryFallback { get; set; } = false;` with XML doc comment.</step>
+    <step order="2">Read `appsettings.template.json` Redis section. Add `"AllowInMemoryFallback": false` with a comment line in the doc template clarifying the env-guard behavior (or a doc-only `//` comment if JSON5-style comments are supported; otherwise document in `appsettings.json` comments-block above the Redis section).</step>
+    <step order="3">Verify `appsettings.json` (the developer-default) does NOT enable fallback by default; the env-guard in CacheModule (task 003) controls actual behavior. Add the property with `false` to make the option visible to developers.</step>
+    <step order="4">Run `dotnet build src/server/api/Sprk.Bff.Api/` to verify no compile errors.</step>
+    <step order="5">Update `TASK-INDEX.md` — mark task 002 ✅.</step>
+    <step order="6">Update `current-task.md` advancing to task 003.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect existing files</tool>
+    <tool name="Edit">Modify `RedisOptions.cs` + JSON</tool>
+    <tool name="Bash">dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/RedisOptions.cs (modified)</output>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.template.json (modified)</output>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.json (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`RedisOptions.AllowInMemoryFallback` property exists; defaults to false; has XML doc comment naming the env-guard behavior.</criterion>
+    <criterion testable="true">`appsettings.template.json` Redis section documents the option.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with no new warnings.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load &lt;knowledge&gt;&lt;files&gt; before starting. STANDARD rigor.</protocol>
+  </execution>
+</task>

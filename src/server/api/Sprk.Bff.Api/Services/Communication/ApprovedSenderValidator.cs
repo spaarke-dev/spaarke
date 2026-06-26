@@ -83,6 +83,7 @@ public sealed class ApprovedSenderValidator
         // Check Redis cache first
         try
         {
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): approved-senders is org-wide configuration (CommunicationOptions config + Dataverse sprk_communicationaccount records merged); per ADR-029 single Redis instance per BFF org.
             var cached = await _cache.GetStringAsync(CacheKey, ct);
             if (cached is not null)
             {
@@ -126,6 +127,7 @@ public sealed class ApprovedSenderValidator
             {
                 AbsoluteExpirationRelativeToNow = CacheTtl
             };
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): approved-senders is org-wide configuration (CommunicationOptions config + Dataverse sprk_communicationaccount records merged); per ADR-029 single Redis instance per BFF org.
             await _cache.SetStringAsync(CacheKey, serialized, cacheOptions, ct);
             _logger.LogDebug("Cached {Count} merged approved senders with {Ttl} TTL", merged.Length, CacheTtl);
         }

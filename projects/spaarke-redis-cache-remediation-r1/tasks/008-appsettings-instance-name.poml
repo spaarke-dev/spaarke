@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>appsettings InstanceName updates (sdap-dev:, sdap: → spaarke:)</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>018</blocks>
+    <tags>bff-api, cache, redis, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Config-only change; small surface; verified by FR-07 grep gate</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Update `appsettings.json` (`sdap-dev:` → `spaarke:`) + `appsettings.template.json` (verify `#{REDIS_INSTANCE_NAME}#` consumer documentation reflects `spaarke:` as the prescribed deploy-time value). Also check `Redis:InstanceName` default in `RedisOptions.cs` — already `"sdap:"`; change to `"spaarke:"`. Per FR-07.</prompt>
+  <role>Spaarke .NET developer. Configuration changes only.</role>
+  <goal>`grep -rn "sdap" src/server/api/Sprk.Bff.Api/` returns ZERO matches across all config + code.</goal>
+  <context>
+    <background>Exploration found dev has `sdap-dev:` (hyphenated variant) — not `sdap:` as spec assumed. Both must be replaced.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.template.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/RedisOptions.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-07 — `sdap:` → `spaarke:` (and dev variant `sdap-dev:`).</constraint>
+    <constraint source="spec">Success Criterion #10 — `grep -r "sdap:" src/server/api/Sprk.Bff.Api/` = ZERO.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Edit `appsettings.json` Redis.InstanceName `sdap-dev:` → `spaarke:`.</step>
+    <step order="2">Edit `appsettings.template.json` — confirm the token (`#{REDIS_INSTANCE_NAME}#`) is documented with `spaarke:` as the expected substitution value.</step>
+    <step order="3">Edit `RedisOptions.cs` — default value `"sdap:"` → `"spaarke:"`.</step>
+    <step order="4">Grep `src/server/api/Sprk.Bff.Api/` for any remaining `sdap`. Expect ZERO matches (modulo `.bicep` / docs which are addressed in Phase 2 + 5).</step>
+    <step order="5">Run `dotnet build`.</step>
+    <step order="6">Update `TASK-INDEX.md` + `current-task.md`.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Inspect files</tool>
+    <tool name="Edit">Modify config + RedisOptions defaults</tool>
+    <tool name="Grep">Verify zero-`sdap` invariant in BFF source</tool>
+    <tool name="Bash">dotnet build</tool>
+  </tools>
+  <outputs>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.json (modified)</output>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.template.json (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/RedisOptions.cs (modified — default)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rn "sdap" src/server/api/Sprk.Bff.Api/` returns ZERO matches.</criterion>
+    <criterion testable="true">`dotnet build` succeeds.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

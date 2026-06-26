@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Phase 1 build + test + publish-size delta</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>018</dependencies>
+    <blocks>030</blocks>
+    <tags>bff-api, deploy, ci-cd, testing, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification gate; binds ADR-029 + NFR-04 publish-size rule</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final Phase 1 gate</parallel-reason>
+  </metadata>
+  <prompt>Run full Phase 1 build + test + publish-size measurement. Compare publish size against baseline at branch start. Per NFR-04 and ADR-029, expected delta ≤+1 MB compressed; expected actual delta ≤+0.1 MB.</prompt>
+  <role>Spaarke developer; deployment hygiene.</role>
+  <goal>`notes/phase-1-publish-size-delta.md` — compressed size before, compressed size after, delta in MB. Delta ≤+1 MB. All tests pass. No new HIGH-severity CVE.</goal>
+  <context><background>Per CLAUDE.md §10 binding rule, every BFF-touching task verifies publish-size. Phase 1 is the largest BFF change — measurement is essential here.</background><relevant-files><file>src/server/api/Sprk.Bff.Api/</file><file>deploy/api-publish/</file></relevant-files></context>
+  <constraints>
+    <constraint source="ADR-029">Publish-size delta ≤+1 MB; absolute ≤60 MB ceiling.</constraint>
+    <constraint source="spec">NFR-04 — expected delta ≤+0.1 MB.</constraint>
+    <constraint source="azure-deployment.md">Per-task publish verification rule.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">From the branch start commit (`b2fa78c81` or master), build the baseline: `git stash` (any in-progress); checkout baseline; `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-baseline/`; compress and measure.</step>
+    <step order="2">Return to Phase 1 working state: `git stash pop` (or re-checkout).</step>
+    <step order="3">Build current: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; compress and measure.</step>
+    <step order="4">Compute delta. Report absolute size + diff in `notes/phase-1-publish-size-delta.md`.</step>
+    <step order="5">Run `dotnet list package --vulnerable --include-transitive`. Verify no new HIGH-severity CVE.</step>
+    <step order="6">Run `dotnet test` (full suite). All pass.</step>
+    <step order="7">If delta &gt; +1 MB or any HIGH CVE: STOP. Block Phase 2/3 until resolved.</step>
+    <step order="8">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">git, dotnet publish/test/list, file size</tool><tool name="Write">Delta report</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/phase-1-publish-size-delta.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Publish-size delta report exists with baseline + current + diff.</criterion>
+    <criterion testable="true">Delta ≤+1 MB compressed; absolute size ≤60 MB.</criterion>
+    <criterion testable="true">`dotnet test` passes; no new HIGH-severity CVE.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

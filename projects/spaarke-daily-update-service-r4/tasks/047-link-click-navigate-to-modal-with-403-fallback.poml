@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Link click → Xrm.Navigation.navigateTo modal + 403 fallback toast (FR-19)</title>
+    <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>handleOpenRecord implemented in DailyBriefingApp: calls Xrm.Navigation.navigateTo({pageType:'entityrecord', entityName, entityId}, {target:2, width:{value:80,unit:'%'}, height:{value:80,unit:'%'}}); on .catch dispatches non-blocking Fluent v9 Toaster toast with intent='warning' — title "Cannot open record" / body "You may not have access." (AC-19a + AC-19b). Single code path for both regarding-name link click AND overflow menu "Open record" item. Toaster mounted once at app root (single instance) using shared dispatchToast. Two new smoke tests added: "FR-19 link-click happy path" (asserts navigateTo args) + "FR-19 / AC-19b: rejected navigateTo (e.g., 403) → toast". Semantic tokens only (ADR-021). Defensive fallback: if Xrm.Navigation.navigateTo is unavailable, dispatches the same toast.</completion-notes>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>045</dependencies>
+    <blocks>049</blocks>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Xrm.Navigation integration + error-path toast UX; Fluent v9 Toaster mount affects app-level surface</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Implement click handler on regarding-name link in NarrativeBullet that calls `Xrm.Navigation.navigateTo({pageType: 'entityrecord', entityName, entityId}, {target: 2, width: {value: 80, unit: '%'}, height: {value: 80, unit: '%'}})`. On promise rejection (Dataverse 403 or other), show non-blocking Fluent v9 `Toaster` toast: "Cannot open record — you may not have access."</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 + React hooks + Xrm.WebApi.</role>
+  <goal>Click regarding-name link → modal record form opens (80%×80% center). On error (403 or other), non-blocking toast shown — no error overlay or page crash.</goal>
+  <context>
+    <background>FR-19: Replace existing link behavior with modal navigation + graceful 403 handling. Toaster mount belongs at DailyBriefingApp level (app-scoped notifications); the link click handler in NarrativeBullet calls a callback that fires both navigation and toast on error.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/DailyBriefingApp.tsx</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; dark mode required; use Fluent v9 Toaster primitives</constraint>
+    <constraint source="ADR-024">Preserve useInlineTodoCreate + TODO_REGARDING_CATALOG in Add to To Do</constraint>
+    <constraint source="project">R3 PR #451 file overlap — see notes/risks.md R1; run conflict-check before merge</constraint>
+    <constraint source="project">Preserve R3 deliverables: schema, TTL=604800, read-state, 3 actions (now via overflow menu)</constraint>
+    <constraint source="project">Toast MUST be non-blocking (no error overlay); single Toaster mount at DailyBriefingApp level</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-024-sprk-todo-polymorphic-resolver.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">In DailyBriefingApp.tsx, mount Fluent v9 `Toaster` (single instance at app root); obtain `dispatchToast` via `useToastController`</step>
+    <step order="2">Add `handleOpenRecord(entityName, entityId)` to DailyBriefingApp: calls `Xrm.Navigation.navigateTo({pageType:'entityrecord', entityName, entityId}, {target:2, width:{value:80,unit:'%'}, height:{value:80,unit:'%'}})`; on `.catch(err)` dispatch toast "Cannot open record — you may not have access."</step>
+    <step order="3">Pass `handleOpenRecord` down to NarrativeBullet via ActivityNotesSection</step>
+    <step order="4">In NarrativeBullet, wire the regarding-name link's `onClick` to call `handleOpenRecord(entityName, entityId)`; preventDefault on the anchor</step>
+    <step order="5">Wire the "Open record" overflow menu item (from task 046) to also call `handleOpenRecord` — single code path for both entry points</step>
+    <step order="6">Verify toast uses semantic tokens (ADR-021); dark mode renders correctly; intent='warning' or 'error' as appropriate</step>
+    <step order="7">Add Jest tests: link click invokes Xrm.Navigation.navigateTo with correct args; rejected promise dispatches toast; happy path no toast</step>
+    <step order="8">Mock Xrm.Navigation in tests; use jest.fn() and Promise.reject for 403 simulation</step>
+    <step order="9">Run `npm test`; ensure pass</step>
+    <step order="10">Run `npm run build`; verify TypeScript compiles</step>
+    <step order="11">Update TASK-INDEX.md ✅</step>
+    <step order="12">Document deviations in notes/</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/DailyBriefingApp.tsx</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/src/components/__tests__/NarrativeBullet.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Click → modal opens for user with Dataverse read access (FR-19 / AC-19a)</criterion>
+    <criterion testable="true">Click → toast shown (no error overlay) for user without Dataverse read access (FR-19 / AC-19b)</criterion>
+    <criterion testable="true">Toast uses Fluent v9 Toaster + semantic tokens per ADR-021; renders in dark mode</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test>Click regarding-name link with access → modal opens at 80%×80%; entityName + entityId correct</test>
+    <test>Click regarding-name link without access (mock 403) → Toaster shows "Cannot open record — you may not have access."; no error overlay</test>
+    <test>Click "Open record" overflow menu item → same navigation path; same 403 handling</test>
+    <test>Dark Mode Compliance: Toaster + toast intent color use semantic tokens per ADR-021; no raw hex; contrast meets WCAG AA</test>
+    <test>Console Errors: no uncaught promise rejections; 403 case shows toast cleanly with no console error stack</test>
+  </ui-tests>
+  <notes>Parallel-safe with task 046 because they touch different code surfaces within the same file set (link handler vs overflow callbacks). But sequential under group "none" because both depend on task 045 menu structure and both edit DailyBriefingApp.tsx. R3 PR #451 overlap — run conflict-check. Toaster mount must be at app root (single instance) per Fluent v9 best practice.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>
