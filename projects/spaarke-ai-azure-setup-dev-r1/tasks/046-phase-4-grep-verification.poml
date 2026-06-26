@@ -54,7 +54,7 @@
     <step order="7">grep `playbook-embeddings` (unprefixed) src/ — must return zero live matches</step>
     <step order="8">grep `spaarke-invoices-dev` src/ — must return zero live matches</step>
     <step order="9">grep `text-embedding-3-small` appsettings* — must return zero matches</step>
-    <step order="10">REMOVE deferred from task 030 — AiSearchOptions.DiscoveryIndexName property (now [Obsolete]); confirm grep `DiscoveryIndexName` src/ returns ZERO matches first (else file blocker — consumer task in 031-037 missed its scope); then delete the property + its [Obsolete] attribute + the (now-unused) backing field; build BFF green</step>
+    <step order="10">REMOVED 2026-06-26: DiscoveryIndexName property removal — superseded by FR-14 reframe per task 031 user decision (property is now canonical, defaults to `spaarke-discovery-index`)</step>
     <step order="11">Document grep results in notes/phase-4-grep-evidence.md; if any non-zero, file follow-up tasks</step>
     <step order="12">Update TASK-INDEX.md: task 046 ✅ completed</step>
   </steps>
@@ -70,7 +70,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">All 9 grep checks return zero live matches (excluding documented historical refs)</criterion>
-    <criterion testable="true">AiSearchOptions.DiscoveryIndexName property removed (deferred from task 030); BFF builds clean</criterion>
+    <criterion testable="true">DiscoveryIndexName removal step retired per FR-14 reframe (2026-06-26 task 031 user decision); property is now canonical and defaults to `spaarke-discovery-index`</criterion>
     <criterion testable="true">Evidence file captures grep commands + results</criterion>
   </acceptance-criteria>
 

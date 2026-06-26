@@ -6,8 +6,22 @@ public class AiSearchOptions
     public string ApiKeySecretName { get; init; } = string.Empty;
     public string KnowledgeIndexName { get; init; } = "spaarke-files-index";
 
-    [Obsolete("FR-14: discovery-index retired; consumers will be refactored to use FilesIndexName via tasks 031-037 of spaarke-ai-azure-setup-dev-r1, after which this property will be removed in task 046 grep cleanup. Default updated to canonical 'spaarke-files-index' so any remaining reader sees the live index.")]
-    public string DiscoveryIndexName { get; init; } = "spaarke-files-index";
+    /// <summary>
+    /// Name of the discovery-tier RAG index (1024-token chunks, 2× larger than
+    /// <see cref="KnowledgeIndexName"/>'s 512-token chunks) populated by
+    /// <see cref="Sprk.Bff.Api.Services.Ai.RagIndexingPipeline"/> in parallel with the
+    /// knowledge index. Used for broader-context retrieval scenarios (full-document
+    /// semantic search) where knowledge-index's finer-grained chunks would miss
+    /// surrounding context.
+    /// <para>FR-14 (`spaarke-ai-azure-setup-dev-r1`): renamed from the historical
+    /// short name `discovery-index` to the canonical `spaarke-discovery-index` per
+    /// the two-tier naming policy (NFR-03 / NFR-10); reactivated as a first-class
+    /// catalog index after the 2026-06-25 audit incorrectly marked it retired —
+    /// runtime audit confirmed the dual-index code path in
+    /// <c>RagIndexingPipeline</c> + <c>RagService.GetIndexHealthAsync</c> +
+    /// <c>EnsureKnownIndex</c> is live.</para>
+    /// </summary>
+    public string DiscoveryIndexName { get; init; } = "spaarke-discovery-index";
     public string RagReferencesIndexName { get; init; } = "spaarke-rag-references";
     public string SemanticConfigName { get; init; } = "semantic-config";
 

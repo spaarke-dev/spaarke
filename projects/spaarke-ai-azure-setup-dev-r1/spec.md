@@ -78,7 +78,7 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs` | Index name constant: `playbook-embeddings` → `spaarke-playbook-embeddings` (line 46) |
 | `src/server/api/Sprk.Bff.Api/appsettings.json` | Remove `spaarke-knowledge-shared` ref (line 122); remove `discovery-index` from `AllowedIndexes` |
 | `src/server/api/Sprk.Bff.Api/appsettings.template.json` | Same as above (lines ~237–242) |
-| `src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs` | UPDATE — REMOVE `DiscoveryIndexName` property entirely (line 8); UPDATE `KnowledgeIndexName` default (line 7) `spaarke-knowledge-index-v2` → `spaarke-files-index` |
+| `src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs` | UPDATE — UPDATE `KnowledgeIndexName` default (line 7) `spaarke-knowledge-index-v2` → `spaarke-files-index`; RENAME (NOT remove) `DiscoveryIndexName` default `discovery-index` → `spaarke-discovery-index` per FR-14 reframed 2026-06-26 |
 | `src/server/api/Sprk.Bff.Api/Configuration/AnalysisOptions.cs` | UPDATE — change `SharedIndexName` default (line 69) from `spaarke-knowledge-index-v2` → `spaarke-files-index` |
 | `src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs` | UPDATE — retire any references to retired indexes in interface signatures / XML doc comments |
 | `src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs` | UPDATE — endpoint references to retired indexes (canonical = `spaarke-files-index`) |
@@ -211,13 +211,17 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 
     **Frontend → BFF abstraction confirmation (2026-06-26 validation)**: ALL frontend AI-Search access in `src/solutions/` goes through the BFF API contract (`/api/ai/rag/index-file`, semantic search endpoints, etc.). ZERO direct `*.search.windows.net` calls from frontends or declarative agents (CopilotAgent routes via `spaarke-api-plugin.json` → BFF OpenAPI spec). BFF refactor transparently covers all production frontend dependencies — no additional frontend code changes required beyond the 3 doc-comment hits listed above.
 
-14. **FR-14** — App settings + template + options-class cleanup (scope expanded 2026-06-26 to include `AiSearchOptions.DiscoveryIndexName` property removal).
-    **Acceptance**:
+14. **FR-14** — App settings + template + options-class cleanup (scope REFRAMED 2026-06-26 per task 031 user decision — see notes/group-c-disposition.md).
+    **Original scope**: Remove `DiscoveryIndexName` property (treating `discovery-index` as retired).
+    **REVISED scope** (2026-06-26): Rename `discovery-index` → canonical `spaarke-discovery-index` per the two-tier naming convention (NFR-03 / NFR-10); REACTIVATE as a first-class catalog index (now §4 entry 1b). The 2026-06-25 audit was incorrect — runtime inspection found `RagIndexingPipeline` actively writes to BOTH knowledge AND discovery indexes (1024-token chunks for broader-context retrieval); `RagService.GetIndexHealthAsync` queries BOTH; `KnowledgeIndexHealthResult` exposes BOTH names on the BuilderAdmin API surface. Removing the property would have shipped dead code AND broken the dual-tier RAG pipeline.
+    **Acceptance** (revised):
     - `appsettings.json:122` `Analysis.SharedIndexName` value updated from `spaarke-knowledge-shared` to `spaarke-files-index`
     - `appsettings.template.json` (lines ~237–242): same update
-    - `discovery-index` removed from `AiSearch.AllowedIndexes` array AND `AiSearch.DiscoveryIndexName` setting key
-    - `src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs:8` — `DiscoveryIndexName` property REMOVED entirely (not just emptied — the property no longer exists as a configurable option, since `discovery-index` is retired)
-    - No app setting OR C# default references `spaarke-knowledge-shared`, `discovery-index`, `spaarke-knowledge-index-v2`, or `spaarke-knowledge-index` after change. Verify via `grep -r` across `src/` returns zero hits for these as live values (doc-comment hits are handled by FR-13).
+    - `src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs:8` — `DiscoveryIndexName` property RETAINED (NOT removed); default value renamed `discovery-index` → `spaarke-discovery-index`; `[Obsolete]` attribute removed; doc-comment expanded to document the dual-tier RAG role
+    - New schema file `infrastructure/ai-search/spaarke-discovery-index.json` created (mirrors `spaarke-files-index.json`'s `KnowledgeDocument` shape with discovery-specific semantic config + vector profile names)
+    - `Deploy-AllIndexes.ps1` `$Catalog` includes new entry for `spaarke-discovery-index` (8 indexes total, was 7)
+    - `AI-SEARCH-INDEX-CATALOG.md` §4 updated: 7 → 8 active indexes (new entry 1b = `spaarke-discovery-index`); §5 retired appendix: 5 → 4 entries; new "Previously-listed-as-retired (reactivated 2026-06-26)" subsection documents the audit-correction trail
+    - No app setting OR C# default references `spaarke-knowledge-shared`, the unprefixed `discovery-index` (must be `spaarke-discovery-index`), `spaarke-knowledge-index-v2`, or `spaarke-knowledge-index` after change. Verify via `grep -r` across `src/` returns zero hits for these as live values (doc-comment hits are handled by FR-13).
 
 15. **FR-15** — Dev BFF app settings KV-reference migration (AI-Search settings only).
     **Acceptance**: Dev BFF (`spaarke-bff-dev`) app settings updated to use Key Vault references following the canonical syntax established by `spaarke-redis-cache-remediation-r1` (handoff doc 2026-06-26): `@Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=<secret-name>)` form (NOT `SecretUri=...` form). The dev KV is **`spaarke-spekvcert`** (RG `SharePointEmbedded`, region `eastus` — cross-region KV ref works); BFF MI has `Key Vault Secrets User` role on this KV. Apply the same role grant for any new AI-Search secrets added. The following AI-Search settings convert to KV references:

@@ -13,7 +13,7 @@ Before this catalog existed, Spaarke had **12 indexes across 3 schema directorie
 
 The catalog answers, for any environment (`dev`/`staging`/`prod`/`demo`):
 
-1. Which indexes are active? (7 — listed in §4)
+1. Which indexes are active? (8 — listed in §4; was 7 prior to 2026-06-26 reactivation of `spaarke-discovery-index`)
 2. What are they named? (env-agnostic per §1)
 3. What schema policy must each field follow? (§2)
 4. What vector + embedding configuration is canonical? (§3)
@@ -149,11 +149,12 @@ Rolling back to 1536-dim would require: (a) re-deploying the OpenAI `text-embedd
 
 ---
 
-## 4. Active Index Catalog (7 indexes)
+## 4. Active Index Catalog (8 indexes)
 
 | # | Canonical name | Purpose | Schema file | Scope (filter dimensions) | Ingestion source | Consumers (services + endpoints) | Post-deploy invariants |
 |---|---|---|---|---|---|---|---|
-| 1 | **spaarke-files-index** | SPE document chunks (replaces retired `spaarke-knowledge-index-v2`); T3 matter-scoped + universal ingest per D-P7 | `infrastructure/ai-search/spaarke-files-index.json` | `tenantId` + `container` + `privilege_group_ids` | `RagIndexingPipeline`, `FilesIndexIngestDocumentSource`, `FileIndexingService` | `RagService` T3, `FilesIndexIngestDocumentSource`, AssistantQuery endpoints, `KnowledgeBaseEndpoints` | Key field present; vector field `contentVector` is 3072-dim HNSW cosine; `tenantId` + `container` + `privilege_group_ids` filterable |
+| 1 | **spaarke-files-index** | SPE document chunks (512-token / 2048-char chunks for fine-grained retrieval); replaces retired `spaarke-knowledge-index-v2`; T3 matter-scoped + universal ingest per D-P7 | `infrastructure/ai-search/spaarke-files-index.json` | `tenantId` + `privilege_group_ids` | `RagIndexingPipeline` (knowledge tier), `FilesIndexIngestDocumentSource`, `FileIndexingService` | `RagService` T3, `FilesIndexIngestDocumentSource`, AssistantQuery endpoints, `KnowledgeBaseEndpoints` | Key field present; vector fields `contentVector3072` + `documentVector3072` are 3072-dim HNSW cosine; `tenantId` + `privilege_group_ids` filterable |
+| 1b | **spaarke-discovery-index** *(renamed from `discovery-index` per FR-14)* | SPE document chunks (1024-token / 4096-char chunks — 2× larger than `spaarke-files-index` for broader-context retrieval). Reactivated 2026-06-26 after spaarke-ai-azure-setup-dev-r1 task 031 audit — the 2026-06-25 retirement was wrong; runtime audit found `RagIndexingPipeline` writes to BOTH indexes in parallel, `RagService.GetIndexHealthAsync` queries BOTH, `EnsureKnownIndex` accepts BOTH | `infrastructure/ai-search/spaarke-discovery-index.json` | `tenantId` + `privilege_group_ids` | `RagIndexingPipeline` (discovery tier — `DiscoveryChunkingOptions`); chunk IDs suffixed `_d` | `RagService.GetIndexHealthAsync` (DiscoveryDocCount + DiscoveryIndexName fields on `KnowledgeIndexHealth` record), `RagService.EnsureKnownIndex`, `KnowledgeBaseEndpoints` health surface (exposed as `DiscoveryDocCount` + `DiscoveryIndexName` on `KnowledgeIndexHealthResult`) | Key field present; vector fields `contentVector3072` + `documentVector3072` are 3072-dim HNSW cosine; `tenantId` + `privilege_group_ids` filterable; semantic config = `discovery-semantic-config`; vector profile = `discovery-vector-profile-3072` |
 | 2 | **spaarke-records-index** | Dataverse record matching (matter / project / invoice / account) | `infrastructure/ai-search/spaarke-records-index.json` | `tenantId` (added Phase 2 per FR-12) + `recordType` + `dataverseEntityName` | `Sync-RecordsToIndex.ps1`, `DataverseIndexSyncService`, `RecordSyncJob` | `RecordSearchService` → `Api/Ai/RecordSearchEndpoints`, `SemanticSearchControl` PCF | Key field present; `tenantId` field exists + filterable + populated; `contentVector` is 3072-dim HNSW cosine; `recordType` + `dataverseRecordId` + `dataverseEntityName` filterable; `privilege_group_ids` filterable |
 | 3 | **spaarke-rag-references** | Golden reference docs (clause libraries, terminology, KNW-*.md content) | `infrastructure/ai-search/spaarke-rag-references.json` | `tenantId` (`"system"` for shared) + `documentType` (renamed from `domain` per FR-17) | `Add-ReferenceToIndex.ps1`, `Index-AllReferences.ps1`, `ReferenceIndexingService` | `ReferenceRetrievalService`, `RagService` T4, `KnowledgeBaseEndpoints` | Key field present; canonical field name is `documentType` (NOT `domain`); `contentVector3072` is 3072-dim HNSW cosine; `tenantId` + `documentType` + `knowledgeSourceId` filterable; semantic config references `documentType` |
 | 4 | **spaarke-insights-index** | Derived intelligence (Observations + Precedents) | `infrastructure/ai-search/spaarke-insights-index.json` (consolidated from `infra/insights/schemas/spaarke-insights-index.index.json` per FR-11) | `tenantId` + `scope.{matterId, entityType, entityId}` + `artifactType` | `ObservationIndexUpserter`, `PrecedentProjectionSync` | `Api/Insights/InsightsSearchEndpoint`, `InsightsAssistantEndpoint`, `IndexRetrieveNode` | Key field present; vector field is 3072-dim HNSW cosine; `tenantId` + scope fields filterable; `artifactType` filterable + facetable |
@@ -166,6 +167,7 @@ Rolling back to 1536-dim would require: (a) re-deploying the OpenAI `text-embedd
 | # | Index | Restoration strategy | Ingestion script | Notes |
 |---|---|---|---|---|
 | 1 | `spaarke-files-index` | Schema only | (deferred) | Re-ingest deferred per owner |
+| 1b | `spaarke-discovery-index` | Schema only | (runtime — `RagIndexingPipeline` writes in parallel with files-index) | Re-ingest deferred per owner; populated automatically when files-index ingest runs |
 | 2 | `spaarke-records-index` | Schema + data | `Sync-RecordsToIndex.ps1` | New `tenantId` field populated |
 | 3 | `spaarke-rag-references` | Schema + data | `Index-AllReferences.ps1` | All KNW-*.md golden refs |
 | 4 | `spaarke-insights-index` | Schema + Precedent data | `PrecedentProjectionSync`; Observations re-projected | Observation history loss accepted; re-project from event history |
@@ -175,7 +177,7 @@ Rolling back to 1536-dim would require: (a) re-deploying the OpenAI `text-embedd
 
 ### Deploy procedure
 
-Indexes are deployed via the **single canonical deployer** `scripts/ai-search/Deploy-AllIndexes.ps1` (FR-07). The script is catalog-driven, supports `-DryRun` + `-VerifyOnly` + `-Indexes <subset>`, and runs the post-deploy invariant verifier per index that asserts the values in the **Post-deploy invariants** column above. Bicep deployment is retained for the Insights index only (`infra/insights/modules/search-index.bicep`); the other 6 indexes are PowerShell-deployed.
+Indexes are deployed via the **single canonical deployer** `scripts/ai-search/Deploy-AllIndexes.ps1` (FR-07). The script is catalog-driven, supports `-DryRun` + `-VerifyOnly` + `-Indexes <subset>`, and runs the post-deploy invariant verifier per index that asserts the values in the **Post-deploy invariants** column above. Bicep deployment is retained for the Insights index only (`infra/insights/modules/search-index.bicep`); the other 7 indexes are PowerShell-deployed.
 
 Full operator procedure: [`docs/guides/ai-search-azure-setup.md`](../guides/ai-search-azure-setup.md) (task 003 of this project).
 
@@ -183,15 +185,20 @@ Full operator procedure: [`docs/guides/ai-search-azure-setup.md`](../guides/ai-s
 
 ## 5. Retired Indexes Appendix
 
-These 5 indexes were deployed historically; they are **retired** as of this catalog publication. Do not recreate them. Any code, script, or doc still referencing them as live targets is a defect (the comprehensive FR-13 grep audit covers this scope across BFF + frontend + `.claude/` paths).
+These 4 indexes were deployed historically; they are **retired** as of this catalog publication. Do not recreate them. Any code, script, or doc still referencing them as live targets is a defect (the comprehensive FR-13 grep audit covers this scope across BFF + frontend + `.claude/` paths).
 
 | Name | Last seen | Why retired | Replacement |
 |---|---|---|---|
 | `spaarke-knowledge-index-v2` | Deleted 2026-06-25 | Owner: "moved on from v2"; functionality moved to D-P7 universal ingest via `spaarke-files-index`. Five-generation drift created config + code + schema mismatch. | `spaarke-files-index` |
-| `discovery-index` | Deleted 2026-06-25 | Provisioned by AIPL-016 but never wired into runtime; no live writer or query path found in the 2026-06-25 audit. Schema cost without runtime benefit. | (none — was never used in production code) |
 | `spaarke-knowledge-shared` | Live in `appsettings.json:122` until FR-14; planned retirement | R3 task 002 was supposed to remove this reference; the C# default in `AnalysisOptions.cs:69` had moved to v2, but the appsettings override survived. FR-14 removes the dangling reference. | `spaarke-files-index` |
 | `spaarke-knowledge-index` (v1) | Deleted pre-2026-06-25 (PPI-036) | Superseded by `spaarke-knowledge-index-v2` (which is now itself superseded). | `spaarke-files-index` |
 | `knowledge-index` | Only ever in `infrastructure/ai-search/_archive/`; never deployed | Early AIPL-016 design draft; never made it to production. | (none) |
+
+### Previously-listed-as-retired (reactivated 2026-06-26)
+
+| Name | Why initially marked retired | Why reactivated | Reactivation evidence |
+|---|---|---|---|
+| `discovery-index` → renamed to **`spaarke-discovery-index`** (now §4 entry 1b) | 2026-06-25 audit said "Provisioned by AIPL-016 but never wired into runtime; no live writer or query path found" | Audit was incorrect. `spaarke-ai-azure-setup-dev-r1` task 031 runtime inspection found the dual-index code path is LIVE: `RagIndexingPipeline.IndexDocumentAsync` writes to both `KnowledgeIndex` AND `DiscoveryIndex` (1024-token chunks); `RagService.GetIndexHealthAsync` queries BOTH for doc counts; `EnsureKnownIndex` accepts BOTH names; `KnowledgeIndexHealth` record exposes BOTH names on the BuilderAdmin API surface. | `src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs:60-72` (DiscoveryChunkingOptions: 4096 char + 400 overlap); `RagService.cs:855-881` (GetIndexHealthAsync); `IRagService.cs:226-231` (KnowledgeIndexHealth record); `KnowledgeBaseEndpoints.cs:130-141, 575` (health surface) |
 
 ### Why these stay retired (NFR-05 + binding MUST rule)
 

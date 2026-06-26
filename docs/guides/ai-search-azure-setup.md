@@ -4,7 +4,7 @@
 > **Audience**: BFF operators, infrastructure engineers, platform DevOps
 > **Status**: Authoritative — operational runbook for provisioning Azure AI Search in any Spaarke environment
 
-This guide is the canonical operational reference for provisioning, configuring, deploying schemas to, validating, rotating secrets for, and troubleshooting the Spaarke AI Search service (`spaarke-search-{env}`) in any environment. A fresh operator should be able to set up a brand-new environment's AI Search end-to-end (service → KV secret → BFF MI role grant → 7 indexes deployed and verified) by following only this document.
+This guide is the canonical operational reference for provisioning, configuring, deploying schemas to, validating, rotating secrets for, and troubleshooting the Spaarke AI Search service (`spaarke-search-{env}`) in any environment. A fresh operator should be able to set up a brand-new environment's AI Search end-to-end (service → KV secret → BFF MI role grant → 8 indexes deployed and verified) by following only this document.
 
 For the canonical per-index inventory (naming, schema property policy, vector + embedding configuration, per-index consumer map, retired indexes appendix), see [`docs/architecture/AI-SEARCH-INDEX-CATALOG.md`](../architecture/AI-SEARCH-INDEX-CATALOG.md). This guide is the operator's "how"; the catalog is the architect's "what" — they cross-reference each other and must not disagree. For the environment-level deployment flow that calls this guide, see [`docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md`](SPAARKE-DEPLOYMENT-GUIDE.md) §4.6.
 
@@ -420,7 +420,7 @@ Invoke-RestMethod -Uri "$endpoint/indexes?api-version=2024-07-01" -Headers $head
   | Sort-Object name
 ```
 
-Expect 7 rows: `spaarke-files-index`, `spaarke-insights-index`, `spaarke-invoices-index`, `spaarke-playbook-embeddings`, `spaarke-rag-references`, `spaarke-records-index`, `spaarke-session-files`. Any extra index (especially `spaarke-knowledge-index-v2`, `discovery-index`, `spaarke-knowledge-shared`) is a defect per the [retired-index appendix](../architecture/AI-SEARCH-INDEX-CATALOG.md#5-retired-indexes-appendix).
+Expect 8 rows: `spaarke-discovery-index`, `spaarke-files-index`, `spaarke-insights-index`, `spaarke-invoices-index`, `spaarke-playbook-embeddings`, `spaarke-rag-references`, `spaarke-records-index`, `spaarke-session-files`. Any extra index (especially `spaarke-knowledge-index-v2`, `discovery-index` without the `spaarke-` prefix, `spaarke-knowledge-shared`) is a defect per the [retired-index appendix](../architecture/AI-SEARCH-INDEX-CATALOG.md#5-retired-indexes-appendix).
 
 ### 5.2 — Per-index field-flag verification
 
@@ -459,7 +459,7 @@ For `spaarke-rag-references`, expect the semantic config to reference field `doc
 ### 5.5 — Per-index document count
 
 ```powershell
-foreach ($name in @('spaarke-files-index','spaarke-records-index','spaarke-rag-references','spaarke-insights-index','spaarke-session-files','spaarke-invoices-index','spaarke-playbook-embeddings')) {
+foreach ($name in @('spaarke-files-index','spaarke-discovery-index','spaarke-records-index','spaarke-rag-references','spaarke-insights-index','spaarke-session-files','spaarke-invoices-index','spaarke-playbook-embeddings')) {
     $count = Invoke-RestMethod -Uri "$endpoint/indexes/$name/docs/`$count?api-version=2024-07-01" -Headers $headers
     Write-Host ("{0,-35} count={1}" -f $name, $count)
 }
@@ -471,7 +471,7 @@ Expected post-ingestion for dev (per FR-18):
 - `spaarke-rag-references` — non-zero (KNW-*.md golden refs)
 - `spaarke-playbook-embeddings` — non-zero (Dataverse playbooks)
 - `spaarke-insights-index` — non-zero (Precedents at minimum; Observations after re-projection)
-- `spaarke-files-index`, `spaarke-session-files`, `spaarke-invoices-index` — zero (schema-only for dev rebuild)
+- `spaarke-files-index`, `spaarke-discovery-index`, `spaarke-session-files`, `spaarke-invoices-index` — zero (schema-only for dev rebuild; discovery-index auto-populates when `RagIndexingPipeline` runs against files-index)
 
 ### 5.6 — BFF functional verification (FR-19)
 

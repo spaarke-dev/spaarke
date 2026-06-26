@@ -42,7 +42,7 @@
 | 020 | Write Deploy-AllIndexes.ps1 | 3 | ✅ | FULL | 001, 002, 003, 010-016 | — |
 | 021 | Validate Deploy-AllIndexes.ps1 (-DryRun + -VerifyOnly) | 3 | ✅ | STANDARD | 020 | — |
 | 030 | BFF Configuration options classes (AiSearchOptions + AnalysisOptions) | 4 | ✅ | FULL | 011, 013, 014 | — (DiscoveryIndexName removal deferred to 046) |
-| 031 | BFF refactor: RAG pipeline services | 4 | 🟡 | FULL | 030 | Group C (BLOCKED — DiscoveryIndexName structural refactor; user decision needed) |
+| 031 | BFF refactor: RAG pipeline services | 4 | ✅ | FULL | 030 | Group C (FR-14 reframed: discovery-index reactivated as `spaarke-discovery-index` 8th catalog index) |
 | 032 | BFF refactor: file indexing + reference services | 4 | ✅ | FULL | 030 | Group C (verified zero-match — already canonical from R5 work) |
 | 033 | BFF refactor: PlaybookEmbedding services | 4 | ✅ | FULL | 013, 030 | Group C (verified zero-match — task 013 covered code) |
 | 034 | BFF refactor: KnowledgeDeployment + KnowledgeBaseEndpoints | 4 | ✅ | FULL | 030 | Group C (4 edits — defaults + doc-comments) |

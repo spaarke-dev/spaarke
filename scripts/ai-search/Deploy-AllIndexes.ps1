@@ -199,8 +199,17 @@ $Catalog = @(
         Name       = 'spaarke-files-index'
         SchemaFile = 'infrastructure/ai-search/spaarke-files-index.json'
         Invariants = @{
-            VectorFields             = @('contentVector')
-            RequiredFilterableFields = @('tenantId', 'container', 'privilege_group_ids')
+            VectorFields             = @('contentVector3072', 'documentVector3072')
+            RequiredFilterableFields = @('tenantId', 'privilege_group_ids')
+        }
+    },
+    @{
+        Key        = 'discovery-index'
+        Name       = 'spaarke-discovery-index'
+        SchemaFile = 'infrastructure/ai-search/spaarke-discovery-index.json'
+        Invariants = @{
+            VectorFields             = @('contentVector3072', 'documentVector3072')
+            RequiredFilterableFields = @('tenantId', 'privilege_group_ids')
         }
     },
     @{
@@ -268,7 +277,7 @@ if ($Indexes) {
     $selected = ($Indexes -split ',') | ForEach-Object { $_.Trim().ToLower() }
     $Catalog = $Catalog | Where-Object { $selected -contains $_.Key.ToLower() }
     if (-not $Catalog -or $Catalog.Count -eq 0) {
-        Write-Error "No catalog entries matched -Indexes '$Indexes'. Valid keys: files-index, records-index, rag-references, insights-index, session-files, invoices-index, playbook-embeddings"
+        Write-Error "No catalog entries matched -Indexes '$Indexes'. Valid keys: files-index, discovery-index, records-index, rag-references, insights-index, session-files, invoices-index, playbook-embeddings"
         exit 3
     }
 }
