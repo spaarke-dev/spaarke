@@ -1,4 +1,4 @@
-# BISECT STEP 2 — add workflow-level config (merge_group + permissions + concurrency)
+# BISECT STEP 3 — add classify job (paths-filter + docs-only flag)
 name: CI
 
 on:
@@ -17,10 +17,64 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  classify:
+    name: Classify Diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      bff: ${{ steps.filter.outputs.bff }}
+      spaarke_ai: ${{ steps.filter.outputs.spaarke_ai }}
+      docs: ${{ steps.filter.outputs.docs }}
+      ci_workflows: ${{ steps.filter.outputs.ci_workflows }}
+      docs_only: ${{ steps.docs-only-flag.outputs.value }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 1 || 0 }}
+
+      - name: Classify changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            bff:
+              - 'src/server/api/Sprk.Bff.Api/**'
+              - 'src/server/shared/**'
+              - 'tests/integration/auth/**'
+              - 'tests/integration/regression/**'
+              - 'tests/unit/Sprk.Bff.Api.Tests/**'
+            spaarke_ai:
+              - 'src/solutions/SpaarkeAi/**'
+            docs:
+              - 'docs/**'
+              - 'projects/**'
+              - '**.md'
+              - '.claude/**'
+            ci_workflows:
+              - '.github/workflows/**'
+
+      - name: Derive docs_only flag
+        id: docs-only-flag
+        shell: bash
+        run: |
+          docs='${{ steps.filter.outputs.docs }}'
+          bff='${{ steps.filter.outputs.bff }}'
+          spaarke_ai='${{ steps.filter.outputs.spaarke_ai }}'
+          ci_workflows='${{ steps.filter.outputs.ci_workflows }}'
+          if [[ "$docs" == "true" && "$bff" != "true" && "$spaarke_ai" != "true" && "$ci_workflows" != "true" ]]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
   Router:
     name: Router
+    needs: classify
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Bisect step 2 echo
-        run: echo "BISECT STEP 2 — config block added (merge_group + permissions + concurrency)."
+      - name: Bisect step 3 echo
+        run: |
+          echo "BISECT STEP 3 — classify added."
+          echo "bff=${{ needs.classify.outputs.bff }} ai=${{ needs.classify.outputs.spaarke_ai }} docs=${{ needs.classify.outputs.docs }} ci=${{ needs.classify.outputs.ci_workflows }} docs_only=${{ needs.classify.outputs.docs_only }}"
