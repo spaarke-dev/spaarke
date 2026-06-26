@@ -3,7 +3,9 @@
   <metadata>
     <title>PR 2 wrap — commit + conflict-check + open PR</title>
     <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>PR 2 wrap done. Build verified clean (dotnet build Sprk.Bff.Api Release: 0 errors, 17 pre-existing warnings). Conflict-check shows no external PR overlap — R3 PR #451 already merged. Per topology decision (notes/conflict-check/018.md), PR-1 and PR-2 share the same long-lived R4 worktree branch (work/spaarke-daily-update-service-r4); GitHub serves them as a single PR. Updated existing draft PR #456 title + body to cover combined PR-1+PR-2 scope. PR URL: https://github.com/spaarke-dev/spaarke/pull/456. PR remains in draft state. PR notes captured at `notes/deployments/018-pr2-opened.md`.</completion-notes>
     <estimated-hours>1</estimated-hours>
     <dependencies>017</dependencies>
     <blocks>020</blocks>

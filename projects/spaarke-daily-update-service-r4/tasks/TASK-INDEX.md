@@ -46,7 +46,7 @@
 | 015 | Re-scoped: Correct repo entities + document deployed canonical state | ✅ | 012, 013, 014 | 016 | — | STANDARD |
 | 016 | Run jps-scope-refresh after PR 2 deployments | ✅ | 015 | 017 | — | MINIMAL |
 | 017 | Smoke test BFF wrapper dispatch against DAILY-BRIEFING-NARRATE | ✅ | 011, 016 | 018 | — | STANDARD |
-| 018 | PR 2 wrap — commit + conflict-check + open PR | 🔲 | 017 | 020 | — | STANDARD |
+| 018 | PR 2 wrap — commit + conflict-check + open PR | ✅ | 017 | 020 | — | STANDARD |
 
 ### PR 3 — W1 Producer customData + stubs + membership (Tasks 020–029)
 
