@@ -3,7 +3,9 @@
   <metadata>
     <title>Migrate notification-tasks-due-soon.json to membership-scope</title>
     <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Deployed corrected `notification-tasks-due-soon.json` (5,615-char serialized payload) to PB-020 `sprk_configjson` via MCP `update_record`. Verified: LookupUserMembership ActionType 52 present (Lookup My Matters node), entityLogicalName=`sprk_event` (NOT OOB `task`), Task eventtype GUID `124f5fc9-98ff-f011-8406-7c1e525abd8b` in filter, membership-scope union OR-branch `(sprk_regardingmatter IN myMatters.ids)` ∪ `(matter ownerid eq-userid)` ∪ `(record ownerid eq-userid)`, due-date filter on `sprk_duedate`/`sprk_finalduedate` within `{{todayUtc}}..{{dueSoonWindowUtc}}`, dedupe by `sprk_eventid` (spec FR-7 said "activityid" — corrected to `sprk_eventid` per CLAUDE.md § 2026-06-25 entity-architecture rule; reaffirmed here). 5 nodes total (Start → Lookup My Matters → Query → Check → Create). Schedule frequency aligned to repo `daily 06:00` (deployed was `hourly`). Smoke notes: `notes/smoke/023-tasks-due-soon-deploy.md`. Parallel-safe with tasks 022/024/025 — independent playbook row.</completion-notes>
     <estimated-hours>2</estimated-hours>
     <dependencies>020, 021</dependencies>
     <blocks>026</blocks>
