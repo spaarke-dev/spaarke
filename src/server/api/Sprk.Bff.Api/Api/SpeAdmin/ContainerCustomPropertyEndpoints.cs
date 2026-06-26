@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 
@@ -117,7 +116,9 @@ public static class ContainerCustomPropertyEndpoints
 
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
-            var properties = await graphService.GetCustomPropertiesAsync(graphClient, containerId, ct);
+            var properties = await GraphCallScope.Run(
+                () => graphService.GetCustomPropertiesAsync(graphClient, containerId, ct),
+                "container.customproperties.get");
 
             if (properties is null)
             {
@@ -150,7 +151,7 @@ public static class ContainerCustomPropertyEndpoints
                 statusCode: StatusCodes.Status400BadRequest,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError) when (odataError.ResponseStatusCode == StatusCodes.Status404NotFound)
+        catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status404NotFound)
         {
             logger.LogInformation(
                 "GetCustomProperties: Graph returned 404 for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -162,18 +163,18 @@ public static class ContainerCustomPropertyEndpoints
                 statusCode: StatusCodes.Status404NotFound,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
             logger.LogError(
-                odataError,
+                ex,
                 "GetCustomProperties: Graph API error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
+                containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 title: "Graph API Error",
-                detail: odataError.Error?.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: odataError.ResponseStatusCode is >= 400 and < 600
-                    ? odataError.ResponseStatusCode
+                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
+                statusCode: ex.StatusCode is >= 400 and < 600
+                    ? ex.StatusCode.Value
                     : StatusCodes.Status502BadGateway,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
@@ -269,8 +270,10 @@ public static class ContainerCustomPropertyEndpoints
 
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
-            var updated = await graphService.UpdateCustomPropertiesAsync(
-                graphClient, containerId, request.Properties, ct);
+            var updated = await GraphCallScope.Run(
+                () => graphService.UpdateCustomPropertiesAsync(
+                    graphClient, containerId, request.Properties, ct),
+                "container.customproperties.put");
 
             if (updated is null)
             {
@@ -303,7 +306,7 @@ public static class ContainerCustomPropertyEndpoints
                 statusCode: StatusCodes.Status400BadRequest,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError) when (odataError.ResponseStatusCode == StatusCodes.Status404NotFound)
+        catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status404NotFound)
         {
             logger.LogInformation(
                 "PutCustomProperties: Graph returned 404 for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -315,18 +318,18 @@ public static class ContainerCustomPropertyEndpoints
                 statusCode: StatusCodes.Status404NotFound,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
             logger.LogError(
-                odataError,
+                ex,
                 "PutCustomProperties: Graph API error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
+                containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 title: "Graph API Error",
-                detail: odataError.Error?.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: odataError.ResponseStatusCode is >= 400 and < 600
-                    ? odataError.ResponseStatusCode
+                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
+                statusCode: ex.StatusCode is >= 400 and < 600
+                    ? ex.StatusCode.Value
                     : StatusCodes.Status502BadGateway,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }

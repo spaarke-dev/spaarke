@@ -1,6 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Graph.Models;
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
 
@@ -132,7 +130,9 @@ public static class ContainerPermissionEndpoints
 
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
-            var permissions = await graphService.ListContainerPermissionsAsync(graphClient, containerId, ct);
+            var permissions = await GraphCallScope.Run(
+                () => graphService.ListContainerPermissionsAsync(graphClient, containerId, ct),
+                "permissions.list");
 
             var result = new ContainerPermissionListResponse(
                 permissions.Select(ContainerPermissionDto.FromDomain).ToList(),
@@ -151,13 +151,13 @@ public static class ContainerPermissionEndpoints
                 configGuid, context.TraceIdentifier);
             return ConfigNotFoundProblem(configGuid, context);
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException sse)
         {
             logger.LogError(
-                odataError,
+                sse,
                 "ListPermissions: Graph API error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
-            return GraphApiProblem(odataError, context);
+                containerId, configGuid, sse.StatusCode, context.TraceIdentifier);
+            return GraphApiProblem(sse, context);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -202,8 +202,10 @@ public static class ContainerPermissionEndpoints
 
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
-            var granted = await graphService.GrantContainerPermissionAsync(
-                graphClient, containerId, request.UserId, request.GroupId, request.Role, ct);
+            var granted = await GraphCallScope.Run(
+                () => graphService.GrantContainerPermissionAsync(
+                    graphClient, containerId, request.UserId, request.GroupId, request.Role, ct),
+                "permission.grant");
 
             logger.LogInformation(
                 "GrantPermission: granted '{Role}' to principal (userId={UserId}, groupId={GroupId}) " +
@@ -230,13 +232,13 @@ public static class ContainerPermissionEndpoints
                 configGuid, context.TraceIdentifier);
             return ConfigNotFoundProblem(configGuid, context);
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException sse)
         {
             logger.LogError(
-                odataError,
+                sse,
                 "GrantPermission: Graph API error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
-            return GraphApiProblem(odataError, context);
+                containerId, configGuid, sse.StatusCode, context.TraceIdentifier);
+            return GraphApiProblem(sse, context);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -290,8 +292,10 @@ public static class ContainerPermissionEndpoints
 
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
-            var updated = await graphService.UpdateContainerPermissionAsync(
-                graphClient, containerId, permissionId, request!.Role, ct);
+            var updated = await GraphCallScope.Run(
+                () => graphService.UpdateContainerPermissionAsync(
+                    graphClient, containerId, permissionId, request!.Role, ct),
+                "permission.update");
 
             if (updated is null)
             {
@@ -325,7 +329,7 @@ public static class ContainerPermissionEndpoints
                 configGuid, context.TraceIdentifier);
             return ConfigNotFoundProblem(configGuid, context);
         }
-        catch (ODataError odataError) when (odataError.ResponseStatusCode == StatusCodes.Status404NotFound)
+        catch (SpaarkeStorageException sse) when (sse.StatusCode == StatusCodes.Status404NotFound)
         {
             logger.LogInformation(
                 "UpdatePermission: Graph returned 404 for permission '{PermissionId}' on container '{ContainerId}', TraceId={TraceId}",
@@ -336,13 +340,13 @@ public static class ContainerPermissionEndpoints
                 statusCode: StatusCodes.Status404NotFound,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException sse)
         {
             logger.LogError(
-                odataError,
+                sse,
                 "UpdatePermission: Graph API error for permission '{PermissionId}', container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                permissionId, containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
-            return GraphApiProblem(odataError, context);
+                permissionId, containerId, configGuid, sse.StatusCode, context.TraceIdentifier);
+            return GraphApiProblem(sse, context);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -392,8 +396,10 @@ public static class ContainerPermissionEndpoints
 
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
-            var deleted = await graphService.RevokeContainerPermissionAsync(
-                graphClient, containerId, permissionId, ct);
+            var deleted = await GraphCallScope.Run(
+                () => graphService.RevokeContainerPermissionAsync(
+                    graphClient, containerId, permissionId, ct),
+                "permission.revoke");
 
             if (!deleted)
             {
@@ -427,7 +433,7 @@ public static class ContainerPermissionEndpoints
                 configGuid, context.TraceIdentifier);
             return ConfigNotFoundProblem(configGuid, context);
         }
-        catch (ODataError odataError) when (odataError.ResponseStatusCode == StatusCodes.Status404NotFound)
+        catch (SpaarkeStorageException sse) when (sse.StatusCode == StatusCodes.Status404NotFound)
         {
             logger.LogInformation(
                 "RevokePermission: Graph returned 404 for permission '{PermissionId}' on container '{ContainerId}', TraceId={TraceId}",
@@ -438,13 +444,13 @@ public static class ContainerPermissionEndpoints
                 statusCode: StatusCodes.Status404NotFound,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException sse)
         {
             logger.LogError(
-                odataError,
+                sse,
                 "RevokePermission: Graph API error for permission '{PermissionId}', container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                permissionId, containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
-            return GraphApiProblem(odataError, context);
+                permissionId, containerId, configGuid, sse.StatusCode, context.TraceIdentifier);
+            return GraphApiProblem(sse, context);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -565,12 +571,12 @@ public static class ContainerPermissionEndpoints
             statusCode: StatusCodes.Status400BadRequest,
             extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
 
-    private static IResult GraphApiProblem(ODataError odataError, HttpContext context) =>
+    private static IResult GraphApiProblem(SpaarkeStorageException ex, HttpContext context) =>
         Results.Problem(
             title: "Graph API Error",
-            detail: odataError.Error?.Message ?? "An error occurred communicating with the Graph API.",
-            statusCode: odataError.ResponseStatusCode is >= 400 and < 600
-                ? odataError.ResponseStatusCode
+            detail: ex.Message ?? "An error occurred communicating with the Graph API.",
+            statusCode: ex.StatusCode is >= 400 and < 600
+                ? ex.StatusCode.Value
                 : StatusCodes.Status502BadGateway,
             extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
 

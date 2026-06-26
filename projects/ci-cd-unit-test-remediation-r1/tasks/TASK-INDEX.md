@@ -107,7 +107,7 @@
 |---|---|---|---|---|---|---|
 | 080 | codify-build-vs-maintain-criteria | FULL | ✅ | **false** (`.claude/` write) | (Phase 2 complete) | 082 |
 | 086 | fix-ci-router-startup-failure | FULL | ✅ | **false** (hot-path `.github/workflows/`) | none | 071 (workflow infrastructure unblocked; SC-12 still gated on 087+088 underlying-test fixes) |
-| 087 | fix-adr-009-imemorycache-endpoints | FULL | 🔲 | **false** (hot-path BFF production) | none (can start anytime) | **071** |
+| 087 | fix-adr-009-imemorycache-endpoints | FULL | ✅ | **false** (hot-path BFF production) | none | 071 (ADR-009 arch test passes locally) |
 | 088 | fix-adr-007-graph-isolation-endpoints | FULL | 🔲 | **false** (hot-path BFF production) | none (can start anytime) | **071** |
 | 081 | build-test-diet-skill | FULL | ✅ | **false** (`.claude/` write — runs in parallel with 080 via main-session sequencing) | (Phase 2 complete) | 090 |
 | 082 | rerun-inventory-broader-criteria | STANDARD | 🔲 | true | 080 | 083 |

@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 
@@ -132,7 +131,9 @@ public static class ContainerTypePermissionEndpoints
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
             // Retrieve application permissions for the container type from Graph API
-            var permissions = await graphService.GetContainerTypePermissionsAsync(graphClient, typeId, ct);
+            var permissions = await GraphCallScope.Run(
+                () => graphService.GetContainerTypePermissionsAsync(graphClient, typeId, ct),
+                "containertypes.permissions.get");
 
             // null indicates the container type was not found (Graph 404)
             if (permissions is null)
@@ -171,12 +172,12 @@ public static class ContainerTypePermissionEndpoints
                 Count = items.Count
             });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
             logger.LogError(
-                odataError,
+                ex,
                 "Graph API error getting permissions for container type {TypeId}, config {ConfigId}. Status: {Status}. TraceId: {TraceId}",
-                typeId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
+                typeId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 detail: "Failed to retrieve container type permissions from the Graph API. Check the app registration credentials in the config.",

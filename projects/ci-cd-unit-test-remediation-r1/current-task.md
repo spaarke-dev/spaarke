@@ -9,9 +9,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 087 (ADR-009 fix; 2-3h) + 088 (ADR-007 fix; 4-6h) — both NEW from 086 bisect fallout |
-| **Step** | Not started; integrated into project artifacts |
-| **Status** | Phase 2.5 substantive work shipped via PR #469 (`b54d7b528`); 087+088 are the remaining cutover gates |
+| **Task** | 087 (ADR-009 fix; 2-3h) IN PROGRESS |
+| **Step** | Step 2: Create IEndpointResponseCache + impl, refactor 3 endpoints, build/test |
+| **Status** | FULL rigor; main session; hot-path BFF production code |
 | **Mode** | 🤖 **AUTONOMOUS** — no approval gates between tasks/steps per project CLAUDE.md |
 | **Next Action** | Execute task 087 (smaller, faster confidence-builder) FIRST in main session. Then 088 (larger, mechanical). Land both as a focused PR `fix/adr-007-009-bff-remediation` off master. After merge: push 2 confirmation commits to master; verify SC-12 (2 consecutive successful master CI Router pushes); then proceed to 071 cutover. |
 

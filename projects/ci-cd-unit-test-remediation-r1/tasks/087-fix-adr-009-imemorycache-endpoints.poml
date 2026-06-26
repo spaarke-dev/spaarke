@@ -1,7 +1,7 @@
 <task id="CICD-087" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Fix ADR-009 violation — extract IMemoryCache out of 3 endpoint classes (HandlerEndpoints, NavMapEndpoints, PlaybookEndpoints) — BLOCKS 071 cutover</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>2-3 hours</estimated-effort>
     <phase>2.5 - Pre-cutover BFF ADR remediation</phase>
     <stream>A - CI tiering remediation</stream>

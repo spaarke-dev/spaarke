@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
@@ -160,7 +159,9 @@ public static class ContainerTypeEndpoints
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
             // List container types from Graph API
-            var containerTypes = await graphService.ListContainerTypesAsync(graphClient, ct);
+            var containerTypes = await GraphCallScope.Run(
+                () => graphService.ListContainerTypesAsync(graphClient, ct),
+                "containertypes.list");
 
             logger.LogInformation(
                 "GET /api/spe/containertypes — returned {Count} container types for config {ConfigId}. TraceId: {TraceId}",
@@ -184,12 +185,12 @@ public static class ContainerTypeEndpoints
                 Count = items.Count
             });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException sse)
         {
             logger.LogError(
-                odataError,
+                sse,
                 "Graph API error listing container types for config {ConfigId}. Status: {Status}. TraceId: {TraceId}",
-                configId, odataError.ResponseStatusCode, context.TraceIdentifier);
+                configId, sse.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 detail: "Failed to retrieve container types from the Graph API. Check the app registration credentials in the config.",
@@ -273,7 +274,9 @@ public static class ContainerTypeEndpoints
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
             // Retrieve the specific container type from Graph API
-            var containerType = await graphService.GetContainerTypeAsync(graphClient, typeId, ct);
+            var containerType = await GraphCallScope.Run(
+                () => graphService.GetContainerTypeAsync(graphClient, typeId, ct),
+                "containertype.get");
 
             if (containerType is null)
             {
@@ -297,12 +300,12 @@ public static class ContainerTypeEndpoints
                 CreatedDateTime = containerType.CreatedDateTime
             });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException sse)
         {
             logger.LogError(
-                odataError,
+                sse,
                 "Graph API error getting container type {TypeId} for config {ConfigId}. Status: {Status}. TraceId: {TraceId}",
-                typeId, configId, odataError.ResponseStatusCode, context.TraceIdentifier);
+                typeId, configId, sse.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 detail: "Failed to retrieve the container type from the Graph API. Check the app registration credentials in the config.",
@@ -420,11 +423,13 @@ public static class ContainerTypeEndpoints
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
             // Create the container type in SharePoint Embedded via Graph API
-            var created = await graphService.CreateContainerTypeAsync(
-                graphClient,
-                request.DisplayName,
-                request.BillingClassification,
-                ct);
+            var created = await GraphCallScope.Run(
+                () => graphService.CreateContainerTypeAsync(
+                    graphClient,
+                    request.DisplayName,
+                    request.BillingClassification,
+                    ct),
+                "containertype.create");
 
             logger.LogInformation(
                 "POST /api/spe/containertypes — created container type '{ContainerTypeId}' ('{DisplayName}') for configId {ConfigId}. TraceId: {TraceId}",
@@ -451,12 +456,12 @@ public static class ContainerTypeEndpoints
 
             return Results.Created($"/api/spe/containertypes/{created.Id}", dto);
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException sse)
         {
             logger.LogError(
-                odataError,
+                sse,
                 "Graph API error creating container type for config {ConfigId}. Status: {Status}. TraceId: {TraceId}",
-                configId, odataError.ResponseStatusCode, context.TraceIdentifier);
+                configId, sse.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 detail: "Failed to create the container type via the Graph API. Check the app registration credentials in the config.",

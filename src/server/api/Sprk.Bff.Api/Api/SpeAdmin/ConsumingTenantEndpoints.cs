@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 
@@ -142,7 +141,9 @@ public static class ConsumingTenantEndpoints
         try
         {
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var consumers = await graphService.ListConsumingTenantsAsync(graphClient, typeId, ct);
+            var consumers = await GraphCallScope.Run(
+                () => graphService.ListConsumingTenantsAsync(graphClient, typeId, ct),
+                "consumers.list");
 
             if (consumers is null)
             {
@@ -159,9 +160,9 @@ public static class ConsumingTenantEndpoints
             var items = consumers.Select(c => MapToDto(c)).ToList();
             return Results.Ok(new ConsumingTenantListDto { Items = items, Count = items.Count });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            return GraphError(odataError, typeId, configGuid, "consumers.list", context, logger);
+            return GraphError(ex, typeId, configGuid, "consumers.list", context, logger);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -220,9 +221,11 @@ public static class ConsumingTenantEndpoints
         try
         {
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var registered = await graphService.RegisterConsumingTenantAsync(
-                graphClient, typeId, request.AppId, request.TenantId,
-                request.DelegatedPermissions, request.ApplicationPermissions, ct);
+            var registered = await GraphCallScope.Run(
+                () => graphService.RegisterConsumingTenantAsync(
+                    graphClient, typeId, request.AppId, request.TenantId,
+                    request.DelegatedPermissions, request.ApplicationPermissions, ct),
+                "consumers.register");
 
             if (registered is null)
             {
@@ -238,7 +241,7 @@ public static class ConsumingTenantEndpoints
                 $"/api/spe/containertypes/{typeId}/consumers/{request.AppId}",
                 dto);
         }
-        catch (ODataError odataError) when (odataError.ResponseStatusCode == StatusCodes.Status409Conflict)
+        catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status409Conflict)
         {
             logger.LogWarning(
                 "POST /api/spe/containertypes/{TypeId}/consumers — conflict: app {AppId} already registered. Config {ConfigId}. TraceId: {TraceId}",
@@ -253,9 +256,9 @@ public static class ConsumingTenantEndpoints
                     ["traceId"] = context.TraceIdentifier
                 });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            return GraphError(odataError, typeId, configGuid, "consumers.register", context, logger);
+            return GraphError(ex, typeId, configGuid, "consumers.register", context, logger);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -313,9 +316,11 @@ public static class ConsumingTenantEndpoints
         try
         {
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var updated = await graphService.UpdateConsumingTenantAsync(
-                graphClient, typeId, appId,
-                request.DelegatedPermissions, request.ApplicationPermissions, ct);
+            var updated = await GraphCallScope.Run(
+                () => graphService.UpdateConsumingTenantAsync(
+                    graphClient, typeId, appId,
+                    request.DelegatedPermissions, request.ApplicationPermissions, ct),
+                "consumers.update");
 
             if (updated is null)
             {
@@ -339,9 +344,9 @@ public static class ConsumingTenantEndpoints
 
             return Results.Ok(MapToDto(updated));
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            return GraphError(odataError, typeId, configGuid, "consumers.update", context, logger);
+            return GraphError(ex, typeId, configGuid, "consumers.update", context, logger);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -398,7 +403,9 @@ public static class ConsumingTenantEndpoints
         try
         {
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var removed = await graphService.RemoveConsumingTenantAsync(graphClient, typeId, appId, ct);
+            var removed = await GraphCallScope.Run(
+                () => graphService.RemoveConsumingTenantAsync(graphClient, typeId, appId, ct),
+                "consumers.remove");
 
             if (!removed)
             {
@@ -422,9 +429,9 @@ public static class ConsumingTenantEndpoints
 
             return Results.NoContent();
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            return GraphError(odataError, typeId, configGuid, "consumers.remove", context, logger);
+            return GraphError(ex, typeId, configGuid, "consumers.remove", context, logger);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -505,7 +512,7 @@ public static class ConsumingTenantEndpoints
 
     /// <summary>Returns a 500 Graph API error ProblemDetails result and logs the error.</summary>
     private static IResult GraphError(
-        ODataError odataError,
+        SpaarkeStorageException ex,
         string typeId,
         Guid configGuid,
         string errorCodePrefix,
@@ -513,9 +520,9 @@ public static class ConsumingTenantEndpoints
         ILogger<Program> logger)
     {
         logger.LogError(
-            odataError,
+            ex,
             "Graph API error for container type {TypeId}, config {ConfigId}. Status: {Status}. ErrorCode: {ErrorCode}. TraceId: {TraceId}",
-            typeId, configGuid, odataError.ResponseStatusCode, errorCodePrefix, context.TraceIdentifier);
+            typeId, configGuid, ex.StatusCode, errorCodePrefix, context.TraceIdentifier);
 
         return Results.Problem(
             detail: "Failed to complete the operation via the Graph API. Check the app registration credentials in the config.",

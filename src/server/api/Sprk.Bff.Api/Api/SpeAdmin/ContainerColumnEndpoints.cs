@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 
@@ -128,7 +127,9 @@ public static class ContainerColumnEndpoints
                 return ConfigNotFoundProblem(configGuid, context);
 
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var columns = await graphService.ListColumnsAsync(graphClient, containerId, ct);
+            var columns = await GraphCallScope.Run(
+                () => graphService.ListColumnsAsync(graphClient, containerId, ct),
+                "container.columns.list");
 
             var result = new ContainerColumnListResponse(
                 columns.Select(ContainerColumnDto.FromDomain).ToList(),
@@ -147,13 +148,13 @@ public static class ContainerColumnEndpoints
                 configGuid, context.TraceIdentifier);
             return ConfigNotFoundProblem(configGuid, context);
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
             logger.LogError(
-                odataError,
+                ex,
                 "ListColumns: Graph API error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
-            return GraphApiProblem(odataError, context);
+                containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
+            return GraphApiProblem(ex, context);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -197,16 +198,18 @@ public static class ContainerColumnEndpoints
 
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
-            var created = await graphService.CreateColumnAsync(
-                graphClient,
-                containerId,
-                request.Name,
-                request.DisplayName,
-                request.Description,
-                request.ColumnType,
-                request.Required,
-                request.Indexed,
-                ct);
+            var created = await GraphCallScope.Run(
+                () => graphService.CreateColumnAsync(
+                    graphClient,
+                    containerId,
+                    request.Name,
+                    request.DisplayName,
+                    request.Description,
+                    request.ColumnType,
+                    request.Required,
+                    request.Indexed,
+                    ct),
+                "container.columns.create");
 
             logger.LogInformation(
                 "CreateColumn: created column '{ColumnId}' ('{Name}', type={ColumnType}) " +
@@ -224,13 +227,13 @@ public static class ContainerColumnEndpoints
                 configGuid, context.TraceIdentifier);
             return ConfigNotFoundProblem(configGuid, context);
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
             logger.LogError(
-                odataError,
+                ex,
                 "CreateColumn: Graph API error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
-            return GraphApiProblem(odataError, context);
+                containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
+            return GraphApiProblem(ex, context);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -293,15 +296,17 @@ public static class ContainerColumnEndpoints
 
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
-            var updated = await graphService.UpdateColumnAsync(
-                graphClient,
-                containerId,
-                columnId,
-                request.DisplayName,
-                request.Description,
-                request.Required,
-                request.Indexed,
-                ct);
+            var updated = await GraphCallScope.Run(
+                () => graphService.UpdateColumnAsync(
+                    graphClient,
+                    containerId,
+                    columnId,
+                    request.DisplayName,
+                    request.Description,
+                    request.Required,
+                    request.Indexed,
+                    ct),
+                "container.columns.update");
 
             if (updated is null)
             {
@@ -326,7 +331,7 @@ public static class ContainerColumnEndpoints
                 configGuid, context.TraceIdentifier);
             return ConfigNotFoundProblem(configGuid, context);
         }
-        catch (ODataError odataError) when (odataError.ResponseStatusCode == StatusCodes.Status404NotFound)
+        catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status404NotFound)
         {
             logger.LogInformation(
                 "UpdateColumn: Graph returned 404 for column '{ColumnId}' on container '{ContainerId}', TraceId={TraceId}",
@@ -337,13 +342,13 @@ public static class ContainerColumnEndpoints
                 statusCode: StatusCodes.Status404NotFound,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
             logger.LogError(
-                odataError,
+                ex,
                 "UpdateColumn: Graph API error for column '{ColumnId}', container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                columnId, containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
-            return GraphApiProblem(odataError, context);
+                columnId, containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
+            return GraphApiProblem(ex, context);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -393,7 +398,9 @@ public static class ContainerColumnEndpoints
 
             var graphClient = await graphService.GetClientForConfigAsync(config, ct);
 
-            var deleted = await graphService.DeleteColumnAsync(graphClient, containerId, columnId, ct);
+            var deleted = await GraphCallScope.Run(
+                () => graphService.DeleteColumnAsync(graphClient, containerId, columnId, ct),
+                "container.columns.delete");
 
             if (!deleted)
             {
@@ -418,7 +425,7 @@ public static class ContainerColumnEndpoints
                 configGuid, context.TraceIdentifier);
             return ConfigNotFoundProblem(configGuid, context);
         }
-        catch (ODataError odataError) when (odataError.ResponseStatusCode == StatusCodes.Status404NotFound)
+        catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status404NotFound)
         {
             logger.LogInformation(
                 "DeleteColumn: Graph returned 404 for column '{ColumnId}' on container '{ContainerId}', TraceId={TraceId}",
@@ -429,13 +436,13 @@ public static class ContainerColumnEndpoints
                 statusCode: StatusCodes.Status404NotFound,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
             logger.LogError(
-                odataError,
+                ex,
                 "DeleteColumn: Graph API error for column '{ColumnId}', container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                columnId, containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
-            return GraphApiProblem(odataError, context);
+                columnId, containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
+            return GraphApiProblem(ex, context);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -538,12 +545,12 @@ public static class ContainerColumnEndpoints
             statusCode: StatusCodes.Status400BadRequest,
             extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
 
-    private static IResult GraphApiProblem(ODataError odataError, HttpContext context) =>
+    private static IResult GraphApiProblem(SpaarkeStorageException ex, HttpContext context) =>
         Results.Problem(
             title: "Graph API Error",
-            detail: odataError.Error?.Message ?? "An error occurred communicating with the Graph API.",
-            statusCode: odataError.ResponseStatusCode is >= 400 and < 600
-                ? odataError.ResponseStatusCode
+            detail: ex.Message ?? "An error occurred communicating with the Graph API.",
+            statusCode: ex.StatusCode is >= 400 and < 600
+                ? ex.StatusCode.Value
                 : StatusCodes.Status502BadGateway,
             extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
 
