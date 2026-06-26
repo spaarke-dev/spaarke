@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="015" project="spaarke-daily-update-service-r4">
   <metadata>
-    <title>Reconcile + redeploy divergent playbook configs from repo source-of-truth</title>
+    <title>Re-scoped: Correct repo entities + document deployed canonical state (was: Reconcile + redeploy divergent playbook configs)</title>
     <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
     <estimated-hours>2</estimated-hours>
     <dependencies>012, 013, 014</dependencies>
     <blocks>016</blocks>
@@ -12,6 +13,34 @@
     <rigor-reason>Dataverse deployment driven by audit reports. For divergent playbooks within scope (i.e., NOT the W1-owned ones), redeploys configjson from repo source-of-truth. No code change. Quality: verify final state via read_query.</rigor-reason>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
+    <completion-notes>
+      Re-scoped 2026-06-25 per owner clarification on Spaarke entity architecture (see CLAUDE.md § '🚨 2026-06-25 — Spaarke entity architecture').
+
+      Original scope: "reconcile + redeploy divergent playbook configs from repo source-of-truth" — premised on the assumption that repo JSON files were the canonical source.
+
+      Discovered during audits 012/013/014: the repo JSON files were authored against WRONG OOB activity-entity assumptions (`task`, `email`, `appointment`). Owner clarified that Spaarke has always used `sprk_event` / `sprk_communication` / `sprk_workassignment`. The DEPLOYED Dataverse playbooks correctly use these custom entities. So:
+      - Deployed entity choices = canonical
+      - Repo JSON files were pre-R4 mistakes
+
+      Re-scoped action taken in this task:
+      1. Discovered entity schemas via `mcp__dataverse__describe` for `sprk_event`, `sprk_communication`, `sprk_workassignment`, `sprk_document` — captured at `notes/design/entity-schemas-discovered.md`
+      2. Rewrote 7 repo JSON files at `projects/spaarke-daily-update-service/notes/playbooks/` to use correct Spaarke entities (`sprk_event` with eventtype discriminator, `sprk_communication` with sprk_communicationtype = 100000000 for Email, `sprk_workassignment`, `sprk_document` with sprk_documentname not sprk_name). Each file has a top-level `_correction` block documenting the rewrite for traceability (block stays in repo; strip before deployment).
+      3. Added LookupUserMembership (ActionType 52) node + `{{joinIds myMatters.ids}}` filter union to all 7 repo JSON files. This goes BEYOND what's currently deployed (deployed playbooks all LACK ActionType 52) — and is the R4 R3 closeout goal per spec FR-5 AC-5b + FR-7 + FR-8 + FR-9.
+      4. Added `notes/risks.md` R4 entry documenting the architecture correction.
+
+      Redeploy is NOT executed in PR 2 — instead, PR 3 W1 tasks 022–025 will deploy the corrected repo state (which includes both correct entities AND the membership-scope branch the R3 UAT identified as missing). Stub playbooks PB-017 + PB-022 also rewritten as full implementations in repo (PR 3 W1 tasks 024/025 deploy them).
+
+      Files written:
+      - notes/design/entity-schemas-discovered.md (authoritative entity reference)
+      - notification-new-emails.json (rewritten: email -> sprk_communication)
+      - notification-new-documents.json (rewritten: sprk_name -> sprk_documentname; widened FetchXml union)
+      - notification-new-events.json (rewritten: appointment -> sprk_event with 5-GUID eventtype IN filter)
+      - notification-tasks-due-soon.json (rewritten: task -> sprk_event with eventtype = Task GUID)
+      - notification-tasks-overdue.json (rewritten: task -> sprk_event with eventtype = Task GUID)
+      - notification-matter-activity.json (stub -> full implementation)
+      - notification-work-assignments.json (stub -> full implementation: task -> sprk_workassignment)
+      - notes/risks.md (added R4 entry)
+    </completion-notes>
   </metadata>
 
   <prompt>For each divergent playbook flagged by audits 012, 014 (NOT 013 — those are W1-owned), redeploy `sprk_configjson` from the canonical repo JSON via MCP `update_record`. Scope: PB-016/PB-018/PB-019 (audit 012) if any divergence, and PB-017/PB-022 (audit 014) ONLY if W1 already shipped a new repo JSON; if W1 has NOT yet shipped, PB-017/PB-022 are NO-OP for this task (W1 owns the redeploy). PB-020/PB-021 (audit 013) are NO-OP in this task — W1 task pair handles them. Verify final state of each redeployed playbook via `read_query` (sprk_configjson semantically matches repo). Document outcomes in `notes/deployments/015-reconcile.md`.</prompt>

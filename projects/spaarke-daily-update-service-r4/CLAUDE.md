@@ -162,6 +162,23 @@ Every BFF-touching task MUST:
 ### 2026-06-25 — Spec path correction: TTL fix lives at `CreateNotificationNodeExecutor.cs:490` (not `NotificationService.cs`)
 - **Reason**: Pre-flight verification showed `Services/Ai/NotificationService.cs` doesn't exist. The TTL fix (`ttlinseconds = 604800`) actually lives in `BuildNotificationEntity` at `CreateNotificationNodeExecutor.cs:490`. Tasks reference the correct path.
 
+### 🚨 2026-06-25 — Spaarke entity architecture (BINDING for every R4 task touching playbook entities)
+- **Owner clarification (verbatim)**: "we do not use OOB tasks / activities or email — our corresponding entities are Events (with event type = tasks, for tasks; but we track other event types too) and communications (with type = email). I'm surprised this has come up since this has been a core part of the design from the very beginning."
+- **Rule**:
+  - ❌ NEVER use OOB `task` / `email` / `appointment` activity entities
+  - ✅ Tasks → `sprk_event` with event-type discriminator = task
+  - ✅ Emails → `sprk_communication` with type discriminator = email
+  - ✅ General events → `sprk_event` with appropriate discriminator
+  - ✅ `appnotification` REMAINS the one OOB entity R4 touches (Microsoft notification surface; customData JSON evolves but column stays OOB)
+- **Spec impact (errors to correct as we go)**:
+  - FR-7 "FetchXml union ... Dedupe by activityid" → should be `sprk_eventid` (sprk_event is the target entity, not OOB task)
+  - PR 3 W1 tasks 022/023 (migrate `notification-tasks-{overdue,due-soon}.json`) → repo JSON files target OOB `task`; deployed playbooks target `sprk_event`. Repo files need REWRITE to match `sprk_event`, then add membership-scope union.
+  - PB-016 (Emails) → deployed targets `sprk_communication`; repo JSON targets OOB `email` — repo needs rewrite.
+  - PB-019 (Events) → deployed targets `sprk_event`; repo JSON targets OOB `appointment` — repo needs rewrite.
+  - "Repo JSON files = canonical source-of-truth" decision (2026-06-25) is REVISED: deployed entity choices are canonical; repo JSON files were authored against a wrong OOB assumption and must be corrected before W0/W1 redeploy work.
+- **Application**: every R4 task touching playbook JSON, NodeExecutor FetchXml, or any Dataverse query — verify the entity name is `sprk_event` / `sprk_communication` / `sprk_workassignment` / `sprk_matter` / `sprk_project` / `sprk_document` (NOT OOB equivalents). When in doubt, query the deployed playbook config via MCP `read_query` to confirm the actual entity in use.
+- **Memory pointer**: `~/.claude/projects/.../memory/spaarke-entity-architecture.md` — project-tier memory persisted across sessions.
+
 ---
 
 ## Implementation Notes

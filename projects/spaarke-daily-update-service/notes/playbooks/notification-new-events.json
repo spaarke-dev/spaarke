@@ -1,9 +1,17 @@
 {
   "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "_correction": {
+    "date": "2026-06-25",
+    "by": "Claude Code task-015 entity-architecture correction",
+    "reason": "Owner clarified Spaarke uses sprk_event (with sprk_eventtype_ref discriminator) for general events. Original repo file used OOB appointment activity entity incorrectly. Corrected per CLAUDE.md § '2026-06-25 — Spaarke entity architecture'.",
+    "previousEntities": ["appointment"],
+    "correctedEntities": ["sprk_event"],
+    "alsoAdded": "Membership-scope branch via LookupUserMembership (ActionType 52) preserved — deployed PB-019 currently LACKS this; R4 PR 3 W1 + AC-5b deploys the corrected union. Event-type filter narrowed to 5 GUIDs {Action, Deadline, Meeting, Milestone, Reminder} per deployed canonical state."
+  },
   "playbook": {
     "id": "NP-005",
     "name": "New Events on Matters/Projects",
-    "description": "Notifies users when new calendar events (appointments, meetings) have been created or updated on their assigned matters or projects since the last check. Queries appointment activity records linked to matters where the user is a team member (owner, assigned attorney, assigned paralegal), filtered by the configurable timeWindow parameter.",
+    "description": "Notifies users when new sprk_event records (of types Action, Deadline, Meeting, Milestone, Reminder) have been created on their assigned matters or projects since the last check. Uses Spaarke custom sprk_event entity (NOT OOB appointment activity).",
     "sprk_playbooktype": 2,
     "isPublic": true,
     "isSystemPlaybook": true,
@@ -43,6 +51,7 @@
       "positionY": 200,
       "dependsOn": [],
       "configJson": {
+        "__actionType": 33,
         "scope": "user-matters-and-projects",
         "resolveUserId": true,
         "description": "Scoped to the current user's assigned matters and projects"
@@ -62,27 +71,27 @@
         "entityType": "sprk_matter",
         "roles": ["owner", "assignedAttorney", "assignedParalegal"],
         "includeRelated": false,
-        "description": "Resolve the executing user's matter memberships (owner + assigned attorney + assigned paralegal). Mirrors the canonical pattern established by notification-new-documents.json (R3 FR-1C.1 / A1 defect). Resolved IDs are bound to `myMatters.ids` for downstream filtering via {{joinIds myMatters.ids}}."
+        "description": "Resolve the executing user's matter memberships (owner + assigned attorney + assigned paralegal) per ADR-034. Resolved IDs are bound to `myMatters.ids` for downstream filtering via {{joinIds myMatters.ids}}."
       }
     },
     {
       "name": "Query New Events",
       "nodeType": "Workflow",
-      "actionType": 22,
-      "canvasType": "updateRecord",
+      "actionType": 51,
+      "canvasType": "queryDataverse",
       "outputVariable": "newEvents",
       "positionX": 450,
       "positionY": 200,
       "dependsOn": ["Lookup My Matters"],
       "configJson": {
-        "__actionType": 22,
+        "__actionType": 51,
         "queryMode": true,
-        "entityLogicalName": "appointment",
-        "fetchXml": "<fetch top='50'><entity name='appointment'><attribute name='subject'/><attribute name='scheduledstart'/><attribute name='scheduledend'/><attribute name='location'/><attribute name='createdon'/><attribute name='modifiedon'/><attribute name='regardingobjectid'/><attribute name='activityid'/><filter type='and'><condition attribute='regardingobjectid' operator='in' value='{{joinIds myMatters.ids}}'/><filter type='or'><condition attribute='createdon' operator='ge' value='{{sinceTimestamp}}'/><condition attribute='modifiedon' operator='ge' value='{{sinceTimestamp}}'/></filter></filter><order attribute='scheduledstart' descending='false'/></entity></fetch>",
-        "parameters": {
-          "sinceTimestamp": "{{timeWindow}}"
+        "entityLogicalName": "sprk_event",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_event\"><attribute name=\"sprk_eventname\"/><attribute name=\"sprk_duedate\"/><attribute name=\"sprk_finalduedate\"/><attribute name=\"sprk_meetingdate\"/><attribute name=\"sprk_plannedstart\"/><attribute name=\"sprk_plannedend\"/><attribute name=\"createdon\"/><attribute name=\"sprk_eventid\"/><attribute name=\"sprk_eventtype_ref\"/><attribute name=\"statuscode\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"createdby\" operator=\"ne-userid\"/><condition attribute=\"sprk_eventtype_ref\" operator=\"in\"><value>5a1c56c3-98ff-f011-8406-7c1e525abd8b</value><value>e0043c4b-99ff-f011-8406-7c1e525abd8b</value><value>8fb9b5a7-99ff-f011-8406-7c1e525abd8b</value><value>b86d712b-99ff-f011-8406-7c1e525abd8b</value><value>da6bc005-99ff-f011-8406-7c1e525abd8b</value></condition><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
+        "templateParameters": {
+          "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
         },
-        "description": "Retrieve appointments whose regardingobjectid is in the user's matter membership set (resolved via myMatters.ids) and that were created or modified within the configured time window."
+        "description": "New sprk_event records (eventtype IN {Action, Deadline, Meeting, Milestone, Reminder}, createdby != current user, createdon in last {{timeWindowHours}}, default 24h) where EITHER (a) sprk_regardingmatter is in the user's myMatters.ids membership set [LookupUserMembership branch], OR (b) the event owner is the current user, OR (c) the sprk_regardingmatter owner is the current user."
       }
     },
     {
@@ -96,8 +105,13 @@
       "dependsOn": ["Query New Events"],
       "configJson": {
         "__actionType": 30,
-        "conditionJson": "{{newEvents.output.count}} > 0",
-        "description": "Check if any new or updated events were found"
+        "condition": {
+          "operator": "gt",
+          "left": "{{newEvents.output.count}}",
+          "right": 0
+        },
+        "trueBranch": "Create Notification",
+        "description": "Check if any new events were found"
       }
     },
     {
@@ -112,26 +126,26 @@
       "configJson": {
         "__actionType": 50,
         "title": "You have {{newEvents.output.count}} new event(s) on your matters",
-        "body": "{{#each newEvents.output.items}}{{subject}} — {{scheduledStartFormatted}}{{#if location}} at {{location}}{{/if}} ({{regardingName}})\n{{/each}}",
+        "body": "{{#each newEvents.output.items}}{{sprk_eventname}} on {{sprk_meetingdate}} ({{sprk_regardingrecordname}})\n{{/each}}",
         "category": "new-events",
         "priority": 100000000,
-        "actionUrl": "/main.aspx?pagetype=entitylist&etn=appointment&viewtype=1039",
+        "actionUrl": "/main.aspx?pagetype=entitylist&etn=sprk_event&viewtype=1039",
         "recipientId": "{{run.userId}}",
-        "regardingType": "appointment",
+        "regardingType": "sprk_event",
         "iterateItems": true,
         "itemNotification": {
-          "title": "New event on {{item.regardingName}}",
-          "body": "{{item.subject}} — {{item.scheduledStartFormatted}}{{#if item.location}} at {{item.location}}{{/if}}",
+          "title": "New event on {{item.sprk_regardingrecordname}}",
+          "body": "{{item.sprk_eventname}} — {{item.sprk_meetingdate}}",
           "category": "new-events",
           "priority": 100000000,
-          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=appointment&id={{item.activityid}}",
+          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_event&id={{item.sprk_eventid}}",
           "recipientId": "{{run.userId}}",
-          "regardingId": "{{item.activityid}}",
-          "regardingType": "appointment"
+          "regardingId": "{{item.sprk_eventid}}",
+          "regardingType": "sprk_event"
         },
         "deduplication": {
           "enabled": true,
-          "key": "new-events:{{run.userId}}:{{item.activityid}}:{{item.modifiedon}}"
+          "key": "new-events:{{run.userId}}:{{item.sprk_eventid}}:{{item.modifiedon}}"
         }
       }
     }

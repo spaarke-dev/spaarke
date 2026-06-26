@@ -3,7 +3,9 @@
   <metadata>
     <title>Run jps-scope-refresh after PR 2 deployments</title>
     <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Catalog state verified via direct MCP read_query against `sprk_analysisaction` + `sprk_analysisplaybook` in spaarkedev1. All 5 R4-deployed actions (SYS-LOOKUP-MEMBERSHIP=52, BRIEF-NARRATE-TLDR=0, BRIEF-NARRATE-CHANNEL=0, BRIEF-VALIDATE-ENTITY-NAMES=141) + the DAILY-BRIEFING-NARRATE playbook (statecode=Active) confirmed present. The PowerShell `Refresh-ScopeModelIndex.ps1` catalog file write remains deferred due to a pre-existing bug on `sprk_externalid` column (task 008 surfaced this; not R4 scope). State documented at `notes/smoke/016-scope-refresh-state.md`. Deferred catalog file write does NOT block PR 2 closeout — Dataverse is the canonical source-of-truth, BFF runtime + PlaybookBuilder UI read from Dataverse directly.</completion-notes>
     <estimated-hours>0.5</estimated-hours>
     <dependencies>015</dependencies>
     <blocks>017</blocks>

@@ -113,6 +113,28 @@ R4 FR-12 (PR 4, task 030) explicitly defers the `/narrate` dispatch path decisio
 
 ---
 
+## R4: Spaarke Entity Architecture Correction (Tasks vs OOB Activities) — ✅ RESOLVED 2026-06-25
+
+### Summary
+
+R4 spec inherited a wrong assumption from pre-existing repo JSON files (at `projects/spaarke-daily-update-service/notes/playbooks/`) that Spaarke uses Microsoft OOB activity entities (`task`, `email`, `appointment`). Owner clarified 2026-06-25 that this has always been wrong: Spaarke uses `sprk_event` (with event-type discriminator) for tasks and general events, and `sprk_communication` (with type discriminator) for emails. The deployed Dataverse playbooks correctly use these custom entities; the repo files were a pre-R4 mistake.
+
+### Resolution (task 015)
+
+Repo JSON files rewritten to use `sprk_event` / `sprk_communication` / `sprk_workassignment` / `sprk_matter` / `sprk_project` / `sprk_document` entities matching the deployed canonical state. Membership-scope branch (LookupUserMembership) added to playbooks where R4 FR-5 AC-5b + FR-7 require it. Spec line 234 ("repo JSON files = canonical source-of-truth") revised: deployed entity choices were canonical from the start; repo files have been corrected to match.
+
+### Carry-forward
+
+- PR 3 W1 task prompts (020–028) reference `sprk_event` / `sprk_communication` etc. — verify when dispatching
+- Spec FR-7 "Dedupe by activityid" — wrong; corrected to `sprk_eventid` in task 023 implementation
+- Memory persisted at `~/.claude/projects/c--code-files-spaarke-wt-spaarke-daily-update-service-r4/memory/spaarke-entity-architecture.md` so future sessions inherit the rule
+
+### Status when resolved
+
+Resolved by task 015 (the formerly-"reconcile + redeploy divergent configs" task, re-scoped to "correct repo entities + document state").
+
+---
+
 ## Status Summary
 
 | Risk | Status | Resolved When |
@@ -120,3 +142,4 @@ R4 FR-12 (PR 4, task 030) explicitly defers the `/narrate` dispatch path decisio
 | R1: R3 PR #451 overlap | ✅ Resolved 2026-06-25 | R3 PR #451 merged at `fa788dcaf`; pulled into R4 at `3e586c1b0` — R4 builds on R3 baseline |
 | R2: NotificationService.cs path | Resolved (documentation) | Captured in CLAUDE.md + this file |
 | R3: `sprk_playbookconsumer` dispatch | Active | Task 030 decision recorded |
+| R4: Spaarke entity architecture | ✅ Resolved 2026-06-25 | Task 015 corrected repo JSON files to use sprk_event / sprk_communication / sprk_workassignment; CLAUDE.md decisions log + design notes captured |
