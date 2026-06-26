@@ -128,6 +128,33 @@ CHECK 23: IsJpsFormat() would detect this as JPS
   - If EITHER false → FAIL (will fall back to flat-text path!)
 ```
 
+### Step 7.5: Playbook-Definition File Validation (BINDING per canonical-truth loop 2026-06-26)
+
+If the file under validation is a **playbook definition** (top-level keys `playbook`, `nodes`), apply the additional contract checks from [`docs/guides/ai-guide-playbook-deploy-recipe.md`](../../../docs/guides/ai-guide-playbook-deploy-recipe.md) — these enforce the runtime contract per [`docs/architecture/ai-architecture-playbook-runtime.md`](../../../docs/architecture/ai-architecture-playbook-runtime.md) and the schema gates in [`src/server/api/Sprk.Bff.Api/Models/Ai/node-routing-config.schema.json`](../../../src/server/api/Sprk.Bff.Api/Models/Ai/node-routing-config.schema.json):
+
+```
+NODE-LEVEL CHECKS (apply per node in nodes[]):
+  ✅/❌ CHECK 24: actionCode is present for every node UNLESS nodeType == "DeliverComposite"
+    — Deploy-Playbook.ps1:331-356 lints this; missing actionCode = silent failure path
+    — DeliverComposite is the only documented exemption (Deploy-Playbook.ps1:333)
+  ✅/❌ CHECK 25: nodeType is one of: AIAnalysis | Output | Control | Workflow | DeliverComposite
+    — These are the 5 server-side NodeType values per INodeExecutor.cs:59-91
+  ✅/⚠️ CHECK 26: For AIAnalysis nodes, configJson.__actionType is set (structural fallback)
+    — Per PlaybookOrchestrationService.cs:1116, runtime falls back to __actionType if no FK
+  ✅/⚠️ CHECK 27: configJson is well-formed against node-routing-config.schema.json
+    — Same schema gate Deploy-Playbook.ps1:789 applies (FR-14e)
+
+  ⚠️ NOTE on sprk_isactive: the JSON file format does NOT carry this field — Deploy-Playbook.ps1:823
+     writes sprk_isactive=true explicitly. There is nothing to validate at the JSON level;
+     the audit skill (jps-playbook-audit) checks the deployed row.
+
+ANTI-PATTERN CHECKS (per ai-architecture-actions-nodes-scopes.md §5):
+  ✅/⚠️ CHECK 28: playbook.sprk_configjson does NOT contain a "nodes" or "edges" array
+    — That's the R4 deploy bug: putting nodes in playbook configjson instead of deploying as rows
+  ✅/⚠️ CHECK 29: Scope decisions (skills, knowledge, tools) live in scopes.*, NOT inline in node configJson
+    — Audit + refresh tooling cannot find inline-JSON scope declarations
+```
+
 ### Step 8: Render Test (Optional)
 
 ```

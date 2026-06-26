@@ -50,13 +50,26 @@ Ask the user:
 5. **What data needs to flow between nodes?** (output of one -> input of another)
 6. **What shared knowledge is needed across nodes?** (standard clauses, regulatory frameworks, etc.)
 
+### Step 1.5: Runtime Contract Reminder (BINDING per canonical-truth loop 2026-06-26)
+
+Before designing, internalize these runtime rules from [`docs/architecture/ai-architecture-playbook-runtime.md`](../../../docs/architecture/ai-architecture-playbook-runtime.md):
+
+1. **Mode is emergent, not declarative**. There is NO `sprk_playbookmode` column read at runtime. The orchestrator (`PlaybookOrchestrationService.cs:246-253`) checks for `sprk_playbooknode` rows; zero rows → Legacy mode log + fallback. **Do NOT instruct the user to set a "mode" field on the playbook row** — instead instruct them to deploy node rows.
+2. **The playbook's `sprk_configjson` is NOT the node graph**. The node graph MUST be deployed as `sprk_playbooknode` rows via `Deploy-Playbook.ps1` per [`ai-guide-playbook-deploy-recipe.md`](../../../docs/guides/ai-guide-playbook-deploy-recipe.md). Putting nodes inline in playbook `sprk_configjson` is the R4 deploy bug — runtime ignores it.
+3. **Action lookup precedence at runtime**: Action FK → ConfigJson `__actionType` → NodeType-default. The deploy script's actionCode lint at `Deploy-Playbook.ps1:331-356` ensures every dispatchable node carries `actionCode`, which is resolved to FK at deploy time. **Authoring by code; runtime by FK.**
+4. **Empty-payload contract** (Path A.5): if the playbook is a non-document dispatch (e.g., `/narrate`, `/summarize` invoked via `IInvokePlaybookAi` facade), the playbook **MUST** have nodes — otherwise Legacy fallback fires + returns 503 `PLAYBOOK_INVOCATION_FAILED`. See [`ai-architecture-consumer-routing.md`](../../../docs/architecture/ai-architecture-consumer-routing.md) §3.
+5. **Config-bag boundary** (from [`ai-architecture-actions-nodes-scopes.md`](../../../docs/architecture/ai-architecture-actions-nodes-scopes.md) §4): every config field has a single Home — Action / Playbook columns / Node row / N:N scopes. When designing nodes, do NOT inline scope decisions in node configJson; use the N:N relationships.
+
 ### Step 2: Load Architecture Context
 
 ```
 LOAD knowledge files:
   - .claude/catalogs/scope-model-index.json (REQUIRED — scope catalog + model rules)
-  - docs/architecture/playbook-architecture.md (playbook data model, node type system, ActionType dispatch, canvas design)
-  - docs/guides/JPS-AUTHORING-GUIDE.md (JPS schema reference, playbook design patterns, scope catalog, model selection)
+  - docs/architecture/ai-architecture-playbook-runtime.md (CANONICAL runtime contract — mode-emergent, action precedence, scope advisory)
+  - docs/architecture/ai-architecture-consumer-routing.md (Path A.5 dispatch for non-document playbooks)
+  - docs/architecture/ai-architecture-actions-nodes-scopes.md (config-home decision tree §4 — load BEFORE Step 4)
+  - docs/guides/ai-guide-playbook-deploy-recipe.md (Deploy-Playbook.ps1 12-step contract)
+  - docs/guides/JPS-AUTHORING-GUIDE.md (JPS schema reference — trimmed to schema-only)
 
 LOAD example JPS files for pattern matching:
   - .claude/skills/jps-action-create/examples/ (all available)
@@ -328,18 +341,38 @@ IF no new scopes were created:
 ### Step 10: Verify Deployment
 
 ```
-QUERY Dataverse to verify:
-  1. Playbook record exists with correct name
-  2. Node count matches definition
-  3. N:N scope associations are correct
-  4. Canvas layout JSON is saved
+QUERY Dataverse via MCP read_query to verify (BINDING — sprk_playbooknode rows are the runtime read path, NOT canvas JSON):
+
+  1. mcp__dataverse__read_query against sprk_analysisplaybook
+       filter: sprk_name eq '{playbookName}'
+       select: sprk_name, sprk_analysisplaybookid, sprk_canvaslayoutjson
+     EXPECT 1 row — capture sprk_analysisplaybookid
+
+  2. mcp__dataverse__read_query against sprk_playbooknode
+       filter: _sprk_playbookid_value eq <captured Guid>
+       select: sprk_name, sprk_nodetype, sprk_isactive, _sprk_actionid_value, sprk_executionorder
+       orderby: sprk_executionorder asc
+     EXPECT N rows where N == definition.nodes.length
+     EXPECT every row has sprk_isactive = true (else runtime sees zero nodes → Legacy mode)
+     EXPECT every dispatchable node has _sprk_actionid_value non-null (the FK is the canonical dispatch axis per ai-architecture-playbook-runtime.md §5)
+
+  3. mcp__dataverse__read_query for N:N associations
+       Verify sprk_analysisplaybook_action, sprk_playbook_skill, sprk_playbook_knowledge, sprk_playbook_tool match scopes
+
+  4. Canvas layout JSON saved (informational — runtime does NOT read this)
 
 REPORT:
   "Deployed successfully
    Playbook: {name} ({guid})
-   Nodes: {count} created
+   Nodes: {count} created (all sprk_isactive=true)
+   FKs: {count}/{count} dispatchable nodes have _sprk_actionid_value
    Scopes: {count} associations
-   Canvas: layout saved"
+   Canvas: layout saved
+   Runtime mode prediction: NodeBased (nodes present, FKs resolved)"
+
+IF node count mismatches OR any sprk_isactive=false OR any dispatchable node missing FK:
+  WARN — playbook will hit Legacy mode log at PlaybookOrchestrationService.cs:250
+  OFFER to re-run Deploy-Playbook.ps1 -Force
 ```
 
 ### Step 11: Document the Playbook
