@@ -78,7 +78,16 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs` | Index name constant: `playbook-embeddings` → `spaarke-playbook-embeddings` (line 46) |
 | `src/server/api/Sprk.Bff.Api/appsettings.json` | Remove `spaarke-knowledge-shared` ref (line 122); remove `discovery-index` from `AllowedIndexes` |
 | `src/server/api/Sprk.Bff.Api/appsettings.template.json` | Same as above (lines ~237–242) |
-| `src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs` | Update `DiscoveryIndexName` removal if present |
+| `src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs` | UPDATE — REMOVE `DiscoveryIndexName` property entirely (line 8); UPDATE `KnowledgeIndexName` default (line 7) `spaarke-knowledge-index-v2` → `spaarke-files-index` |
+| `src/server/api/Sprk.Bff.Api/Configuration/AnalysisOptions.cs` | UPDATE — change `SharedIndexName` default (line 69) from `spaarke-knowledge-index-v2` → `spaarke-files-index` |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs` | UPDATE — retire any references to retired indexes in interface signatures / XML doc comments |
+| `src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs` | UPDATE — endpoint references to retired indexes (canonical = `spaarke-files-index`) |
+| `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` | UPDATE — doc-comment refs (lines 12, 133) `spaarke-knowledge-index-v2` → `spaarke-files-index` |
+| `src/server/api/Sprk.Bff.Api/Models/Ai/PlaybookEmbeddingDocument.cs` | UPDATE — doc-comment ref (line 13) + ensure model name aligns with `spaarke-playbook-embeddings` rename per FR-10 |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs` | UPDATE — doc-comment ref (line 878) to retired index |
+| `src/server/api/Sprk.Bff.Api/appsettings.tokens.md` | UPDATE — token doc references to retired indexes |
+| `src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SearchIndexResolver.ts` | UPDATE — doc-comment ref (line 35) `spaarke-knowledge-index-v2` → `spaarke-files-index` |
+| `src/server/api/Sprk.Bff.Api/appsettings.template.json` (line 248) | UPDATE — `EmbeddingModelName` `text-embedding-3-small` → `text-embedding-3-large` per FR-20 (NFR-11 alignment; pre-pipeline audit 2026-06-26) |
 | `scripts/ai-search/Sync-RecordsToIndex.ps1` | Populate `tenantId` field |
 | `scripts/ai-search/Add-ReferenceToIndex.ps1` | Verify `domain` field population |
 | `scripts/ai-search/Index-AllReferences.ps1` | Ingestion script (no changes expected) |
@@ -147,15 +156,34 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 
 #### Code + Config
 
-13. **FR-13** — BFF code refactor: knowledge-v2 → files-index.
-    **Acceptance**: Grep for `spaarke-knowledge-index-v2` returns zero matches in `src/server/api/`. References replaced with `spaarke-files-index` in: `RagService.cs`, `RagIndexingPipeline.cs`, `BulkRagIndexingJobHandler.cs`, `RagIndexingJobHandler.cs`, `KnowledgeDeploymentService.cs`, `IndexRetrieveNode.cs`, and any AssistantQuery/SemanticSearch endpoints discovered.
+13. **FR-13** — BFF code refactor: knowledge-v2 → files-index (scope expanded 2026-06-26 to include C# defaults + interface + endpoints + doc-comments per pre-pipeline grep audit).
+    **Acceptance**: Grep for `spaarke-knowledge-index-v2` returns zero matches in `src/` as a live string value (doc-comment hits accepted only if updated to current name). References replaced with `spaarke-files-index` in:
 
-14. **FR-14** — App settings + template cleanup.
+    **Code (runtime defaults — MUST change):**
+    - `src/server/api/Sprk.Bff.Api/Configuration/AnalysisOptions.cs:69` — `SharedIndexName` default
+    - `src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs:7` — `KnowledgeIndexName` default
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs`
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs`
+    - `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/BulkRagIndexingJobHandler.cs`
+    - `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs`
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/KnowledgeDeploymentService.cs` + `IKnowledgeDeploymentService.cs` interface
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/IndexRetrieveNode.cs`
+    - `src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs` (and any other AssistantQuery / SemanticSearch endpoints discovered)
+
+    **Doc comments (cosmetic — update for grep hygiene):**
+    - `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` (lines 12, 133)
+    - `src/server/api/Sprk.Bff.Api/Models/Ai/PlaybookEmbeddingDocument.cs:13`
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs:878`
+    - `src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SearchIndexResolver.ts:35`
+    - `src/server/api/Sprk.Bff.Api/appsettings.tokens.md`
+
+14. **FR-14** — App settings + template + options-class cleanup (scope expanded 2026-06-26 to include `AiSearchOptions.DiscoveryIndexName` property removal).
     **Acceptance**:
     - `appsettings.json:122` `Analysis.SharedIndexName` value updated from `spaarke-knowledge-shared` to `spaarke-files-index`
     - `appsettings.template.json` (lines ~237–242): same update
-    - `discovery-index` removed from `AiSearch.AllowedIndexes` array and `AiSearch.DiscoveryIndexName`
-    - No app setting references `spaarke-knowledge-shared`, `discovery-index`, `spaarke-knowledge-index-v2`, or `spaarke-knowledge-index` after change
+    - `discovery-index` removed from `AiSearch.AllowedIndexes` array AND `AiSearch.DiscoveryIndexName` setting key
+    - `src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs:8` — `DiscoveryIndexName` property REMOVED entirely (not just emptied — the property no longer exists as a configurable option, since `discovery-index` is retired)
+    - No app setting OR C# default references `spaarke-knowledge-shared`, `discovery-index`, `spaarke-knowledge-index-v2`, or `spaarke-knowledge-index` after change. Verify via `grep -r` across `src/` returns zero hits for these as live values (doc-comment hits are handled by FR-13).
 
 15. **FR-15** — Dev BFF app settings KV-reference migration (AI-Search settings only).
     **Acceptance**: Dev BFF (`spaarke-bff-dev`) app settings updated to use Key Vault references like prod/demo pattern. Specifically the following **AI-Search-related** settings — all use `@Microsoft.KeyVault(VaultName=...;SecretName=...)` syntax pointing to `sprkspaarkedev-aif-kv` or equivalent dev KV:
@@ -176,8 +204,12 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 16. **FR-16** — Deploy 7 schemas to `spaarke-search-dev`.
     **Acceptance**: `Deploy-AllIndexes.ps1 -EnvironmentName dev` deploys all 7 indexes successfully. Post-deploy verifier reports all invariants pass. `az search indexes list -g spe-infrastructure-westus2 --service-name spaarke-search-dev` shows 7 indexes with canonical names.
 
-17. **FR-17** — Validate `spaarke-rag-references` `domain`/`documentType` claim.
-    **Acceptance**: Targeted grep + code-trace pass before Phase 5 data ingestion. Document whether the bug exists (writer/reader use different field names) OR is a non-issue (writer correctly maps `Domain = domain`, reader correctly filters by `domain`). Apply fix ONLY if bug is reproduced; otherwise close as non-issue with note in `_archive/` or PR description.
+17. **FR-17** — Fix `spaarke-rag-references` writer/reader field-name mismatch (**bug confirmed 2026-06-26 by pre-pipeline investigation** — no longer conditional).
+    **Acceptance**: Bug is real and reproduced. PowerShell writers populate field `domain`; C# mapper writes to property `DocumentType` → field `documentType`; C# reader filters on `documentType`. PowerShell-indexed documents are invisible to C# readers. Fix lands in **Phase 2 schema-patch PR** (moved from Phase 5; canonical field name = `documentType`):
+    - **Schema**: rename field `domain` → `documentType` in `infrastructure/ai-search/spaarke-rag-references.json:39`; update semantic config field reference (line 151)
+    - **PowerShell writers**: change `domain` → `documentType` in `scripts/ai-search/Add-ReferenceToIndex.ps1:456` (`Index-AllReferences.ps1` delegates — no change needed)
+    - **C# code**: no change (already targets `documentType` at `KnowledgeDocumentSchemaMapper.cs:56` and `ReferenceRetrievalService.cs:309`)
+    - **Phase 5 verification**: golden-reference roundtrip test (write via `Add-ReferenceToIndex.ps1`, read via `ReferenceRetrievalService`) returns the document with `documentType` populated; reindex any pre-existing PowerShell-written documents that have only `domain`.
 
 18. **FR-18** — Data ingestion for ingestible indexes.
     **Acceptance**:
@@ -196,6 +228,17 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
     - `POST /api/ai/insights/search` returns insights (uses spaarke-insights-index)
     - Playbook dispatch routes correctly (uses spaarke-playbook-embeddings)
 
+#### Embedding Model Alignment (added 2026-06-26 from pre-pipeline audit)
+
+20. **FR-20** — Reconcile embedding-model name across spec, schemas, and BFF appsettings to the single canonical value `text-embedding-3-large` (3072 dimensions). Pre-pipeline audit (2026-06-26) found drift: `appsettings.template.json:248` declares `text-embedding-3-small` (1536-dim) while spec NFR-11 + design.md vector config + all 7 schemas use `text-embedding-3-large` (3072-dim). Mismatch causes ingestion to fail on vector-field type mismatch.
+    **Acceptance**:
+    - `src/server/api/Sprk.Bff.Api/appsettings.template.json:248` — change `"EmbeddingModelName": "text-embedding-3-small"` to `"EmbeddingModelName": "text-embedding-3-large"`
+    - `src/server/api/Sprk.Bff.Api/appsettings.json` — verify same key holds `text-embedding-3-large` (or KV-reference resolving to it)
+    - All 7 schema vector profiles use 3072 dimensions + HNSW cosine (already covered by FR-09; this FR is the BFF-side alignment so produced vectors match schema dimensionality)
+    - Verify by: post-fix, BFF startup log shows embedding client configured for `text-embedding-3-large`; first RAG ingestion successfully writes a 3072-dim vector to `spaarke-files-index` and confirms no Azure Search `400 Bad Request: vector dimension mismatch` error.
+    - **Pre-condition for Phase 5 ingestion (FR-18)**: this FR MUST land before FR-18 runs, or every embedding-generating ingestion will fail at upsert time.
+    - **External prerequisite (NOT this FR's task)**: user verifies `text-embedding-3-large` deployment is provisioned in the dev Azure OpenAI resource. If only `text-embedding-3-small` exists, either (a) deploy the large model and proceed, or (b) re-open NFR-11 + all 7 schemas to use 1536-dim vectors (architectural rollback — not recommended; design.md vector config is authoritative).
+
 ### Non-Functional Requirements
 
 - **NFR-01** — `Deploy-AllIndexes.ps1` MUST be idempotent (re-running against an environment where indexes already exist is safe; no destructive side effects without explicit `-Force`).
@@ -205,10 +248,10 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 - **NFR-05** — Prod and demo environments MUST remain unchanged throughout this project. No commands in Deploy-AllIndexes.ps1 or any script can target `spaarke-search-prod` or `spaarke-search-demo` during this project's execution.
 - **NFR-06** — `Deploy-AllIndexes.ps1` MUST support `-DryRun` (show what would deploy without changes) and `-VerifyOnly` (run only post-deploy invariant checks against existing indexes).
 - **NFR-07** — Schema renames MUST be coordinated atomically per rename (one PR per rename touches all of: schema file, JSON `name` field, BFF code constant, deploy script reference, BU value config, runbook table).
-- **NFR-08** — `spaarke-rag-references` `documentType`/`domain` claim MUST be validated (FR-17) before any code fix is applied. No "fix" applied without reproduction.
+- **NFR-08** — `spaarke-rag-references` field-name fix (per FR-17) MUST land in Phase 2 schema-patch PR — **NOT** Phase 5. Bug was confirmed 2026-06-26 by pre-pipeline investigation; no further validation gate required. Phase 5 only verifies the fix landed correctly (golden-reference roundtrip).
 - **NFR-09** — Every schema MUST comply with the property policy unless a documented JSON comment explains the override (e.g., `"// retrievable=false because field contains PII"`).
 - **NFR-10** — Naming policy (top-level resource env-suffix vs sub-resource env-agnostic) MUST be documented as canonical in both the catalog and the operational guide. Future environment provisioning MUST follow this rule.
-- **NFR-11** — All 7 schemas use `text-embedding-3-large` (3072 dimensions) for vector fields. No 1536-dim vectors permitted in any restored index.
+- **NFR-11** — All 7 schemas use `text-embedding-3-large` (3072 dimensions) for vector fields. No 1536-dim vectors permitted in any restored index. **BFF appsettings MUST match**: per FR-20 (added 2026-06-26 audit), `appsettings.template.json:248` MUST resolve to `text-embedding-3-large` so produced vectors match schema dimensionality. Spec authoritative; appsettings is the side that needs the fix.
 - **NFR-12** — `Deploy-AllIndexes.ps1` total runtime for full 7-index deploy MUST complete within 30 minutes (Azure provisioning latency varies; this is a target not a hard deadline).
 - **NFR-13** — **Project Sequencing**: This project's Phase 3 (Deploy Infrastructure) MUST NOT begin until `spaarke-redis-cache-remediation-r1` Phase 3 (Dev environment cutover) completes successfully. Cross-reference: the Redis project's success criterion 1 (BFF startup log shows Redis-enabled) is the prerequisite gate for this project's FR-16 deploy step.
 
@@ -289,7 +332,7 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 | Redis disposition | Keep recreated or delete? | **Delegated to `spaarke-redis-cache-remediation-r1`** (prerequisite project — 2026-06-25) | FR-08 removed (delegated); FR-15 narrowed to AI-Search settings only; NFR-13 added as sequencing gate |
 | Dev plan tier | Investigate B1→P1v3 flip? | Accept current P1v3 (~$200/mo); no investigation needed | No action this project |
 | ADR drift | Fold into this project or separate ticket? | Fold in | FR-06 |
-| rag-references bug | Apply fix or verify first? | Confirm and validate before fix | FR-17 enforced as NFR-08 |
+| rag-references bug | Apply fix or verify first? | **Bug confirmed 2026-06-26** by pre-pipeline investigation (PowerShell writers use `domain`; C# mapper/reader use `documentType` — PS-indexed docs invisible to C# readers). Fix moved from Phase 5 (verify-then-fix) → Phase 2 (schema patch). Canonical field name = `documentType`. | FR-17 updated; NFR-08 updated; 3-line fix per FR-17 |
 | Insights observations | Accept loss or re-project? | Re-project | Included in FR-18 |
 | Invoices data | Defer or rebuild? | Skip — was empty pre-deletion | FR-18 (schema-only for invoices) |
 | Schema consolidation | Now or later? | Now, in Phase 2 | FR-11 |
@@ -319,7 +362,7 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 
 - [ ] **Will the post-deploy verifier need read-only Search service permission?** (Likely just admin key reuse; verify during FR-07 implementation)
 - [ ] **Should `Deploy-AllIndexes.ps1` write a `deploymentstate.json` artifact** (or call `factory-r1`'s registry?) recording what was deployed when? (Defer — factory-r1 hasn't designed its registry extension yet)
-- [ ] **Should `infra/insights/modules/search-index.bicep` be retired entirely** in favor of `Deploy-AllIndexes.ps1`, or kept as the canonical Bicep pattern for environments that prefer Bicep over PowerShell? (Defer until Phase 3 — depends on how `Deploy-AllIndexes.ps1` shapes up)
+- [x] ~~Should `infra/insights/modules/search-index.bicep` be retired entirely~~ — **RESOLVED 2026-06-26**: pre-pipeline audit confirmed `infra/insights/main.bicep` calls `modules/search-index.bicep` via its own isolated `deploymentScript` (NOT dependent on `scripts/ai-search/Deploy-IndexSchemas.ps1`). Retiring the broken PS script per FR-07 does NOT affect Insights Bicep deployment. **Recommendation**: KEEP the Bicep module for the Insights index (consistent with the rest of `infra/insights/` Bicep stack); `Deploy-AllIndexes.ps1` becomes canonical for the OTHER 6 indexes. The Bicep + PS dual-deployer arrangement is acceptable since they target different indexes and don't conflict.
 - [ ] **Should we add `corsOptions` to all 7 schemas** (only `spaarke-files-index` has it currently)? (Defer — minor consistency cleanup, not blocking)
 
 ---
