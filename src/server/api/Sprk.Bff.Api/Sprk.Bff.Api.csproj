@@ -90,6 +90,10 @@
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.14.0" />
+    <!-- Redis tracing instrumentation (spaarke-redis-cache-remediation-r1 task 040 closure).
+         Without this, App Insights' standard SDK does NOT capture StackExchange.Redis
+         dependency calls. Pinned to 1.12.0-beta.1 (current stable-ish for OTel 1.15.x). -->
+    <PackageReference Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="1.12.0-beta.1" />
 
     <!-- Polly (CRITICAL - must be 8.x) -->
     <PackageReference Include="Polly" Version="8.6.5" />

@@ -94,6 +94,30 @@ The deployed BFF code on `spaarke-bff-dev` is **pre-Phase-1** (the working tree 
 
 ---
 
+## Post-deploy validation (after `bff-deploy` at 2026-06-26T12:24:57 UTC)
+
+| Check | Result | Notes |
+|---|---|---|
+| BFF builds + tests | ✅ 0 errors / 7886 pass / 1 pre-existing fail / 135 skipped | Same baseline as pre-merge |
+| Deploy succeeded | ✅ hash-verify 4/4 critical files match | `Deploy-BffApi.ps1` |
+| BFF startup log line | ✅ `"Distributed cache: Redis enabled with instance name 'spaarke:'"` at 2026-06-26T12:24:57 UTC | New deploy timestamp; matches Success Criterion #1 |
+| `/healthz` | ✅ HTTP 200 | |
+| KV reference resolution | ✅ status "Resolved" via `Microsoft.Web/sites/config/configreferences` API | |
+| Live Redis traffic | ✅ ~800–1000 `totalcommandsprocessed` /min on `spaarke-bff-redis-dev` since 11:28 UTC | Azure Monitor resource metric (not App Insights) |
+| App Insights — Redis dependencies | ⏸ NOT visible | **Root cause**: classic SDK doesn't auto-instrument StackExchange.Redis; OTel pipeline has no exporter wired. Tracked as **R7 backlog S7**. |
+| App Insights — `cache.hits` / `cache.misses` / `cache.redis_call_duration_ms` custom metrics | ⏸ NOT visible | Same root cause — `Meter "Sprk.Bff.Api.Cache"` is emitting correctly but OTel→AppInsights exporter is missing. Renaming the Meter (`Spaarke.Cache` → `Sprk.Bff.Api.Cache`) and adding `OpenTelemetry.Instrumentation.StackExchangeRedis` are **correct preparation** — they'll start working immediately once R7-S7 wires the exporter. |
+
+**Net validation status**:
+
+- ✅ Infrastructure cutover validated end-to-end
+- ✅ Code cutover validated at startup-log level (post-deploy line confirmed)
+- ✅ Live Redis traffic confirmed via Azure Monitor resource-level metrics (BFF is genuinely using the new Redis)
+- ⏸ App Insights-level Redis observability + custom cache metrics blocked by pre-existing BFF telemetry-pipeline gap (R7-S7)
+
+The R7-S7 gap is NOT a regression introduced by this project — it predates `spaarke-redis-cache-remediation-r1` and affects every Meter in the BFF (12 total registered in `TelemetryModule.cs`). This project's contributions (correct Meter naming, Redis OTel instrumentation registration) are the **right preparation** for the S7 fix to be a 1-line code change.
+
+---
+
 ## Operator next steps (post-PR-merge)
 
 After `work/spaarke-redis-cache-remediation-r1` merges to master:

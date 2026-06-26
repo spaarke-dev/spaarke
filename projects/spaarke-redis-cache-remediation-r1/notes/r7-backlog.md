@@ -194,6 +194,132 @@ The architectural patterns laid down by this project work on either product:
 
 ---
 
+## S6 — Rename App Insights `spe-insights-dev-67e2xz` → `spaarke-bff-insights-dev` (canonical pattern)
+
+### Summary
+
+The current BFF App Insights instance is `spe-insights-dev-67e2xz` (RG `spe-infrastructure-westus2`) — off-pattern legacy name created alongside `spe-redis-dev-67e2xz` (which THIS project replaced). It is the live receiver for `spaarke-bff-dev` telemetry. Surfaced by the user during this project's Phase 3 cutover (2026-06-26) but explicitly out of scope here.
+
+### Why this matters
+
+- Same naming convention as the Redis instance we replaced — applies the **two-tier resource-naming rule** (NFR-03/NFR-10 in this project's amended ADR-009): top-level resources `spaarke-bff-<service>-{env}`.
+- Future operators auditing resources by canonical name will miss the BFF App Insights and may provision a duplicate. Renaming closes that drift.
+
+### Approach
+
+Azure Application Insights resources cannot be renamed in place (same as Azure Cache for Redis — what this project just navigated). The pattern:
+1. Provision new `spaarke-bff-insights-dev` (same workspace if Log Analytics-backed; otherwise standalone).
+2. Update BFF App Settings: `APPLICATIONINSIGHTS_CONNECTION_STRING` → new instance's connection string.
+3. Restart BFF; verify telemetry flowing to new instance (`traces | summarize count() by cloud_RoleName`).
+4. 24-hr verification window.
+5. Decommission `spe-insights-dev-67e2xz` (tag-then-delete).
+
+### Reusable patterns from this project
+
+- `Deploy-RedisCache.ps1` script structure (params, `-WhatIf`, KV/AppSettings cutover, post-deploy validation) → extend to `Deploy-AppInsights.ps1`.
+- Cutover-deploy-log + sister-handoff template.
+- KV-reference syntax pattern for any secrets (App Insights doesn't typically need KV for connection string but the pattern still applies if you choose to vault it).
+
+### Coordination
+
+Fold this into sister project `spaarke-ai-azure-setup-dev-r1` (already doing canonicalization for AI Search + KV — a third resource fits the workstream) OR carve as its own follow-up. Sister project's spec already references off-pattern legacy resources; adding App Insights is a small additive scope item.
+
+### Estimated effort
+
+**0.5-1 day** (much simpler than Redis: no `ITenantCache`-style code change, no atomic migration; just resource provision + connection-string swap + verify + decommission).
+
+### How to start
+
+1. **Entry file**: this entry + sister project `spaarke-ai-azure-setup-dev-r1/spec.md` (decide whether to fold in).
+2. **First PR action**: branch `work/spaarke-appinsights-rename-dev-r1` OR `work/spaarke-ai-azure-setup-dev-r1` (if folding in); open issue referencing S6 + the Phase 3 conversation log.
+
+### Reference
+
+User-flagged during this project's Phase 3 cutover (2026-06-26 conversation log). See `notes/cutover-deploy-log.md`.
+
+---
+
+## S7 — Wire OpenTelemetry → Azure Monitor exporter (BFF telemetry pipeline closure)
+
+### Summary
+
+The BFF currently uses **classic Application Insights SDK** (`services.AddApplicationInsightsTelemetry()`) AND has an **OpenTelemetry pipeline registered** (`services.AddOpenTelemetry().WithMetrics(...).WithTracing(...)` in `TelemetryModule.cs`), but the OTel pipeline has **no exporter wired to Azure Monitor**. Result:
+
+- ✅ Classic SDK auto-instruments HTTP, ServiceBus, KeyVault, Search dependencies — visible in App Insights
+- ❌ Classic SDK does NOT auto-instrument StackExchange.Redis (no Redis dependencies in App Insights — verified 2026-06-26)
+- ❌ ALL custom Meters (`Sprk.Bff.Api.Cache`, `Sprk.Bff.Api.Ai`, `Sprk.Bff.Api.Rag`, `Sprk.Bff.Api.CircuitBreaker`, `Sprk.Bff.Api.Finance`, plus 7 more registered in `TelemetryModule.cs`) emit measurements via System.Diagnostics.Metrics but NEVER reach App Insights — confirmed 2026-06-26 via `customMetrics | where name startswith 'cache.'` returning empty
+
+### Why this matters
+
+The `spaarke-redis-cache-remediation-r1` project added a `Sprk.Bff.Api.Cache` Meter (`cache.hits`, `cache.misses`, `cache.redis_call_duration_ms`) per FR-16 and `OpenTelemetry.Instrumentation.StackExchangeRedis` per task 040 closure (2026-06-26 commit). Both are **correctly registered**; they will start producing dashboard-visible data the moment an exporter is wired. Until then, the metrics + Redis spans live only in-process.
+
+This affects every Meter in the BFF, not just the cache one. The full custom-metric pipeline (R5 Summarize, Insights Widgets, AI Capabilities, AI Latency, Prompt Shield, etc.) is similarly dark in App Insights.
+
+### Approach
+
+Two viable paths — pick one for the BFF as a whole.
+
+**Path A — Modern `Azure.Monitor.OpenTelemetry.AspNetCore` (recommended, replaces classic SDK)**:
+
+```xml
+<PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.4.0" />
+```
+```csharp
+// Program.cs — replace AddApplicationInsightsTelemetry()
+builder.Services.AddOpenTelemetry().UseAzureMonitor();
+```
+- One-call wiring; replaces classic SDK with OTel-native AppInsights bridge
+- Removes the dual-pipeline drift (classic SDK + OTel)
+- Custom Meters + ActivitySources automatically flow to App Insights
+- `OpenTelemetry.Instrumentation.StackExchangeRedis` (already added) starts emitting Redis dependency spans
+
+**Path B — Add explicit exporters alongside classic SDK** (less invasive):
+```xml
+<PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.0" />
+<!-- Or for direct Azure Monitor: -->
+<PackageReference Include="Azure.Monitor.OpenTelemetry.Exporter" Version="1.4.0" />
+```
+```csharp
+// TelemetryModule.cs
+.WithMetrics(m => m.AddAzureMonitorMetricExporter())
+.WithTracing(t => t.AddAzureMonitorTraceExporter())
+```
+- Dual pipeline coexists; ARE you OK with duplicate data?
+- More config knobs but more surface area
+
+### Verification recipes (run after wiring)
+
+```kql
+// 1) Custom metrics should appear
+customMetrics
+| where timestamp > ago(15m)
+| where name in ('cache.hits', 'cache.misses', 'cache.redis_call_duration_ms')
+| summarize sum(value) by name
+// Expect: non-empty result
+
+// 2) Redis dependencies should appear
+dependencies
+| where timestamp > ago(15m)
+| where type contains 'Redis'
+| summarize count() by name
+// Expect: SET / GET / EVAL etc.
+```
+
+### Estimated effort
+
+**0.5-1 day**. Path A is a 1-line code change + package add + retest; the heavy lift is the regression sweep (some classic-SDK telemetry shapes differ slightly under the OTel bridge — affects existing dashboards/alerts).
+
+### How to start
+
+1. **Entry file**: `src/server/api/Sprk.Bff.Api/Program.cs` + `Sprk.Bff.Api.csproj`.
+2. **First PR action**: branch `work/bff-telemetry-otel-exporter`; design.md justifying Path A vs B; smoke test before merge against `spaarke-bff-dev`.
+
+### Reference
+
+Surfaced during this project's Phase 4 verification (2026-06-26). See `notes/cutover-deploy-log.md`. The classic-SDK + OTel-no-exporter drift is the root cause that prevents FR-16 metrics from being visible in App Insights despite the wrapper emitting them correctly.
+
+---
+
 ## Cross-References
 
 - **Spec source**: [`spec.md`](../spec.md) FR-22 (fifth bullet) + Out of Scope section
