@@ -3,7 +3,9 @@
   <metadata>
     <title>Add customData schema-conformance xUnit fixture</title>
     <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>CustomDataSchemaConformanceTests.cs added at tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/. 5 test methods (3 Theories with 7 playbook fixtures + 2 Facts + 1 AC-11 Fact) = 24 individual test cases. All pass; full suite 7873 passed / 134 skipped (pre-existing) / 0 failed. Theory matrix covers PB-016 through PB-022 with channel-aware fixture columns (sourceEntityType, regardingType, expectViaMatter, expectDueDate, channelLabel). AC-11 test wires MembershipResolverService directly with Mock&lt;ILogger&gt; and asserts member_skipped warning fires with required structured fields (matter/contact/role/reason). Assertion messages name each violated AC.</completion-notes>
     <estimated-hours>2.5</estimated-hours>
     <dependencies>020, 021, 026, 027</dependencies>
     <blocks>029</blocks>
