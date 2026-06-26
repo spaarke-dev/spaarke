@@ -1548,6 +1548,22 @@ export interface IUseSseStreamResult {
    * payload verbatim into Application Insights / browser telemetry.
    */
   setOnPlaybookOptions: (handler: ((payload: IPlaybookOptionsPayload) => void) | null) => void;
+
+  /**
+   * R6 Pillar 6c / task 095 — register/unregister a synchronous callback for
+   * `context_event` SSE forwarding (trace bridge from BFF ContextEventEmitter
+   * to PaneEventBus `context` channel).
+   *
+   * Same callback-ref pattern as setOnPlaybookOptions — payload delivered
+   * verbatim from the fetch loop without React state batching. Host (typically
+   * ConversationPane) dispatches each event to the `context` PaneEventBus
+   * channel so ExecutionTraceWidget renders in real time. Pass `null` to
+   * unregister.
+   *
+   * ADR-015: the callback receives ONLY typed enumerated fields (toolName,
+   * decisionId, outcome, durationMs, etc.) — no user content.
+   */
+  setOnContextEvent: (handler: ((data: IChatSseEventData) => void) | null) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

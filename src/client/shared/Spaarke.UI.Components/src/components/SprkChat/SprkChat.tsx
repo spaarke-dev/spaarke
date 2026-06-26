@@ -1021,7 +1021,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       return;
     }
 
-    setOnContextEvent(data => {
+    setOnContextEvent((data: IChatSseEventData) => {
       try {
         onContextEventProp(data);
       } catch (err) {
