@@ -141,7 +141,15 @@
           "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_event&id={{item.sprk_eventid}}",
           "recipientId": "{{run.userId}}",
           "regardingId": "{{item.sprk_eventid}}",
-          "regardingType": "sprk_event"
+          "regardingType": "sprk_event",
+          "regardingName": "{{item.sprk_eventname}}",
+          "sourceEntityType": "sprk_event",
+          "sourceId": "{{item.sprk_eventid}}",
+          "sourceModifiedOn": "{{item.createdon}}",
+          "sourceOwningUser": "{{item.ownerid}}",
+          "viaMatterId": "{{item.sprk_regardingmatter}}",
+          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterMembershipsVariable": "myMatters"
         },
         "deduplication": {
           "enabled": true,

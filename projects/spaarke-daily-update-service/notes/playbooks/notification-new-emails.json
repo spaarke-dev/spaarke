@@ -141,7 +141,15 @@
           "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_communication&id={{item.sprk_communicationid}}",
           "recipientId": "{{run.userId}}",
           "regardingId": "{{item.sprk_communicationid}}",
-          "regardingType": "sprk_communication"
+          "regardingType": "sprk_communication",
+          "regardingName": "{{item.sprk_subject}}",
+          "sourceEntityType": "sprk_communication",
+          "sourceId": "{{item.sprk_communicationid}}",
+          "sourceModifiedOn": "{{item.createdon}}",
+          "sourceOwningUser": "{{item.ownerid}}",
+          "viaMatterId": "{{item.sprk_regardingmatter}}",
+          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterMembershipsVariable": "myMatters"
         },
         "deduplication": {
           "enabled": true,

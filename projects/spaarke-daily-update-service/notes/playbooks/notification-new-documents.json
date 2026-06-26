@@ -140,7 +140,15 @@
           "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_document&id={{item.sprk_documentid}}",
           "recipientId": "{{run.userId}}",
           "regardingId": "{{item.sprk_documentid}}",
-          "regardingType": "sprk_document"
+          "regardingType": "sprk_document",
+          "regardingName": "{{item.sprk_documentname}}",
+          "sourceEntityType": "sprk_document",
+          "sourceId": "{{item.sprk_documentid}}",
+          "sourceModifiedOn": "{{item.createdon}}",
+          "sourceOwningUser": "{{item.ownerid}}",
+          "viaMatterId": "{{item.sprk_matter}}",
+          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterMembershipsVariable": "myMatters"
         }
       }
     }

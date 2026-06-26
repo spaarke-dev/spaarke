@@ -79,7 +79,7 @@
         "__actionType": 51,
         "queryMode": true,
         "entityLogicalName": "sprk_event",
-        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_event\"><attribute name=\"sprk_eventname\"/><attribute name=\"sprk_duedate\"/><attribute name=\"sprk_finalduedate\"/><attribute name=\"sprk_eventid\"/><attribute name=\"sprk_eventtype_ref\"/><attribute name=\"statuscode\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"sprk_eventtype_ref\" operator=\"eq\" value=\"124f5fc9-98ff-f011-8406-7c1e525abd8b\"/><condition attribute=\"statuscode\" operator=\"eq\" value=\"659490001\"/><filter type=\"or\"><condition attribute=\"sprk_duedate\" operator=\"lt\" value=\"{{todayUtc}}\"/><condition attribute=\"sprk_finalduedate\" operator=\"lt\" value=\"{{todayUtc}}\"/></filter><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"sprk_finalduedate\" descending=\"false\"/><order attribute=\"sprk_duedate\" descending=\"false\"/></entity></fetch>",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_event\"><attribute name=\"sprk_eventname\"/><attribute name=\"sprk_duedate\"/><attribute name=\"sprk_finalduedate\"/><attribute name=\"sprk_eventid\"/><attribute name=\"sprk_eventtype_ref\"/><attribute name=\"statuscode\"/><attribute name=\"modifiedon\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"sprk_eventtype_ref\" operator=\"eq\" value=\"124f5fc9-98ff-f011-8406-7c1e525abd8b\"/><condition attribute=\"statuscode\" operator=\"eq\" value=\"659490001\"/><filter type=\"or\"><condition attribute=\"sprk_duedate\" operator=\"lt\" value=\"{{todayUtc}}\"/><condition attribute=\"sprk_finalduedate\" operator=\"lt\" value=\"{{todayUtc}}\"/></filter><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"sprk_finalduedate\" descending=\"false\"/><order attribute=\"sprk_duedate\" descending=\"false\"/></entity></fetch>",
         "description": "Open Task-type sprk_events (sprk_eventtype_ref = Task GUID 124f5fc9-…, statuscode=Open 659490001) with sprk_duedate OR sprk_finalduedate before today. Membership-scope union: (a) sprk_regardingmatter IN myMatters.ids OR (b) record-owner OR (c) matter-owner = current user. Sort: sprk_finalduedate asc, sprk_duedate asc tiebreaker. Dedupe by sprk_eventid (NOT activityid)."
       }
     },
@@ -131,7 +131,15 @@
           "recipientId": "{{run.userId}}",
           "regardingId": "{{item.sprk_eventid}}",
           "regardingType": "sprk_event",
-          "dueDate": "{{item.sprk_duedate}}"
+          "dueDate": "{{item.sprk_duedate}}",
+          "regardingName": "{{item.sprk_eventname}}",
+          "sourceEntityType": "sprk_event",
+          "sourceId": "{{item.sprk_eventid}}",
+          "sourceModifiedOn": "{{item.modifiedon}}",
+          "sourceOwningUser": "{{item.ownerid}}",
+          "viaMatterId": "{{item.sprk_regardingmatter}}",
+          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterMembershipsVariable": "myMatters"
         },
         "deduplication": {
           "enabled": true,

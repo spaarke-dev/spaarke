@@ -85,11 +85,11 @@
         "__actionType": 51,
         "queryMode": true,
         "entityLogicalName": "sprk_workassignment",
-        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_workassignment\"><attribute name=\"sprk_name\"/><attribute name=\"sprk_workassignmentid\"/><attribute name=\"sprk_workassignmentnumber\"/><attribute name=\"sprk_priority\"/><attribute name=\"sprk_responseduedate\"/><attribute name=\"sprk_assignedto\"/><attribute name=\"sprk_assignedtointernal\"/><attribute name=\"sprk_assignedattorney1\"/><attribute name=\"sprk_assignedparalegal1\"/><attribute name=\"createdon\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"statecode\" operator=\"eq\" value=\"0\"/><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_workassignment\"><attribute name=\"sprk_name\"/><attribute name=\"sprk_workassignmentid\"/><attribute name=\"sprk_workassignmentnumber\"/><attribute name=\"sprk_priority\"/><attribute name=\"sprk_responseduedate\"/><attribute name=\"sprk_assignedto\"/><attribute name=\"sprk_assignedtointernal\"/><attribute name=\"sprk_assignedattorney1\"/><attribute name=\"sprk_assignedparalegal1\"/><attribute name=\"createdon\"/><attribute name=\"modifiedon\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"statecode\" operator=\"eq\" value=\"0\"/><filter type=\"or\"><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"modifiedon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/></filter><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
         "templateParameters": {
           "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
         },
-        "description": "New sprk_workassignment records (statecode=Active 0, createdon in last {{timeWindowHours}}) where EITHER (a) sprk_regardingmatter IN myMatters.ids OR (b) record-owner OR (c) matter-owner = current user. Sort: createdon desc."
+        "description": "New OR updated sprk_workassignment records (statecode=Active 0, createdon OR modifiedon in last {{timeWindowHours}}) where EITHER (a) sprk_regardingmatter IN myMatters.ids OR (b) record-owner OR (c) matter-owner = current user. Sort: createdon desc."
       }
     },
     {
@@ -139,7 +139,15 @@
           "recipientId": "{{run.userId}}",
           "regardingId": "{{item.sprk_workassignmentid}}",
           "regardingType": "sprk_workassignment",
-          "dueDate": "{{item.sprk_responseduedate}}"
+          "dueDate": "{{item.sprk_responseduedate}}",
+          "regardingName": "{{item.sprk_name}}",
+          "sourceEntityType": "sprk_workassignment",
+          "sourceId": "{{item.sprk_workassignmentid}}",
+          "sourceModifiedOn": "{{item.modifiedon}}",
+          "sourceOwningUser": "{{item.ownerid}}",
+          "viaMatterId": "{{item.sprk_regardingmatter}}",
+          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterMembershipsVariable": "myMatters"
         },
         "deduplication": {
           "enabled": true,

@@ -3,7 +3,9 @@
   <metadata>
     <title>Standardize enriched customData across all 7 notification playbooks</title>
     <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>All 7 deployed notification playbooks (PB-016..PB-022) now emit the FR-6 enriched customData schema. Added 8 new config params (regardingName, sourceEntityType, sourceId, sourceModifiedOn, sourceOwningUser, viaMatterId, viaMatterName, viaMatterMembershipsVariable) to each playbook's CreateNotification.itemNotification block. Added modifiedon attribute to PB-020/PB-021 FetchXml so sourceModifiedOn can populate. PB-022 repo JSON synced with deployed FetchXml additions from task 025. All 7 repo JSON files updated + 7 sprk_configjson rows redeployed via MCP. Audit doc: notes/audit/026-customdata-standardization.md. AC-10 GREEN: 7/7 playbooks emit full enriched schema; downstream task 028 schema fixture can rely on uniform shape.</completion-notes>
     <estimated-hours>2</estimated-hours>
     <dependencies>022, 023, 024, 025</dependencies>
     <blocks>028</blocks>
