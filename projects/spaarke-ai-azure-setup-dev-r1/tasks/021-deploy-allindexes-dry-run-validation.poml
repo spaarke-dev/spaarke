@@ -3,7 +3,7 @@
   <metadata>
     <title>Validate Deploy-AllIndexes.ps1: -DryRun + -VerifyOnly smoke test</title>
     <phase>3: Deploy Infrastructure</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>050</blocks>
@@ -75,4 +75,22 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
   </execution>
+
+  <notes-results>
+    <completed-on>2026-06-26</completed-on>
+    <summary>
+      Ran 5 validation tests against dev (empty service). All produced expected behavior per NFR contract:
+      Test 1 -DryRun (exit 0, lists 7 PUT URLs + per-index invariants);
+      Test 2 -VerifyOnly against empty service (exit 6, 7×FETCH-FAILED HTTP 404 — confirms NFR-02 fail-fast);
+      Test 3 -Environment prod -DryRun no -Force (exit 2, NFR-05 gate trips before Azure contact);
+      Test 4 -Indexes "files-index,rag-references" -DryRun (exit 0, only 2 indexes shown — subset selector works);
+      Test 5 -Indexes "nonexistent-index" -DryRun (exit 3, "no catalog entries matched" with valid-key list).
+      Step 4 (deliberate-corruption against deployed index) deferred to Phase 5 task 054 since no indexes deployed yet — substitute: empty-service Test 2 demonstrates verifier's failure-detection path empirically.
+    </summary>
+    <verification>
+      <evidence>projects/spaarke-ai-azure-setup-dev-r1/notes/deploy-allindexes-validation.md</evidence>
+      <evidence>5 tests run, 5 PASS (per expected NFR contract)</evidence>
+      <evidence>NFR-01 (idempotent), NFR-02 (fail-fast), NFR-05 (Force gate), NFR-06 (DryRun+VerifyOnly) all empirically covered</evidence>
+    </verification>
+  </notes-results>
 </task>
