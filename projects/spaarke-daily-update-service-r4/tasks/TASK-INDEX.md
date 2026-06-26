@@ -82,7 +82,7 @@
 | 040 | Wire timeWindow preference to fetchNotifications createdon filter (FR-17a) | ✅ | 036 | 049 | Group E1 | FULL |
 | 041 | Wire dueWithinDays preference to fetchNotifications filter (FR-17b) | ✅ | 036 | 049 | Group E1 | FULL |
 | 042 | Wire disabledChannels server-side $filter on sprk_category (FR-17c) | ✅ | 036, 040, 041 | 049 | Group E2 | FULL |
-| 043 | Wire autoPopup preference to workspace launcher hook (FR-17d) | 🔲 | 036 | 049 | Group E2 | FULL |
+| 043 | Wire autoPopup preference to workspace launcher hook (FR-17d) | ✅ | 036 | 049 | Group E2 | FULL |
 | 044 | Remove minConfidence end-to-end + grep verify zero references (FR-17e) | ✅ | 036 | 049 | Group E2 | FULL |
 | 045 | Implement NarrativeBullet three-dot overflow menu (FR-18) | ✅ | 036 | 046, 049 | — | FULL |
 | 046 | Wire overflow menu callbacks in ActivityNotesSection + DailyBriefingApp | 🔲 | 045 | 049 | — | FULL |

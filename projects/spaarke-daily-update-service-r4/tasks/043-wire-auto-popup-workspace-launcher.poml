@@ -3,7 +3,8 @@
   <metadata>
     <title>Wire autoPopup preference to workspace launcher hook (FR-17d)</title>
     <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>036</dependencies>
     <blocks>049</blocks>
@@ -12,6 +13,21 @@
     <rigor-reason>Code implementation in shell-level mount hook; cross-component behavior with UX-visible side effects</rigor-reason>
     <parallel-group>E2</parallel-group>
     <parallel-safe>true</parallel-safe>
+    <completion-notes>
+      Modified shell file: `src/solutions/LegalWorkspace/src/hooks/useDailyDigestAutoPopup.ts` (the existing workspace launcher hook called by `WorkspaceGrid.tsx`). Rewired from legacy R1 preference type 100000001 / `{enabled: bool}` schema to the canonical R4 schema: type 100000002 (`PREFERENCE_TYPE_DAILY_DIGEST`) with `autoPopup` field on `DailyDigestPreferences`. The same `sprk_userpreference` row that the in-widget `PreferencesDropdown` writes via `saveDigestPreferences` is now what the auto-popup hook reads — they share ONE preference, not two parallel ones.
+
+      Architectural finding: WorkspaceShell does NOT have a "tab" model (it's a flat grid of sections — Daily Briefing is one section among many). The "auto-open Daily Briefing tab" behavior in spec assumption was reinterpreted as the existing R1 modal Code Page popup pattern (open standalone `sprk_dailyupdate` Code Page as 60×80% dialog) — which already hosts `DailyBriefingApp`. The hook surface, popup dialog UX, and SpaarkeAi-embedding suppression (via `suppressLegalWorkspaceDailyDigestAutoPopup` in SpaarkeAi `main.tsx`) all remain unchanged. Only the preference source flipped.
+
+      Added: a pure helper `parseAutoPopupFromPreferenceJson` (exported from the hook file for unit testability) that mirrors the `mergeWithDefaults` semantics from the canonical preferences service. Opt-out default preserved (missing record / missing field / malformed JSON → autoPopup=true).
+
+      Tests added at `src/client/shared/Spaarke.DailyBriefing.Components/test/autoPopupPreferenceContract.test.ts` (15 tests, all pass): canonical-constants contract, parser branches (true/false/missing/null/empty/malformed/non-boolean), and round-trip via `fetchDigestPreferences` (proves hook + widget share schema). Schema constants asserted (`PREFERENCE_TYPE_DAILY_DIGEST === 100000002`, `DEFAULT_DAILY_DIGEST_PREFERENCES.autoPopup === true`) — drift in those values would now break this test, alerting the LegalWorkspace hook owner.
+
+      Test status: 128/129 daily-briefing tests pass (the 1 pre-existing flake in `DailyBriefingApp.smoke.test.tsx` 5s timeout is unrelated to this task — fails in isolation too). New contract suite: 15/15 pass. TypeScript: no new errors in the hook or test (pre-existing "Cannot find module" errors are install-state, not code).
+
+      Per task constraint: no new NPM dependencies added; LegalWorkspace inlines the preference-type constant and parser helper rather than importing `@spaarke/daily-briefing-components`. Drift between the two copies is caught by the new contract test.
+
+      ADR-021 (Fluent v9 + semantic tokens): N/A — no UI primitives touched; only preference fetch + Xrm.Navigation popup wiring.
+    </completion-notes>
   </metadata>
   <prompt>The workspace launcher (`LegalWorkspaceApp` mount hook or equivalent) reads `autoPopup` preference on mount and opens the Daily Briefing tab automatically if true. Adjust if a different shell owns this — confirm during pre-flight inspection.</prompt>
   <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 + React hooks + Xrm.WebApi.</role>
