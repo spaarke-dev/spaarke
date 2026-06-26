@@ -511,7 +511,7 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
             });
             services.AddScoped(sp =>
             {
-                var cache = sp.GetRequiredService<IDistributedCache>();
+                var cache = sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
                 var repo = sp.GetRequiredService<IChatDataverseRepository>();
                 var logger = NullLogger<ChatSessionManager>.Instance;
                 return new ChatSessionManager(cache, repo, logger);
