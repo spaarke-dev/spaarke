@@ -61,7 +61,7 @@
 | 026 | Standardize enriched customData across all 7 notification playbooks | ✅ | 022, 023, 024, 025 | 028 | — | STANDARD |
 | 027 | Add structured member_skipped warning logging for Contact-only members | ✅ | 020 | 028 | — | FULL |
 | 028 | Add customData schema-conformance xUnit fixture | ✅ | 020, 021, 026, 027 | 029 | — | STANDARD |
-| 029 | PR 3 wrap — code-review + adr-check + publish-size + CVE + open PR | 🔲 | 028 | 030 | — | STANDARD |
+| 029 | PR 3 wrap — code-review + adr-check + publish-size + CVE + open PR | ✅ | 028 | 030 | — | STANDARD |
 
 ### PR 4 — W2 Consumer /narrate dispatch + cache + fallback (Tasks 030–036)
 

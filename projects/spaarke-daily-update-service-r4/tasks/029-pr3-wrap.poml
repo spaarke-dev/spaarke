@@ -3,7 +3,9 @@
   <metadata>
     <title>PR 3 wrap — code-review + adr-check + publish-size + CVE + open PR</title>
     <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>PR 3 wrap completed. Build clean (0 errors, 17 pre-existing warnings). Full BFF test suite 7873 passed / 134 skipped (pre-existing) / 0 failed. Publish-size 46.31 MB compressed (uncompressed 140.07 MB) — +0.66 MB delta vs 45.65 MB post-Phase 5 Outcome A baseline. Well under 60 MB hard ceiling and 55 MB architecture-review threshold. CVE scan: single HIGH (Kiota Abstractions 1.21.2, GHSA-7j59-v9qr-6fq9) is pre-existing and carries forward from master — NO new HIGH introduced by PR 3. Conflict-check: PR #456 is the only open R4 PR on this branch; other open PRs (devops, dependabot) do not overlap PR 3 file surface. PR #456 description updated via `gh pr edit 456 --body-file` to cover PR 1 + PR 2 + PR 3 scope. ADR-013 placement confirmed (all PR 3 changes are extensions to existing surface; no new endpoints / DI / packages). §F.1 asymmetric-registration N/A (no DI module changes). PR 4 (task 030+) is unblocked.</completion-notes>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>028</dependencies>
     <blocks>030</blocks>
