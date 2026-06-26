@@ -889,6 +889,15 @@ public static class AnalysisServicesModule
         // per CLAUDE.md §F.1 asymmetric-registration governance (no feature gate).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.EntityNameValidatorNodeExecutor>();
 
+        // StartNodeExecutor — ActionType.Start = 33 (R4 spaarke-daily-update-service-r4,
+        // post canonical-truth deploy UAT 2026-06-25). First-class entry-point executor:
+        // binds the dispatching wrapper's payload (Parameters[payloadKey]) as JsonElement
+        // into the playbook scope under node.OutputVariable (default "start"). Optional
+        // input-contract validation gated by configJson.validateOnExecute. Singleton:
+        // pure ConfigJson + Parameters read, ILogger only; no Scoped deps. UNCONDITIONAL
+        // registration per CLAUDE.md §10 BFF Hygiene §F.1.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.StartNodeExecutor>();
+
         // CodeInterpreterBridge — thin wrapper around AgentServiceClient for Code Interpreter sandbox
         // invocations (AIPU-070). Singleton: stateless, thread-safe. Kill switch: CodeInterpreter:Enabled.
         // CodeInterpreterTools are NOT registered here — they are factory-instantiated by SprkChatAgentFactory

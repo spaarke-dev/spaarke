@@ -103,9 +103,24 @@ When the orchestrator processes a node, it must determine `(action, actionType, 
 
 1. **Action FK** (canonical) — if `node.ActionId != Guid.Empty`, `_scopeResolver.GetActionAsync(node.ActionId, ct)` returns the row; `actionType = action.ActionType` (per Insights r2 Wave B 2026-06-02 decision at `:1059-1069`).
 2. **ConfigJson `__actionType`** (structural fallback) — `ExtractActionTypeFromConfig(node.ConfigJson)` reads `__actionType` from the per-node blob; a synthetic `AnalysisAction { Id=Guid.Empty, ActionType=…, Name=node.Name }` is constructed.
-3. **NodeType-default** (last resort) — `NodeType` → default `ActionType` switch at `:1117-1127`.
+3. **Deployed-Start detection** (R4 2026-06-25) — when neither rung 1 nor rung 2 resolved, `IsDeployedStartNode(node)` matches Control nodes whose ConfigJson lacks `__actionType` but otherwise carries the Start shape (empty ConfigJson, Name="Start", `canvasType=="start"`, OR an `inputContract` object). Routes to `ActionType.Start` → `StartNodeExecutor`. Closes the UAT gap where Deploy-Playbook.ps1 deploys Start rows without `__actionType=33` (only `NodeService.BuildConfigJson` on the canvas-sync path injects it).
+4. **NodeType-default** (last resort) — `NodeType` → default `ActionType` switch at `:1106-1117`.
 
 **AI nodes require Action FK.** `NodeType.AIAnalysis` with no `ActionId` raises `"AI node '{node.Name}' requires an Action but has no ActionId"` at `:1099`. Non-AI executors (LookupUserMembership, CreateNotification, QueryDataverse — they read configJson, not SystemPrompt) work with the synthetic action.
+
+### Start node semantics (R4 first-class executor, 2026-06-25)
+
+Start is an **executable entry-point** node, not canvas metadata. Its responsibility is to bind the dispatching wrapper's payload (passed via `PlaybookRunContext.Parameters`) into the playbook scope under `node.OutputVariable` (default `"start"`). Downstream nodes then reference fields via standard substitution — e.g., `{{start.channels}}` in `daily-briefing-narrate.json`.
+
+`StartNodeExecutor` (pairs with `ActionType.Start = 33`) resolves the payload from `Parameters` in this priority order:
+1. `configJson.payloadParameter` (explicit author choice)
+2. `"briefingPayload"` (R4 wrapper convention from `DailyBriefingEndpoints.NarrateAsync:281`)
+3. `OutputVariable` name (generic fallback)
+4. Empty object (`{}`) when no payload is present — per §7 empty-payload contract; downstream `{{start.field}}` refs resolve to null without throwing.
+
+**Optional input-contract validation** — when ConfigJson carries an `inputContract` object AND `validateOnExecute: true`, the executor checks that every top-level contract key is present in the parsed payload. Missing keys produce a `NodeErrorCodes.ValidationFailed` chunk. The flag is opt-in — the deployed R4 playbooks carry `inputContract` as documentation only (no enforcement) until an author explicitly enables `validateOnExecute`.
+
+Prior to R4 the orchestrator handled Start nodes via an inline "passthrough" handler at `PlaybookOrchestrationService.cs:1031-1046` that returned a no-op success WITHOUT binding the payload — `{{start.channels}}` would silently resolve to null. That handler has been retired; the executor now does the binding correctly.
 
 **Per-code lookup paths** (FK-bypass) exist for two cases:
 - `PlaybookExecutionEngine.cs:475` (chat-summarize FK chain) — looks up an action by `sprk_actioncode` using `KeyAttributeCollection`. Documented at `SessionSummarizeOrchestrator.cs:23` as "the alternate-key bypass… when the playbook FK chain is broken."
@@ -184,7 +199,7 @@ These are not synonyms.
 | Workflow | 100_000_003 | Future; rule-based, scope TBD |
 | DeliverComposite | 100_000_004 | R6 multi-section delivery (ADR-037); no Action or scopes |
 
-**ActionType** (31 enum values; on `sprk_analysisaction.sprk_actiontype` via `sprk_actiontype/sprk_executoractiontype`; `INodeExecutor.cs:97-252`): 0, 1, 2, 10, 11, 12, 20, 21, 22, 23, 24, 30, 31, 32, 33, 40, 41, 42, 50, 51, 52, 60, 70, 80, 90, 100, 110, 120, 130, 140, 141.
+**ActionType** (31 enum values; on `sprk_analysisaction.sprk_actiontype` via `sprk_actiontype/sprk_executoractiontype`; `INodeExecutor.cs:97-252`): 0, 1, 2, 10, 11, 12, 20, 21, 22, 23, 24, 30, 31, 32, **33** (`Start` — first-class executor as of R4 2026-06-25; pairs with `StartNodeExecutor`), 40, 41, 42, 50, 51, 52, 60, 70, 80, 90, 100, 110, 120, 130, 140, 141.
 
 **The two axes can be incongruent** — e.g., a `NodeType.Control` node can carry `ActionType.QueryDataverse` via `__actionType` in ConfigJson. The orchestrator accommodates by routing on `actionType` from the action FK if present, else from ConfigJson `__actionType`, else from `NodeType → default` mapping. The `NodeExecutorRegistry` indexes executors **BY `ActionType`**, not NodeType.
 
