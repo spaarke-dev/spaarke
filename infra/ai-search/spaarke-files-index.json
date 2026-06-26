@@ -1,5 +1,5 @@
 {
-  "name": "spaarke-file-index",
+  "name": "spaarke-files-index",
   "fields": [
     { "// override-sortable-facetable": "key field: Azure forbids sortable/facetable on the key", "name": "id",                  "type": "Edm.String",                "key": true,  "retrievable": true,  "filterable": true,  "searchable": false, "sortable": false, "facetable": false },
     { "name": "tenantId",            "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
