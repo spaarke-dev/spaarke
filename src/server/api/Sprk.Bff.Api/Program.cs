@@ -1,3 +1,4 @@
+using Azure.Monitor.OpenTelemetry.AspNetCore;      // R7-S7: UseAzureMonitor() extension
 using Sprk.Bff.Api.Api.Membership;                 // R3 task 035 — AddMembershipApi() pairing
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Dataverse;                  // Dataverse passthrough endpoints (Phase B)
@@ -12,8 +13,22 @@ builder.Services.AddConfigurationModule(builder.Configuration);
 
 // ---- Services Registration ----
 
-// Application Insights telemetry
-builder.Services.AddApplicationInsightsTelemetry();
+// OpenTelemetry → Azure Monitor (replaces classic Application Insights SDK).
+// Per spaarke-redis-cache-remediation-r1 R7-S7 (2026-06-26): the classic SDK
+// didn't auto-instrument StackExchange.Redis and the OTel pipeline had no
+// exporter — neither Redis dependency telemetry nor the 12 Sprk.Bff.Api.* Meters
+// reached App Insights. UseAzureMonitor() wires both pipelines to the same
+// App Insights resource pointed at by APPLICATIONINSIGHTS_CONNECTION_STRING.
+//
+// Guard: UseAzureMonitor() throws at host start if no connection string is
+// present (unlike the classic SDK, which silently no-op'd). Skip in test /
+// local-dev hosts where the connection string is not configured.
+var aiConnString = builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]
+    ?? Environment.GetEnvironmentVariable("APPLICATIONINSIGHTS_CONNECTION_STRING");
+if (!string.IsNullOrWhiteSpace(aiConnString))
+{
+    builder.Services.AddOpenTelemetry().UseAzureMonitor();
+}
 
 // Core module (AuthorizationService, RequestCache)
 builder.Services.AddSpaarkeCore();

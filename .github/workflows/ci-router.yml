@@ -50,17 +50,28 @@ on:
   push:
     branches: [master]
   merge_group:
-    branches: [master]
+    # NOTE: `merge_group` does NOT support a `branches:` filter per GitHub Actions
+    # schema (only `types:` is allowed). Adding `branches:` here causes workflow
+    # startup_failure on every push to master. Merge queue events only fire for
+    # the queue's target branch anyway, so no filter is needed.
 
 permissions:
   contents: read
   pull-requests: read   # required by dorny/paths-filter on pull_request to read changed-file list
 
 concurrency:
-  # PR runs are cancelled on push; merge_group + push-to-master runs are NOT
-  # cancelled (each must complete to report the required check status).
+  # NOTE: `cancel-in-progress` MUST be a literal boolean — GitHub Actions
+  # schema rejects expressions here at workflow startup (was the cause of
+  # startup_failure 2026-06-26). Using literal `true` is safe because the
+  # `group` key already segregates events:
+  #   - PRs: group `ci-router-{pr_number}` — new push cancels previous PR run (desired)
+  #   - master push: group `ci-router-refs/heads/master` — back-to-back master
+  #     pushes (rare) may cancel each other; acceptable since the newer push
+  #     supersedes the older one anyway
+  #   - merge_group: group includes the ephemeral queue ref, so each queued PR
+  #     gets its own group — no cross-cancellation
   group: ci-router-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   # ==========================================================================

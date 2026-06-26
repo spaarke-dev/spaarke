@@ -61,8 +61,8 @@
 | 032 | Key Vault Redis-ConnectionString secret upsert | ✅ | 031 | 033 | 1 | FULL | 2026-06-26 11:14 UTC — connection string upserted to `spaarke-spekvcert`; KV-reference resolution verified via `Microsoft.Web/sites/config/configreferences` API |
 | 033 | Update spaarke-bff-dev App Settings | ✅ | 032 | 034 | 1 | FULL | 2026-06-26 11:18 UTC — 4 App Settings: `Redis__Enabled=true`, `Redis__InstanceName=spaarke:`, KV ref, `Redis__AllowInMemoryFallback=false` |
 | 034 | BFF restart + verify (**Success Criterion #1 — gate signal**) | ✅ | 033 | 035, 038 | 1 | FULL | 2026-06-26 11:21:39 UTC — startup log confirms `"Distributed cache: Redis enabled with instance name 'spaarke:'"`; `/healthz` 200; **GATE SIGNAL CLEARED for sister project NFR-13** |
-| 035 | Smoke test — chat session key format | ⏸ PARTIAL | 034 | 036 | 1 | FULL | Infrastructure cutover validated; tenant-prefix `spaarke:tenant:*` key verification requires new BFF code deployed (PR merge + `bff-deploy`) |
-| 036 | 24-hr verification window | ⏸ DEFERRED | 035 | 037 | 1 | STANDARD | Window opens at task 034 timestamp; closes 2026-06-27 11:21 UTC; operator queries App Insights for error rate + in-memory-mode log lines |
+| 035 | Smoke test — chat session key format | ✅ | 034 | 036 | 1 | FULL | Post-PR-merge BFF deploy (2026-06-26 12:24 UTC); traces show `Cached 2 communication accounts (comm:accounts:receive-enabled)` + every-minute Redis health check passing + ~800-1000 cmds/min on `spaarke-bff-redis-dev`; new BFF code live with `spaarke:` InstanceName + `TenantCache` |
+| 036 | 24-hr verification window | ⏸ OPERATOR | 035 | 037 | 1 | STANDARD | Window opens 2026-06-26 12:24 UTC (BFF deploy with new code); closes 2026-06-27 12:24 UTC; operator queries App Insights for error rate + in-memory-mode log lines |
 | 037 | Decommission legacy spe-redis-dev-67e2xz | ✅ | 036 | 038 | 1 | FULL | 2026-06-26 12:18 UTC — TAGGED (not deleted): `decommission=2026-06-26`, `decommission-reason=replaced-by-spaarke-bff-redis-dev`, `decommission-project=spaarke-redis-cache-remediation-r1`. 7–14 day reversibility window |
 | 038 | Sister project handoff signal | ✅ | 034, 037 | 039 | 1 | MINIMAL | 2026-06-26 12:20 UTC — `projects/spaarke-ai-azure-setup-dev-r1/notes/handoffs/redis-cache-remediation-r1-phase3-cleared.md` written |
 | 039 | Phase 3 retro | ✅ | 038 | 051 | 1 | MINIMAL | Deviations captured in `notes/cutover-deploy-log.md` (KV name correction, legacy-still-running discovery, post-deploy-verification harness quirk, partial code-vs-infra cutover) |
@@ -73,9 +73,9 @@
 
 | ID | Title | Status | Dependencies | Blocks | Hours | Rigor | Parallel |
 |---|---|---|---|---|---|---|---|
-| 040 | Verify App Insights Redis dependency telemetry | ⏸ PARTIAL | 035 | — | 1 | STANDARD | Instrumentation wired (IK on `spaarke-bff-dev`); live verification requires new BFF code deployed (PR merge + `bff-deploy`) — old code makes infrequent cache calls |
-| 041 | Custom metrics emission from ITenantCache | ✅ | 006, 019 | 042 | 3 | FULL | `Meter "Spaarke.Cache"` + counters + histogram with `resource` dim; +1 unit test pass; publish-size delta **−2.0 MB** vs branch start (PR adds ~120 LOC of in-process metrics) |
-| 042 | Verify custom metrics visible in App Insights | ⏸ PARTIAL | 041 | — | 1 | STANDARD | Code complete (Meter "Spaarke.Cache" in `TenantCache`); App Insights visibility requires new BFF code deployed |
+| 040 | Verify App Insights Redis dependency telemetry | ✅ | 035 | — | 1 | STANDARD | KQL verified 2026-06-26 after R7-S7 sub-gap #1 fix (`RedisCacheOptions.ConnectionMultiplexerFactory` wired in `CacheModule.cs:99-112`): `dependencies | where type contains 'Redis'` returns HMGET=30, UNLINK=18, CLIENT=4 in 10min window |
+| 041 | Custom metrics emission from ITenantCache | ✅ | 006, 019 | 042 | 3 | FULL | Meter `Sprk.Bff.Api.Cache` + counters + histogram. Emission moved to `MetricsDistributedCache` decorator in R7-S7 sub-gap #2 fix so ALL cache paths (including system-cache exceptions) are counted exactly once |
+| 042 | Verify custom metrics visible in App Insights | ✅ | 041 | — | 1 | STANDARD | KQL verified 2026-06-26 after R7-S7 sub-gap #2 fix (`MetricsDistributedCache` decorator wired in `CacheModule.DecorateDistributedCacheWithMetrics`): `customMetrics | where name startswith 'cache.'` returns `cache.hits=20 / cache.misses=9 / cache.redis_call_duration_ms=15 records` in 10min window |
 | 043 | 3 alert definitions (hit rate, P95, memory) | ✅ | 041 | — | 2 | STANDARD | `notes/alert-definitions-draft.md` + ready-to-paste Bicep skeletons; integrated into `redis-cache-azure-setup.md` §8 |
 | 044 | Phase 4 publish-size delta | ✅ (subsumed by 041) | 041, 043 | — | 1 | STANDARD | Cumulative measurement done in task 041; **−2.0 MB** vs branch start |
 

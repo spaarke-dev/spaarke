@@ -1,0 +1,381 @@
+$schema-doc: |
+  Spaarke Resources Manifest — single source of truth for non-secret Azure / Dataverse /
+  SharePoint Embedded resource information. Secrets live in Azure Key Vault, referenced
+  by name (kv:SECRET-NAME) never by value. Update by hand; sync secrets to local file
+  via scripts/Sync-LocalConfig.ps1.
+
+# ============================================================================
+# Lifecycle conventions
+# ============================================================================
+# Every resource entry may carry an optional `_meta:` block:
+#   _meta:
+#     status: active | deprecated | legacy | retired | planned
+#     created: YYYY-MM-DD
+#     retired: YYYY-MM-DD             # only if status != active
+#     reason_retained: "..."          # why kept after retirement (archival)
+#     history:
+#       - YYYY-MM-DD: note
+# Active resources may omit `_meta:` entirely (assumed: active, history unknown).
+# Deprecated / legacy / retired resources MUST carry a `_meta:` block.
+
+# ============================================================================
+# Manifest changelog (top-level chronology of significant changes)
+# ============================================================================
+_changelog:
+  - 2026-06-26:
+      action: created
+      summary: Consolidated 8 fragmented config/*.local.json files into single YAML manifest. First sync verified 6/8 KV references; 2 BFF/DV references corrected post-discovery via `az keyvault secret list`.
+      author: Claude Code
+  - 2026-05-24:
+      action: migration
+      summary: BFF dev migrated from Windows `spe-api-dev-67e2xz` to Linux `spaarke-bff-dev`. Old app preserved for stability window before decommission.
+  - 2025-12-31:
+      action: app_reg_consolidation
+      summary: BFF + GitHub Actions OIDC consolidated under SDAP-BFF-SPE-API (`1e40baad-...`). Old `Spaarke DMS-SPE Dev 1` (`fd1325aa-...`) moved to deprecated.
+  - 2025-09-22:
+      action: created
+      summary: SPE container type "Spaarke PAYGO 1" provisioned (`8a6ce34c-...`)
+
+# ============================================================================
+# Tenant (one for all environments)
+# ============================================================================
+
+tenant:
+  id: a221a95e-6abc-4434-aecc-e48338a1b2f2
+  name: spaarke.onmicrosoft.com
+  authority: https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2
+
+# ============================================================================
+# Subscriptions
+# ============================================================================
+
+subscriptions:
+  spe:
+    id: 484bc857-3802-427f-9ea5-ca47b43db0f0
+    name: Spaarke SPE Subscription 1
+    purpose: BFF API, AI services, App Service, AI Search, OpenAI, Key Vault, SPE
+  power_platform:
+    id: e430b9aa-6e75-4f7b-8927-fdcc4ef852df
+    name: SPRK Power Platform 1
+    purpose: Power Platform and Dataverse resources
+
+# ============================================================================
+# App Registrations (cross-environment — these apps live in the tenant, not per-env)
+# ============================================================================
+
+app_registrations:
+  bff_api:
+    app_name: SDAP-BFF-SPE-API
+    client_id: 1e40baad-e065-4aea-a8d4-4b7ab273458c
+    object_id: c2aab303-50f8-4279-9934-503ab3a4b357
+    service_principal_id: d93c832e-9b1d-4ccc-a2a8-9419fbf3fc18
+    audience: api://1e40baad-e065-4aea-a8d4-4b7ab273458c
+    scope_uri: api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation
+    sign_in_audience: AzureADMyOrg
+    purpose: BFF API authentication + GitHub Actions OIDC deployment
+    federated_credentials:
+      - name: github-actions-deploy-staging
+        id: 4c6439fa-e1f2-4139-93fd-9cd4a5914b62
+        issuer: https://token.actions.githubusercontent.com
+        subject: repo:spaarke-dev/spaarke:environment:staging
+        audiences: [api://AzureADTokenExchange]
+
+  msal_client:
+    client_id: 5175798e-f23e-41c3-b09b-7a90b9218189
+    purpose: MSAL SPA client for PCF controls and Code Pages
+
+  code_page_client:
+    client_id: 170c98e1-d486-4355-bcbe-170454e0207c
+    purpose: Code page auth (also = SPE owning application)
+    note: Same client_id as sharepoint_embedded.owning_app_id below
+
+  pcf_file_viewer:
+    app_name: SPE File Viewer PCF
+    client_id: b36e9b91-ee7d-46e6-9f6a-376871cc9d54
+    purpose: PCF control auth for SharePoint Embedded file operations
+
+  deprecated:
+    dev1:
+      _meta:
+        status: deprecated
+        retired: 2025-12-31
+        reason_retained: May still be referenced in older configurations; preserved for forensic traceability
+        history:
+          - pre-2025-09-22: In use as primary dev app reg
+          - 2025-12-31: Superseded by SDAP-BFF-SPE-API (consolidation)
+      app_name: Spaarke DMS-SPE Dev 1
+      client_id: fd1325aa-a709-4f15-b1f5-600f30d28875
+      object_id: 8b867837-a546-4407-86c7-cf0b22925db6
+
+# ============================================================================
+# SharePoint Embedded (tenant-level, region eastus)
+# ============================================================================
+
+sharepoint_embedded:
+  container_type_name: Spaarke PAYGO 1
+  container_type_id: 8a6ce34c-6055-4681-8f87-2f4f9f921c06
+  owning_app_id: 170c98e1-d486-4355-bcbe-170454e0207c # = app_registrations.code_page_client.client_id
+  azure_subscription_id: 484bc857-3802-427f-9ea5-ca47b43db0f0
+  resource_group: SharePointEmbedded
+  region: eastus
+  classification: Standard
+  creation_date: 2025-09-22
+  application_redirect_url: https://localhost
+  is_governable_by_admin: true
+
+# ============================================================================
+# Environments
+# ============================================================================
+# Each environment has its own Key Vault. Secret references (kv:SECRET-NAME) resolve
+# against that environment's Key Vault during sync.
+
+environments:
+  dev:
+    display_name: Development
+    resource_group: spe-infrastructure-westus2
+    location: westus2
+    region: West US 2
+    keyvault: spaarke-spekvcert # NOTE: this KV lives in the SharePointEmbedded RG, not in spe-infrastructure-westus2
+    keyvault_resource_group: SharePointEmbedded
+    keyvault_url: https://spaarke-spekvcert.vault.azure.net/
+    keyvault_resource_id: /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/SharePointEmbedded/providers/Microsoft.KeyVault/vaults/spaarke-spekvcert
+
+    bff:
+      app_service_name: spaarke-bff-dev # Canonical Linux app, post-2026-05-24 migration
+      app_service_url: https://spaarke-bff-dev.azurewebsites.net
+      app_service_slot: staging
+      app_service_plan: spe-asp-dev
+      app_service_plan_sku: B1
+      kind: app,linux
+      health_endpoint: /healthz
+      ping_endpoint: /ping
+      deployment_method: GitHub Actions OIDC
+      deployment_workflow: .github/workflows/deploy-bff-api.yml
+      app_registration_ref: app_registrations.bff_api
+      secrets:
+        # KV duplicate exists: also stored as `BFF-API-ClientSecret` (PascalCase) — both point at same value historically; lowercase-kebab is canonical
+        api_client_secret: kv:bff-api-client-secret
+        graph_api_client_secret: kv:Graph-API-ClientSecret
+        application_insights_key: kv:application-insights-key
+        servicebus_connection_string: kv:ServiceBus-ConnectionString
+        redis_connection_string: kv:Redis-ConnectionString
+      legacy:
+        _meta:
+          status: legacy
+          retired: 2026-05-24
+          reason_retained: Preserved for stability window before decommission; some older docs/scripts still reference
+          history:
+            - 2025-12-10: Provisioned (Windows, B1)
+            - 2026-05-24: Linux replacement `spaarke-bff-dev` deployed; legacy kept for rollback
+        app_service_name: spe-api-dev-67e2xz
+        url: https://spe-api-dev-67e2xz.azurewebsites.net
+
+    dataverse:
+      env_url: https://spaarkedev1.crm.dynamics.com
+      api_url: https://spaarkedev1.api.crm.dynamics.com/api/data/v9.2/
+      region: unitedstates
+      app_user_client_id_ref: app_registrations.bff_api.client_id
+      secrets:
+        # Dataverse application user shares the BFF API app registration, so it reuses bff-api-client-secret.
+        # No dedicated DV-* secret exists in dev KV (confirmed via `az keyvault secret list` 2026-06-26).
+        app_user_client_secret: kv:bff-api-client-secret
+
+    ai:
+      openai:
+        endpoint: https://spaarke-openai-dev.openai.azure.com/
+        resource_name: spaarke-openai-dev
+        api_version: 2024-02-01
+        resource_group: spe-infrastructure-westus2
+        region: eastus
+        resource_id: /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/spe-infrastructure-westus2/providers/Microsoft.CognitiveServices/accounts/spaarke-openai-dev
+        models:
+          gpt_4o_mini:
+            deployment_name: gpt-4o-mini
+            model_name: gpt-4o-mini
+            model_version: 2024-07-18
+            purpose: Document summarization
+            max_tokens: 128000
+            max_output_tokens: 16384
+        secrets:
+          api_key: kv:ai-openai-key
+          endpoint_ref: kv:ai-openai-endpoint
+      ai_search:
+        endpoint: https://spaarke-search-dev.search.windows.net
+        resource_name: spaarke-search-dev
+        resource_group: spe-infrastructure-westus2
+        region: westus2
+        sku: standard
+        replica_count: 1
+        partition_count: 1
+        semantic_search: standard
+        index_name: spaarke-records-index
+        resource_id: /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/spe-infrastructure-westus2/providers/Microsoft.Search/searchServices/spaarke-search-dev
+        secrets:
+          admin_key: kv:ai-search-key
+          endpoint_ref: kv:ai-search-endpoint
+      document_intelligence:
+        resource_name: spaarke-docintel-dev
+
+    spe:
+      # Container TYPE is tenant-level (see top-level `sharepoint_embedded:` block).
+      # Container INSTANCES (specific drives) are per-environment, listed here.
+      containers:
+        spaarke_demo:
+          _meta:
+            status: active
+            created: 2025-09-22
+            history:
+              - 2025-09-22: Provisioned as default EmailProcessing container
+          drive_id: b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50
+          friendly_name: Spaarke Demo
+          purpose: Knowledge / default for EmailProcessing DefaultContainerId
+          ai_search_index: spaarke-knowledge-index-v2
+          dataverse_env_var: sprk_SharePointEmbeddedContainerId # in SpaarkeCore solution; current dev value
+          bff_setting: EmailProcessing__DefaultContainerId
+        spaarke_files:
+          _meta:
+            status: active
+            created: 2026-05-28
+            history:
+              - 2026-05-28: Created as "Spaarke Dev Container 2" during multi-container-multi-index-r1 Phase 2
+          drive_id: b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh
+          friendly_name: Spaarke Dev Container 2
+          purpose: File storage container; mapped to `spaarke-file-index` search index for document RAG
+          ai_search_index: spaarke-file-index
+      cert_secrets:
+        certificate: kv:spe-app-cert
+        certificate_password: kv:spe-app-cert-pass
+        owning_app_secret: kv:spe-owning-app-secret # SPE owning app (170c98e1-...) client secret
+
+    # -----------------------------------------------------------------------
+    # Dev Key Vault inventory snapshot — every secret known to exist in
+    # `spaarke-spekvcert` as of 2026-06-26 (via `az keyvault secret list`).
+    # This catches "is X in the vault?" and "is X duplicated?" questions.
+    # Rule: a secret SHOULD appear here AND be referenced as `kv:NAME` elsewhere
+    # in this manifest. If it's here but unreferenced, it's a candidate for cleanup.
+    # -----------------------------------------------------------------------
+    keyvault_inventory:
+      referenced: # All currently referenced by this manifest
+        - ai-openai-endpoint
+        - ai-openai-key
+        - ai-search-endpoint
+        - ai-search-key
+        - application-insights-key
+        - bff-api-client-secret
+        - Graph-API-ClientSecret
+        - Redis-ConnectionString
+        - ServiceBus-ConnectionString
+        - spe-app-cert
+        - spe-app-cert-pass
+        - spe-owning-app-secret
+      not_secret_but_stored_as_secret: # These are GUIDs/URLs — should live in YAML, not KV
+        - bff-api-tenant-id # = tenant.id
+        - DATAVERSE-URL # = environments.dev.dataverse.env_url
+        - MANAGED-IDENTITY-CLIENT-ID
+        - office-addin-client-id
+        - SPE-ContainerTypeId # = sharepoint_embedded.container_type_id
+        - SPRK-DEV-DATAVERSE-URL # duplicate of DATAVERSE-URL
+        - SPRK-MANAGED-IDENTITY-CLIENT-ID # duplicate of MANAGED-IDENTITY-CLIENT-ID
+        - UAMI-ClientId
+      duplicates: # Multiple KV entries for the same value
+        - [bff-api-client-secret, BFF-API-ClientSecret] # PascalCase legacy entry
+        - [ai-openai-key, AzureOpenAI-ApiKey] # PascalCase legacy entry
+      orphaned_or_unreviewed: # Not yet classified — review next sync
+        []
+
+  demo:
+    display_name: Demo
+    resource_group: rg-spaarke-platform-prod
+    location: westus2
+    region: West US 2
+    keyvault: sprk-platform-prod-kv
+    keyvault_resource_group: rg-spaarke-platform-prod
+
+    bff:
+      app_service_name: spaarke-bff-prod
+      app_service_url: https://api.spaarke.com
+      app_service_slot: staging
+      app_registration_ref: app_registrations.bff_api # TBD: confirm if demo uses separate app reg
+      secrets:
+        api_client_secret: kv:API-CLIENT-SECRET
+
+    dataverse:
+      env_url: https://spaarke-demo.crm.dynamics.com
+      region: unitedstates
+
+    ai:
+      openai:
+        endpoint: https://spaarke-openai-demo.openai.azure.com/
+        resource_name: spaarke-openai-demo
+      ai_search:
+        resource_name: spaarke-search-demo
+      document_intelligence:
+        resource_name: spaarke-docintel-demo
+
+    spe:
+      containers:
+        spe_root:
+          _meta:
+            status: active
+            created: 2026-03-25
+            history:
+              - 2026-03-25: Provisioned during demo environment deployment
+          drive_id: b!FzmtPrWQEEi1yPtUOXM4_h7X4udVbCVJgu1ClOi23elAbPdL3-EGQK-D8YZ9tcZp
+          friendly_name: SPE Root Container
+          purpose: Demo environment root container
+          dataverse_env_var: sprk_SharePointEmbeddedContainerId # demo value
+
+# ============================================================================
+# GitHub Actions (OIDC + repo secrets)
+# ============================================================================
+# Secrets stored in GitHub repo settings; this section mirrors the configuration.
+# Values resolve against the references shown — single source of truth still here.
+
+github_actions:
+  repository: spaarke-dev/spaarke
+  oidc:
+    app_registration_ref: app_registrations.bff_api
+    federated_credentials:
+      - name: github-actions-deploy-staging
+        subject: repo:spaarke-dev/spaarke:environment:staging
+        audience: api://AzureADTokenExchange
+        environments: [staging]
+    required_role_assignments:
+      - role: Contributor
+        scope: /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/spe-infrastructure-westus2
+        purpose: App Service deployment
+  repo_secrets:
+    # These mirror values stored as GitHub Actions secrets in the repo settings
+    AZURE_CLIENT_ID: app_registrations.bff_api.client_id
+    AZURE_TENANT_ID: tenant.id
+    AZURE_SUBSCRIPTION_ID: subscriptions.spe.id
+    STAGING_APP_NAME: spe-api-dev-67e2xz # Legacy; revisit post-Linux-migration
+
+# ============================================================================
+# Maintenance metadata
+# ============================================================================
+
+_metadata:
+  version: 1
+  source_of_truth: Spaarke non-secret manifest
+  last_updated: 2026-06-26
+  replaces:
+    - config/azure-config.local.json
+    - config/app-registrations.local.json
+    - config/app-service-config.local.json
+    - config/dataverse-config.local.json
+    - config/sharepoint-config.local.json
+    - config/keyvault-config.local.json
+    - config/ai-config.local.json
+    - config/github-actions-config.local.json
+  conventions:
+    secret_references: |
+      Any value matching the pattern `kv:SECRET-NAME` is a Key Vault reference. The
+      vault is implicit per environment (environments.<env>.keyvault). Use
+      scripts/Sync-LocalConfig.ps1 to materialize values to config/secrets.local.json.
+    no_secrets_in_repo: |
+      This file is TRACKED in git. It MUST NOT contain any secret values — only
+      structural metadata and KV references.
+    drift_detection: |
+      When you discover drift (e.g., a resource renamed in Azure but still using the
+      old name here), update this file in the same PR as the Azure change.
