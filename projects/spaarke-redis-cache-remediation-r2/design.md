@@ -1,10 +1,19 @@
 # spaarke-redis-cache-remediation-r2 — Design
 
-> **Last Updated**: 2026-06-26 (revised)
-> **Status**: Draft (design)
+> **Last Updated**: 2026-06-26 (revised + decisions locked)
+> **Status**: Spec-locked — ready to execute
 > **Owner**: spaarke-dev
 > **Predecessor**: [`spaarke-redis-cache-remediation-r1`](../spaarke-redis-cache-remediation-r1/) (R7-S7 closure shipped; 6 items filed as GitHub Issues #462–#467; #466 DEF-005 Managed Redis closed Won't Fix per [`notes/managed-redis-decision.md`](notes/managed-redis-decision.md))
 > **Background research** (informational): [`notes/managed-redis-ai-research.md`](notes/managed-redis-ai-research.md)
+
+## Decisions locked (2026-06-26)
+
+| # | Decision | Source |
+|---|---|---|
+| 1 | **Cron cadence**: quarterly per environment | Q1 answer |
+| 2 | **Theme B environment coverage**: all environments (dev + staging + prod) from day 1, staggered cron times to catch breakage in dev before prod | Q2 answer + safety refinement |
+| 3 | **Resource dimension cardinality**: no soft cap. Code-driven bounding (~10-20 expected values). Re-evaluate only if observed cardinality > 50. | Q3 — operator discretion |
+| 4 | **PR sequencing**: one combined PR for all 3 themes — ship quickly | Q4 answer |
 
 ---
 
@@ -166,18 +175,31 @@ Rotate-RedisKey.ps1 -Environment dev [-WhatIf]
 
 Log every step to App Insights as a custom event (`RedisKeyRotation`) with `outcome`, `environment`, `duration_ms` fields.
 
-### B.2 Scheduled trigger — GitHub Actions workflow
+### B.2 Scheduled trigger — GitHub Actions workflow (all environments, staggered)
 
-New `.github/workflows/redis-key-rotation.yml` running on cron:
+New `.github/workflows/redis-key-rotation.yml` with three scheduled jobs — staggered by 7 days so dev rotates first; if anything breaks, dev catches it before staging/prod:
 
 ```yaml
 on:
   schedule:
-    - cron: '0 6 1 */3 *'  # 06:00 UTC on the 1st of every 3rd month (quarterly)
-  workflow_dispatch:  # Allow manual trigger for testing
+    - cron: '0 6 1 */3 *'   # Dev:     06:00 UTC on the  1st of Jan/Apr/Jul/Oct
+    - cron: '0 6 8 */3 *'   # Staging: 06:00 UTC on the  8th of Jan/Apr/Jul/Oct
+    - cron: '0 6 15 */3 *'  # Prod:    06:00 UTC on the 15th of Jan/Apr/Jul/Oct
+  workflow_dispatch:        # Manual trigger for testing — env input parameter
+    inputs:
+      environment:
+        type: choice
+        options: [dev, staging, prod]
 ```
 
-Uses existing OIDC auth pattern (already in use for other workflows). Invokes `Rotate-RedisKey.ps1 -Environment dev` (initially dev-only; expand to staging/prod after 2 successful dev runs).
+Job logic determines which environment to rotate based on `github.event.schedule` (dev/staging/prod literal match on the cron expression) or `inputs.environment` for manual runs.
+
+Uses existing OIDC auth pattern (already in use for other Spaarke workflows). Distinct service-principal-to-environment mapping in GitHub Environments + secrets:
+- `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` shared across envs
+- `AZURE_CLIENT_ID_DEV`, `AZURE_CLIENT_ID_STAGING`, `AZURE_CLIENT_ID_PROD` per environment (so a compromised prod SP can't rotate dev)
+- KV name + Redis name + App Service name parameterized per environment
+
+**Initial rollout**: enable `workflow_dispatch` for all three envs; run dev manually first to validate the script + auth chain end-to-end. Only after one successful manual dev run, enable the cron schedules. Then watch staging at +7 days, then prod at +14 days.
 
 ### B.3 Operational runbook update
 
@@ -204,10 +226,13 @@ New alert in `infrastructure/bicep/alerts.bicep` (added in Theme A.4):
 ### Theme B acceptance criteria
 
 - [ ] `Rotate-RedisKey.ps1 -Environment dev -WhatIf` plans correctly without making changes
-- [ ] Dry-run actual rotation: KV secret has TWO versions (old + new); BFF restart succeeds; `/healthz` 200; App Insights logs `RedisKeyRotation` event with `outcome=success`
-- [ ] GitHub Actions workflow runs successfully via `workflow_dispatch`
+- [ ] `Rotate-RedisKey.ps1 -Environment staging -WhatIf` and `... prod -WhatIf` both plan correctly with the right per-env resource names
+- [ ] Dry-run actual rotation on dev: KV secret has TWO versions (old + new); BFF restart succeeds; `/healthz` 200; App Insights logs `RedisKeyRotation` event with `outcome=success`, `environment=dev`
+- [ ] GitHub Actions workflow runs successfully via `workflow_dispatch` for dev (validates auth chain end-to-end)
+- [ ] Cron schedules enabled only after manual dispatch succeeds for at least dev
 - [ ] Manual fallback procedure still works (operator unfamiliar with automation can still rotate)
-- [ ] Alert fires if `RedisKeyRotation` event missing for >100 days (test by faking timestamp in App Insights)
+- [ ] Alert fires if `RedisKeyRotation` event missing for >100 days for any environment (test by faking timestamp in App Insights)
+- [ ] Per-env service principals scoped to their environment's KV + Redis only (prod SP cannot rotate dev, dev SP cannot rotate prod)
 
 ---
 
@@ -283,12 +308,14 @@ New alert in `infrastructure/bicep/alerts.bicep` (added in Theme A.4):
 
 ---
 
-## 8. Open questions for project owner before spec lock
+## 8. Open questions — resolved 2026-06-26
 
-1. **Cron cadence for key rotation** — quarterly (`0 6 1 */3 *`) is the spec assumption. Acceptable, or do you want a different cadence (monthly is more conservative; semi-annual is closer to the 90-day target)?
-2. **Initial environment coverage for Theme B** — dev only (safest), or dev + staging + prod from day 1?
-3. **Theme A.3 `resource` dimension cardinality cap** — how many distinct resources to allow before tagging as `other`? Default in the design is "unbounded but expected ≤20".
-4. **PR sequencing** — A then B+C in parallel (recommended), or one combined PR (faster review but harder to revert one piece)?
+All four resolved in "Decisions locked" header at the top of this document. Preserved here for the historical record:
+
+1. ~~Cron cadence~~ → quarterly per environment, staggered (dev 1st / staging 8th / prod 15th)
+2. ~~Initial environment coverage~~ → all environments from day 1; manual `workflow_dispatch` validates first before enabling cron
+3. ~~`resource` cardinality cap~~ → no soft cap; code-driven natural bounding; re-evaluate only if observed > 50 distinct values
+4. ~~PR sequencing~~ → one combined PR for all 3 themes; speed prioritized over revert-granularity
 
 ---
 
