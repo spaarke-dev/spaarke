@@ -283,7 +283,17 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   };
 
   const handleLinkClick = (): void => {
-    openRecordViaXrm(primaryEntityType, primaryEntityId);
+    if (!primaryEntityType || !primaryEntityId) return;
+    // FR-19 (task 047): when the parent supplies `onOpenRecord`, route the
+    // regarding-name link click through it so the parent owns the
+    // `Xrm.Navigation.navigateTo` call AND the 403-fallback Toaster dispatch.
+    // When the prop is omitted (back-compat / standalone usage), fall back to
+    // the in-component Xrm helper that silently swallows the rejection.
+    if (onOpenRecord) {
+      onOpenRecord(primaryEntityType, primaryEntityId);
+    } else {
+      openRecordViaXrm(primaryEntityType, primaryEntityId);
+    }
   };
 
   // ---------------------------------------------------------------------------

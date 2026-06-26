@@ -17,7 +17,7 @@
  */
 
 import * as React from 'react';
-import { render, waitFor, screen } from '@testing-library/react';
+import { render, waitFor, screen, fireEvent, act } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 // ---- Mock the @spaarke/auth peer dep (routed by jest.config moduleNameMapper)
@@ -130,7 +130,8 @@ const fakeChannels: ChannelFetchResult[] = [
   },
 ];
 
-function installXrmGlobal(): void {
+function installXrmGlobal(navigateToImpl?: jest.Mock): jest.Mock {
+  const navigateTo = navigateToImpl ?? jest.fn().mockResolvedValue(undefined);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (window as any).Xrm = {
     WebApi: {
@@ -140,6 +141,7 @@ function installXrmGlobal(): void {
       updateRecord: jest.fn(),
       deleteRecord: jest.fn(),
     },
+    Navigation: { navigateTo },
     Utility: {
       getGlobalContext: () => ({
         userSettings: {
@@ -148,6 +150,7 @@ function installXrmGlobal(): void {
       }),
     },
   };
+  return navigateTo;
 }
 
 function uninstallXrmGlobal(): void {
@@ -272,23 +275,108 @@ describe('DailyBriefingApp (smoke)', () => {
   it('renders the 3 new R3 per-item action buttons + preserves Add to To Do (ADR-024)', async () => {
     renderApp();
 
-    // Wait for the narrative bullet to mount (downstream of /narrate fetch).
+    // R4 task 045 — the inline 5-icon action row was REPLACED by a three-dot
+    // overflow menu (FR-18). The 3 R3 actions + Add to To Do now live inside
+    // a Fluent v9 MenuPopover that mounts ONLY while the menu is open. To
+    // assert their presence + their canonical labels, we wait for the
+    // MenuButton trigger (aria-label="More actions") then click to open it
+    // and assert against the rendered MenuItems.
     await waitFor(
       () => {
-        expect(screen.queryByRole('button', { name: /mark as read/i })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /More actions/i })).toBeInTheDocument();
       },
       { timeout: 5000 }
     );
 
-    // R3 task 031 — 3 new per-item buttons with owner-specified tooltips:
+    const trigger = screen.getByRole('button', { name: /More actions/i });
+    act(() => {
+      fireEvent.click(trigger);
+    });
+
+    // R3 task 031 — 3 new per-item menu items with owner-specified labels:
     //   1. "Mark as read"                          (CheckmarkRegular)
     //   2. "Remove from briefing"                  (DismissRegular)
     //   3. "Keep on briefing for 7 more days"      (CalendarAddRegular)
-    expect(screen.getByRole('button', { name: /mark as read/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /remove from briefing/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /keep on briefing for 7 more days/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Mark as read$/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Remove from briefing$/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('menuitem', { name: /^Keep on briefing for 7 more days$/i })
+    ).toBeInTheDocument();
 
-    // ADR-024 regression-free: existing "Add to To Do" button still renders.
-    expect(screen.getByRole('button', { name: /add to to do/i })).toBeInTheDocument();
+    // ADR-024 regression-free: existing "Add to To Do" menu item still renders.
+    expect(screen.getByRole('menuitem', { name: /^Add to To Do$/i })).toBeInTheDocument();
+  });
+
+  it('FR-19 link-click happy path: Open record menu item → Xrm.Navigation.navigateTo({pageType, entityName, entityId}, {target:2, 80%×80%}) (AC-19a)', async () => {
+    // Override Xrm with a navigateTo that resolves (success case = no toast).
+    uninstallXrmGlobal();
+    const navigateTo = installXrmGlobal(jest.fn().mockResolvedValue(undefined));
+    renderApp();
+
+    await waitFor(
+      () => {
+        expect(screen.queryByRole('button', { name: /More actions/i })).toBeInTheDocument();
+      },
+      { timeout: 5000 }
+    );
+
+    const trigger = screen.getByRole('button', { name: /More actions/i });
+    act(() => {
+      fireEvent.click(trigger);
+    });
+    act(() => {
+      fireEvent.click(screen.getByRole('menuitem', { name: /^Open record$/i }));
+    });
+
+    expect(navigateTo).toHaveBeenCalledTimes(1);
+    const [page, options] = navigateTo.mock.calls[0];
+    expect(page).toEqual({
+      pageType: 'entityrecord',
+      entityName: 'sprk_matter',
+      entityId: '11111111-1111-1111-1111-111111111111',
+    });
+    expect(options).toMatchObject({
+      target: 2,
+      width: { value: 80, unit: '%' },
+      height: { value: 80, unit: '%' },
+    });
+  });
+
+  it('FR-19 / AC-19b: rejected navigateTo (e.g., 403) → non-blocking Toaster toast "Cannot open record" rendered', async () => {
+    // Override Xrm with a navigateTo that REJECTS — simulates Dataverse 403.
+    uninstallXrmGlobal();
+    installXrmGlobal(jest.fn().mockRejectedValue(new Error('403 Forbidden')));
+    renderApp();
+
+    await waitFor(
+      () => {
+        expect(screen.queryByRole('button', { name: /More actions/i })).toBeInTheDocument();
+      },
+      { timeout: 5000 }
+    );
+
+    // Open the overflow menu and click "Open record" — triggers the rejected
+    // navigateTo path → DailyBriefingApp.handleOpenRecord dispatches a toast.
+    const trigger = screen.getByRole('button', { name: /More actions/i });
+    await act(async () => {
+      fireEvent.click(trigger);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('menuitem', { name: /^Open record$/i }));
+      // Flush the rejected promise so the .catch handler dispatches the toast.
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The Toaster (mounted at app root) renders the toast title in the DOM
+    // once dispatched. We assert the canonical FR-19 user-facing copy.
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Cannot open record/i)).toBeInTheDocument();
+      },
+      { timeout: 2000 }
+    );
+    // Body cue: "You may not have access." matches the AC-19b copy.
+    expect(screen.getByText(/You may not have access\./i)).toBeInTheDocument();
   });
 });

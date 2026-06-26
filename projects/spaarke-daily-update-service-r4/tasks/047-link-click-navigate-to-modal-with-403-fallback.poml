@@ -3,7 +3,9 @@
   <metadata>
     <title>Link click → Xrm.Navigation.navigateTo modal + 403 fallback toast (FR-19)</title>
     <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>handleOpenRecord implemented in DailyBriefingApp: calls Xrm.Navigation.navigateTo({pageType:'entityrecord', entityName, entityId}, {target:2, width:{value:80,unit:'%'}, height:{value:80,unit:'%'}}); on .catch dispatches non-blocking Fluent v9 Toaster toast with intent='warning' — title "Cannot open record" / body "You may not have access." (AC-19a + AC-19b). Single code path for both regarding-name link click AND overflow menu "Open record" item. Toaster mounted once at app root (single instance) using shared dispatchToast. Two new smoke tests added: "FR-19 link-click happy path" (asserts navigateTo args) + "FR-19 / AC-19b: rejected navigateTo (e.g., 403) → toast". Semantic tokens only (ADR-021). Defensive fallback: if Xrm.Navigation.navigateTo is unavailable, dispatches the same toast.</completion-notes>
     <estimated-hours>2</estimated-hours>
     <dependencies>045</dependencies>
     <blocks>049</blocks>

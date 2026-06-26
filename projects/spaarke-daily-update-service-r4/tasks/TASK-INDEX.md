@@ -85,8 +85,8 @@
 | 043 | Wire autoPopup preference to workspace launcher hook (FR-17d) | ✅ | 036 | 049 | Group E2 | FULL |
 | 044 | Remove minConfidence end-to-end + grep verify zero references (FR-17e) | ✅ | 036 | 049 | Group E2 | FULL |
 | 045 | Implement NarrativeBullet three-dot overflow menu (FR-18) | ✅ | 036 | 046, 049 | — | FULL |
-| 046 | Wire overflow menu callbacks in ActivityNotesSection + DailyBriefingApp | 🔲 | 045 | 049 | — | FULL |
-| 047 | Link click → Xrm.Navigation.navigateTo modal + 403 fallback toast (FR-19) | 🔲 | 045 | 049 | — | FULL |
+| 046 | Wire overflow menu callbacks in ActivityNotesSection + DailyBriefingApp | ✅ | 045 | 049 | — | FULL |
+| 047 | Link click → Xrm.Navigation.navigateTo modal + 403 fallback toast (FR-19) | ✅ | 045 | 049 | — | FULL |
 | 048 | TL;DR ↔ Activities count reconciliation smoke test (FR-20) | 🔲 | 042, 045 | 049 | — | STANDARD |
 | 049 | PR 5 wrap — code-review + adr-check + ui-test + accessibility + open PR | 🔲 | 042, 043, 044, 046, 047, 048 | 090 | — | STANDARD |
 

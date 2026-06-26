@@ -176,6 +176,21 @@ export interface ActivityNotesSectionProps {
    * service layer surfaces `ttlinseconds` on `NotificationItem`).
    */
   onKeep?: (itemId: string, currentTtlSeconds: number) => void;
+  /**
+   * R4 task 046+047 / FR-18 + FR-19 — "Open record" callback.
+   *
+   * Single code path for both entry points:
+   *   - The regarding-name link click in NarrativeBullet (FR-19)
+   *   - The "Open record" overflow menu item (FR-18 / AC-18a #6)
+   *
+   * Wired from `DailyBriefingApp.handleOpenRecord` which invokes
+   * `Xrm.Navigation.navigateTo` with `target:2, width/height 80%×80%` and
+   * dispatches a non-blocking Fluent v9 Toaster toast on rejection
+   * (403 fallback per AC-19b). Optional for back-compat with consumers that
+   * have not yet wired the app-level toast; absent value falls back to the
+   * NarrativeBullet-internal Xrm helper which silently swallows the rejection.
+   */
+  onOpenRecord?: (entityType: string, entityId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,6 +340,7 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
   onCheck,
   onRemove,
   onKeep,
+  onOpenRecord,
 }) => {
   const styles = useStyles();
 
@@ -492,6 +508,11 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
                   onCheck={onCheck}
                   onRemove={onRemove}
                   onKeep={onKeep}
+                  // R4 task 046+047 — single Open record path for both the
+                  // regarding-name link (FR-19) AND the overflow menu item
+                  // (FR-18 / AC-18a #6). DailyBriefingApp owns the 403-fallback
+                  // toast dispatch via the shared Toaster instance.
+                  onOpenRecord={onOpenRecord}
                 />
               );
             })}

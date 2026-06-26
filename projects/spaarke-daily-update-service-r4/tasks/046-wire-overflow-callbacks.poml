@@ -3,7 +3,9 @@
   <metadata>
     <title>Wire overflow menu callbacks in ActivityNotesSection + DailyBriefingApp</title>
     <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>All 6 overflow callbacks wired through ActivityNotesSection → NarrativeBullet. R3 Check/Remove/Keep + ADR-024 Add to To Do paths preserved unchanged. Open record callback wired in this task (handler body implemented by task 047 in the same commit). New test file `test/ActivityNotesSection.callbacks.test.tsx` (8 tests) locks the propagation contract for all six callbacks including FR-19 regarding-name link click path. DailyBriefingApp smoke test updated to open overflow menu before asserting MenuItem presence (previous "find buttons" assertion no longer valid post-FR-18).</completion-notes>
     <estimated-hours>2</estimated-hours>
     <dependencies>045</dependencies>
     <blocks>049</blocks>
