@@ -1,6 +1,8 @@
 # Azure Managed Redis — Research + Spaarke AI Service Mapping
 
-> **Purpose**: Supplement to `design.md`. Captures the technical research on Azure Managed Redis (`Microsoft.Cache/redisEnterprise`, GA mid-2025) + an honest audit of which Spaarke AI services would actually benefit. Used to gate the R2 Phase 2 decision.
+> **Status as of 2026-06-26**: **Informational only**. The Managed Redis migration decision has been made (NO — see [`managed-redis-decision.md`](managed-redis-decision.md)). This research document is retained as the substantive backing for that decision and as ready-to-use input if conditions ever trigger a revisit.
+>
+> **Purpose**: Captures the technical research on Azure Managed Redis (`Microsoft.Cache/redisEnterprise`, GA mid-2025) + an honest audit of which Spaarke AI services would actually benefit.
 >
 > **Sources**: Microsoft Learn `azure/redis/*` (cited inline). Researcher subagent findings 2026-06-26 saved at `.claude/agent-memory/researcher/azure-managed-redis-2026-06-26.md`.
 >
