@@ -128,3 +128,25 @@ After `work/spaarke-redis-cache-remediation-r1` merges to master:
 5. **Now-valid metrics**: query App Insights for `cache.hits`/`cache.misses`/`cache.redis_call_duration_ms` with `resource` dimension.
 6. 24-hr verification window (task 036) — error rate stays at baseline; no in-memory-mode log lines.
 7. After 24 hr: legacy can be deleted (or extend reversibility window further if preferred). Tag was applied today (2026-06-26).
+
+---
+
+## R7-S7 inline partial closure (2026-06-26 ~13:25 UTC)
+
+User authorized inline R7-S7 fix to close the App Insights telemetry pipeline gap (see [`r7-backlog.md` § S7 "Status"](r7-backlog.md#status-2026-06-26-partial-closure-landed-inline) for full status).
+
+**Wired in this project**:
+- Added `Azure.Monitor.OpenTelemetry.AspNetCore 1.4.0`
+- Replaced `Program.cs:16` `AddApplicationInsightsTelemetry()` with `AddOpenTelemetry().UseAzureMonitor()` (guarded on connection-string presence so tests/local-dev continue to work)
+- Deployed to `spaarke-bff-dev`; 4/4 critical DLLs hash-verified; `/healthz` 200; build clean (`7885 pass / 2 flaky-fail / 135 skip` — baseline)
+
+**Now flowing to App Insights** (verified via KQL):
+- HTTP server/client metrics: `http.server.request.duration`, `http.client.request.duration`, `http.client.open_connections`, `http.client.connection.duration`, `http.client.request.time_in_queue`, `http.server.active_requests`, `http.client.active_requests`
+- Custom counter from BFF code: `circuit_breaker.open_count` — proves Sprk.Bff.Api.* Meter pipeline works
+- Existing dependency telemetry (HTTP / AAD / ServiceBus / KeyVault / Search / Cosmos) continues
+
+**Still NOT visible (R8 follow-up)** — two specific sub-gaps documented in r7-backlog.md S7:
+- Redis dependency spans (`dependencies | where type contains 'Redis'` empty despite Redis being healthy + writes happening). Hypothesis: `Microsoft.Extensions.Caching.StackExchangeRedis` creates its own internal `ConnectionMultiplexer`; the DI-registered one (instrumented) is idle. Fix: wire `RedisCacheOptions.ConnectionMultiplexerFactory` in CacheModule to share the multiplexer.
+- `cache.hits` / `cache.misses` / `cache.redis_call_duration_ms` (`customMetrics | where name startswith 'cache.'` empty despite `TenantCache` being exercised). Hypothesis: `TenantCache.Meter` static-init order vs MeterProvider; OR not all cache call sites route through the static counter. Requires audit.
+
+These are NOT regressions — neither was visible before this project. The project shipped the prep work (correct Meter name, Redis instrumentation registration, OTel exporter); R8 closes the last mile.

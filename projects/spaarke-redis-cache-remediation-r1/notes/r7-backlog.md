@@ -318,6 +318,29 @@ dependencies
 
 Surfaced during this project's Phase 4 verification (2026-06-26). See `notes/cutover-deploy-log.md`. The classic-SDK + OTel-no-exporter drift is the root cause that prevents FR-16 metrics from being visible in App Insights despite the wrapper emitting them correctly.
 
+### Status (2026-06-26): partial closure landed inline
+
+**Done in this project (commit pending)**:
+- Path A wired: added `Azure.Monitor.OpenTelemetry.AspNetCore 1.4.0`; replaced `Program.cs:16` `AddApplicationInsightsTelemetry()` with `AddOpenTelemetry().UseAzureMonitor()` (guarded on `APPLICATIONINSIGHTS_CONNECTION_STRING` to keep tests/local-dev hosts working).
+- Deployed to `spaarke-bff-dev` (deploy `2026-06-26 ~13:25 UTC`; 4 critical DLLs hash-verified; `/healthz` green).
+- **Proven flowing to App Insights**: `http.server.request.duration`, `http.client.request.duration`, `http.client.open_connections`, `http.client.connection.duration`, `http.client.request.time_in_queue`, `http.server.active_requests`, `http.client.active_requests`, `circuit_breaker.open_count` (custom Meter from BFF code). Built-in dependency telemetry continues for HTTP/AAD/ServiceBus/KeyVault/Search/Cosmos. KQL verified.
+
+**Remaining gaps — require R8 follow-up code work**:
+
+1. **`AddRedisInstrumentation()` not surfacing Redis dep spans even though traffic is flowing.**
+   - Evidence: BFF traces show every-minute `"Cached 2 communication accounts (comm:accounts:receive-enabled) with 00:05:00 TTL"` + `"Health check redis with status Healthy"` confirming Redis IS being written/read. But `dependencies | where type contains 'Redis'` returns ZERO across multiple 10-/60-/360-minute windows.
+   - Root cause hypothesis: `Microsoft.Extensions.Caching.StackExchangeRedis` creates its **own internal** `ConnectionMultiplexer` from the connection string. The DI-registered `IConnectionMultiplexer` (per CacheModule's symmetric ADR-032 registration) is a **separate** instance. `AddRedisInstrumentation()` hooks the DI-registered one — which is idle in the cache hot path.
+   - Fix: wire `RedisCacheOptions.ConnectionMultiplexerFactory` in `CacheModule.cs` to return the DI-registered `IConnectionMultiplexer` (so cache + telemetry share the same multiplexer instance). ~1-line CacheModule change + redeploy + reverify.
+
+2. **`cache.hits` / `cache.misses` / `cache.redis_call_duration_ms` Meter measurements not appearing in `customMetrics`.**
+   - Evidence: `customMetrics | where name startswith 'cache.'` returns ZERO across 10-/60-/180-minute windows, despite `Sprk.Bff.Api.Cache` Meter being registered in `TelemetryModule.cs:25` AND `TenantCache.HitsCounter.Add(...)` being called by hot-path code (verified via comm:accounts log).
+   - Root cause hypothesis: `TenantCache.Meter` is created at static-init (`internal static readonly Meter Meter = new("Sprk.Bff.Api.Cache", "1.0.0")`) which runs at TenantCache type-load time, potentially BEFORE the OTel MeterProvider is wired up by `UseAzureMonitor()` + `TelemetryModule.AddTelemetryModule()`. Counter measurements recorded before MeterProvider subscribes may be lost. OR: not all migrated cache call sites actually route through `TenantCache.HitsCounter` (some may bypass to `IDistributedCache` directly within `TenantCache.cs` extensions / `Spaarke.Core/Cache/DistributedCacheExtensions.cs`).
+   - Fix: (a) Audit Meter construction ordering — possibly move Meter creation to `TenantCache` constructor or use `IMeterFactory` from DI. (b) Audit ALL `cache.hits/misses` increment sites to confirm they fire on every cache path. Probably a half-day investigation + small fix.
+
+Both fixes are non-blocking for: (i) the dev cutover (Phase 3 already cleared sister project per NFR-11/13), (ii) operational health (Redis IS healthy + reachable + responding to BFF traffic per traces), (iii) general telemetry pipeline (it's flowing for HTTP/built-in deps + at least one custom counter).
+
+**Recommended R8 sequencing**: Fix #1 first (1-line code change, immediate Redis dep telemetry restoration). Fix #2 second (deeper audit; cache.* dashboard is the more visible payoff for end users). Both <1 day combined.
+
 ---
 
 ## Cross-References

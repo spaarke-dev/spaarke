@@ -94,6 +94,10 @@
          Without this, App Insights' standard SDK does NOT capture StackExchange.Redis
          dependency calls. Pinned to 1.12.0-beta.1 (current stable-ish for OTel 1.15.x). -->
     <PackageReference Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="1.12.0-beta.1" />
+    <!-- spaarke-redis-cache-remediation-r1 R7-S7 closure (2026-06-26): wire the OTel pipeline
+         to Azure Monitor so the 12 registered Meters + AddRedisInstrumentation() actually
+         flow to App Insights. Replaces classic AddApplicationInsightsTelemetry() in Program.cs. -->
+    <PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.4.0" />
 
     <!-- Polly (CRITICAL - must be 8.x) -->
     <PackageReference Include="Polly" Version="8.6.5" />
