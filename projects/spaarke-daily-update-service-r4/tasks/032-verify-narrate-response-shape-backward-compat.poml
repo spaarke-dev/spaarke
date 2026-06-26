@@ -3,7 +3,9 @@
   <metadata>
     <title>Verify /narrate response shape backward compat — widget parser unchanged</title>
     <phase>4: W2 Consumer — /narrate dispatch + cache + fallback (PR 4)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>Added DailyBriefingResponseShapeTests.cs (3 tests, all pass) verifying /narrate response shape backward compat. Frozen R3 sample captured at notes/samples/narrate-response-r3.json. Tests assert: (1) every widget-consumed field is populated end-to-end, (2) camelCase serialization (no PascalCase leak — widget parser break guard), (3) frozen sample round-trips structurally identical (TL;DR text + per-bullet entity refs preserved; category/priority counts correctly re-injected from request).</completion-notes>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>031</dependencies>
     <blocks>035</blocks>
