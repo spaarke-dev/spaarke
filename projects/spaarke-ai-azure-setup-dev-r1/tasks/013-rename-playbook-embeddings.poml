@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Atomic rename: playbook-embeddings → spaarke-playbook-embeddings (FR-10, rename 2 of 3)</title>
+    <phase>2: Schema Preparation</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>002, 010</dependencies>
+    <blocks>020</blocks>
+    <tags>azure-search, schemas, refactoring, rename</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Atomic rename per NFR-07</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>NFR-07: one PR per rename</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Atomically rename `playbook-embeddings` to `spaarke-playbook-embeddings` (apply spaarke- prefix) across all touchpoints in ONE PR per NFR-07.
+    Touchpoints: schema file path + JSON name + code constant in PlaybookEmbeddingService.cs:46 + Index-ExistingPlaybooks.ps1 + any deploy script refs.
+  </prompt>
+
+  <role>
+    Spaarke platform Azure AI Search engineer.
+  </role>
+
+  <goal>
+    All references to `playbook-embeddings` (unprefixed) replaced with `spaarke-playbook-embeddings`.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>infrastructure/ai-search/spaarke-playbook-embeddings.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs</file>
+      <file>scripts/Index-ExistingPlaybooks.ps1</file>
+      <file>scripts/Create-PlaybookEmbeddingsIndex.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-10">All touchpoints updated atomically</constraint>
+    <constraint source="NFR-07">One PR per rename</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep for `playbook-embeddings` (without `spaarke-` prefix) to enumerate touchpoints</step>
+    <step order="2">git mv schema file to `spaarke-playbook-embeddings.json`; edit JSON `name` field</step>
+    <step order="3">Edit `PlaybookEmbeddingService.cs:46` index name constant</step>
+    <step order="4">Edit `Index-ExistingPlaybooks.ps1` index name reference</step>
+    <step order="5">Note: `Create-PlaybookEmbeddingsIndex.ps1` is retired by FR-07 in Phase 3; no rename needed (deleted later)</step>
+    <step order="6">Update TASK-INDEX.md: task 013 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Enumerate references</tool>
+    <tool name="Bash">git mv</tool>
+    <tool name="Edit">Update touchpoints</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">infrastructure/ai-search/spaarke-playbook-embeddings.json</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs</output>
+    <output type="script">scripts/Index-ExistingPlaybooks.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep for `playbook-embeddings` returns matches only with `spaarke-` prefix (or in retired-script context)</criterion>
+    <criterion testable="true">Schema JSON name = `spaarke-playbook-embeddings`</criterion>
+    <criterion testable="true">PlaybookEmbeddingService.cs:46 uses new constant</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

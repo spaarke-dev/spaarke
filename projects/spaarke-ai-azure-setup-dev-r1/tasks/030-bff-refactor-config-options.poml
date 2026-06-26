@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>BFF refactor: Configuration options classes (AiSearchOptions + AnalysisOptions) (FR-13 + FR-14)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>011, 013, 014</dependencies>
+    <blocks>031, 032, 033, 034, 035, 036, 037, 045</blocks>
+    <tags>bff-api, refactoring, config, options</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation: BFF DI-relevant options classes; tags include bff-api; modifies .cs files</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Options classes are shared by many consumers; must update first before consumer refactors</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update BFF Configuration options classes per FR-13 + FR-14: AiSearchOptions.KnowledgeIndexName default `spaarke-knowledge-index-v2` → `spaarke-files-index`; REMOVE AiSearchOptions.DiscoveryIndexName property entirely; AnalysisOptions.SharedIndexName default `spaarke-knowledge-index-v2` → `spaarke-files-index`.
+  </prompt>
+
+  <role>
+    Spaarke platform .NET 8 Minimal API developer. Familiar with Options pattern + DI binding.
+  </role>
+
+  <goal>
+    Both options classes use canonical names; DiscoveryIndexName property removed.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AnalysisOptions.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">AiSearchOptions.KnowledgeIndexName default (line 7) `spaarke-knowledge-index-v2` → `spaarke-files-index`</constraint>
+    <constraint source="FR-13">AnalysisOptions.SharedIndexName default (line 69) `spaarke-knowledge-index-v2` → `spaarke-files-index`</constraint>
+    <constraint source="FR-14">REMOVE AiSearchOptions.DiscoveryIndexName property (line 8) entirely (not just emptied)</constraint>
+    <constraint source="NFR-04">Net publish-size delta ≤ 0 MB — refactor only, no new packages</constraint>
+    <constraint source="CLAUDE.md §10">MUST NOT introduce new BFF services or packages</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AnalysisOptions.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Edit AiSearchOptions.cs:7 KnowledgeIndexName default → `spaarke-files-index`</step>
+    <step order="2">Edit AiSearchOptions.cs:8 REMOVE DiscoveryIndexName property entirely</step>
+    <step order="3">Edit AnalysisOptions.cs:69 SharedIndexName default → `spaarke-files-index`</step>
+    <step order="4">Build: `dotnet build src/server/api/Sprk.Bff.Api/` — must succeed</step>
+    <step order="5">Note: consumers of DiscoveryIndexName are addressed in tasks 031-037 (they will get compile errors until updated)</step>
+    <step order="6">Update TASK-INDEX.md: task 030 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Update options classes</tool>
+    <tool name="dotnet">Build BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/AnalysisOptions.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AiSearchOptions.KnowledgeIndexName default = `spaarke-files-index`</criterion>
+    <criterion testable="true">AiSearchOptions.DiscoveryIndexName property no longer exists in source</criterion>
+    <criterion testable="true">AnalysisOptions.SharedIndexName default = `spaarke-files-index`</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

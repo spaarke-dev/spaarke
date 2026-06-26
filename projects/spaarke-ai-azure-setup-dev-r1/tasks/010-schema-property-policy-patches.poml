@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Apply schema property policy to 7 schemas (FR-09)</title>
+    <phase>2: Schema Preparation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>020</blocks>
+    <tags>azure-search, schemas, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>JSON schema patches across 7 files; explicit per-field acceptance criteria (FR-09 + NFR-09)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential review needed to apply consistent property policy across all 7 schemas</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Apply schema property policy to all 7 active index schemas per FR-09 + NFR-09: every scalar field gets `filterable=true sortable=true facetable=true retrievable=true` unless Azure forbids OR documented JSON-comment override.
+    `searchable=true` ONLY on text-content fields. Key field follows Azure-required config. Vector fields use 3072 dim + HNSW cosine + retrievable=false stored=true.
+  </prompt>
+
+  <role>
+    Spaarke platform Azure AI Search schema engineer.
+  </role>
+
+  <goal>
+    All 7 schemas in `infrastructure/ai-search/` (or wherever they live pre-consolidation) compliant with schema property policy. Overrides documented with JSON-comment rationale.
+  </goal>
+
+  <context>
+    <background>
+      Past silent zero-result bug on knowledge index was caused by missing `filterable`. Azure flags cannot be changed post-creation; default-enable everything Azure allows.
+    </background>
+    <relevant-files>
+      <file>infrastructure/ai-search/spaarke-files-index.json</file>
+      <file>infrastructure/ai-search/spaarke-records-index.json</file>
+      <file>infrastructure/ai-search/spaarke-rag-references.json</file>
+      <file>infrastructure/ai-search/spaarke-insights-index.json</file>
+      <file>infrastructure/ai-search/spaarke-session-files.json</file>
+      <file>infrastructure/ai-search/spaarke-invoices-index.json</file>
+      <file>infrastructure/ai-search/spaarke-playbook-embeddings.json</file>
+      <file>infra/ai-search/spaarke-file-index.json</file>
+      <file>infra/insights/schemas/spaarke-insights-index.index.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-09">Every scalar field has filterable=true sortable=true facetable=true retrievable=true unless Azure-restricted or documented override</constraint>
+    <constraint source="NFR-09">Override comments use `// reason` JSON-comment style; specify reason (e.g., PII, performance, etc.)</constraint>
+    <constraint source="NFR-11">Vector fields use 3072 dim + HNSW cosine + retrievable=false stored=true</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/design.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>infrastructure/ai-search/spaarke-rag-references.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Enumerate all 7 schema files (note: consolidation per FR-11 happens in task 012)</step>
+    <step order="2">For each schema: review every scalar field; apply property policy; add override comments for any exceptions</step>
+    <step order="3">For vector fields: confirm 3072 dim + HNSW cosine + retrievable=false stored=true</step>
+    <step order="4">For key field: confirm Azure-required config (filterable=true, sortable=false, facetable=false)</step>
+    <step order="5">For each schema: list fields-changed in PR description for code review evidence</step>
+    <step order="6">Update TASK-INDEX.md: task 010 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read each schema file</tool>
+    <tool name="Edit">Apply property flags + override comments</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">7 patched schema JSON files</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every scalar field in 7 schemas has filterable=true sortable=true facetable=true retrievable=true (or documented override)</criterion>
+    <criterion testable="true">searchable=true only on text-content fields</criterion>
+    <criterion testable="true">All vector fields use 3072 dim + HNSW cosine + retrievable=false stored=true</criterion>
+    <criterion testable="true">Override comments specify reason</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

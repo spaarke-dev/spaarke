@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Data ingestion for 4 ingestible indexes (FR-18)</title>
+    <phase>5: Deploy + Validate</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>050, 051</dependencies>
+    <blocks>054</blocks>
+    <tags>azure-search, ingestion, data, ai, scripts</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Data ingestion execution; new constraint (FR-20 must land first)</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Run data ingestion for 4 ingestible indexes per FR-18:
+    - records-index: Sync-RecordsToIndex.ps1 (with tenantId)
+    - rag-references: Index-AllReferences.ps1 (KNW-*.md files)
+    - playbook-embeddings: Index-ExistingPlaybooks.ps1
+    - insights-index: Precedents via PrecedentProjectionSync + Observations re-projection
+    Schema-only (no ingestion): files-index, session-files, invoices-index.
+  </prompt>
+
+  <role>
+    Spaarke platform data ingestion operator.
+  </role>
+
+  <goal>
+    Each ingestion script reports non-zero documents indexed; spot-check queries return expected matches.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>scripts/ai-search/Sync-RecordsToIndex.ps1</file>
+      <file>scripts/ai-search/Index-AllReferences.ps1</file>
+      <file>scripts/Index-ExistingPlaybooks.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Insights/PrecedentProjectionSync.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-18">Each ingestion script reports non-zero documents (except schema-only indexes)</constraint>
+    <constraint source="FR-20">EmbeddingModelName = text-embedding-3-large MUST be live (task 038 + FR-21 #4 verified)</constraint>
+    <constraint source="ADR-013">Honor SemaphoreSlim bounded concurrency in ingestion (max 16 indexing)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>.claude/adr/ADR-013-ai-bounded-concurrency.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify task 038 (EmbeddingModelName = text-embedding-3-large) live in dev BFF</step>
+    <step order="2">Run Sync-RecordsToIndex.ps1 — verify tenantId populated; report count</step>
+    <step order="3">Run Index-AllReferences.ps1 — report count</step>
+    <step order="4">Run Index-ExistingPlaybooks.ps1 — report count</step>
+    <step order="5">Trigger PrecedentProjectionSync via BFF or scheduled job</step>
+    <step order="6">Re-project Observations via pipeline re-run against historical events</step>
+    <step order="7">Spot-check queries: 1 query per ingested index — verify expected matches</step>
+    <step order="8">Document counts + spot-check results in notes/phase-5-ingestion-evidence.md</step>
+    <step order="9">Update TASK-INDEX.md: task 052 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">Run ingestion scripts</tool>
+    <tool name="az">Index document counts</tool>
+    <tool name="curl">BFF queries for spot-checks</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">4 indexes populated</output>
+    <output type="evidence">projects/spaarke-ai-azure-setup-dev-r1/notes/phase-5-ingestion-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each ingestion script reports non-zero documents</criterion>
+    <criterion testable="true">Records-index has tenantId populated</criterion>
+    <criterion testable="true">Spot-check queries return expected matches</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

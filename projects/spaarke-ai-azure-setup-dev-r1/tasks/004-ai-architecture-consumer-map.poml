@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Update AI-ARCHITECTURE.md with AI Search consumer map</title>
+    <phase>1: Documentation Foundation + Pre-Flight Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001, 002</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, architecture, azure-search</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Doc update: add one section + table to existing canonical doc (FR-03)</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a new section to `docs/architecture/AI-ARCHITECTURE.md` containing a single greppable table mapping each of 7 active AI Search indexes to their consumers (services + endpoints) and data flow direction.
+    Include prominent link to AI-SEARCH-INDEX-CATALOG.md. Do NOT duplicate catalog content.
+  </prompt>
+
+  <role>
+    Spaarke platform technical writer.
+  </role>
+
+  <goal>
+    `docs/architecture/AI-ARCHITECTURE.md` has new "AI Search Consumer Map" section with single table + link to catalog.
+  </goal>
+
+  <context>
+    <background>
+      Currently AI-ARCHITECTURE.md has no map showing which indexes are consumed by which services/endpoints. FR-03 adds this surface.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-03">Single greppable table (NOT per-section). Includes prominent link to catalog. Does NOT duplicate catalog content.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing AI-ARCHITECTURE.md; identify insertion point for new section</step>
+    <step order="2">Draft "AI Search Consumer Map" section with single table: index name, primary consumers (services + endpoints), data flow direction (in/out)</step>
+    <step order="3">Add prominent cross-link to AI-SEARCH-INDEX-CATALOG.md at top of section</step>
+    <step order="4">Edit AI-ARCHITECTURE.md to add new section</step>
+    <step order="5">Update TASK-INDEX.md: task 004 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Add new section to existing doc</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/AI-ARCHITECTURE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AI-ARCHITECTURE.md has new section "AI Search Consumer Map"</criterion>
+    <criterion testable="true">Section contains single table with all 7 active indexes + consumers + flow direction</criterion>
+    <criterion testable="true">Prominent link to AI-SEARCH-INDEX-CATALOG.md present</criterion>
+    <criterion testable="true">Section does NOT duplicate catalog table content (consumer mapping only)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

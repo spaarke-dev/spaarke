@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>BFF refactor: RAG pipeline services (RagService, RagIndexingPipeline, IndexRetrieveNode) (FR-13)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>046</blocks>
+    <tags>bff-api, refactoring, ai, rag</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation: BFF services with explicit constraints (FR-13); modifies .cs files</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Refactor RAG pipeline services per FR-13: replace `spaarke-knowledge-index-v2` references with `spaarke-files-index` in RagService.cs, RagIndexingPipeline.cs, IndexRetrieveNode.cs.
+  </prompt>
+
+  <role>
+    Spaarke platform .NET 8 BFF developer with AI/RAG expertise.
+  </role>
+
+  <goal>
+    All 3 files use `spaarke-files-index` as canonical index name.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/IndexRetrieveNode.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">Replace all spaarke-knowledge-index-v2 references with spaarke-files-index</constraint>
+    <constraint source="ADR-013">Preserve SemaphoreSlim bounded concurrency patterns</constraint>
+    <constraint source="NFR-04">Publish-size delta ≤ 0 MB</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>.claude/adr/ADR-013-ai-bounded-concurrency.md</file>
+      <file>.claude/patterns/ai/indexing-pipeline.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep within 3 files for `spaarke-knowledge-index-v2` to enumerate exact lines</step>
+    <step order="2">Edit each file to replace with `spaarke-files-index`</step>
+    <step order="3">Build BFF: `dotnet build src/server/api/Sprk.Bff.Api/` — must succeed</step>
+    <step order="4">Update TASK-INDEX.md: task 031 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Find references</tool>
+    <tool name="Edit">Replace strings</tool>
+    <tool name="dotnet">Build BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/IndexRetrieveNode.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep within 3 files for `spaarke-knowledge-index-v2` returns zero matches</criterion>
+    <criterion testable="true">BFF builds successfully</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

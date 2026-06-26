@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>MANDATORY test-fixture sweep alongside DI changes (NFR-14)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030, 031, 032, 033, 034, 035, 036, 037, 038, 041</dependencies>
+    <blocks>046, 050</blocks>
+    <tags>testing, integration-test, unit-test, bff-api, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Test infrastructure changes alongside production DI; NFR-14 binding; Redis project hit 337 failures from analogous pattern</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>NFR-14 — MUST land in same PR as production DI changes; sequential gate</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Sweep test fixtures alongside production DI changes per NFR-14 (binding — Redis project hit 337 test failures from analogous DI tightening).
+    Ensure: in-memory config supplies fake AI-Search endpoint + key for tests; SearchIndexClient services.RemoveAll + mock-replaced; no test relies on resolved KV refs at construction time; RecordSyncJobTests.cs:43 hardcoded `https://spaarke-search-dev.search.windows.net` replaced with fake `https://test.search.windows.net`.
+  </prompt>
+
+  <role>
+    Spaarke platform .NET 8 test engineer. §F.2 Fixture-Config-FIRST discipline.
+  </role>
+
+  <goal>
+    All WebApplicationFactory-derived tests pass with refactored production DI; no resolved-KV-at-construction-time dependencies.
+  </goal>
+
+  <context>
+    <background>
+      Redis project's spec.md NFR-14 — preventive sweep IS the gate. Reactive sweep (after N failures) is unacceptable.
+      Fixture-Config-FIRST protocol (CLAUDE.md §F.2): inspect fixture config / claims / mocks BEFORE blaming production DI.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Spe.Integration.Tests/IntegrationTestFixture.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/CustomWebAppFactory.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-14">Same PR as production DI changes — preventive, not reactive</constraint>
+    <constraint source="CLAUDE.md §F.2">Fixture-Config-FIRST: inspect fixture config before blaming production DI</constraint>
+    <constraint source="project">RecordSyncJobTests.cs:43 hardcoded URL → fake `https://test.search.windows.net`</constraint>
+    <constraint source="project">SearchIndexClient + SearchClient mocks consistent with refactored index names</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/handoff-to-ai-search-project.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/test-fixture-contracts.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read IntegrationTestFixture.cs + CustomWebAppFactory.cs — identify AI-Search config injection points</step>
+    <step order="2">Ensure in-memory config supplies fake AiSearch__Endpoint = "https://test.search.windows.net" + fake AiSearch__Key</step>
+    <step order="3">Ensure services.RemoveAll&lt;SearchIndexClient&gt;() + Mock&lt;SearchIndexClient&gt; replacement in test fixtures</step>
+    <step order="4">Grep tests/ for hardcoded `spaarke-search-dev.search.windows.net` — replace with fake URL</step>
+    <step order="5">Grep tests/ for Mock&lt;SearchIndexClient&gt; / Mock&lt;SearchClient&gt; setups; ensure index-name args match refactored canonical names</step>
+    <step order="6">Specifically fix RecordSyncJobTests.cs:43 hardcoded endpoint per spec</step>
+    <step order="7">Run full test suite: `dotnet test` — must pass with zero failures</step>
+    <step order="8">If failures: apply §F.2 Fixture-Config-FIRST protocol (inspect fixture, NOT production DI)</step>
+    <step order="9">Document evidence in notes/test-fixture-sweep.md (count of files swept + test pass rate)</step>
+    <step order="10">Update TASK-INDEX.md: task 042 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Test fixtures</tool>
+    <tool name="Grep">Find hardcoded values + mock setups</tool>
+    <tool name="Edit">Update fixtures + mocks</tool>
+    <tool name="dotnet">Run test suite</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">Updated test fixtures + mocks</output>
+    <output type="evidence">projects/spaarke-ai-azure-setup-dev-r1/notes/test-fixture-sweep.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All WebApplicationFactory-derived tests pass</criterion>
+    <criterion testable="true">Grep tests/ for `spaarke-search-dev.search.windows.net` returns zero hits (fake URL used)</criterion>
+    <criterion testable="true">RecordSyncJobTests.cs:43 uses fake `https://test.search.windows.net`</criterion>
+    <criterion testable="true">SearchIndexClient mocks reference canonical index names</criterion>
+    <criterion testable="true">`dotnet test` returns zero failures</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: code-review + adr-check at Step 9.5. §F.2 Fixture-Config-FIRST mandatory.</protocol>
+  </execution>
+</task>

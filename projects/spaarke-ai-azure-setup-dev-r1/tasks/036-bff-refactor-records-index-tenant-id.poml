@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>BFF refactor: records-index tenantId writer + reader (FR-12 code side)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>015, 030</dependencies>
+    <blocks>046, 050</blocks>
+    <tags>bff-api, refactoring, ai, multi-tenant, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation: tenantId writer + authorization filter; multi-tenant security relevance</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Wire tenantId field on spaarke-records-index per FR-12 code side: DataverseIndexSyncService.cs and RecordSyncJob.cs populate tenantId from Dataverse tenant context; RecordSearchAuthorizationFilter.cs:43 uses tenantId filter (remove "no tenantId field" workaround comment).
+    Also update Sync-RecordsToIndex.ps1 to populate tenantId.
+  </prompt>
+
+  <role>
+    Spaarke platform .NET 8 BFF developer with multi-tenant + authorization expertise.
+  </role>
+
+  <goal>
+    tenantId populated by writer; reader applies tenantId filter; workaround comment removed.
+  </goal>
+
+  <context>
+    <background>
+      Schema field added in task 015. This task wires the writer + reader. Security-sensitive change — tenant isolation filter must be exact.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RecordSyncJob.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/RecordSearchAuthorizationFilter.cs</file>
+      <file>scripts/ai-search/Sync-RecordsToIndex.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-12">Writer populates tenantId from Dataverse tenant context</constraint>
+    <constraint source="FR-12">Reader uses tenantId filter at line 43; remove workaround comment</constraint>
+    <constraint source="ADR-014">Tenant isolation principle (inline-cited; rename per FR-06 may apply)</constraint>
+    <constraint source="ADR-017">Preserve job contract for RecordSyncJob</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>.claude/adr/ADR-017-background-jobs-service-bus.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Edit DataverseIndexSyncService.cs to populate tenantId from Dataverse tenant context</step>
+    <step order="2">Edit RecordSyncJob.cs same</step>
+    <step order="3">Edit RecordSearchAuthorizationFilter.cs:43 to apply tenantId filter; remove workaround comment</step>
+    <step order="4">Edit Sync-RecordsToIndex.ps1 to populate tenantId</step>
+    <step order="5">Build BFF + run unit tests for filter; verify security boundary</step>
+    <step order="6">Update TASK-INDEX.md: task 036 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">4 files</tool>
+    <tool name="dotnet">Build + test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">3 BFF files</output>
+    <output type="script">scripts/ai-search/Sync-RecordsToIndex.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DataverseIndexSyncService writes tenantId on every record</criterion>
+    <criterion testable="true">RecordSyncJob writes tenantId on every record</criterion>
+    <criterion testable="true">RecordSearchAuthorizationFilter.cs:43 applies `tenantId eq` filter; workaround comment removed</criterion>
+    <criterion testable="true">Sync-RecordsToIndex.ps1 populates tenantId</criterion>
+    <criterion testable="true">Unit tests for filter pass; tenant boundary verified</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: code-review + adr-check at Step 9.5. Security-sensitive — escalate if filter logic ambiguous.</protocol>
+  </execution>
+</task>

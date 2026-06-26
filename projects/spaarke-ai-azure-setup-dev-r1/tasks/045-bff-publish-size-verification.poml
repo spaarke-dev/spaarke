@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>BFF publish-size delta verification (NFR-04 / CLAUDE.md §10)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>not-started</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>030, 031, 032, 033, 034, 035, 036, 037, 038, 041, 042</dependencies>
+    <blocks>046</blocks>
+    <tags>bff-api, verification, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification per CLAUDE.md §10 binding rule; explicit acceptance criteria (NFR-04)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify BFF publish-size delta ≤ 0 MB per CLAUDE.md §10 NFR-04 (this project is pure refactor — no new packages or services).
+    Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` before AND after refactor (or use git stash to compare); measure compressed output; document delta in PR description.
+  </prompt>
+
+  <role>
+    Spaarke platform .NET deployment engineer.
+  </role>
+
+  <goal>
+    BFF publish size unchanged (or reduced) post-refactor; delta documented.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-04">Net publish-size delta ≤ 0 MB</constraint>
+    <constraint source="CLAUDE.md §10">≥+5 MB single-task delta = escalation; ≥55 MB cumulative = architecture review; ≥60 MB = HARD STOP</constraint>
+    <constraint source="CLAUDE.md §10">Baseline (2026-05-26): ~45.65 MB compressed</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Capture baseline: git stash; dotnet publish -c Release; measure compressed output</step>
+    <step order="2">Restore changes: git stash pop; dotnet publish -c Release; measure compressed output</step>
+    <step order="3">Compute delta: post - baseline</step>
+    <step order="4">Document delta + absolute sizes in notes/publish-size-verification.md</step>
+    <step order="5">If delta &gt; 0 MB: investigate (this project should be net-zero or negative)</step>
+    <step order="6">Update TASK-INDEX.md: task 045 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">publish Release builds</tool>
+    <tool name="Bash">git stash + size measurement</tool>
+  </tools>
+
+  <outputs>
+    <output type="evidence">projects/spaarke-ai-azure-setup-dev-r1/notes/publish-size-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Publish-size delta ≤ 0 MB documented</criterion>
+    <criterion testable="true">Absolute size remains &lt; 60 MB hard ceiling</criterion>
+    <criterion testable="true">Evidence file captures before/after sizes + delta</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Follow CLAUDE.md §10 binding rule.</protocol>
+  </execution>
+</task>

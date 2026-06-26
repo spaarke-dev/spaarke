@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Add tenantId field to spaarke-records-index schema (FR-12)</title>
+    <phase>2: Schema Preparation</phase>
+    <status>not-started</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>020, 040</blocks>
+    <tags>azure-search, schemas, multi-tenant</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema patch with explicit field config (FR-12)</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add `tenantId` field to `spaarke-records-index` schema: Edm.String, filterable=true, sortable=true, facetable=true, retrievable=true, searchable=false.
+    Writer + reader updates handled in Phase 4 (task 040).
+  </prompt>
+
+  <role>
+    Spaarke platform Azure AI Search schema engineer.
+  </role>
+
+  <goal>
+    `spaarke-records-index` schema has `tenantId` field with required property flags.
+  </goal>
+
+  <context>
+    <background>
+      Records-index has a "no tenantId field" workaround comment in RecordSearchAuthorizationFilter.cs:43. FR-12 closes this gap. Adding field is atomic; Phase 4 wires writers/readers.
+    </background>
+    <relevant-files>
+      <file>infrastructure/ai-search/spaarke-records-index.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-12">Field config: Edm.String, filterable=true, sortable=true, facetable=true, retrievable=true, searchable=false</constraint>
+    <constraint source="NFR-09">No override comment needed (this is canonical policy)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>infrastructure/ai-search/spaarke-records-index.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `infrastructure/ai-search/spaarke-records-index.json`</step>
+    <step order="2">Add `tenantId` field per FR-12 config to fields array</step>
+    <step order="3">Update TASK-INDEX.md: task 015 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Add tenantId field to schema</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">infrastructure/ai-search/spaarke-records-index.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Schema has `tenantId` field</criterion>
+    <criterion testable="true">Field config matches FR-12 exactly (Edm.String, all 4 flags true, searchable false)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

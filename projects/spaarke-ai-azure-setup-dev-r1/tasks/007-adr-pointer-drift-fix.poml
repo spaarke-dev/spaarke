@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Resolve ADR pointer drift: ADR-014 + ADR-004 (FR-06)</title>
+    <phase>1: Documentation Foundation + Pre-Flight Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, adr, cleanup</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Doc update: ADR citation corrections; touches .claude/ — main-session-only</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Resolve ADR pointer drift: ADR-014 (currently about caching, inline-cited for tenant isolation) and ADR-004 (currently about job contract, inline-cited for idempotent re-indexing).
+    Per project Assumption: use option (b) — inline citation correction in `rag-architecture.md` + any other docs/agent prompts citing them.
+    Flag for owner confirmation if option (a) preferred (rename ADRs + create new ones for principles).
+  </prompt>
+
+  <role>
+    Spaarke platform technical writer + ADR maintainer.
+  </role>
+
+  <goal>
+    Inline citations in `rag-architecture.md` (and other discovered cite sites) correctly reference ADRs by actual content topic.
+    CLAUDE.md and any agent prompts updated if they cite these ADRs.
+  </goal>
+
+  <context>
+    <background>
+      ADR-014 is about caching (not tenant isolation). ADR-004 is about job contract (not idempotent re-indexing). Inline citations in rag-architecture.md treat them as the principle, not the actual content.
+      Per spec Assumption, default to citation correction; flag for owner if rename preferred.
+    </background>
+    <relevant-files>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>docs/architecture/rag-architecture.md</file>
+      <file>CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-06">Either (a) rename ADRs + create new ADRs for inline-cited principles, OR (b) correct inline citations. Default per Assumption: (b)</constraint>
+    <constraint source="project">Sub-agents CANNOT write .claude/ — main session only</constraint>
+    <constraint source="project">Flag for owner confirmation if cleanup scope warrants (a) instead of (b)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>docs/architecture/rag-architecture.md</file>
+      <file>CLAUDE.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify actual ADR-014 + ADR-004 content (caching + job contract per spec)</step>
+    <step order="2">Grep across `docs/` + `.claude/` + `CLAUDE.md` for ADR-014 + ADR-004 inline citations</step>
+    <step order="3">For each citation site: determine if context matches actual ADR content OR is misattributed (tenant isolation / idempotent re-indexing)</step>
+    <step order="4">Correct misattributed citations: either remove the citation OR replace with a TODO note for owner</step>
+    <step order="5">Flag for owner confirmation: "Default applied (b — citation correction). Owner: confirm OK or request (a — rename + new ADRs)"</step>
+    <step order="6">Update TASK-INDEX.md: task 007 ✅ completed (or 🟡 awaiting owner if scope ambiguous)</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Find all ADR-014 / ADR-004 citation sites</tool>
+    <tool name="Edit">Correct misattributed inline citations</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/rag-architecture.md</output>
+    <output type="docs">CLAUDE.md (if cited there — verify first)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All ADR-014 / ADR-004 citation sites discovered via grep and reviewed</criterion>
+    <criterion testable="true">Misattributed citations corrected per FR-06 option (b)</criterion>
+    <criterion testable="true">Owner-flag note appended to task notes if scope warrants option (a)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Sub-agents may grep but NOT write to .claude/. Main session applies edits.</protocol>
+  </execution>
+</task>

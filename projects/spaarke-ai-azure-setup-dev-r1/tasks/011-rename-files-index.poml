@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Atomic rename: spaarke-file-index → spaarke-files-index (FR-10, rename 1 of 3)</title>
+    <phase>2: Schema Preparation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002, 010</dependencies>
+    <blocks>012, 020</blocks>
+    <tags>azure-search, schemas, refactoring, rename</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Atomic rename with coordinated touchpoints per NFR-07; explicit acceptance criteria</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>NFR-07: atomic rename — one PR per rename</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Atomically rename `spaarke-file-index` (singular) to `spaarke-files-index` (plural) across ALL touchpoints in ONE PR per NFR-07.
+    Touchpoints: schema file path + JSON `name` field + BFF code constants (already plural in AiSearchOptions.cs:19; verify) + deploy script references + BU value config + runbook table.
+  </prompt>
+
+  <role>
+    Spaarke platform Azure AI Search engineer. Coordinated-refactor discipline.
+  </role>
+
+  <goal>
+    All references to `spaarke-file-index` (singular) replaced with `spaarke-files-index` (plural) atomically.
+  </goal>
+
+  <context>
+    <background>
+      Three-way naming drift: code default `spaarke-files-index` (plural), schema file `spaarke-file-index.json` (singular), runbook BU table singular. Code wins; schema + runbook must match.
+    </background>
+    <relevant-files>
+      <file>infra/ai-search/spaarke-file-index.json</file>
+      <file>infrastructure/ai-search/spaarke-files-index.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs</file>
+      <file>docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-10">File path + JSON name field + code constants + deploy script refs + BU values + runbook table all updated atomically</constraint>
+    <constraint source="NFR-07">One PR per rename — atomic touchpoint coordination</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>infra/ai-search/spaarke-file-index.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep across repo for `spaarke-file-index` (singular) to enumerate all touchpoints</step>
+    <step order="2">Move + rename `infra/ai-search/spaarke-file-index.json` → `infrastructure/ai-search/spaarke-files-index.json` (note: location move per FR-11 happens in task 012; this task does the rename only)</step>
+    <step order="3">Edit schema JSON `name` field to `spaarke-files-index`</step>
+    <step order="4">Verify AiSearchOptions.cs:19 already uses plural `spaarke-files-index` (no change expected)</step>
+    <step order="5">Edit MULTI-CONTAINER-RUNBOOK.md BU value table to plural form</step>
+    <step order="6">Verify Bicep `loadJsonContent()` paths updated (coordinate with task 012)</step>
+    <step order="7">Update TASK-INDEX.md: task 011 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Enumerate all `spaarke-file-index` references</tool>
+    <tool name="Bash">git mv for file rename</tool>
+    <tool name="Edit">Update touchpoints</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">infrastructure/ai-search/spaarke-files-index.json (renamed)</output>
+    <output type="docs">docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep across repo for `spaarke-file-index` (singular, hyphenated) returns zero matches as live references</criterion>
+    <criterion testable="true">Schema JSON `name` field = `spaarke-files-index`</criterion>
+    <criterion testable="true">BU value table in MULTI-CONTAINER-RUNBOOK.md uses plural form</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

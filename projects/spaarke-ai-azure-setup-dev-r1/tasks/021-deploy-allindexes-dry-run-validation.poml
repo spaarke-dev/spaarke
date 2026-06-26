@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Validate Deploy-AllIndexes.ps1: -DryRun + -VerifyOnly smoke test</title>
+    <phase>3: Deploy Infrastructure</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>050</blocks>
+    <tags>azure-search, deploy, testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Script validation against dev environment (NFR-01 idempotency + NFR-02 fail-fast verification)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Validate Deploy-AllIndexes.ps1 against dev environment WITHOUT deploying anything destructively. Run -DryRun + -VerifyOnly + idempotency probe.
+  </prompt>
+
+  <role>
+    Spaarke platform QA engineer.
+  </role>
+
+  <goal>
+    -DryRun shows all 7 indexes would be created (currently empty service per FR-21 #5). -VerifyOnly returns "no indexes to verify" or non-zero with clear error. Idempotency probe confirms re-run is safe.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>scripts/ai-search/Deploy-AllIndexes.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-01">Idempotent — re-run produces no side effects</constraint>
+    <constraint source="NFR-02">Fail-fast on policy violations</constraint>
+    <constraint source="NFR-05">Do NOT run against prod/demo</constraint>
+    <constraint source="NFR-06">-DryRun + -VerifyOnly supported</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/ai-search/Deploy-AllIndexes.ps1</file>
+      <file>docs/guides/ai-search-azure-setup.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `Deploy-AllIndexes.ps1 -Environment dev -DryRun` — capture output</step>
+    <step order="2">Verify output lists all 7 indexes that would be created</step>
+    <step order="3">Run `Deploy-AllIndexes.ps1 -Environment dev -VerifyOnly` against empty service — verify clear no-op or expected-non-zero behavior</step>
+    <step order="4">Run a deliberate violation test: temporarily corrupt a schema; run -VerifyOnly; confirm non-zero exit with clear error; revert</step>
+    <step order="5">Document evidence in `notes/deploy-allindexes-validation.md`</step>
+    <step order="6">Update TASK-INDEX.md: task 021 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">Run PowerShell script</tool>
+    <tool name="Write">Evidence file</tool>
+  </tools>
+
+  <outputs>
+    <output type="evidence">projects/spaarke-ai-azure-setup-dev-r1/notes/deploy-allindexes-validation.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">-DryRun output lists all 7 indexes</criterion>
+    <criterion testable="true">-VerifyOnly behaves correctly against empty service + deliberately-corrupted schema</criterion>
+    <criterion testable="true">Evidence captured in notes file</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

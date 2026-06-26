@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Dev BFF app settings: AI-Search KV-reference migration (FR-15)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>001, 030, 038</dependencies>
+    <blocks>046, 050</blocks>
+    <tags>azure, auth, key-vault, bff-api, settings</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Security-sensitive: KV-ref migration; tags include auth; modifies live App Service config</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches live Azure App Service config; sequential within Phase 4</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Migrate dev BFF (spaarke-bff-dev) AI-Search app settings from hardcoded URLs/keys to Key Vault references per FR-15.
+    Canonical KV = spaarke-spekvcert (NOT sprkspaarkedev-aif-kv per spec correction 2026-06-26).
+    Form: @Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=<secret-name>) — NOT SecretUri form.
+    Settings to migrate: AiSearch__Endpoint, AiSearch__Key (or AiSearch__ApiKeySecretName), DocumentIntelligence__AiSearchEndpoint, DocumentIntelligence__AiSearchKey, RecordSync__AiSearchEndpoint, RecordSync__AiSearchApiKey, AiSearch__ReferencesEndpoint.
+  </prompt>
+
+  <role>
+    Spaarke platform Azure operations engineer. ADR-028 expert.
+  </role>
+
+  <goal>
+    No hardcoded AI-Search URLs or API keys in dev BFF app settings; all use KV references via canonical syntax.
+  </goal>
+
+  <context>
+    <background>
+      Pre-condition (task 001 FR-21 #1 #2): KV admin-key fresh + BFF MI role on spaarke-search-dev restored.
+      Redis project handoff §3-§4: canonical KV + KV-ref syntax.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/handoff-to-ai-search-project.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-15">All 7 AI-Search settings converted to @Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=...) form</constraint>
+    <constraint source="FR-15">Out of scope: Redis settings (owned by Redis project — DELIVERED)</constraint>
+    <constraint source="ADR-028">KV references via VaultName=;SecretName= form + MI resolution</constraint>
+    <constraint source="NFR-05">Do NOT touch prod/demo</constraint>
+    <constraint source="NFR-14">Test fixtures swept in SAME PR per task 042</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/handoff-to-ai-search-project.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify KV admin-key freshness (task 001 FR-21 #1 completion)</step>
+    <step order="2">For each AI-Search secret, verify secret exists in spaarke-spekvcert; create + populate if missing</step>
+    <step order="3">For each setting, run `az webapp config appsettings set` with @Microsoft.KeyVault form</step>
+    <step order="4">Verify KV-reference resolution status via Microsoft.Web/sites/config/configreferences API — all should show "Resolved"</step>
+    <step order="5">Restart BFF; check healthz returns 200; check startup log for KV-ref resolution success</step>
+    <step order="6">Run `az webapp config appsettings list` — verify no hardcoded URLs/keys in AI-Search-related settings</step>
+    <step order="7">Document in notes/kv-migration-verification.md</step>
+    <step order="8">Update TASK-INDEX.md: task 041 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="az">CLI for KV + webapp + config queries</tool>
+    <tool name="curl">healthz check</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">spaarke-bff-dev App Settings updated</output>
+    <output type="evidence">projects/spaarke-ai-azure-setup-dev-r1/notes/kv-migration-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 AI-Search settings use @Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=...) form</criterion>
+    <criterion testable="true">KV-reference resolution status = Resolved for all</criterion>
+    <criterion testable="true">BFF healthz returns 200 post-migration</criterion>
+    <criterion testable="true">`az webapp config appsettings list` shows no hardcoded URLs/keys for AI-Search</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: code-review + adr-check at Step 9.5. Security-sensitive.</protocol>
+  </execution>
+</task>

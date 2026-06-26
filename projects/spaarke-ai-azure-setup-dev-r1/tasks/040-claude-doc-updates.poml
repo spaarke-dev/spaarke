@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>.claude/ doc updates (FR-13: skill + pattern docs)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>not-started</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>046</blocks>
+    <tags>docs, refactoring</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Doc-comment hygiene; touches .claude/ — main session only</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update 2 .claude/ docs per FR-13 (2026-06-26 validation):
+    - .claude/patterns/ai/indexing-pipeline.md (lines 8, 29) — `spaarke-knowledge-index-v2` → `spaarke-files-index`
+    - .claude/skills/add-reference-to-index/SKILL.md — verify `spaarke-rag-references` reference is canonical (no change expected)
+    LEAVE AS HISTORICAL: .claude/FAILURE-MODES.md:148 (AP-2 anti-pattern doc)
+    NO ACTION: .claude/skills/azure-deploy/SKILL.md:225 (`spaarke-search-dev` is service name, not index)
+  </prompt>
+
+  <role>
+    Spaarke platform .claude/ maintainer.
+  </role>
+
+  <goal>
+    .claude/patterns/ai/indexing-pipeline.md uses canonical index names; other .claude/ docs verified.
+  </goal>
+
+  <context>
+    <background>
+      Sub-agents CANNOT write to .claude/ — main session must execute. Task touches .claude/patterns/ + verifies (no change) .claude/skills/add-reference-to-index/.
+    </background>
+    <relevant-files>
+      <file>.claude/patterns/ai/indexing-pipeline.md</file>
+      <file>.claude/skills/add-reference-to-index/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">Update .claude/patterns/ai/indexing-pipeline.md lines 8, 29</constraint>
+    <constraint source="project">LEAVE .claude/FAILURE-MODES.md:148 as historical reference</constraint>
+    <constraint source="CLAUDE.md §3">Sub-agents CANNOT write to .claude/ — main session only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>.claude/patterns/ai/indexing-pipeline.md</file>
+      <file>.claude/skills/add-reference-to-index/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Edit .claude/patterns/ai/indexing-pipeline.md lines 8, 29 — canonical names</step>
+    <step order="2">Read .claude/skills/add-reference-to-index/SKILL.md — verify spaarke-rag-references reference is canonical (no change expected)</step>
+    <step order="3">Grep .claude/ (excluding archive/ + FAILURE-MODES.md) for retired index names — verify zero live references</step>
+    <step order="4">Update TASK-INDEX.md: task 040 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">indexing-pipeline.md</tool>
+    <tool name="Read">add-reference-to-index SKILL.md</tool>
+    <tool name="Grep">Verify .claude/ hygiene</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/patterns/ai/indexing-pipeline.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">.claude/patterns/ai/indexing-pipeline.md uses canonical names</criterion>
+    <criterion testable="true">Grep .claude/ for retired index names returns zero live matches (excluding archive + FAILURE-MODES.md)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Main session only. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

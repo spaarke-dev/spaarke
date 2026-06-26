@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Pre-Phase-3 Operational Verification (10 checks per FR-21)</title>
+    <phase>1: Documentation Foundation + Pre-Flight Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>020, 021, 022</blocks>
+    <tags>azure, infrastructure, verification, azure-search, key-vault, service-bus, azure-openai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification + evidence capture task with explicit constraints (FR-21); no code implementation</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Foundational task; blocks all Phase 3 work; sequential first task</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Execute the 10 pre-Phase-3 operational verification checks (5 Redis prereqs from NFR-13 + 5 AI-Search-specific from FR-21).
+    Capture CLI output evidence in `notes/pre-phase-3-verification.md`. All checks must PASS before Phase 3 can begin.
+    Failures block Phase 3 — remediate before proceeding.
+  </prompt>
+
+  <role>
+    Spaarke platform Azure operations engineer. Familiar with Azure CLI, Key Vault, App Service config, Service Bus,
+    Azure OpenAI, and Azure AI Search. Methodical evidence-capture discipline.
+  </role>
+
+  <goal>
+    `projects/spaarke-ai-azure-setup-dev-r1/notes/pre-phase-3-verification.md` exists with CLI output evidence for all 10 checks.
+    All 10 checks show PASS state. Any FAIL state is documented with remediation steps taken.
+  </goal>
+
+  <context>
+    <background>
+      Per spec.md FR-21 + NFR-13, Phase 3 (Deploy Infrastructure) must NOT begin until 10 prereq checks pass.
+      The 5 Redis prereqs verify `spaarke-redis-cache-remediation-r1` Phase 3 cutover (✅ DELIVERED 2026-06-26).
+      The 5 AI-Search prereqs verify: KV admin-key freshness, BFF MI RBAC re-grant on recreated search service,
+      Service Bus queues exist, Azure OpenAI `text-embedding-3-large` deployment exists, empirical resource state matches spec narrative.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/notes/pre-phase-3-verification.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/handoff-to-ai-search-project.md</file>
+      <file>infrastructure/byok/main.bicep</file>
+      <file>infrastructure/bicep/customer.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-21">All 10 checks MUST pass; evidence captured in notes/pre-phase-3-verification.md</constraint>
+    <constraint source="NFR-13">Redis prereqs MUST pass — Phase 3 blocked otherwise</constraint>
+    <constraint source="NFR-05">MUST NOT touch prod or demo resources during verification</constraint>
+    <constraint source="project">If KV admin-key drift detected, rotate atomically (FR-21 #1 code block)</constraint>
+    <constraint source="project">If BFF MI role lost, re-run infrastructure/byok/main.bicep (FR-21 #2)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/plan.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/CLAUDE.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/handoff-to-ai-search-project.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>infrastructure/byok/main.bicep</file>
+      <file>infrastructure/bicep/customer.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create `projects/spaarke-ai-azure-setup-dev-r1/notes/pre-phase-3-verification.md` with sections for each of 10 checks</step>
+    <step order="2">Run 5 Redis prereqs from spec NFR-13 (verbatim commands); capture output for each</step>
+    <step order="3">Run FR-21 check #1 (KV admin-key freshness); rotate KV secret if drift detected</step>
+    <step order="4">Run FR-21 check #2 (BFF MI RBAC re-grant); re-run `infrastructure/byok/main.bicep` if role lost on recreated `spaarke-search-dev`</step>
+    <step order="5">Run FR-21 check #3 (Service Bus queues `sdap-jobs` + `sdap-communication`); recreate via Bicep if missing</step>
+    <step order="6">Run FR-21 check #4 (Azure OpenAI `text-embedding-3-large` deployment); HALT and escalate if missing</step>
+    <step order="7">Run FR-21 check #5 (empirical resource state verification — `az search service show` + index list); document discrepancies</step>
+    <step order="8">Summarize results: 10/10 PASS = Phase 3 unblocked; any FAIL = block Phase 3 with remediation log</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: task 001 status to ✅ completed (or 🟡 blocked with reason)</step>
+    <step order="10">Update `current-task.md`: clear active task; set next action to task 002</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for search, keyvault, webapp, servicebus, cognitiveservices queries</tool>
+    <tool name="bicep">Re-run BYOK Bicep if RBAC role lost</tool>
+    <tool name="curl">BFF healthz endpoint check</tool>
+  </tools>
+
+  <outputs>
+    <output type="evidence">projects/spaarke-ai-azure-setup-dev-r1/notes/pre-phase-3-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/pre-phase-3-verification.md exists with all 10 checks documented + CLI output evidence per check</criterion>
+    <criterion testable="true">All 5 Redis prereq checks return expected values (Redis Succeeded, KV secret enabled, app setting contains KV ref, healthz 200, startup log shows Redis enabled)</criterion>
+    <criterion testable="true">FR-21 #1: KV admin-key in `spaarke-spekvcert/AiSearch--AdminKey` matches current `spaarke-search-dev` primary key</criterion>
+    <criterion testable="true">FR-21 #2: BFF MI has `Search Index Data Contributor` role on `spaarke-search-dev`</criterion>
+    <criterion testable="true">FR-21 #3: `sdap-jobs` + `sdap-communication` Service Bus queues exist with `Active` status</criterion>
+    <criterion testable="true">FR-21 #4: Azure OpenAI deployment for `text-embedding-3-large` exists in dev resource</criterion>
+    <criterion testable="true">FR-21 #5: `spaarke-search-dev` service exists, Standard tier, empty (or discrepancies documented)</criterion>
+    <criterion testable="true">Summary section declares Phase 3 status: UNBLOCKED or BLOCKED-WITH-REMEDIATION</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The 5 Redis prereqs are verbatim from `projects/spaarke-redis-cache-remediation-r1/notes/handoff-to-ai-search-project.md` §9.
+    The 5 AI-Search prereqs are verbatim from spec.md FR-21 #1-#5.
+    Sub-agents CAN execute the Azure CLI queries in parallel for evidence capture (5+5 commands), but verification + remediation decisions are main-session-only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

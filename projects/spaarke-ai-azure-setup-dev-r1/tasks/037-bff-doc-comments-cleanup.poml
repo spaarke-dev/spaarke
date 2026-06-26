@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>BFF doc-comment cleanup (FR-13 cosmetic — 4 BFF files)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>not-started</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>046</blocks>
+    <tags>bff-api, refactoring, docs</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Doc-comment hygiene only — no behavior change (FR-13 cosmetic)</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update 4 BFF doc-comment references per FR-13 cosmetic scope (for grep hygiene; no behavior change):
+    KnowledgeDocument.cs (lines 12, 133), PlaybookEmbeddingDocument.cs:13, AiAnalysisNodeExecutor.cs:878, appsettings.tokens.md.
+  </prompt>
+
+  <role>
+    Spaarke platform .NET developer.
+  </role>
+
+  <goal>
+    All BFF doc comments reference canonical index names.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/PlaybookEmbeddingDocument.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.tokens.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">Cosmetic doc-comment updates only; no behavior change</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Edit KnowledgeDocument.cs lines 12, 133 — canonical names</step>
+    <step order="2">Edit PlaybookEmbeddingDocument.cs:13 — verify model name aligns with spaarke-playbook-embeddings rename (per FR-10)</step>
+    <step order="3">Edit AiAnalysisNodeExecutor.cs:878 — canonical name</step>
+    <step order="4">Edit appsettings.tokens.md — canonical names</step>
+    <step order="5">Build BFF (no behavior change expected)</step>
+    <step order="6">Update TASK-INDEX.md: task 037 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">4 files</tool>
+    <tool name="dotnet">Build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">4 BFF files (cosmetic)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 files have updated doc comments referencing canonical names</criterion>
+    <criterion testable="true">BFF builds (no behavior change)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

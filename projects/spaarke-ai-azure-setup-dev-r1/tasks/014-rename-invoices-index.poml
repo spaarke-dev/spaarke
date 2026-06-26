@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Atomic rename: spaarke-invoices-dev → spaarke-invoices-index (FR-10, rename 3 of 3)</title>
+    <phase>2: Schema Preparation</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>002, 010</dependencies>
+    <blocks>020</blocks>
+    <tags>azure-search, schemas, refactoring, rename</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Atomic rename per NFR-07</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>NFR-07: one PR per rename</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Atomically rename `spaarke-invoices-dev` to `spaarke-invoices-index` (drop env suffix per NFR-03, apply -index type suffix) across all touchpoints in ONE PR per NFR-07.
+    Touchpoints: schema file path + JSON name + InvoiceIndexingJobHandler.cs:40 + InvoiceSearchService.cs:45 + retire Deploy-InvoiceSearchIndex.ps1 (Phase 3) + deploy-invoice-index.ps1 + deploy-invoice-index.bicep (per 2026-06-26 audit).
+  </prompt>
+
+  <role>
+    Spaarke platform Azure AI Search engineer.
+  </role>
+
+  <goal>
+    All references to `spaarke-invoices-dev` replaced with `spaarke-invoices-index`.
+  </goal>
+
+  <context>
+    <background>
+      `spaarke-invoices-dev` violates NFR-03 (no env suffix on sub-resources). Canonical is `spaarke-invoices-index`.
+    </background>
+    <relevant-files>
+      <file>infrastructure/ai-search/spaarke-invoices-index.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceSearchService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-10">All touchpoints updated atomically</constraint>
+    <constraint source="NFR-03">No env suffix on sub-resources</constraint>
+    <constraint source="NFR-07">One PR per rename</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep for `spaarke-invoices-dev` to enumerate touchpoints</step>
+    <step order="2">git mv schema to `spaarke-invoices-index.json`; edit JSON name</step>
+    <step order="3">Edit `InvoiceIndexingJobHandler.cs:40` constant</step>
+    <step order="4">Edit `InvoiceSearchService.cs:45` constant</step>
+    <step order="5">Note: `Deploy-InvoiceSearchIndex.ps1`, `deploy-invoice-index.ps1`, `deploy-invoice-index.bicep` retired by FR-07 in Phase 3</step>
+    <step order="6">Update TASK-INDEX.md: task 014 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Enumerate references</tool>
+    <tool name="Bash">git mv</tool>
+    <tool name="Edit">Update touchpoints</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">infrastructure/ai-search/spaarke-invoices-index.json</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceSearchService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep for `spaarke-invoices-dev` returns zero live references</criterion>
+    <criterion testable="true">Schema JSON name = `spaarke-invoices-index`</criterion>
+    <criterion testable="true">Code constants use new name</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

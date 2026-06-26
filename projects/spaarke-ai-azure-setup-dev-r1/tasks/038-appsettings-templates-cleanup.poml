@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>appsettings + templates cleanup (FR-13 + FR-14 + FR-20)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>046, 050</blocks>
+    <tags>bff-api, config, settings, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Config updates with explicit acceptance criteria (FR-13 + FR-14 + FR-20)</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update BFF appsettings + env templates per FR-13 + FR-14 + FR-20:
+    - appsettings.json line 122 Analysis.SharedIndexName `spaarke-knowledge-shared` → `spaarke-files-index`
+    - appsettings.template.json lines ~237–242 same
+    - Remove `discovery-index` from AiSearch.AllowedIndexes array AND AiSearch.DiscoveryIndexName key
+    - appsettings.Development.json.template + appsettings.Production.json.template (2026-06-26 audit) — knowledge-v2 → files-index
+    - appsettings.template.json:248 EmbeddingModelName `text-embedding-3-small` → `text-embedding-3-large` per FR-20
+  </prompt>
+
+  <role>
+    Spaarke platform .NET BFF configuration engineer.
+  </role>
+
+  <goal>
+    All appsettings + templates use canonical index names + correct embedding model.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.template.json</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.Development.json.template</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.Production.json.template</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">All knowledge-v2 refs → files-index in env templates</constraint>
+    <constraint source="FR-14">Remove discovery-index from AllowedIndexes + DiscoveryIndexName setting key</constraint>
+    <constraint source="FR-14">appsettings.json:122 + appsettings.template.json:~237–242: spaarke-knowledge-shared → spaarke-files-index</constraint>
+    <constraint source="FR-20">appsettings.template.json:248 EmbeddingModelName = text-embedding-3-large</constraint>
+    <constraint source="NFR-11">All appsettings consistent with 3072-dim vectors</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Edit appsettings.json:122 SharedIndexName → spaarke-files-index</step>
+    <step order="2">Edit appsettings.template.json lines 237–242 same</step>
+    <step order="3">Remove discovery-index from AllowedIndexes arrays in both files</step>
+    <step order="4">Remove AiSearch.DiscoveryIndexName key from both files</step>
+    <step order="5">Edit appsettings.Development.json.template + appsettings.Production.json.template — knowledge-v2 → files-index</step>
+    <step order="6">Edit appsettings.template.json:248 EmbeddingModelName = text-embedding-3-large</step>
+    <step order="7">Grep across all appsettings* files for `spaarke-knowledge-shared`, `discovery-index`, `spaarke-knowledge-index-v2`, `text-embedding-3-small` — verify zero live values</step>
+    <step order="8">Build BFF</step>
+    <step order="9">Update TASK-INDEX.md: task 038 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">4 appsettings files</tool>
+    <tool name="Grep">Verify zero remaining stale values</tool>
+    <tool name="dotnet">Build</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">4 appsettings + template files</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep across appsettings* for `spaarke-knowledge-shared`, `discovery-index`, `spaarke-knowledge-index-v2`, `text-embedding-3-small` returns zero live values</criterion>
+    <criterion testable="true">EmbeddingModelName = text-embedding-3-large in template</criterion>
+    <criterion testable="true">BFF builds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

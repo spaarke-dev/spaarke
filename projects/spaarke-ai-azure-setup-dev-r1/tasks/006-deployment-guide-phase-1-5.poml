@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Append §4.6 to SPAARKE-DEPLOYMENT-GUIDE.md + Appendix D update (FR-05)</title>
+    <phase>1: Documentation Foundation + Pre-Flight Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001, 002, 003</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, deploy, guides</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Doc update: new section + Appendix D entry (FR-05)</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Append §4.6 "Phase 1.5: AI Search Index Schemas" to `docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md` between Phase 1 (Azure Infrastructure) and Phase 2 (Entra ID). Update Appendix D Script Reference to include `Deploy-AllIndexes.ps1`.
+  </prompt>
+
+  <role>
+    Spaarke platform technical writer.
+  </role>
+
+  <goal>
+    SPAARKE-DEPLOYMENT-GUIDE.md has new §4.6 with code block invoking `Deploy-AllIndexes.ps1 -EnvironmentName <env>` and cross-links to catalog + operational guide. Appendix D includes Deploy-AllIndexes.ps1.
+  </goal>
+
+  <context>
+    <background>
+      SPAARKE-DEPLOYMENT-GUIDE.md (canonical environment deployment doc) currently has no AI Search index deployment phase. §4 creates the search service; §6 stashes admin key in KV; the guide then jumps to Dataverse solutions. FR-05 fills the gap.
+    </background>
+    <relevant-files>
+      <file>docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>docs/guides/ai-search-azure-setup.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-05">§4.6 contains: context paragraph, `Deploy-AllIndexes.ps1 -EnvironmentName <env>` code block, cross-link to catalog and operational guide</constraint>
+    <constraint source="FR-05">Appendix D Script Reference includes `Deploy-AllIndexes.ps1` row</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>docs/guides/ai-search-azure-setup.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SPAARKE-DEPLOYMENT-GUIDE.md; locate Phase 1 end + Phase 2 start (insertion point for §4.6)</step>
+    <step order="2">Draft §4.6 "Phase 1.5: AI Search Index Schemas" with context paragraph + Deploy-AllIndexes.ps1 invocation + cross-links</step>
+    <step order="3">Edit doc to insert §4.6</step>
+    <step order="4">Edit Appendix D Script Reference table to add `Deploy-AllIndexes.ps1` row</step>
+    <step order="5">Update TASK-INDEX.md: task 006 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Insert §4.6 and update Appendix D</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">§4.6 "Phase 1.5: AI Search Index Schemas" exists in SPAARKE-DEPLOYMENT-GUIDE.md between Phase 1 and Phase 2</criterion>
+    <criterion testable="true">§4.6 contains Deploy-AllIndexes.ps1 invocation code block</criterion>
+    <criterion testable="true">§4.6 cross-links to AI-SEARCH-INDEX-CATALOG.md and ai-search-azure-setup.md</criterion>
+    <criterion testable="true">Appendix D Script Reference has Deploy-AllIndexes.ps1 row</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>
