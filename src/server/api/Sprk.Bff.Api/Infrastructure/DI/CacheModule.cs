@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
@@ -99,11 +101,17 @@ public static class CacheModule
             // ADR-032 symmetric registration: real IConnectionMultiplexer in Redis-on path.
             services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer>(connectionMultiplexer);
 
+            // R7-S7 sub-gap #1 closure (2026-06-26): wire ConnectionMultiplexerFactory so
+            // Microsoft.Extensions.Caching.StackExchangeRedis reuses the DI-registered multiplexer
+            // instead of constructing its own internal one. Without this, the DI-registered
+            // multiplexer (which `OpenTelemetry.Instrumentation.StackExchangeRedis.AddRedisInstrumentation()`
+            // hooks at startup) is idle in the cache hot path and zero Redis dependency spans
+            // reach App Insights. When this factory is set, options.Configuration /
+            // ConfigurationOptions are ignored, so they are intentionally NOT set here.
             services.AddStackExchangeRedisCache(options =>
             {
-                options.Configuration = redisConnectionString;
                 options.InstanceName = redisOptions.InstanceName;
-                options.ConfigurationOptions = configOptions;
+                options.ConnectionMultiplexerFactory = () => Task.FromResult(connectionMultiplexer);
             });
 
             logging.AddSimpleConsole().Services.Configure<Microsoft.Extensions.Logging.Console.SimpleConsoleFormatterOptions>(options =>
@@ -152,10 +160,46 @@ public static class CacheModule
 
         services.AddMemoryCache();
 
-        // Tenant-scoped cache wrapper (FR-05, NFR-12). Wraps the IDistributedCache registered above
-        // (Redis or in-memory dev fallback) and enforces mandatory tenant scoping at the public API.
+        // R7-S7 sub-gap #2 closure (2026-06-26): decorate IDistributedCache with
+        // MetricsDistributedCache so cache.* Meter instruments fire on EVERY call —
+        // including the system-cache exception path (CommunicationAccountService,
+        // MSAL token cache, membership refresh) that injects IDistributedCache
+        // directly and bypasses TenantCache. Without this decorator, those ~11 hot-path
+        // system-cache sites emitted zero metrics.
+        DecorateDistributedCacheWithMetrics(services);
+
+        // Tenant-scoped cache wrapper (FR-05, NFR-12). Wraps the (now metrics-decorated)
+        // IDistributedCache and enforces mandatory tenant scoping at the public API.
         services.AddSingleton<ITenantCache, TenantCache>();
 
         return services;
+    }
+
+    private static void DecorateDistributedCacheWithMetrics(IServiceCollection services)
+    {
+        var existing = services.FirstOrDefault(d => d.ServiceType == typeof(IDistributedCache));
+        if (existing is null)
+        {
+            return;
+        }
+
+        services.Remove(existing);
+
+        if (existing.ImplementationInstance is IDistributedCache instance)
+        {
+            services.AddSingleton<IDistributedCache>(new MetricsDistributedCache(instance));
+        }
+        else if (existing.ImplementationFactory is not null)
+        {
+            services.AddSingleton<IDistributedCache>(sp =>
+                new MetricsDistributedCache((IDistributedCache)existing.ImplementationFactory(sp)));
+        }
+        else if (existing.ImplementationType is not null)
+        {
+            // Re-register concrete inner cache as itself so we can resolve and wrap it.
+            services.TryAddSingleton(existing.ImplementationType);
+            services.AddSingleton<IDistributedCache>(sp =>
+                new MetricsDistributedCache((IDistributedCache)sp.GetRequiredService(existing.ImplementationType)));
+        }
     }
 }
