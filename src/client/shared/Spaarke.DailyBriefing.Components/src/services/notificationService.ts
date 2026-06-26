@@ -134,7 +134,10 @@ export function computeTimeWindowIso(setting: TimeWindow | undefined | null): st
  *
  * Pure (no I/O) — keep this way for testability.
  */
-export function filterByDueWithinDays(items: NotificationItem[], days: DueWindowDays | undefined | null): NotificationItem[] {
+export function filterByDueWithinDays(
+  items: NotificationItem[],
+  days: DueWindowDays | undefined | null
+): NotificationItem[] {
   if (days === undefined || days === null) return items;
   const boundaryMs = Date.now() + days * 24 * 60 * 60 * 1000;
   return items.filter(item => {

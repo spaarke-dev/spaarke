@@ -259,7 +259,9 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
 
   // Resolve the Xrm globals once (used by both the inline regarding-name link
   // and the fallback "Open record" overflow-menu handler).
-  const resolveXrm = (): { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } } | undefined => {
+  const resolveXrm = ():
+    | { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } }
+    | undefined => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (window as any)?.Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
   };
@@ -268,18 +270,16 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
     if (!entityType || !entityId) return;
     const xrm = resolveXrm();
     if (!xrm?.Navigation?.navigateTo) return;
-    xrm.Navigation
-      .navigateTo(
-        {
-          pageType: 'entityrecord',
-          entityName: entityType,
-          entityId: entityId,
-        },
-        { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
-      )
-      .catch(() => {
-        /* user closed dialog */
-      });
+    xrm.Navigation.navigateTo(
+      {
+        pageType: 'entityrecord',
+        entityName: entityType,
+        entityId: entityId,
+      },
+      { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
+    ).catch(() => {
+      /* user closed dialog */
+    });
   };
 
   const handleLinkClick = (): void => {
@@ -409,12 +409,7 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
         */}
         <Menu>
           <MenuTrigger disableButtonEnhancement>
-            <MenuButton
-              appearance="subtle"
-              size="small"
-              icon={<MoreHorizontalRegular />}
-              aria-label="More actions"
-            />
+            <MenuButton appearance="subtle" size="small" icon={<MoreHorizontalRegular />} aria-label="More actions" />
           </MenuTrigger>
           <MenuPopover>
             <MenuList>
