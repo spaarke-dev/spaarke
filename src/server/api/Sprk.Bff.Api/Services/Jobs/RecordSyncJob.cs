@@ -635,6 +635,7 @@ public class RecordSyncJob : BackgroundService
     public virtual async Task<DateTimeOffset> ReadWatermarkAsync(string entityType, CancellationToken ct)
     {
         var key = $"{WatermarkKeyPrefix}{entityType}";
+        // SYSTEM-LEVEL EXCEPTION (NFR-08): watermark is a durable system-wide bookmark for cross-tenant Dataverse sync per entity type; tenant-scoping would fragment the bookmark.
         var data = await _cache.GetStringAsync(key, ct);
 
         if (string.IsNullOrEmpty(data) || !DateTimeOffset.TryParse(data, out var watermark))
@@ -655,6 +656,7 @@ public class RecordSyncJob : BackgroundService
         var key = $"{WatermarkKeyPrefix}{entityType}";
 
         // Persist watermark indefinitely (no sliding expiry — this is a durable bookmark).
+        // SYSTEM-LEVEL EXCEPTION (NFR-08): watermark is a durable system-wide bookmark for cross-tenant Dataverse sync per entity type; tenant-scoping would fragment the bookmark.
         await _cache.SetStringAsync(key, watermark.ToString("O"), new DistributedCacheEntryOptions(), ct);
 
         _logger.LogDebug(

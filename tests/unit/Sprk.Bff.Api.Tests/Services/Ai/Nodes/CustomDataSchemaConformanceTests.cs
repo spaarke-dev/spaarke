@@ -24,7 +24,6 @@
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -32,10 +31,12 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Xunit;
 
@@ -486,7 +487,7 @@ public class CustomDataSchemaConformanceTests
             discoveryMock.Object,
             identityMock.Object,
             dataverseMock.Object,
-            new InMemoryCache(),
+            new InMemoryTenantCache(),
             Options.Create(new MembershipOptions()),
             loggerMock.Object);
 
@@ -672,29 +673,8 @@ public class CustomDataSchemaConformanceTests
         return doc.RootElement.GetProperty("customData").Clone();
     }
 
-    /// <summary>
-    /// Tiny <see cref="IDistributedCache"/> stub backed by a dictionary so we don't pull
-    /// Redis into a unit test.
-    /// </summary>
-    private sealed class InMemoryCache : IDistributedCache
-    {
-        private readonly Dictionary<string, byte[]> _store = new(StringComparer.Ordinal);
-
-        public byte[]? Get(string key) => _store.TryGetValue(key, out var v) ? v : null;
-        public Task<byte[]?> GetAsync(string key, CancellationToken token = default) => Task.FromResult(Get(key));
-        public void Refresh(string key) { }
-        public Task RefreshAsync(string key, CancellationToken token = default) => Task.CompletedTask;
-        public void Remove(string key) => _store.Remove(key);
-        public Task RemoveAsync(string key, CancellationToken token = default)
-        {
-            _store.Remove(key);
-            return Task.CompletedTask;
-        }
-        public void Set(string key, byte[] value, DistributedCacheEntryOptions options) => _store[key] = value;
-        public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default)
-        {
-            _store[key] = value;
-            return Task.CompletedTask;
-        }
-    }
+    // Note: a local `InMemoryCache : IDistributedCache` stub previously lived here. Removed
+    // when `MembershipResolverService` migrated from `IDistributedCache` to `ITenantCache`
+    // (PR #458 / spaarke-redis-cache-remediation-r1 — Wave 6 task 012). The canonical test
+    // stand-in is now `Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache`.
 }

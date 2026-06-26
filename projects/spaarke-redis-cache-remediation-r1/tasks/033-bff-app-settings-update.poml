@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Update spaarke-bff-dev App Settings (Redis cutover)</title>
+    <phase>3: Dev environment cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>032</dependencies>
+    <blocks>034</blocks>
+    <tags>azure, deploy, app-service, config</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Live App Service config change; triggers BFF restart on next task</rigor-reason>
+    <parallel-group>Phase3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase 3 cutover sequence — strictly serial</parallel-reason>
+  </metadata>
+  <prompt>Update `spaarke-bff-dev` App Settings: `Redis__Enabled=true`, `Redis__InstanceName=spaarke:`, `ConnectionStrings__Redis=@Microsoft.KeyVault(VaultName={dev-kv};SecretName=Redis-ConnectionString)`, `Redis__AllowInMemoryFallback=false`. Do NOT restart yet (task 034 does verified restart).</prompt>
+  <role>Spaarke operator; App Service config management.</role>
+  <goal>`az webapp config appsettings list -g rg-spaarke-dev -n spaarke-bff-dev --query "[?contains(name, 'Redis')]"` returns the new values; KV reference syntax verified.</goal>
+  <context><background>This is the cutover moment — App Settings now point at the new Redis via KV reference. Restart in task 034 surfaces verification log.</background><relevant-files><file>spaarke-bff-dev (Azure App Service)</file></relevant-files></context>
+  <constraints>
+    <constraint source="ADR-028">KV reference syntax.</constraint>
+    <constraint source="spec">FR-14.</constraint>
+    <constraint source="spec">Success Criterion #2.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/dev-cutover-baseline.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Resolve `{dev-kv}` from baseline notes.</step>
+    <step order="2">`az webapp config appsettings set -g rg-spaarke-dev -n spaarke-bff-dev --settings Redis__Enabled=true Redis__InstanceName="spaarke:" "ConnectionStrings__Redis=@Microsoft.KeyVault(VaultName={dev-kv};SecretName=Redis-ConnectionString)" Redis__AllowInMemoryFallback=false`.</step>
+    <step order="3">Verify: query and confirm all 4 settings reflect new values; KV reference resolves (not "Key Vault Reference Could Not Be Resolved").</step>
+    <step order="4">Append to `notes/cutover-deploy-log.md`.</step>
+    <step order="5">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">az CLI</tool><tool name="Write">log append</tool></tools>
+  <outputs><output type="azure">spaarke-bff-dev App Settings (modified)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All 4 App Settings reflect new values per FR-14.</criterion>
+    <criterion testable="true">KV reference resolves (`az webapp config appsettings list --query "[?name=='ConnectionStrings__Redis'].value"` does NOT contain "Could Not Be Resolved").</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>

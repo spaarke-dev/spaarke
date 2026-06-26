@@ -51,7 +51,8 @@ public class AnalysisOrchestrationServiceTests
         var httpContextAccessorMock = new Mock<IHttpContextAccessor>();
         var speFileOperationsMock = new Mock<ISpeFileOperations>();
         var textExtractorMock = new Mock<ITextExtractor>();
-        var distributedCacheMock = new Mock<IDistributedCache>();
+        // FR-05 redis remediation r1: AnalysisDocumentLoader + AnalysisRagProcessor now use ITenantCache.
+        var tenantCacheMock = new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
         var ragServiceMock = new Mock<IRagService>();
         var storageRetryPolicyMock = new Mock<IStorageRetryPolicy>();
         var exportRegistry = new ExportServiceRegistry(Array.Empty<IExportService>());
@@ -67,14 +68,14 @@ public class AnalysisOrchestrationServiceTests
             _dataverseServiceMock.Object,
             speFileOperationsMock.Object,
             textExtractorMock.Object,
-            distributedCacheMock.Object,
+            tenantCacheMock.Object,
             httpContextAccessorMock.Object,
             new Mock<ILogger<AnalysisDocumentLoader>>().Object);
 
         var ragProcessor = new AnalysisRagProcessor(
             ragServiceMock.Object,
             new RagQueryBuilder(),
-            distributedCacheMock.Object,
+            tenantCacheMock.Object,
             httpContextAccessorMock.Object,
             options,
             new Mock<ILogger<AnalysisRagProcessor>>().Object);

@@ -3,9 +3,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Nodes;
@@ -84,10 +84,16 @@ public sealed class PlaybookDispatcher
     /// </summary>
     private static readonly SemaphoreSlim AiConcurrencyLimiter = new(maxCount: 10, initialCount: 10);
 
+    /// <summary>Tenant-cache resource name for dispatch output-node metadata (FR-05).</summary>
+    internal const string CacheResource = "playbook-dispatch-output";
+
+    /// <summary>Tenant-cache schema version for dispatch output-node metadata.</summary>
+    internal const int CacheVersion = 1;
+
     private readonly PlaybookEmbeddingService _embeddingService;
     private readonly IChatClient _executionClient;
     private readonly INodeService _nodeService;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly IMemoryCache _memoryCache;
     private readonly ILogger _logger;
     private readonly string _tenantId;
@@ -149,7 +155,7 @@ public sealed class PlaybookDispatcher
         PlaybookEmbeddingService embeddingService,
         IChatClient executionClient,
         INodeService nodeService,
-        IDistributedCache cache,
+        ITenantCache cache,
         string tenantId,
         ILogger<PlaybookDispatcher> logger,
         IMemoryCache? memoryCache = null)
@@ -1000,13 +1006,13 @@ public sealed class PlaybookDispatcher
         NodeDestination nodeDestination, string? widgetType)>
         GetOutputNodeMetadataAsync(string playbookId, CancellationToken cancellationToken)
     {
-        // ADR-014: Cache key scoped by tenant and playbook
-        var cacheKey = $"dispatch:output:{_tenantId}:{playbookId}";
-
+        // ADR-014 / FR-05: tenant-scoped via ITenantCache. Resource = "playbook-dispatch-output";
+        // id = playbookId.
         try
         {
             // Check cache first
-            var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+            var cached = await _cache.GetStringAsync(
+                _tenantId, CacheResource, playbookId, CacheVersion, ct: cancellationToken);
             if (cached is not null)
             {
                 var cachedMeta = JsonSerializer.Deserialize<OutputNodeMetadata>(cached);
@@ -1072,14 +1078,17 @@ public sealed class PlaybookDispatcher
                 widgetType = null;
             }
 
-            // Cache the result (ADR-014)
+            // Cache the result (ADR-014 / FR-05 wrapper, absolute TTL).
             var metadata = new OutputNodeMetadata(
                 outputType, requiresConfirmation, targetPage, nodeDestination, widgetType);
             await _cache.SetStringAsync(
-                cacheKey,
+                _tenantId,
+                CacheResource,
+                playbookId,
+                CacheVersion,
                 JsonSerializer.Serialize(metadata),
-                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheTtl },
-                cancellationToken);
+                ttl: CacheTtl,
+                ct: cancellationToken);
 
             return (outputType, requiresConfirmation, targetPage, nodeDestination, widgetType);
         }

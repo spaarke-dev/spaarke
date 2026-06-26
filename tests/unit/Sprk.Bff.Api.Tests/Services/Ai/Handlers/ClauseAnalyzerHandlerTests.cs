@@ -6,8 +6,10 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Xunit;
@@ -37,21 +39,27 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
 {
     private static readonly Assembly BffAssembly = typeof(IToolHandler).Assembly;
 
+    private static ITenantCache CreateTenantCache(IDistributedCache? distributedCache = null)
+    {
+        var dc = distributedCache ?? new MemoryDistributedCache(
+            Options.Create(new MemoryDistributedCacheOptions()));
+        return new TenantCache(dc, NullLogger<TenantCache>.Instance);
+    }
+
     private ClauseAnalyzerHandler CreateHandler(
         IDistributedCache? cache = null,
         Mock<IOpenAiClient>? openAi = null,
         ModelSelectorOptions? options = null)
     {
         var oai = openAi ?? OpenAiClientMock;
-        var dc = cache ?? new MemoryDistributedCache(
-            Options.Create(new MemoryDistributedCacheOptions()));
+        var tenantCache = CreateTenantCache(cache);
         var opts = Options.Create(options ?? new ModelSelectorOptions
         {
             ToolHandlerModel = "gpt-4o-mini"
         });
         return new ClauseAnalyzerHandler(
             oai.Object,
-            dc,
+            tenantCache,
             opts,
             CreateLogger<ClauseAnalyzerHandler>());
     }
@@ -123,8 +131,8 @@ public sealed class ClauseAnalyzerHandlerTests : TypedToolHandlerTestFixture
 
         parameterTypes.Should().Contain(typeof(IOpenAiClient),
             because: "FR-14 LLM-assisted handlers depend on IOpenAiClient (Azure OpenAI structured outputs)");
-        parameterTypes.Should().Contain(typeof(IDistributedCache),
-            because: "ADR-014 per-tenant caching requires IDistributedCache");
+        parameterTypes.Should().Contain(typeof(ITenantCache),
+            because: "ADR-014 + FR-05 (redis remediation r1) per-tenant caching uses ITenantCache wrapper");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

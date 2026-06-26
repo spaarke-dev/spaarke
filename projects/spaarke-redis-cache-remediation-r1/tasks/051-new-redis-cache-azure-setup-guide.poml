@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>NEW docs/guides/redis-cache-azure-setup.md (operational runbook)</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>039,043</dependencies>
+    <blocks>054,055,056</blocks>
+    <tags>docs, deploy, azure, infrastructure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>NEW major operational doc; binds FR-19 + Success Criterion #6</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Author NEW `docs/guides/redis-cache-azure-setup.md` (kebab-case): operational runbook covering Prerequisites, Provision Commands (per env), Verification, Cutover Protocol, Rollback, Secret Rotation, Decommission, Troubleshooting, Known Limitation note. A fresh operator can provision a new env Redis in &lt;30 min from this doc alone (Success Criterion #6).</prompt>
+  <role>Spaarke architect/doc writer.</role>
+  <goal>File exists at the prescribed path. All sections per FR-19. Cross-references to `caching-architecture.md`, ADR-009, `SPAARKE-DEPLOYMENT-GUIDE.md` §4.5 (added in task 054).</goal>
+  <context><background>This is the operational source of truth. Lessons-learned (task 056) and secret rotation (task 055) appended here.</background><relevant-files><file>docs/guides/redis-cache-azure-setup.md (NEW)</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">FR-19.</constraint>
+    <constraint source="spec">Q-F — kebab-case for NEW files.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cutover-deploy-log.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/dev-cutover-baseline.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/phase-3-retro.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/alert-definitions-draft.md</file>
+      <file>scripts/Deploy-RedisCache.ps1</file>
+      <file>docs/architecture/caching-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Author Prerequisites section (KV, MI permissions, App Service, App Settings template).</step>
+    <step order="2">Author Provision Commands section (per environment with `Deploy-RedisCache.ps1` invocations + expected outputs).</step>
+    <step order="3">Author Verification section (KV reference resolves, BFF startup log line, `/healthz` 200, smoke test key format).</step>
+    <step order="4">Author Cutover Protocol section: dev = empty Redis (clean slate); staging/prod = G13 key-migration options (key-warming OR cache-miss-window — both documented with tradeoffs).</step>
+    <step order="5">Author Rollback section (revert App Settings to baseline; keep new Redis up; safe rollback).</step>
+    <step order="6">Author Secret Rotation section (handed off from task 055 — placeholder; task 055 fills in).</step>
+    <step order="7">Author Decommission section.</step>
+    <step order="8">Author Troubleshooting section (include 3 alert definitions from task 043; common failure modes; KQL queries).</step>
+    <step order="9">Add Known Limitation note: "in-memory fallback mode does NOT support multi-instance deployment — single-instance local dev only."</step>
+    <step order="10">Cross-link to `caching-architecture.md`, ADR-009.</step>
+    <step order="11">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">notes + spec</tool><tool name="Write">new guide</tool></tools>
+  <outputs><output type="docs">docs/guides/redis-cache-azure-setup.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">File exists with all FR-19 sections.</criterion>
+    <criterion testable="true">File name is kebab-case.</criterion>
+    <criterion testable="true">Cross-links to architecture doc + ADR-009 present.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

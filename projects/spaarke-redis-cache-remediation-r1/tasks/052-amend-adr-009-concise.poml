@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>AMEND .claude/adr/ADR-009-redis-caching.md (concise)</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>053</blocks>
+    <tags>docs, adr</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>ADR amendment is binding doctrine; lockstep PR with task 053</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `.claude/` — main-session-only per CLAUDE.md §3 sub-agent write boundary</parallel-reason>
+  </metadata>
+  <prompt>AMEND `.claude/adr/ADR-009-redis-caching.md` (concise version): preserve all existing MUSTs/MUST NOTs; ADD operational MUSTs per FR-20 (SKU table, KV reference mandate, fail-fast in deployed envs, tenant prefix format, `InstanceName=spaarke:`, Pub/Sub topology, App Insights mandate, two-tier resource-naming rule). Refresh Last Updated date.</prompt>
+  <role>Spaarke architect; ADR maintainer. Sub-agents cannot write here — main session only.</role>
+  <goal>Concise ADR-009 file contains the new operational MUSTs in addition to preserved existing constraints. Last Updated reflects today.</goal>
+  <context><background>The concise ADR is the agent-facing version (auto-loaded by `adr-aware`); the full ADR (`docs/adr/...`) is the human-readable version with rationale. Both must be amended in lockstep (task 053).</background><relevant-files><file>.claude/adr/ADR-009-redis-caching.md</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">FR-20 — lockstep amendment.</constraint>
+    <constraint source="CLAUDE.md §3">Sub-agent write boundary; this task runs in MAIN SESSION.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>docs/architecture/caching-architecture.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read current ADR-009 concise. Identify section structure (Decision, Constraints/MUSTs, Implementation Pattern, Exceptions).</step>
+    <step order="2">Add a new section or subsection "Operational MUSTs (added 2026-XX-XX by spaarke-redis-cache-remediation-r1)" listing the 8 new MUSTs per FR-20.</step>
+    <step order="3">Preserve all existing constraint text verbatim.</step>
+    <step order="4">Cross-link to `docs/architecture/caching-architecture.md` + `docs/guides/redis-cache-azure-setup.md`.</step>
+    <step order="5">Refresh Last Updated date.</step>
+    <step order="6">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">existing concise ADR</tool><tool name="Edit">amend</tool></tools>
+  <outputs><output type="docs">.claude/adr/ADR-009-redis-caching.md (modified)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All 8 new operational MUSTs present (verified by grep for key phrases: "Standard C0", "Key Vault", "AbortOnConnectFail", "tenant:", "spaarke:", "Pub/Sub", "Application Insights", "two-tier").</criterion>
+    <criterion testable="true">Existing MUSTs/MUST NOTs unchanged in text.</criterion>
+    <criterion testable="true">Last Updated date refreshed to today.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor. MUST run in main session.</protocol></execution>
+</task>

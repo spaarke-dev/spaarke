@@ -2,7 +2,7 @@
 
 > **Status**: Accepted
 > **Domain**: Data/Caching
-> **Last Updated**: 2025-12-18
+> **Last Updated**: 2026-06-26 (operational MUSTs added by `spaarke-redis-cache-remediation-r1`)
 
 ---
 
@@ -32,16 +32,53 @@ Use **Redis as distributed cache**. Per-request cache for within-request de-dupe
 
 ---
 
+## Operational MUSTs (added 2026-06-26 by `spaarke-redis-cache-remediation-r1`)
+
+### ✅ MUST (operational)
+
+- **MUST** use canonical resource name `spaarke-bff-redis-{env}` for the top-level Redis Cache for Redis instance (env-suffixed). Sub-resources (cache keys, KV secret names) MUST be env-agnostic — environment is implicit in the parent service hostname.
+- **MUST** size by environment per the SKU table below.
+
+  | Environment | SKU | Capacity | Rationale |
+  |---|---|---|---|
+  | dev | Basic | C0 | ~$15/mo; no HA; acceptable for dev |
+  | staging | Standard | C0+ | HA fidelity to prod; minimum non-prod with HA |
+  | prod | Standard C2+ or Premium P1+ | sized to traffic | C2+ for traffic floor; Premium for VNet/geo-replication/Entra ID auth (S1) |
+- **MUST** store the Redis connection string in Key Vault and reference it from App Settings via `@Microsoft.KeyVault(VaultName={vault};SecretName=Redis-ConnectionString)`. Plain-text connection strings in App Settings are prohibited.
+- **MUST** fail-fast at BFF startup when `Redis:Enabled=true` and the instance is unreachable. `ConfigurationOptions.AbortOnConnectFail = true` in `CacheModule`. The in-memory fallback path is restricted to Development environment + explicit `Redis:AllowInMemoryFallback=true` opt-in; deployed environments throw at startup.
+- **MUST** embed tenant ID in every cache key produced by application code. Industry-standard format `{InstanceName}tenant:{tenantId}:{resource}:{id}:v{version}` (final on-wire key shape: `spaarke:tenant:{tenantId}:{resource}:{id}:v{version}`). System-level exceptions (non-tenant-scoped keys for cross-tenant resources like idempotency, watermarks, schema cache) MUST be explicitly allow-listed in `Sprk.Bff.Api/Infrastructure/Cache/SystemCacheKeys.cs` with per-site rationale (NFR-08).
+- **MUST** set `Redis:InstanceName = "spaarke:"` (canonical app prefix). The deprecated `sdap:` brand is dropped.
+- **MUST** register `IConnectionMultiplexer` symmetrically (real or `NullConnectionMultiplexer` based on config; never asymmetric `if (flag) { register }`). See ADR-032.
+- **MUST** capture Redis dependency calls in Application Insights. Emit custom metrics from the `TenantCache` wrapper: `cache.hits`, `cache.misses`, `cache.redis_call_duration_ms` (with `resource` dimension). Hit-rate is derived downstream. Minimum 3 alerts defined: (a) hit_rate <80% / 15min, (b) P95 >100ms / 5min, (c) memory >80% of SKU.
+- **MUST** access the distributed cache through the `ITenantCache` wrapper from `Sprk.Bff.Api`. Direct `IDistributedCache.GetAsync/SetAsync/RemoveAsync` calls in `Sprk.Bff.Api/` are prohibited except for sites enumerated in `SystemCacheKeys.cs`.
+
+### ❌ MUST NOT (operational)
+
+- **MUST NOT** allow silent in-memory fallback in Staging/Production environments. Even Development requires explicit `Redis:AllowInMemoryFallback=true`.
+- **MUST NOT** recreate per-customer Redis instances. Per-customer Redis is deprecated (Q-E Architecture 1, FR-12 of `spaarke-redis-cache-remediation-r1`). Future per-customer Redis (e.g., for data-residency) is registered via the wrapper named-instance pattern (`ITenantCache cacheInstance` parameter, NFR-12 — additive change, not redesign).
+- **MUST NOT** put plain-text Redis connection strings in App Settings, `appsettings.*.json`, or any code path. Always KV reference.
+
+### Pub/Sub topology
+
+- **MAY** share a single Redis instance for cache + Pub/Sub in dev/staging.
+- **SHOULD** separate Pub/Sub from cache in prod (S2 stretch — separate Redis instance dedicated to Pub/Sub avoids fan-out backpressure on the cache).
+
+---
+
 ## Implementation Pattern
 
-### Distributed Cache (Default)
+### Distributed Cache (Default) — via `ITenantCache` wrapper
 
 ```csharp
-// ✅ DO: Use distributed cache
-var metadata = await _cache.GetOrCreateAsync(
-    $"doc-metadata:{docId}:v{rowVersion}",
-    async () => await _dataverse.GetDocumentMetadataAsync(docId),
-    TimeSpan.FromMinutes(5));
+// ✅ DO: Use the ITenantCache wrapper (mandatory tenantId)
+var metadata = await _tenantCache.GetOrCreateAsync<DocumentMetadata>(
+    tenantId: User.FindFirstValue("tid")!,
+    resource: "doc-metadata",
+    id: docId,
+    version: rowVersion,
+    factory: ct => _dataverse.GetDocumentMetadataAsync(docId, ct),
+    ttl: TimeSpan.FromMinutes(5));
+// On-wire key: spaarke:tenant:{tenantId}:doc-metadata:{docId}:v{rowVersion}
 ```
 
 ### Per-Request Cache
@@ -70,7 +107,16 @@ var snapshot = await _requestCache.GetOrCreateAsync(
 | ADR | Relationship |
 |-----|--------------|
 | [ADR-003](ADR-003-authorization-seams.md) | Cache snapshots, not decisions |
-| [ADR-010](ADR-010-di-minimalism.md) | No hybrid cache services |
+| [ADR-010](ADR-010-di-minimalism.md) | No hybrid cache services; `ITenantCache` justified per ≥2-impls test (default today + future named instances per NFR-12) |
+| [ADR-028](ADR-028-spaarke-auth-architecture.md) | KV reference syntax for connection string; App Service MI reads |
+| [ADR-029](ADR-029-bff-publish-hygiene.md) | Publish-size delta ≤+1 MB per BFF-touching task |
+| [ADR-032](ADR-032-bff-nullobject-kill-switch.md) | `IConnectionMultiplexer` Null-Object symmetric registration |
+
+## See also
+
+- `docs/architecture/caching-architecture.md` — design rationale + tenant isolation + multi-instance behavior + failure mode catalog
+- `docs/guides/redis-cache-azure-setup.md` — operational runbook (provisioning, cutover, rollback, secret rotation, troubleshooting, lessons learned)
+- `scripts/Deploy-RedisCache.ps1` — provisioning automation
 
 ---
 

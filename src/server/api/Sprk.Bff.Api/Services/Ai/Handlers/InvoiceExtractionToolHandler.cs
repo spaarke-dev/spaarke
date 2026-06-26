@@ -3,8 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -79,6 +79,12 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 public sealed class InvoiceExtractionToolHandler : IToolHandler
 {
     private const string HandlerIdValue = "InvoiceExtractionToolHandler";
+    // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
+    // spaarke:tenant:{tenantId}:invoice-extractor:{hash}:v1
+    private const string CacheResource = "invoice-extractor";
+    private const int CacheVersion = 1;
+    // Retained for legacy BuildCacheKey static helper exposed to tests (returns a stable
+    // string representation used by tenant-isolation assertions).
     private const string CacheKeyPrefix = "invoice-extractor";
 
     private static readonly IReadOnlySet<string> DefaultExpectedCurrencies =
@@ -184,13 +190,13 @@ public sealed class InvoiceExtractionToolHandler : IToolHandler
     private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
 
     private readonly IOpenAiClient _openAiClient;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ModelSelectorOptions _modelSelectorOptions;
     private readonly ILogger<InvoiceExtractionToolHandler> _logger;
 
     public InvoiceExtractionToolHandler(
         IOpenAiClient openAiClient,
-        IDistributedCache cache,
+        ITenantCache cache,
         IOptions<ModelSelectorOptions> modelSelectorOptions,
         ILogger<InvoiceExtractionToolHandler> logger)
     {
@@ -368,25 +374,21 @@ public sealed class InvoiceExtractionToolHandler : IToolHandler
                 ? _modelSelectorOptions.ToolHandlerModel
                 : config.ModelDeployment;
 
-            var cacheKey = BuildCacheKey(tenantId!, invoiceText, config);
+            var cacheId = BuildCacheId(invoiceText, config);
 
-            // ADR-014 — per-tenant cache lookup.
+            // ADR-014 + FR-05 (redis remediation r1) — per-tenant cache lookup via ITenantCache.
             bool cacheHit = false;
             LlmInvoicePayload? llmPayload = null;
-            var cachedBytes = await _cache.GetAsync(cacheKey, cancellationToken).ConfigureAwait(false);
-            if (cachedBytes is not null && cachedBytes.Length > 0)
+            try
             {
-                try
-                {
-                    var cachedJson = Encoding.UTF8.GetString(cachedBytes);
-                    llmPayload = JsonSerializer.Deserialize<LlmInvoicePayload>(cachedJson, JsonOptions);
-                    cacheHit = llmPayload is not null;
-                }
-                catch (JsonException)
-                {
-                    // Cache poisoned — fall through and re-fetch.
-                    cacheHit = false;
-                }
+                llmPayload = await _cache.GetAsync<LlmInvoicePayload>(
+                    tenantId!, CacheResource, cacheId, CacheVersion, ct: cancellationToken).ConfigureAwait(false);
+                cacheHit = llmPayload is not null;
+            }
+            catch (JsonException)
+            {
+                // Cache poisoned — fall through and re-fetch.
+                cacheHit = false;
             }
 
             if (!cacheHit)
@@ -469,13 +471,10 @@ public sealed class InvoiceExtractionToolHandler : IToolHandler
                         });
                 }
 
-                // Cache the raw LLM payload (already strict-decoded JSON).
-                var rawBytes = Encoding.UTF8.GetBytes(rawJson);
-                var cacheOptions = new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = CacheTtl
-                };
-                await _cache.SetAsync(cacheKey, rawBytes, cacheOptions, cancellationToken).ConfigureAwait(false);
+                // Cache the parsed LLM payload via ITenantCache (JSON serialization handled by wrapper).
+                await _cache.SetAsync(
+                    tenantId!, CacheResource, cacheId, CacheVersion,
+                    llmPayload, CacheTtl, ct: cancellationToken).ConfigureAwait(false);
             }
 
             // Currency validation — fail fast if the LLM reports a currency we don't accept.
@@ -876,15 +875,25 @@ public sealed class InvoiceExtractionToolHandler : IToolHandler
     }
 
     /// <summary>
-    /// ADR-014 cache key: <c>invoice-extractor:{tenantId}:{sha256(text + config)}</c>.
-    /// Includes the config fingerprint so different tax-method / discount-order configurations
-    /// don't collide on the same text input.
+    /// Legacy cache-key string for tests asserting per-tenant isolation. Post FR-05 migration
+    /// (ITenantCache wrapper), runtime uses <see cref="BuildCacheId"/> + tenantId via the wrapper;
+    /// this static is retained as a stable test surface verifying the tenant-isolation contract.
     /// </summary>
     internal static string BuildCacheKey(string tenantId, string invoiceText, InvoiceExtractionConfig config)
     {
         if (string.IsNullOrWhiteSpace(tenantId))
             throw new ArgumentException("tenantId is required for ADR-014 cache key.", nameof(tenantId));
 
+        var hex = BuildCacheId(invoiceText, config);
+        return $"{CacheKeyPrefix}:{tenantId}:{hex}";
+    }
+
+    /// <summary>
+    /// Builds the cache "id" component (content hash) consumed by ITenantCache.
+    /// ITenantCache prepends <c>tenant:{tenantId}:{resource}:</c> and appends <c>:v{version}</c>.
+    /// </summary>
+    internal static string BuildCacheId(string invoiceText, InvoiceExtractionConfig config)
+    {
         var fingerprint = invoiceText + "\0" +
                           (config.TaxMethod ?? "exclusive") + "\0" +
                           (config.DiscountOrder ?? "pre-tax") + "\0" +
@@ -895,8 +904,7 @@ public sealed class InvoiceExtractionToolHandler : IToolHandler
 
         var bytes = Encoding.UTF8.GetBytes(fingerprint);
         var hash = SHA256.HashData(bytes);
-        var hex = Convert.ToHexString(hash);
-        return $"{CacheKeyPrefix}:{tenantId}:{hex}";
+        return Convert.ToHexString(hash);
     }
 
     private static MidpointRounding ParseRoundingMode(string? mode) =>

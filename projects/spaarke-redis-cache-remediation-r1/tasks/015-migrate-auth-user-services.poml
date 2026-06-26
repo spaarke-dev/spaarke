@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Migrate Auth/User services to ITenantCache</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>016</blocks>
+    <tags>bff-api, cache, redis, refactoring, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + auth + .cs modifications</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Atomic migration ordering</parallel-reason>
+  </metadata>
+  <prompt>Migrate Auth/User services (`Infrastructure/Auth/`, `Services/Users/`) direct `IDistributedCache.` calls to `ITenantCache`. ADR-009 MUST NOT cache authz decisions remains binding — verify no migrated call introduces such caching.</prompt>
+  <role>Spaarke .NET developer with auth context.</role>
+  <goal>`grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/Infrastructure/Auth/` and `Services/Users/` return ZERO unflagged matches.</goal>
+  <context><background>Auth/User services often have direct claim-based tenant context. Verify ADR-009 authz-no-cache invariant on migration.</background><relevant-files><file>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/</file><file>src/server/api/Sprk.Bff.Api/Services/Users/</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">FR-06 atomic migration.</constraint>
+    <constraint source="ADR-009">MUST NOT cache authorization decisions.</constraint>
+    <constraint source="ADR-028">Auth boundaries preserved.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/ITenantCache.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Open inventory Auth/User section.</step>
+    <step order="2">For each site: verify NOT caching authz decisions (audit current key + value); migrate to `ITenantCache`.</step>
+    <step order="3">`dotnet build` + `dotnet test` auth tests.</step>
+    <step order="4">Update inventory + TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">Inventory + sites</tool><tool name="Edit">Migration</tool><tool name="Bash">build/test</tool></tools>
+  <outputs><output type="code">Auth + Users service files (modified)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Auth/Users grep returns ZERO unflagged matches.</criterion>
+    <criterion testable="true">No new authorization-decision caching introduced (ADR-009 preserved).</criterion>
+    <criterion testable="true">Auth tests pass.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>redis-prod.bicepparam (Standard C2 / placeholder)</title>
+    <phase>2: Bicep + provisioning artifacts</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>020,021</dependencies>
+    <blocks>025</blocks>
+    <tags>azure, bicep, infrastructure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New param file (placeholder); actual prod provisioning OUT of scope</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create `infrastructure/bicep/parameters/redis-prod.bicepparam`: `redisName = 'spaarke-bff-redis-prod'`, `sku = 'Standard'`, `capacity = 2` (Standard C2 as starting recommendation; Premium tier deferred to S1), TLS 1.2, non-SSL false, tag `environment: 'prod'`. Header comment: "DO NOT deploy from this project — produced for sister/future use; actual prod provisioning is separate go/no-go per spec Out of Scope."</prompt>
+  <role>Spaarke infrastructure developer.</role>
+  <goal>`redis-prod.bicepparam` exists with explicit DO-NOT-DEPLOY header comment + canonical config; `bicep build` validates.</goal>
+  <context><background>Per spec Out of Scope: production provisioning is separate; this project produces the param file template.</background><relevant-files><file>infrastructure/bicep/parameters/redis-prod.bicepparam (NEW)</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">Out of Scope — prod provisioning separate.</constraint>
+    <constraint source="spec">NFR-05 — MUST NOT touch prod during this project.</constraint>
+    <constraint source="spec">FR-20 SKU table — Standard C2+ or Premium for prod.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>infrastructure/bicep/modules/redis.bicep</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Create `redis-prod.bicepparam` with DO-NOT-DEPLOY header comment + recommended config.</step>
+    <step order="2">`bicep build`.</step>
+    <step order="3">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Write">Param file</tool><tool name="Bash">bicep build</tool></tools>
+  <outputs><output type="config">infrastructure/bicep/parameters/redis-prod.bicepparam (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">File exists with DO-NOT-DEPLOY header comment + `Standard C2` placeholder.</criterion>
+    <criterion testable="true">`bicep build` succeeds.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

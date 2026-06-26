@@ -4,11 +4,15 @@ using System.Text;
 using System.Text.Json;
 using Azure.Core;
 using FluentAssertions;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Moq.Protected;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Xunit;
@@ -452,8 +456,15 @@ public class PlaybookServiceTests
             http,
             config,
             new StubTokenCredential(),
-            NullLogger<PlaybookService>.Instance);
+            NullLogger<PlaybookService>.Instance,
+            CreateNoOpCache());
     }
+
+    // Helper: no-op ITenantCache wrapping an in-memory distributed cache so tests don't
+    // need to construct Redis. Replaces the pre-FR-05 nullable `IDistributedCache?` ctor arg.
+    private static ITenantCache CreateNoOpCache() => new TenantCache(
+        new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+        NullLogger<TenantCache>.Instance);
 
     /// <summary>
     /// Replay handler that returns successive responses keyed by URL match. Captures the
@@ -624,7 +635,7 @@ public class PlaybookServiceTests
         var config = new ConfigurationBuilder().AddInMemoryCollection(configData).Build();
         var handler = new ReplayHandler(new[] { JsonResponse("", HttpStatusCode.NoContent) });
         var http = new HttpClient(handler);
-        var svc = new PlaybookService(http, config, new StubTokenCredential(), loggerMock.Object);
+        var svc = new PlaybookService(http, config, new StubTokenCredential(), loggerMock.Object, CreateNoOpCache());
 
         const string secretishError = "SECRET_PII_ERROR_BODY_MUST_NOT_APPEAR_IN_LOGS";
 

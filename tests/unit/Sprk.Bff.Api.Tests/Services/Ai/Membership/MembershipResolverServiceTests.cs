@@ -18,7 +18,6 @@
 // Per docs/procedures/testing-and-code-quality.md — Arrange-Act-Assert + FluentAssertions.
 
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -26,6 +25,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Xunit;
@@ -827,7 +827,7 @@ public class MembershipResolverServiceTests
         IMembershipFieldDiscoveryService discovery,
         IIdentityNormalizationService identity,
         IDataverseService dataverse,
-        IDistributedCache? cache = null,
+        ITenantCache? cache = null,
         ILogger<MembershipResolverService>? logger = null)
     {
         return new MembershipResolverService(
@@ -896,45 +896,55 @@ public class MembershipResolverServiceTests
     }
 
     /// <summary>
-    /// Tiny in-memory <see cref="IDistributedCache"/> for unit-test isolation.
+    /// Tiny in-memory <see cref="ITenantCache"/> for unit-test isolation.
     /// Tracks Get/Set call counts so tests can verify cache hit/miss behavior
-    /// without a Redis dependency.
+    /// without a Redis dependency. Named <c>FakeDistributedCache</c> for
+    /// backward-compatibility with pre-migration test bodies.
     /// </summary>
-    private sealed class FakeDistributedCache : IDistributedCache
+    private sealed class FakeDistributedCache : ITenantCache
     {
-        private readonly Dictionary<string, byte[]> _store = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, object?> _store = new(StringComparer.Ordinal);
         public int GetCallCount { get; private set; }
         public int SetCallCount { get; private set; }
 
-        public byte[]? Get(string key)
+        private static string BuildKey(string tenantId, string resource, string id, int version)
+            => $"tenant:{tenantId}:{resource}:{id}:v{version}";
+
+        public Task<T?> GetAsync<T>(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default)
         {
             GetCallCount++;
-            return _store.TryGetValue(key, out var v) ? v : null;
+            var key = BuildKey(tenantId, resource, id, version);
+            return Task.FromResult(_store.TryGetValue(key, out var v) ? (T?)v : default);
         }
 
-        public Task<byte[]?> GetAsync(string key, CancellationToken token = default)
-            => Task.FromResult(Get(key));
-
-        public void Refresh(string key) { }
-        public Task RefreshAsync(string key, CancellationToken token = default) => Task.CompletedTask;
-
-        public void Remove(string key) => _store.Remove(key);
-        public Task RemoveAsync(string key, CancellationToken token = default)
+        public Task SetAsync<T>(string tenantId, string resource, string id, int version, T value, TimeSpan? ttl = null, string cacheInstance = "default", CancellationToken ct = default)
         {
+            SetCallCount++;
+            var key = BuildKey(tenantId, resource, id, version);
+            _store[key] = value;
+            return Task.CompletedTask;
+        }
+
+        public Task RemoveAsync(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default)
+        {
+            var key = BuildKey(tenantId, resource, id, version);
             _store.Remove(key);
             return Task.CompletedTask;
         }
 
-        public void Set(string key, byte[] value, DistributedCacheEntryOptions options)
+        public async Task<T> GetOrCreateAsync<T>(string tenantId, string resource, string id, int version, Func<CancellationToken, Task<T>> factory, TimeSpan? ttl = null, string cacheInstance = "default", CancellationToken ct = default)
         {
-            SetCallCount++;
-            _store[key] = value;
-        }
-
-        public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default)
-        {
-            Set(key, value, options);
-            return Task.CompletedTask;
+            var existing = await GetAsync<T>(tenantId, resource, id, version, cacheInstance, ct);
+            if (existing is not null)
+            {
+                return existing;
+            }
+            var produced = await factory(ct);
+            if (produced is not null)
+            {
+                await SetAsync(tenantId, resource, id, version, produced, ttl, cacheInstance, ct);
+            }
+            return produced!;
         }
     }
 }

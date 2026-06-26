@@ -9,7 +9,6 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -18,6 +17,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
@@ -649,7 +649,7 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
 public sealed class TestableChatSessionManager : ChatSessionManager
 {
     public TestableChatSessionManager() : base(
-        cache: Mock.Of<IDistributedCache>(),
+        cache: Mock.Of<ITenantCache>(),
         dataverseRepository: Mock.Of<IChatDataverseRepository>(),
         logger: Mock.Of<ILogger<ChatSessionManager>>(),
         persistence: null,

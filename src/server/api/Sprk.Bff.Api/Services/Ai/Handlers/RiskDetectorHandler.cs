@@ -5,8 +5,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -83,7 +83,10 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 public sealed class RiskDetectorHandler : IToolHandler
 {
     private const string HandlerIdValue = nameof(RiskDetectorHandler);
-    private const string CacheKeyPrefix = "risk-detector";
+    // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
+    // spaarke:tenant:{tenantId}:risk-detector:{hash}:v1
+    private const string CacheResource = "risk-detector";
+    private const int CacheVersion = 1;
     private const string SchemaName = "RiskDetectionResult";
     private const double DefaultConfidenceThreshold = 0.6;
     private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
@@ -130,13 +133,13 @@ public sealed class RiskDetectorHandler : IToolHandler
         };
 
     private readonly IOpenAiClient _openAiClient;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ModelSelectorOptions _modelSelectorOptions;
     private readonly ILogger<RiskDetectorHandler> _logger;
 
     public RiskDetectorHandler(
         IOpenAiClient openAiClient,
-        IDistributedCache cache,
+        ITenantCache cache,
         IOptions<ModelSelectorOptions> modelSelectorOptions,
         ILogger<RiskDetectorHandler> logger)
     {
@@ -414,13 +417,13 @@ public sealed class RiskDetectorHandler : IToolHandler
         var effectiveWeights = ResolveEffectiveWeights(config);
         var confidenceThreshold = config.ConfidenceThreshold ?? DefaultConfidenceThreshold;
 
-        // ADR-014: per-tenant cache key — never cross-tenant
-        var cacheKey = BuildCacheKey(
-            tenantId, inputText, effectiveCategories, effectiveSeverities,
+        // ADR-014 + FR-05: per-tenant cache id — ITenantCache wraps tenant scoping.
+        var cacheId = BuildCacheId(
+            inputText, effectiveCategories, effectiveSeverities,
             effectiveWeights, confidenceThreshold);
 
         // Cache lookup (best-effort — failures fall through to LLM call)
-        var cached = await TryGetFromCacheAsync(cacheKey, cancellationToken);
+        var cached = await TryGetFromCacheAsync(tenantId, cacheId, cancellationToken);
         if (cached is not null)
         {
             stopwatch.Stop();
@@ -503,7 +506,7 @@ public sealed class RiskDetectorHandler : IToolHandler
         };
 
         // Cache store (best-effort)
-        await TrySetCacheAsync(cacheKey, result, cancellationToken);
+        await TrySetCacheAsync(tenantId, cacheId, result, cancellationToken);
 
         stopwatch.Stop();
 
@@ -688,8 +691,8 @@ public sealed class RiskDetectorHandler : IToolHandler
     // ADR-014: per-tenant cache key
     // ─────────────────────────────────────────────────────────────────────────────
 
-    private static string BuildCacheKey(
-        string tenantId,
+    // Builds the cache "id" component (content hash) consumed by ITenantCache.
+    private static string BuildCacheId(
         string inputText,
         IReadOnlyList<string> categories,
         IReadOnlyList<string> severities,
@@ -707,19 +710,16 @@ public sealed class RiskDetectorHandler : IToolHandler
 
         using var sha = SHA256.Create();
         var hashBytes = sha.ComputeHash(Encoding.UTF8.GetBytes(rawComposite));
-        var hashHex = Convert.ToHexString(hashBytes).ToLowerInvariant();
-        return $"{CacheKeyPrefix}:{tenantId}:{hashHex}";
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
     private async Task<RiskDetectionResult?> TryGetFromCacheAsync(
-        string cacheKey, CancellationToken cancellationToken)
+        string tenantId, string cacheId, CancellationToken cancellationToken)
     {
         try
         {
-            var bytes = await _cache.GetAsync(cacheKey, cancellationToken);
-            if (bytes is null || bytes.Length == 0)
-                return null;
-            return JsonSerializer.Deserialize<RiskDetectionResult>(bytes, JsonOpts);
+            return await _cache.GetAsync<RiskDetectionResult>(
+                tenantId, CacheResource, cacheId, CacheVersion, ct: cancellationToken);
         }
         catch (Exception ex)
         {
@@ -731,16 +731,12 @@ public sealed class RiskDetectorHandler : IToolHandler
     }
 
     private async Task TrySetCacheAsync(
-        string cacheKey, RiskDetectionResult value, CancellationToken cancellationToken)
+        string tenantId, string cacheId, RiskDetectionResult value, CancellationToken cancellationToken)
     {
         try
         {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(value, JsonOpts);
             await _cache.SetAsync(
-                cacheKey,
-                bytes,
-                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheTtl },
-                cancellationToken);
+                tenantId, CacheResource, cacheId, CacheVersion, value, CacheTtl, ct: cancellationToken);
         }
         catch (Exception ex)
         {
