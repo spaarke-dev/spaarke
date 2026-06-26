@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 active indexes) and rename `spe-redis-dev-67e2xz` to canonical `spaarke-bff-redis-dev`. Use this rebuild to formalize the AI Search provisioning process into a single canonical doc + unified deploy script + property policy + naming convention, usable for any future environment setup. Out of scope: prod/demo (intentionally cost-reduced per prior user ask) and `spaarke-environment-factory-r1` work (this project is a prerequisite, not part of it).
+Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 active indexes). Use this rebuild to formalize the AI Search provisioning process into a single canonical doc + unified deploy script + property policy + naming convention, usable for any future environment setup. **Redis canonical-rename is delegated to `spaarke-redis-cache-remediation-r1`** (prerequisite to this project's Phase 3 — see NFR-13). Out of scope: prod/demo (intentionally cost-reduced per prior user ask) and `spaarke-environment-factory-r1` work (this project is a prerequisite, not part of it).
 
 ---
 
@@ -20,7 +20,7 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 **Restoration (immediate dev recovery)**
 1. Restore 7 active AI Search indexes to `spaarke-search-dev`
 2. Update `spaarke-bff-dev` app settings to remove hardcoded API keys + URLs (migrate to Key Vault references)
-3. Rename `spe-redis-dev-67e2xz` → `spaarke-bff-redis-dev` (canonical pattern); update Key Vault `Redis-ConnectionString` secret
+3. *DELEGATED — Redis canonical-rename (`spe-redis-dev-67e2xz` → `spaarke-bff-redis-dev`) and the `Redis-ConnectionString` Key Vault secret migration are handed off to `spaarke-redis-cache-remediation-r1` (prerequisite project; see FR-08 and NFR-13)*
 
 **Canonicalization (structural fix, reusable for any env)**
 4. New canonical architecture doc: `docs/architecture/AI-SEARCH-INDEX-CATALOG.md`
@@ -124,8 +124,7 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 7. **FR-07** — Write `scripts/ai-search/Deploy-AllIndexes.ps1` unified deployer.
    **Acceptance**: Script exists, is catalog-driven (reads index list from a manifest or the catalog itself), supports `-DryRun`, `-VerifyOnly`, `-Indexes <subset>`, `-EnvironmentName <env>`, idempotent (safe to re-run), includes post-deploy invariant verifier per index (vector dim, key field, required-filterable fields, schema policy compliance). Uses `deploy-session-files-index.ps1` as structural template. Returns non-zero exit on any failure.
 
-8. **FR-08** — Rename `spe-redis-dev-67e2xz` to `spaarke-bff-redis-dev`.
-   **Acceptance**: New Redis instance `spaarke-bff-redis-dev` (Basic C0, same RG: `spe-infrastructure-westus2`) provisioned; Key Vault secret `Redis-ConnectionString` updated to point to new instance; old `spe-redis-dev-67e2xz` deleted; BFF dev verified to still resolve Redis connection (even though `Redis__Enabled=false`).
+8. **FR-08** — *REMOVED. Redis canonical-rename + Key Vault `Redis-ConnectionString` migration are delegated end-to-end to `spaarke-redis-cache-remediation-r1` (prerequisite project — see NFR-13 and design.md §Project Dependencies). This project does NOT provision, rename, delete, or wire up Redis resources or secrets.*
 
 #### Schemas
 
@@ -157,8 +156,19 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
     - `discovery-index` removed from `AiSearch.AllowedIndexes` array and `AiSearch.DiscoveryIndexName`
     - No app setting references `spaarke-knowledge-shared`, `discovery-index`, `spaarke-knowledge-index-v2`, or `spaarke-knowledge-index` after change
 
-15. **FR-15** — Dev BFF app settings KV-reference migration.
-    **Acceptance**: Dev BFF (`spaarke-bff-dev`) app settings updated to use Key Vault references like prod/demo pattern. Specifically: `AiSearch__Endpoint`, `DocumentIntelligence__AiSearchEndpoint`, `RecordSync__AiSearchEndpoint`, `AiSearch__ReferencesEndpoint`, `DocumentIntelligence__AiSearchKey`, `RecordSync__AiSearchApiKey` — all use `@Microsoft.KeyVault(VaultName=...;SecretName=...)` syntax pointing to `sprkspaarkedev-aif-kv` or equivalent dev KV. No hardcoded URLs or API keys remain in dev BFF app settings.
+15. **FR-15** — Dev BFF app settings KV-reference migration (AI-Search settings only).
+    **Acceptance**: Dev BFF (`spaarke-bff-dev`) app settings updated to use Key Vault references like prod/demo pattern. Specifically the following **AI-Search-related** settings — all use `@Microsoft.KeyVault(VaultName=...;SecretName=...)` syntax pointing to `sprkspaarkedev-aif-kv` or equivalent dev KV:
+    - `AiSearch__Endpoint`
+    - `AiSearch__Key` (or `AiSearch__ApiKeySecretName` referencing KV)
+    - `DocumentIntelligence__AiSearchEndpoint`
+    - `DocumentIntelligence__AiSearchKey`
+    - `RecordSync__AiSearchEndpoint`
+    - `RecordSync__AiSearchApiKey`
+    - `AiSearch__ReferencesEndpoint`
+
+    No hardcoded AI-Search URLs or API keys remain in dev BFF app settings after this FR completes.
+
+    **Out of scope for this FR**: any Redis-related setting (`ConnectionStrings__Redis`, `Redis__*`) — these are owned by `spaarke-redis-cache-remediation-r1` and migrated to KV reference under that project, not here. The Redis project also establishes the canonical KV-reference pattern that this FR follows.
 
 #### Deploy + Validate
 
@@ -199,6 +209,7 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 - **NFR-10** — Naming policy (top-level resource env-suffix vs sub-resource env-agnostic) MUST be documented as canonical in both the catalog and the operational guide. Future environment provisioning MUST follow this rule.
 - **NFR-11** — All 7 schemas use `text-embedding-3-large` (3072 dimensions) for vector fields. No 1536-dim vectors permitted in any restored index.
 - **NFR-12** — `Deploy-AllIndexes.ps1` total runtime for full 7-index deploy MUST complete within 30 minutes (Azure provisioning latency varies; this is a target not a hard deadline).
+- **NFR-13** — **Project Sequencing**: This project's Phase 3 (Deploy Infrastructure) MUST NOT begin until `spaarke-redis-cache-remediation-r1` Phase 3 (Dev environment cutover) completes successfully. Cross-reference: the Redis project's success criterion 1 (BFF startup log shows Redis-enabled) is the prerequisite gate for this project's FR-16 deploy step.
 
 ---
 
@@ -242,13 +253,13 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 3. [ ] **All 7 active indexes deployed** to `spaarke-search-dev` with canonical names + correct property policy + 3072 vectors. Verify by: `az search indexes list` returns 7 + each schema query confirms field flags + vector dims.
 4. [ ] **`spaarke-records-index` has `tenantId` field** populated by ingestion; reader removes workaround comment. Verify by: index query confirms field present; sample record query confirms `tenantId` populated; grep confirms reader code uses `tenantId` filter.
 5. [ ] **No code references to retired indexes**. Verify by: `grep -r "spaarke-knowledge-index-v2\|spaarke-knowledge-shared\|discovery-index\|spaarke-knowledge-index" src/` returns zero matches.
-6. [ ] **No hardcoded API keys or URLs** in dev BFF app settings (migrated to Key Vault references). Verify by: `az webapp config appsettings list --name spaarke-bff-dev` shows no `https://...search.windows.net` or raw keys.
+6. [ ] **No hardcoded API keys or URLs** in dev BFF app settings (migrated to Key Vault references). Verify by: `az webapp config appsettings list --name spaarke-bff-dev` shows no `https://...search.windows.net` or raw keys AND no hardcoded Redis connection strings (owned by Redis project — verify completion before this check).
 7. [ ] **Dev BFF functional**: `/healthz` Healthy + 4 AI endpoints return real (non-error) results. Verify by: FR-19 acceptance.
 8. [ ] **`SPAARKE-DEPLOYMENT-GUIDE.md` §4.6 added** with Deploy-AllIndexes.ps1 invocation; Appendix D updated. Verify by: file inspection.
 9. [ ] **factory-r1 handoff documented**: this project's design.md and new docs are referenced from factory-r1's plan as a prerequisite. Verify by: factory-r1 plan.md or notes include reference to this project's deliverables.
 10. [ ] **Stale doc cleanups completed** per FR-04. Verify by: grep across `docs/` confirms no retired index names referenced as active.
 11. [ ] **ADR pointer drift resolved** per FR-06. Verify by: file inspection of ADRs + CLAUDE.md + any agent prompts.
-12. [ ] **Redis renamed**: `spaarke-bff-redis-dev` provisioned; `spe-redis-dev-67e2xz` deleted; KV secret updated; BFF dev resolves Redis connection. Verify by: Azure CLI listing + KV secret value + dev BFF log on startup.
+12. [ ] *REMOVED — Redis rename verification owned by `spaarke-redis-cache-remediation-r1`. This project's prerequisite-gate enforcement is covered by NFR-13.*
 13. [ ] **BFF publish-size delta ≤ 0 MB** per CLAUDE.md §10 NFR-01. Verify by: `dotnet publish -c Release` before/after + compressed size measurement.
 
 ---
@@ -273,7 +284,7 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 
 | Topic | Question | Answer | Impact |
 |---|---|---|---|
-| Redis disposition | Keep recreated or delete? | Don't recreate with random-suffix name. Rename to canonical `spaarke-bff-redis-dev`. Redis is coded into BFF, will be used in future. | Codified naming convention for top-level resources; new FR-08 + FR-15 |
+| Redis disposition | Keep recreated or delete? | **Delegated to `spaarke-redis-cache-remediation-r1`** (prerequisite project — 2026-06-25) | FR-08 removed (delegated); FR-15 narrowed to AI-Search settings only; NFR-13 added as sequencing gate |
 | Dev plan tier | Investigate B1→P1v3 flip? | Accept current P1v3 (~$200/mo); no investigation needed | No action this project |
 | ADR drift | Fold into this project or separate ticket? | Fold in | FR-06 |
 | rag-references bug | Apply fix or verify first? | Confirm and validate before fix | FR-17 enforced as NFR-08 |

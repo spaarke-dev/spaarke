@@ -28,7 +28,7 @@ During a cost-reduction operation requested by the user (target: demo + prod), C
 | Resource | Action taken | Current state |
 |---|---|---|
 | `spaarke-search-dev` (AI Search Standard) | Deleted then recreated empty (no indexes) | Standard tier, running, **billing ~$16/day with no indexes** |
-| `spe-redis-dev-67e2xz` (Redis Basic C0) | Deleted then recreated | Provisioned, but `Redis__Enabled=false` everywhere → was not actively used. **Will be replaced** with canonical-name `spaarke-bff-redis-dev` (see §Scope.16). |
+| `spe-redis-dev-67e2xz` (Redis Basic C0) | Deleted then recreated | Provisioned, but `Redis__Enabled=false` everywhere → was not actively used. **Delegated** to `spaarke-redis-cache-remediation-r1` (prerequisite to this project's Phase 3 — see §Project Dependencies). |
 | `spaarke-dev-plan` (App Service Plan) | Scaled P1v3 → B1 | **Currently P1v3** — either user reverted, or the original scale command had partial effect; root cause unknown |
 
 `spaarke-bff-dev` is **Running** on P1v3 and references the deleted indexes via 5 app settings; with the search service empty, search/RAG endpoints return zero results.
@@ -58,7 +58,7 @@ This project addresses both the immediate restoration AND the structural gap.
 | Resource | Pre-incident | Post-incident | Restoration approach |
 |---|---|---|---|
 | `spaarke-search-dev` indexes | 12 indexes (7 active, 5 retired) | Empty service | Restore 7 active (per user triage), keep 5 retired deleted |
-| `spe-redis-dev-67e2xz` | Basic C0, unused (`Redis__Enabled=false` everywhere) | Recreated Basic C0 (random suffix from original Bicep deployment) | **Delete + recreate as `spaarke-bff-redis-dev`** per canonical naming (Redis IS coded into BFF, will be used in future — see §Scope.16) |
+| `spe-redis-dev-67e2xz` | Basic C0, unused (`Redis__Enabled=false` everywhere) | Recreated Basic C0 (random suffix from original Bicep deployment) | **Delegated to `spaarke-redis-cache-remediation-r1`** (prerequisite to this project's Phase 3) |
 | `spaarke-dev-plan` | P1v3 PremiumV3 | P1v3 PremiumV3 (current) | No action — already in correct state; root cause of apparent revert noted as open question |
 
 ### Other resources changed during the 2026-06-25 operation (intentional — OUT OF SCOPE for this project)
@@ -119,7 +119,7 @@ When prod/demo are restored later, that will be a separate project that consumes
    - `appsettings.json:122` — replace `Analysis.SharedIndexName = "spaarke-knowledge-shared"` with `"spaarke-files-index"`
    - `appsettings.template.json:237-242` — same
    - Remove `discovery-index` from `AiSearch.AllowedIndexes` array + `AiSearch.DiscoveryIndexName`
-   - Dev BFF app service — replace hardcoded URLs + API keys with Key Vault references (current state has bare `https://spaarke-search-dev.search.windows.net/` and bare API key in 5 settings)
+   - Dev BFF app service — replace hardcoded AI-SEARCH URLs + API keys with Key Vault references (current state has bare `https://spaarke-search-dev.search.windows.net/` and bare API key in 5 settings). **Redis connection string is handled by `spaarke-redis-cache-remediation-r1`** and NOT touched here.
 
 12. **Schema-file consolidation** — move `infra/ai-search/spaarke-file-index.json` and `infra/insights/schemas/spaarke-insights-index.index.json` into `infrastructure/ai-search/` (one location). Rename files to canonical names. Update Bicep `loadJsonContent()` paths.
 
@@ -136,13 +136,6 @@ When prod/demo are restored later, that will be a separate project that consumes
 
 15. **Append AI Search index deployment phase to `SPAARKE-DEPLOYMENT-GUIDE.md`** — new §4.6 between Phase 1 (infrastructure) and Phase 2 (Entra ID): one paragraph + a `Deploy-AllIndexes.ps1` invocation + cross-link to the catalog. Also update Appendix D Script Reference.
 
-16. **Redis rename + canonical resource naming**:
-   - Delete the recreated `spe-redis-dev-67e2xz` (Bicep-generated random suffix — not a canonical name)
-   - Create `spaarke-bff-redis-dev` (Basic C0, same RG: `spe-infrastructure-westus2`) following the **top-level-resource canonical pattern**: `spaarke-{component}-{type}-{env}`
-   - Update Key Vault secret `Redis-ConnectionString` to point to the new instance
-   - Update BFF code references (none expected — Redis URL is resolved at runtime from KV reference, but verify)
-   - Codify the canonical pattern in `AI-SEARCH-INDEX-CATALOG.md` and `ai-search-azure-setup.md`: **top-level Azure resources** (Search service, Redis, App Service, KV, Storage, Service Bus, Cosmos) MUST use `spaarke-{component}-{env}` or similar env-suffixed form because they have global DNS; **sub-resources** (indexes inside Search, secrets inside KV, queues inside SBus) MUST be env-agnostic because env is implicit in the parent's name.
-
 ### Out of Scope
 
 - Prod / demo AI Search restoration (user's intentional cost-reduction stays in place; if/when restored, that's a separate project consuming this project's `Deploy-AllIndexes.ps1`).
@@ -150,7 +143,28 @@ When prod/demo are restored later, that will be a separate project that consumes
 - Multi-tenant architecture changes for the `spaarke-records-index` (we add `tenantId` for future use but don't redesign tenancy).
 - Data seeding tooling (separate repo: `SPAARKE-DATA-CLI`).
 - BFF App Service Plan tier changes (current P1v3 is correct per investigation).
-- Redis: in scope (per §Scope.16) — rename `spe-redis-dev-67e2xz` → `spaarke-bff-redis-dev`. Redis is coded into BFF (currently `Redis__Enabled=false`) and will be re-enabled in the future. Keep the resource provisioned but renamed for canonical consistency.
+- Redis rename + canonicalization: **delegated to `spaarke-redis-cache-remediation-r1`** (prerequisite project — see §Project Dependencies). This project does NOT touch Redis resources, settings, KV secrets, or BFF Redis wiring. The Redis project produces the canonical `spaarke-bff-redis-dev` instance, the KV-reference pattern for the Redis connection string, and the BFF dev-environment cutover. Sequencing rule: the Redis project's Phase 3 MUST complete before this project's Phase 3 (Deploy Infrastructure) begins.
+
+---
+
+## Project Dependencies
+
+**Prerequisite**: `spaarke-redis-cache-remediation-r1` MUST complete Phases 1-3 before this project's Phase 3 (Deploy Infrastructure). The Redis project produces:
+- Canonical Redis instance `spaarke-bff-redis-dev` provisioned + healthy
+- Key Vault `Redis-ConnectionString` populated and verified
+- Dev BFF cutover complete (Redis-on with KV reference)
+- KV reference pattern established for any future BFF secret migrations
+
+After Redis project Phase 3 completes, this project's Phase 4 (Code + Config Refactor) handles only the AI-Search-related secrets in dev BFF app settings:
+- `AiSearch__Endpoint`
+- `AiSearch__Key` (or `AiSearch__ApiKeySecretName` referencing KV)
+- `DocumentIntelligence__AiSearchEndpoint`
+- `DocumentIntelligence__AiSearchKey`
+- `RecordSync__AiSearchEndpoint`
+- `RecordSync__AiSearchApiKey`
+- `AiSearch__ReferencesEndpoint`
+
+The Redis connection string secret (`Redis-ConnectionString` in KV) is owned by the Redis project and not touched here.
 
 ---
 
@@ -286,7 +300,7 @@ Reduced from initial 13 phases to 5 after user feedback on overengineering. Each
 |---|---|---|---|
 | **1. Documentation Foundation** | Catalog (`AI-SEARCH-INDEX-CATALOG.md`) + operational guide (`ai-search-azure-setup.md`) + `AI-ARCHITECTURE.md` update with consumer map. Stale-doc cleanup: `AI-EMBEDDING-STRATEGY.md`, `rag-architecture.md`, `MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md`, retire `docs/notes/rag-indexing-configuration.md`. Append §4.6 to `SPAARKE-DEPLOYMENT-GUIDE.md` + Appendix D. ADR pointer drift fix (ADR-014, ADR-004). | — | STANDARD |
 | **2. Schema Preparation** | Apply property policy patches to all 7 schemas (default-enable all allowed flags). 3 schema renames (`spaarke-file-index` → `spaarke-files-index` plural, `playbook-embeddings` → `spaarke-playbook-embeddings`, `spaarke-invoices-dev` → `spaarke-invoices-index`). Schema-file consolidation (move `infra/ai-search/` + `infra/insights/schemas/` into `infrastructure/ai-search/`, update Bicep `loadJsonContent()` paths). Add `tenantId` field to `spaarke-records-index` schema. | Phase 1 (catalog drives the work) | STANDARD |
-| **3. Deploy Infrastructure** | Write `scripts/ai-search/Deploy-AllIndexes.ps1` (unified deployer, catalog-driven, `-DryRun` + `-VerifyOnly`, post-deploy invariant verifier). Redis rename: delete `spe-redis-dev-67e2xz`, create `spaarke-bff-redis-dev` (Basic C0, same RG), update Key Vault `Redis-ConnectionString` secret. | Phase 1, Phase 2 | FULL |
+| **3. Deploy Infrastructure** | Write `scripts/ai-search/Deploy-AllIndexes.ps1` (unified deployer, catalog-driven, `-DryRun` + `-VerifyOnly`, post-deploy invariant verifier). **Prerequisite check**: verify `spaarke-redis-cache-remediation-r1` Phase 3 (Dev environment cutover) complete before proceeding. | Phase 1, Phase 2, `spaarke-redis-cache-remediation-r1` Phase 3 | FULL |
 | **4. Code + Config Refactor** | BFF code: knowledge-v2 → files-index references (~7 files: `RagService.cs`, `RagIndexingPipeline.cs`, `BulkRagIndexingJobHandler.cs`, `RagIndexingJobHandler.cs`, `KnowledgeDeploymentService.cs`, `IndexRetrieveNode.cs`, AssistantQuery endpoints). App settings + template cleanup (remove `spaarke-knowledge-shared`, `discovery-index`). Dev BFF app settings: hardcoded URLs/API keys → Key Vault references like prod pattern. Records-index writer (`Sync-RecordsToIndex.ps1`, `DataverseIndexSyncService.cs`) to populate `tenantId`. Records-index reader (`RecordSearchAuthorizationFilter.cs:43`) to use `tenantId`. Invoice handler + service name updates (`InvoiceIndexingJobHandler.cs:40`, `InvoiceSearchService.cs:45`). Playbook embeddings service name update (`PlaybookEmbeddingService.cs:46`). | Phase 1, Phase 2 | FULL |
 | **5. Deploy + Validate** | Deploy 7 schemas to `spaarke-search-dev` via `Deploy-AllIndexes.ps1`. Post-deploy invariant verification per index. **Validate `spaarke-rag-references` `domain`/`documentType` bug claim** (Q4 — agent reads disagreed; targeted verification before any code fix). Data ingestion: records (`Sync-RecordsToIndex.ps1`), rag-references (`Index-AllReferences.ps1`), playbook-embeddings (`Index-ExistingPlaybooks.ps1`), insights Precedents (`PrecedentProjectionSync`) + Observations re-projection (per user Q5 confirmation). Files-index + invoices-index = schema-only (deferred ingestion per user Q6: invoice index was empty pre-deletion). Dev BFF functional verification (search/RAG/insights endpoints return real results). | Phase 3, Phase 4 | FULL |
 
@@ -307,13 +321,13 @@ Reduced from initial 13 phases to 5 after user feedback on overengineering. Each
 9. [ ] **factory-r1 handoff documented**: this project's design.md + new docs are referenced from factory-r1 plan as a prerequisite.
 10. [ ] **Stale doc cleanups completed** per §Scope.13.
 11. [ ] **ADR pointer drift resolved** per §Scope.14 (rename or new ADRs for the two principles).
-12. [ ] **Redis decision executed** per user's call.
+12. [ ] **Redis rename prerequisite verified** — `spaarke-redis-cache-remediation-r1` Phase 3 complete and validated (Redis instance live, KV `Redis-ConnectionString` populated, dev BFF Redis-enabled with KV reference) before this project's Phase 3 deploy begins. Cross-references NFR-13.
 
 ---
 
 ## Open Questions — ALL RESOLVED 2026-06-25
 
-1. ~~Redis~~ — **RESOLVED**: Redis IS coded into BFF (currently `Redis__Enabled=false`, will be re-enabled). Don't recreate with old random-suffix name (`spe-redis-dev-67e2xz`). Use canonical `spaarke-bff-redis-dev` per the top-level-resource pattern. Codified in §Scope.16.
+1. ~~Redis~~ — **DELEGATED 2026-06-25** to `spaarke-redis-cache-remediation-r1`. Out of scope for this project.
 2. ~~`spaarke-dev-plan` apparent tier flip~~ — **RESOLVED**: User accepts current P1v3 state (~$200/mo). No root-cause investigation needed.
 3. ~~ADR pointer drift fix scope~~ — **RESOLVED**: Fold into this project (Phase 1).
 4. ~~`spaarke-rag-references` documentType/domain bug~~ — **RESOLVED**: Confirm and validate during Phase 5 verification pass. Apply fix only if reproduced.
