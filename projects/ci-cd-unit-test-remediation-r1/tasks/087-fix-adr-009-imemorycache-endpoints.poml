@@ -1,0 +1,121 @@
+<task id="CICD-087" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Fix ADR-009 violation — extract IMemoryCache out of 3 endpoint classes (HandlerEndpoints, NavMapEndpoints, PlaybookEndpoints) — BLOCKS 071 cutover</title>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <phase>2.5 - Pre-cutover BFF ADR remediation</phase>
+    <stream>A - CI tiering remediation</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>false</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies></dependencies>
+    <blocks>071</blocks>
+    <tags>bff-api, adr-009, caching, hot-path, FR-A06</tags>
+    <execution-note>Modifies src/server/api/Sprk.Bff.Api/** — hot-path. Overrides project's `<hot-path-declaration><bff-api>NO</bff-api>` per owner direction 2026-06-26 ("if it is a real issue then we need to fix it"). Coordinate via INDEX.md before editing.</execution-note>
+  </metadata>
+
+  <prompt>
+    Per spec FR-A06 (CI Router stability gate). The new CI Router exposes a pre-existing ADR-009 violation: 3 endpoint classes inject `IMemoryCache` directly. NetArchTest `ADR-009: IMemoryCache should not be registered as Singleton` fails because `Endpoints` types have a dependency on `Microsoft.Extensions.Caching.Memory.IMemoryCache`. Fix: introduce a wrapper service (`IEndpointResponseCache`) that hides `IMemoryCache` behind an interface in `Infrastructure/Caching/`; endpoints inject the wrapper. ADR-009's runtime semantics are preserved (process-wide cache; same TTL behaviour); the wrapper just keeps endpoint surfaces facade-isolated.
+
+    Discovered as fallout from CICD-086 bisect — when CI Router stopped failing with `startup_failure`, the underlying test failures surfaced. ADR-009 is one of two arch test violations; ADR-007 is the other (task 088).
+  </prompt>
+
+  <role>BFF engineer applying a focused refactor to satisfy a binding ADR.</role>
+
+  <goal>NetArchTest `ADR-009: IMemoryCache should not be registered as Singleton` PASSES on master. Build succeeds. Existing behavioural tests for the 3 endpoints continue to pass.</goal>
+
+  <inputs>
+    <file purpose="failing-test">tests/Spaarke.ArchTests/ADR009_CachingTests.cs (line 14-43 — `MemoryCacheShouldNotBeSingleton`)</file>
+    <file purpose="violation-1">src/server/api/Sprk.Bff.Api/Api/Ai/HandlerEndpoints.cs (line 129: `IMemoryCache cache` param; 3 cache usages)</file>
+    <file purpose="violation-2">src/server/api/Sprk.Bff.Api/Api/NavMapEndpoints.cs (lines 89/178/284: `IMemoryCache cache` param; 12 cache usages)</file>
+    <file purpose="violation-3">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs (line 402: `IMemoryCache memoryCache` param; 1 cache usage)</file>
+    <file purpose="adr">.claude/adr/ADR-009*.md OR docs/adr/ADR-009*.md (Caching policy — Redis-first)</file>
+    <file purpose="DI-pattern">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs (where the new wrapper gets registered)</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md (binding module-level rules)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-A06 (2026-06-26)">CI Router MUST achieve ≥2 consecutive successful master pushes before cutover; ADR-009 fail blocks this.</constraint>
+    <constraint source="ADR-009">Cross-request cache = Redis (IDistributedCache). IMemoryCache is allowed for process-wide read-only/derived data with explicit TTL; the wrapper preserves this contract.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF Hygiene: any addition to Sprk.Bff.Api MUST load `.claude/constraints/bff-extensions.md` before designing; verify publish-size impact stays ≤60 MB (new wrapper is a tiny class — negligible delta).</constraint>
+    <constraint source="hot-path">Coordinate via projects/INDEX.md before editing; modifies Sprk.Bff.Api production code (overrides project's hot-path-declaration per owner direction 2026-06-26).</constraint>
+    <constraint source="testing">Update tests in tests/unit/Sprk.Bff.Api.Tests/ where the 3 endpoints have existing behavioural coverage; substitute `IEndpointResponseCache` mock for `IMemoryCache` mock.</constraint>
+  </constraints>
+
+  <design>
+    **Interface** (`src/server/api/Sprk.Bff.Api/Infrastructure/Caching/IEndpointResponseCache.cs`):
+    ```csharp
+    public interface IEndpointResponseCache
+    {
+        bool TryGet&lt;T&gt;(string key, out T? value) where T : class;
+        void Set&lt;T&gt;(string key, T value, TimeSpan ttl) where T : class;
+    }
+    ```
+
+    **Implementation** (`src/server/api/Sprk.Bff.Api/Infrastructure/Caching/EndpointResponseCache.cs`):
+    ```csharp
+    public sealed class EndpointResponseCache(IMemoryCache memoryCache) : IEndpointResponseCache
+    {
+        public bool TryGet&lt;T&gt;(string key, out T? value) where T : class
+            => memoryCache.TryGetValue(key, out value);
+
+        public void Set&lt;T&gt;(string key, T value, TimeSpan ttl) where T : class
+        {
+            var options = new MemoryCacheEntryOptions()
+                .SetAbsoluteExpiration(ttl)
+                .SetPriority(CacheItemPriority.Normal);
+            memoryCache.Set(key, value, options);
+        }
+    }
+    ```
+
+    **DI registration** (in `CacheModule.cs`):
+    ```csharp
+    services.AddSingleton&lt;IEndpointResponseCache, EndpointResponseCache&gt;();
+    ```
+
+    **Endpoint refactor pattern** (same for all 3):
+    - Replace `IMemoryCache cache` parameter with `IEndpointResponseCache cache`
+    - Replace `cache.TryGetValue(...)` with `cache.TryGet&lt;T&gt;(...)`
+    - Replace `cache.Set(key, value, options)` with `cache.Set(key, value, ttl)` (TTL extracted from existing options)
+    - Remove `using Microsoft.Extensions.Caching.Memory;` from each file
+
+    **Tests** — substitute `Mock&lt;IEndpointResponseCache&gt;` for `Mock&lt;IMemoryCache&gt;` in affected test classes; the wrapper's interface is simpler so test setup gets shorter.
+  </design>
+
+  <steps>
+    <step order="1">Read ADR-009 + .claude/constraints/bff-extensions.md + CacheModule.cs to confirm pattern fits.</step>
+    <step order="2">Create `Sprk.Bff.Api/Infrastructure/Caching/IEndpointResponseCache.cs` + `EndpointResponseCache.cs` per design above.</step>
+    <step order="3">Register in `CacheModule.cs` (AddSingleton matches IMemoryCache's lifetime).</step>
+    <step order="4">Refactor `HandlerEndpoints.cs` (GetHandlers method, line 127-175): swap IMemoryCache → IEndpointResponseCache; verify cacheOptions TTL preserved.</step>
+    <step order="5">Refactor `NavMapEndpoints.cs` (3 methods at lines 86, 174, 280; 12 cache calls): swap parameter + replace TryGetValue + Set calls.</step>
+    <step order="6">Refactor `PlaybookEndpoints.cs` (line 402 method; 1 cache call): swap parameter + replace.</step>
+    <step order="7">Update tests in tests/unit/Sprk.Bff.Api.Tests/ for the 3 endpoints — substitute Mock&lt;IEndpointResponseCache&gt;.</step>
+    <step order="8">Build: `dotnet build src/server/api/Sprk.Bff.Api/`. Must succeed.</step>
+    <step order="9">Run ADR-009 arch test locally: `dotnet test tests/Spaarke.ArchTests/ --filter "FullyQualifiedName~MemoryCacheShouldNotBeSingleton"`. Must PASS.</step>
+    <step order="10">Run BFF unit tests for 3 affected endpoints: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~HandlerEndpointsTests|NavMapEndpointsTests|PlaybookEndpointsTests"`. Must PASS.</step>
+    <step order="11">Verify publish-size impact: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; check delta vs current ~45.65 MB baseline. Expected: negligible (wrapper adds &lt;1 KB).</step>
+    <step order="12">Step 9.5: code-review + adr-check on modified files (FULL rigor binding).</step>
+    <step order="13">Commit + push as part of the new 087/088 PR (combined PR since both fix the same gate).</step>
+  </steps>
+
+  <outputs>
+    <output type="new-file">src/server/api/Sprk.Bff.Api/Infrastructure/Caching/IEndpointResponseCache.cs</output>
+    <output type="new-file">src/server/api/Sprk.Bff.Api/Infrastructure/Caching/EndpointResponseCache.cs</output>
+    <output type="modified">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs (+1 line)</output>
+    <output type="modified">src/server/api/Sprk.Bff.Api/Api/Ai/HandlerEndpoints.cs</output>
+    <output type="modified">src/server/api/Sprk.Bff.Api/Api/NavMapEndpoints.cs</output>
+    <output type="modified">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEndpoints.cs</output>
+    <output type="modified">tests/unit/Sprk.Bff.Api.Tests/** (3 test classes; mock substitution)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">IEndpointResponseCache + EndpointResponseCache files exist; registered in CacheModule</criterion>
+    <criterion testable="true">3 endpoint classes no longer reference `Microsoft.Extensions.Caching.Memory.IMemoryCache`</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds</criterion>
+    <criterion testable="true">NetArchTest `MemoryCacheShouldNotBeSingleton` PASSES locally</criterion>
+    <criterion testable="true">Existing BFF unit tests for the 3 endpoints PASS after mock substitution</criterion>
+    <criterion testable="true">Publish-size delta &lt; +0.5 MB (target: negligible)</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check PASS</criterion>
+  </acceptance-criteria>
+</task>

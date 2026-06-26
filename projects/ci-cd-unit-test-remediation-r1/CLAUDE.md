@@ -123,11 +123,11 @@ Spec FR-B07 explicitly overrides the default STANDARD-rigor skip on Step 9.5 for
 
 ```xml
 <hot-path-declaration>
-  <bff-api>NO — no production code in src/server/api/Sprk.Bff.Api/** modified by this project</bff-api>
+  <bff-api>YES (revised 2026-06-26 per owner direction) — tasks CICD-087 + CICD-088 modify Sprk.Bff.Api production code to remediate pre-existing ADR-007 + ADR-009 violations that the new CI Router exposes. Originally NO; revised after CICD-086 bisect surfaced the pre-existing violations as cutover gate blockers.</bff-api>
   <spaarke-ai>NO production code modified; YES adds .github/workflows/deploy-spaarke-ai.yml as new CD plumbing for src/solutions/SpaarkeAi/</spaarke-ai>
   <ci-workflows>YES — adds router/tier1/tier2, augments nightly-health, retires sdap-ci, flips branch protection. Highest-impact hot-path category for this project.</ci-workflows>
-  <skill-directives>YES — modifies task-execute, project-pipeline, conflict-check SKILL.md. Coordination required with any other in-flight project modifying same skills.</skill-directives>
-  <root-CLAUDE-md>YES — §8 (rigor table), §10 (BFF Hygiene), §17 (pointers). Single-file edit, coordinated via this project's worktree.</root-CLAUDE-md>
+  <skill-directives>YES — modifies task-execute, project-pipeline, conflict-check SKILL.md + adds new /test-diet skill (FR-B09). Coordination required with any other in-flight project modifying same skills.</skill-directives>
+  <root-CLAUDE-md>YES — §7 (test diet gate), §8 (rigor table), §10 (BFF Hygiene), §17 (pointers). Single-file edit, coordinated via this project's worktree.</root-CLAUDE-md>
 </hot-path-declaration>
 ```
 
