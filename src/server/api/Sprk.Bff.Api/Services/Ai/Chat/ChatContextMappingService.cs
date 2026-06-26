@@ -38,7 +38,7 @@ public class ChatContextMappingService
     private const string CacheKeyPrefix = "chat:ctx-mapping:";
 
     private readonly IDistributedCache _cache;
-    private readonly IConnectionMultiplexer? _redis;
+    private readonly IConnectionMultiplexer _redis;
     private readonly IGenericEntityService _genericEntityService;
     private readonly ILogger<ChatContextMappingService> _logger;
 
@@ -52,12 +52,12 @@ public class ChatContextMappingService
         IDistributedCache cache,
         IGenericEntityService genericEntityService,
         ILogger<ChatContextMappingService> logger,
-        IConnectionMultiplexer? redis = null)
+        IConnectionMultiplexer redis)
     {
-        _cache = cache;
-        _redis = redis;
-        _genericEntityService = genericEntityService;
-        _logger = logger;
+        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _redis = redis ?? throw new ArgumentNullException(nameof(redis));
+        _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>
@@ -121,7 +121,13 @@ public class ChatContextMappingService
     /// <returns>Number of cache keys evicted.</returns>
     public async Task<int> EvictAllCachedMappingsAsync(CancellationToken ct = default)
     {
-        if (_redis is null)
+        // Symmetric DI registration (ADR-032 + spaarke-redis-cache-remediation-r1
+        // task 005): _redis is always non-null. When Redis is disabled,
+        // NullConnectionMultiplexer.GetEndPoints() returns an empty array, so
+        // the SCAN loop below becomes a no-op and 0 is returned — same behavior
+        // the legacy null-check produced. The warning is preserved for operator
+        // visibility when running in in-memory mode.
+        if (!_redis.IsConnected)
         {
             _logger.LogWarning(
                 "EvictAllCachedMappings: Redis not available (in-memory cache). " +

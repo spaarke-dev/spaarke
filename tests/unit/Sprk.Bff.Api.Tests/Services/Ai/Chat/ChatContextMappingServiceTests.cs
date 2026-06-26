@@ -2,12 +2,15 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache.NullObjects;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using StackExchange.Redis;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -38,6 +41,7 @@ public class ChatContextMappingServiceTests
     private readonly Mock<IDistributedCache> _cacheMock;
     private readonly Mock<IGenericEntityService> _genericEntityServiceMock;
     private readonly Mock<ILogger<ChatContextMappingService>> _loggerMock;
+    private readonly IConnectionMultiplexer _redis;
     private readonly ChatContextMappingService _sut;
 
     public ChatContextMappingServiceTests()
@@ -45,10 +49,17 @@ public class ChatContextMappingServiceTests
         _cacheMock = new Mock<IDistributedCache>();
         _genericEntityServiceMock = new Mock<IGenericEntityService>();
         _loggerMock = new Mock<ILogger<ChatContextMappingService>>();
+        // Per spaarke-redis-cache-remediation-r1 task 005, ChatContextMappingService
+        // now requires a non-nullable IConnectionMultiplexer. NullConnectionMultiplexer
+        // (the ADR-032 P2 no-op peer registered by CacheModule when Redis is disabled)
+        // is the canonical test stand-in: IsConnected=false drives the EvictAll
+        // short-circuit and GetEndPoints returns empty, matching the legacy null-check.
+        _redis = new NullConnectionMultiplexer(NullLogger<NullConnectionMultiplexer>.Instance);
         _sut = new ChatContextMappingService(
             _cacheMock.Object,
             _genericEntityServiceMock.Object,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            _redis);
     }
 
     // =========================================================================

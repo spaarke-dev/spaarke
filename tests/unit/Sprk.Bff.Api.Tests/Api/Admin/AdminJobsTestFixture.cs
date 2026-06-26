@@ -100,6 +100,11 @@ public class AdminJobsTestFixture : WebApplicationFactory<Program>
                 ["DocumentIntelligence:AiSearchKey"] = "test-search-key",
                 ["OfficeRateLimit:Enabled"] = "false",
                 ["Redis:Enabled"] = "false",
+                // spaarke-redis-cache-remediation-r1 task 003 (FR-02 fail-fast): CacheModule now
+                // throws unless either Redis is enabled OR AllowInMemoryFallback is set AND env
+                // is Development. Opt the test host into the in-memory fallback branch so the
+                // host can build. See bff-extensions.md §F.2 (Fixture-Config-FIRST).
+                ["Redis:AllowInMemoryFallback"] = "true",
                 ["ModelSelector:DefaultModel"] = "gpt-4o",
                 ["AzureOpenAI:Endpoint"] = "https://test.openai.azure.com/",
                 ["AzureOpenAI:ChatModelName"] = "gpt-4o",
@@ -129,7 +134,20 @@ public class AdminJobsTestFixture : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        // spaarke-redis-cache-remediation-r1 task 003 (FR-02): CacheModule's in-memory fallback
+        // branch requires IHostEnvironment.IsDevelopment(). "Testing" environment trips Branch (c)
+        // and throws at startup. Switch to "Development" so the fallback path runs.
+        builder.UseEnvironment("Development");
+
+        // Development environment defaults to ValidateScopes=true, which catches pre-existing
+        // singleton→scoped DI lifetime issues in the production codebase (not introduced by this
+        // PR). Original "Testing" environment defaulted ValidateScopes=false. Restore that
+        // behavior explicitly so the existing tests pass unchanged.
+        builder.UseDefaultServiceProvider(options =>
+        {
+            options.ValidateScopes = false;
+            options.ValidateOnBuild = false;
+        });
 
         builder.ConfigureTestServices(services =>
         {

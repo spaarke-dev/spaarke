@@ -11,15 +11,15 @@
 
 | ID | Title | Status | Dependencies | Blocks | Hours | Rigor | Parallel |
 |---|---|---|---|---|---|---|---|
-| 001 | Cache call-site inventory (authoritative count) | 🔲 | — | 010–018 | 2 | STANDARD | Group 0 — foundational |
-| 002 | Add Redis:AllowInMemoryFallback option | 🔲 | 001 | 003 | 1 | STANDARD | Group A |
-| 003 | CacheModule 4-branch logic + AbortOnConnectFail=true | 🔲 | 002 | 005, 009 | 3 | FULL | Group A |
-| 004 | NullConnectionMultiplexer (ADR-032 Null-Object) | 🔲 | 002 | 005, 009 | 3 | FULL | Group A |
-| 005 | Symmetric DI registration (§F.1 static-scan) | 🔲 | 003, 004 | 009 | 2 | FULL | Group B |
-| 006 | ITenantCache interface + default implementation | 🔲 | 005 | 009, 010–017 | 4 | FULL | Group C |
-| 007 | DistributedCacheExtensions: `sdap` → `spaarke` prefix | 🔲 | 006 | 010–017 | 2 | STANDARD | Group C |
-| 008 | appsettings InstanceName updates | 🔲 | 006 | 018 | 1 | STANDARD | Group C |
-| 009 | CacheModuleTests (4 branches + Null-Object) | 🔲 | 005, 006, 007, 008 | 010 | 3 | FULL | Group D |
+| 001 | Cache call-site inventory (authoritative count) | ✅ | — | 010–018 | 2 | STANDARD | Group 0 — foundational (authoritative count: **153 sites / 56 files**) |
+| 002 | Add Redis:AllowInMemoryFallback option | ✅ | 001 | 003 | 1 | STANDARD | Group A — RedisOptions + appsettings.template.json |
+| 003 | CacheModule 4-branch logic + AbortOnConnectFail=true | ✅ | 002 | 005, 009 | 3 | FULL | Group A — 4-branch + Program.cs IHostEnvironment plumbing |
+| 004 | NullConnectionMultiplexer (ADR-032 Null-Object) | ✅ | 002 | 005, 009 | 3 | FULL | Group A — full IConnectionMultiplexer surface; P2 Pub/Sub, P3 GetDatabase |
+| 005 | Symmetric DI registration (§F.1 static-scan) | ✅ | 003, 004 | 009 | 2 | FULL | Group B — fixed 2 nullable `IConnectionMultiplexer?` + factory→ctor in OfficeModule |
+| 006 | ITenantCache interface + default implementation | ✅ | 005 | 009, 010–017 | 4 | FULL | Group C — interface + TenantCache + DI singleton; `tenant:{tid}:{res}:{id}:v{n}` key format |
+| 007 | DistributedCacheExtensions: `sdap` → `spaarke` prefix | ✅ | 006 | 010–017 | 2 | STANDARD | Group C — line 171 + doc; 13/13 cache tests pass |
+| 008 | appsettings InstanceName updates | ✅ | 006 | 018 | 1 | STANDARD | Group C — RedisOptions default + `appsettings.tokens.md` (`appsettings.json` doesn't exist for BFF) |
+| 009 | CacheModuleTests (4 branches + Null-Object) | ✅ | 005, 006, 007, 008 | 010 | 3 | FULL | Group D — 8 tests (7 pass + 1 Skip for live-Redis path); + test-fixture repair across 15 files (§F.2 obligation: 337 latent failures → 0; 7826 passing) |
 | 010 | Migrate Office services to ITenantCache | 🔲 | 001, 006, 009 | 011 | 3 | FULL | Group E *(sequential — NFR-07)* |
 | 011 | Migrate Chat services to ITenantCache | 🔲 | 010 | 012 | 4 | FULL | Group E |
 | 012 | Migrate Membership services to ITenantCache | 🔲 | 011 | 013 | 3 | FULL | Group E |
@@ -37,15 +37,15 @@
 
 | ID | Title | Status | Dependencies | Blocks | Hours | Rigor | Parallel |
 |---|---|---|---|---|---|---|---|
-| 020 | redis.bicep parameter audit (FR-09) | 🔲 | — | 022, 023, 024 | 2 | STANDARD | Group G — parallel to Phase 1 |
-| 021 | bicepparam drift audit + fix (FR-10) | 🔲 | — | 022, 023, 024 | 2 | STANDARD | Group G |
-| 022 | redis-dev.bicepparam (Basic C0) | 🔲 | 020, 021 | 025, 028, 031 | 1 | STANDARD | Group H |
-| 023 | redis-staging.bicepparam (Standard C0) | 🔲 | 020, 021 | 025 | 1 | STANDARD | Group H |
-| 024 | redis-prod.bicepparam (Standard C2 placeholder) | 🔲 | 020, 021 | 025 | 1 | STANDARD | Group H |
-| 025 | NEW Deploy-RedisCache.ps1 | 🔲 | 022, 023, 024 | 027, 028, 031 | 4 | FULL | Group I |
-| 026 | Extend RedisValidationTests.ps1 | 🔲 | 025 | 028 | 2 | STANDARD | Group I |
-| 027 | Refactor Provision-Customer.ps1 to call Deploy-RedisCache | 🔲 | 025 | — | 2 | FULL | Group I |
-| 028 | Deploy-RedisCache.ps1 -WhatIf integration check | 🔲 | 022, 025, 026 | — | 1 | STANDARD | Group I |
+| 020 | redis.bicep parameter audit (FR-09) | ✅ | — | 022, 023, 024 | 2 | STANDARD | Group G — added `redisVersion`/`staticIP`/`redisPrimaryKey` output; SKU kept as string+int |
+| 021 | bicepparam drift audit + fix (FR-10) | ✅ | — | 022, 023, 024 | 2 | STANDARD | Group G — fixed `customer-template.bicepparam` (broken `using`+schema) |
+| 022 | redis-dev.bicepparam (Basic C0) | ✅ | 020, 021 | 025, 028, 031 | 1 | STANDARD | Group H |
+| 023 | redis-staging.bicepparam (Standard C0) | ✅ | 020, 021 | 025 | 1 | STANDARD | Group H |
+| 024 | redis-prod.bicepparam (Standard C2 placeholder) | ✅ | 020, 021 | 025 | 1 | STANDARD | Group H — DO-NOT-DEPLOY header; `deploy-gate=finance+security` tag |
+| 025 | NEW Deploy-RedisCache.ps1 | ✅ | 022, 023, 024 | 027, 028, 031 | 4 | FULL | Group I — `-WhatIf dev` exit 0; prod no-`-Force` exit 2 with NFR-05 message |
+| 026 | Extend RedisValidationTests.ps1 | ✅ | 025 | 028 | 2 | STANDARD | Group I — `Test-TenantPrefixInvariant` + `Test-FailFastBehavior`; `redis-cli` optional |
+| 027 | Refactor Provision-Customer.ps1 to call Deploy-RedisCache | ✅ | 025 | — | 2 | FULL | Group I — inline Redis logic removed; Q-E deprecation comment + NFR-12 pointer |
+| 028 | Deploy-RedisCache.ps1 -WhatIf integration check | ✅ | 022, 025, 026 | — | 1 | STANDARD | Group I — dev-WhatIf exit 0; prod-no-Force exit 1 (pwsh wrapper clamps 2→1; acceptance still met) |
 | 029 | Phase 2 review (PSScriptAnalyzer + Bicep linter) | 🔲 | 020–028 | 030 | 1 | STANDARD | Group I — final gate |
 
 ---
@@ -85,14 +85,14 @@
 
 | ID | Title | Status | Dependencies | Blocks | Hours | Rigor | Parallel |
 |---|---|---|---|---|---|---|---|
-| 050 | UPDATE caching-architecture.md | 🔲 | — | 052, 053, 058 | 3 | STANDARD | Group J — parallel to Phase 1+2 |
+| 050 | UPDATE caching-architecture.md | ✅ | — | 052, 053, 058 | 3 | STANDARD | Group J — all FR-18 sections added; `sdap:`→`spaarke:` migrated |
 | 051 | NEW redis-cache-azure-setup.md (operational runbook) | 🔲 | 039, 043 | 054, 055, 056 | 4 | STANDARD | Group J |
 | 052 | AMEND .claude/adr/ADR-009-redis-caching.md (concise) | 🔲 | 050 | 053 | 2 | FULL | Group K — **main-session-only** (`.claude/` write boundary) |
 | 053 | AMEND docs/adr/ADR-009-caching-redis-first.md (full) — lockstep | 🔲 | 052 | — | 2 | FULL | Group K — sequential lockstep |
 | 054 | UPDATE SPAARKE-DEPLOYMENT-GUIDE.md §4.5 + Appendix D | 🔲 | 051 | — | 1 | STANDARD | Group L |
 | 055 | Secret rotation procedure section | 🔲 | 051 | — | 1 | MINIMAL | Group L |
 | 056 | Lessons-learned section | 🔲 | 039, 051 | — | 1 | MINIMAL | Group L |
-| 057 | R7 backlog (S1–S4 deferred items) | 🔲 | — | — | 1 | MINIMAL | Group L — parallel-safe |
+| 057 | R7 backlog (S1–S4 deferred items) | ✅ | — | — | 1 | MINIMAL | Group L — parallel-safe |
 | 058 | Doc-drift sweep (ZERO `sdap:` in active docs) | 🔲 | 050, 051, 052, 053, 054, 055 | 059 | 1 | STANDARD | Wrap |
 | 059 | Final /code-review run | 🔲 | 058 | 060 | 2 | STANDARD | Wrap |
 | 060 | Final /adr-check run | 🔲 | 059 | 061 | 1 | STANDARD | Wrap |
