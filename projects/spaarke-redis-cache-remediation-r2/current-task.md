@@ -1,7 +1,7 @@
 # Current Task State — spaarke-redis-cache-remediation-r2
 
 > **Last Updated**: 2026-06-26
-> **Status**: ✅ Group 0 + Group A done (4 of 17 tasks) · 🔲 Next: Group B (003 + 005)
+> **Status**: ✅ PROJECT COMPLETE (LOCAL) — PR pending operator-driven Phase 4 task 030 live deploy + KQL verification
 
 ---
 
@@ -10,43 +10,50 @@
 | Field | Value |
 |-------|-------|
 | **Project** | spaarke-redis-cache-remediation-r2 |
-| **Active task** | Group B wave (003 + 005 — parallel-safe) |
-| **Status** | Group A ✅ done; Group B ready to dispatch |
-| **Next action** | Dispatch tasks 003, 005 in parallel via 2 sub-agents |
+| **Active task** | — (none; 16 of 17 ✅ ; task 030 🟡 PARTIAL ⏸ OPERATOR) |
+| **Status** | All local work complete + committed + pushed to `origin/work/spaarke-redis-cache-remediation-r2` |
+| **Next action** | PR open + merge per NFR-01 atomic strategy |
 
 ---
 
-## Completed Tasks (4 of 17)
+## Completion Summary
 
-| # | Task | Files | Commit |
-|---|---|---|---|
-| 001 | `cache.failures` Counter + try/catch + ClassifyException (FR-01) | TenantCache.cs (Counter add) + MetricsDistributedCache.cs (try/catch + ClassifyException) | `73b79857c` |
-| 002 | Meter consolidation — canonical static CacheMetrics class (FR-02) | CacheMetrics.cs (static) + TenantCache.cs (fields removed) + MetricsDistributedCache.cs (refs switched) + 6 consumers (EmbeddingCache, GraphTokenCache, GraphMetadataCache, CachedAccessDataSource, AnalysisRagProcessor, TextExtractorService) + DocumentsModule.cs (DI removal) + SpaarkeCore.cs (factory cleanup) + 2 test files | Group A commit (pending) |
-| 004 | NEW alerts.bicep + Deploy-RedisCache.ps1 `-DeployAlerts` flag (FR-04) | infrastructure/bicep/alerts.bicep (NEW) + scripts/Deploy-RedisCache.ps1 (extended) | Group A commit (pending) |
-| 006 | UseAzureMonitor() fails-open guard (FR-06) | Infrastructure/Startup/AzureMonitorGuard.cs (NEW) + Program.cs (call site) + tests/Startup/AzureMonitorGuardTests.cs (9 tests) | Group A commit (pending) |
+- **Theme A** (FR-01..06): ✅ done (tasks 001-006)
+- **Theme B** (FR-07..11): ✅ done (tasks 010-014)
+- **Theme C** (FR-12..14): ✅ done (tasks 020-022)
+- **Task 030**: 🟡 PARTIAL — offline parts done (BFF publish-size delta = +0.01 MB apples-to-apples per `notes/post-deploy-verification.md`); live Azure deploy + KQL verification ⏸ OPERATOR
+- **Task 031**: ✅ done — Issues #483/484/485 filed; #462 commented; R1 `defer-issues.md` flipped
+- **Task 032**: ✅ done — code-review + adr-check clean; lessons-learned authored; README status flipped; current-task reset
 
-**Build state after Group A**: `dotnet build src/server/api/Sprk.Bff.Api/` returns 0 errors, 18 pre-existing warnings (0 new). Test project also builds clean.
+**Build state**: `dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj` returns 0 errors, 0 warnings.
 
----
+**Publish-size delta** (NFR-04): +0.01 MB compressed apples-to-apples vs R1 close-out baseline of 46.67 MB → R2 46.68 MB after master-sync. Well within ≤+0.5 MB ceiling.
 
-## Active Group — Group B (tasks 003 + 005)
-
-Both depend on task 002 ✅. Parallel-safe (distinct files: TenantCache.cs vs new integration test file).
-
-| Task | Title | Files | Rigor |
-|---|---|---|---|
-| 003 | `cache.hits.by_resource` + `cache.misses.by_resource` Counters at TenantCache layer | Infrastructure/Cache/TenantCache.cs + Telemetry/CacheMetrics.cs (extend with 2 new Counters) | FULL |
-| 005 | Decorator regression integration test (`MetricsDistributedCacheRegistrationTests`) | tests/integration/Sprk.Bff.Api.Tests.Integration/Cache/MetricsDistributedCacheRegistrationTests.cs (NEW) | FULL (TEST-MODIFYING) |
-
-**Coordination note for task 003**: CacheMetrics is now a static class (post task 002). Add 2 new Counters as static fields/properties on CacheMetrics: `HitsByResourceCounter` + `MissesByResourceCounter`. TenantCache calls them with the `resource` parameter as a dimension on every Get/Set/Remove path.
-
-**Coordination note for task 005**: locate the integration test project (find via `glob tests/integration/**/CustomWebAppFactory*` or similar). The test asserts (a) `IDistributedCache` resolves to `MetricsDistributedCache` wrapping the expected inner type; (b) exactly one `Meter("Sprk.Bff.Api.Cache")` instance exists at runtime via `MeterListener` enumeration.
+**Quality gates** (task 032 FULL rigor):
+- `code-review`: 0 critical, 0 warnings, 2 optional suggestions (deferred). All AI smell categories clean. Quantitative metrics within thresholds. Quality direction Improved on the consumer-cleanup files; Neutral on the new files.
+- `adr-check`: 5/5 focus ADRs compliant (ADR-009 untouched per NFR-08; ADR-010 surface decreased; ADR-029 publish-size verified; ADR-032 symmetric IConnectionMultiplexer preserved; ADR-038 KEEP-path placement + naming + no banned antipatterns).
 
 ---
 
 ## Resume Protocol
 
-If context is reset / new session:
+If a new session needs to act on R2:
+
 1. Read this file
-2. Read `tasks/TASK-INDEX.md` for overall status
-3. Dispatch Group B: ONE message with 2 Agent tool calls (or run sequentially if context tight)
+2. Open the PR (or check whether the operator has done so)
+3. Watch CI checks; on green + operator-approved KQL verification, merge to master
+4. After merge: archive worktree per `devops-project-archive` convention
+
+---
+
+## Files Modified by Task 032
+
+| Path | Purpose |
+|---|---|
+| `projects/spaarke-redis-cache-remediation-r2/README.md` | Status header → Complete |
+| `projects/spaarke-redis-cache-remediation-r2/notes/lessons-learned.md` | NEW — what worked, what surprised, recommendations |
+| `projects/spaarke-redis-cache-remediation-r2/current-task.md` | THIS FILE — reset to PROJECT COMPLETE |
+| `projects/spaarke-redis-cache-remediation-r2/tasks/TASK-INDEX.md` | Task 032 🔲 → ✅ |
+| `projects/spaarke-redis-cache-remediation-r2/notes/draft-pr-description.md` | NEW — operator PR body skeleton |
+
+`projects/INDEX.md` left in current state (R2 row stays in Active table until PR merge, per R1 convention).

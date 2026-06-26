@@ -11,10 +11,13 @@
 
 | Field | Value |
 |---|---|
-| **Phase** | Spec-locked — ready for `/project-pipeline` |
+| **Phase** | ✅ Complete (PR pending) |
 | **Owner** | spaarke-dev |
 | **Estimated effort** | 3-5 days (one combined PR per spec NFR-01) |
 | **Spec lock date** | 2026-06-26 |
+| **Local complete date** | 2026-06-26 |
+
+All 17 tasks shipped to `origin/work/spaarke-redis-cache-remediation-r2`; PR pending operator-driven live deploy + KQL verification per [`notes/post-deploy-verification.md`](notes/post-deploy-verification.md). Lessons learned captured in [`notes/lessons-learned.md`](notes/lessons-learned.md).
 
 ## Summary
 
