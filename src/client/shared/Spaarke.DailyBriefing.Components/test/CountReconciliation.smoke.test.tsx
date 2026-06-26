@@ -157,10 +157,7 @@ function buildNarrateResponseBody(channels: ChannelFetchResult[]): string {
       })),
     }));
 
-  const totalCount = channels.reduce(
-    (sum, ch) => sum + (ch.status === 'success' ? ch.group.items.length : 0),
-    0
-  );
+  const totalCount = channels.reduce((sum, ch) => sum + (ch.status === 'success' ? ch.group.items.length : 0), 0);
 
   return JSON.stringify({
     tldr: {
@@ -264,9 +261,7 @@ describe('FR-20 / AC-20 — TL;DR ↔ Activities count reconciliation (smoke)', 
     );
 
     const calls = (authenticatedFetch as jest.Mock).mock.calls;
-    const narrateCall = calls.find(
-      c => typeof c[0] === 'string' && c[0].includes('/api/ai/daily-briefing/narrate')
-    );
+    const narrateCall = calls.find(c => typeof c[0] === 'string' && c[0].includes('/api/ai/daily-briefing/narrate'));
     expect(narrateCall).toBeDefined();
 
     const requestInit = narrateCall![1] as RequestInit;
@@ -358,9 +353,7 @@ describe('FR-20 / AC-20 — TL;DR ↔ Activities count reconciliation (smoke)', 
     // Find the most recent /narrate call (preferences-driven refetch may
     // produce multiple) and assert its totalNotificationCount.
     const calls = (authenticatedFetch as jest.Mock).mock.calls;
-    const narrateCalls = calls.filter(
-      c => typeof c[0] === 'string' && c[0].includes('/api/ai/daily-briefing/narrate')
-    );
+    const narrateCalls = calls.filter(c => typeof c[0] === 'string' && c[0].includes('/api/ai/daily-briefing/narrate'));
     expect(narrateCalls.length).toBeGreaterThan(0);
     const lastNarrateCall = narrateCalls[narrateCalls.length - 1];
     const lastRequest = JSON.parse((lastNarrateCall[1] as RequestInit).body as string);
