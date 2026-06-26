@@ -128,11 +128,8 @@ public static class ContainerPermissionEndpoints
             if (config is null)
                 return ConfigNotFoundProblem(configGuid, context);
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var permissions = await GraphCallScope.Run(
-                () => graphService.ListContainerPermissionsAsync(graphClient, containerId, ct),
-                "permissions.list");
+            var permissions = await graphService.ListContainerPermissionsForConfigAsync(
+                config, containerId, ct);
 
             var result = new ContainerPermissionListResponse(
                 permissions.Select(ContainerPermissionDto.FromDomain).ToList(),
@@ -200,12 +197,8 @@ public static class ContainerPermissionEndpoints
             if (config is null)
                 return ConfigNotFoundProblem(configGuid, context);
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var granted = await GraphCallScope.Run(
-                () => graphService.GrantContainerPermissionAsync(
-                    graphClient, containerId, request.UserId, request.GroupId, request.Role, ct),
-                "permission.grant");
+            var granted = await graphService.GrantContainerPermissionForConfigAsync(
+                config, containerId, request.UserId, request.GroupId, request.Role, ct);
 
             logger.LogInformation(
                 "GrantPermission: granted '{Role}' to principal (userId={UserId}, groupId={GroupId}) " +
@@ -290,12 +283,8 @@ public static class ContainerPermissionEndpoints
             if (config is null)
                 return ConfigNotFoundProblem(configGuid, context);
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var updated = await GraphCallScope.Run(
-                () => graphService.UpdateContainerPermissionAsync(
-                    graphClient, containerId, permissionId, request!.Role, ct),
-                "permission.update");
+            var updated = await graphService.UpdateContainerPermissionForConfigAsync(
+                config, containerId, permissionId, request!.Role, ct);
 
             if (updated is null)
             {
@@ -394,12 +383,8 @@ public static class ContainerPermissionEndpoints
             if (config is null)
                 return ConfigNotFoundProblem(configGuid, context);
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var deleted = await GraphCallScope.Run(
-                () => graphService.RevokeContainerPermissionAsync(
-                    graphClient, containerId, permissionId, ct),
-                "permission.revoke");
+            var deleted = await graphService.RevokeContainerPermissionForConfigAsync(
+                config, containerId, permissionId, ct);
 
             if (!deleted)
             {

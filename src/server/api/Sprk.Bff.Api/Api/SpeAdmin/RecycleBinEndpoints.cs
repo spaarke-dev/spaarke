@@ -112,12 +112,8 @@ public static class RecycleBinEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var deleted = await GraphCallScope.Run(
-                () => graphService.ListDeletedContainersAsync(
-                    graphClient, config.ContainerTypeId, ct),
-                "recyclebin.list");
+            var deleted = await graphService.ListDeletedContainersForConfigAsync(
+                config, config.ContainerTypeId, ct);
 
             var items = deleted
                 .Select(c => new DeletedContainerDto
@@ -225,11 +221,8 @@ public static class RecycleBinEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var found = await GraphCallScope.Run(
-                () => graphService.RestoreContainerAsync(graphClient, containerId, ct),
-                "recyclebin.restore");
+            var found = await graphService.RestoreContainerForConfigAsync(
+                config, containerId, ct);
 
             if (!found)
             {
@@ -360,11 +353,8 @@ public static class RecycleBinEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var found = await GraphCallScope.Run(
-                () => graphService.PermanentDeleteContainerAsync(graphClient, containerId, ct),
-                "recyclebin.permanent-delete");
+            var found = await graphService.PermanentDeleteContainerForConfigAsync(
+                config, containerId, ct);
 
             if (!found)
             {

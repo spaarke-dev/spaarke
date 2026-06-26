@@ -274,10 +274,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var items = await GraphCallScope.Run(
-                () => graphService.ListContainerItemsAsync(graphClient, id, folderId, ct),
-                "container.items.list");
+            var items = await graphService.ListContainerItemsForConfigAsync(
+                config, id, folderId, ct);
 
             logger.LogInformation(
                 "SPE Admin list items succeeded — Container: {ContainerId}, FolderId: {FolderId}, " +
@@ -355,10 +353,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var versions = await GraphCallScope.Run(
-                () => graphService.GetFileVersionsAsync(graphClient, id, itemId, ct),
-                "file.versions");
+            var versions = await graphService.GetFileVersionsForConfigAsync(
+                config, id, itemId, ct);
 
             logger.LogInformation(
                 "SPE Admin get file versions succeeded — Container: {ContainerId}, ItemId: {ItemId}, " +
@@ -435,10 +431,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var thumbnails = await GraphCallScope.Run(
-                () => graphService.GetFileThumbnailsAsync(graphClient, id, itemId, ct),
-                "file.thumbnails");
+            var thumbnails = await graphService.GetFileThumbnailsForConfigAsync(
+                config, id, itemId, ct);
 
             logger.LogInformation(
                 "SPE Admin get thumbnails succeeded — Container: {ContainerId}, ItemId: {ItemId}, " +
@@ -529,13 +523,10 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var sharingLink = await GraphCallScope.Run(
-                () => graphService.CreateSharingLinkAsync(
-                    graphClient, id, itemId,
-                    request.LinkType, request.Scope, request.ExpirationDateTime,
-                    ct),
-                "sharing.link.create");
+            var sharingLink = await graphService.CreateSharingLinkForConfigAsync(
+                config, id, itemId,
+                request.LinkType, request.Scope, request.ExpirationDateTime,
+                ct);
 
             logger.LogInformation(
                 "SPE Admin create sharing link succeeded — Container: {ContainerId}, ItemId: {ItemId}, " +
@@ -636,11 +627,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var folder = await GraphCallScope.Run(
-                () => graphService.CreateFolderAsync(
-                    graphClient, id, request.Name, request.ParentFolderId, ct),
-                "folder.create");
+            var folder = await graphService.CreateFolderForConfigAsync(
+                config, id, request.Name, request.ParentFolderId, ct);
 
             logger.LogInformation(
                 "SPE Admin create folder succeeded — Container: {ContainerId}, FolderName: {FolderName}, " +
@@ -736,10 +724,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var result = await GraphCallScope.Run(
-                () => graphService.DownloadDriveItemAsync(graphClient, id, itemId, ct),
-                "driveitem.download");
+            var result = await graphService.DownloadDriveItemForConfigAsync(
+                config, id, itemId, ct);
 
             if (result is null)
             {
@@ -838,10 +824,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var previewUrl = await GraphCallScope.Run(
-                () => graphService.GetPreviewUrlAsync(graphClient, id, itemId, ct),
-                "driveitem.preview");
+            var previewUrl = await graphService.GetPreviewUrlForConfigAsync(
+                config, id, itemId, ct);
 
             if (previewUrl is null)
             {
@@ -934,10 +918,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var deleted = await GraphCallScope.Run(
-                () => graphService.DeleteDriveItemAsync(graphClient, id, itemId, ct),
-                "driveitem.delete");
+            var deleted = await graphService.DeleteDriveItemForConfigAsync(
+                config, id, itemId, ct);
 
             if (!deleted)
             {
@@ -1076,16 +1058,11 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             SpeAdminGraphService.SpeContainerItemSummary uploadedItem;
             await using (var fileStream = formFile.OpenReadStream())
             {
-                var fileStreamLocal = fileStream;
-                uploadedItem = await GraphCallScope.Run(
-                    () => graphService.UploadFileToContainerAsync(
-                        graphClient, id, fileName, fileStreamLocal, formFile.Length, folderId, ct),
-                    "container.upload");
+                uploadedItem = await graphService.UploadFileToContainerForConfigAsync(
+                    config, id, fileName, fileStream, formFile.Length, folderId, ct);
             }
 
             logger.LogInformation(

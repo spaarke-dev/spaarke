@@ -126,10 +126,8 @@ public static class ContainerColumnEndpoints
             if (config is null)
                 return ConfigNotFoundProblem(configGuid, context);
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var columns = await GraphCallScope.Run(
-                () => graphService.ListColumnsAsync(graphClient, containerId, ct),
-                "container.columns.list");
+            var columns = await graphService.ListColumnsForConfigAsync(
+                config, containerId, ct);
 
             var result = new ContainerColumnListResponse(
                 columns.Select(ContainerColumnDto.FromDomain).ToList(),
@@ -196,20 +194,16 @@ public static class ContainerColumnEndpoints
             if (config is null)
                 return ConfigNotFoundProblem(configGuid, context);
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var created = await GraphCallScope.Run(
-                () => graphService.CreateColumnAsync(
-                    graphClient,
-                    containerId,
-                    request.Name,
-                    request.DisplayName,
-                    request.Description,
-                    request.ColumnType,
-                    request.Required,
-                    request.Indexed,
-                    ct),
-                "container.columns.create");
+            var created = await graphService.CreateColumnForConfigAsync(
+                config,
+                containerId,
+                request.Name,
+                request.DisplayName,
+                request.Description,
+                request.ColumnType,
+                request.Required,
+                request.Indexed,
+                ct);
 
             logger.LogInformation(
                 "CreateColumn: created column '{ColumnId}' ('{Name}', type={ColumnType}) " +
@@ -294,19 +288,15 @@ public static class ContainerColumnEndpoints
             if (config is null)
                 return ConfigNotFoundProblem(configGuid, context);
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var updated = await GraphCallScope.Run(
-                () => graphService.UpdateColumnAsync(
-                    graphClient,
-                    containerId,
-                    columnId,
-                    request.DisplayName,
-                    request.Description,
-                    request.Required,
-                    request.Indexed,
-                    ct),
-                "container.columns.update");
+            var updated = await graphService.UpdateColumnForConfigAsync(
+                config,
+                containerId,
+                columnId,
+                request.DisplayName,
+                request.Description,
+                request.Required,
+                request.Indexed,
+                ct);
 
             if (updated is null)
             {
@@ -396,11 +386,8 @@ public static class ContainerColumnEndpoints
             if (config is null)
                 return ConfigNotFoundProblem(configGuid, context);
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var deleted = await GraphCallScope.Run(
-                () => graphService.DeleteColumnAsync(graphClient, containerId, columnId, ct),
-                "container.columns.delete");
+            var deleted = await graphService.DeleteColumnForConfigAsync(
+                config, containerId, columnId, ct);
 
             if (!deleted)
             {

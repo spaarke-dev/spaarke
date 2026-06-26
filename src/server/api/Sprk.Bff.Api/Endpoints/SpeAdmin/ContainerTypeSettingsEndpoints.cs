@@ -150,20 +150,15 @@ public static class ContainerTypeSettingsEndpoints
 
         try
         {
-            // Get the Graph client authenticated for this config's app registration
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // PATCH container type settings via Graph API
-            var result = await GraphCallScope.Run(
-                () => graphService.UpdateContainerTypeSettingsAsync(
-                    graphClient,
-                    typeId,
-                    request.SharingCapability,
-                    request.IsVersioningEnabled,
-                    request.MajorVersionLimit,
-                    request.StorageUsedInBytes,
-                    ct),
-                "containertype.settings.update");
+            var result = await graphService.UpdateContainerTypeSettingsForConfigAsync(
+                config,
+                typeId,
+                request.SharingCapability,
+                request.IsVersioningEnabled,
+                request.MajorVersionLimit,
+                request.StorageUsedInBytes,
+                ct);
 
             if (result is null)
             {

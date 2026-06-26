@@ -101,16 +101,12 @@ public static class SearchContainersEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var searchPage = await GraphCallScope.Run(
-                () => graphService.SearchContainersAsync(
-                    graphClient,
-                    request.Query,
-                    request.PageSize,
-                    request.SkipToken,
-                    ct),
-                "search.containers");
+            var searchPage = await graphService.SearchContainersForConfigAsync(
+                config,
+                request.Query,
+                request.PageSize,
+                request.SkipToken,
+                ct);
 
             var response = new SearchContainersResponse(
                 Items: searchPage.Items

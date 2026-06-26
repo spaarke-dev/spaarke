@@ -140,10 +140,8 @@ public static class ConsumingTenantEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var consumers = await GraphCallScope.Run(
-                () => graphService.ListConsumingTenantsAsync(graphClient, typeId, ct),
-                "consumers.list");
+            var consumers = await graphService.ListConsumingTenantsForConfigAsync(
+                config, typeId, ct);
 
             if (consumers is null)
             {
@@ -220,12 +218,9 @@ public static class ConsumingTenantEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var registered = await GraphCallScope.Run(
-                () => graphService.RegisterConsumingTenantAsync(
-                    graphClient, typeId, request.AppId, request.TenantId,
-                    request.DelegatedPermissions, request.ApplicationPermissions, ct),
-                "consumers.register");
+            var registered = await graphService.RegisterConsumingTenantForConfigAsync(
+                config, typeId, request.AppId, request.TenantId,
+                request.DelegatedPermissions, request.ApplicationPermissions, ct);
 
             if (registered is null)
             {
@@ -315,12 +310,9 @@ public static class ConsumingTenantEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var updated = await GraphCallScope.Run(
-                () => graphService.UpdateConsumingTenantAsync(
-                    graphClient, typeId, appId,
-                    request.DelegatedPermissions, request.ApplicationPermissions, ct),
-                "consumers.update");
+            var updated = await graphService.UpdateConsumingTenantForConfigAsync(
+                config, typeId, appId,
+                request.DelegatedPermissions, request.ApplicationPermissions, ct);
 
             if (updated is null)
             {
@@ -402,10 +394,8 @@ public static class ConsumingTenantEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var removed = await GraphCallScope.Run(
-                () => graphService.RemoveConsumingTenantAsync(graphClient, typeId, appId, ct),
-                "consumers.remove");
+            var removed = await graphService.RemoveConsumingTenantForConfigAsync(
+                config, typeId, appId, ct);
 
             if (!removed)
             {

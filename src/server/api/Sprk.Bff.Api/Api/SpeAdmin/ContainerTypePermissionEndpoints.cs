@@ -127,13 +127,9 @@ public static class ContainerTypePermissionEndpoints
 
         try
         {
-            // Get the Graph client authenticated for this config's app registration
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // Retrieve application permissions for the container type from Graph API
-            var permissions = await GraphCallScope.Run(
-                () => graphService.GetContainerTypePermissionsAsync(graphClient, typeId, ct),
-                "containertypes.permissions.get");
+            var permissions = await graphService.GetContainerTypePermissionsForConfigAsync(
+                config, typeId, ct);
 
             // null indicates the container type was not found (Graph 404)
             if (permissions is null)

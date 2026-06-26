@@ -155,13 +155,8 @@ public static class ContainerTypeEndpoints
 
         try
         {
-            // Get the Graph client authenticated for this config's app registration
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // List container types from Graph API
-            var containerTypes = await GraphCallScope.Run(
-                () => graphService.ListContainerTypesAsync(graphClient, ct),
-                "containertypes.list");
+            var containerTypes = await graphService.ListContainerTypesForConfigAsync(config, ct);
 
             logger.LogInformation(
                 "GET /api/spe/containertypes — returned {Count} container types for config {ConfigId}. TraceId: {TraceId}",
@@ -270,13 +265,8 @@ public static class ContainerTypeEndpoints
 
         try
         {
-            // Get the Graph client authenticated for this config's app registration
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // Retrieve the specific container type from Graph API
-            var containerType = await GraphCallScope.Run(
-                () => graphService.GetContainerTypeAsync(graphClient, typeId, ct),
-                "containertype.get");
+            var containerType = await graphService.GetContainerTypeForConfigAsync(config, typeId, ct);
 
             if (containerType is null)
             {
@@ -419,17 +409,12 @@ public static class ContainerTypeEndpoints
 
         try
         {
-            // Get the Graph client authenticated for this config's app registration
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // Create the container type in SharePoint Embedded via Graph API
-            var created = await GraphCallScope.Run(
-                () => graphService.CreateContainerTypeAsync(
-                    graphClient,
-                    request.DisplayName,
-                    request.BillingClassification,
-                    ct),
-                "containertype.create");
+            var created = await graphService.CreateContainerTypeForConfigAsync(
+                config,
+                request.DisplayName,
+                request.BillingClassification,
+                ct);
 
             logger.LogInformation(
                 "POST /api/spe/containertypes — created container type '{ContainerTypeId}' ('{DisplayName}') for configId {ConfigId}. TraceId: {TraceId}",

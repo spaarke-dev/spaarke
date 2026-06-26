@@ -178,13 +178,9 @@ public static class ContainerEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // Use paginated list — supports $top and $skipToken for cursor-based pagination.
-            var page = await GraphCallScope.Run(
-                () => graphService.ListContainersPageAsync(
-                    graphClient, config.ContainerTypeId, top, skipToken, ct),
-                "containers.list");
+            var page = await graphService.ListContainersPageForConfigAsync(
+                config, config.ContainerTypeId, top, skipToken, ct);
 
             var result = new ContainerListResponse(
                 page.Items.Select(ContainerDto.FromSummary).ToList(),
@@ -283,12 +279,9 @@ public static class ContainerEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // Retrieve single container directly from Graph (more efficient than listing all).
-            var container = await GraphCallScope.Run(
-                () => graphService.GetContainerAsync(graphClient, containerId, ct),
-                "container.get");
+            var container = await graphService.GetContainerForConfigAsync(
+                config, containerId, ct);
 
             if (container is null)
             {
@@ -432,17 +425,13 @@ public static class ContainerEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // Create the container in SharePoint Embedded via Graph API.
-            var created = await GraphCallScope.Run(
-                () => graphService.CreateContainerAsync(
-                    graphClient,
-                    config.ContainerTypeId,
-                    request.DisplayName,
-                    request.Description,
-                    ct),
-                "container.create");
+            var created = await graphService.CreateContainerForConfigAsync(
+                config,
+                config.ContainerTypeId,
+                request.DisplayName,
+                request.Description,
+                ct);
 
             logger.LogInformation(
                 "CreateContainer: created container '{ContainerId}' ('{DisplayName}') for configId {ConfigId}, TraceId={TraceId}",
@@ -567,12 +556,8 @@ public static class ContainerEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var found = await GraphCallScope.Run(
-                () => graphService.UpdateContainerAsync(
-                    graphClient, containerId, request.DisplayName, request.Description, ct),
-                "container.patch");
+            var found = await graphService.UpdateContainerForConfigAsync(
+                config, containerId, request.DisplayName, request.Description, ct);
 
             if (!found)
             {
@@ -655,11 +640,7 @@ public static class ContainerEndpoints
             containerId, configId, graphService, auditService, logger, context, ct,
             operationName: "ActivateContainer",
             auditCategory: "ContainerActivated",
-            graphOperation: async (resolvedConfig, id, token) =>
-            {
-                var client = await graphService.GetClientForConfigAsync(resolvedConfig, token);
-                return await graphService.ActivateContainerAsync(client, id, token);
-            });
+            graphOperation: graphService.ActivateContainerForConfigAsync);
     }
 
     /// <summary>
@@ -681,11 +662,7 @@ public static class ContainerEndpoints
             containerId, configId, graphService, auditService, logger, context, ct,
             operationName: "LockContainer",
             auditCategory: "ContainerLocked",
-            graphOperation: async (resolvedConfig, id, token) =>
-            {
-                var client = await graphService.GetClientForConfigAsync(resolvedConfig, token);
-                return await graphService.LockContainerAsync(client, id, token);
-            });
+            graphOperation: graphService.LockContainerForConfigAsync);
     }
 
     /// <summary>
@@ -707,11 +684,7 @@ public static class ContainerEndpoints
             containerId, configId, graphService, auditService, logger, context, ct,
             operationName: "UnlockContainer",
             auditCategory: "ContainerUnlocked",
-            graphOperation: async (resolvedConfig, id, token) =>
-            {
-                var client = await graphService.GetClientForConfigAsync(resolvedConfig, token);
-                return await graphService.UnlockContainerAsync(client, id, token);
-            });
+            graphOperation: graphService.UnlockContainerForConfigAsync);
     }
 
     /// <summary>
@@ -759,10 +732,10 @@ public static class ContainerEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            // Caller closure builds the Graph client (keeps Microsoft.Graph.GraphServiceClient out of this file).
-            var found = await GraphCallScope.Run(
-                () => graphOperation(config, containerId, ct),
-                operationName);
+            // Caller delegate calls a *ForConfig* facade on SpeAdminGraphService — keeps
+            // Microsoft.Graph.GraphServiceClient out of this file per ADR-007 §1. The
+            // facade also translates ODataError to SpaarkeStorageException internally.
+            var found = await graphOperation(config, containerId, ct);
 
             if (!found)
             {

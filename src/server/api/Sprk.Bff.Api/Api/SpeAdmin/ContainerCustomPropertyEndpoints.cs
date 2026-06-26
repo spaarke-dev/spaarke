@@ -114,11 +114,8 @@ public static class ContainerCustomPropertyEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var properties = await GraphCallScope.Run(
-                () => graphService.GetCustomPropertiesAsync(graphClient, containerId, ct),
-                "container.customproperties.get");
+            var properties = await graphService.GetCustomPropertiesForConfigAsync(
+                config, containerId, ct);
 
             if (properties is null)
             {
@@ -268,12 +265,8 @@ public static class ContainerCustomPropertyEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var updated = await GraphCallScope.Run(
-                () => graphService.UpdateCustomPropertiesAsync(
-                    graphClient, containerId, request.Properties, ct),
-                "container.customproperties.put");
+            var updated = await graphService.UpdateCustomPropertiesForConfigAsync(
+                config, containerId, request.Properties, ct);
 
             if (updated is null)
             {

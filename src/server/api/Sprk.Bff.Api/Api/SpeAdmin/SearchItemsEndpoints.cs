@@ -111,19 +111,15 @@ public static class SearchItemsEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // Execute search via Graph search API.
-            var searchResult = await GraphCallScope.Run(
-                () => graphService.SearchItemsAsync(
-                    graphClient,
-                    request.Query,
-                    request.ContainerId,
-                    request.FileType,
-                    request.PageSize,
-                    request.SkipToken,
-                    ct),
-                "search.items");
+            var searchResult = await graphService.SearchItemsForConfigAsync(
+                config,
+                request.Query,
+                request.ContainerId,
+                request.FileType,
+                request.PageSize,
+                request.SkipToken,
+                ct);
 
             // Map from service domain model to endpoint DTO (ADR-007: no Graph SDK types in public surface).
             var response = new SearchItemsResponse(

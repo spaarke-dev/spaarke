@@ -132,10 +132,8 @@ public static class SecurityEndpoints
                     });
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var alerts = await GraphCallScope.Run(
-                () => graphService.GetSecurityAlertsAsync(graphClient, maxAlerts, ct),
-                "security.alerts");
+            var alerts = await graphService.GetSecurityAlertsForConfigAsync(
+                config, maxAlerts, ct);
 
             // Map Graph service domain models → API response DTOs (ADR-007)
             var dtos = alerts.Select(a => new SecurityAlertDto
@@ -243,10 +241,8 @@ public static class SecurityEndpoints
                     });
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var scoreResult = await GraphCallScope.Run(
-                () => graphService.GetSecureScoreAsync(graphClient, ct),
-                "security.score");
+            var scoreResult = await graphService.GetSecureScoreForConfigAsync(
+                config, ct);
 
             if (scoreResult is null)
             {
