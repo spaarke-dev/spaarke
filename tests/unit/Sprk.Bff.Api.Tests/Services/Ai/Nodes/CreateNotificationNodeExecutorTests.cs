@@ -1014,6 +1014,178 @@ public class CreateNotificationNodeExecutorTests
             textContent: "1 matter resolved");
     }
 
+    #endregion
+
+    #region FR-6 AC-6d / Task 021: sprk_category column dual-write
+
+    /// <summary>
+    /// FR-6 AC-6d / R4 task 021: Producer MUST write the standalone Dataverse column
+    /// <c>sprk_category</c> on every produced appnotification entity. This is binding because
+    /// Dataverse OData does NOT support <c>$filter</c> on nested JSON (per 2026-06-25 owner
+    /// clarification) — the consumer FR-17c <c>disabledChannels</c> server-side filter
+    /// (<c>sprk_category not in (…)</c>) depends on the column being populated.
+    /// </summary>
+    [Fact]
+    public async Task BuildNotificationEntity_PopulatesSprkCategory()
+    {
+        // Arrange
+        var recipientId = Guid.NewGuid();
+        const string category = "document-upload";
+        var config = JsonSerializer.Serialize(new
+        {
+            title = "New document",
+            body = "Body",
+            category,
+            recipientId = recipientId.ToString()
+        });
+        var context = CreateValidContext(config);
+
+        SetupMockPassThrough();
+        Entity? capturedEntity = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedEntity.Should().NotBeNull();
+        capturedEntity!.Contains("sprk_category").Should().BeTrue(
+            "FR-6 AC-6d: standalone column MUST be set so FR-17c $filter on sprk_category works");
+        capturedEntity["sprk_category"].Should().Be(category,
+            "sprk_category column MUST mirror the rendered category exactly");
+    }
+
+    /// <summary>
+    /// FR-6 AC-6d edge case: when no category is supplied, the producer MUST NOT write an
+    /// empty/null sprk_category attribute (Dataverse OData would otherwise treat empty string
+    /// as a distinct filter value). Absent column attribute is the canonical "no category" signal.
+    /// </summary>
+    [Fact]
+    public async Task BuildNotificationEntity_HandlesNullCategory()
+    {
+        // Arrange — no category in config
+        var recipientId = Guid.NewGuid();
+        var config = JsonSerializer.Serialize(new
+        {
+            title = "Notification without category",
+            body = "Body",
+            recipientId = recipientId.ToString()
+        });
+        var context = CreateValidContext(config);
+
+        SetupMockPassThrough();
+        Entity? capturedEntity = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedEntity.Should().NotBeNull();
+        capturedEntity!.Contains("sprk_category").Should().BeFalse(
+            "FR-6 AC-6d edge: null category MUST be handled gracefully — column attribute is OMITTED, not set to empty string");
+    }
+
+    /// <summary>
+    /// FR-6 AC-6d invariant: across multiple representative fixtures (legacy + enriched +
+    /// iterate-items + template-rendered), the rendered <c>category</c> value MUST always
+    /// equal <c>entity["sprk_category"]</c>. Producer is the single writer that keeps the
+    /// column in sync by construction.
+    /// </summary>
+    [Theory]
+    [InlineData("document-upload")]
+    [InlineData("matter-activity")]
+    [InlineData("tasks-overdue")]
+    [InlineData("tasks-due-soon")]
+    [InlineData("work-assignments")]
+    [InlineData("emails")]
+    [InlineData("events")]
+    public async Task BuildNotificationEntity_SprkCategoryMatchesCustomDataCategory_Always(string category)
+    {
+        // Arrange
+        var recipientId = Guid.NewGuid();
+        var config = JsonSerializer.Serialize(new
+        {
+            title = "Notification " + category,
+            body = "Body for " + category,
+            category,
+            recipientId = recipientId.ToString()
+        });
+        var context = CreateValidContext(config);
+
+        SetupMockPassThrough();
+        Entity? capturedEntity = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedEntity.Should().NotBeNull();
+        capturedEntity!["sprk_category"].Should().Be(category,
+            $"FR-6 AC-6d invariant: sprk_category column MUST equal the rendered category for every channel ({category})");
+    }
+
+    /// <summary>
+    /// FR-6 AC-6d iterate-items path: when a notification is produced from the iterate-items
+    /// branch, the sprk_category column dual-write MUST also apply (same BuildNotificationEntity
+    /// is invoked).
+    /// </summary>
+    [Fact]
+    public async Task BuildNotificationEntity_IterateItemsPath_PopulatesSprkCategory()
+    {
+        // Arrange
+        var recipientId = Guid.NewGuid();
+        var itemRegardingId = Guid.NewGuid();
+        const string category = "tasks-overdue";
+
+        var iterateConfig = new
+        {
+            title = "(parent placeholder)",
+            body = "(parent placeholder)",
+            iterateItems = true,
+            itemNotification = new
+            {
+                title = "Item: {{item.name}}",
+                body = "Body",
+                category,
+                recipientId = recipientId.ToString()
+            }
+        };
+        var config = JsonSerializer.Serialize(iterateConfig);
+        var context = CreateIterateContext(config, itemRegardingId);
+
+        SetupMockPassThrough();
+        Entity? capturedEntity = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        var result = await _executor.ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        result.TextContent.Should().Contain("Created 1 notifications");
+        capturedEntity.Should().NotBeNull();
+        capturedEntity!.Contains("sprk_category").Should().BeTrue(
+            "FR-6 AC-6d: iterate-items path MUST also populate sprk_category column");
+        capturedEntity["sprk_category"].Should().Be(category);
+    }
+
     private static NodeOutput BuildMultiRoleLookupMembershipOutput(Guid matterId, params string[] roles)
     {
         var byRole = roles.ToDictionary(r => r, _ => new[] { matterId.ToString() });

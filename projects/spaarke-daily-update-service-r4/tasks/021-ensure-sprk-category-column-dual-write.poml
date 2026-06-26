@@ -3,10 +3,12 @@
   <metadata>
     <title>Ensure sprk_category column dual-write (audit + fix if missing)</title>
     <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>022, 023, 024, 025, 028</blocks>
+    <completion-notes>Audit confirmed `sprk_category` column dual-write was ALREADY PRESENT in `BuildNotificationEntity` (lines 554–557) — introduced pre-R4 for idempotency check in `CheckForDuplicateNotificationAsync`. Same write satisfies FR-17c. Both code paths (standard at line 271, iterate-items at line 421) call the shared `BuildNotificationEntity` and pass the rendered category. Null/empty category gracefully OMITS the column attribute (no empty-string write). No production code change required. Added 4 new xUnit test methods (10 test executions counting Theory cases) to lock the invariant explicitly — `BuildNotificationEntity_PopulatesSprkCategory`, `BuildNotificationEntity_HandlesNullCategory`, `BuildNotificationEntity_SprkCategoryMatchesCustomDataCategory_Always [Theory × 7]`, `BuildNotificationEntity_IterateItemsPath_PopulatesSprkCategory`. All 15 active tests pass. Publish size: 47.14 MB (+0.83 MB tooling-variance vs task 020's 46.31 MB; test code does not ship). CVE: Kiota 1.21.2 GHSA-7j59-v9qr-6fq9 pre-existing in master, no new HIGH. Unblocks tasks 022/023/024/025/028 + PR 5 task 042.</completion-notes>
     <tags>bff-api, refactoring</tags>
     <rigor-hint>FULL</rigor-hint>
     <rigor-reason>Modifies BFF NodeExecutor C# (CreateNotificationNodeExecutor.cs). Load-bearing for FR-17c server-side `$filter` (consumer cannot exclude disabled channels server-side without this). Touches BFF — CLAUDE.md §10 publish-size + CVE applies.</rigor-reason>
