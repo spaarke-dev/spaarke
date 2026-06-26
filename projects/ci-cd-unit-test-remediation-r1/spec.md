@@ -93,6 +93,22 @@ Ships in **~2 weeks elapsed, no dev halt**, with one ~4-hour cutover window.
 12. **FR-B06** — Sliced DELETE in 3 PRs by test project, sequenced via INDEX.md to avoid active-worktree conflicts. Code-review at Step 9.5 enforces deletion-safety by path check (any deletion under the 6 KEEP-protected paths requires a same-PR replacement).
 13. **FR-B07** — Restore `Release` to `Build & Test` matrix only after surviving suite is green ≥7 consecutive days. Root `CLAUDE.md` §8 rigor table updated: test PRs = FULL rigor (no STANDARD skip on Step 9.5) for the duration of this project and ongoing.
 
+**Stream B — Test reset (extended scope, added 2026-06-26 per owner direction)**
+
+The original FR-B01..FR-B07 framing attacked symptoms (coverage %, specific antipatterns) and produced a narrow 9-file deletion against strict signature-match criteria. The owner's "build-vs-maintain" framing (2026-06-26) identifies the deeper structural debt: most of the surviving ~6,700 BFF unit tests are **scaffolding-class tests** (written during development to drive design or satisfy coverage targets) that should be reconciled at project close, leaving only **integrate/maintain-class tests** (regression-protectors, contract-anchors, business-logic-with-branches) for long-term ownership. Industry consensus (Beck "delete the scaffolding"; Feathers characterization-vs-behavior; Google test-sizes; DHH less-tests) supports this framing. Three additional FRs encode the discipline.
+
+14. **FR-B08** — **Build-vs-maintain criteria codification (binding standard)**. Author a comprehensive list of scaffolding-test signatures beyond the current 3-pattern ban (`Mock<HttpMessageHandler>`, DI-registration tests, ctor null-checks). Minimum 10 new bans covering: mirror tests (test code 1:1 with production), tests-with-all-mocks-and-trivial-assertion, internal/private method tests, pass-through wrapper tests, coverage-fillers, language-feature redundancy tests, snapshot tests of trivial output, tests whose name doesn't describe behavior, tests of types the type system enforces, tests where assertion count < setup line count by >10×. Codified in: new ADR-038 §"Build-vs-Maintain Criteria" (or sibling ADR), `.claude/constraints/testing.md` MUST NOT rules, `tests/CLAUDE.md` banned-antipattern section. Each criterion includes concrete C# example + one-line "why it's scaffolding" rationale.
+
+15. **FR-B09** — **Project-close test diet protocol (binding workflow)**. New `/test-diet` skill (or extension to `/repo-cleanup`) invoked from every project's `090-wrapup-*` task. Protocol: for every test file added/modified during the project, apply build-vs-maintain criteria → flag scaffolding tests for deletion in the wrap-up PR → confirm maintain tests live at correct KEEP path → document count delta (added / promoted / deleted). Update `task-execute` skill to require `/test-diet` invocation as part of 090 wrap-up. Update `tests/CLAUDE.md` with the protocol as a permanent author obligation: "every test you write today, expect to defend at project close — if it can't be defended as integrate/maintain class, it gets deleted in the diet pass."
+
+16. **FR-B10** — **Retroactive deep-cleanup pass**. Re-run the test inventory (task CICD-020 produced narrow 11-file output) with the broader FR-B08 criteria. Expected outcome: 1,500-3,000 additional DELETE candidates from the ~6,700 BFF unit tests. Execute deletion in sliced PRs (3-5 PRs by criterion bucket, similar to original 053a/b/c plan but with real scope). Each PR runs `dotnet build` + spot-check `dotnet test` of surviving tests. Path-check at Step 9.5 enforces no KEEP-path file deleted without same-PR replacement (FR-B06 applies). Final state target: BFF unit test count drops from ~6,700 to **≤3,500** (≥48% reduction) — concrete count target replaces the spec's earlier "portfolio shape, not count" framing for this scope.
+
+### Owner directive recording the scope change
+
+Owner clarification 2026-06-26 (recorded after task 053 deletion completed): "The assessment said we have way over-engineered the unit testing. The current 9-file deletion (179 tests removed) doesn't accomplish the goals of the project. My understanding is there are two categories of unit tests: (1) build tests created during the build process that validate aspects of the build, and (2) integrate/maintain tests that ship to long-term ownership. The protocol should ensure we reconcile (1) and (2) at project close, AND apply that protocol retroactively to existing components. There ARE clear best practices for what's build-only vs integrate/maintain."
+
+This directive expands FR-B scope from FR-B01..FR-B07 to FR-B01..FR-B10. Phase 2 task 053 (narrow 9-file deletion) is preserved as a foundation; FR-B08/B09/B10 are additive deliverables required before Phase 3 cutover (071).
+
 **Stream C — Hot-path coordination**
 
 14. **FR-C01** — GitHub merge queue enabled on `master` (initial batch=1, no speculative, queue timeout 30 min). Revisit after 2 weeks based on observed 5-6-worktree throughput.
@@ -147,6 +163,7 @@ Ships in **~2 weeks elapsed, no dev halt**, with one ~4-hour cutover window.
 | SC-08 | GitHub merge queue enabled; INDEX.md lists all 5-6 active worktrees with hot-path declarations; `conflict-check` auto-invokes on hot-path tasks | repo settings + file + task-execute log |
 | SC-09 | `deploy-spaarke-ai.yml` exists with ≥1 successful CD-from-master deploy; `deploy-bff-api.yml` confirmed master-triggered | workflow runs |
 | SC-10 | Hot-path collision incidents (master rebase conflicts on `Program.cs` / SpaarkeAi registries) drop ≥ 50% over 30 days vs prior 30 days | git log analysis |
+| SC-11 | BFF unit test count (`tests/unit/Sprk.Bff.Api.Tests/`) reduced from ~6,700 (post-053) to **≤ 3,500** (≥48% reduction) via FR-B10 deep cleanup. Build-vs-maintain criteria from FR-B08 codified; `/test-diet` skill from FR-B09 wired into project wrap-up protocol. | `grep -rE "^\s*\[(Fact\|Theory\|SkippableFact)\b" tests/unit/Sprk.Bff.Api.Tests \| wc -l` + skill existence check |
 
 ## Rollback
 

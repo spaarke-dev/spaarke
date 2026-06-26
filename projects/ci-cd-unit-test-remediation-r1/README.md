@@ -26,9 +26,9 @@ Ships in ~2 weeks elapsed (no dev halt) with one ~4-hour cutover window.
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Phase 0 (pipeline-initialized) |
-| **Progress** | 0% |
-| **Target Date** | 2026-07-23 (~28 elapsed days from start) |
+| **Phase** | Phase 2 complete + merged; Phase 2.5 next (scope-expanded 2026-06-26) |
+| **Progress** | 65% (20 of 31 tasks; was 80% of 25 before scope expansion) |
+| **Target Date** | ~2026-07-30 (~35 elapsed days from start; was 2026-07-23 before Phase 2.5 add) |
 | **Completed Date** | — |
 | **Owner** | spaarke-dev (solo) |
 
@@ -54,6 +54,9 @@ The project is considered **complete** when:
 - [ ] GitHub merge queue enabled; INDEX.md lists all active worktrees with hot-path declarations
 - [ ] `deploy-spaarke-ai.yml` exists with ≥1 successful CD-from-master deploy; `deploy-bff-api.yml` confirmed master-triggered
 - [ ] Hot-path collision incidents drop ≥ 50% over 30 days vs prior 30 days
+- [ ] **BFF unit test count reduced from ~6,700 to ≤ 3,500** (≥48% reduction via FR-B10 deep cleanup; added 2026-06-26 per owner-directed scope expansion to address the build-vs-maintain framing)
+- [ ] **Build-vs-maintain criteria codified** (FR-B08) — ≥10 new scaffolding-test bans documented in ADR-038 / `.claude/constraints/testing.md` / `tests/CLAUDE.md`
+- [ ] **`/test-diet` skill exists** (FR-B09) — wired into `/repo-cleanup` + `090-wrapup-*` so every future project reconciles scaffolding vs maintain tests at close
 
 ## Scope
 
@@ -109,6 +112,8 @@ The project is considered **complete** when:
 | Date | Version | Change | Author |
 |------|---------|--------|--------|
 | 2026-06-25 | 0.1 | Pipeline-initialized: design.md, spec.md, README, plan, tasks scaffolded | Claude Opus 4.7 |
+| 2026-06-26 | 0.2 | Phase 1 + Phase 2 shipped to master (PR #459 merged at be07090bc); portfolio Tasks Completed 0 → 20 | Claude Opus 4.7 |
+| 2026-06-26 | 0.3 | **Scope expansion**: owner directive adds Phase 2.5 (FR-B08/B09/B10 + SC-11) — build-vs-maintain codification, /test-diet skill, retroactive deep cleanup to reduce BFF unit test count ~6,700 → ≤3,500. Task count 25 → 31. | Owner directive + Claude Opus 4.7 |
 
 ---
 
