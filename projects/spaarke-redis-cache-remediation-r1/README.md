@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-06-26
 >
-> **Status**: ✅ **COMPLETE** — all 5 phases shipped via PRs #458 + #460. Telemetry pipeline closure (R7-S7) partially landed inline; two specific Redis observability sub-gaps deliberately deferred to R8 (documented in `notes/r7-backlog.md`).
+> **Status**: ✅ **COMPLETE** — all 5 phases + R7-S7 telemetry pipeline closure shipped. Six future-round items (DEF-001..DEF-006) are filed as GitHub Issues #462–#467 and tracked in [`notes/defer-issues.md`](notes/defer-issues.md).
 
 ## Overview
 
@@ -22,20 +22,26 @@ Fix the BFF's Redis/cache configuration drift (`Redis__Enabled=false` in a deplo
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | All 5 phases complete; R7-S7 telemetry pipeline closure landed (partial — see "Known follow-up" below) |
+| **Phase** | All 5 phases + R7-S7 (telemetry pipeline closure including Redis dep telemetry + cache.* custom metrics) complete |
 | **Progress** | 100% (project deliverables) |
-| **PRs** | #458 (Phase 1+2+3+5, merged) + #460 (AI-Search handoff + R7-S7 OTel exporter, merged) |
+| **PRs** | #458 (Phase 1+2+3+5, merged) + #460 (AI-Search handoff + R7-S7 OTel exporter, merged) + R7-S7 sub-gap closure PR (filed via this session) |
 | **Completed Date** | 2026-06-26 |
 | **Owner** | spaarke-dev |
 
-### Known follow-up (R8 — NOT in this project)
+### Tracked follow-up work (next round)
 
-R7-S7 wired the OTel → Azure Monitor exporter (`UseAzureMonitor()`) inline, restoring custom Meter flow to App Insights (verified via KQL: HTTP server/client histograms + custom `circuit_breaker.open_count` counter now visible). Two specific Redis observability sub-gaps remain — both require deeper investigation, documented in [`notes/r7-backlog.md` §S7](notes/r7-backlog.md):
+Six items filed as GitHub Issues + tracked in [`notes/defer-issues.md`](notes/defer-issues.md) via the new `/project-defer-issue-tracking` skill:
 
-1. `AddRedisInstrumentation()` not surfacing Redis dep spans — fix: wire `RedisCacheOptions.ConnectionMultiplexerFactory` in CacheModule so cache + telemetry share the same `IConnectionMultiplexer` (~1 line + redeploy).
-2. `cache.hits/misses/redis_call_duration_ms` Meter measurements not appearing — needs static-init vs MeterProvider ordering audit + call-site coverage audit.
+| ID | Title | Issue |
+|---|---|---|
+| DEF-001 | Entra ID auth via Managed Identity + "Redis Data Owner" role | [#462](https://github.com/spaarke-dev/spaarke/issues/462) |
+| DEF-002 | Pub/Sub separation in prod (dedicated Redis instance) | [#463](https://github.com/spaarke-dev/spaarke/issues/463) |
+| DEF-003 | Multi-region Redis (geo-replication) | [#464](https://github.com/spaarke-dev/spaarke/issues/464) |
+| DEF-004 | Plain-text secret remediation (non-Redis) | [#465](https://github.com/spaarke-dev/spaarke/issues/465) |
+| DEF-005 | Evaluate Azure Managed Redis for prod | [#466](https://github.com/spaarke-dev/spaarke/issues/466) |
+| DEF-006 | Rename App Insights `spe-insights-dev-67e2xz` → canonical | [#467](https://github.com/spaarke-dev/spaarke/issues/467) |
 
-Neither is a regression — both were silent before this project. The project shipped the prep work (correct Meter name, Redis instrumentation registration, OTel exporter); R8 closes the last mile.
+Each entry has a paired GitHub Issue so the work is visible to anyone, not just whoever stumbles into this folder. `notes/r7-backlog.md` is retained as a historical decision record (initial backlog organized by R7 round); `notes/defer-issues.md` is the canonical tracker going forward.
 
 ## Problem Statement
 

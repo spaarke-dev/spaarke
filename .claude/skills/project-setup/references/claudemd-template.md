@@ -158,6 +158,39 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 
 ---
 
+## Deferrals & Issues — tracking obligation (read this)
+
+This project tracks deferred work + newly-discovered issues in TWO places, kept in sync:
+
+1. **`notes/defer-issues.md`** — source of truth (full context, links, traceability)
+2. **GitHub Issues** on the portfolio board (visibility — others can see + claim)
+
+### When to file
+
+| Situation | Use |
+|---|---|
+| Spec scope item dropped to keep this project shippable | DEF-{NNN} |
+| Refactor / cleanup > 2hr that's not in current spec | DEF-{NNN} |
+| Production / dev bug uncovered outside this project's responsibility | ISS-{NNN} |
+| Telemetry / monitoring gap requiring follow-up | ISS-{NNN} |
+| Failure mode discovered + worked around (not fixed) | ISS-{NNN} |
+
+### How to file
+
+Invoke `/project-defer-issue-tracking` (alias `/defer`) — it writes to BOTH places in one step.
+
+NEVER add an entry only to `notes/defer-issues.md` and skip the GitHub Issue. The whole point of this protocol is visibility. The `push-to-github` skill scans for entries without GitHub URLs and blocks push until they're filed.
+
+### CLAUDE.md §11 rule applies
+
+Every entry must name a concrete behavior or contract that fails without the work. "For future flexibility" / "improve testability" / "separation of concerns" = NOT a valid reason — the skill refuses to file.
+
+### Status
+
+See `notes/defer-issues.md` for the current rollup. Use `gh issue list --label {project-name}` for the team-visible view.
+
+---
+
 ## Resources
 
 ### Applicable ADRs
