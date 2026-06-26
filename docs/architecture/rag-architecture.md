@@ -34,8 +34,8 @@ The tenant-isolation principle (every index document carries `tenantId`) and the
 | RagIndexingJobHandler | `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs` | Service Bus job handler for single-document RAG indexing |
 | BulkRagIndexingJobHandler | `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/BulkRagIndexingJobHandler.cs` | Service Bus job handler for batch RAG indexing |
 | RagTelemetry | `src/server/api/Sprk.Bff.Api/Telemetry/RagTelemetry.cs` | OpenTelemetry-compatible metrics for RAG operations |
-| PlaybookEmbeddingService | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs` | Vector search for playbook dispatch (separate index: `playbook-embeddings`) |
-| PlaybookIndexingService | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexingService.cs` | Indexes playbook metadata into the playbook-embeddings index |
+| PlaybookEmbeddingService | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs` | Vector search for playbook dispatch (separate index: `spaarke-playbook-embeddings`) |
+| PlaybookIndexingService | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexingService.cs` | Indexes playbook metadata into the spaarke-playbook-embeddings index |
 | DocumentSearchTools | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs` | AI function tool: entity-scoped document search for SprkChat |
 | KnowledgeRetrievalTools | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/KnowledgeRetrievalTools.cs` | AI function tool: knowledge-source-scoped retrieval for SprkChat |
 

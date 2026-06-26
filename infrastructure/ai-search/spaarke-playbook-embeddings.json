@@ -1,5 +1,5 @@
 {
-  "name": "playbook-embeddings",
+  "name": "spaarke-playbook-embeddings",
   "fields": [
     {
       "// override-sortable-facetable": "key field: Azure forbids sortable/facetable on the key",

@@ -51,7 +51,7 @@ Decision confirmed 2026-06-25 after explicit owner question. Rationale:
 | Type | `index`, `references`, `embeddings`, `files` | — |
 | Full name | hyphenated, lowercase | `spaarke-records-index`, `spaarke-rag-references`, `spaarke-playbook-embeddings` |
 
-**Files index settled as plural** (`spaarke-files-index`, not `spaarke-file-index`) — matches code default in `AiSearchOptions.cs:19` and naming convention examples (`rag-references`, `playbook-embeddings`).
+**Files index settled as plural** (`spaarke-files-index`, not `spaarke-file-index`) — matches code default in `AiSearchOptions.cs:19` and naming convention examples (`spaarke-rag-references`, `spaarke-playbook-embeddings`).
 
 ### Forbidden patterns
 

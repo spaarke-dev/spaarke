@@ -3,7 +3,7 @@
   <metadata>
     <title>Atomic rename: playbook-embeddings → spaarke-playbook-embeddings (FR-10, rename 2 of 3)</title>
     <phase>2: Schema Preparation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>002, 010</dependencies>
     <blocks>020</blocks>
@@ -80,4 +80,39 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
   </execution>
+
+  <notes-results>
+    <completed-date>2026-06-26</completed-date>
+    <rigor-applied>STANDARD</rigor-applied>
+    <summary>Atomic rename of `playbook-embeddings` → `spaarke-playbook-embeddings` per FR-10 / NFR-07. All in-scope touchpoints updated in one PR-eligible change set.</summary>
+
+    <touchpoints-updated>
+      <schema-rename>infrastructure/ai-search/playbook-embeddings.json → spaarke-playbook-embeddings.json (git mv); JSON `name` field updated</schema-rename>
+      <bff-code>
+        <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs:46 — IndexName constant updated; doc-comments at lines 13, 25, 83, 184, 209, 336</file>
+        <file>src/server/api/Sprk.Bff.Api/Models/Ai/PlaybookEmbeddingDocument.cs:8,13,14 — doc-comments updated</file>
+        <file>src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEmbeddingEndpoints.cs:8 — doc-comment updated</file>
+        <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs:22,386,401,572,627 — doc-comments updated</file>
+        <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexDriftDetectionJob.cs:10 — doc-comment updated</file>
+      </bff-code>
+      <scripts>
+        <file>scripts/Index-ExistingPlaybooks.ps1:3,8,15,67,73 — $IndexName + comments updated</file>
+        <file>scripts/Create-PlaybookEmbeddingsIndex.ps1:3,12,13,21,56,61 — schema path + comments updated (retired by FR-07 in task 020; kept functional in interim)</file>
+      </scripts>
+      <docs>
+        <file>docs/architecture/chat-architecture.md:57 — updated</file>
+        <file>docs/architecture/rag-architecture.md:37,38 — updated</file>
+        <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md:54 — naming-convention example updated to canonical; line 59 (forbidden-patterns) intentionally preserved as historical narrative</file>
+      </docs>
+    </touchpoints-updated>
+
+    <verification>
+      <grep-result>Clean — no in-scope bare `playbook-embeddings` references remain. Remaining matches are confined to: other project specs/notes (out of scope), `.claude/agent-memory/researcher/` (historical narrative), `AI-SEARCH-INDEX-CATALOG.md` forbidden-patterns line (intentional preservation).</grep-result>
+    </verification>
+
+    <scope-discipline>
+      <not-touched>TASK-INDEX.md (owned by main session per task-013 instructions); property-policy patches from task 010; git commit/push (main session will commit as atomic NFR-07 PR)</not-touched>
+      <observation>Sibling task 014 (invoice rename) had already staged invoice-index-schema.json → spaarke-invoices-index.json — confirmed via `git status` after own git mv. No conflict.</observation>
+    </scope-discipline>
+  </notes-results>
 </task>

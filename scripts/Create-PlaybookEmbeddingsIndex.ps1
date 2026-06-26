@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Creates or updates the playbook-embeddings AI Search index using bearer token authentication.
+    Creates or updates the spaarke-playbook-embeddings AI Search index using bearer token authentication.
 
 .DESCRIPTION
     This script deploys the playbook embeddings index schema to Azure AI Search using the REST API
@@ -9,8 +9,8 @@
     The index supports vector search for playbook semantic matching using text-embedding-3-large
     (3072 dimensions) with HNSW algorithm and cosine metric.
 
-    Index name: playbook-embeddings
-    Schema: infrastructure/ai-search/playbook-embeddings.json
+    Index name: spaarke-playbook-embeddings
+    Schema: infrastructure/ai-search/spaarke-playbook-embeddings.json
     Vector: text-embedding-3-large (3072 dimensions), HNSW with cosine metric
 
 .PARAMETER SearchServiceName
@@ -18,7 +18,7 @@
 
 .PARAMETER SchemaPath
     Path to the playbook embeddings index schema JSON file. Defaults to the co-located
-    playbook-embeddings.json in infrastructure/ai-search/ relative to repo root.
+    spaarke-playbook-embeddings.json in infrastructure/ai-search/ relative to repo root.
 
 .PARAMETER ApiVersion
     Azure AI Search REST API version. Defaults to '2024-07-01'.
@@ -53,12 +53,12 @@ param(
 $ErrorActionPreference = "Stop"
 
 # -------------------------------------------------------------------
-# Resolve schema path (default: infrastructure/ai-search/playbook-embeddings.json)
+# Resolve schema path (default: infrastructure/ai-search/spaarke-playbook-embeddings.json)
 # -------------------------------------------------------------------
 if (-not $SchemaPath) {
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
     $repoRoot = Split-Path -Parent $scriptDir
-    $SchemaPath = Join-Path $repoRoot "infrastructure" "ai-search" "playbook-embeddings.json"
+    $SchemaPath = Join-Path $repoRoot "infrastructure" "ai-search" "spaarke-playbook-embeddings.json"
 }
 
 # -------------------------------------------------------------------
