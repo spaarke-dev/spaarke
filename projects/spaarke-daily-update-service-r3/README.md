@@ -1,5 +1,7 @@
 # Daily Briefing — Read-State Decoupling + Producer TTL Hardening (R3)
 
+> **Portfolio**: [Issue #455](https://github.com/spaarke-dev/spaarke/issues/455) · Epic [#421 AI Platform & Chat](https://github.com/spaarke-dev/spaarke/issues/421) · Status: Completed · Tasks: 7/7
+>
 > **Last Updated**: 2026-06-25
 >
 > **Status**: ✅ Complete — Partially Verified (R3 core wins shipped; broader UAT findings absorbed by R4)
