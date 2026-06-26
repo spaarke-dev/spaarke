@@ -81,6 +81,10 @@ export const NODE_TYPE_INFO: Record<PlaybookNodeType, { label: string; descripti
     label: 'Lookup User Membership',
     description: 'Resolve user record IDs that have membership on a parent entity (e.g. matter team members)',
   },
+  entityNameValidator: {
+    label: 'Entity Name Validator',
+    description: 'Scrub LLM-emitted entity names not present in an allow-list (logs hallucination_detected)',
+  },
   wait: {
     label: 'Wait',
     description: 'Pause workflow for a duration',
