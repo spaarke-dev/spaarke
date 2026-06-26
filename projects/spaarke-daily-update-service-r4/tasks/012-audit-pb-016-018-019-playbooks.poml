@@ -3,7 +3,7 @@
   <metadata>
     <title>Audit deployed sprk_configjson for PB-016, PB-018, PB-019 (already-migrated playbooks)</title>
     <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>011</dependencies>
     <blocks>015</blocks>
@@ -12,6 +12,14 @@
     <rigor-reason>Read-only audit comparing deployed vs repo JSON. No code change; produces a divergence report consumed by task 015 (reconcile). Parallel-safe with sibling audit tasks 013, 014.</rigor-reason>
     <parallel-group>C</parallel-group>
     <parallel-safe>true</parallel-safe>
+    <completed>2026-06-25</completed>
+    <completion-notes>
+      Audit report written to `projects/spaarke-daily-update-service-r4/notes/audit/012-pb-016-018-019.md`.
+      Verdicts: PB-016 DIVERGENT-MAJOR; PB-018 DIVERGENT-MAJOR; PB-019 DIVERGENT-MAJOR.
+      AC-5b: 0/3 deployed playbooks contain an ActionType 52 LookupUserMembership node — spec FR-5 claim is empirically falsified. Owner escalation flagged in report for task 015 reconcile decisions.
+      Side findings (similar in spirit to task 011's NVARCHAR(10) truncation): (1) spec/task-prompt PB-code → playbook-name mapping is INVERTED for docs/emails — actual: PB-016=Emails, PB-018=Documents, PB-019=Events. (2) `sprk_configjson` storage model splits across two tables (`sprk_analysisplaybook` for header, `sprk_playbooknode` rows for graph) — reconcile must split monolithic repo JSON before redeploy. (3) PB-018 schedule diverges (deployed=hourly, repo=daily 06:00). (4) PB-019 Create Notification has runtime template-binding bug (`{{subject}}` references a field the deployed query doesn't return).
+      No deployed rows mutated (read-only). Repo source-of-truth files untouched. Task 015 must reconcile based on this audit + sibling audits 013/014.
+    </completion-notes>
   </metadata>
 
   <prompt>Follow the `jps-playbook-audit` skill. For each of PB-016 (notification-new-documents), PB-018 (notification-new-emails), and PB-019 (notification-new-events), read the deployed `sprk_configjson` from spaarkedev1 via MCP `read_query`. Compare against the canonical repo JSON at `projects/spaarke-daily-update-service/notes/playbooks/notification-new-{documents,emails,events}.json`. Confirm presence of a Node referencing ActionType 52 (`LookupUserMembership`) in each deployed config. Document any divergences (deployed vs repo) in `notes/audit/012-pb-016-018-019.md` for downstream consumption by task 015 (reconcile).</prompt>
