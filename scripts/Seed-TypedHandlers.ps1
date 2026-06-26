@@ -177,6 +177,16 @@ $RowFiles = @{
     # (intentional — default user affordance available in every chat session; handler-side
     # gates supply the authorization surface). sprk_availableincontexts = Chat (100000001).
     "UPDATE-WORKSPACE-TAB"             = "$RepoRoot/infra/dataverse/sprk_analysistool-update-workspace-tab-row.json"
+    # R6 Pillar 6b / D-C-07 / task 056 — CloseWorkspaceTabHandler: single row exposing the
+    # close_workspace_tab(tabId) chat tool. Removes a non-pinned tab from the current chat
+    # session's workspace via IWorkspaceStateService.CloseTabAsync. Pinned tabs are refused
+    # with structured 'pinned_tab_refused' response (Q8 USER WINS — closing pinned content
+    # requires explicit user action). sprk_requiredcapability = null (intentional — default
+    # user affordance available in every chat session). sprk_availableincontexts = Chat
+    # (100000001). Added to seed script 2026-06-25 (R6 surface completion sprint) — closes
+    # TIER-C UAT primary failure where LLM lacked the ability to close tabs and read
+    # workspace content despite the C# handlers being deployed.
+    "CLOSE-WORKSPACE-TAB"              = "$RepoRoot/infra/dataverse/sprk_analysistool-close-workspace-tab-row.json"
     # R6 Pillar 7 / D-C-23 / task 069 — ManagePinnedContextHandler: single row exposing the
     # manage_pinned_context(action, pinType, title, content?) chat tool. Creates or deletes
     # PinnedContextItem rows via IPinnedContextRepository. Voice command surface (FR-47):
