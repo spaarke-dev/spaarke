@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF refactor: records-index tenantId writer + reader (FR-12 code side)</title>
     <phase>4: Code + Config Refactor</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>015, 030</dependencies>
     <blocks>046, 050</blocks>

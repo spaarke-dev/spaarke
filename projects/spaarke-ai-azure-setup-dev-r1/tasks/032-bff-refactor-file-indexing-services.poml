@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF refactor: file indexing + reference services (FR-13 expanded scope)</title>
     <phase>4: Code + Config Refactor</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>046</blocks>

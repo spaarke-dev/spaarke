@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF refactor: Job handlers (RagIndexingJobHandler + BulkRagIndexingJobHandler + InvoiceIndexingJobHandler) (FR-13 + FR-10)</title>
     <phase>4: Code + Config Refactor</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>014, 030</dependencies>
     <blocks>046</blocks>

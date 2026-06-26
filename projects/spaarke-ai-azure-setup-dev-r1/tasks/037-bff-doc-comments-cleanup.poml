@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF doc-comment cleanup (FR-13 cosmetic — 4 BFF files)</title>
     <phase>4: Code + Config Refactor</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>0.5</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>046</blocks>

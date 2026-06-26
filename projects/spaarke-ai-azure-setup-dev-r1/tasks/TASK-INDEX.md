@@ -42,13 +42,13 @@
 | 020 | Write Deploy-AllIndexes.ps1 | 3 | ✅ | FULL | 001, 002, 003, 010-016 | — |
 | 021 | Validate Deploy-AllIndexes.ps1 (-DryRun + -VerifyOnly) | 3 | ✅ | STANDARD | 020 | — |
 | 030 | BFF Configuration options classes (AiSearchOptions + AnalysisOptions) | 4 | ✅ | FULL | 011, 013, 014 | — (DiscoveryIndexName removal deferred to 046) |
-| 031 | BFF refactor: RAG pipeline services | 4 | 🔲 | FULL | 030 | Group C |
-| 032 | BFF refactor: file indexing + reference services | 4 | 🔲 | FULL | 030 | Group C |
-| 033 | BFF refactor: PlaybookEmbedding services | 4 | 🔲 | FULL | 013, 030 | Group C |
-| 034 | BFF refactor: KnowledgeDeployment + KnowledgeBaseEndpoints | 4 | 🔲 | FULL | 030 | Group C |
-| 035 | BFF refactor: Job handlers (Rag + Invoice) | 4 | 🔲 | FULL | 014, 030 | Group C |
-| 036 | BFF refactor: records-index tenantId writer + reader | 4 | 🔲 | FULL | 015, 030 | Group C |
-| 037 | BFF doc-comment cleanup (4 BFF files) | 4 | 🔲 | MINIMAL | 030 | Group C |
+| 031 | BFF refactor: RAG pipeline services | 4 | 🟡 | FULL | 030 | Group C (BLOCKED — DiscoveryIndexName structural refactor; user decision needed) |
+| 032 | BFF refactor: file indexing + reference services | 4 | ✅ | FULL | 030 | Group C (verified zero-match — already canonical from R5 work) |
+| 033 | BFF refactor: PlaybookEmbedding services | 4 | ✅ | FULL | 013, 030 | Group C (verified zero-match — task 013 covered code) |
+| 034 | BFF refactor: KnowledgeDeployment + KnowledgeBaseEndpoints | 4 | ✅ | FULL | 030 | Group C (4 edits — defaults + doc-comments) |
+| 035 | BFF refactor: Job handlers (Rag + Invoice) | 4 | ✅ | FULL | 014, 030 | Group C (verified zero-match — task 014 covered code) |
+| 036 | BFF refactor: records-index tenantId writer + reader | 4 | ✅ | FULL | 015, 030 | Group C (C# done in 015; PS script tenantId added) |
+| 037 | BFF doc-comment cleanup (4 BFF files) | 4 | ✅ | MINIMAL | 030 | Group C (5 doc-comment edits) |
 | 038 | appsettings + templates cleanup (FR-13 + FR-14 + FR-20) | 4 | 🔲 | STANDARD | 030 | Group D |
 | 039 | Frontend doc-comments cleanup (4 client files) | 4 | 🔲 | MINIMAL | 011 | Group D |
 | 040 | .claude/ doc updates (FR-13) | 4 | 🔲 | MINIMAL | 011 | — (touches .claude/) |
