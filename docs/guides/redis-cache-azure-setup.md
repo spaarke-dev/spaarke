@@ -256,6 +256,147 @@ If post-cutover verification fails (`/healthz` returns non-200, startup log show
 
 Rotate the Redis primary key with minimal downtime. Frequency: per organizational policy (typical: every 90 days).
 
+### 6.1 Per-Environment OIDC Service-Principal Provisioning (one-time setup, per FR-09)
+
+**Operator must complete this section BEFORE enabling the automated rotation workflow** ([`.github/workflows/redis-key-rotation.yml`](../../.github/workflows/redis-key-rotation.yml), provisioned by task 011 of `spaarke-redis-cache-remediation-r2`). The workflow consumes three distinct GitHub Environment secrets — one per Azure environment — each backed by a separate Azure AD service principal scoped to ONLY that environment's resources.
+
+#### Rationale (why three SPs, not one)
+
+- **Blast-radius isolation**: a compromised prod SP MUST NOT be able to rotate dev (and vice versa). A single shared SP with org-wide write across all three envs collapses the blast radius of any credential leak to "all envs at once."
+- **Compliance posture**: per-env separation of duties is a standard audit expectation (SOC 2 CC6.1, ISO 27001 A.9.2). Per-env SPs make the access boundary auditable via a single `az role assignment list` per principal.
+- **Least privilege**: each SP holds only the three role assignments needed to rotate one env (KV secret write, Redis key regenerate, App Service restart). No cross-env grants.
+
+#### Step 1 — Create one service principal per environment
+
+Replace `{SUB_ID}` with the target Azure subscription ID for each env (dev/staging/prod may share a subscription or use separate ones; commands below are per-env regardless).
+
+```bash
+# Dev
+az ad sp create-for-rbac \
+  --name "sp-spaarke-redis-rotation-dev" \
+  --role "Reader" \
+  --scopes "/subscriptions/{SUB_ID_DEV}/resourceGroups/rg-spaarke-dev" \
+  --query "{clientId:appId, tenantId:tenant}" -o json
+# Record output clientId → AZURE_CLIENT_ID_DEV
+
+# Staging
+az ad sp create-for-rbac \
+  --name "sp-spaarke-redis-rotation-staging" \
+  --role "Reader" \
+  --scopes "/subscriptions/{SUB_ID_STAGING}/resourceGroups/rg-spaarke-staging" \
+  --query "{clientId:appId, tenantId:tenant}" -o json
+# Record output clientId → AZURE_CLIENT_ID_STAGING
+
+# Prod
+az ad sp create-for-rbac \
+  --name "sp-spaarke-redis-rotation-prod" \
+  --role "Reader" \
+  --scopes "/subscriptions/{SUB_ID_PROD}/resourceGroups/rg-spaarke-prod" \
+  --query "{clientId:appId, tenantId:tenant}" -o json
+# Record output clientId → AZURE_CLIENT_ID_PROD
+```
+
+The `Reader` grant at RG scope is a placeholder so `create-for-rbac` succeeds; the operationally meaningful grants are the three narrow role assignments in Step 3. The Reader grant MAY be removed after Step 3 completes if your security policy prefers a strict "only the three rotation roles" posture.
+
+#### Step 2 — Configure federated identity credentials (OIDC, no client secrets)
+
+For each SP, add a federated identity credential that trusts GitHub Actions running in the corresponding GitHub Environment. Repeat per env (replace `{APP_ID}` with the SP's appId from Step 1, `{ENV}` with `dev`/`staging`/`prod`):
+
+```bash
+az ad app federated-credential create \
+  --id {APP_ID} \
+  --parameters '{
+    "name": "github-spaarke-redis-rotation-{ENV}",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:spaarke-dev/spaarke:environment:{ENV}",
+    "audiences": ["api://AzureADTokenExchange"]
+  }'
+```
+
+The `subject` claim binds the credential to the specific GitHub Environment, so a workflow job running in env `dev` cannot mint a token for the `prod` SP even if it knows the prod clientId.
+
+#### Step 3 — Assign narrowly-scoped roles (env-specific resource IDs only)
+
+For each env, run all three assignments. **Critical**: scopes MUST be the env-specific resource ID, not the RG or subscription. Replace `{SUB_ID}`, `{KV_NAME}`, `{REDIS_NAME}`, `{APP_SERVICE_NAME}`, `{SP_OBJECT_ID}` (the SP's objectId — get via `az ad sp show --id {APP_ID} --query id -o tsv`).
+
+```bash
+# (a) Key Vault Secrets Officer — write Redis-ConnectionString secret
+az role assignment create \
+  --assignee {SP_OBJECT_ID} \
+  --role "Key Vault Secrets Officer" \
+  --scope "/subscriptions/{SUB_ID}/resourceGroups/rg-spaarke-{ENV}/providers/Microsoft.KeyVault/vaults/{KV_NAME}"
+
+# (b) Redis cache contributor — regenerate primary key
+# Built-in "Redis Cache Contributor" includes Microsoft.Cache/redis/regenerateKey/action and listKeys/action.
+# If your security policy disallows the built-in (it also grants write/delete on the cache resource),
+# create a custom role "spaarke-redis-key-rotator" with ONLY:
+#   - Microsoft.Cache/redis/listKeys/action
+#   - Microsoft.Cache/redis/regenerateKey/action
+#   - Microsoft.Cache/redis/read
+# and assign that instead.
+az role assignment create \
+  --assignee {SP_OBJECT_ID} \
+  --role "Redis Cache Contributor" \
+  --scope "/subscriptions/{SUB_ID}/resourceGroups/rg-spaarke-{ENV}/providers/Microsoft.Cache/Redis/{REDIS_NAME}"
+
+# (c) Website Contributor — restart App Service so the new KV reference is picked up
+# "Website Contributor" includes Microsoft.Web/sites/restart/action. A tighter custom role
+# limited to restart/action only is acceptable if preferred.
+az role assignment create \
+  --assignee {SP_OBJECT_ID} \
+  --role "Website Contributor" \
+  --scope "/subscriptions/{SUB_ID}/resourceGroups/rg-spaarke-{ENV}/providers/Microsoft.Web/sites/{APP_SERVICE_NAME}"
+```
+
+For env `dev`, the resource names per current cutover baseline are: `{KV_NAME}=spaarke-spekvcert`, `{REDIS_NAME}=spaarke-bff-redis-dev`, `{APP_SERVICE_NAME}=spaarke-bff-dev`. Staging and prod names follow the same `{prefix}-{env}` pattern (confirm against env-specific cutover records).
+
+#### Step 4 — Publish the clientId to the corresponding GitHub Environment
+
+Create the three GitHub Environments first (if they do not already exist) at `https://github.com/spaarke-dev/spaarke/settings/environments` — names: `dev`, `staging`, `prod`. Add required reviewers + deployment branch rules on `prod` per organizational policy.
+
+Then publish each SP's clientId as an environment-scoped secret (per spec FR-09 naming):
+
+```bash
+gh secret set AZURE_CLIENT_ID_DEV     --env dev     --body "{APP_ID_DEV}"
+gh secret set AZURE_CLIENT_ID_STAGING --env staging --body "{APP_ID_STAGING}"
+gh secret set AZURE_CLIENT_ID_PROD    --env prod    --body "{APP_ID_PROD}"
+```
+
+Also publish `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` per env (these may be repo-level secrets if all envs share the same tenant/sub, or env-scoped if they differ).
+
+#### Step 5 — Verify isolation
+
+For each SP, list ALL role assignments across ALL subscriptions and confirm the only env-meaningful grants are scoped to that SP's env.
+
+```bash
+az role assignment list --assignee {SP_OBJECT_ID_DEV}     --all -o table
+az role assignment list --assignee {SP_OBJECT_ID_STAGING} --all -o table
+az role assignment list --assignee {SP_OBJECT_ID_PROD}    --all -o table
+```
+
+Expected shape per SP (three rows, plus the placeholder `Reader` from Step 1 if retained):
+
+```
+Principal                                Role                          Scope
+--------------------------------------   ---------------------------   -----------------------------------------------------------------------------
+sp-spaarke-redis-rotation-{env}          Key Vault Secrets Officer     /subscriptions/.../rg-spaarke-{env}/providers/Microsoft.KeyVault/vaults/...
+sp-spaarke-redis-rotation-{env}          Redis Cache Contributor       /subscriptions/.../rg-spaarke-{env}/providers/Microsoft.Cache/Redis/...
+sp-spaarke-redis-rotation-{env}          Website Contributor           /subscriptions/.../rg-spaarke-{env}/providers/Microsoft.Web/sites/...
+```
+
+**FR-09 acceptance**: every Scope column value MUST contain the SP's own env name (`rg-spaarke-{env}`) and MUST NOT reference any other env's resources. If `az role assignment list --assignee {SP_OBJECT_ID_PROD}` shows any scope under `rg-spaarke-dev` or `rg-spaarke-staging`, isolation is broken — remove the cross-env assignment before enabling the workflow.
+
+#### Operator one-time setup checklist
+
+- [ ] 1. Create three SPs via Step 1 (`sp-spaarke-redis-rotation-{dev|staging|prod}`); record each appId + objectId.
+- [ ] 2. Add federated identity credential per SP, bound to `repo:spaarke-dev/spaarke:environment:{env}` (Step 2).
+- [ ] 3. Assign three narrow roles per SP — KV Secrets Officer, Redis Cache Contributor, Website Contributor — at env-specific resource scopes (Step 3).
+- [ ] 4. Create three GitHub Environments (`dev`, `staging`, `prod`) with required reviewers on prod; publish `AZURE_CLIENT_ID_{ENV}` as env-scoped secret (Step 4).
+- [ ] 5. Verify isolation per SP via `az role assignment list --assignee {SP_OBJECT_ID} --all` (Step 5); confirm no cross-env scopes.
+- [ ] 6. Enable the cron schedule in [`.github/workflows/redis-key-rotation.yml`](../../.github/workflows/redis-key-rotation.yml) (the workflow is dormant until these SPs exist).
+
+Once this section is complete, the automated rotation workflow (task 011) consumes these SPs via OIDC token exchange — no client secrets stored anywhere.
+
 ### Steps
 
 1. **Verify current state** — capture current secret version: `az keyvault secret show --vault-name <kv> --name Redis-ConnectionString --query attributes.version -o tsv`. Record in cutover/rotation log.
