@@ -1,4 +1,4 @@
-# BISECT STEP 3 — add classify job (paths-filter + docs-only flag)
+# BISECT STEP 4 — add tier1 reusable workflow call (NOT tier2 yet)
 name: CI
 
 on:
@@ -28,53 +28,50 @@ jobs:
       ci_workflows: ${{ steps.filter.outputs.ci_workflows }}
       docs_only: ${{ steps.docs-only-flag.outputs.value }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           fetch-depth: ${{ github.event_name == 'pull_request' && 1 || 0 }}
-
-      - name: Classify changed paths
-        id: filter
+      - id: filter
         uses: dorny/paths-filter@v3
         with:
           filters: |
             bff:
               - 'src/server/api/Sprk.Bff.Api/**'
               - 'src/server/shared/**'
-              - 'tests/integration/auth/**'
-              - 'tests/integration/regression/**'
-              - 'tests/unit/Sprk.Bff.Api.Tests/**'
             spaarke_ai:
               - 'src/solutions/SpaarkeAi/**'
             docs:
               - 'docs/**'
-              - 'projects/**'
               - '**.md'
               - '.claude/**'
             ci_workflows:
               - '.github/workflows/**'
-
-      - name: Derive docs_only flag
-        id: docs-only-flag
+      - id: docs-only-flag
         shell: bash
         run: |
-          docs='${{ steps.filter.outputs.docs }}'
-          bff='${{ steps.filter.outputs.bff }}'
-          spaarke_ai='${{ steps.filter.outputs.spaarke_ai }}'
-          ci_workflows='${{ steps.filter.outputs.ci_workflows }}'
-          if [[ "$docs" == "true" && "$bff" != "true" && "$spaarke_ai" != "true" && "$ci_workflows" != "true" ]]; then
+          if [[ "${{ steps.filter.outputs.docs }}" == "true" && "${{ steps.filter.outputs.bff }}" != "true" && "${{ steps.filter.outputs.spaarke_ai }}" != "true" && "${{ steps.filter.outputs.ci_workflows }}" != "true" ]]; then
             echo "value=true" >> "$GITHUB_OUTPUT"
           else
             echo "value=false" >> "$GITHUB_OUTPUT"
           fi
 
+  tier1:
+    name: Tier 1 (Blocking)
+    needs: classify
+    if: needs.classify.outputs.docs_only != 'true'
+    uses: ./.github/workflows/ci-tier1-blocking.yml
+    secrets: inherit
+    with:
+      bff_changed: ${{ needs.classify.outputs.bff }}
+      spaarke_ai_changed: ${{ needs.classify.outputs.spaarke_ai }}
+
   Router:
     name: Router
-    needs: classify
+    if: always()
+    needs: [classify, tier1]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Bisect step 3 echo
+      - name: Bisect step 4 result
         run: |
-          echo "BISECT STEP 3 — classify added."
-          echo "bff=${{ needs.classify.outputs.bff }} ai=${{ needs.classify.outputs.spaarke_ai }} docs=${{ needs.classify.outputs.docs }} ci=${{ needs.classify.outputs.ci_workflows }} docs_only=${{ needs.classify.outputs.docs_only }}"
+          echo "classify=${{ needs.classify.result }} tier1=${{ needs.tier1.result }}"
