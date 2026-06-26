@@ -1,7 +1,7 @@
 using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -25,7 +25,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 public static class ProjectClosureEndpoint
 {
     private const string ExternalAccessEntitySet = "sprk_externalrecordaccesses";
-    private const string CacheKeyPrefix = "sdap:external:access:";
+    // Resource identifier for ITenantCache (FR-05). Per-Contact participation cache —
+    // not an authz decision. Tenant scope is derived from the caller's 'tid' claim.
+    private const string ExternalAccessResource = "external-access-grant";
+    private const int CacheVersion = 1;
 
     /// <summary>
     /// Registers the close-project endpoint on the external-access management group.
@@ -67,7 +70,7 @@ public static class ProjectClosureEndpoint
         CloseProjectRequest request,
         DataverseWebApiClient dataverseClient,
         SpeContainerMembershipService speContainerMembership,
-        IDistributedCache cache,
+        ITenantCache cache,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -127,7 +130,8 @@ public static class ProjectClosureEndpoint
         }
 
         // Step 4: Invalidate Redis cache for all affected Contacts
-        await InvalidateContactCachesAsync(cache, affectedContactIds, logger, ct);
+        var tenantId = ExtractTenantId(httpContext);
+        await InvalidateContactCachesAsync(cache, tenantId, affectedContactIds, logger, ct);
 
         logger.LogInformation(
             "[CLOSE-PROJECT] Project closure complete: ProjectId={ProjectId}, " +
@@ -233,20 +237,29 @@ public static class ProjectClosureEndpoint
     /// Uses fire-and-forget per contact to avoid blocking the response on cache errors.
     /// </summary>
     private static async Task InvalidateContactCachesAsync(
-        IDistributedCache cache,
+        ITenantCache cache,
+        string? tenantId,
         IReadOnlyList<Guid> contactIds,
         ILogger logger,
         CancellationToken ct)
     {
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            logger.LogWarning(
+                "[CLOSE-PROJECT] No tenant claim found — skipping cache invalidation for {Count} Contacts",
+                contactIds.Count);
+            return;
+        }
+
         foreach (var contactId in contactIds)
         {
-            var cacheKey = $"{CacheKeyPrefix}{contactId}";
             try
             {
-                await cache.RemoveAsync(cacheKey, ct);
+                await cache.RemoveAsync(
+                    tenantId, ExternalAccessResource, contactId.ToString(), CacheVersion,
+                    ct: ct);
                 logger.LogDebug(
-                    "[CLOSE-PROJECT] Invalidated Redis cache for Contact {ContactId} (key: {CacheKey})",
-                    contactId, cacheKey);
+                    "[CLOSE-PROJECT] Invalidated Redis cache for Contact {ContactId}", contactId);
             }
             catch (Exception ex)
             {
@@ -258,6 +271,14 @@ public static class ProjectClosureEndpoint
             }
         }
     }
+
+    /// <summary>
+    /// Extracts the Azure AD tenant ID ('tid' claim) from the authenticated HttpContext.
+    /// Returns null when no claim is present (in which case cache invalidation is skipped).
+    /// </summary>
+    private static string? ExtractTenantId(HttpContext httpContext)
+        => httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 
     // =========================================================================
     // Private types

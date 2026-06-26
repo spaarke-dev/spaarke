@@ -1,0 +1,65 @@
+<task id="CICD-043" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Augment .github/workflows/nightly-health.yml with Tier 3 jobs (full integration + coverage observation + Trivy + dep audit)</title>
+    <status>complete</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>2 - Stream A</phase>
+    <stream>A - CI tiering</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>ci, workflow, tier3, nightly, augmentation</tags>
+  </metadata>
+
+  <prompt>
+    Per spec FR-A04: Tier 3 = ADDITIVE contributions to existing `nightly-health.yml`. NO new workflow file. Add 4 new jobs hooking into the existing report-dependency pattern (which already has flake-hunt, bundle-size, vuln-scan, report jobs): (1) full integration tests, (2) coverage observation (track but never gate), (3) Trivy scan, (4) dependency audit.
+  </prompt>
+
+  <role>CI/CD engineer extending an existing scheduled health workflow.</role>
+
+  <goal>`nightly-health.yml` runs nightly with 4 additional jobs whose outputs feed the existing rolling health-report issue.</goal>
+
+  <inputs>
+    <file purpose="pre-augment-source">.github/workflows/nightly-health.yml</file>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-A04">NO new workflow file. Augment existing nightly-health.yml.</constraint>
+    <constraint source="existing-pattern">Each new job follows job-output → report-dependency shape (job emits structured output; report job aggregates).</constraint>
+    <constraint source="spec MUST NOT">No coverage-% gating. Coverage measurement is observation only.</constraint>
+    <constraint source="project autonomous">FULL rigor — Step 9.5.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>nightly-health augmentation</topic>
+    <files>
+      <file>.github/workflows/nightly-health.yml (current 4 jobs: flake-hunt, bundle-size, vuln-scan, report)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current nightly-health.yml end-to-end. Identify report job's `needs:` and outputs-aggregation pattern.</step>
+    <step order="2">Author full-integration job: run all `tests/integration/**` suites; emit pass/fail summary; no gating</step>
+    <step order="3">Author coverage-observation job: collect coverage from full unit + integration runs; publish artifact + summary; no gating (per spec MUST NOT)</step>
+    <step order="4">Author Trivy job: full filesystem scan + container scan; emit high-severity count</step>
+    <step order="5">Author dep-audit job: `dotnet list package --vulnerable --include-transitive` + `npm audit` on key packages; emit severity counts</step>
+    <step order="6">Update report job's `needs:` to include the 4 new jobs; extend report-issue template with their outputs</step>
+    <step order="7">Validate with actionlint</step>
+    <step order="8">Step 9.5</step>
+  </steps>
+
+  <outputs>
+    <output type="workflow">.github/workflows/nightly-health.yml (augmented, not replaced)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File passes actionlint</criterion>
+    <criterion testable="true">4 new jobs added: full-integration, coverage-observation, trivy, dep-audit</criterion>
+    <criterion testable="true">All 4 feed into report job's needs/aggregation</criterion>
+    <criterion testable="true">No coverage % gating present (coverage observation only)</criterion>
+    <criterion testable="true">Existing 4 jobs (flake-hunt, bundle-size, vuln-scan, report) preserved unchanged</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+  </acceptance-criteria>
+</task>

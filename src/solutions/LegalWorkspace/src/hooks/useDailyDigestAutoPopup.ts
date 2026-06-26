@@ -1,14 +1,38 @@
 /**
- * useDailyDigestAutoPopup — Opens the Daily Digest (sprk_dailyupdate) Code Page
- * dialog automatically on first workspace launch per browser session, if the
- * user's autoPopup preference is enabled.
+ * useDailyDigestAutoPopup — Opens the Daily Briefing (sprk_dailyupdate) Code
+ * Page dialog automatically on first workspace launch per browser session,
+ * controlled by the user's `autoPopup` preference from the canonical R4
+ * Daily Briefing preferences schema (sprk_userpreference type 100000002).
  *
- * Behavior:
- *   1. Queries sprk_userpreference for the DailyDigestAutoPopup preference type.
- *   2. If no preference record exists, auto-popup is enabled by default (opt-out model).
- *   3. Checks sessionStorage for "spaarke_dailyDigestShown" — only fires once per session.
- *   4. Opens sprk_dailyupdate via Xrm.Navigation.navigateTo (60% × 80% dialog).
- *   5. Sets the sessionStorage flag so subsequent navigations don't re-trigger.
+ * R4 task 043 / FR-17d (2026-06-26) — REWIRED:
+ *   - Pre-R4 (R1 era): read preference type 100000001 (DailyDigestAutoPopup)
+ *     with JSON shape `{ enabled: boolean }`.
+ *   - R4: read preference type 100000002 (DailyDigest — shared by the
+ *     widget's preferences dropdown) with JSON shape including
+ *     `{ autoPopup: boolean, ... }`. This unifies "auto-popup on workspace
+ *     launch" with the in-widget preferences toggle the user already
+ *     manipulates — they are now the SAME preference, not two parallel ones.
+ *   - Default behavior (opt-out model) preserved: when no preference record
+ *     exists, auto-popup IS enabled (matches `DEFAULT_DAILY_DIGEST_PREFERENCES.autoPopup === true`).
+ *
+ * Behavior (unchanged from R1):
+ *   1. Queries sprk_userpreference for the DailyDigest preference type.
+ *   2. If no preference record exists, auto-popup is enabled by default
+ *      (opt-out model — matches the R4 widget defaults).
+ *   3. Checks sessionStorage for "spaarke_dailyDigestShown" — only fires
+ *      once per session.
+ *   4. Opens sprk_dailyupdate (the standalone Daily Briefing Code Page
+ *      hosting `DailyBriefingApp`) via Xrm.Navigation.navigateTo
+ *      (60% × 80% dialog).
+ *   5. Sets the sessionStorage flag so subsequent navigations don't
+ *      re-trigger.
+ *
+ * SpaarkeAi-embedding suppression (unchanged):
+ *   SpaarkeAi's `main.tsx` writes the sessionStorage sentinel BEFORE any
+ *   React tree mounts (see `suppressLegalWorkspaceDailyDigestAutoPopup`)
+ *   so embedded LegalWorkspace instances never auto-popup the modal — the
+ *   daily-briefing widget renders INLINE in SpaarkeAi via the workspace
+ *   section registry instead.
  *
  * Usage:
  *   useDailyDigestAutoPopup({ webApi, userId });
@@ -23,16 +47,26 @@ import type { IWebApi } from "../types/xrm";
 // ---------------------------------------------------------------------------
 
 /**
- * Dataverse choice value for the DailyDigestAutoPopup preference type.
- * Must match the sprk_preferencetype option set value in Dataverse.
- * (100000000 = TodoKanbanThresholds, 100000001 = DailyDigestAutoPopup)
+ * Dataverse choice value for the canonical R4 DailyDigest preference type.
+ *
+ * Mirrors `PREFERENCE_TYPE_DAILY_DIGEST` in
+ * `@spaarke/daily-briefing-components/src/types/notifications.ts`. We
+ * intentionally inline the constant rather than import to keep
+ * LegalWorkspace's dependency graph stable (no new NPM dependencies per
+ * R4 task 043 constraints). Schema contract under test in
+ * `Spaarke.DailyBriefing.Components/test/autoPopupPreferenceContract.test.ts`.
+ *
+ * sprk_preferencetype option set values:
+ *   100000000 = TodoKanbanThresholds
+ *   100000001 = (legacy) DailyDigestAutoPopup — DEPRECATED in R4
+ *   100000002 = DailyDigest (autoPopup, disabledChannels, dueWithinDays, timeWindow)
  */
-const PREFERENCE_TYPE_DAILY_DIGEST_AUTO_POPUP = 100000001;
+const PREFERENCE_TYPE_DAILY_DIGEST = 100000002;
 
 /** SessionStorage key — prevents re-opening the digest within the same browser session. */
 const SESSION_KEY = "spaarke_dailyDigestShown";
 
-/** Web resource name for the Daily Digest Code Page. */
+/** Web resource name for the Daily Briefing standalone Code Page. */
 const DAILY_DIGEST_WEB_RESOURCE = "sprk_dailyupdate";
 
 // ---------------------------------------------------------------------------
@@ -44,6 +78,38 @@ export interface IUseDailyDigestAutoPopupOptions {
   webApi: IWebApi;
   /** GUID of the current user (context.userSettings.userId). */
   userId: string;
+}
+
+// ---------------------------------------------------------------------------
+// Pure parsing helper (exported for unit testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse the `autoPopup` field from a raw `sprk_preferencevalue` JSON string.
+ *
+ * Contract (FR-17d):
+ *   - Returns `true` if the JSON parses and contains `autoPopup === true`.
+ *   - Returns `false` if the JSON parses and contains `autoPopup === false`.
+ *   - Returns `true` if the JSON is missing the `autoPopup` field (opt-out
+ *     default — matches `DEFAULT_DAILY_DIGEST_PREFERENCES.autoPopup`).
+ *   - Returns `true` if the JSON is malformed/empty (defensive — opt-out
+ *     model, don't silently disable the popup on parse failure).
+ *
+ * Mirrors the merge-with-defaults semantics in the canonical
+ * `mergeWithDefaults` helper at
+ * `@spaarke/daily-briefing-components/src/services/preferencesService.ts:155`.
+ * Schema parity is asserted in
+ * `Spaarke.DailyBriefing.Components/test/autoPopupPreferenceContract.test.ts`.
+ */
+export function parseAutoPopupFromPreferenceJson(rawValue: string | undefined | null): boolean {
+  if (!rawValue) return true;
+  try {
+    const parsed = JSON.parse(rawValue) as { autoPopup?: unknown };
+    if (typeof parsed.autoPopup === "boolean") return parsed.autoPopup;
+    return true; // missing field → default (opt-out)
+  } catch {
+    return true; // malformed → default (opt-out)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -73,29 +139,27 @@ export function useDailyDigestAutoPopup(
 
     (async () => {
       try {
-        // Check user preference — opt-out model: enabled by default
+        // Check user preference — opt-out model: enabled by default.
+        // R4 task 043 (2026-06-26): now reads PREFERENCE_TYPE_DAILY_DIGEST
+        // (100000002, the canonical R4 widget preferences row) and parses
+        // the `autoPopup` field per `DailyDigestPreferences` schema.
         const service = new DataverseService(webApi);
         const result = await service.getUserPreferences(
           userId,
-          PREFERENCE_TYPE_DAILY_DIGEST_AUTO_POPUP
+          PREFERENCE_TYPE_DAILY_DIGEST
         );
 
         if (result.success && result.data.length > 0) {
-          // Preference record exists — check if user explicitly disabled auto-popup
-          try {
-            const parsed = JSON.parse(result.data[0].sprk_preferencevalue) as {
-              enabled?: boolean;
-            };
-            if (parsed.enabled === false) {
-              // User opted out — mark session so we don't re-query
-              sessionStorage.setItem(SESSION_KEY, "opted-out");
-              return;
-            }
-          } catch {
-            // Malformed JSON — treat as enabled (default)
+          // Preference record exists — check the R4 `autoPopup` field
+          const rawValue = result.data[0].sprk_preferencevalue;
+          const autoPopup = parseAutoPopupFromPreferenceJson(rawValue);
+          if (!autoPopup) {
+            // User opted out — mark session so we don't re-query next render
+            sessionStorage.setItem(SESSION_KEY, "opted-out");
+            return;
           }
         }
-        // No preference record OR enabled: proceed to open dialog
+        // No preference record OR autoPopup=true (default): proceed to open dialog
 
         // Mark session BEFORE opening to prevent race conditions with re-renders
         sessionStorage.setItem(SESSION_KEY, "shown");

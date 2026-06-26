@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>PR 1 wrap — commit + conflict-check + open PR</title>
+    <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>
+      PR 1 W0 wrap complete. Quality gates run on aggregated PR 1 surface:
+      - dotnet build src/server/api/Sprk.Bff.Api/ -c Release: 0 errors, 17 pre-existing warnings (unrelated to PR 1)
+      - dotnet test EntityNameValidator filter: 12/12 passed in 39ms
+      - dotnet publish -c Release: 44.98 MB compressed (under 60 MB ceiling; under +0.2 MB PR target)
+      - dotnet list package --vulnerable: only pre-existing Kiota 1.21.2 HIGH (transitive of Microsoft.Graph 5.99.0); no new CVE
+      - ADR-013: ✅ (no new endpoints; extends established NodeExecutor pattern + AnalysisServicesModule.cs §F.1 unconditional registration)
+      - ADR-021: ✅ (EntityNameValidatorForm.tsx — zero hex codes; semantic tokens only)
+      - ADR-034: ✅ (SYS-LOOKUP-MEMBERSHIP row deployed; closes R3 UAT defect)
+      - ADR-029 publish hygiene: ✅ (within ceiling)
+      - conflict-check (gh pr list): no overlapping open PRs on PR 1 surface (Dependabot PRs touch unrelated paths; #452/#453 are DevOps housekeeping). R3 PR #451 already merged at fa788dcaf per repo log.
+      Draft PR opened. URL recorded in task 009 commit message + final report.
+    </completion-notes>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>008</dependencies>
+    <blocks>010</blocks>
+    <tags>bff-api, devops</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>PR wrap-up. Code-review + adr-check + publish-size + CVE checks already ran in tasks 002/003; this task re-verifies on the aggregated diff and opens the PR.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final PR 1 step; depends on all prior PR 1 tasks being complete; serializes onto remote.</parallel-reason>
+  </metadata>
+
+  <prompt>Run `code-review` + `adr-check` skills on the touched files from tasks 002, 003, 004, 005, 006, 007. Run `dotnet build src/server/api/Sprk.Bff.Api/` — capture publish-size baseline + delta per CLAUDE.md §10. Run `dotnet list package --vulnerable --include-transitive` — verify no new HIGH CVE. Run `npm run build` in PlaybookBuilder. Run `/conflict-check` against R3 PR #451 + any other open PRs. Commit + push. Open a draft PR titled "feat(daily-briefing-r4/PR-1): W0 — Action rows + EntityNameValidator (ActionType 141)" with body summarizing FR-1, FR-2, FR-3.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. PR steward — runs the binding quality gates, ensures CLAUDE.md §10 BFF Hygiene checks pass, opens the draft PR with a thorough body.</role>
+
+  <goal>Draft PR opened against `work/spaarke-daily-update-service-r4` summarizing PR 1 deliverables; code-review + adr-check report clean against ADR-013/021/034; BFF publish-size delta ≤ +1 MB; no new HIGH CVE; conflict-check report attached; PR body cites FR-1/FR-2/FR-3 and all PR 1 ACs.</goal>
+
+  <context>
+    <background>R4 ships in 5 phased PRs (per plan.md §3). PR 1 closes W0.1: 1 enum addition + 1 new C# executor (+ tests) + 1 new TSX form + 4 deployed Action rows. PR 2 (next) is W0.2 (DAILY-BRIEFING-NARRATE playbook + reconciliation of 7 deployed playbooks); it depends on PR 1 propagating to spaarkedev1. R3 PR #451 (line 305 spec) overlaps file surface in DailyBriefing.Components/ — conflict-check identifies which side rebases.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/EntityNameValidatorNodeExecutorTests.cs</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/EntityNameValidatorForm.tsx</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/actions/sys-lookup-membership.action.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-tldr.action.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-channel.action.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/actions/brief-validate-entity-names.action.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">All AI work in BFF; PR description must state placement justification — extension of established NodeExecutor + JPS Action patterns; no facade-layer change needed.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — verify publish-size delta + CVE check + bff-extensions.md §A checklist; report in PR description. Expected total PR 1 delta ≤ +0.2 MB.</constraint>
+    <constraint source="spec NFR-01">No new HIGH-severity CVE.</constraint>
+    <constraint source="spec NFR-02">BFF publish-size delta ≤ +1 MB across whole project; PR 1's share expected ≤ +0.2 MB.</constraint>
+    <constraint source="project">PR title MUST follow `feat(daily-briefing-r4/PR-1): W0 — …` format. PR remains DRAFT until UAT signoff per PR 5.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+      <file>.claude/skills/push-to-github/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/plan.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Referenced for PR description framing of BFF surface unchanged.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Re-confirm tasks 001-008 ✅ in TASK-INDEX.</step>
+    <step order="2">Invoke `code-review` skill against the staged changes from tasks 002, 003, 004 (touched .cs / .ts files). Capture findings.</step>
+    <step order="3">Invoke `adr-check` skill against ADR-013, ADR-021, ADR-034. Capture findings.</step>
+    <step order="4">Run `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors. Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; record compressed size + delta vs baseline ~45.65 MB.</step>
+    <step order="5">Run `dotnet list package --vulnerable --include-transitive`; confirm no new HIGH-severity entries vs baseline.</step>
+    <step order="6">Run `npm run build` in `src/client/code-pages/PlaybookBuilder/` — 0 errors.</step>
+    <step order="7">Invoke `/conflict-check` against R3 PR #451 + any other open PRs touching `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/` or `src/client/code-pages/PlaybookBuilder/`. Record results.</step>
+    <step order="8">Address any code-review / adr-check / conflict-check blocking findings before commit.</step>
+    <step order="9">Stage all PR 1 changes (avoid `git add -A`; add specific files). Commit with message `feat(daily-briefing-r4/PR-1): W0 — Action rows + EntityNameValidator (ActionType 141)` and body referencing FR-1/FR-2/FR-3. Push to `work/spaarke-daily-update-service-r4`.</step>
+    <step order="10">Open a DRAFT PR via `gh pr create --draft` with title above + body containing: Summary (3 bullets — enum/executor/form + 4 Action rows), Test plan (markdown checklist referencing AC-1/AC-2a/AC-2b/AC-3a/AC-3b/AC-3c), CLAUDE.md §10 evidence (publish-size delta + CVE result), conflict-check summary.</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅.</step>
+    <step order="12">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, publish, CVE-scan .NET projects</tool>
+    <tool name="npm">Build PlaybookBuilder</tool>
+    <tool name="gh">Open draft PR</tool>
+  </tools>
+
+  <outputs>
+    <output type="pr">Draft PR on GitHub titled "feat(daily-briefing-r4/PR-1): W0 — Action rows + EntityNameValidator (ActionType 141)"</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">code-review + adr-check report clean (no blocking findings) against PR 1 surface.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤ +0.2 MB vs baseline; cumulative cumulative ≤ +1 MB toward project ceiling.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE.</criterion>
+    <criterion testable="true">conflict-check report attached to PR; any R3 PR #451 overlaps identified.</criterion>
+    <criterion testable="true">Draft PR opened with correct title + body referencing AC-1, AC-2a, AC-2b, AC-3a, AC-3b, AC-3c.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: All PR 1 ACs (1, 2a, 2b, 3a, 3b, 3c) covered. CLAUDE.md §10 publish-size + CVE checks: re-verify on aggregated diff even though tasks 002/003 already ran them individually — PR-level evidence is what reviewers cite. PR stays DRAFT until PR 5 UAT signoff per plan.md §3 graduation criteria.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

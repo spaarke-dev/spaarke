@@ -49,6 +49,7 @@ import { WaitForm } from './WaitForm';
 import { UpdateRecordForm } from './UpdateRecordForm';
 import { CreateNotificationForm } from './CreateNotificationForm';
 import { LookupUserMembershipForm } from './LookupUserMembershipForm';
+import { EntityNameValidatorForm } from './EntityNameValidatorForm';
 import { NodeValidationBadge } from './NodeValidationBadge';
 import { PromptSchemaForm } from './PromptSchemaForm';
 import { PromptSchemaEditor } from './PromptSchemaEditor';
@@ -120,6 +121,7 @@ const NODE_TYPE_LABELS: Record<string, string> = {
   sendEmail: 'Send Email',
   createNotification: 'Create Notification',
   lookupUserMembership: 'Lookup User Membership',
+  entityNameValidator: 'Entity Name Validator',
   wait: 'Wait',
 };
 
@@ -153,6 +155,7 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({ node }: Nod
     'aiCompletion',
     'wait',
     'lookupUserMembership',
+    'entityNameValidator',
   ].includes(nodeType);
 
   // Generic field updater
@@ -431,6 +434,13 @@ export const NodePropertiesForm = memo(function NodePropertiesForm({ node }: Nod
               )}
               {nodeType === 'lookupUserMembership' && (
                 <LookupUserMembershipForm
+                  nodeId={node.id}
+                  configJson={node.data.configJson ?? '{}'}
+                  onConfigChange={handleConfigChange}
+                />
+              )}
+              {nodeType === 'entityNameValidator' && (
+                <EntityNameValidatorForm
                   nodeId={node.id}
                   configJson={node.data.configJson ?? '{}'}
                   onConfigChange={handleConfigChange}

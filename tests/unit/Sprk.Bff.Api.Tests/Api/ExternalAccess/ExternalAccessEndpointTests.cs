@@ -880,7 +880,7 @@ public class ExternalAccessEndpointTests
             new Mock<ILogger<SpeContainerMembershipService>>().Object);
 
         var request = new CloseProjectRequest(ProjectId: Guid.Empty, ContainerId: null);
-        var cacheMock = new Mock<IDistributedCache>();
+        var cacheMock = new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
         var httpContext = CreateHttpContext();
         var logger = CreateLogger();
 

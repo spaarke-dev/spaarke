@@ -4,8 +4,10 @@ using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Handlers;
@@ -219,7 +221,7 @@ public sealed class HandlerDispatchTests : TypedToolHandlerTestFixture
 
         var handler = new EntityExtractorHandler(
             OpenAiClientMock.Object,
-            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+            new TenantCache(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<TenantCache>.Instance),
             Options.Create(new ModelSelectorOptions
             {
                 ToolHandlerModel = DefaultModelDeployment,
@@ -266,7 +268,7 @@ public sealed class HandlerDispatchTests : TypedToolHandlerTestFixture
 
         var handler = new ClauseAnalyzerHandler(
             OpenAiClientMock.Object,
-            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+            new TenantCache(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<TenantCache>.Instance),
             Options.Create(new ModelSelectorOptions { ToolHandlerModel = DefaultModelDeployment }),
             CreateLogger<ClauseAnalyzerHandler>());
 
@@ -314,7 +316,7 @@ public sealed class HandlerDispatchTests : TypedToolHandlerTestFixture
 
         var handler = new RiskDetectorHandler(
             OpenAiClientMock.Object,
-            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+            new TenantCache(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<TenantCache>.Instance),
             Options.Create(new ModelSelectorOptions { ToolHandlerModel = DefaultModelDeployment }),
             CreateLogger<RiskDetectorHandler>());
 
@@ -379,7 +381,7 @@ public sealed class HandlerDispatchTests : TypedToolHandlerTestFixture
 
         var handler = new InvoiceExtractionToolHandler(
             OpenAiClientMock.Object,
-            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+            new TenantCache(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<TenantCache>.Instance),
             Options.Create(new ModelSelectorOptions { ToolHandlerModel = DefaultModelDeployment }),
             CreateLogger<InvoiceExtractionToolHandler>());
 
@@ -451,7 +453,7 @@ public sealed class HandlerDispatchTests : TypedToolHandlerTestFixture
 
         var handler = new EntityExtractorHandler(
             OpenAiClientMock.Object,
-            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+            new TenantCache(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<TenantCache>.Instance),
             Options.Create(new ModelSelectorOptions
             {
                 ToolHandlerModel = DefaultModelDeployment,
@@ -503,7 +505,7 @@ public sealed class HandlerDispatchTests : TypedToolHandlerTestFixture
 
         var handler = new ClauseAnalyzerHandler(
             OpenAiClientMock.Object,
-            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+            new TenantCache(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<TenantCache>.Instance),
             Options.Create(new ModelSelectorOptions { ToolHandlerModel = DefaultModelDeployment }),
             CreateLogger<ClauseAnalyzerHandler>());
 
@@ -549,7 +551,7 @@ public sealed class HandlerDispatchTests : TypedToolHandlerTestFixture
 
         var handler = new RiskDetectorHandler(
             OpenAiClientMock.Object,
-            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+            new TenantCache(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<TenantCache>.Instance),
             Options.Create(new ModelSelectorOptions { ToolHandlerModel = DefaultModelDeployment }),
             CreateLogger<RiskDetectorHandler>());
 
@@ -615,7 +617,7 @@ public sealed class HandlerDispatchTests : TypedToolHandlerTestFixture
 
         var handler = new InvoiceExtractionToolHandler(
             OpenAiClientMock.Object,
-            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+            new TenantCache(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<TenantCache>.Instance),
             Options.Create(new ModelSelectorOptions { ToolHandlerModel = DefaultModelDeployment }),
             CreateLogger<InvoiceExtractionToolHandler>());
 

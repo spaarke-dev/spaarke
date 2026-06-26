@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Cache call-site inventory (authoritative count)</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>010,011,012,013,014,015,016,017,018</blocks>
+    <tags>bff-api, cache, redis, inventory, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Inventory + analysis task; no code changes; outputs a notes file used to size downstream migration tasks</rigor-reason>
+    <parallel-group>0</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Foundational — blocks tasks 010-018; spec called for 117 sites, exploration found ~199; this task establishes authoritative count</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Produce a definitive, grouped inventory of every direct `IDistributedCache.` call in `src/server/api/Sprk.Bff.Api/`. The plan assumed ~199 sites across 62 files (exploration finding); the spec said 117. This inventory replaces both numbers and sizes Phase 1 migration tasks 010–017.
+  </prompt>
+
+  <role>
+    Spaarke platform developer. Read-only inventory work. Use Grep and Read tools; no edits to production code. Output is a `notes/cache-call-site-inventory.md` artifact.
+  </role>
+
+  <goal>
+    A complete, grouped list of all direct `IDistributedCache` injections and `.GetAsync` / `.SetAsync` / `.RemoveAsync` / `.GetStringAsync` / `.SetStringAsync` / `.RefreshAsync` call sites in `src/server/api/Sprk.Bff.Api/`, with file paths, line numbers, key formats (where extractable), and tenant-scope classification (tenant-scoped candidate vs. system-level exception candidate).
+  </goal>
+
+  <context>
+    <background>
+      The BFF will atomically migrate every direct `IDistributedCache.` call site to the new `ITenantCache` wrapper (NFR-07). The migration MUST be in a single coordinated PR to prevent the read-old/write-new bug class. Tasks 010–017 split the work by sub-area for review tractability; this inventory tells us how to slice and how many sites per slice.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/server/shared/Spaarke.Core/Cache/DistributedCacheExtensions.cs</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-06 + NFR-07 — atomic migration of ALL sites; this inventory must be exhaustive (no sampling).</constraint>
+    <constraint source="spec">NFR-08 — system-level cache exceptions (non-tenant-scoped) MUST be explicitly flagged with rationale.</constraint>
+    <constraint source="project">Output is read-only inventory; do not edit production code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/plan.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep recursively under `src/server/api/Sprk.Bff.Api/` for `IDistributedCache` injections (constructor params + field declarations). Record file path + line.</step>
+    <step order="2">Grep for direct method calls on `IDistributedCache` instances: `.GetAsync`, `.SetAsync`, `.RemoveAsync`, `.GetStringAsync`, `.SetStringAsync`, `.RefreshAsync`. Record file path + line + the key argument expression (best-effort).</step>
+    <step order="3">Also grep `src/server/shared/Spaarke.Core/Cache/` for `IDistributedCache` direct calls — these are shared-library wrappers consumed by BFF; flag them for sub-task migration in task 016.</step>
+    <step order="4">Group results by service area (Office, Chat, Membership, Document/AI, Background jobs, Auth/User, Shared `Spaarke.Core` consumers). Count per group.</step>
+    <step order="5">For each group, classify each call site as: (a) tenant-scopable today, (b) tenant-scopable with refactor (needs tenantId injection at call site), or (c) system-level exception candidate (feature flags, system config). Flag (c) for NFR-08 documentation.</step>
+    <step order="6">Write `notes/cache-call-site-inventory.md` with: headline totals (files, call-sites), per-group breakdown table, per-site list grouped by file, explicit "Sub-task assignment" mapping each group to one of tasks 010-017, and a "System-level exceptions" sub-section.</step>
+    <step order="7">Update `TASK-INDEX.md` — mark task 001 as ✅; add a note pointing to inventory file.</step>
+    <step order="8">Update `current-task.md` (advance to task 002 placeholder).</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Search call sites by pattern</tool>
+    <tool name="Read">Inspect surrounding code for key formats and tenant context</tool>
+    <tool name="Glob">Enumerate files for completeness check</tool>
+    <tool name="Write">Create the inventory markdown</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</output>
+    <output type="docs">projects/spaarke-redis-cache-remediation-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Inventory file lists every `IDistributedCache.{Get|Set|Remove|GetString|SetString|Refresh}Async` call in `src/server/api/Sprk.Bff.Api/` with file:line. A fresh `grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/` count matches the inventory's headline total ±0.</criterion>
+    <criterion testable="true">Inventory groups sites into the 8 sub-task buckets (Office, Chat, Membership, Document/AI, Background jobs, Auth/User, Shared, system-exception allow-list) with per-group counts.</criterion>
+    <criterion testable="true">System-level exception candidates are flagged with a brief reason (per NFR-08); the per-call-site rationale stub is included so task 017 can be authored against it.</criterion>
+    <criterion testable="true">TASK-INDEX.md updated: task 001 marked ✅; tasks 010–018 reference the inventory by section heading.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Exploration during pipeline planning suggested ~199 sites across 62 files. The skill assumes the inventory may correct that number; do not anchor on either 117 or 199. The authoritative count is whatever this task produces.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute Step 0.5 rigor decision tree; STANDARD applies (per `rigor-hint`).
+    </protocol>
+  </execution>
+</task>

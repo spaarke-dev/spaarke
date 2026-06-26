@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>PR 4 wrap — quality gates + conflict-check + open PR</title>
+    <phase>4: W2 Consumer — /narrate dispatch + cache + fallback (PR 4)</phase>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>PR 4 wrap. Quality gates: dotnet build Release succeeded (0 errors, 17 pre-existing warnings). Full BFF test suite 7879 pass / 0 fail / 134 skip (re-run confirmed prior 1-failure was flaky and did not reproduce). Jest suite 97 pass / 0 fail across 12 suites. Publish-size 44.97 MB compressed (uncompressed 140.05 MB) — net REDUCTION of -1.34 MB vs PR 3 baseline 46.31 MB (task 031 removed 340 LOC of inline LLM-prompt construction). CVE scan: no new HIGH; single pre-existing HIGH on Microsoft.Kiota.Abstractions 1.21.2 carries forward unchanged. Conflict-check: PR #456 is only open R4 PR; no file-surface overlap with other open PRs (devops chores #452/#453, dependabot bumps). ADR-013 placement preserved (HandleNarrate uses Services/Ai/PublicContracts/ facades exclusively — no direct IOpenAiClient/IPlaybookService/IPlaybookOrchestrationService injection). ADR-021 semantic tokens preserved in ActivityNotesSection fallback. PR #456 description updated via gh pr edit to cover combined PR 1+2+3+4 scope with PR 4 section + cumulative §10 gates.</completion-notes>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>035</dependencies>
+    <blocks>040</blocks>
+    <tags>bff-api, pcf, devops</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>PR wrap is procedural — quality-gate execution + PR open, no new code authoring.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Run `code-review` + `adr-check` + `ui-test` (Step 9.7). Run `dotnet build src/server/api/Sprk.Bff.Api/` + publish-size delta. Run CVE check. Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` + `npm test --workspace=@spaarke/daily-briefing-components`. Run `/conflict-check` against R3 PR #451 — explicit attention given file overlap. Commit. Open draft PR titled "feat(daily-briefing-r4/PR-4): W2 Consumer — /narrate playbook dispatch + cache fix + fallback".</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. PR wrap-up + quality-gate execution + GitHub PR authoring.</role>
+  <goal>All quality gates pass (code-review, adr-check, ui-test). Build + tests green on both BFF + widget. CVE scan clean. Publish-size delta reported within thresholds. `/conflict-check` against R3 PR #451 documented + resolved. Draft PR opened on GitHub with all AC references + placement justification.</goal>
+  <context>
+    <background>PR 4 completes Workstream W2 (Consumer): /narrate playbook dispatch (FR-12), useBriefingNarration cache fix (FR-15), and ActivityNotesSection fallback (FR-16). Before opening the PR, all quality gates must be run + the conflict-check vs R3 PR #451 must be explicit because of file-family overlap (risks.md R1).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingNarration.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">BFF AI placement — /narrate is thin wrapper dispatching to existing playbook engine</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — publish-size + CVE per task; placement justification in PR description</constraint>
+    <constraint source="project">Response shape backward compat — existing widget parser must work unchanged (NFR-05)</constraint>
+    <constraint source="project">No hardcoded LLM prompt strings remain in DailyBriefingEndpoints.cs (FR-12)</constraint>
+    <constraint source="project">PR must reference R3 PR #451 conflict-check outcome explicitly</constraint>
+    <constraint source="CLAUDE.md §10">Placement Justification section required in PR description</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Run `code-review` skill on all PR 4 changes</step>
+    <step order="2">Run `adr-check` skill — verify ADR-013, ADR-001 compliance</step>
+    <step order="3">Run `ui-test` skill on widget changes (cache fix + fallback)</step>
+    <step order="4">Run `dotnet build src/server/api/Sprk.Bff.Api/` — must succeed clean</step>
+    <step order="5">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed publish-size; record delta vs prior baseline (~45.65 MB) in notes</step>
+    <step order="6">Run `dotnet list package --vulnerable --include-transitive` — no new HIGH-severity CVE</step>
+    <step order="7">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — all pass</step>
+    <step order="8">Run `npm test --workspace=@spaarke/daily-briefing-components` — all pass</step>
+    <step order="9">Run `/conflict-check` against R3 PR #451; document outcome in notes/decisions/036-pr451-conflict-check.md</step>
+    <step order="10">Stage + commit changes with conventional-commit message</step>
+    <step order="11">Push branch to origin</step>
+    <step order="12">Open draft PR via `gh pr create` titled `feat(daily-briefing-r4/PR-4): W2 Consumer — /narrate playbook dispatch + cache fix + fallback`</step>
+    <step order="13">PR body MUST include: Summary, AC checklist (12a/b/c, 15, 16), Placement Justification per CLAUDE.md §10, publish-size delta, CVE result, R3 PR #451 conflict-check outcome, Test plan</step>
+    <step order="14">Update TASK-INDEX.md ✅</step>
+    <step order="15">Document deviations + PR URL in notes/</step>
+  </steps>
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="pr">GitHub draft PR (URL recorded in notes/)</output>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/decisions/036-pr451-conflict-check.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All PR 4 ACs (AC-12a, AC-12b, AC-12c, AC-15, AC-16) satisfied + referenced in PR description</criterion>
+    <criterion testable="true">`code-review` + `adr-check` + `ui-test` skills report PASS</criterion>
+    <criterion testable="true">BFF build succeeds; publish-size within CLAUDE.md §10 thresholds</criterion>
+    <criterion testable="true">CVE scan reports no new HIGH-severity vulnerabilities</criterion>
+    <criterion testable="true">All xUnit + Jest tests pass</criterion>
+    <criterion testable="true">R3 PR #451 conflict-check outcome documented + resolved (no unsafe overlap)</criterion>
+    <criterion testable="true">Draft PR opened on GitHub with Placement Justification section</criterion>
+  </acceptance-criteria>
+  <notes>**R3 PR #451 overlap** — risks.md R1 flags useBriefingNarration.ts + ActivityNotesSection.tsx as potentially conflicting with R3 work. The conflict-check at step 9 is THE blocking check before PR open. If conflicts exist, escalate per CLAUDE.md §6 BEFORE pushing. PR title format follows Spaarke conventional-commit + project-prefix pattern observed in recent merges.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

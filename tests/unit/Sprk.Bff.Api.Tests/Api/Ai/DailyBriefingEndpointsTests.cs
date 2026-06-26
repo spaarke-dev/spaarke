@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -5,46 +6,61 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
-using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
 
 /// <summary>
-/// Unit tests for <see cref="DailyBriefingEndpoints"/>.
+/// Unit tests for <see cref="DailyBriefingEndpoints"/> — R4 task 031 (FR-12 Path A.5).
 ///
-/// Verifies fix for task 083: an empty narrate payload (no categories, no priority
-/// items, no channels) returns 200 with empty bullets/channels instead of 400
-/// "Bad Request". This unblocks the frontend `useDailyBriefing` hook in fresh
-/// dev environments where the user has no notifications to narrate.
+/// HandleNarrate is now a thin dispatch wrapper that:
+///   1. Resolves the DAILY-BRIEFING-NARRATE playbook GUID via IConsumerRoutingService
+///      using the ConsumerTypes.DailyBriefingNarrate compile-time constant
+///   2. Serializes the request payload + invokes the playbook via IInvokePlaybookAi
+///   3. Projects PlaybookInvocationResult.StructuredData → DailyBriefingNarrateResponse
+///      (preserves the existing widget-parser contract per AC-12b)
 ///
-/// Task 070 repair (2026-05-31): the production HandleNarrate signature was changed
-/// — the old `IOpenAiClient` parameter was replaced by an optional `IBriefingAi?` and
-/// reordered (`request, loggerFactory, httpContext, cancellationToken, briefingAi`).
-/// The reflection invocation has been updated to match the current signature and
-/// pass <c>null</c> for the briefingAi (the AI-disabled path is what the existing
-/// "empty payload" assertions exercise).
+/// Tests in this file verify:
+///   - Backward-compat: empty-payload tolerance (200 + empty bullets) short-circuits
+///     BEFORE playbook dispatch
+///   - New dispatch path: routing.ResolveAsync receives the correct ConsumerTypes constant
+///   - New dispatch path: invokePlaybookAi.InvokePlaybookAsync receives the resolved
+///     playbook ID + the request as a serialized parameter
+///   - 503 fallback: when routing returns null, response is 503 Service Unavailable
+///   - Response-shape backward compat: StructuredData → DailyBriefingNarrateResponse
+///   - No inline prompt strings remain in the source (FR-12 / AC-12a)
+///
+/// Prior tests for inline prompt builders (BuildNarrateTldrPrompt /
+/// BuildChannelNarrationPrompt / ParseTldrResponse / ValidateBulletPrimaryEntityIds)
+/// have been REMOVED because the underlying helpers are deleted — prompt
+/// construction now lives in the playbook + Action rows.
 /// </summary>
-[Trait("status", "repaired")]
+[Trait("status", "task-031-r4")]
 public sealed class DailyBriefingEndpointsTests
 {
+    private const string ExpectedConsumerType = "daily-briefing-narrate";
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Invokes the private static HandleNarrate handler via reflection.
-    /// Current production signature (task 070 repair):
-    ///   HandleNarrate(DailyBriefingNarrateRequest request, ILoggerFactory loggerFactory,
-    ///                 HttpContext httpContext, CancellationToken cancellationToken,
-    ///                 IBriefingAi? briefingAi = null)
-    /// The empty-payload short-circuit returns 200 only AFTER the AI-availability
-    /// check; tests must therefore pass a non-null <c>briefingAi</c> mock. The mock
-    /// uses <see cref="MockBehavior.Strict"/> so any unexpected call would fail.
+    /// Invokes the private static HandleNarrate handler via reflection. New
+    /// signature (R4 task 031 / FR-12 Path A.5):
+    ///   HandleNarrate(
+    ///       DailyBriefingNarrateRequest request,
+    ///       ILoggerFactory loggerFactory,
+    ///       IConsumerRoutingService routing,
+    ///       IInvokePlaybookAi invokePlaybookAi,
+    ///       HttpContext httpContext,
+    ///       CancellationToken cancellationToken)
     /// </summary>
     private static async Task<IResult> InvokeHandleNarrateAsync(
         DailyBriefingNarrateRequest request,
-        IBriefingAi briefingAi,
-        HttpContext httpContext,
+        IConsumerRoutingService routing,
+        IInvokePlaybookAi invokePlaybookAi,
+        HttpContext? httpContext = null,
         CancellationToken cancellationToken = default)
     {
         var method = typeof(DailyBriefingEndpoints)
@@ -56,20 +72,77 @@ public sealed class DailyBriefingEndpointsTests
         {
             request,
             NullLoggerFactory.Instance,
-            httpContext,
-            cancellationToken,
-            briefingAi
+            routing,
+            invokePlaybookAi,
+            httpContext ?? new DefaultHttpContext(),
+            cancellationToken
         })!;
 
         return await task;
     }
 
-    private static HttpContext MakeContext() => new DefaultHttpContext();
+    private static DailyBriefingNarrateRequest BuildNonEmptyRequest() => new()
+    {
+        Categories =
+        [
+            new NotificationCategoryDto { Name = "Tasks Overdue", Count = 1, UnreadCount = 1 }
+        ],
+        PriorityItems =
+        [
+            new PriorityItemDto { Category = "Tasks", Title = "Review engagement letter" }
+        ],
+        TotalNotificationCount = 1,
+        Channels =
+        [
+            new ChannelNarrationInput
+            {
+                Category = "tasks",
+                Label = "Tasks Overdue",
+                Items =
+                [
+                    new ChannelItemDto
+                    {
+                        Id = "notif-1",
+                        Title = "Review engagement letter",
+                        RegardingName = "Acme Corp",
+                        RegardingEntityType = "sprk_matter",
+                        RegardingId = Guid.NewGuid().ToString(),
+                        Priority = "high"
+                    }
+                ]
+            }
+        ]
+    };
 
-    // ── Tests: empty payload → 200 ────────────────────────────────────────────
+    private static Mock<IConsumerRoutingService> BuildRoutingMock(Guid? resolvedPlaybookId)
+    {
+        var mock = new Mock<IConsumerRoutingService>(MockBehavior.Strict);
+        mock.Setup(r => r.ResolveAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(resolvedPlaybookId);
+        return mock;
+    }
+
+    private static Mock<IInvokePlaybookAi> BuildInvokeMock(PlaybookInvocationResult result)
+    {
+        var mock = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
+        mock.Setup(i => i.InvokePlaybookAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyDictionary<string, string>?>(),
+                It.IsAny<PlaybookInvocationContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
+        return mock;
+    }
+
+    // ── Tests: empty payload → 200 (short-circuits BEFORE playbook dispatch) ────
 
     [Fact]
-    public async Task HandleNarrate_Returns_200_Empty_On_Empty_Payload()
+    public async Task HandleNarrate_Returns_200_Empty_On_Empty_Payload_Without_Invoking_Dispatch()
     {
         // Arrange — fully empty request (matches frontend buildEmptyNarrateRequest())
         var request = new DailyBriefingNarrateRequest
@@ -80,15 +153,14 @@ public sealed class DailyBriefingEndpointsTests
             Channels = []
         };
 
-        // BriefingAi must NOT be invoked — empty payload short-circuits before any AI call.
-        var briefingAi = new Mock<IBriefingAi>(MockBehavior.Strict);
-        var context = MakeContext();
+        // STRICT mocks — neither routing nor invokePlaybookAi must be called.
+        var routing = new Mock<IConsumerRoutingService>(MockBehavior.Strict);
+        var invokePlaybookAi = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
 
         // Act
-        var result = await InvokeHandleNarrateAsync(request, briefingAi.Object, context);
+        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
 
-        // Assert — 200 with empty narrative response
-        // R2.2: TldrResult shape changed — Briefing replaced by Summary + KeyTakeaways[].
+        // Assert — 200 with empty narrative response, dispatch not invoked.
         result.Should().BeOfType<Ok<DailyBriefingNarrateResponse>>();
         var ok = (Ok<DailyBriefingNarrateResponse>)result;
         ok.Value.Should().NotBeNull();
@@ -100,14 +172,14 @@ public sealed class DailyBriefingEndpointsTests
         ok.Value.Tldr.PriorityItemCount.Should().Be(0);
         ok.Value.ChannelNarratives.Should().BeEmpty();
 
-        // Strict mock — verifies BriefingAi was never called
-        briefingAi.VerifyNoOtherCalls();
+        routing.VerifyNoOtherCalls();
+        invokePlaybookAi.VerifyNoOtherCalls();
     }
 
     [Fact]
     public async Task HandleNarrate_Returns_200_Empty_On_All_Empty_Even_With_Nonzero_TotalCount()
     {
-        // Arrange — TotalNotificationCount > 0 but no actionable content (edge case)
+        // Arrange — TotalNotificationCount > 0 but no actionable arrays (edge case)
         var request = new DailyBriefingNarrateRequest
         {
             Categories = [],
@@ -116,339 +188,394 @@ public sealed class DailyBriefingEndpointsTests
             Channels = []
         };
 
-        var briefingAi = new Mock<IBriefingAi>(MockBehavior.Strict);
-        var context = MakeContext();
+        var routing = new Mock<IConsumerRoutingService>(MockBehavior.Strict);
+        var invokePlaybookAi = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
 
         // Act
-        var result = await InvokeHandleNarrateAsync(request, briefingAi.Object, context);
+        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
 
-        // Assert — still 200 because the three actionable arrays are all empty
+        // Assert — still 200, dispatch not invoked.
         result.Should().BeOfType<Ok<DailyBriefingNarrateResponse>>();
-        briefingAi.VerifyNoOtherCalls();
+        routing.VerifyNoOtherCalls();
+        invokePlaybookAi.VerifyNoOtherCalls();
     }
 
-    // ── Tests: FR-15 — `BuildChannelNarrationPrompt` emits `regardingId=` per item ────────────
-    //
-    // Task 030 (R2 spec §P2b FR-15/FR-16) updated `BuildChannelNarrationPrompt` so that
-    // every item line carries the item's regardingId in the bracketed prefix when present.
-    // This gives the LLM a real ID to echo back as `primaryEntityId` instead of inventing
-    // one. The defensive graceful-degradation case: items WITHOUT a regardingId emit only
-    // `[id={id}]` (no empty `regardingId=` token the LLM might literalize back).
+    // ── Tests: dispatch path — Path A.5 ────────────────────────────────────────
 
     [Fact]
-    public void BuildChannelNarrationPrompt_Includes_RegardingId_Per_Item_With_Regarding()
+    public async Task HandleNarrate_Resolves_Playbook_Via_ConsumerRouting_With_Correct_ConsumerType()
     {
-        // Arrange — channel with 2 items, both have non-empty RegardingId
-        var matterId = Guid.NewGuid().ToString();
-        var taskId = Guid.NewGuid().ToString();
-        var channel = new ChannelNarrationInput
-        {
-            Category = "tasks",
-            Label = "Tasks Overdue",
-            Items =
-            [
-                new ChannelItemDto
+        // Arrange
+        var request = BuildNonEmptyRequest();
+        var playbookId = Guid.NewGuid();
+        var routing = BuildRoutingMock(playbookId);
+        var invokePlaybookAi = BuildInvokeMock(BuildSuccessResult());
+
+        // Act
+        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
+
+        // Assert — routing called with the ConsumerTypes.DailyBriefingNarrate constant.
+        result.Should().BeOfType<Ok<DailyBriefingNarrateResponse>>();
+        routing.Verify(r => r.ResolveAsync(
+            ExpectedConsumerType,
+            "default",
+            null,
+            null,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task HandleNarrate_Invokes_Playbook_With_Resolved_Id_And_Request_Payload_Parameters()
+    {
+        // Arrange
+        var request = BuildNonEmptyRequest();
+        var playbookId = Guid.NewGuid();
+        var routing = BuildRoutingMock(playbookId);
+
+        IReadOnlyDictionary<string, string>? capturedParameters = null;
+        Guid capturedPlaybookId = Guid.Empty;
+        PlaybookInvocationContext? capturedContext = null;
+
+        var invokePlaybookAi = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
+        invokePlaybookAi.Setup(i => i.InvokePlaybookAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyDictionary<string, string>?>(),
+                It.IsAny<PlaybookInvocationContext>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, IReadOnlyDictionary<string, string>?, PlaybookInvocationContext, CancellationToken>(
+                (id, parameters, ctx, _) =>
                 {
-                    Id = "notif-1",
-                    Title = "Review engagement letter",
-                    RegardingName = "Acme Corp",
-                    RegardingEntityType = "sprk_matter",
-                    RegardingId = matterId,
-                    Priority = "high"
-                },
-                new ChannelItemDto
-                {
-                    Id = "notif-2",
-                    Title = "File response brief",
-                    RegardingName = "Acme v Bravo",
-                    RegardingEntityType = "sprk_matter",
-                    RegardingId = taskId,
-                    Priority = "normal"
-                },
-            ]
-        };
+                    capturedPlaybookId = id;
+                    capturedParameters = parameters;
+                    capturedContext = ctx;
+                })
+            .ReturnsAsync(BuildSuccessResult());
 
         // Act
-        var prompt = DailyBriefingEndpoints.BuildChannelNarrationPrompt(channel);
-
-        // Assert — prompt MUST contain `regardingId={guid}` for each item that has one (FR-15).
-        prompt.Should().Contain($"regardingId={matterId}");
-        prompt.Should().Contain($"regardingId={taskId}");
-
-        // Each item's `[id=… regardingId=…]` prefix is present in the per-item line.
-        prompt.Should().Contain($"[id=notif-1 regardingId={matterId}]");
-        prompt.Should().Contain($"[id=notif-2 regardingId={taskId}]");
-
-        // FR-16 — instruction text MUST tell the model to use supplied regardingId, not the notification id.
-        prompt.Should().Contain("Set `primaryEntityId` to the matching `regardingId`");
-        prompt.Should().Contain("Do NOT use the `[id=...]` notification ID");
-        prompt.Should().Contain("Do NOT invent IDs");
-    }
-
-    [Fact]
-    public void BuildChannelNarrationPrompt_Omits_RegardingId_Token_When_Item_Has_No_Regarding()
-    {
-        // Arrange — single item with empty RegardingId. Task 030 defensive path: emit `[id={id}]`
-        // WITHOUT a `regardingId=` token, so the LLM cannot echo back an empty string ID.
-        var channel = new ChannelNarrationInput
-        {
-            Category = "system",
-            Label = "System Notifications",
-            Items =
-            [
-                new ChannelItemDto
-                {
-                    Id = "notif-orphan",
-                    Title = "Welcome to Spaarke",
-                    RegardingName = "",
-                    RegardingEntityType = "",
-                    RegardingId = "",
-                    Priority = "normal"
-                },
-            ]
-        };
-
-        // Act
-        var prompt = DailyBriefingEndpoints.BuildChannelNarrationPrompt(channel);
-
-        // Assert — prefix is `[id=notif-orphan]` only; `regardingId=` token MUST be absent for this item.
-        prompt.Should().Contain("[id=notif-orphan]");
-        prompt.Should().NotContain("regardingId="); // No item has regardingId in this channel → no token anywhere.
-    }
-
-    // ── Tests: FR-17 — server-side validation of LLM-returned `primaryEntityId` ──────────────
-    //
-    // Task 031 added `BuildAllowedRegardingIdSet` + `ValidateBulletPrimaryEntityIds` (both
-    // `internal static`) to enforce server-side that any `primaryEntityId` the LLM returns
-    // matches a supplied `regardingId`. Defense-in-depth: even if FR-15/FR-16 prompt
-    // improvements nudge the model correctly, this guarantees no hallucinated ID reaches
-    // the client (frontend would render a broken link). Mock the LLM here by feeding a
-    // synthetic parsed-bullet array as the function-under-test input.
-
-    [Fact]
-    public void ValidateBulletPrimaryEntityIds_Nulls_Fields_And_Logs_Warning_When_Id_Hallucinated()
-    {
-        // Arrange — channel with 1 supplied RegardingId (the "allowed" set).
-        var suppliedId = Guid.NewGuid().ToString();
-        var channel = new ChannelNarrationInput
-        {
-            Category = "tasks",
-            Label = "Tasks Overdue",
-            Items =
-            [
-                new ChannelItemDto
-                {
-                    Id = "notif-1",
-                    Title = "Review document",
-                    RegardingId = suppliedId,
-                    RegardingEntityType = "sprk_matter",
-                    RegardingName = "Acme Corp"
-                }
-            ]
-        };
-        var allowedRegardingIds = DailyBriefingEndpoints.BuildAllowedRegardingIdSet(channel);
-
-        // Mocked LLM response: bullet whose primaryEntityId is NOT in the supplied set.
-        var hallucinatedId = Guid.NewGuid().ToString();
-        var bullets = new[]
-        {
-            new NarrativeBulletDto
-            {
-                Narrative = "Review the Acme Corp engagement letter today.",
-                ItemIds = ["notif-1"],
-                PrimaryEntityType = "sprk_matter",
-                PrimaryEntityId = hallucinatedId, // hallucinated — not in allowedRegardingIds
-                PrimaryEntityName = "Hallucinated Matter"
-            }
-        };
-        var logger = new CapturingTestLogger();
-
-        // Act
-        var validated = DailyBriefingEndpoints.ValidateBulletPrimaryEntityIds(
-            bullets, allowedRegardingIds, channel, logger);
-
-        // Assert — primaryEntity* fields are nulled (string.Empty) so frontend renders no link.
-        validated.Should().HaveCount(1);
-        validated[0].PrimaryEntityType.Should().BeEmpty();
-        validated[0].PrimaryEntityId.Should().BeEmpty();
-        validated[0].PrimaryEntityName.Should().BeEmpty();
-
-        // Narrative + itemIds preserved — only the (untrusted) ID trio is scrubbed.
-        validated[0].Narrative.Should().Be("Review the Acme Corp engagement letter today.");
-        validated[0].ItemIds.Should().BeEquivalentTo(new[] { "notif-1" });
-
-        // Structured warning logged with the FR-17 marker text and the hallucinated ID for App Insights.
-        logger.WarningCount.Should().Be(1);
-        logger.LastWarningMessage.Should().Contain("FR-17 validation");
-        logger.LastWarningMessage.Should().Contain(hallucinatedId);
-    }
-
-    [Fact]
-    public void ValidateBulletPrimaryEntityIds_Retains_Fields_When_Id_Is_In_Allowed_Set()
-    {
-        // Arrange — channel with 1 supplied RegardingId; the LLM returns the SAME id.
-        var suppliedId = Guid.NewGuid().ToString();
-        var channel = new ChannelNarrationInput
-        {
-            Category = "tasks",
-            Label = "Tasks Overdue",
-            Items =
-            [
-                new ChannelItemDto
-                {
-                    Id = "notif-1",
-                    Title = "Review document",
-                    RegardingId = suppliedId,
-                    RegardingEntityType = "sprk_matter",
-                    RegardingName = "Acme Corp"
-                }
-            ]
-        };
-        var allowedRegardingIds = DailyBriefingEndpoints.BuildAllowedRegardingIdSet(channel);
-
-        var bullets = new[]
-        {
-            new NarrativeBulletDto
-            {
-                Narrative = "Review the Acme Corp engagement letter today.",
-                ItemIds = ["notif-1"],
-                PrimaryEntityType = "sprk_matter",
-                PrimaryEntityId = suppliedId, // valid — matches supplied regardingId
-                PrimaryEntityName = "Acme Corp"
-            }
-        };
-        var logger = new CapturingTestLogger();
-
-        // Act
-        var validated = DailyBriefingEndpoints.ValidateBulletPrimaryEntityIds(
-            bullets, allowedRegardingIds, channel, logger);
-
-        // Assert — all fields preserved; no warning emitted (happy path).
-        validated.Should().HaveCount(1);
-        validated[0].PrimaryEntityType.Should().Be("sprk_matter");
-        validated[0].PrimaryEntityId.Should().Be(suppliedId);
-        validated[0].PrimaryEntityName.Should().Be("Acme Corp");
-        logger.WarningCount.Should().Be(0);
-    }
-
-    // ── Tests: R2.2 — structured TL;DR prompt + ParseTldrResponse ─────────────────
-    //
-    // R2.2 hotfix switched TL;DR from a single 5-7 sentence narrative to a
-    // structured response (summary + keyTakeaways[] + topAction) so the client
-    // can render a scannable shape. These tests cover the new prompt + parser.
-
-    [Fact]
-    public void BuildNarrateTldrPrompt_Requests_Json_Structured_Response()
-    {
-        // Arrange — minimal request (prompt content is invariant to data shape)
-        var request = new DailyBriefingNarrateRequest
-        {
-            Categories = [],
-            PriorityItems = [],
-            TotalNotificationCount = 0,
-            Channels = []
-        };
-
-        // Act
-        var prompt = DailyBriefingEndpoints.BuildNarrateTldrPrompt(request);
-
-        // Assert — prompt must request the JSON shape, NOT a 5-7 sentence narrative.
-        prompt.Should().Contain("summary");
-        prompt.Should().Contain("keyTakeaways");
-        prompt.Should().Contain("topAction");
-        prompt.Should().Contain("JSON");
-        prompt.Should().NotContain("5-7 sentence", because: "R2.2 replaced free-form narrative with structured JSON");
-        prompt.Should().NotContain("Do NOT use bullet points", because: "bullets are now requested");
-    }
-
-    [Fact]
-    public void ParseTldrResponse_Parses_Valid_Json_Successfully()
-    {
-        // Arrange — well-formed JSON matching the prompt contract
-        var json = """
-            {
-              "summary": "Three urgent matters need attention today.",
-              "keyTakeaways": ["Acme contract overdue", "Bravo brief due tomorrow", "Charlie meeting at 3pm"],
-              "topAction": "Review the Acme engagement letter (2 days overdue)."
-            }
-            """;
-        var logger = NullLogger.Instance;
-
-        // Act
-        var result = DailyBriefingEndpoints.ParseTldrResponse(json, logger);
+        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
 
         // Assert
-        result.Summary.Should().Be("Three urgent matters need attention today.");
-        result.KeyTakeaways.Should().HaveCount(3);
-        result.KeyTakeaways[0].Should().Be("Acme contract overdue");
-        result.TopAction.Should().Be("Review the Acme engagement letter (2 days overdue).");
+        result.Should().BeOfType<Ok<DailyBriefingNarrateResponse>>();
+        capturedPlaybookId.Should().Be(playbookId);
+
+        capturedParameters.Should().NotBeNull();
+        capturedParameters!.Should().ContainKey("briefingPayload");
+        capturedParameters!.Should().ContainKey("totalNotificationCount");
+        capturedParameters!.Should().ContainKey("categoryCount");
+        capturedParameters!.Should().ContainKey("priorityItemCount");
+        capturedParameters!.Should().ContainKey("channelCount");
+
+        // The serialized payload must round-trip back to the original request shape
+        // (camelCase property names matching the playbook's template references).
+        var payloadJson = capturedParameters!["briefingPayload"];
+        var roundTripped = JsonSerializer.Deserialize<DailyBriefingNarrateRequest>(
+            payloadJson,
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+        roundTripped.Should().NotBeNull();
+        roundTripped!.Categories.Should().HaveCount(1);
+        roundTripped.PriorityItems.Should().HaveCount(1);
+        roundTripped.Channels.Should().HaveCount(1);
+
+        capturedContext.Should().NotBeNull();
+        capturedContext!.HttpContext.Should().NotBeNull();
     }
 
     [Fact]
-    public void ParseTldrResponse_Strips_Markdown_Code_Fences()
+    public async Task HandleNarrate_Returns_503_When_Routing_Returns_Null_PlaybookId()
     {
-        // Arrange — LLM sometimes wraps JSON in ```json fences despite "no markdown" instruction
-        var fencedJson = """
-            ```json
+        // Arrange — routing returns null (no sprk_playbookconsumer row matches)
+        var request = BuildNonEmptyRequest();
+        var routing = BuildRoutingMock(null);
+        // STRICT — InvokePlaybookAsync must NOT be called when routing fails.
+        var invokePlaybookAi = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
+
+        // Act
+        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
+
+        // Assert — 503 ProblemDetails (preserves the prior service-unavailable contract).
+        var problem = result.Should().BeAssignableTo<IStatusCodeHttpResult>().Subject;
+        problem.StatusCode.Should().Be(503);
+        invokePlaybookAi.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task HandleNarrate_Returns_503_When_Playbook_Result_Reports_Failure()
+    {
+        // Arrange — playbook resolves but execution fails (orchestration-level failure).
+        var request = BuildNonEmptyRequest();
+        var routing = BuildRoutingMock(Guid.NewGuid());
+        var failedResult = new PlaybookInvocationResult
+        {
+            RunId = Guid.NewGuid(),
+            Success = false,
+            ErrorCode = "PLAYBOOK_INVOCATION_FAILED",
+            ErrorMessage = "node BRIEF-NARRATE-TLDR failed"
+        };
+        var invokePlaybookAi = BuildInvokeMock(failedResult);
+
+        // Act
+        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
+
+        // Assert — 503 (AiUnavailable), not 500.
+        var problem = result.Should().BeAssignableTo<IStatusCodeHttpResult>().Subject;
+        problem.StatusCode.Should().Be(503);
+    }
+
+    // ── Tests: response shape backward compatibility (AC-12b) ──────────────────
+
+    [Fact]
+    public async Task HandleNarrate_Projects_StructuredData_Into_DailyBriefingNarrateResponse()
+    {
+        // Arrange — playbook returns structured TL;DR + per-channel narratives.
+        var request = BuildNonEmptyRequest();
+        var routing = BuildRoutingMock(Guid.NewGuid());
+
+        // Mirror the playbook's ReturnResponse node binding (responseBinding.tldr +
+        // responseBinding.channelNarratives) — see daily-briefing-narrate.json.
+        using var doc = JsonDocument.Parse("""
             {
-              "summary": "Test summary.",
-              "keyTakeaways": ["one"],
-              "topAction": "Do the thing."
+              "tldr": {
+                "summary": "Three urgent matters need attention today.",
+                "keyTakeaways": ["Acme contract overdue", "Bravo brief due tomorrow"],
+                "topAction": "Review the Acme engagement letter (2 days overdue)."
+              },
+              "channelNarratives": [
+                {
+                  "category": "tasks",
+                  "bullets": [
+                    {
+                      "narrative": "Review the Acme engagement letter today.",
+                      "itemIds": ["notif-1"],
+                      "primaryEntityType": "sprk_matter",
+                      "primaryEntityId": "00000000-0000-0000-0000-000000000001",
+                      "primaryEntityName": "Acme Corp"
+                    }
+                  ]
+                }
+              ]
             }
-            ```
-            """;
-        var logger = NullLogger.Instance;
+            """);
+
+        var playbookResult = new PlaybookInvocationResult
+        {
+            RunId = Guid.NewGuid(),
+            Success = true,
+            StructuredData = doc.RootElement.Clone()
+        };
+        var invokePlaybookAi = BuildInvokeMock(playbookResult);
 
         // Act
-        var result = DailyBriefingEndpoints.ParseTldrResponse(fencedJson, logger);
+        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
 
-        // Assert — fences stripped, JSON parsed (mirrors ParseChannelBullets convention).
-        result.Summary.Should().Be("Test summary.");
-        result.KeyTakeaways.Should().ContainSingle().Which.Should().Be("one");
-        result.TopAction.Should().Be("Do the thing.");
+        // Assert — response shape matches the existing widget parser contract.
+        var ok = result.Should().BeOfType<Ok<DailyBriefingNarrateResponse>>().Subject;
+        ok.Value.Should().NotBeNull();
+
+        // TL;DR fields preserved + category / priority counts re-injected from request.
+        ok.Value!.Tldr.Summary.Should().Be("Three urgent matters need attention today.");
+        ok.Value.Tldr.KeyTakeaways.Should().HaveCount(2);
+        ok.Value.Tldr.TopAction.Should().Be("Review the Acme engagement letter (2 days overdue).");
+        ok.Value.Tldr.CategoryCount.Should().Be(request.Categories.Length);
+        ok.Value.Tldr.PriorityItemCount.Should().Be(request.PriorityItems.Length);
+
+        // Channel narratives preserved.
+        ok.Value.ChannelNarratives.Should().HaveCount(1);
+        ok.Value.ChannelNarratives[0].Category.Should().Be("tasks");
+        ok.Value.ChannelNarratives[0].Bullets.Should().HaveCount(1);
+        ok.Value.ChannelNarratives[0].Bullets[0].Narrative
+            .Should().Be("Review the Acme engagement letter today.");
+        ok.Value.ChannelNarratives[0].Bullets[0].PrimaryEntityName.Should().Be("Acme Corp");
+
+        // GeneratedAtUtc is populated.
+        ok.Value.GeneratedAtUtc.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(10));
     }
 
     [Fact]
-    public void ParseTldrResponse_Falls_Back_To_Raw_Summary_On_Invalid_Json()
+    public async Task HandleNarrate_Falls_Back_To_TextContent_When_StructuredData_Missing()
     {
-        // Arrange — LLM returns a paragraph instead of JSON (failure mode)
-        var nonJsonResponse = "Three urgent matters need attention today. Review the Acme letter first.";
-        var logger = new CapturingTestLogger();
+        // Arrange — playbook returns TextContent only (no StructuredData).
+        var request = BuildNonEmptyRequest();
+        var routing = BuildRoutingMock(Guid.NewGuid());
+        var playbookResult = new PlaybookInvocationResult
+        {
+            RunId = Guid.NewGuid(),
+            Success = true,
+            TextContent = "Fallback summary text from playbook."
+        };
+        var invokePlaybookAi = BuildInvokeMock(playbookResult);
 
         // Act
-        var result = DailyBriefingEndpoints.ParseTldrResponse(nonJsonResponse, logger);
+        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
 
-        // Assert — graceful degradation: raw text becomes Summary, bullets + topAction empty.
-        result.Summary.Should().Be(nonJsonResponse);
-        result.KeyTakeaways.Should().BeEmpty();
-        result.TopAction.Should().BeEmpty();
-        logger.WarningCount.Should().Be(1, because: "fallback path logs a structured warning");
+        // Assert — graceful degradation: TextContent becomes Summary; bullets/channels empty.
+        var ok = result.Should().BeOfType<Ok<DailyBriefingNarrateResponse>>().Subject;
+        ok.Value.Should().NotBeNull();
+        ok.Value!.Tldr.Summary.Should().Be("Fallback summary text from playbook.");
+        ok.Value.Tldr.KeyTakeaways.Should().BeEmpty();
+        ok.Value.Tldr.TopAction.Should().BeEmpty();
+        ok.Value.ChannelNarratives.Should().BeEmpty();
+    }
+
+    // ── Tests: ProjectPlaybookResultToNarrateResponse — direct ─────────────────
+
+    [Fact]
+    public void ProjectPlaybookResultToNarrateResponse_Maps_StructuredData_To_Response_Shape()
+    {
+        // Arrange — direct test of the projection helper (avoids reflection-on-private).
+        var request = BuildNonEmptyRequest();
+        using var doc = JsonDocument.Parse("""
+            {
+              "tldr": {
+                "summary": "Summary text.",
+                "keyTakeaways": ["A", "B", "C"],
+                "topAction": "Do A first."
+              },
+              "channelNarratives": []
+            }
+            """);
+        var playbookResult = new PlaybookInvocationResult
+        {
+            RunId = Guid.NewGuid(),
+            Success = true,
+            StructuredData = doc.RootElement.Clone()
+        };
+
+        // Act
+        var response = DailyBriefingEndpoints.ProjectPlaybookResultToNarrateResponse(
+            playbookResult, request, NullLogger.Instance);
+
+        // Assert
+        response.Tldr.Summary.Should().Be("Summary text.");
+        response.Tldr.KeyTakeaways.Should().HaveCount(3);
+        response.Tldr.TopAction.Should().Be("Do A first.");
+        response.Tldr.CategoryCount.Should().Be(request.Categories.Length);
+        response.Tldr.PriorityItemCount.Should().Be(request.PriorityItems.Length);
+        response.ChannelNarratives.Should().BeEmpty();
+    }
+
+    // ── Tests: AC-12a — no inline prompt strings remain in DailyBriefingEndpoints ──
+
+    [Fact]
+    public void DailyBriefingEndpoints_Source_Has_No_Inline_LLM_Prompt_Helpers()
+    {
+        // Reflection sanity check: the previously-existing prompt-build helpers
+        // (BuildNarrateTldrPrompt, BuildChannelNarrationPrompt, ParseTldrResponse,
+        // ParseChannelBullets, BuildAllowedRegardingIdSet, ValidateBulletPrimaryEntityIds)
+        // MUST NOT exist on the static class anymore. Their presence would be a
+        // regression of FR-12 / AC-12a.
+        var type = typeof(DailyBriefingEndpoints);
+        var bindings = System.Reflection.BindingFlags.Public
+            | System.Reflection.BindingFlags.NonPublic
+            | System.Reflection.BindingFlags.Static
+            | System.Reflection.BindingFlags.Instance;
+
+        var removed = new[]
+        {
+            "BuildNarrateTldrPrompt",
+            "BuildChannelNarrationPrompt",
+            "ParseTldrResponse",
+            "ParseChannelBullets",
+            "BuildAllowedRegardingIdSet",
+            "ValidateBulletPrimaryEntityIds",
+            "GetTldrAsync",
+            "GetChannelNarrationAsync"
+        };
+
+        foreach (var name in removed)
+        {
+            type.GetMethod(name, bindings)
+                .Should().BeNull(because:
+                    $"R4 task 031 removed the {name} helper — prompt construction now lives in the playbook + Action rows.");
+        }
+    }
+
+    // ── Tests: exception paths — edge cases (R4 task 035) ─────────────────────
+
+    [Fact]
+    public async Task HandleNarrate_Returns_503_When_InvokePlaybook_Throws_FeatureDisabledException()
+    {
+        // Arrange — playbook resolves, but the AI kill-switch is OFF
+        // (ADR-032 NullInvokePlaybookAi P3 Fail-Fast surfaces this exception).
+        var request = BuildNonEmptyRequest();
+        var routing = BuildRoutingMock(Guid.NewGuid());
+
+        var invokePlaybookAi = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
+        invokePlaybookAi.Setup(i => i.InvokePlaybookAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyDictionary<string, string>?>(),
+                It.IsAny<PlaybookInvocationContext>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new FeatureDisabledException("ai.briefing.disabled", "AI disabled"));
+
+        // Act
+        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
+
+        // Assert — 503 (canonical kill-switch response, NOT 500).
+        var problem = result.Should().BeAssignableTo<IStatusCodeHttpResult>().Subject;
+        problem.StatusCode.Should().Be(503);
+    }
+
+    [Fact]
+    public async Task HandleNarrate_Returns_500_When_InvokePlaybook_Throws_Generic_Exception()
+    {
+        // Arrange — playbook resolves, but execution throws an unexpected
+        // exception (NOT one of the well-known recoverable types). Endpoint
+        // should NOT leak the inner exception text; should return 500 ProblemDetails.
+        var request = BuildNonEmptyRequest();
+        var routing = BuildRoutingMock(Guid.NewGuid());
+
+        var invokePlaybookAi = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
+        invokePlaybookAi.Setup(i => i.InvokePlaybookAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyDictionary<string, string>?>(),
+                It.IsAny<PlaybookInvocationContext>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("unexpected playbook engine failure"));
+
+        // Act
+        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
+
+        // Assert — 500 (catch-all branch).
+        var problem = result.Should().BeAssignableTo<IStatusCodeHttpResult>().Subject;
+        problem.StatusCode.Should().Be(500);
+    }
+
+    [Fact]
+    public async Task HandleNarrate_Propagates_OperationCanceledException_When_Caller_Cancels()
+    {
+        // Arrange — caller cancels mid-dispatch. Endpoint must propagate the
+        // cancellation cleanly (NOT swallow into a 500 ProblemDetails).
+        var request = BuildNonEmptyRequest();
+        var routing = BuildRoutingMock(Guid.NewGuid());
+
+        var invokePlaybookAi = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
+        invokePlaybookAi.Setup(i => i.InvokePlaybookAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyDictionary<string, string>?>(),
+                It.IsAny<PlaybookInvocationContext>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException("caller cancelled"));
+
+        // Act + Assert — exception bubbles out (test framework observes it).
+        var act = () => InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Captures warning-level log messages so FR-17 validation tests can assert
-    /// the structured warning was emitted (per BFF §10 bullet 6 test obligation).
-    /// Mirrors the <c>TestLogger</c> pattern used by
-    /// <see cref="Sprk.Bff.Api.Tests.Services.Ai.AnalysisToolDtoTests"/>.
-    /// </summary>
-    private sealed class CapturingTestLogger : ILogger
+    private static PlaybookInvocationResult BuildSuccessResult()
     {
-        public int WarningCount { get; private set; }
-        public string? LastWarningMessage { get; private set; }
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(LogLevel logLevel) => true;
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state,
-            Exception? exception, Func<TState, Exception?, string> formatter)
-        {
-            if (logLevel == LogLevel.Warning)
+        using var doc = JsonDocument.Parse("""
             {
-                WarningCount++;
-                LastWarningMessage = formatter(state, exception);
+              "tldr": { "summary": "ok", "keyTakeaways": [], "topAction": "" },
+              "channelNarratives": []
             }
-        }
+            """);
+        return new PlaybookInvocationResult
+        {
+            RunId = Guid.NewGuid(),
+            Success = true,
+            StructuredData = doc.RootElement.Clone()
+        };
     }
 }

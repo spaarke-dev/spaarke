@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-daily-update-service-r3">
+  <metadata>
+    <title>Project wrap-up: lessons-learned, status update, archive</title>
+    <phase>Phase 5: Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>none</blocks>
+    <tags>wrap-up, documentation, lessons-learned</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation only; no source-code changes</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Wrap up the R3 project. Author `notes/lessons-learned.md` capturing what went well, what was hard, and any cross-project gotchas (including any worth recording for the missing R2 lessons-learned). Update `README.md` Status to Complete. Update `current-task.md` to reflect project completion (status: "none", next action: "run /repo-cleanup"). Move PR #451 from draft to ready-for-review; merge after approval.
+  </prompt>
+
+  <role>SPAARKE platform developer wrapping up a small defect-fix + feature project. Expert in Spaarke wrap-up convention (lessons-learned + repo-cleanup).</role>
+
+  <goal>`notes/lessons-learned.md` authored. `README.md` status: Complete. `current-task.md`: project complete. PR #451 ready to merge (or merged).</goal>
+
+  <context>
+    <background>
+      R3 wrap-up follows Spaarke convention: capture lessons-learned for the next time a similar defect-fix project happens, update status, and prepare for `repo-cleanup` skill to validate the final folder structure. R2 has no `lessons-learned.md` — this is a documented gap. R3 wrap-up is a good moment to author one that covers BOTH projects' learnings (per CLAUDE.md note in R2).
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r3/README.md</file>
+      <file>projects/spaarke-daily-update-service-r3/current-task.md</file>
+      <file>projects/spaarke-daily-update-service-r3/notes/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All UAT ACs from task 040 must pass before wrap-up</constraint>
+    <constraint source="project">Lessons-learned MUST include both R3-specific learnings AND any cross-cutting observations applicable to future Daily Briefing / appnotification work</constraint>
+    <constraint source="project">Do NOT delete `notes/` content — it's part of the project record; `repo-cleanup` decides what to prune (separately)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r3/design.md</file>
+      <file>projects/spaarke-daily-update-service-r3/CLAUDE.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/merge-to-master/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Review all `notes/` files: bff-size-check.md, bff-cve-check.md, schema-deployment.md, uat-*.md</step>
+    <step order="2">Author `notes/lessons-learned.md` covering at minimum:
+      - What the UAT-driven design session produced (root cause analysis cycle, owner clarifications resolved 7 questions in 1 session)
+      - The `toasttype` semantic-mismatch class of bug (this was the 2nd instance after Phase B; document the pattern: "Microsoft option-set values have canonical display-behavior meanings; never repurpose them as state markers")
+      - The `ttlindays` vs `ttlinseconds` field-name class of bug (1st was R2 Phase B; document the pattern: "Microsoft Learn is authoritative for OOB field names; verify before writing")
+      - Wave 1 parallel execution (001 ∥ 010 ∥ 020) — did it work? Time savings?
+      - Any UAT surprises (e.g., maker-portal default-value handling for Choice on OOB tables)
+      - Any worth carrying forward for R2 retrospective gap
+    </step>
+    <step order="3">Update `README.md`:
+      - Status: Complete
+      - Progress: 100%
+      - Completed Date: today
+      - Graduation Criteria checkboxes: all checked
+    </step>
+    <step order="4">Update `current-task.md`:
+      - Active Task: none
+      - Status: none
+      - Next Action: "Run `/repo-cleanup` to validate folder structure and prune ephemeral notes"
+    </step>
+    <step order="5">Update `TASK-INDEX.md`: change task 090 status from 🔲 to ✅; verify all other tasks marked ✅</step>
+    <step order="6">Update PR #451 description to reflect completion (link UAT findings, list merged work). Move from draft to ready-for-review</step>
+    <step order="7">Optionally invoke `merge-to-master` skill when reviewer approves (depends on owner workflow)</step>
+    <step order="8">Recommend running `repo-cleanup` skill post-merge to validate structure</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">Update PR status</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r3/notes/lessons-learned.md (NEW)</output>
+    <output type="docs">projects/spaarke-daily-update-service-r3/README.md (status update)</output>
+    <output type="docs">projects/spaarke-daily-update-service-r3/current-task.md (project-complete state)</output>
+    <output type="docs">projects/spaarke-daily-update-service-r3/tasks/TASK-INDEX.md (all tasks ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/lessons-learned.md` exists with the 4 minimum sections per Step 2</criterion>
+    <criterion testable="true">README Status: Complete; all graduation criteria checked</criterion>
+    <criterion testable="true">current-task.md: status = none, next action = run /repo-cleanup</criterion>
+    <criterion testable="true">TASK-INDEX.md: all tasks ✅</criterion>
+    <criterion testable="true">PR #451 description reflects completion; moved from draft to ready-for-review (or merged)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Lessons-learned is the single most leveraged artifact for future similar projects. Capture honestly — what was surprising, what was hard, what would you do differently? Don't pad it.
+
+    Two semantic-mismatch bugs (toasttype + ttlinseconds) in two projects (R2 Phase B + R3) suggest a recurring pattern worth flagging in lessons-learned — "always verify OOB field semantics via Microsoft Learn before writing Dataverse fields, especially when names look like they encode meaning."
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

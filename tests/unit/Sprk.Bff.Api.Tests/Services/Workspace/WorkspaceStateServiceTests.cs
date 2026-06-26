@@ -2,11 +2,11 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Azure.Cosmos;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Workspace;
 using Sprk.Bff.Api.Services.Workspace;
 using Xunit;
@@ -38,31 +38,64 @@ public class WorkspaceStateServiceTests
     // Helpers
     // =========================================================================
 
-    private sealed class FakeDistributedCache : IDistributedCache
+    /// <summary>
+    /// In-memory <see cref="ITenantCache"/> for tests. Mirrors the real wrapper's
+    /// key format <c>tenant:{tenantId}:{resource}:{id}:v{version}</c> so the Store
+    /// dictionary can be asserted against canonical keys (e.g.,
+    /// <c>tenant:tenant-a:workspace-state:session-001:v1</c>).
+    /// </summary>
+    private sealed class FakeTenantCache : ITenantCache
     {
-        public Dictionary<string, (byte[] Value, DistributedCacheEntryOptions Options)> Store { get; } = new();
+        private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
-        public byte[]? Get(string key) => Store.TryGetValue(key, out var v) ? v.Value : null;
-        public Task<byte[]?> GetAsync(string key, CancellationToken token = default) => Task.FromResult(Get(key));
+        /// <summary>(Key, RawBytes, TTL) — TTL is null for "no explicit TTL".</summary>
+        public Dictionary<string, (byte[] Value, TimeSpan? Ttl)> Store { get; } = new();
 
-        public void Refresh(string key) { }
-        public Task RefreshAsync(string key, CancellationToken token = default) => Task.CompletedTask;
-
-        public void Remove(string key) => Store.Remove(key);
-        public Task RemoveAsync(string key, CancellationToken token = default) { Store.Remove(key); return Task.CompletedTask; }
-
-        public void Set(string key, byte[] value, DistributedCacheEntryOptions options) => Store[key] = (value, options);
-        public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default)
+        public Task<T?> GetAsync<T>(string tenantId, string resource, string id, int version,
+            string cacheInstance = "default", CancellationToken ct = default)
         {
-            Store[key] = (value, options);
+            var key = BuildKey(tenantId, resource, id, version);
+            if (!Store.TryGetValue(key, out var entry)) return Task.FromResult(default(T));
+            var deserialized = JsonSerializer.Deserialize<T>(entry.Value, SerializerOptions);
+            return Task.FromResult(deserialized);
+        }
+
+        public Task SetAsync<T>(string tenantId, string resource, string id, int version, T value,
+            TimeSpan? ttl = null, string cacheInstance = "default", CancellationToken ct = default)
+        {
+            var key = BuildKey(tenantId, resource, id, version);
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(value, SerializerOptions);
+            Store[key] = (bytes, ttl);
             return Task.CompletedTask;
         }
+
+        public Task RemoveAsync(string tenantId, string resource, string id, int version,
+            string cacheInstance = "default", CancellationToken ct = default)
+        {
+            var key = BuildKey(tenantId, resource, id, version);
+            Store.Remove(key);
+            return Task.CompletedTask;
+        }
+
+        public async Task<T> GetOrCreateAsync<T>(string tenantId, string resource, string id, int version,
+            Func<CancellationToken, Task<T>> factory, TimeSpan? ttl = null,
+            string cacheInstance = "default", CancellationToken ct = default)
+        {
+            var existing = await GetAsync<T>(tenantId, resource, id, version, cacheInstance, ct);
+            if (existing is not null) return existing;
+            var produced = await factory(ct);
+            await SetAsync(tenantId, resource, id, version, produced, ttl, cacheInstance, ct);
+            return produced;
+        }
+
+        private static string BuildKey(string tenantId, string resource, string id, int version)
+            => $"tenant:{tenantId}:{resource}:{id}:v{version}";
     }
 
-    private static (WorkspaceStateService Service, FakeDistributedCache Cache, Mock<Container> ContainerMock)
+    private static (WorkspaceStateService Service, FakeTenantCache Cache, Mock<Container> ContainerMock)
         CreateSut(Action<Mock<Container>>? configureContainer = null)
     {
-        var cache = new FakeDistributedCache();
+        var cache = new FakeTenantCache();
         var containerMock = new Mock<Container>();
         configureContainer?.Invoke(containerMock);
 
@@ -129,14 +162,14 @@ public class WorkspaceStateServiceTests
     [Fact]
     public void BuildRedisKey_IsolatesTenants_ForSameSessionId()
     {
-        // Arrange
+        // Arrange — post-migration shape: tenant:{tenantId}:workspace-state:{sessionId}:v1
         var keyA = WorkspaceStateService.BuildRedisKey(TenantA, SessionId);
         var keyB = WorkspaceStateService.BuildRedisKey(TenantB, SessionId);
 
         // Assert — keys are distinct and both contain the tenantId
         keyA.Should().NotBe(keyB);
-        keyA.Should().Be($"workspace:{TenantA}:{SessionId}");
-        keyB.Should().Be($"workspace:{TenantB}:{SessionId}");
+        keyA.Should().Be($"tenant:{TenantA}:workspace-state:{SessionId}:v1");
+        keyB.Should().Be($"tenant:{TenantB}:workspace-state:{SessionId}:v1");
     }
 
     [Fact]
@@ -152,8 +185,8 @@ public class WorkspaceStateServiceTests
         await sut.UpsertTabAsync(TenantB, SessionId, tabB);
 
         // Assert — both keys exist in cache; they do NOT collide
-        cache.Store.Should().ContainKey($"workspace:{TenantA}:{SessionId}");
-        cache.Store.Should().ContainKey($"workspace:{TenantB}:{SessionId}");
+        cache.Store.Should().ContainKey($"tenant:{TenantA}:workspace-state:{SessionId}:v1");
+        cache.Store.Should().ContainKey($"tenant:{TenantB}:workspace-state:{SessionId}:v1");
         cache.Store.Should().HaveCount(2);
     }
 
@@ -207,9 +240,10 @@ public class WorkspaceStateServiceTests
         // Act
         await sut.UpsertTabAsync(TenantA, SessionId, tab);
 
-        // Assert
-        var (_, options) = cache.Store[$"workspace:{TenantA}:{SessionId}"];
-        options.SlidingExpiration.Should().Be(TimeSpan.FromHours(24));
+        // Assert — post-migration: AbsoluteExpirationRelativeToNow (the wrapper does not expose
+        // SlidingExpiration); 24h horizon preserved.
+        var (_, ttl) = cache.Store[$"tenant:{TenantA}:workspace-state:{SessionId}:v1"];
+        ttl.Should().Be(TimeSpan.FromHours(24));
     }
 
     // =========================================================================
@@ -266,7 +300,7 @@ public class WorkspaceStateServiceTests
         await sut.PinTabAsync(TenantA, SessionId, "tab-pin-2", "matter-X");
 
         // Assert — Redis row still present
-        cache.Store.Should().ContainKey($"workspace:{TenantA}:{SessionId}");
+        cache.Store.Should().ContainKey($"tenant:{TenantA}:workspace-state:{SessionId}:v1");
     }
 
     [Fact]
@@ -296,7 +330,7 @@ public class WorkspaceStateServiceTests
         await sut.CloseTabAsync(TenantA, SessionId, "tab-close-1");
 
         // Assert — Redis key was removed entirely (only tab in session)
-        cache.Store.Should().NotContainKey($"workspace:{TenantA}:{SessionId}");
+        cache.Store.Should().NotContainKey($"tenant:{TenantA}:workspace-state:{SessionId}:v1");
 
         // No Cosmos delete / upsert calls
         containerMock.Verify(c => c.DeleteItemAsync<It.IsAnyType>(
@@ -323,9 +357,11 @@ public class WorkspaceStateServiceTests
         await sut.CloseTabAsync(TenantA, SessionId, "tab-1");
 
         // Assert — Redis key still present; tab-2 alive
-        cache.Store.Should().ContainKey($"workspace:{TenantA}:{SessionId}");
-        var bytes = cache.Store[$"workspace:{TenantA}:{SessionId}"].Value;
-        var dict = JsonSerializer.Deserialize<Dictionary<string, WorkspaceTab>>(bytes);
+        var key = $"tenant:{TenantA}:workspace-state:{SessionId}:v1";
+        cache.Store.Should().ContainKey(key);
+        var bytes = cache.Store[key].Value;
+        var dict = JsonSerializer.Deserialize<Dictionary<string, WorkspaceTab>>(
+            bytes, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         dict.Should().NotBeNull();
         dict!.Should().HaveCount(1).And.ContainKey("tab-2");
     }

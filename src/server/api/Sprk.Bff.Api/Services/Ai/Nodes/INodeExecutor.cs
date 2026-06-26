@@ -239,5 +239,14 @@ public enum ActionType
     /// observation-emission portion of the code-defined <c>IngestOrchestrator</c>
     /// (retired Wave C-G4 / task 022). NEW in Wave C1 per design-a5 §4 Node 6.
     /// </summary>
-    ObservationEmit = 140
+    ObservationEmit = 140,
+
+    /// <summary>
+    /// Post-LLM output scrubber. Validates entity names in LLM output against an allow-list
+    /// and removes hallucinated names. Logs <c>hallucination_detected</c> event per removal.
+    /// Slots into the post-LLM cluster alongside <see cref="Sanitization"/> (130) and
+    /// <see cref="ObservationEmit"/> (140). NEW in R4 per spaarke-daily-update-service-r4
+    /// FR-3 / AC-3a (PR 1 / W0).
+    /// </summary>
+    EntityNameValidator = 141
 }

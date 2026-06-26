@@ -1,0 +1,50 @@
+<task id="CICD-023" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Draft new docs/standards/TEST-ARCHITECTURE.md (integration-heavy pyramid, 6-category portfolio, TimeProvider, mock-boundary rules)</title>
+    <status>complete</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1 - Stream B</phase>
+    <stream>B - Test reset</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>testing, standards, docs</tags>
+  </metadata>
+
+  <prompt>
+    Author the new `docs/standards/TEST-ARCHITECTURE.md` per spec FR-B04. Content: test pyramid (heavy integration, modest unit, no UI yet), 6-category portfolio shape (regression / security-auth / data-mutation / tenant-isolation / endpoint-contract / domain-logic), `TimeProvider` usage instead of `Stopwatch` for time-dependent tests, mock-boundary rules (mock at module boundaries, not at HTTP-handler level), forcing-function enforcement points (where Step 9.5 / nightly-health / Tier 3 reinforce the policy).
+  </prompt>
+
+  <role>Test architecture engineer authoring a new cross-cutting standard.</role>
+
+  <goal>`docs/standards/TEST-ARCHITECTURE.md` exists; cross-referenced from `tests/CLAUDE.md` (task 021), `.claude/constraints/testing.md` (task 022), and root `CLAUDE.md` §17 (task 062).</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+    <file purpose="design">projects/ci-cd-unit-test-remediation-r1/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B04">Must include: test pyramid, 6 KEEP categories, TimeProvider instead of Stopwatch, mock-boundary rules.</constraint>
+    <constraint source="spec MUST">MUST NOT introduce coverage-% targets.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Read spec.md FR-B04 + design.md §100 (TEST-ARCHITECTURE.md table row)</step>
+    <step order="2">Survey existing docs/standards/ files for tone and structure (CODING-STANDARDS.md, INTEGRATION-CONTRACTS.md, ANTI-PATTERNS.md)</step>
+    <step order="3">Draft sections: (1) Purpose, (2) Test Pyramid (integration-heavy), (3) Six KEEP Categories with examples, (4) TimeProvider over Stopwatch (with code example), (5) Mock-Boundary Rules with examples, (6) Forcing-function enforcement (Step 9.5, nightly-health Tier 3), (7) Cross-references</step>
+    <step order="4">Write `docs/standards/TEST-ARCHITECTURE.md`</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">docs/standards/TEST-ARCHITECTURE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File exists with all 7 sections</criterion>
+    <criterion testable="true">No coverage-% targets anywhere</criterion>
+    <criterion testable="true">TimeProvider example is concrete (not pseudocode)</criterion>
+    <criterion testable="true">All 6 KEEP categories defined with examples</criterion>
+  </acceptance-criteria>
+</task>

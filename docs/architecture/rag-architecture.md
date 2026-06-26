@@ -78,7 +78,7 @@ The key design decision is **idempotent re-indexing** (ADR-004): re-indexing the
 | Discovery chunk size | 1024 tokens (~4096 chars) | 100-token overlap |
 | Semantic config name | `knowledge-semantic-config` | Must match AI Search index definition |
 | Search fields | `content`, `fileName`, `knowledgeSourceName` | Keyword search targets |
-| Embedding cache key | `sdap:embedding:{base64-sha256-hash}` | Redis, 7-day TTL |
+| Embedding cache key | `spaarke:embedding:{base64-sha256-hash}` (system-level exception per ADR-009 + `SystemCacheKeys.Embedding` — content-addressed, no tenant context) | Redis, 7-day TTL |
 | RAG result cache TTL | 15 minutes | `AnalysisRagProcessor` cache |
 | Default TopK | 5 | Max: 20 |
 | Default MinScore | 0.7 | Score threshold for result filtering |

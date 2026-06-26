@@ -3,9 +3,9 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Telemetry;
 using AnalysisDocumentResult = Sprk.Bff.Api.Models.Ai.DocumentAnalysisResult;
@@ -21,11 +21,16 @@ public class AnalysisRagProcessor
 {
     private readonly IRagService _ragService;
     private readonly RagQueryBuilder _ragQueryBuilder;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly CacheMetrics? _cacheMetrics;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly AnalysisOptions _options;
     private readonly ILogger<AnalysisRagProcessor> _logger;
+
+    // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
+    // spaarke:tenant:{tenantId}:rag-cache:{queryHash}:v1
+    private const string CacheResource = "rag-cache";
+    private const int CacheVersion = 1;
 
     /// <summary>
     /// TTL for cached RAG search results. Short TTL ensures index updates are reflected quickly.
@@ -41,7 +46,7 @@ public class AnalysisRagProcessor
     public AnalysisRagProcessor(
         IRagService ragService,
         RagQueryBuilder ragQueryBuilder,
-        IDistributedCache cache,
+        ITenantCache cache,
         IHttpContextAccessor httpContextAccessor,
         IOptions<AnalysisOptions> options,
         ILogger<AnalysisRagProcessor> logger,
@@ -137,9 +142,9 @@ public class AnalysisRagProcessor
                 _logger.LogDebug("Searching RAG index for knowledge source {SourceId}: {SourceName}",
                     source.Id, source.Name);
 
-                var ragCacheKey = ComputeRagCacheKey(source.Id.ToString(), ragQuery.SearchText);
+                var ragCacheId = ComputeRagCacheId(source.Id.ToString(), ragQuery.SearchText);
                 var searchResult = await GetOrSearchRagCacheAsync(
-                    ragCacheKey, ragQuery.SearchText, searchOptions, cancellationToken);
+                    tenantId, ragCacheId, ragQuery.SearchText, searchOptions, cancellationToken);
 
                 sourceStopwatch.Stop();
 
@@ -202,23 +207,25 @@ public class AnalysisRagProcessor
     }
 
     /// <summary>
-    /// Computes a composite Redis cache key for RAG search results.
-    /// Key pattern: sdap:ai:rag:{knowledgeSourceId}:{SHA256 hash of query text}.
-    /// Per ADR-009: Redis-first caching with structured key hierarchy.
+    /// Computes the cache "id" component (knowledgeSourceId + query hash) consumed by ITenantCache.
+    /// ITenantCache prepends `tenant:{tenantId}:rag-cache:` and appends `:v{version}`.
     /// </summary>
-    internal static string ComputeRagCacheKey(string knowledgeSourceId, string queryText)
+    internal static string ComputeRagCacheId(string knowledgeSourceId, string queryText)
     {
         var queryHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(queryText))).ToLowerInvariant();
-        return $"sdap:ai:rag:{knowledgeSourceId}:{queryHash}";
+        return $"{knowledgeSourceId}:{queryHash}";
     }
 
     /// <summary>
-    /// Cache-aside pattern for RAG search results (ADR-009).
-    /// Checks Redis cache first; on miss, executes the search and caches the result.
-    /// Cache failures are handled gracefully -- search proceeds without caching.
+    /// Cache-aside pattern for RAG search results (ADR-009 + FR-05).
+    /// Checks Redis cache first via ITenantCache; on miss, executes the search and caches the
+    /// result. Cache failures are handled gracefully -- search proceeds without caching. The
+    /// <see cref="_ragSearchSemaphore"/> bounded-concurrency wrapper around the LIVE search is
+    /// preserved (ADR-013).
     /// </summary>
     internal async Task<RagSearchResponse> GetOrSearchRagCacheAsync(
-        string cacheKey,
+        string tenantId,
+        string cacheId,
         string searchText,
         RagSearchOptions searchOptions,
         CancellationToken cancellationToken)
@@ -228,23 +235,20 @@ public class AnalysisRagProcessor
         // Step 1: Try cache
         try
         {
-            var cachedJson = await _cache.GetStringAsync(cacheKey, cancellationToken);
-            if (cachedJson is not null)
+            var cachedResult = await _cache.GetAsync<RagSearchResponse>(
+                tenantId, CacheResource, cacheId, CacheVersion, ct: cancellationToken);
+            if (cachedResult is not null)
             {
-                var cachedResult = JsonSerializer.Deserialize<RagSearchResponse>(cachedJson);
-                if (cachedResult is not null)
-                {
-                    sw.Stop();
-                    _cacheMetrics?.RecordHit(sw.Elapsed.TotalMilliseconds, "rag");
-                    _logger.LogDebug("RAG cache HIT for key {CacheKey} in {ElapsedMs}ms",
-                        cacheKey, sw.ElapsedMilliseconds);
-                    return cachedResult;
-                }
+                sw.Stop();
+                _cacheMetrics?.RecordHit(sw.Elapsed.TotalMilliseconds, "rag");
+                _logger.LogDebug("RAG cache HIT for id {CacheId} in {ElapsedMs}ms",
+                    cacheId, sw.ElapsedMilliseconds);
+                return cachedResult;
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "RAG cache read error for key {CacheKey}, proceeding with live search", cacheKey);
+            _logger.LogWarning(ex, "RAG cache read error for id {CacheId}, proceeding with live search", cacheId);
         }
 
         sw.Stop();
@@ -256,22 +260,16 @@ public class AnalysisRagProcessor
         // Step 3: Store result in cache
         try
         {
-            var json = JsonSerializer.Serialize(searchResult);
-            await _cache.SetStringAsync(
-                cacheKey,
-                json,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = RagCacheTtl
-                },
-                cancellationToken);
+            await _cache.SetAsync(
+                tenantId, CacheResource, cacheId, CacheVersion,
+                searchResult, RagCacheTtl, ct: cancellationToken);
 
-            _logger.LogDebug("RAG cache SET for key {CacheKey}, TTL={TtlMinutes}min, results={ResultCount}",
-                cacheKey, RagCacheTtl.TotalMinutes, searchResult.Results.Count);
+            _logger.LogDebug("RAG cache SET for id {CacheId}, TTL={TtlMinutes}min, results={ResultCount}",
+                cacheId, RagCacheTtl.TotalMinutes, searchResult.Results.Count);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "RAG cache write error for key {CacheKey}", cacheKey);
+            _logger.LogWarning(ex, "RAG cache write error for id {CacheId}", cacheId);
         }
 
         return searchResult;

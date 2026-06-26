@@ -1,9 +1,9 @@
 using System.Security.Claims;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Graph.Models;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -26,7 +26,11 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 public static class GrantExternalAccessEndpoint
 {
     private const string EntitySet = "sprk_externalrecordaccesses";
-    private const string CacheKeyPrefix = "sdap:external:access:";
+    // Resource identifier for ITenantCache (FR-05). Tenant scope is derived from the caller's
+    // 'tid' claim. The cached value is a list of active participations per Contact — not an
+    // authorization decision.
+    private const string ExternalAccessResource = "external-access-grant";
+    private const int CacheVersion = 1;
 
     /// <summary>
     /// Registers the grant endpoint on the external-access group.
@@ -56,7 +60,7 @@ public static class GrantExternalAccessEndpoint
         GrantAccessRequest request,
         DataverseWebApiClient dataverseClient,
         IGraphClientFactory graphClientFactory,
-        IDistributedCache cache,
+        ITenantCache cache,
         HttpContext httpContext,
         ILogger<Program> logger,
         IConfiguration configuration,
@@ -140,9 +144,20 @@ public static class GrantExternalAccessEndpoint
         // ── Step 3: Invalidate Redis cache ───────────────────────────────────
         try
         {
-            var cacheKey = $"{CacheKeyPrefix}{request.ContactId}";
-            await cache.RemoveAsync(cacheKey, ct);
-            logger.LogDebug("[EXT-GRANT] Invalidated cache key {CacheKey}", cacheKey);
+            var tenantId = ExtractTenantId(httpContext);
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                await cache.RemoveAsync(
+                    tenantId, ExternalAccessResource, request.ContactId.ToString(), CacheVersion,
+                    ct: ct);
+                logger.LogDebug("[EXT-GRANT] Invalidated cache for Contact {ContactId}", request.ContactId);
+            }
+            else
+            {
+                logger.LogWarning(
+                    "[EXT-GRANT] No tenant claim found — skipping cache invalidation for Contact {ContactId}",
+                    request.ContactId);
+            }
         }
         catch (Exception ex)
         {
@@ -255,6 +270,14 @@ public static class GrantExternalAccessEndpoint
             return false;
         }
     }
+
+    /// <summary>
+    /// Extracts the Azure AD tenant ID ('tid' claim) from the authenticated HttpContext.
+    /// Returns null when no claim is present (in which case cache invalidation is skipped).
+    /// </summary>
+    private static string? ExtractTenantId(HttpContext httpContext)
+        => httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 
     // ── Dataverse row DTO ────────────────────────────────────────────────────
 

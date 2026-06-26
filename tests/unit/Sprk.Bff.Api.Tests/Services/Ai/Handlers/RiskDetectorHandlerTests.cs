@@ -3,10 +3,13 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Xunit;
@@ -28,33 +31,43 @@ public sealed class RiskDetectorHandlerTests : TypedToolHandlerTestFixture
 {
     private static readonly Assembly BffAssembly = typeof(IToolHandler).Assembly;
 
-    private readonly Mock<IDistributedCache> _cacheMock = new();
-    private readonly Dictionary<string, byte[]> _cacheStore = new(StringComparer.Ordinal);
-
-    public RiskDetectorHandlerTests()
+    // Recording IDistributedCache so tests can inspect/clear stored keys without rebuilding the mock.
+    private sealed class RecordingDistributedCache : IDistributedCache
     {
-        // Wire the cache mock to an in-memory store so we can verify hit/miss behavior.
-        _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string key, CancellationToken _) =>
-                _cacheStore.TryGetValue(key, out var bytes) ? bytes : null!);
+        private readonly IDistributedCache _inner;
+        public Dictionary<string, byte[]> Store { get; } = new(StringComparer.Ordinal);
 
-        _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Returns((string key, byte[] bytes, DistributedCacheEntryOptions _, CancellationToken _) =>
+        public RecordingDistributedCache(IDistributedCache inner) { _inner = inner; }
+
+        public byte[]? Get(string key) => _inner.Get(key);
+        public Task<byte[]?> GetAsync(string key, CancellationToken token = default) => _inner.GetAsync(key, token);
+        public void Refresh(string key) => _inner.Refresh(key);
+        public Task RefreshAsync(string key, CancellationToken token = default) => _inner.RefreshAsync(key, token);
+        public void Remove(string key) { Store.Remove(key); _inner.Remove(key); }
+        public Task RemoveAsync(string key, CancellationToken token = default) { Store.Remove(key); return _inner.RemoveAsync(key, token); }
+        public void Set(string key, byte[] value, DistributedCacheEntryOptions options) { Store[key] = value; _inner.Set(key, value, options); }
+        public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default)
+        {
+            Store[key] = value;
+            return _inner.SetAsync(key, value, options, token);
+        }
+
+        public void ClearStore()
+        {
+            foreach (var k in Store.Keys.ToList())
             {
-                _cacheStore[key] = bytes;
-                return Task.CompletedTask;
-            });
+                _inner.Remove(k);
+            }
+            Store.Clear();
+        }
     }
+
+    private readonly RecordingDistributedCache _cacheStore = new(new MemoryDistributedCache(
+        Options.Create(new MemoryDistributedCacheOptions())));
 
     private RiskDetectorHandler CreateHandler() => new(
         OpenAiClientMock.Object,
-        _cacheMock.Object,
+        new TenantCache(_cacheStore, NullLogger<TenantCache>.Instance),
         Options.Create(new ModelSelectorOptions
         {
             ToolHandlerModel = "gpt-4o-mini",
@@ -455,7 +468,7 @@ public sealed class RiskDetectorHandlerTests : TypedToolHandlerTestFixture
 
         var defaultResult = await handler.ExecuteAsync(contextDefault, toolDefault, CancellationToken.None);
         // Clear cache to force re-evaluation under the override config.
-        _cacheStore.Clear();
+        _cacheStore.ClearStore();
         var overrideResult = await handler.ExecuteAsync(contextOverride, toolOverride, CancellationToken.None);
 
         var defaultData = GetData(defaultResult);
@@ -521,7 +534,7 @@ public sealed class RiskDetectorHandlerTests : TypedToolHandlerTestFixture
             handlerClass: nameof(RiskDetectorHandler), toolType: ToolType.RiskDetector);
 
         var first = await handler.ExecuteAsync(context, tool, CancellationToken.None);
-        _cacheStore.Clear(); // force LLM call on second run
+        _cacheStore.ClearStore(); // force LLM call on second run
         var second = await handler.ExecuteAsync(context, tool, CancellationToken.None);
 
         first.Success.Should().BeTrue();
@@ -575,7 +588,7 @@ public sealed class RiskDetectorHandlerTests : TypedToolHandlerTestFixture
         string? canonical = null;
         for (var i = 0; i < 25; i++)
         {
-            _cacheStore.Clear();
+            _cacheStore.ClearStore();
             var r = await handler.ExecuteAsync(context, tool, CancellationToken.None);
             r.Success.Should().BeTrue();
             var json = r.Data!.Value.GetRawText();
@@ -730,8 +743,9 @@ public sealed class RiskDetectorHandlerTests : TypedToolHandlerTestFixture
             It.IsAny<CancellationToken>()),
             Times.Exactly(2));
 
-        _cacheStore.Keys.Should().Contain(k => k.Contains(":tenant-A:"));
-        _cacheStore.Keys.Should().Contain(k => k.Contains(":tenant-B:"));
+        // TenantCache produces keys of form `tenant:{tenantId}:risk-detector:{hash}:v1`.
+        _cacheStore.Store.Keys.Should().Contain(k => k.Contains("tenant:tenant-A:"));
+        _cacheStore.Store.Keys.Should().Contain(k => k.Contains("tenant:tenant-B:"));
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

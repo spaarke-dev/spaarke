@@ -71,7 +71,10 @@ public sealed class MembershipCacheInvalidationSubscriber : IHostedService, IAsy
     private readonly IConnectionMultiplexer _redis;
     private readonly IConfiguration _configuration;
     private readonly RedisChannel _channel;
-    private readonly string _keyPrefix; // {InstanceName}membership:resolved:
+    // Format: {InstanceName}tenant:{*}:membership-resolved: — covers ALL tenants in
+    // the single-Redis-per-BFF deployment (FR-05 tenant-scoped keys; subscriber
+    // evicts cross-tenant in case junction writes affect users in multiple tenants).
+    private readonly string _instanceName;
     private readonly ILogger<MembershipCacheInvalidationSubscriber> _logger;
     private ChannelMessageQueue? _messageQueue;
 
@@ -107,9 +110,9 @@ public sealed class MembershipCacheInvalidationSubscriber : IHostedService, IAsy
         _channel = RedisChannel.Literal(channelName);
 
         // StackExchange.Redis distributed cache prepends InstanceName to
-        // every key. Match the CacheModule default ("sdap:") if unset.
-        var instanceName = _configuration["Redis:InstanceName"] ?? "sdap:";
-        _keyPrefix = instanceName + MembershipResolverService.CacheKeyPrefix;
+        // every key. Match the CacheModule default ("spaarke:") if unset
+        // (spaarke-redis-cache-remediation-r1 FR-07: dropped deprecated "sdap:").
+        _instanceName = _configuration["Redis:InstanceName"] ?? "spaarke:";
     }
 
     /// <inheritdoc />
@@ -126,8 +129,8 @@ public sealed class MembershipCacheInvalidationSubscriber : IHostedService, IAsy
             _ = Task.Run(ProcessMessagesAsync);
 
             _logger.LogInformation(
-                "MembershipCacheInvalidationSubscriber subscribed to channel '{Channel}' (cacheKeyPrefix='{Prefix}')",
-                _channel.ToString(), _keyPrefix);
+                "MembershipCacheInvalidationSubscriber subscribed to channel '{Channel}' (instanceName='{InstanceName}')",
+                _channel.ToString(), _instanceName);
         }
         catch (Exception ex)
         {
@@ -254,21 +257,22 @@ public sealed class MembershipCacheInvalidationSubscriber : IHostedService, IAsy
     }
 
     /// <summary>
-    /// Evict cache entries by prefix. The cache key shape is
-    /// <c>{InstanceName}membership:resolved:{personId:D}:{entityType}:{optionsHash}</c>
-    /// (see <see cref="MembershipResolverService.CacheKeyPrefix"/> +
-    /// <c>BuildCacheKey</c>). We delete every key matching
-    /// <c>{prefix}{personId}:{entityLogicalName}:*</c> regardless of
-    /// options-hash suffix — the user may have cached multiple
-    /// option-shapes (roles filter, includeRelated, etc.) for the same
-    /// (personId, entityType) tuple and ALL must be evicted on a
-    /// junction write.
+    /// Evict cache entries by prefix. After the FR-05 tenant-scoping migration,
+    /// the on-wire cache key shape is
+    /// <c>{InstanceName}tenant:{tenantId}:membership-resolved:{personId:D}:{entityType}:{optionsHash}:v{version}</c>
+    /// (see <see cref="MembershipResolverService.CacheResource"/> + <c>BuildCacheId</c>).
+    /// We delete every key matching
+    /// <c>{InstanceName}tenant:*:membership-resolved:{personId}:{entityLogicalName}:*</c>
+    /// across all tenants — the user may exist in multiple tenants (rare but
+    /// possible in B2B/guest scenarios), the optionsHash suffix varies per query
+    /// shape, and the schema version suffix varies if multiple BFF versions
+    /// share the Redis instance during deploy windows.
     /// </summary>
     private async Task EvictAsync(MembershipCacheInvalidationMessage msg)
     {
         var personIdString = msg.PersonId.ToString("D");
         var entity = msg.EntityLogicalName.Trim().ToLowerInvariant();
-        var matchPattern = $"{_keyPrefix}{personIdString}:{entity}:*";
+        var matchPattern = $"{_instanceName}tenant:*:{MembershipResolverService.CacheResource}:{personIdString}:{entity}:*";
 
         int deleted = 0;
         try

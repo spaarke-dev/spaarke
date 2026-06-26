@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>DistributedCacheExtensions: sdap → spaarke prefix + tenant integration</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>010,011,012,013,014,015,016,017</blocks>
+    <tags>bff-api, cache, redis, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Modifies shared library; small surface; covered by existing tests + new wrapper tests</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Update `src/server/shared/Spaarke.Core/Cache/DistributedCacheExtensions.cs` — change hardcoded `"sdap"` key prefix to `"spaarke"` (FR-07). Where helper is still used outside the BFF wrapper boundary (shared lib consumers), keep the existing public API contract so consumers don't break. Internal BFF call sites will migrate to `ITenantCache` in tasks 010–017.</prompt>
+  <role>Spaarke .NET developer; preserve public API; targeted internal change.</role>
+  <goal>`CreateKey()` produces `spaarke:{category}:{id}:v{version}` (or whatever the existing helper shape is — preserve shape, swap prefix). All Spaarke.Core consumers compile; existing tests pass.</goal>
+  <context>
+    <background>FR-07 mandates the `sdap:` → `spaarke:` switch. The helper is shared, so we change it once here; the BFF-only `ITenantCache` wrapper supersedes it for new code and the migration tasks (010+).</background>
+    <relevant-files>
+      <file>src/server/shared/Spaarke.Core/Cache/DistributedCacheExtensions.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-07 — `sdap:` → `spaarke:` across appsettings, template, helpers, Bicep params.</constraint>
+    <constraint source="project">Preserve public API of `DistributedCacheExtensions` (consumers in `Spaarke.Core` callers).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read `DistributedCacheExtensions.cs`. Identify the hardcoded `"sdap"` token (exploration noted line 171).</step>
+    <step order="2">Replace `"sdap"` → `"spaarke"` in the helper.</step>
+    <step order="3">Grep all consumers (`grep -rn "CreateKey" src/server/`) to confirm signature unchanged.</step>
+    <step order="4">Run `dotnet test` for `Spaarke.Core.Tests` and `Sprk.Bff.Api.Tests` — preserve existing behavior.</step>
+    <step order="5">Update `TASK-INDEX.md` + `current-task.md`.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Inspect helper</tool>
+    <tool name="Edit">Update prefix</tool>
+    <tool name="Grep">Verify consumers</tool>
+    <tool name="Bash">dotnet test</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Core/Cache/DistributedCacheExtensions.cs (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`grep -n "sdap" src/server/shared/Spaarke.Core/Cache/DistributedCacheExtensions.cs` returns ZERO matches.</criterion>
+    <criterion testable="true">`dotnet test` for Spaarke.Core.Tests passes.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

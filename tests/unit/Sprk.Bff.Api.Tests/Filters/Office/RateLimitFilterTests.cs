@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Filters.Office;
@@ -16,19 +17,22 @@ namespace Sprk.Bff.Api.Tests.Filters.Office;
 /// <summary>
 /// Unit tests for <see cref="OfficeRateLimitFilter"/> and <see cref="OfficeRateLimitService"/>.
 /// Tests rate limiting behavior for Office endpoints.
-/// Uses MemoryDistributedCache instead of Mock&lt;IDistributedCache&gt; because
-/// GetStringAsync/SetStringAsync are extension methods that cannot be mocked.
+/// Uses MemoryDistributedCache wrapped in <see cref="TenantCache"/> (task 010 migration to
+/// <see cref="ITenantCache"/>) — service no longer takes IDistributedCache directly.
 /// </summary>
 public class RateLimitFilterTests
 {
-    private readonly IDistributedCache _cache;
+    private const string TestTenantId = "test-tenant-1";
+    private readonly IDistributedCache _innerCache;
+    private readonly ITenantCache _cache;
     private readonly Mock<ILogger<OfficeRateLimitService>> _serviceLoggerMock;
     private readonly Mock<ILogger<OfficeRateLimitFilter>> _filterLoggerMock;
     private readonly OfficeRateLimitOptions _options;
 
     public RateLimitFilterTests()
     {
-        _cache = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+        _innerCache = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+        _cache = new TenantCache(_innerCache, Mock.Of<ILogger<TenantCache>>());
         _serviceLoggerMock = new Mock<ILogger<OfficeRateLimitService>>();
         _filterLoggerMock = new Mock<ILogger<OfficeRateLimitFilter>>();
         _options = new OfficeRateLimitOptions
@@ -61,8 +65,9 @@ public class RateLimitFilterTests
 
     private IOfficeRateLimitService CreateRateLimitService(IDistributedCache cache)
     {
+        var tenantCache = new TenantCache(cache, Mock.Of<ILogger<TenantCache>>());
         return new OfficeRateLimitService(
-            cache,
+            tenantCache,
             Options.Create(_options),
             _serviceLoggerMock.Object);
     }
@@ -83,11 +88,12 @@ public class RateLimitFilterTests
             _filterLoggerMock.Object);
     }
 
-    private static ClaimsPrincipal CreateAuthenticatedUser(string userId = "user-123")
+    private static ClaimsPrincipal CreateAuthenticatedUser(string userId = "user-123", string tenantId = TestTenantId)
     {
         var claims = new List<Claim>
         {
-            new("oid", userId)
+            new("oid", userId),
+            new("tid", tenantId)
         };
         var identity = new ClaimsIdentity(claims, "TestAuth");
         return new ClaimsPrincipal(identity);
@@ -144,7 +150,7 @@ public class RateLimitFilterTests
         var service = CreateRateLimitService();
 
         // Act
-        var result = await service.CheckAndIncrementAsync("user-123", OfficeRateLimitCategory.Save);
+        var result = await service.CheckAndIncrementAsync(TestTenantId, "user-123", OfficeRateLimitCategory.Save);
 
         // Assert
         result.IsAllowed.Should().BeTrue();
@@ -159,7 +165,7 @@ public class RateLimitFilterTests
         var service = CreateRateLimitService();
 
         // Act
-        var result = await service.CheckAndIncrementAsync("user-123", OfficeRateLimitCategory.Save);
+        var result = await service.CheckAndIncrementAsync(TestTenantId, "user-123", OfficeRateLimitCategory.Save);
 
         // Assert
         result.IsAllowed.Should().BeTrue();
@@ -180,7 +186,7 @@ public class RateLimitFilterTests
         var service = CreateRateLimitService();
 
         // Act
-        var result = await service.CheckAndIncrementAsync("user-123", category);
+        var result = await service.CheckAndIncrementAsync(TestTenantId, "user-123", category);
 
         // Assert
         result.Limit.Should().Be(expectedLimit);
@@ -194,7 +200,7 @@ public class RateLimitFilterTests
         var service = CreateRateLimitService(throwingCache);
 
         // Act
-        var result = await service.CheckAndIncrementAsync("user-123", OfficeRateLimitCategory.Save);
+        var result = await service.CheckAndIncrementAsync(TestTenantId, "user-123", OfficeRateLimitCategory.Save);
 
         // Assert
         result.IsAllowed.Should().BeTrue(); // Fail open
@@ -239,9 +245,11 @@ public class RateLimitFilterTests
             segmentCounts[currentSegment - i] = 2; // 2 requests per segment = 12 total (> 10 limit)
         }
 
+        // Per task 010 migration: cache uses tenant-scoped key produced by ITenantCache wrapper:
+        //   tenant:{tenantId}:office-rate-limit:{userId}:{category}:v1
         var cachedState = System.Text.Json.JsonSerializer.Serialize(new { SegmentCounts = segmentCounts });
-        var cacheKey = $"{_options.KeyPrefix}user-123:Save";
-        await _cache.SetStringAsync(cacheKey, cachedState);
+        var cacheKey = $"tenant:{TestTenantId}:office-rate-limit:user-123:Save:v1";
+        await _innerCache.SetStringAsync(cacheKey, cachedState);
 
         var filter = CreateFilter(OfficeRateLimitCategory.Save);
         var context = CreateContext(CreateAuthenticatedUser());
@@ -290,10 +298,10 @@ public class RateLimitFilterTests
         // Act
         await filter.InvokeAsync(context.Object, NextDelegate);
 
-        // Assert — verify that a cache entry was created with the user's OID in the key
-        var cacheKey = $"{_options.KeyPrefix}{userId}:Save";
-        var cached = await _cache.GetStringAsync(cacheKey);
-        cached.Should().NotBeNull("cache entry should exist with user OID in the key");
+        // Assert — verify that a cache entry was created with the user's OID in the tenant-scoped key
+        var cacheKey = $"tenant:{TestTenantId}:office-rate-limit:{userId}:Save:v1";
+        var cached = await _innerCache.GetStringAsync(cacheKey);
+        cached.Should().NotBeNull("cache entry should exist with user OID in the tenant-scoped key");
     }
 
     [Fact]
@@ -303,7 +311,8 @@ public class RateLimitFilterTests
         var userId = "name-id-user-456";
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, userId)
+            new(ClaimTypes.NameIdentifier, userId),
+            new("tid", TestTenantId)
         };
         var identity = new ClaimsIdentity(claims, "TestAuth");
         var user = new ClaimsPrincipal(identity);
@@ -314,10 +323,10 @@ public class RateLimitFilterTests
         // Act
         await filter.InvokeAsync(context.Object, NextDelegate);
 
-        // Assert — verify that a cache entry was created with the user's NameIdentifier in the key
-        var cacheKey = $"{_options.KeyPrefix}{userId}:Save";
-        var cached = await _cache.GetStringAsync(cacheKey);
-        cached.Should().NotBeNull("cache entry should exist with user NameIdentifier in the key");
+        // Assert — verify that a cache entry was created with the user's NameIdentifier in the tenant-scoped key
+        var cacheKey = $"tenant:{TestTenantId}:office-rate-limit:{userId}:Save:v1";
+        var cached = await _innerCache.GetStringAsync(cacheKey);
+        cached.Should().NotBeNull("cache entry should exist with user NameIdentifier in the tenant-scoped key");
     }
 
     #endregion
@@ -384,8 +393,8 @@ public class RateLimitFilterTests
         }
 
         var cachedState = System.Text.Json.JsonSerializer.Serialize(new { SegmentCounts = segmentCounts });
-        var cacheKey = $"{_options.KeyPrefix}user-123:Save";
-        await _cache.SetStringAsync(cacheKey, cachedState);
+        var cacheKey = $"tenant:{TestTenantId}:office-rate-limit:user-123:Save:v1";
+        await _innerCache.SetStringAsync(cacheKey, cachedState);
 
         var filter = CreateFilter(OfficeRateLimitCategory.Save);
         var context = CreateContext(CreateAuthenticatedUser());

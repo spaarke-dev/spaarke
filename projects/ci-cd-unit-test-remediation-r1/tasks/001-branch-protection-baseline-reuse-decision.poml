@@ -1,0 +1,49 @@
+<task id="CICD-001" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Decide whether to reuse existing branch-protection baseline JSON or take fresh interim snapshot</title>
+    <status>complete</status>
+    <estimated-effort>0.5 hours</estimated-effort>
+    <phase>1 - Cross-cutting</phase>
+    <stream>cross-cutting</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>ci, branch-protection, baseline, decision</tags>
+  </metadata>
+
+  <prompt>
+    The existing baseline at `projects/github-actions-rationalization-r1/baseline/branch-protection-2026-06-01.json` is 24 days old. Compare to the current branch protection state via `gh api repos/spaarke-dev/spaarke/branches/master/protection`. Decide and document whether to (a) use the existing baseline as reference for Phase 1 work and take the authoritative pre-cutover snapshot at task 070, or (b) take an interim snapshot now and use it through Phase 1/2.
+  </prompt>
+
+  <role>CI/CD engineer making a documentation decision.</role>
+
+  <goal>A decision recorded in `notes/branch-protection-baseline-decision.md` with rationale. Either option is acceptable; choose by data.</goal>
+
+  <inputs>
+    <file purpose="reference">projects/github-actions-rationalization-r1/baseline/branch-protection-2026-06-01.json</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec">Authoritative pre-cutover snapshot MUST be taken in task 070 regardless of this decision (FR-A06).</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Read `projects/github-actions-rationalization-r1/baseline/branch-protection-2026-06-01.json`</step>
+    <step order="2">Run `gh api repos/spaarke-dev/spaarke/branches/master/protection` → save as `notes/branch-protection-current.json`</step>
+    <step order="3">Diff: identify any differences (required checks, restrictions, enforce_admins, etc.)</step>
+    <step order="4">If diff is trivial → option (a) reuse existing; if diff is material → option (b) take interim snapshot now to `notes/branch-protection-interim.json`</step>
+    <step order="5">Write `notes/branch-protection-baseline-decision.md` documenting choice + rationale</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/branch-protection-current.json</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/branch-protection-baseline-decision.md</output>
+    <output type="notes" optional="true">projects/ci-cd-unit-test-remediation-r1/notes/branch-protection-interim.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Decision document exists with explicit choice + rationale</criterion>
+    <criterion testable="true">Current state captured as JSON</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,66 @@
+<task id="CICD-022" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Rewrite .claude/constraints/testing.md: drop coverage/mock-I/O/timing MUST rules, add 6 path categories as MUST, fix ADR-022 misattribution</title>
+    <status>complete</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1 - Stream B</phase>
+    <stream>B - Test reset</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>testing, directive-rewrite, constraints, ADR-correction</tags>
+  </metadata>
+
+  <prompt>
+    Rewrite `.claude/constraints/testing.md` end-to-end per spec FR-B01. Drop: "minimum 80% line coverage" MUST (line 51), "mock all I/O" MUST (line 38), `&lt;100ms/test` MUST (line 40). Add: 6 path-based KEEP categories as MUST rules (deletion requires same-PR replacement), bans on `Mock&lt;HttpMessageHandler&gt;` / `Mock&lt;IServiceClient&gt;` / DI-registration tests / constructor null-checks. ALSO fix the ADR-022 misattribution at line 25 (it references ADR-022 as testing policy source, but ADR-022 is actually PCF Platform Libraries — replace with reference to new ADR-038).
+  </prompt>
+
+  <role>Test architecture engineer rewriting the binding constraint file loaded by Claude on every test-touching task.</role>
+
+  <goal>`.claude/constraints/testing.md` rewritten with the new MUST/MUST NOT rules, path-based KEEP enforcement, and corrected ADR reference.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+    <file purpose="pre-rewrite-source">.claude/constraints/testing.md</file>
+    <file purpose="new-ADR">docs/adr/ADR-038-testing-strategy.md (drafted in task 024; if missing when this runs in parallel, draft in coordination)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B01">No 80% coverage MUST. No mock-all-I/O MUST. No `&lt;100ms/test` MUST. Add 6 KEEP categories as MUST rules. Add bans listed above.</constraint>
+    <constraint source="user-clarification">ADR-022 is actually PCF Platform Libraries — NOT a testing ADR. The misattribution at constraints/testing.md line 25 must be corrected (replace with ADR-038 reference, standalone testing strategy).</constraint>
+    <constraint source="spec MUST">MUST NOT introduce coverage-% targets (binding for ≥6 months).</constraint>
+    <constraint source="project autonomous">FULL rigor — Step 9.5 code-review + adr-check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Test policy directives</topic>
+    <files>
+      <file>.claude/constraints/testing.md (current state)</file>
+      <file>docs/adr/ADR-022-pcf-platform-libraries.md (verify it is NOT a testing ADR)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md (drafted in task 024)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current `.claude/constraints/testing.md` end-to-end. Note line 25 (ADR-022 reference) and the footer at lines 131-133 (which correctly notes ADR-022 is PCF libraries, not testing — this confirms the misattribution).</step>
+    <step order="2">Read `docs/adr/ADR-022-pcf-platform-libraries.md` to confirm it has no coverage clauses.</step>
+    <step order="3">Read spec.md FR-B01 + design.md §97-98 (constraints/testing.md table row)</step>
+    <step order="4">Draft new structure: Purpose → ADR-038 reference (correct, replaces line-25 misattribution) → MUST rules (6 KEEP categories with path conventions) → MUST NOT rules (bans listed) → Mock-boundary guidance (module level, not HTTP-handler level) → TimeProvider usage</step>
+    <step order="5">Write the rewritten file (single Write replacing entire contents)</step>
+    <step order="6">Step 9.5: invoke code-review + adr-check; verify line 25 ADR-022 reference is gone; verify no coverage-% MUST remains; verify ban list is complete; verify 6 path categories are MUST-encoded</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">.claude/constraints/testing.md (rewrite)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "ADR-022" .claude/constraints/testing.md` returns zero or only an explanatory note ("ADR-022 is PCF Platform Libraries, not testing — testing strategy is ADR-038")</criterion>
+    <criterion testable="true">`grep -E "80%|coverage.*MUST" .claude/constraints/testing.md` finds no MUST coverage mandate</criterion>
+    <criterion testable="true">`grep "&lt;100ms" .claude/constraints/testing.md` returns nothing</criterion>
+    <criterion testable="true">6 KEEP path categories appear as MUST rules</criterion>
+    <criterion testable="true">Ban list contains Mock&lt;HttpMessageHandler&gt;, Mock&lt;IServiceClient&gt;, DI-registration tests, constructor null-checks</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check pass</criterion>
+  </acceptance-criteria>
+</task>

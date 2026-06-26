@@ -98,7 +98,7 @@ builder.Services.AddOfficeServiceBus(builder.Configuration);
 builder.Services.AddOfficeWorkers(builder.Configuration);
 
 // Distributed cache (Redis or in-memory)
-builder.Services.AddCacheModule(builder.Configuration, builder.Logging);
+builder.Services.AddCacheModule(builder.Configuration, builder.Logging, builder.Environment);
 
 // Graph API resilience, client factory, and Dataverse service
 builder.Services.AddGraphModule(builder.Configuration);

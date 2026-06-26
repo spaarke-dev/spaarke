@@ -1,0 +1,40 @@
+{
+  "tldr": {
+    "summary": "Three urgent matters need attention today.",
+    "keyTakeaways": [
+      "Acme contract overdue",
+      "Bravo brief due tomorrow",
+      "Foxtrot deposition scheduled"
+    ],
+    "topAction": "Review the Acme engagement letter (2 days overdue).",
+    "categoryCount": 3,
+    "priorityItemCount": 5
+  },
+  "channelNarratives": [
+    {
+      "category": "tasks",
+      "bullets": [
+        {
+          "narrative": "Review the Acme engagement letter today.",
+          "itemIds": ["notif-1"],
+          "primaryEntityType": "sprk_matter",
+          "primaryEntityId": "00000000-0000-0000-0000-000000000001",
+          "primaryEntityName": "Acme Corp"
+        }
+      ]
+    },
+    {
+      "category": "new-documents",
+      "bullets": [
+        {
+          "narrative": "Contract_v2.pdf was uploaded to Matter Bravo.",
+          "itemIds": ["notif-2", "notif-3"],
+          "primaryEntityType": "sprk_matter",
+          "primaryEntityId": "00000000-0000-0000-0000-000000000002",
+          "primaryEntityName": "Matter Bravo"
+        }
+      ]
+    }
+  ],
+  "generatedAtUtc": "2026-06-26T10:00:00+00:00"
+}

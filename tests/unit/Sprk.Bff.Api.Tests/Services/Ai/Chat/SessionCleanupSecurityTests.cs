@@ -185,8 +185,11 @@ public class SessionCleanupSecurityTests
         // Arrange & Act
         var key = ChatSessionManager.BuildCacheKey("tenant-abc", "session-xyz");
 
-        // Assert
-        key.Should().Be("chat:session:tenant-abc:session-xyz",
-            "cache key must follow pattern chat:session:{tenantId}:{sessionId} (ADR-014)");
+        // Assert — spaarke-redis-cache-remediation-r1 FR-05 wrapper key format.
+        // On-wire the StackExchangeRedisCache prepends InstanceName (e.g. "spaarke:"),
+        // yielding "spaarke:tenant:tenant-abc:session:session-xyz:v1" per FR-14 smoke test.
+        key.Should().Be("tenant:tenant-abc:session:session-xyz:v1",
+            "cache key must follow ITenantCache wrapper pattern " +
+            "tenant:{tenantId}:session:{sessionId}:v1 (FR-05).");
     }
 }

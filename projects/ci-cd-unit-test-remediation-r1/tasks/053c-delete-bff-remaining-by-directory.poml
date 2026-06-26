@@ -1,0 +1,59 @@
+<task id="CICD-053c" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>DELETE PR 3c/3c: BFF.Api.Tests remaining DELETE files by directory (final sweep)</title>
+    <status>cancelled-no-scope</status>
+    <completion-note>2026-06-26: Cancelled. Per inventory (task 020): 0 remaining DELETE files in BFF.Api.Tests beyond the 11 captured by 053a + 053b (collapsed to single 053 PR). No scope for a third sub-slice.</completion-note>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2 - Stream B</phase>
+    <stream>B - Test reset</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>053b</dependencies>
+    <blocks>070</blocks>
+    <tags>testing, deletion, sliced-PR, bff-api, final-sweep</tags>
+  </metadata>
+
+  <prompt>
+    Final BFF sub-slice (3c/3c). Delete all remaining DELETE-categorized files in `tests/unit/Sprk.Bff.Api.Tests/` not covered by 053a (HttpMessageHandler) or 053b (DI/null-checks). Sweep by directory alphabetically for review predictability. Estimated ~200-235 files.
+  </prompt>
+
+  <role>Test architecture engineer executing the final-sweep slice.</role>
+
+  <goal>All DELETE-categorized BFF.Api.Tests files removed; only KEEP-categorized tests remain in Sprk.Bff.Api.Tests.</goal>
+
+  <inputs>
+    <file purpose="inventory">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory.csv (remaining DELETE rows for BFF.Api.Tests)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B06">Path-check at Step 9.5.</constraint>
+    <constraint source="spec MUST NOT">MUST NOT restore Release matrix until after this slice merges AND surviving suite green ≥7 days.</constraint>
+    <constraint source="project autonomous">FULL rigor; gates Phase 3 cutover.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Rebase on master (53b should have merged)</step>
+    <step order="2">Load inventory CSV; filter DELETE rows for BFF.Api.Tests not already deleted in 053a or 053b</step>
+    <step order="3">Sort alphabetically by directory for review predictability</step>
+    <step order="4">No protected-path violations check</step>
+    <step order="5">`git rm` files; update .csproj if needed</step>
+    <step order="6">Run `dotnet build` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`</step>
+    <step order="7">Final verification: `dotnet test` across all KEEP paths shows expected pass count from inventory; no test left in unexpected location</step>
+    <step order="8">Step 9.5; commit + PR (title: "test(b-phase2): delete remaining BFF.Api.Tests DELETE files [slice 3c/3c, final BFF deletion]")</step>
+  </steps>
+
+  <outputs>
+    <output type="test-deletion">~200-235 files from tests/unit/Sprk.Bff.Api.Tests/</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/post-deletion-summary.md (totals: KEEP count by category, total deletion count, surviving Sprk.Bff.Api.Tests test count)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All inventory DELETE rows for BFF.Api.Tests now deleted</criterion>
+    <criterion testable="true">No protected-path violations</criterion>
+    <criterion testable="true">`dotnet test` passes</criterion>
+    <criterion testable="true">post-deletion-summary.md exists with totals</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+    <criterion testable="true">Unblocks Phase 3 cutover (070+071)</criterion>
+  </acceptance-criteria>
+</task>

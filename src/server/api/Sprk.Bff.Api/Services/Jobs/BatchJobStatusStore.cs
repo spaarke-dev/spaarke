@@ -56,6 +56,7 @@ public class BatchJobStatusStore
         try
         {
             var key = GetKey(jobId);
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): JobContract carries no tenantId; batch-job IDs are system-level GUIDs and the cache key is cross-tenant by design.
             var data = await _cache.GetStringAsync(key, cancellationToken);
 
             if (string.IsNullOrEmpty(data))
@@ -191,6 +192,7 @@ public class BatchJobStatusStore
         try
         {
             var key = GetKey(jobId);
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): JobContract carries no tenantId; batch-job IDs are system-level GUIDs and the cache key is cross-tenant by design.
             var data = await _cache.GetStringAsync(key, cancellationToken);
 
             if (string.IsNullOrEmpty(data))
@@ -220,6 +222,7 @@ public class BatchJobStatusStore
                 AbsoluteExpirationRelativeToNow = DefaultExpiration
             };
 
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): JobContract carries no tenantId; batch-job IDs are system-level GUIDs and the cache key is cross-tenant by design.
             await _cache.SetStringAsync(key, data, options, cancellationToken);
         }
         catch (Exception ex)

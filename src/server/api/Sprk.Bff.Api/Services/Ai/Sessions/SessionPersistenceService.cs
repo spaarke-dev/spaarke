@@ -1,7 +1,6 @@
 using System.Diagnostics;
-using System.Text.Json;
 using Microsoft.Azure.Cosmos;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
 
@@ -33,20 +32,37 @@ public class SessionPersistenceService : ISessionPersistenceService
     /// <summary>Redis sliding TTL for hot session cache (NFR-07: 24-hour idle expiry, ADR-009).</summary>
     internal static readonly TimeSpan RedisTtl = TimeSpan.FromHours(24);
 
-    /// <summary>Redis key prefix — distinct from ChatSessionManager's "chat:session:" prefix (ADR-014).</summary>
-    private const string RedisKeyPrefix = "sessions";
+    /// <summary>
+    /// Tenant-cache resource name for warm-tier StoredSession payloads (FR-05).
+    /// Distinct from <see cref="ChatSessionManager.CacheResource"/> ("session") because
+    /// SessionPersistenceService is the Cosmos-warm-tier write-through path (full
+    /// <see cref="StoredSession"/> shape) vs ChatSessionManager's hot-tier
+    /// <see cref="ChatSession"/> shape.
+    /// </summary>
+    internal const string CacheResource = "stored-session";
+
+    /// <summary>Tenant-cache schema version for StoredSession payloads.</summary>
+    internal const int CacheVersion = 1;
+
+    /// <summary>
+    /// Reproduces the on-wire cache key produced by <see cref="ITenantCache"/> for legacy
+    /// test consumers that asserted on the raw Redis key shape pre-FR-05.
+    /// Format: <c>tenant:{tenantId}:stored-session:{sessionId}:v1</c>.
+    /// </summary>
+    internal static string BuildRedisKey(string tenantId, string sessionId)
+        => $"tenant:{tenantId}:{CacheResource}:{sessionId}:v{CacheVersion}";
 
     /// <summary>Cosmos DB container name (ADR-015 Tier 3 container mapping).</summary>
     private const string ContainerName = "sessions";
 
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly CosmosClient _cosmosClient;
     private readonly string _databaseName;
     private readonly ILogger<SessionPersistenceService> _logger;
     private readonly IContextEventEmitter _contextEventEmitter;
 
     public SessionPersistenceService(
-        IDistributedCache cache,
+        ITenantCache cache,
         CosmosClient cosmosClient,
         IConfiguration configuration,
         ILogger<SessionPersistenceService> logger,
@@ -155,11 +171,10 @@ public class SessionPersistenceService : ISessionPersistenceService
             "SessionPersistenceService: Deleting session {SessionId} from both stores (tenant={TenantId})",
             sessionId, tenantId);
 
-        // Delete from Redis
+        // Delete from Redis (tenant-scoped via ITenantCache per FR-05)
         try
         {
-            var key = BuildRedisKey(tenantId, sessionId);
-            await _cache.RemoveAsync(key, ct);
+            await _cache.RemoveAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
         }
         catch (Exception ex)
         {
@@ -444,10 +459,6 @@ public class SessionPersistenceService : ISessionPersistenceService
     // Private helpers — Redis
     // =========================================================================
 
-    /// <summary>Builds the Redis key for a session. Pattern: <c>sessions:{tenantId}:{sessionId}</c>.</summary>
-    internal static string BuildRedisKey(string tenantId, string sessionId)
-        => $"{RedisKeyPrefix}:{tenantId}:{sessionId}";
-
     private async Task<StoredSession?> LoadFromRedisAsync(
         string tenantId,
         string sessionId,
@@ -455,18 +466,13 @@ public class SessionPersistenceService : ISessionPersistenceService
     {
         try
         {
-            var key = BuildRedisKey(tenantId, sessionId);
-            var bytes = await _cache.GetAsync(key, ct);
-            if (bytes is null)
-            {
-                return null;
-            }
-
-            var session = JsonSerializer.Deserialize<StoredSession>(bytes);
+            // Tenant-scoped via ITenantCache per FR-05.
+            var session = await _cache.GetAsync<StoredSession>(
+                tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
             if (session is not null)
             {
                 // Refresh sliding TTL on every access (ADR-009)
-                await _cache.RefreshAsync(key, ct);
+                await _cache.RefreshAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
             }
 
             return session;
@@ -488,13 +494,15 @@ public class SessionPersistenceService : ISessionPersistenceService
     {
         try
         {
-            var key = BuildRedisKey(tenantId, sessionId);
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(session);
-            var options = new DistributedCacheEntryOptions
-            {
-                SlidingExpiration = RedisTtl   // ADR-009, NFR-07
-            };
-            await _cache.SetAsync(key, bytes, options, ct);
+            // Sliding expiry per ADR-009 / NFR-07; tenant-scoped via ITenantCache per FR-05.
+            await _cache.SetSlidingAsync(
+                tenantId,
+                CacheResource,
+                sessionId,
+                CacheVersion,
+                session,
+                RedisTtl,
+                ct: ct);
         }
         catch (Exception ex)
         {
