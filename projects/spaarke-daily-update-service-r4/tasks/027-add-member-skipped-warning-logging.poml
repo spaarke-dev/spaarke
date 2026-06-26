@@ -3,8 +3,25 @@
   <metadata>
     <title>Add structured member_skipped warning logging for Contact-only members</title>
     <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>
+      Added structured `member_skipped` warning emission in `MembershipResolverService.BuildFetchXml`
+      (src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs) — the `case "Contact":` branch
+      now emits `_logger.LogWarning("member_skipped: matter={MatterId} contact={ContactId} role={Role} reason={Reason} field={Field}", entityType, systemUserId, d.Role, "no_systemuser_mapping", d.Field)` whenever the
+      resolved identity has NO ContactId (the Contact ↔ SystemUser cross-ref gap per ADR-028). Behavior unchanged — descriptor still skipped — only observability added.
+      Refactored BuildFetchXml from static to instance method (so it can access the existing `_logger` — no new DI dependencies; no new types).
+      Field bindings per FR-11: `MatterId={entityType}` (sprk_matter in canonical case), `ContactId={systemUserId}` (literal NULL is the trigger, SystemUserId provides traceability), `Role={descriptor.Role}`, `Reason="no_systemuser_mapping"`, `Field={descriptor.Field}` (extra diagnostic).
+      The literal token `member_skipped` lives in the message template so `traces | where message contains "member_skipped"` queries match (App Insights pattern matches task 003's `hallucination_detected`).
+      Tests: 3 new methods added to tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs — `ResolveAsync_ContactDescriptorWithNullContactId_EmitsMemberSkippedWarning` (positive case, FR-11 fields bound), `ResolveAsync_ContactDescriptorWithContactId_DoesNotEmitMemberSkipped` (false-positive guard), `ResolveAsync_MultipleContactDescriptorsAllNull_EmitsOneWarningPerDescriptor` (multiplicity invariant). Mock-`ILogger` pattern mirrors EntityNameValidatorNodeExecutorTests.cs.
+      Build: dotnet build src/server/api/Sprk.Bff.Api/ -c Release → succeeded (0 errors, 17 pre-existing warnings).
+      Tests: dotnet test --filter "FullyQualifiedName~Membership" → 201/201 passed (was 198 — added 3).
+      Publish-size: 46.31 MB compressed (no delta vs task 020 baseline; -0.83 MB vs task 021 baseline due to tooling artifact — task 027 production code is ~12 LoC). Headroom: 13.69 MB below §10 ceiling.
+      CVE: Microsoft.Kiota.Abstractions 1.21.2 (High) is pre-existing — NOT introduced by task 027. Zero new packages.
+      Logging-site decision + size measurement documented in projects/spaarke-daily-update-service-r4/notes/debug/027-publish-size.md.
+    </completion-notes>
     <estimated-hours>1.5</estimated-hours>
+    <actual-hours>1.0</actual-hours>
     <dependencies>020</dependencies>
     <blocks>028</blocks>
     <tags>bff-api, observability, refactoring</tags>

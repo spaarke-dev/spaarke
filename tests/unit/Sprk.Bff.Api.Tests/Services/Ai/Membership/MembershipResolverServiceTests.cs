@@ -19,6 +19,7 @@
 
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
@@ -336,6 +337,137 @@ public class MembershipResolverServiceTests
         result.Ids.Should().BeEmpty();
         result.ByRole.Should().ContainKey("owner");
         result.ByRole["owner"].Should().BeEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // R4 spec FR-11 / AC-11 — Contact-only `member_skipped` warning logging
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ResolveAsync_ContactDescriptorWithNullContactId_EmitsMemberSkippedWarning()
+    {
+        // R4 spec FR-11 / AC-11: when a Contact-typed membership descriptor is
+        // present but the resolved identity has NO ContactId (no Contact↔SystemUser
+        // cross-ref via azureactivedirectoryobjectid per ADR-028), the resolver
+        // MUST emit a structured `member_skipped` warning so App Insights can
+        // pivot on it. Behavior is unchanged — the descriptor is still skipped;
+        // observability is added.
+        //
+        // Arrange
+        var discovery = BuildDiscoveryMock(
+            Descriptor("ownerid", "owner", "SystemUser"),
+            Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact"));
+
+        // Identity has NO ContactId — the Contact descriptor cannot match.
+        var identity = BuildIdentityMock(new PersonIdentity(
+            SystemUserId: TestSystemUserId,
+            ContactId: null,
+            PrimaryEmail: null,
+            TeamIds: Array.Empty<Guid>(),
+            BusinessUnitId: null,
+            AccountId: null,
+            OrganizationIds: Array.Empty<Guid>()));
+
+        var dataverse = BuildDataverseMockReturning(
+            MatterRow(MatterIdA, ("ownerid", new EntityReference("systemuser", TestSystemUserId))));
+
+        var loggerMock = new Mock<ILogger<MembershipResolverService>>();
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object, logger: loggerMock.Object);
+
+        // Act
+        var result = await sut.ResolveAsync(TestSystemUserId, EntityType, options: null, CancellationToken.None);
+
+        // Assert — behavior unchanged: descriptor skipped, owner descriptor still resolves
+        result.Should().NotBeNull();
+        result.ByRole.Should().ContainKey("owner");
+        result.ByRole.Should().ContainKey("assignedAttorney");
+        result.ByRole["assignedAttorney"].Should().BeEmpty("the Contact descriptor was skipped — no match possible");
+
+        // Assert — `member_skipped` warning emitted with required structured fields:
+        // matter={EntityType}, contact={SystemUserId}, role={Role}, reason="no_systemuser_mapping"
+        loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("member_skipped")
+                                              && o.ToString()!.Contains(EntityType)
+                                              && o.ToString()!.Contains("assignedAttorney")
+                                              && o.ToString()!.Contains("no_systemuser_mapping")
+                                              && o.ToString()!.Contains(TestSystemUserId.ToString())),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once,
+            "Contact-typed descriptor with no ContactId MUST emit exactly one `member_skipped` warning per FR-11");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ContactDescriptorWithContactId_DoesNotEmitMemberSkipped()
+    {
+        // Inverse case: when ContactId IS present, no `member_skipped` warning fires.
+        // Guards against false-positive emission.
+        //
+        // Arrange
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact"));
+
+        var identity = BuildIdentityMock(BuildFullIdentity()); // has ContactId
+
+        var dataverse = BuildDataverseMockReturning(
+            MatterRow(MatterIdA, ("sprk_assignedattorney1", new EntityReference("contact", TestContactId))));
+
+        var loggerMock = new Mock<ILogger<MembershipResolverService>>();
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object, logger: loggerMock.Object);
+
+        // Act
+        await sut.ResolveAsync(TestSystemUserId, EntityType, options: null, CancellationToken.None);
+
+        // Assert — NO `member_skipped` warning emitted when ContactId is present.
+        loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("member_skipped")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never,
+            "Contact-typed descriptor with valid ContactId MUST NOT emit `member_skipped`");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_MultipleContactDescriptorsAllNull_EmitsOneWarningPerDescriptor()
+    {
+        // Two Contact-typed descriptors both unresolvable → exactly two warnings.
+        // Verifies per-descriptor emission semantics.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact"),
+            Descriptor("sprk_secondarycontact", "secondaryContact", "Contact"));
+
+        var identity = BuildIdentityMock(new PersonIdentity(
+            SystemUserId: TestSystemUserId,
+            ContactId: null,
+            PrimaryEmail: null,
+            TeamIds: Array.Empty<Guid>(),
+            BusinessUnitId: TestBusinessUnit,
+            AccountId: null,
+            OrganizationIds: Array.Empty<Guid>()));
+
+        // Dataverse not actually queried (no conditions buildable) — strict mock OK.
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+
+        var loggerMock = new Mock<ILogger<MembershipResolverService>>();
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object, logger: loggerMock.Object);
+
+        await sut.ResolveAsync(TestSystemUserId, EntityType, options: null, CancellationToken.None);
+
+        loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("member_skipped")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Exactly(2),
+            "two Contact-typed descriptors with no ContactId MUST emit two `member_skipped` warnings");
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -695,7 +827,8 @@ public class MembershipResolverServiceTests
         IMembershipFieldDiscoveryService discovery,
         IIdentityNormalizationService identity,
         IDataverseService dataverse,
-        IDistributedCache? cache = null)
+        IDistributedCache? cache = null,
+        ILogger<MembershipResolverService>? logger = null)
     {
         return new MembershipResolverService(
             discovery,
@@ -703,7 +836,7 @@ public class MembershipResolverServiceTests
             dataverse,
             cache ?? new FakeDistributedCache(),
             Options.Create(new MembershipOptions()),
-            NullLogger<MembershipResolverService>.Instance);
+            logger ?? NullLogger<MembershipResolverService>.Instance);
     }
 
     private static Mock<IMembershipFieldDiscoveryService> BuildDiscoveryMock(

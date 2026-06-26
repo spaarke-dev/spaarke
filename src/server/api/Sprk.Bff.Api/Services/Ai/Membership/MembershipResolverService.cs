@@ -243,7 +243,8 @@ public sealed class MembershipResolverService : IMembershipResolverService
             descriptors,
             identity,
             effectiveLimit,
-            fetchSkip);
+            fetchSkip,
+            systemUserId);
 
         if (fetchSummary.ConditionCount == 0)
         {
@@ -391,12 +392,13 @@ public sealed class MembershipResolverService : IMembershipResolverService
     ///   Organization   → N conditions (in organizationIds[])
     /// Returns the FetchXml text + a small summary used for logging / empty-detection.
     /// </summary>
-    private static (string FetchXml, FetchSummary Summary) BuildFetchXml(
+    private (string FetchXml, FetchSummary Summary) BuildFetchXml(
         string entityType,
         IReadOnlyList<MembershipDescriptor> descriptors,
         PersonIdentity identity,
         int limit,
-        int skip)
+        int skip,
+        Guid systemUserId)
     {
         // The set of attributes we need to project — entity id + each descriptor's
         // field — so the materialization step can attribute rows to roles.
@@ -440,6 +442,35 @@ public sealed class MembershipResolverService : IMembershipResolverService
                     if (identity.ContactId is { } cid)
                     {
                         conditionCount += AppendCondition(sb, d.Field, cid);
+                    }
+                    else
+                    {
+                        // R4 spec FR-11 / AC-11: Contact-typed membership descriptor whose
+                        // user has no Contact cross-ref via azureactivedirectoryobjectid
+                        // (per ADR-028 canonical mapping) is silently skipped today. Emit a
+                        // structured `member_skipped` warning so Application Insights can
+                        // pivot on it (traces | where message contains "member_skipped").
+                        //
+                        // Field bindings (per FR-11):
+                        //   - MatterId  → entityType (the entity being resolved; sprk_matter in
+                        //                 the canonical assignedAttorney case)
+                        //   - ContactId → systemUserId (the caller whose Contact cross-ref is
+                        //                 missing; ContactId itself is NULL — that IS the
+                        //                 trigger — so we emit the SystemUserId for traceability)
+                        //   - Role      → descriptor.Role (e.g., "assignedAttorney")
+                        //   - Reason    → literal "no_systemuser_mapping"
+                        //   - Field     → descriptor.Field (e.g., "sprk_assignedattorney1") —
+                        //                 extra diagnostic context, not required by FR-11
+                        //
+                        // The literal token "member_skipped" stays in the message template so
+                        // App Insights field-extraction captures the named columns.
+                        _logger.LogWarning(
+                            "member_skipped: matter={MatterId} contact={ContactId} role={Role} reason={Reason} field={Field}",
+                            entityType,
+                            systemUserId,
+                            d.Role,
+                            "no_systemuser_mapping",
+                            d.Field);
                     }
                     break;
 
