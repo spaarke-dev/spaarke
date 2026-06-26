@@ -397,7 +397,70 @@ sp-spaarke-redis-rotation-{env}          Website Contributor           /subscrip
 
 Once this section is complete, the automated rotation workflow (task 011) consumes these SPs via OIDC token exchange — no client secrets stored anywhere.
 
-### Steps
+### 6.2 Automated rotation (primary path, per FR-10)
+
+**This is the canonical rotation path.** The 90-day rotation is performed by the GitHub Actions workflow [`.github/workflows/redis-key-rotation.yml`](../../.github/workflows/redis-key-rotation.yml) (provisioned by task 011 of `spaarke-redis-cache-remediation-r2`), which invokes [`scripts/Rotate-RedisKey.ps1`](../../scripts/Rotate-RedisKey.ps1) (provisioned by task 010) under the per-env OIDC service principal configured in §6.1.
+
+#### How the cron fires
+
+The workflow is scheduled (per the YAML `on.schedule.cron` value) to run automatically every 90 days against each environment in turn. Each scheduled invocation:
+
+1. Selects the matching GitHub Environment (`dev` / `staging` / `prod`) so OIDC mints a token for the env-specific SP.
+2. Runs `scripts/Rotate-RedisKey.ps1 -Environment {env}` (with `-Force` for staging/prod per NFR-05).
+3. The script executes the safe-window algorithm: regenerate Secondary → upsert KV secret → restart BFF → poll `/healthz` for 120s → on success, regenerate Primary (eliminating the old key); on failure, roll back by restoring the previous KV secret version and restart BFF.
+4. Every step emits a `RedisKeyRotation` customEvent to Application Insights (see §6.4 for the verification query).
+
+#### Manually trigger an out-of-band rotation
+
+For ad-hoc rotation (e.g., scheduled maintenance window, post-incident, or compliance attestation):
+
+```bash
+# Trigger rotation against dev
+gh workflow run redis-key-rotation.yml --ref master -f environment=dev
+
+# Trigger rotation against staging (requires environment approvers per §6.1 Step 4)
+gh workflow run redis-key-rotation.yml --ref master -f environment=staging
+
+# Trigger rotation against prod (requires environment approvers per §6.1 Step 4)
+gh workflow run redis-key-rotation.yml --ref master -f environment=prod
+```
+
+Follow the run via `gh run watch` or in the Actions UI. The workflow's environment-approval gate (prod, optionally staging) enforces dual-control per organizational policy.
+
+#### Local invocation (developer / operator pre-prod testing)
+
+The same script can be invoked locally for dev-environment rotation by an operator with the appropriate Azure CLI login:
+
+```powershell
+# Plan only — no Azure mutations, shows planned actions
+./scripts/Rotate-RedisKey.ps1 -Environment dev -WhatIf
+
+# Execute against dev (no -Force required)
+./scripts/Rotate-RedisKey.ps1 -Environment dev
+
+# Execute against staging/prod (NFR-05 gate)
+./scripts/Rotate-RedisKey.ps1 -Environment staging -Force
+./scripts/Rotate-RedisKey.ps1 -Environment prod -Force
+```
+
+Local invocation is operationally identical to the workflow invocation; the workflow simply hosts the same script under OIDC auth. Prefer the workflow for production rotations so the run is auditable in Actions.
+
+### 6.3 Emergency fallback — manual rotation
+
+> **Use ONLY when the automated path cannot run.** The automated workflow (§6.2) is the canonical rotation path. Reach for this section only in the scenarios below — every routine 90-day rotation MUST go through §6.2 so the App Insights audit trail (§6.4) is preserved.
+
+#### When to use this fallback
+
+Use the manual procedure if AND ONLY IF one of the following applies:
+
+- [ ] **Suspected key compromise** requiring immediate rotation faster than the workflow can be triggered or approved (e.g., out-of-band incident response while environment approvers are unavailable).
+- [ ] **Workflow disabled or broken** — `.github/workflows/redis-key-rotation.yml` is disabled, deleted, or failing in a way that blocks even manual `gh workflow run` invocation.
+- [ ] **SP expired or de-provisioned** — the per-env OIDC service principal (§6.1) is expired, has lost a required role assignment, or has been deleted, and rotation must proceed before §6.1 can be re-completed.
+- [ ] **Tenant-level GitHub outage** preventing Actions from running.
+
+If none of these apply, STOP and use §6.2 instead. The manual procedure lacks the App Insights audit trail and the safe-window automatic rollback that the script provides.
+
+#### Manual steps (preserved from pre-automation procedure)
 
 1. **Verify current state** — capture current secret version: `az keyvault secret show --vault-name <kv> --name Redis-ConnectionString --query attributes.version -o tsv`. Record in cutover/rotation log.
 2. **Regenerate primary key** in Azure: `az redis regenerate-key -g <rg> -n spaarke-bff-redis-<env> --key-type Primary`.
@@ -408,16 +471,31 @@ Once this section is complete, the automated rotation workflow (task 011) consum
    - **Option B (background)**: Let KV reference TTL expire naturally over ~24 hours. Zero downtime but each instance picks up new value at staggered times.
 6. **Verify** — after BFF picks up new value, hit `/healthz` and confirm a fresh chat-session creates a key in Redis (verifies the new connection string works).
 7. **Decommission previous key** — `az redis regenerate-key --key-type Secondary` is a separate, optional step to invalidate any lingering use of the OLD primary (now-secondary) key. Do AFTER verifying step 6.
-8. **Audit** — record rotation in `notes/cutover-deploy-log.md` with timestamps + KV secret version + which option (A/B) was used + downtime observed.
+8. **Audit** — record rotation in `notes/cutover-deploy-log.md` with timestamps + KV secret version + which option (A/B) was used + downtime observed. **Additionally**: file a follow-up to restore the automated path (re-provision SP per §6.1 / re-enable workflow / re-trigger §6.2) so the next rotation returns to the canonical path.
 
-### Expected Downtime
+#### Expected Downtime
 
 - Option A: ~30 seconds per BFF instance during restart.
 - Option B: 0 downtime; rotation completes within ~24 hours.
 
-### Failure Recovery
+#### Failure Recovery
 
 - If new connection string is wrong or KV upsert fails: revert by restoring the previous secret version (`az keyvault secret set` with the old value, captured in step 1) and restart BFF.
+
+### 6.4 Verification (post-rotation)
+
+After EITHER the automated (§6.2) or manual (§6.3) procedure completes, the operator confirms the last successful rotation by running the following KQL query against the env-specific App Insights workspace (`spaarke-{env}-appi`):
+
+```kusto
+customEvents
+| where name == 'RedisKeyRotation' and outcome == 'success'
+| top 1 by timestamp desc
+| project environment, timestamp, duration_ms
+```
+
+Expected result: exactly one row showing the target `environment`, the rotation `timestamp`, and `duration_ms` (typical end-to-end safe-window rotation: ~60-180 seconds depending on App Service restart time).
+
+> **Note**: The `RedisKeyRotation` customEvent is emitted by `scripts/Rotate-RedisKey.ps1` (every step → `RedisKeyRotation` with `step` / `outcome` properties). Manual rotations performed via §6.3 will NOT produce this event, so the query will return the most-recent automated rotation only. If the latest automated timestamp is older than the rotation cadence (90 days for routine; same day for incident-response), investigate via Actions run history and §6.2 + §6.1 health.
 
 ---
 

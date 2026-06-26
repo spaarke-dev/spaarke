@@ -1,0 +1,240 @@
+# ============================================================================
+# redis-key-rotation.yml — Quarterly automated Redis access-key rotation
+# ============================================================================
+#
+# FR-08 of spaarke-redis-cache-remediation-r2.
+#
+# Triggers:
+#   - 3 staggered quarterly crons (06:00 UTC, Jan/Apr/Jul/Oct):
+#       * dev      — 1st of the month  (catches breakage first)
+#       * staging  — 8th of the month  (7-day soak after dev)
+#       * prod     — 15th of the month (7-day soak after staging)
+#   - workflow_dispatch with an `environment` choice input for on-demand runs
+#     (e.g., post-incident rotation, or to validate the workflow itself).
+#
+# Each environment runs as its own job, gated by an `if:` clause matching
+# either the cron expression or the dispatch input. Per-environment secrets
+# resolve via GitHub Environment binding (`environment: dev|staging|prod`)
+# so a single workflow file consumes 3 distinct AZURE_CLIENT_ID_* federated
+# identities (FR-09 SP isolation).
+#
+# Auth: OIDC federated identity (no PAT secrets). Same pattern as
+#       deploy-bff-api.yml. Per-env client-id/tenant-id/subscription-id come
+#       from the bound GitHub Environment's secrets.
+#
+# Body: Each job invokes `./scripts/Rotate-RedisKey.ps1 -Environment {env}
+#       -Force`. The PowerShell script implements the safe-window algorithm
+#       (Secondary regen → KV upsert → BFF restart → /healthz poll → Primary
+#       regen, with automatic rollback on healthz failure). See script for
+#       FR-07 detail and exit-code table.
+#
+# Summary: Each job appends an App Insights KQL verification query to the
+#          GitHub run summary. Operator pastes this into the App Insights
+#          Logs blade to confirm the `RedisKeyRotation` customEvent ledger.
+#
+# Operator prerequisites (per spec §External Dependencies):
+#   - GitHub Environments `dev`, `staging`, `prod` exist with secrets
+#     AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID populated for
+#     the per-env service principal (federated to this repo).
+#   - Each SP has Redis Cache Contributor + Key Vault Secrets Officer +
+#     Website Contributor on the corresponding resources.
+# ============================================================================
+
+name: Redis Key Rotation
+
+on:
+  schedule:
+    # dev — 06:00 UTC on the 1st of Jan, Apr, Jul, Oct
+    - cron: '0 6 1 */3 *'
+    # staging — 06:00 UTC on the 8th of Jan, Apr, Jul, Oct (7d after dev)
+    - cron: '0 6 8 */3 *'
+    # prod — 06:00 UTC on the 15th of Jan, Apr, Jul, Oct (7d after staging)
+    - cron: '0 6 15 */3 *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment for ad-hoc rotation'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+        default: 'dev'
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC-based Azure login
+
+concurrency:
+  # Serialize rotations against the same environment; never cancel an
+  # in-progress rotation (the safe-window algorithm has rollback semantics
+  # but cancelling mid-flight could strand the BFF on a stale KV reference).
+  group: redis-key-rotation-${{ github.event.inputs.environment || github.event.schedule }}
+  cancel-in-progress: false
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # dev — cron 1st of the month OR manual dispatch with environment=dev
+  # ──────────────────────────────────────────────────────────────────────────
+  rotate-dev:
+    name: Rotate Redis Key — dev
+    runs-on: ubuntu-latest
+    if: |
+      github.event.schedule == '0 6 1 */3 *' ||
+      github.event.inputs.environment == 'dev'
+    environment: dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Rotate Redis access key
+        shell: pwsh
+        run: ./scripts/Rotate-RedisKey.ps1 -Environment dev -Force
+
+      - name: Post App Insights verification query to run summary
+        if: always()
+        shell: pwsh
+        run: |
+          $kql = @'
+          customEvents
+          | where name == "RedisKeyRotation"
+          | where customDimensions.environment == "dev"
+          | where timestamp > ago(1h)
+          | project timestamp,
+                    step    = tostring(customDimensions.step),
+                    outcome = tostring(customDimensions.outcome),
+                    duration_ms = toint(customMeasurements.duration_ms),
+                    detail  = tostring(customDimensions.detail)
+          | order by timestamp asc
+          '@
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Redis Key Rotation — dev"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Trigger: ``${{ github.event_name }}`` (${{ github.event.schedule || github.event.inputs.environment }})"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### App Insights verification (paste into Logs blade)"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```kusto'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $kql
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Expected ledger: preflight → read_conn_old → regenerate_secondary → kv_upsert_new → bff_restart → healthz_poll → regenerate_primary → rotation=success."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # staging — cron 8th of the month OR manual dispatch with environment=staging
+  # ──────────────────────────────────────────────────────────────────────────
+  rotate-staging:
+    name: Rotate Redis Key — staging
+    runs-on: ubuntu-latest
+    if: |
+      github.event.schedule == '0 6 8 */3 *' ||
+      github.event.inputs.environment == 'staging'
+    environment: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Rotate Redis access key
+        shell: pwsh
+        run: ./scripts/Rotate-RedisKey.ps1 -Environment staging -Force
+
+      - name: Post App Insights verification query to run summary
+        if: always()
+        shell: pwsh
+        run: |
+          $kql = @'
+          customEvents
+          | where name == "RedisKeyRotation"
+          | where customDimensions.environment == "staging"
+          | where timestamp > ago(1h)
+          | project timestamp,
+                    step    = tostring(customDimensions.step),
+                    outcome = tostring(customDimensions.outcome),
+                    duration_ms = toint(customMeasurements.duration_ms),
+                    detail  = tostring(customDimensions.detail)
+          | order by timestamp asc
+          '@
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Redis Key Rotation — staging"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Trigger: ``${{ github.event_name }}`` (${{ github.event.schedule || github.event.inputs.environment }})"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### App Insights verification (paste into Logs blade)"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```kusto'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $kql
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Expected ledger: preflight → read_conn_old → regenerate_secondary → kv_upsert_new → bff_restart → healthz_poll → regenerate_primary → rotation=success."
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # prod — cron 15th of the month OR manual dispatch with environment=prod
+  # ──────────────────────────────────────────────────────────────────────────
+  rotate-prod:
+    name: Rotate Redis Key — prod
+    runs-on: ubuntu-latest
+    if: |
+      github.event.schedule == '0 6 15 */3 *' ||
+      github.event.inputs.environment == 'prod'
+    environment: prod
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Rotate Redis access key
+        shell: pwsh
+        run: ./scripts/Rotate-RedisKey.ps1 -Environment prod -Force
+
+      - name: Post App Insights verification query to run summary
+        if: always()
+        shell: pwsh
+        run: |
+          $kql = @'
+          customEvents
+          | where name == "RedisKeyRotation"
+          | where customDimensions.environment == "prod"
+          | where timestamp > ago(1h)
+          | project timestamp,
+                    step    = tostring(customDimensions.step),
+                    outcome = tostring(customDimensions.outcome),
+                    duration_ms = toint(customMeasurements.duration_ms),
+                    detail  = tostring(customDimensions.detail)
+          | order by timestamp asc
+          '@
+
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "## Redis Key Rotation — prod"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Trigger: ``${{ github.event_name }}`` (${{ github.event.schedule || github.event.inputs.environment }})"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### App Insights verification (paste into Logs blade)"
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```kusto'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $kql
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '```'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ""
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Expected ledger: preflight → read_conn_old → regenerate_secondary → kv_upsert_new → bff_restart → healthz_poll → regenerate_primary → rotation=success."

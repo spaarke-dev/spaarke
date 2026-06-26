@@ -29,10 +29,10 @@ Mixed scripting + IaC + docs. Parallel-safe with Phase 3.
 | ID | Title | Status | Dependencies | Blocks | Hours | Rigor | Parallel |
 |---|---|---|---|---|---|---|---|
 | 010 | NEW `scripts/Rotate-RedisKey.ps1` (safe-window rotation algorithm) | ✅ | — | 011, 013, 030 | 4 | STANDARD | Group C — **Done 2026-06-26**: ~430 lines. 5 params, exit codes 0/2/3-10 verified; full FR-07 safe-window algorithm with rollback (exit 8) + rollback-failure escalation (exit 10). App Insights emission via direct REST to ingestion endpoint (no SDK). PSScriptAnalyzer clean. |
-| 011 | NEW `.github/workflows/redis-key-rotation.yml` (3 cron jobs + `workflow_dispatch`) | 🔲 | 010 | 030 | 2 | STANDARD | Group C — depends on script existence |
+| 011 | NEW `.github/workflows/redis-key-rotation.yml` (3 cron jobs + `workflow_dispatch`) | ✅ | 010 | 030 | 2 | STANDARD | Group C-cont — **Done 2026-06-26**: 3 separate jobs (not matrix) for env isolation; cron schedules `0 6 1/8/15 */3 *`; OIDC auth mirroring `deploy-bff-api.yml`; concurrency serialized + `cancel-in-progress:false` (safe-window can't be cancelled mid-flight); KQL verification appended to `$GITHUB_STEP_SUMMARY` on every run. |
 | 012 | Document per-env OIDC SP isolation procedure | ✅ | — | 013 | 1 | MINIMAL | Group C — **Done 2026-06-26**: NEW §6.1 inserted at runbook lines 259-397: rationale + 5 steps (SP creation, OIDC fed identity, role assignments, `gh secret set`, `az role assignment list` verification) + operator checklist + cross-ref to task 011 workflow. Spec FR-09 naming `AZURE_CLIENT_ID_DEV`/_STAGING/_PROD. |
-| 013 | Runbook §6 update — automated as primary; manual as emergency | 🔲 | 010, 012 | 030 | 1 | MINIMAL | Group C — depends on 010 + 012 |
-| 014 | Missed-rotation alert (>100 days) added to `alerts.bicep` | 🔲 | 004 | 030 | 1 | STANDARD | Group C — depends on 004 (extends same Bicep) |
+| 013 | Runbook §6 update — automated as primary; manual as emergency | ✅ | 010, 012 | 030 | 1 | MINIMAL | Group C-cont — **Done 2026-06-26**: §6.2 (automated primary) + §6.3 (manual emergency fallback, relocated verbatim + "use ONLY when automation cannot run" caveat + 4-item when-to-use checklist) + §6.4 (verification KQL). No cross-link breakage. §6.1 (task 012) preserved. |
+| 014 | Missed-rotation alert (>100 days) added to `alerts.bicep` | ✅ | 004 | 030 | 1 | STANDARD | Group C-cont — **Done 2026-06-26**: NEW `redis-cache-rotation-missed-${environment}` scheduledQueryRule; parameterized 100-day window (`missedRotationDays`); severity 2; daily evaluation; isnull-arm fallback for never-recorded envs; routes to same actionGroup as Theme A. `az bicep build` PASS. |
 
 ---
 
@@ -43,8 +43,8 @@ IaC + docs cleanup. Parallel-safe with Phase 2.
 | ID | Title | Status | Dependencies | Blocks | Hours | Rigor | Parallel |
 |---|---|---|---|---|---|---|---|
 | 020 | Remove Redis from `customer.bicep` (module call + params + var + outputs); `what-if` verify | ✅ | — | 021, 030 | 2 | STANDARD | Group D — **Done 2026-06-26**: 5 edits (params 60-67, redisName var 99-100, REDIS CACHE block 177-191, 3 outputs 223-227, header bullet). LIVE `az deployment sub what-if` PRE + POST against fresh `rg-spaarke-whatif-prod`: pre showed `+ create` (not delete/modify — escalation gate cleared); post shows 0 redis matches. No live customer RGs use customer.bicep pattern (confirmed via `az group list`). `az bicep build` PASS. Notes at `notes/customer-bicep-what-if.md`. |
-| 021 | Drop `redisSku` / `redisCapacity` from `customer-template.bicepparam` | 🔲 | 020 | 030 | 1 | STANDARD | Group D — depends on 020 |
-| 022 | `SPAARKE-DEPLOYMENT-GUIDE.md` §4.6 strikethrough/footnote cleanup | 🔲 | 020 | 030 | 1 | MINIMAL | Group D — docs-only |
+| 021 | Drop `redisSku` / `redisCapacity` from `customer-template.bicepparam` | ✅ | 020 | 030 | 1 | STANDARD | Group D-cont — **Done 2026-06-26**: 3 files modified (customer-template.bicepparam, demo-customer.bicepparam, demo-customer.json). 5 param lines + 2 JSON parameter objects removed. `az bicep build-params` PASS for both. Dev/staging/prod.bicepparam still have redisSku but target `stacks/model1-shared.bicep` (NOT customer.bicep) — out of FR-13 scope. |
+| 022 | `SPAARKE-DEPLOYMENT-GUIDE.md` §4.6 strikethrough/footnote cleanup | ✅ | 020 | 030 | 1 | MINIMAL | Group D-cont — **Done 2026-06-26**: 1 line removed (the `~~Redis Cache~~` strikethrough row + 60-word footnote at line 398). Table reads naturally as Storage / Key Vault / Service Bus. No additional note required (§4.5 above already establishes Redis as platform-level). |
 
 ---
 
