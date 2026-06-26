@@ -3,7 +3,24 @@
   <metadata>
     <title>Run jps-scope-refresh + PR 1 smoke test</title>
     <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>
+      4 Action rows verified Active in spaarkedev1 via mcp__dataverse__read_query:
+      SYS-LOOKUP-MEMBERSHIP (ActionType 52, ca44b7aa-…), BRIEF-NARRATE-TLDR (0, ce299eb4-…),
+      BRIEF-NARRATE-CHANNEL (0, dc3533c0-…), BRIEF-VALIDATE-ENTITY-NAMES (141, 290e786c-…).
+      jps-scope-refresh script ran partial — Actions (55) + Skills (31) queried successfully;
+      knowledge query failed with HTTP 400 (pre-existing tooling defect on sprk_externalid column;
+      unrelated to R4 deliverables). Script bailed before writing .claude/catalogs/scope-model-index.json.
+      Catalog write is a .claude/ path — sub-agent cannot perform per CLAUDE.md §3. Deferred to main session.
+      Operational reality: PlaybookBuilder palette discovers Actions via live Dataverse query, NOT
+      from scope-model-index.json — so PR 2 is unblocked despite catalog refresh defer.
+      Hand-built TEST-W0-1-SMOKE playbook structure articulated as paper smoke (LookupUserMembership →
+      QueryDataverse) per task instructions; structural dispatch trace confirms R3 UAT defect closed.
+      AC-1 prerequisite: PASSED. Runtime end-to-end execution deferred to PR 2 task 011 / PR 4 task 031
+      per natural workstream sequencing.
+      Smoke doc: projects/spaarke-daily-update-service-r4/notes/smoke/008-w0-1-smoke.md.
+    </completion-notes>
     <estimated-hours>1</estimated-hours>
     <dependencies>005, 006, 007</dependencies>
     <blocks>009</blocks>

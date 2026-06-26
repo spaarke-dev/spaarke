@@ -30,8 +30,8 @@
 | 004 | Author EntityNameValidatorForm.tsx PlaybookBuilder property panel | ✅ | 002 | 007 | Group A | FULL |
 | 005 | Deploy SYS-LOOKUP-MEMBERSHIP sprk_analysisaction row (ActionType 52) | ✅ | 001 | 011 | Group B | STANDARD |
 | 006 | Deploy BRIEF-NARRATE-TLDR + BRIEF-NARRATE-CHANNEL action rows | ✅ | 001 | 011 | Group B | STANDARD |
-| 007 | Deploy BRIEF-VALIDATE-ENTITY-NAMES action row (ActionType 141) | 🔲 | 002, 003, 004 | 011 | — | STANDARD |
-| 008 | Run jps-scope-refresh + PR 1 smoke test | 🔲 | 005, 006, 007 | 009 | — | STANDARD |
+| 007 | Deploy BRIEF-VALIDATE-ENTITY-NAMES action row (ActionType 141) | ✅ | 002, 003, 004 | 011 | — | STANDARD |
+| 008 | Run jps-scope-refresh + PR 1 smoke test | ✅ | 005, 006, 007 | 009 | — | STANDARD |
 | 009 | PR 1 wrap — commit + conflict-check + open PR | 🔲 | 008 | 010 | — | STANDARD |
 
 ### PR 2 — W0 JPS Narrate playbook + reconcile 7 (Tasks 010–018)

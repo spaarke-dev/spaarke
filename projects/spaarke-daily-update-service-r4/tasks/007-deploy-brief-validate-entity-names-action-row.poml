@@ -3,7 +3,9 @@
   <metadata>
     <title>Deploy BRIEF-VALIDATE-ENTITY-NAMES action row (ActionType 141)</title>
     <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Deployed sprk_analysisaction row 290e786c-ff70-f111-ab0e-7ced8ddc4cc6 to spaarkedev1 via MCP create_record. sprk_executoractiontype=141, statecode=0 (Active), statuscode=1 (Active). Canonical repo JSON authored at projects/spaarke-daily-update-service/notes/playbooks/actions/brief-validate-entity-names.action.json — mirrors EntityNameValidatorNodeExecutor (task 003) contract verbatim (candidateText + allowList input; scrubbedText + removedTerms output). Closes EntityNameValidator triplet (002 enum + 003 executor + 004 form + 007 row). Smoke notes at projects/spaarke-daily-update-service-r4/notes/smoke/007-brief-validate-entity-names-deploy.md. AC-3a verified; AC-3c (PlaybookBuilder palette display) deferred to task 008 PR 1 smoke after jps-scope-refresh.</completion-notes>
     <estimated-hours>2</estimated-hours>
     <dependencies>002, 003, 004</dependencies>
     <blocks>011</blocks>
