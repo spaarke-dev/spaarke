@@ -1,0 +1,52 @@
+<task id="CICD-031" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Extend .claude/skills/conflict-check/SKILL.md with hot-path watchlist + auto-trigger criteria</title>
+    <status>complete</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>1 - Stream C</phase>
+    <stream>C - Hot-path coordination</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies></dependencies>
+    <tags>skill-directive, conflict-check, hot-path</tags>
+    <execution-note>Modifies .claude/ — MUST run in main session, not sub-agent (per root CLAUDE.md §3 write boundary)</execution-note>
+  </metadata>
+
+  <prompt>
+    Extend `.claude/skills/conflict-check/SKILL.md` per spec FR-C03. Add a "Hot-Path Watchlist" section that defines: `src/server/api/Sprk.Bff.Api/**` (BFF), `src/solutions/SpaarkeAi/**` (SpaarkeAi code page), `Program.cs` (BFF entry), `*.csproj` for BFF, `Services/Ai/*Module.cs` (DI modules), `src/solutions/SpaarkeAi/src/*Registry*` (widget/route registries), `package.json` at hot paths. Add auto-trigger criteria: invoked when changed files match watchlist. This is the source-of-truth file that task-execute Step 0.5 reads (task 060 wires the invocation).
+  </prompt>
+
+  <role>Skill author updating a load-bearing harness skill.</role>
+
+  <goal>`.claude/skills/conflict-check/SKILL.md` contains the Hot-Path Watchlist section with concrete glob patterns and auto-trigger criteria.</goal>
+
+  <inputs>
+    <file purpose="pre-rewrite-source">.claude/skills/conflict-check/SKILL.md</file>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="root-CLAUDE-3">This task modifies `.claude/` — sub-agents cannot. MUST run in main session.</constraint>
+    <constraint source="spec FR-C03">Watchlist must include BFF + SpaarkeAi paths. Auto-trigger criteria must be machine-readable for task-execute Step 0.5.</constraint>
+    <constraint source="project autonomous">FULL rigor — Step 9.5 code-review + adr-check.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Read current `.claude/skills/conflict-check/SKILL.md` end-to-end. Note 5-workflow-step structure.</step>
+    <step order="2">Draft new "Hot-Path Watchlist" section with: (1) glob patterns table (BFF, SpaarkeAi, ci-workflows, skill-directives), (2) Auto-Trigger Criteria (when invoked by task-execute Step 0.5 — match on changed-files intersect with watchlist), (3) Output format expected (conflict report referencing INDEX.md active projects)</step>
+    <step order="3">Insert section after the existing "Workflow" steps (or wherever fits)</step>
+    <step order="4">Step 9.5: code-review + adr-check; verify watchlist is complete; verify auto-trigger criteria is machine-readable</step>
+  </steps>
+
+  <outputs>
+    <output type="skill">.claude/skills/conflict-check/SKILL.md (extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File contains "Hot-Path Watchlist" section with at least 4 watchlist entries (BFF, SpaarkeAi, ci-workflows, skill-directives)</criterion>
+    <criterion testable="true">Auto-trigger criteria documented in machine-readable form (task-execute can reference deterministically)</criterion>
+    <criterion testable="true">Section cross-references `projects/INDEX.md` as the active-project source</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check pass</criterion>
+  </acceptance-criteria>
+</task>
