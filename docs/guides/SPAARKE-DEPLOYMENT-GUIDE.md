@@ -390,12 +390,12 @@ See [`docs/architecture/caching-architecture.md`](../architecture/caching-archit
 
 Per-customer Azure resources are created by `Provision-Customer.ps1` (§12). The Bicep template is `infrastructure/bicep/customer.bicep` and creates:
 
-| Resource | Name Pattern |
-|----------|-------------|
-| Storage Account | `sprk{customerId}{env}sa` |
-| Key Vault | `sprk-{customerId}-{env}-kv` |
-| Service Bus | `sprk-{customerId}-{env}-sbus` |
-| Redis Cache | `sprk-{customerId}-{env}-redis` |
+| Resource | Name Pattern | Notes |
+|----------|--------------|-------|
+| Storage Account | `sprk{customerId}{env}sa` | |
+| Key Vault | `sprk-{customerId}-{env}-kv` | |
+| Service Bus | `sprk-{customerId}-{env}-sbus` | |
+| ~~Redis Cache~~ | ~~`sprk-{customerId}-{env}-redis`~~ | **DEPRECATED** per R1 FR-12 / Q-E Architecture 1. Use the platform Redis `spaarke-bff-redis-{env}` provisioned via `Deploy-RedisCache.ps1`. `Provision-Customer.ps1` no longer creates per-customer Redis; `customer.bicep` still has a `modules/redis.bicep` call (line 181) that will be removed in a follow-up. |
 
 ### 4.7 Verify Platform
 
