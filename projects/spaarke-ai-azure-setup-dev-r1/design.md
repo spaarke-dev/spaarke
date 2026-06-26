@@ -102,7 +102,7 @@ When prod/demo are restored later, that will be a separate project that consumes
 
 5. **UPDATE: `docs/architecture/AI-ARCHITECTURE.md`** — add the AI Search index consumer map (which indexes are consumed where in the system), link to new catalog.
 
-6. **NEW: `scripts/ai-search/Deploy-AllIndexes.ps1`** — unified deployer driven by the catalog. Supports `-Indexes <subset>`, `-DryRun`, `-VerifyOnly`. Single post-deploy verifier that asserts per-policy field flags + key fields present + tenant isolation invariants. Uses `deploy-session-files-index.ps1` as the structural template.
+6. **NEW: `scripts/ai-search/Deploy-AllIndexes.ps1`** — **single canonical deployer for ALL Spaarke AI Search indexes** (one script, parameterized to deploy one or multiple indexes via `-Indexes <subset>`; defaults to all 7). Catalog-driven. Supports `-DryRun`, `-VerifyOnly`, `-EnvironmentName <env>`. Single post-deploy verifier asserts per-policy field flags + key fields present + tenant isolation invariants. Uses `deploy-session-files-index.ps1` as the structural template — and **replaces it** (no per-index wrapper scripts retained). **Retires ALL pre-existing per-index PowerShell deploy scripts**: `Deploy-IndexSchemas.ps1`, `Deploy-InvoiceSearchIndex.ps1`, `deploy-invoice-index.ps1`, `deploy-session-files-index.ps1`, `Create-PlaybookEmbeddingsIndex.ps1`. (Bicep deployer `infra/insights/modules/search-index.bicep` retention is a separate architectural decision — see Unresolved Questions in spec.md.)
 
 7. **Index renames (3, coordinated across schema + code + deploy script + BU values)**:
    - `playbook-embeddings` → `spaarke-playbook-embeddings` (apply `spaarke-` prefix)
@@ -263,7 +263,7 @@ This project produces:
 - **One new architecture doc** (`AI-SEARCH-INDEX-CATALOG.md`) — no existing doc owns this surface; cannot extend
 - **One new operational guide** (`ai-search-azure-setup.md`) — `SPAARKE-DEPLOYMENT-GUIDE.md` would balloon if absorbed; better as a focused guide referenced from the deployment guide
 - **One update to existing canonical** (`AI-ARCHITECTURE.md`) — adds consumer map section, links to catalog
-- **One new script** (`scripts/ai-search/Deploy-AllIndexes.ps1`) — replaces 3 partial/broken scripts; could not extend `Deploy-IndexSchemas.ps1` because it's structurally wrong
+- **One new script** (`scripts/ai-search/Deploy-AllIndexes.ps1`) — single canonical deployer parameterized for one-or-multiple indexes via `-Indexes <subset>`. Replaces ALL 5 pre-existing per-index PowerShell deploy scripts (`Deploy-IndexSchemas.ps1`, `Deploy-InvoiceSearchIndex.ps1`, `deploy-invoice-index.ps1`, `deploy-session-files-index.ps1`, `Create-PlaybookEmbeddingsIndex.ps1`). Could not extend `Deploy-IndexSchemas.ps1` because it's structurally wrong (covers only 3 of 7 indexes, wrong `IndexMap`). Consolidation is binding (see spec.md MUST rules + FR-07): no per-index wrappers, no backward-compat shim scripts.
 - **One updated existing canonical** (`SPAARKE-DEPLOYMENT-GUIDE.md`) — add §4.6 with single paragraph + script invocation
 
 **No new BFF surface** is added. Code changes in BFF are refactors (rename references) + one schema gap fix (add tenantId to records-index + writer/reader updates) + app settings cleanup. Publish-size impact: negligible (net zero — only string constants change).

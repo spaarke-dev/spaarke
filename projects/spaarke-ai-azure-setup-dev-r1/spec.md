@@ -84,8 +84,9 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 | `scripts/ai-search/Index-AllReferences.ps1` | Ingestion script (no changes expected) |
 | `scripts/Create-PlaybookEmbeddingsIndex.ps1` | Index name update + retire (replaced by Deploy-AllIndexes.ps1) |
 | `scripts/Index-ExistingPlaybooks.ps1` | Index name update |
-| `infrastructure/ai-search/Deploy-InvoiceSearchIndex.ps1` | RETIRE (replaced by Deploy-AllIndexes.ps1) |
-| `infrastructure/ai-search/deploy-session-files-index.ps1` | KEEP as backward-compat wrapper that calls Deploy-AllIndexes.ps1 |
+| `infrastructure/ai-search/Deploy-InvoiceSearchIndex.ps1` | RETIRE (replaced by `Deploy-AllIndexes.ps1 -Indexes invoices`) |
+| `infrastructure/ai-search/deploy-invoice-index.ps1` | RETIRE (legacy lowercase duplicate of `Deploy-InvoiceSearchIndex.ps1`) |
+| `infrastructure/ai-search/deploy-session-files-index.ps1` | RETIRE (replaced by `Deploy-AllIndexes.ps1 -Indexes session-files`; its structural pattern is preserved in the new unified script per FR-07) |
 | `.claude/adr/ADR-014-*.md` | Either rename to reflect actual scope, OR write new ADR for tenant isolation |
 | `.claude/adr/ADR-004-*.md` | Either rename to reflect actual scope, OR write new ADR for idempotent re-indexing |
 
@@ -121,8 +122,8 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 
 #### Deploy Infrastructure
 
-7. **FR-07** — Write `scripts/ai-search/Deploy-AllIndexes.ps1` unified deployer.
-   **Acceptance**: Script exists, is catalog-driven (reads index list from a manifest or the catalog itself), supports `-DryRun`, `-VerifyOnly`, `-Indexes <subset>`, `-EnvironmentName <env>`, idempotent (safe to re-run), includes post-deploy invariant verifier per index (vector dim, key field, required-filterable fields, schema policy compliance). Uses `deploy-session-files-index.ps1` as structural template. Returns non-zero exit on any failure.
+7. **FR-07** — Write `scripts/ai-search/Deploy-AllIndexes.ps1` as the **single canonical deployer for ALL Spaarke AI Search indexes** — one script parameterized to deploy one-or-multiple indexes (no per-index wrappers, no backward-compat shim scripts).
+   **Acceptance**: Script exists, is catalog-driven (reads index list from a manifest or the catalog itself), supports `-DryRun`, `-VerifyOnly`, `-Indexes <subset>` (deploys any subset of the 7 indexes via comma-separated list; defaults to all 7), `-EnvironmentName <env>`, idempotent (safe to re-run), includes post-deploy invariant verifier per index (vector dim, key field, required-filterable fields, schema policy compliance). Uses `deploy-session-files-index.ps1` as the structural template — and **replaces it**. Returns non-zero exit on any failure. **Retires** (as part of this FR's PR): `scripts/ai-search/Deploy-IndexSchemas.ps1`, `infrastructure/ai-search/Deploy-InvoiceSearchIndex.ps1`, `infrastructure/ai-search/deploy-invoice-index.ps1`, `infrastructure/ai-search/deploy-session-files-index.ps1`, `scripts/Create-PlaybookEmbeddingsIndex.ps1`. Single script. Single source of truth.
 
 8. **FR-08** — *REMOVED. Redis canonical-rename + Key Vault `Redis-ConnectionString` migration are delegated end-to-end to `spaarke-redis-cache-remediation-r1` (prerequisite project — see NFR-13 and design.md §Project Dependencies). This project does NOT provision, rename, delete, or wire up Redis resources or secrets.*
 
@@ -225,6 +226,7 @@ Restore the accidentally-deleted `spaarke-search-dev` AI Search service (7 activ
 
 ### MUST Rules (binding)
 
+- ✅ MUST consolidate ALL index-deployment PowerShell scripts into the single `scripts/ai-search/Deploy-AllIndexes.ps1` (no per-index wrappers, no backward-compat shim scripts). The single script handles 1-or-many indexes via `-Indexes <subset>`. All five pre-existing per-index PS deploy scripts named in FR-07 MUST be deleted as part of FR-07's PR.
 - ✅ MUST use canonical index names per AI-SEARCH-INDEX-CATALOG.md (no env suffix on indexes)
 - ✅ MUST apply schema property policy unless Azure-restricted; document any override with a JSON comment
 - ✅ MUST use 3072-dim vectors (`text-embedding-3-large`); no 1536-dim vectors
