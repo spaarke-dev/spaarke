@@ -120,6 +120,39 @@ export function computeTimeWindowIso(setting: TimeWindow | undefined | null): st
 }
 
 /**
+ * Build the disabledChannels OData `$filter` clause (R4 task 042 / FR-17c).
+ *
+ * OData v4 has NO `not in` operator (and Dataverse rejects `in` against custom
+ * columns in practice — verified by spec line 361 fallback note), so this helper
+ * emits an AND-chained sequence of `sprk_category ne '<value>'` predicates.
+ *
+ * Examples:
+ *   - `[]` or `undefined`               → `null` (no clause; caller skips)
+ *   - `['new-emails']`                  → `sprk_category ne 'new-emails'`
+ *   - `['new-emails','tasks-overdue']`  → `(sprk_category ne 'new-emails' and sprk_category ne 'tasks-overdue')`
+ *
+ * Why `sprk_category` (column) and NOT `customData.category` (nested JSON):
+ *   Dataverse OData does NOT support `$filter` on nested JSON. Producer task 021
+ *   dual-writes `sprk_category` on every `appnotification` row precisely to make
+ *   this server-side filter possible. See project CLAUDE.md decision
+ *   "Use `sprk_category` column (not `customData.category`) for query filters"
+ *   (2026-06-25 owner Q&A).
+ *
+ * Single-quote escape: OData v4 doubles single quotes inside string literals
+ * (`it's` → `'it''s'`). NotificationCategory is a constrained enum (no apostrophes
+ * today), but we apply the standard escape defensively in case the enum widens.
+ *
+ * Pure (no I/O). Returns `null` (not empty string) for the empty case so the
+ * caller can cleanly skip appending without producing a `... and `-trailing
+ * artefact in the final filter string.
+ */
+export function buildDisabledChannelsFilter(disabled: NotificationCategory[] | undefined | null): string | null {
+  if (!disabled || disabled.length === 0) return null;
+  const clauses = disabled.map(cat => `sprk_category ne '${String(cat).replace(/'/g, "''")}'`);
+  return clauses.length === 1 ? clauses[0] : `(${clauses.join(' and ')})`;
+}
+
+/**
  * Filter notifications by `dueWithinDays` preference (post-fetch client filter).
  *
  * R4 task 041 / FR-17b:
@@ -255,6 +288,13 @@ function toNotificationItem(entity: WebApiEntity): NotificationItem | null {
  *   filter on `customData.dueDate` (nested JSON — not OData-filterable).
  *   Items without a `dueDate` are kept (FR-17b AC).
  *
+ * R4 task 042 / FR-17c:
+ *   When `options.disabledChannels` is non-empty, AND-joins a server-side
+ *   `sprk_category ne '<cat>'` predicate per disabled channel into the
+ *   `$filter`. Disabled channels do NOT reach the widget OR /narrate
+ *   (visibility-impacting). Producer task 021 dual-writes `sprk_category`
+ *   to make this filter possible. Empty / undefined arrays add no clause.
+ *
  * @param webApi - Xrm.WebApi reference (from xrmProvider)
  * @param options - Optional filters + preferences
  * @returns IResult<NotificationItem[]>
@@ -268,6 +308,8 @@ export async function fetchNotifications(
     timeWindow?: TimeWindow;
     /** R4 FR-17b: due-soon window in days for post-fetch client filter. No filter if undefined. */
     dueWithinDays?: DueWindowDays;
+    /** R4 FR-17c: channels the user has disabled. Excluded server-side via `sprk_category ne '<cat>'`. */
+    disabledChannels?: NotificationCategory[];
   } = {}
 ): Promise<IResult<NotificationItem[]>> {
   const top = options.top ?? MAX_NOTIFICATIONS;
@@ -289,6 +331,12 @@ export async function fetchNotifications(
   //     preference (defaulted to "24h"). This makes the recency window a
   //     visible-difference control rather than a no-op UI toggle.
   //
+  // R4 task 042 / FR-17c:
+  //   - When disabledChannels is non-empty, AND-join a `sprk_category ne '<cat>'`
+  //     predicate per disabled channel. OData v4 has no `not in`, so we emit
+  //     AND-joined `ne` clauses. Producer task 021 dual-writes the column.
+  //     Empty / undefined arrays add no clause (no-op).
+  //
   // FR-7 invariant: filters do NOT read or write `toasttype` / `isread` for
   // read-state purposes — those are bell-panel concerns.
   const predicates: string[] = [EXCLUDE_REMOVED_FILTER];
@@ -296,6 +344,10 @@ export async function fetchNotifications(
     predicates.push('(sprk_briefingstate ne 1 or sprk_briefingstate eq null)');
   }
   predicates.push(`createdon ge ${computeTimeWindowIso(timeWindow)}`);
+  const disabledClause = buildDisabledChannelsFilter(options.disabledChannels);
+  if (disabledClause) {
+    predicates.push(disabledClause);
+  }
   const filter = `&$filter=${predicates.join(' and ')}`;
 
   const query = `?$select=${NOTIFICATION_SELECT}` + filter + `&$orderby=createdon desc` + `&$top=${top}`;
