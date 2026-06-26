@@ -142,13 +142,14 @@
       "type": "Collection(Edm.ComplexType)",
       "fields": [
         {
+          "// override-sortable-facetable": "Azure forbids sortable/facetable on fields inside Collection(Edm.ComplexType) parents (multi-valued)",
           "name": "refType",
           "type": "Edm.String",
           "searchable": false,
           "filterable": true,
           "retrievable": true,
-          "sortable": true,
-          "facetable": true
+          "sortable": false,
+          "facetable": false
         },
         {
           "// override-sortable-facetable": "ref is a high-cardinality identifier (per-evidence opaque); sortable/facetable not useful",

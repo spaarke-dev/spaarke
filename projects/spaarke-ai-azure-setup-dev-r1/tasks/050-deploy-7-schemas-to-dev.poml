@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy 7 schemas to spaarke-search-dev (FR-16)</title>
     <phase>5: Deploy + Validate</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>020, 021, 036, 041, 042, 046</dependencies>
     <blocks>051, 052, 053, 054</blocks>

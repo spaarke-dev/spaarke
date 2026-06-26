@@ -56,7 +56,7 @@
 | 042 | MANDATORY test-fixture sweep (NFR-14) | 4 | ✅ | FULL | 030-041 | — (gate) — single targeted RecordSyncJobTests fix; §F.2 protocol confirmed no regression; pre-existing failures filed as backlog |
 | 045 | BFF publish-size delta verification (NFR-04) | 4 | ✅ | STANDARD | 030-042 | — (46.33 MB, +0.68 vs baseline — within thresholds; project contribution ≤ 0) |
 | 046 | Phase 4 final grep verification | 4 | ✅ | STANDARD | 031-041 | — (9 greps clean; 3 stale IKnowledgeDeploymentService refs caught and fixed) |
-| 050 | Deploy 7 schemas to spaarke-search-dev (FR-16) | 5 | 🔲 | FULL | 020, 021, 036, 041, 042, 046 | — |
+| 050 | Deploy 7 schemas to spaarke-search-dev (FR-16) | 5 | ✅ | FULL | 020, 021, 036, 041, 042, 046 | — (8 indexes deployed; FR-14 reframe added discovery; all post-deploy invariants pass) |
 | 051 | FR-17 verification: rag-references golden-reference roundtrip | 5 | 🔲 | STANDARD | 016, 050 | Group E |
 | 052 | Data ingestion for 4 ingestible indexes (FR-18) | 5 | 🔲 | STANDARD | 050, 051 | Group E |
 | 054 | Dev BFF functional verification (5 endpoints FR-19) | 5 | 🔲 | FULL | 050, 051, 052 | — |

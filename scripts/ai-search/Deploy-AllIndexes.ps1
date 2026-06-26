@@ -264,7 +264,7 @@ $Catalog = @(
         Name       = 'spaarke-playbook-embeddings'
         SchemaFile = 'infrastructure/ai-search/spaarke-playbook-embeddings.json'
         Invariants = @{
-            VectorFields             = @('contentVector')
+            VectorFields             = @('contentVector3072')
             RequiredFilterableFields = @()  # Playbook embeddings is global (no tenantId); playbook ID is the key
         }
     }
@@ -527,10 +527,39 @@ if ($VerifyOnly) {
 Write-Host "Deploying $($Catalog.Count) index(es)..." -ForegroundColor Cyan
 $deployFailures = @()
 
+function Remove-JsonCommentKeys {
+    <#
+    .SYNOPSIS
+        Strips `"// rationale": "<text>",` documentation keys from a JSON schema
+        file via regex (preserves array semantics).
+    .DESCRIPTION
+        Spaarke schemas use `"// rationale": "<documentation>"` keys to inline-comment
+        per-field policy overrides (NFR-09 override discipline). Azure AI Search REST
+        API rejects these as unknown field properties (HTTP 400).
+
+        Regex-based strip (NOT JSON parse+serialize) chosen because PowerShell's
+        ConvertTo-Json unwraps single-element arrays into objects — fatal for
+        `vectorSearch.algorithms` and `.profiles` which are arrays.
+
+        Pattern matches: `"//<anything>": "<anything>",` (with optional trailing
+        comma) — only quoted-string-value comment fields. Other forms (numeric,
+        nested-object comments) are NOT used in Spaarke schemas.
+    #>
+    param([Parameter(Mandatory)] [string]$JsonText)
+    # Match: "//..." OR "_comment_..." keys with quoted string values.
+    # Spaarke schemas use two comment-key conventions:
+    #   1. `"// rationale": "<text>"` (most schemas — files, records, rag-references, etc.)
+    #   2. `"_comment_": "<text>"` (insights-index — Bicep-influenced single underscore-wrapped key)
+    # Both are stripped here as they're rejected by Azure REST API.
+    $stripped = [regex]::Replace($JsonText, '"//[^"]*"\s*:\s*"[^"]*"\s*,?\s*', '')
+    return [regex]::Replace($stripped, '"_comment_"\s*:\s*"[^"]*"\s*,?\s*', '')
+}
+
 foreach ($entry in $Catalog) {
     $name = $entry.Name
     $schemaPath = Join-Path $repoRoot $entry.SchemaFile
-    $schemaJson = Get-Content $schemaPath -Raw
+    $schemaRaw  = Get-Content $schemaPath -Raw
+    $schemaJson = Remove-JsonCommentKeys $schemaRaw
 
     if ($PSCmdlet.ShouldProcess("index '$name' at $endpoint", "PUT schema from $($entry.SchemaFile)")) {
         try {
