@@ -1,4 +1,4 @@
-# BISECT STEP 4 — add tier1 reusable workflow call (NOT tier2 yet)
+# BISECT STEP 5 — add tier2 reusable workflow call (with fixed string-type inputs)
 name: CI
 
 on:
@@ -65,13 +65,27 @@ jobs:
       bff_changed: ${{ needs.classify.outputs.bff }}
       spaarke_ai_changed: ${{ needs.classify.outputs.spaarke_ai }}
 
+  tier2:
+    name: Tier 2 (Advisory)
+    needs: classify
+    if: needs.classify.outputs.docs_only != 'true'
+    uses: ./.github/workflows/ci-tier2-advisory.yml
+    secrets: inherit
+    with:
+      run-lint: ${{ needs.classify.outputs.spaarke_ai == 'true' || needs.classify.outputs.bff == 'true' }}
+      run-format: true
+      run-unit-tests: ${{ needs.classify.outputs.bff == 'true' }}
+      run-adr-compliance: true
+      run-markdown: true
+      run-last-reviewed: true
+      run-plugin-size: ${{ needs.classify.outputs.bff == 'true' }}
+
   Router:
     name: Router
     if: always()
-    needs: [classify, tier1]
+    needs: [classify, tier1, tier2]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Bisect step 4 result
-        run: |
-          echo "classify=${{ needs.classify.result }} tier1=${{ needs.tier1.result }}"
+      - run: |
+          echo "classify=${{ needs.classify.result }} tier1=${{ needs.tier1.result }} tier2=${{ needs.tier2.result }}"
