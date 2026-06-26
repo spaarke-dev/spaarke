@@ -3,7 +3,7 @@
   <metadata>
     <title>Audit PB-017, PB-022 stub playbooks</title>
     <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>011</dependencies>
     <blocks>015</blocks>
@@ -12,6 +12,8 @@
     <rigor-reason>Read-only audit confirming current stub state. Repo JSON will be authored by W1 tasks 024/025; this captures the pre-W1 stub baseline. Parallel-safe with sibling tasks 012, 013.</rigor-reason>
     <parallel-group>C</parallel-group>
     <parallel-safe>true</parallel-safe>
+    <completed>2026-06-25</completed>
+    <completion-notes>Both PB-017 and PB-022 confirmed STUB-AS-EXPECTED on spaarkedev1. PB-017 (GUID 24051c80-…) has 1 deployed node which has drifted to a bare AI-Analysis placeholder (nodeType=100000000, __actionType=0) — even more inert than the repo stub which defines a createNotification node. PB-022 (GUID be7874be-…) has 1 deployed node "Notify New Assignment" matching the repo stub (actionType=50 with {{task.*}} mustache referencing variables no upstream node produces — inert). Both playbook headers (schedule/parameters/channel) match repo exactly. Both playbooks produce zero notifications today (no query node feeding the template). Neither has LookupUserMembership. Audit report at notes/audit/014-pb-017-022.md instructs task 015 to SKIP both — W1 tasks 024 (matter-activity) + 025 (work-assignments) own end-to-end rewrite + redeploy. Carry-forward note for W1: PB-017's deployed node needs wholesale delete-and-replace (currently an AI-Analysis placeholder, not the createNotification stub from repo).</completion-notes>
   </metadata>
 
   <prompt>For PB-017 (notification-matter-activity) and PB-022 (notification-work-assignments), confirm the current deployed state in spaarkedev1 is a stub (per spec these are flagged as "stub" — implement in W1). Read deployed `sprk_configjson` via MCP `read_query`. Compare against the canonical repo JSON at `projects/spaarke-daily-update-service/notes/playbooks/notification-{matter-activity,work-assignments}.json`. Note: W1 tasks 024 (matter-activity) and 025 (work-assignments) will author the full repo JSON + redeploy. THIS task documents the CURRENT stub state for reconciliation baseline. Document state + stub-status in `notes/audit/014-pb-017-022.md`.</prompt>
