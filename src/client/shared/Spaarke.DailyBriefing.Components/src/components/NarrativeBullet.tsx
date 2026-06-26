@@ -32,7 +32,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Text, Button, Tooltip, Spinner } from '@fluentui/react-components';
-import { DismissRegular } from '@fluentui/react-icons';
+import { CalendarAddRegular, CheckmarkRegular, DismissRegular } from '@fluentui/react-icons';
 import { MicrosoftToDoIcon } from '@spaarke/ui-components';
 import type { NotificationItem } from '../types/notifications';
 import { formatDueDate } from '../utils/formatDueDate';
@@ -165,6 +165,44 @@ export interface NarrativeBulletProps {
    * marks only the specific `appnotification` row as read.
    */
   onDismissItem?: (itemId: string) => void;
+  /**
+   * R3 task 031 / FR-4 — "Mark as read" action.
+   *
+   * When supplied, a Check button (`CheckmarkRegular`) renders FIRST in the
+   * action row. Clicking invokes `onCheck(firstItemId)`. The parent wraps
+   * the `markChecked` hook handler with an optimistic-update + toast callback.
+   *
+   * Defensive default: when undefined, the button is hidden (the existing
+   * NarrativeBullet remains backward-compatible with consumers that have not
+   * yet wired the new action layer).
+   */
+  onCheck?: (itemId: string) => void;
+  /**
+   * R3 task 031 / FR-5 — "Remove from briefing" action.
+   *
+   * When supplied, a Remove button (`DismissRegular`) renders SECOND in the
+   * action row. Clicking invokes `onRemove(firstItemId)`. The parent wraps
+   * the `markRemoved` hook handler with optimistic UI + toast callback.
+   *
+   * Defensive default: hidden when undefined.
+   */
+  onRemove?: (itemId: string) => void;
+  /**
+   * R3 task 031 / FR-6 — "Keep on briefing for 7 more days" action.
+   *
+   * When supplied, a Keep button (`CalendarAddRegular`) renders THIRD in the
+   * action row. Clicking invokes `onKeep(firstItemId, currentTtlSeconds)`.
+   * The parent wraps the `extendTtl` hook handler with optimistic UI + toast
+   * callback (the toast renders the new effective expiry date).
+   *
+   * `currentTtlSeconds` reflects the item's current `ttlinseconds` value; the
+   * service computes `newTtl = currentTtlSeconds + 604800`. If the consumer
+   * cannot resolve a value (e.g., not selected on the query), pass `0` —
+   * the service interprets this as "extend by 7 days from now".
+   *
+   * Defensive default: hidden when undefined.
+   */
+  onKeep?: (itemId: string, currentTtlSeconds: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +223,9 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   items,
   onAddToTodoItem,
   onDismissItem,
+  onCheck,
+  onRemove,
+  onKeep,
 }) => {
   const styles = useStyles();
 
@@ -232,6 +273,40 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
 
   const handleDismiss = () => {
     onDismiss(itemIds);
+  };
+
+  // R3 task 031 — per-item action handlers (FR-4 / FR-5 / FR-6).
+  //
+  // The 3 new actions operate at single-item granularity (`appnotificationid`
+  // GUID), matching the underlying hook signatures `markChecked(id) /
+  // markRemoved(id) / extendTtl(id, currentTtl)`. The primary subject of the
+  // bullet is `itemIds[0]` — for aggregated bullets, the parent supplies the
+  // bullet's lead item; the per-row Sub-list owns its own (future) controls.
+  const primaryItemId = itemIds[0] ?? '';
+
+  // R3 FR-6: `currentTtlSeconds` is sourced from the corresponding
+  // NotificationItem. The service-layer FR-6 follow-up adds `ttlinseconds`
+  // to NOTIFICATION_SELECT + toNotificationItem mapping so items carry their
+  // current TTL. Coalesce to 0 for pre-rollout rows with no stored TTL
+  // (those fall back to tenant default 14d at Dataverse; Keep writes an
+  // explicit 604800 = 7d, which may shorten them — acceptable per spec
+  // for the legacy-row edge case; post-task-010 producer-written rows have
+  // explicit ttlinseconds = 604800 so Keep correctly extends to 1209600).
+  const primaryItemTtlSeconds = items?.find(item => item.id === primaryItemId)?.ttlinseconds ?? 0;
+
+  const handleCheck = () => {
+    if (!primaryItemId) return;
+    onCheck?.(primaryItemId);
+  };
+
+  const handleRemove = () => {
+    if (!primaryItemId) return;
+    onRemove?.(primaryItemId);
+  };
+
+  const handleKeep = () => {
+    if (!primaryItemId) return;
+    onKeep?.(primaryItemId, primaryItemTtlSeconds);
   };
 
   // Determine To Do button tooltip
@@ -283,6 +358,48 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
         )}
       </div>
       <div className={styles.actions}>
+        {/*
+          R3 task 031 — 3 new per-item actions (FR-4 / FR-5 / FR-6).
+          Each renders only when its callback prop is wired by the parent
+          (defensive default per task POML step 5). Owner-specified icon set:
+          CheckmarkRegular / DismissRegular / CalendarAddRegular. Owner-specified
+          tooltips per spec.md. Order: Check → Remove → Keep → (existing) Add to
+          To Do → (existing) Dismiss. Existing "Add to To Do" button is preserved
+          unchanged to satisfy ADR-024 regression-free invariant.
+        */}
+        {onCheck && (
+          <Tooltip content="Mark as read" relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<CheckmarkRegular />}
+              onClick={handleCheck}
+              aria-label="Mark as read"
+            />
+          </Tooltip>
+        )}
+        {onRemove && (
+          <Tooltip content="Remove from briefing" relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<DismissRegular />}
+              onClick={handleRemove}
+              aria-label="Remove from briefing"
+            />
+          </Tooltip>
+        )}
+        {onKeep && (
+          <Tooltip content="Keep on briefing for 7 more days" relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<CalendarAddRegular />}
+              onClick={handleKeep}
+              aria-label="Keep on briefing for 7 more days"
+            />
+          </Tooltip>
+        )}
         <Tooltip content={todoTooltip} relationship="label">
           <Button
             appearance="subtle"

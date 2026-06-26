@@ -22,6 +22,54 @@
 /** Minimal type for a Dataverse entity record returned by WebApi queries. */
 export type WebApiEntity = Record<string, unknown>;
 
+/**
+ * Daily-Briefing-scoped read-state values for the custom `sprk_briefingstate`
+ * Choice column on `appnotification` (R3 task 001 / FR-1). These decouple the
+ * widget's read/checked/removed lifecycle from the native bell-panel
+ * (`toasttype`/`isread`) state per FR-7 invariant.
+ *
+ *   Unread  = 0  (default at Dataverse schema level; null on read coalesces to this)
+ *   Checked = 1  (set by widget "Mark as read" action — FR-4)
+ *   Removed = 2  (set by widget "Remove from briefing" action — FR-5; filtered from queries)
+ */
+export const BRIEFING_STATE_UNREAD = 0 as const;
+export const BRIEFING_STATE_CHECKED = 1 as const;
+export const BRIEFING_STATE_REMOVED = 2 as const;
+export type BriefingState =
+  | typeof BRIEFING_STATE_UNREAD
+  | typeof BRIEFING_STATE_CHECKED
+  | typeof BRIEFING_STATE_REMOVED;
+
+/**
+ * Documented shape of an `appnotification` entity record fetched via
+ * `Xrm.WebApi.retrieveMultipleRecords`. R3 adds `sprk_briefingstate` (FR-3);
+ * older rows may surface as `undefined` (FR-3 AC-3c — null-coalesce to Unread).
+ *
+ * This is a documentary alias of `WebApiEntity` — TypeScript erases the index
+ * signature, so it's safe to widen at call sites with `as` casts where the
+ * existing code does so.
+ */
+export interface AppNotificationEntity extends WebApiEntity {
+  appnotificationid?: string;
+  title?: string;
+  body?: string;
+  /** JSON-string payload — parsed by `parseNotificationData`. */
+  data?: string;
+  /** Microsoft "Timed" / "Persistent" display behavior (NOT a read marker — FR-7). */
+  toasttype?: number;
+  createdon?: string;
+  /**
+   * R3 custom Choice column — Daily Briefing read-state (Unread / Checked / Removed).
+   * Optional because pre-rollout existing rows have no value (treated as Unread).
+   */
+  sprk_briefingstate?: number;
+  /**
+   * Time-to-live in seconds before Dataverse auto-purge. Extended by the
+   * "Keep 7 more days" action (R3 FR-6) via `+ 604800`.
+   */
+  ttlinseconds?: number;
+}
+
 /** Result shape from retrieveMultipleRecords. */
 export interface RetrieveMultipleResult {
   entities: WebApiEntity[];
@@ -224,6 +272,16 @@ export interface NotificationItem {
    * matter-activity, events).
    */
   dueDate: string | null;
+  /**
+   * R3 FR-6: current Dataverse `appnotification.ttlinseconds` value, surfaced
+   * so the "Keep 7 more days" action can compute `newTtl = current + 604800`
+   * additively (rather than writing a flat 604800 which would shorten TTL
+   * for items already extended). Undefined for pre-rollout existing rows
+   * with no stored TTL (those fall back to tenant default 14d at Dataverse);
+   * on Keep, we coerce to 0 → write 604800 (7d explicit). New rows after
+   * task 010 ships always have ttlinseconds=604800 written by the producer.
+   */
+  ttlinseconds?: number;
 }
 
 // ---------------------------------------------------------------------------

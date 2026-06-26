@@ -33,4 +33,4 @@ export { useBriefingPreferences } from './useBriefingPreferences';
 export type { UseBriefingPreferencesResult } from './useBriefingPreferences';
 
 export { useBriefingActions } from './useBriefingActions';
-export type { UseBriefingActionsResult } from './useBriefingActions';
+export type { UseBriefingActionsResult, BriefingActionOptions } from './useBriefingActions';
