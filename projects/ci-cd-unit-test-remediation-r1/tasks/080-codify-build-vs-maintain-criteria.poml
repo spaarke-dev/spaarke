@@ -1,7 +1,7 @@
 <task id="CICD-080" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Codify build-vs-maintain criteria: extend ADR-038 + .claude/constraints/testing.md + tests/CLAUDE.md with ≥10 new scaffolding-test bans</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>2.5 - Build-vs-maintain codification</phase>
     <stream>B - Test reset (extended)</stream>
@@ -84,4 +84,23 @@
     <criterion testable="true">Industry references (Beck, Feathers, Google, DHH) cited at least once across the artifacts</criterion>
     <criterion testable="true">Step 9.5 code-review + adr-check pass on all 3 files</criterion>
   </acceptance-criteria>
+
+  <notes status="completion-2026-06-26">
+    Executed in main session per parallel-safe=false (.claude/ + docs/adr/ + tests/CLAUDE.md modifications).
+
+    **Deliverables**:
+    - `docs/adr/ADR-038-testing-strategy.md` — added §7 "Build-vs-Maintain Criteria (Scaffolding-Test Bans)" with 12 new bans (B6-B17), each containing signature + BAD/GOOD C# examples + one-line rationale. Summary table of all 17 bans. Industry references: Beck, Feathers, Google test-sizes, DHH.
+    - `.claude/constraints/testing.md` — extended "Banned wiring-test antipatterns" section from 5 to 17 (renamed to "Banned scaffolding-test antipatterns"). B6-B17 are one-liners with link to ADR-038 §7 for full examples.
+    - `tests/CLAUDE.md` — extended "Banned Antipatterns" from 5 to 17 with C# examples inline. New "Expect to Defend at Project Close" section added with build-vs-maintain table + three-question test.
+
+    **Bans codified (12)**:
+    B6 Mirror tests · B7 All-mocks+trivial-assertion · B8 Internal/private method tests · B9 Pass-through wrappers · B10 Coverage-fillers · B11 Language-feature redundancy · B12 Snapshot-of-trivial-output · B13 Names-without-scenario+expected · B14 Exhaustive-switch coverage · B15 Setup-to-assertion ratio &gt;10:1 · B16 Pure getter/setter · B17 Generated-code field-by-field.
+
+    **Quality gates (BINDING per FR-B07)**:
+    - code-review: PASS (structure consistent, BAD/GOOD pairs self-contained)
+    - adr-check: PASS (ADR-038 §7 internally consistent; ADR-022 untouched)
+    - Lint: N/A (markdown only)
+
+    **Outputs feed**: Task 082 uses this list as classifier for the broader test inventory. Task 081 (`/test-diet` skill) uses this list as canonical reference. Tasks 083-085 use this list as their deletion criteria.
+  </notes>
 </task>

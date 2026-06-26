@@ -1,7 +1,7 @@
 <task id="CICD-081" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Build /test-diet skill — project-close test reconciliation (scaffolding vs maintain) per FR-B09</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>2.5 hours</estimated-effort>
     <phase>2.5 - Build-vs-maintain codification</phase>
     <stream>B - Test reset (extended)</stream>
@@ -87,4 +87,26 @@
     <criterion testable="true">Skill DOES NOT auto-delete — emits commands for reviewer judgment</criterion>
     <criterion testable="true">Step 9.5 code-review + adr-check pass</criterion>
   </acceptance-criteria>
+
+  <notes status="completion-2026-06-26">
+    Executed in main session per parallel-safe=false (.claude/ + root CLAUDE.md modifications).
+
+    **Decision**: NEW skill at `.claude/skills/test-diet/SKILL.md` (NOT an extension of `/repo-cleanup`). Cleaner separation of concerns; `/repo-cleanup` invokes `/test-diet` as a Step 1.5 sub-step at project-completion mode.
+
+    **Deliverables**:
+    - `.claude/skills/test-diet/SKILL.md` — NEW skill, full workflow (6 steps); 12 per-method evaluation heuristics align with ADR-038 §7 17-ban list (B1-B17); read-only contract (emits `git rm`/`git mv`, never executes); failure modes + reviewer-judgment-final guarantees.
+    - `.claude/skills/INDEX.md` — added test-diet row after repo-cleanup with description + trigger phrases.
+    - `.claude/skills/task-execute/SKILL.md` Step 11 — added BINDING "Test Diet Gate at Project Close" block; HARD WARNING if 090-wrapup-* completes without `/test-diet`; skip requires logged rationale + PR description note.
+    - `.claude/skills/repo-cleanup/SKILL.md` Step 1.5 — added project-completion-mode `/test-diet` invocation (blocking; reviewer applies returned commands before Step 2).
+    - root `CLAUDE.md` §7 — added "Project-close test diet gate (BINDING)" subsection cross-referencing ADR-038 §7.
+
+    **Quality gates (BINDING per FR-B07)**:
+    - code-review: PASS (skill structure follows Spaarke convention; BINDING blocks integrate cleanly with existing Step 11 / Step 1 flows)
+    - adr-check: PASS (consistent with ADR-038 §7)
+    - Lint: N/A
+
+    **Verification**: System reminder after INDEX.md edit confirmed `/test-diet` is now visible to the harness skill-discovery layer.
+
+    **Outputs feed**: Future projects' 090-wrapup-* tasks will invoke `/test-diet` automatically per task-execute Step 11; sample report format is in test-diet SKILL.md Step 4 (will be exercised first when this project runs its own 090 task).
+  </notes>
 </task>

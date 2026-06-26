@@ -19,10 +19,11 @@
 > **Authoritative count**: 39 POML files in `tasks/` (corrected 2026-06-26 — prior "25" / "31" framing was mathematically wrong; original was 33 actual POMLs, scope expansion added 6, total = 39).
 
 - **Total tasks (POML files)**: 39
-- **Resolved** (complete / complete-merged / complete-partial / cancelled-no-scope): **27 of 39 (69%)**
-- **Not started**: 12 (Phase 2.5: 080, 081, 082, 083, 084, 085 + Phase 3: 071, 075, 076, 077 + wrap-up: 090 + Phase 0: 000-preflight which was skipped at pipeline pre-flight but POML status remains `not-started` for audit)
-- **Breakdown of resolved (27)**:
-  - 21 `complete` (Phase 1 + Phase 2 implementation tasks + Phase 3 task 070)
+- **Resolved** (complete / complete-merged / complete-partial / cancelled-no-scope): **29 of 40 (72.5%)**
+- **Not started**: 11 (Phase 2.5: 082, 083, 084, 085, **086** + Phase 3: 071, 075, 076, 077 + wrap-up: 090 + Phase 0: 000-preflight which was skipped at pipeline pre-flight but POML status remains `not-started` for audit)
+- **Breakdown of resolved (29)**:
+  - 23 `complete` (Phase 1 + Phase 2 implementation tasks + Phase 3 task 070 + Phase 2.5 tasks 080 & 081)
+- **CRITICAL EXCEPTION**: task 040 (build-ci-router-yml) is marked ✅ but the deployed workflow fails with `startup_failure` on every push since merge (`cc305da98`). Workflow disabled via `gh workflow disable CI`. Task 086 remediates per spec FR-A06.
   - 2 `complete-merged` (053a, 053b — collapsed into single 053 PR per inventory)
   - 1 `complete-partial` (050 — scaffolded; bulk move deferred per `notes/path-reorganization-design.md`)
   - 3 `cancelled-no-scope` (051, 052, 053c — no DELETE scope per inventory)
@@ -104,8 +105,9 @@
 
 | # | Task | Rigor | Status | Parallel-safe | Dependencies | Blocks |
 |---|---|---|---|---|---|---|
-| 080 | codify-build-vs-maintain-criteria | FULL | 🔲 | **false** (`.claude/` write) | (Phase 2 complete) | 082 |
-| 081 | build-test-diet-skill | FULL | 🔲 | **false** (`.claude/` write — runs in parallel with 080 via main-session sequencing) | (Phase 2 complete) | 090 |
+| 080 | codify-build-vs-maintain-criteria | FULL | ✅ | **false** (`.claude/` write) | (Phase 2 complete) | 082 |
+| 086 | fix-ci-router-startup-failure | FULL | 🔲 | **false** (hot-path `.github/workflows/`) | none (can start anytime) | **071** |
+| 081 | build-test-diet-skill | FULL | ✅ | **false** (`.claude/` write — runs in parallel with 080 via main-session sequencing) | (Phase 2 complete) | 090 |
 | 082 | rerun-inventory-broader-criteria | STANDARD | 🔲 | true | 080 | 083 |
 | 083 | deep-cleanup-pr-1 (highest-confidence DELETE bucket) | FULL | 🔲 | **false** (strict serial) | 082 | 084 |
 | 084 | deep-cleanup-pr-2 (medium-confidence DELETE bucket) | FULL | 🔲 | **false** (strict serial) | 083 | 085 |

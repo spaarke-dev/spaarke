@@ -104,7 +104,7 @@ Wrap-up (0.5d)
 - Phase 3 sdap-ci retirement (`077`) GATED by cutover+14d (MUST rule)
 - Phase 3 Release matrix restoration GATED by surviving suite green ≥7 days (`075`)
 
-**Critical path** (revised 2026-06-26 to include Phase 2.5): `000 → 022 → 060 → 050 → 053(collapsed) → 080 → 082 → 085 → 070 → 071 → 075 → 077 → 076 → 090` ≈ **~32-35 elapsed days** (was 28 before scope expansion)
+**Critical path** (revised 2026-06-26 twice — once for Phase 2.5 scope expansion, once for CI Router discovery): `000 → 022 → 060 → 050 → 053(collapsed) → 080 → 082 → 085 → 070 → 086 → 071 → 075 → 077 → 076 → 090` ≈ **~33-37 elapsed days** (was 28 pre-expansion; 32-35 post-expansion; 086 adds 1-2 days for fix + 2-push stability proof). **086 can run in parallel with 083-085** (touches `.github/workflows/` not `tests/`), so its calendar impact compresses if parallelized. **Hard gate**: 071 cutover requires BOTH 085 (deep cleanup) AND 086 (CI Router stability) green.
 
 **High-Risk Items**:
 - Tier 1 flake rate stays >1% after migration — Mitigation: shadow phase measures BEFORE cutover; if >1%, pause cutover and re-triage
@@ -229,13 +229,15 @@ The original Phase 2 Stream B deletion (task 053) removed only 9 files (179 test
 - `081-build-test-diet-skill.poml` — can run in parallel with 080; gates 090 wrap-up update
 - `082-rerun-inventory-broader-criteria.poml` — depends on 080; gates deletion PRs
 - `083` / `084` / `085` — strict serial; each rebases on master after prior merges; final 085 unblocks 070→071 cutover
+- **`086-fix-ci-router-startup-failure.poml`** (added 2026-06-26 after parallel-session discovery) — independent of 082-085 chain (touches workflow YAML, not test .cs); BLOCKS 071. Awaits user-supplied browser error message OR explicit bisect approval before execution.
 
 **Parallel Groups**:
 
 - **PG-4 (Phase 2.5 codification, parallel)**: 080 + 081 (different file domains; 080 = constraint/ADR/tests/CLAUDE; 081 = new skill SKILL.md). Both modify `.claude/` — main-session sequential per write boundary.
 - **PG-5 (Phase 2.5 deletion, STRICT SERIAL)**: 082 → 083 → 084 → 085 → unblocks 070
+- **PG-6 (Phase 2.5 CI remediation, parallel with PG-5)**: 086 runs in main session concurrently with PG-5 chain. Different file domain (`.github/workflows/` vs `tests/`); no collision. 086 + 085 both must complete before 071 fires.
 
-**Calendar impact**: adds ~3-5 elapsed days of active work. Phase 3 cutover (071) shifts ~1 week. Total project: ~3 weeks elapsed (vs spec's original ~2-week framing).
+**Calendar impact**: adds ~3-5 elapsed days of active work; +1-2 days if 086 must serialize (parallel saves the days). Phase 3 cutover (071) shifts ~1 week. Total project: ~3-3.5 weeks elapsed (vs spec's original ~2-week framing).
 
 **Rigor levels**: All Phase 2.5 tasks are FULL rigor per spec FR-B07 (test-modifying override). Code-review + adr-check unconditional at Step 9.5.
 
