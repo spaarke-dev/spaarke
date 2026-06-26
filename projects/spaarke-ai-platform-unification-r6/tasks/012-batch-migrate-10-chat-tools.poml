@@ -2,7 +2,7 @@
   <metadata>
     <title>D-A-11 BIG-BANG MIGRATION (Q9) — Migrate All 10 Pre-R5 Chat Tools to `IToolHandler` + `sprk_analysistool` Rows</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>8-12 hours (multi-day — high-risk gate task)</estimated-effort>
     <dependencies>011</dependencies>
     <blocks>013</blocks>

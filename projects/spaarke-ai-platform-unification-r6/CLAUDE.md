@@ -7,10 +7,13 @@
 
 ## Project Status
 
-- **Phase**: Ready for Implementation (Phase A pending start)
-- **Last Updated**: 2026-06-07
-- **Current Task**: Not started (project-pipeline artifacts just generated)
-- **Next Action**: Run task-create (Step 3 of project-pipeline) to decompose plan.md into ~80 POML task files
+- **Phase**: Closeout — Surface Completion (post-UAT 2026-06-25)
+- **Last Updated**: 2026-06-25
+- **Backend status**: 100% complete; deployed to master 2026-06-24 (PR #401 / commit `8579d6536`)
+- **UAT result**: Tier G ✅; Tier F partial; Tiers A/B deferred (focused project); Tiers C/D/E blocked on surface wiring gaps
+- **Current pending work**: TIER-C diagnostic + tasks 095, 097b, 098 (surface completion); 091, 093 (Builder UI — may defer to R7); 089/090 (closeout — after UAT pass)
+- **Next Action**: TIER-C diagnostic (1-2 hours, no code) → surface completion sprint (~20h) → re-UAT → 089/090 close R6
+- **Audit reference**: [r6-deliverables-audit.md](r6-deliverables-audit.md) is the source of truth for "shipped vs surfaced vs working" per pillar
 
 ---
 

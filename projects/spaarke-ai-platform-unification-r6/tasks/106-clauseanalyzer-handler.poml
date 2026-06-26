@@ -2,7 +2,7 @@
   <metadata>
     <title>D-H-06 `ClauseAnalyzerHandler` (FR-14, Wave 2 — LLM-Assisted)</title>
     <phase>Parallel — 8 Typed Tool Handlers</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>8 hours</estimated-effort>
     <dependencies>104</dependencies>
     <blocks>109</blocks>

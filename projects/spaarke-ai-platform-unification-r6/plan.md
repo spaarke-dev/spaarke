@@ -1,9 +1,10 @@
 # Project Plan: Spaarke AI Platform Unification R6
 
-> **Last Updated**: 2026-06-07
-> **Status**: Ready for Tasks
+> **Last Updated**: 2026-06-25 (post-UAT)
+> **Status**: Backend complete + deployed (PR #401 merged 2026-06-24); Surface completion sprint pending; closeout (089/090) deferred until UAT passes
 > **Spec**: [spec.md](spec.md)
 > **Design**: [design.md](design.md)
+> **Surface audit**: [r6-deliverables-audit.md](r6-deliverables-audit.md) — gaps identified post-implementation
 
 ---
 

@@ -1,0 +1,43 @@
+<task id="091" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>Builder UI — Persona Dropdown on Playbook Properties Form (Pillar 1 closeout)</title>
+    <phase>Closeout — Surface Completion (post-audit)</phase>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <dependencies>001, 002, 003, 004, 005 (Pillar 1 backend already shipped)</dependencies>
+    <blocks>none (R6 may close without this; deferrable to R7)</blocks>
+    <tags>builder-ui, pcf, pillar-1, persona, audit-gap</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>UI on PCF builder; touches PlaybookBuilder code-page; modifies maker-facing form schema.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent UI work; no other closeout task touches PlaybookBuilder.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a persona dropdown to the Playbook properties form in PlaybookBuilder so that
+    makers can attach a CUST- or playbook-bound `sprk_aipersona` to a playbook.
+
+    Without this UI, only the SYS-DEFAULT persona resolution layer is reachable — the
+    CUST- and playbook-attached layers exist in `AnalysisPersonaService` code but are
+    unauthored.
+
+    **Source of truth**: `projects/spaarke-ai-platform-unification-r6/r6-deliverables-audit.md`
+    section "Pillar 1 — Persona" identifies this as Phase 3a, ~1 day effort.
+
+    **Backend already shipped** (tasks 001-005 ✅):
+    - `sprk_aipersona` entity exists
+    - `GET /api/ai/scopes/personas` endpoint returns available personas
+    - `AnalysisPersonaService.GetEffectivePersonaAsync` does most-specific-wins resolution
+    - `SprkChatAgentFactory.CreateAgentAsync` consumes the effective persona
+
+    **UI work scope**:
+    1. Add persona lookup field to playbook properties form in PlaybookBuilder code-page
+    2. Wire lookup to `/api/ai/scopes/personas` for type-ahead
+    3. Save selected persona ID on `sprk_analysisplaybook.sprk_personaid` (verify field exists or add via dataverse-create-schema)
+    4. Display effective persona in playbook header (read-only "Effective: SYS-DEFAULT" or selected)
+    5. UAT: create a CUST- persona row in Dataverse, attach to a playbook, run /summarize, verify system prompt reflects the attached persona
+
+    **Out of scope**: per-session persona override in chat session UI (R7).
+  </prompt>
+</task>

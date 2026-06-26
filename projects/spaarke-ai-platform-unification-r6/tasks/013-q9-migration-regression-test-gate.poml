@@ -2,7 +2,7 @@
   <metadata>
     <title>D-A-11 (continued) — Q9 Migration Regression Test Gate (Staging Validation)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>012</dependencies>
     <blocks>028</blocks>

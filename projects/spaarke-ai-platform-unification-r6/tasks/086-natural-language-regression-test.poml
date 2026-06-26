@@ -2,7 +2,7 @@
   <metadata>
     <title>D-D-07 Natural Language Regression Test — Existing CapabilityRouter Behavior Preserved Alongside Slashes</title>
     <phase>Phase D — Command Router + Integration + Closeout</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>080</dependencies>
     <blocks>087</blocks>

@@ -1,7 +1,7 @@
 <task id="053" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-04 — Wire `WorkspaceStateService` into `SprkChatAgentFactory.CreateAgentAsync` per-turn snapshot</title>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>6 hours</estimated-effort>
     <phase>Phase C — Tri-directional Workspace (Pillar 6a)</phase>
     <wave>C-G1 (sequential; final 6a task — UNGATES 6b/6c/7/9)</wave>

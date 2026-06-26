@@ -1,7 +1,7 @@
 <task id="079" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>Phase C exit-gate validation (6 exit criteria + Q7 criterion)</title>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>Phase C — Exit Gate</phase>
     <wave>C-G4 (sequential after 078)</wave>

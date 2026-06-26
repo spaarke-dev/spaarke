@@ -2,7 +2,7 @@
   <metadata>
     <title>D-D-01 CommandRouter Parser — Intent { command, references[], rawText } (Pillar 8 foundation)</title>
     <phase>Phase D — Command Router + Integration + Closeout</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>6 hours</estimated-effort>
     <dependencies>078</dependencies>
     <blocks>081, 082, 083, 084, 086</blocks>

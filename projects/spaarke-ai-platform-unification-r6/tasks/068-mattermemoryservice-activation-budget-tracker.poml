@@ -1,7 +1,7 @@
 <task id="068" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-21 + D-C-22 — Activate `MatterMemoryService` into chat-agent prompt assembly + shared token budget tracker</title>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>1 day</estimated-effort>
     <phase>Phase C — Cross-Conversation Memory (Pillar 7)</phase>
     <wave>C-G2 (sequential after 067)</wave>

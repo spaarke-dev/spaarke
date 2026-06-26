@@ -1,7 +1,7 @@
 <task id="070" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-24 + D-C-25 — **Q7 SCOPE EXPANSION**: Pinned Memory CRUD + Visualization UI in Context pane</title>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>1-2 weeks</estimated-effort>
     <phase>Phase C — Cross-Conversation Memory (Pillar 7) — Q7 EXPANSION</phase>
     <wave>C-G3 (sequential after 065/069)</wave>

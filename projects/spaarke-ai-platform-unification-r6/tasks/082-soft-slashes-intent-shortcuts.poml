@@ -2,7 +2,7 @@
   <metadata>
     <title>D-D-03 Soft Slashes — `/summarize`, `/draft`, `/extract-entities`, `/analyze` (intent shortcuts via agent)</title>
     <phase>Phase D — Command Router + Integration + Closeout</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>6 hours</estimated-effort>
     <dependencies>080</dependencies>
     <blocks>084</blocks>

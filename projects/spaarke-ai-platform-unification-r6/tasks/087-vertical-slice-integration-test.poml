@@ -2,7 +2,7 @@
   <metadata>
     <title>D-D-08 Vertical-Slice Integration Test — Summarize Playbook End-to-End Exercises Every Pillar</title>
     <phase>Phase D — Command Router + Integration + Closeout</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>10 hours</estimated-effort>
     <dependencies>029, 049, 079, 084, 085, 086</dependencies>
     <blocks>088</blocks>

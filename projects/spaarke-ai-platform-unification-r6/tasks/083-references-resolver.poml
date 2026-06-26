@@ -2,7 +2,7 @@
   <metadata>
     <title>D-D-04 References Resolver — `#scope`, `@&lt;entity&gt;`, `#&lt;filename&gt;` resolved at parse time</title>
     <phase>Phase D — Command Router + Integration + Closeout</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>7 hours</estimated-effort>
     <dependencies>080</dependencies>
     <blocks>084</blocks>

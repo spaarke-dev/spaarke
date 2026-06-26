@@ -1,7 +1,7 @@
 <task id="072" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-27 — Extend `WorkspaceWidgetRegistry` with optional `getVisibleState?: () =&gt; unknown` field</title>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>Phase C — Widget Visibility Contract (Pillar 9)</phase>
     <wave>C-G2 (sequential after 071)</wave>

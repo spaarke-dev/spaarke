@@ -2,9 +2,26 @@
 
 > **Project**: spaarke-ai-platform-unification-r6
 > **Generated**: 2026-06-07 via `/project-pipeline` Step 3
-> **Total tasks**: 80 (across 4 phases + parallel handler workstream + wrap-up)
+> **Last status sync**: 2026-06-25 (post-UAT)
+> **Total tasks**: 80 original + 9 closeout audit (091-098, ~~094~~ withdrawn) + 1 TIER-C diagnostic = 89 + 1 withdrawn
 > **Driver**: All tasks executed via `task-execute` skill (FULL rigor for code tasks; STANDARD for tests/exit gates; MINIMAL for docs)
 > **Calendar estimate**: 6–7 weeks (Q7 expansion adds 1–2 weeks vs spec's 5–7)
+
+---
+
+## Current Status Roll-up (2026-06-25)
+
+| Status | Count | Notes |
+|---|---|---|
+| ✅ Completed | 80 (original) + 2 (097a, 097c) = 82 | All Phase A/B/C/D + handler workstream + 2 audit hotfixes |
+| 🔲 Pending — closeout (R6 admin) | 089, 090 | Phase D exit-gate + project wrap-up; gated on UAT pass |
+| 🔲 Pending — surface completion | 095, 097b, 098, TIER-C (+optional 096) | **UAT-blocking per 2026-06-25 walkthrough** |
+| 🔲 Pending — Builder UI | 091, 093 (+092 cleanup) | Without these, persona + Q5 routing aren't configurable from maker portal |
+| ❌ Withdrawn | 094 | Audit found already wired |
+
+**R6 closure criteria**: surface completion (95/97b/98/TIER-C) → UAT Tiers A–G pass → 089 + 090 close. Builder UI (091, 093) may carry to R7 per audit recommendation.
+
+**Production state**: PR #401 merged 2026-06-24 (commit `8579d6536`); deployed via Environment Promotion at 19:06:26.
 
 ---
 
@@ -172,6 +189,26 @@
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
 | 090 | END | Project wrap-up (code-review + adr-check + repo-cleanup + lessons-learned) | 🔲 | FULL | false | 089 |
+
+### Closeout Audit — Surface Completion (added 2026-06-21 per `r6-deliverables-audit.md`)
+
+Tasks identified by the R6 deliverables audit after R6 was declared "feature-complete". These close the gap between SHIPPED code and USABLE functionality. UAT on 2026-06-25 confirmed these are blocking real-world use.
+
+| ID | Pillar | Title | Status | Effort | Notes |
+|----|--------|-------|--------|--------|-------|
+| 091 | 1 | Builder UI: persona dropdown on playbook properties form | 🔲 | ~1 day | Without this, only SYS-DEFAULT persona is reachable; CUST- and playbook-attached layers exist in code but unauthored |
+| 092 | 2 | Verify + remove vestigial `sprk_capabilities` field on playbook entity (if confirmed) | 🔲 | ~1h | Dataverse maker-portal check |
+| 093 | 5 | Builder UI: `destination` + `widgetType` fields on node properties form | 🔲 | ~1 day | Without this, every playbook routes the default way; makers can't configure Q5 |
+| ~~094~~ | 6a | ~~Frontend workspace state restore~~ | ❌ | — | **WITHDRAWN** — audit found already wired |
+| 095 | 6c | Server SSE bridge for `context.*` events + client mount for `ExecutionTraceWidget` | 🔲 | ~4h | Events emit (063 ✅) but no rendering surface (Tier D UAT empty) |
+| 096 | 7 | Mount `PinnedMemoryListWidget` in SpaarkeAi shell (visible affordance only) | 🔲 | ~2h | Optional — makes voice-pinned context inspectable |
+| 097a | 8 | Wire `createNewSession` callback to POST `/api/ai/chat/sessions` | ✅ | ~30m | Done 2026-06-21 (commit `869bdd777`) |
+| 097b | 8 | Wire `getConversationHistory` to expose SprkChat message-list (ref/callback) | 🔲 | ~2h | `/export` produces empty markdown until this lands |
+| 097c | 8 | Wire `getFocusedTabId` via PaneEventBus `tab_change` subscription | ✅ | ~1h | Done 2026-06-21 (commit `869bdd777`) |
+| 098 | 9 | Render `AddToAssistantToggle` per-tab in tab header + wire PATCH | 🔲 | ~1.5h | Server projection ready; UI mount missing (Tier E UAT untestable) |
+| **TIER-C** | 6 | **Diagnose + fix LLM workspace visibility** (Tier C UAT primary failure) | 🔲 | ~1-2h diag + fix | Most likely: 3 workspace chat tools not registered or system-prompt snapshot empty. PRIMARY UAT blocker per 2026-06-25 walkthrough. |
+
+**Closeout audit total**: ~12-15 hours surface (095, 097b, 098, TIER-C, optionally 096) + ~2 days Builder UI (091, 093) + ~1h cleanup (092).
 
 ---
 

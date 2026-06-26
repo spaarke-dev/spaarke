@@ -1,7 +1,7 @@
 <task id="057" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-08 + D-C-09 + D-C-10 — User affordances: "Send to Workspace" + "Add to Assistant" + "Pin to Matter"</title>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>1.5 days</estimated-effort>
     <phase>Phase C — Tri-directional Workspace (Pillar 6b)</phase>
     <wave>C-G2 (parallel after 6a)</wave>
