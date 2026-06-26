@@ -1,7 +1,7 @@
 # Current Task State — spaarke-redis-cache-remediation-r2
 
-> **Last Updated**: 2026-06-26 (initialized by `/project-pipeline`)
-> **Status**: 🔄 ready — task 001 dispatching (autonomous mode)
+> **Last Updated**: 2026-06-26
+> **Status**: ✅ Task 001 complete · 🔲 Next: Task 002 (Meter consolidation) — Group A wave
 
 ---
 
@@ -10,55 +10,44 @@
 | Field | Value |
 |-------|-------|
 | **Project** | spaarke-redis-cache-remediation-r2 |
-| **Active task** | 001 — `cache.failures` Counter + try/finally + `ClassifyException` (FR-01) |
-| **Status** | not-started → about to begin via `task-execute` |
-| **Next action** | `task-execute` with `tasks/001-cache-failures-counter.poml` |
+| **Active task** | Group A wave (002 + 004 + 006 — parallel-safe) |
+| **Status** | Group 0 ✅ done; Group A ready to dispatch |
+| **Next action** | Dispatch tasks 002, 004, 006 in parallel via 3 task-execute invocations in ONE message |
 
 ---
 
-## Active Task Details
+## Task 001 — Completed 2026-06-26
 
-- **Task ID**: 001
-- **Title**: `cache.failures` Counter + try/finally + `ClassifyException` helper in `MetricsDistributedCache`
-- **FR**: FR-01 (Theme A — Cache observability hardening)
-- **Rigor**: FULL (`bff-api` tag + `.cs` modification — code-review + adr-check at Step 9.5)
-- **Files**: `src/server/api/Sprk.Bff.Api/Infrastructure/Cache/MetricsDistributedCache.cs` (modify)
-- **Acceptance**: KQL `customMetrics | where name == 'cache.failures' | summarize sum(value) by tostring(customDimensions.outcome)` returns ≥1 row after `az redis force-reboot` against dev (verified at task 030)
-
-### Steps Completed (will populate as work progresses)
-
-- [ ] Step 0 — Context check
-- [ ] Step 1 — Review TASK-INDEX + dependencies (none for task 001)
-- [ ] Step 2 — Gather resources (ADR-009, ADR-010, ADR-029, ADR-032; constraints/bff-extensions.md; MetricsDistributedCache.cs)
-- [ ] Step 3 — Plan implementation (try/finally wrap + ClassifyException helper + cache.failures Counter)
-- [ ] Step 4 — Implement
-- [ ] Step 5 — Verify (build clean + unit tests if applicable)
-- [ ] Step 6 — Document (update TASK-INDEX 🔲 → ✅)
-- [ ] Step 9.5 — Quality gates (code-review + adr-check)
-
-### Files Modified (will populate during execution)
-
-| File | Change | Status |
-|---|---|---|
-
-### Decisions / Notes (will populate during execution)
+- **Title**: `cache.failures` Counter + try/catch + `ClassifyException` (FR-01)
+- **Rigor**: FULL
+- **Files modified**:
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs` — added `FailuresCounter` static field (uses same Meter `Sprk.Bff.Api.Cache`; no new Meter instance)
+  - `src/server/api/Sprk.Bff.Api/Infrastructure/Cache/MetricsDistributedCache.cs` — wrapped all 8 public methods (Get, GetAsync, Set, SetAsync, Refresh, RefreshAsync, Remove, RemoveAsync) in try/catch; added `RecordFailure` + `ClassifyException` (switch over 5 outcomes: canceled, timeout, connection, serialization, other)
+- **Build verification**: `dotnet build src/server/api/Sprk.Bff.Api/` returned 0 errors, 18 pre-existing warnings (0 new)
+- **Note**: `RedisTimeoutException` derives from `TimeoutException` so the `RedisTimeoutException` arm was unreachable; `RedisServerException` similarly redundant — both removed with inline comment.
+- **Deferred verification**:
+  - KQL `customMetrics | where name == 'cache.failures'` — verified post-deploy in task 030
+  - Integration test asserting Meter count = 1 — explicit verification in task 005 after task 002 lands
 
 ---
 
-## Parallel Execution Tracker
+## Active Group — Group A (tasks 002, 004, 006)
 
-Task 001 is in **Group 0** (foundational — serial). Group A (tasks 002, 004, 006) dispatches after 001 completes.
+All three are parallel-safe (distinct files: Telemetry/CacheMetrics.cs + TenantCache.cs vs alerts.bicep vs Program.cs).
+
+| Task | Title | Files | Rigor |
+|---|---|---|---|
+| 002 | Meter consolidation — promote CacheMetrics to static; remove TenantCache static fields | Telemetry/CacheMetrics.cs, Infrastructure/Cache/TenantCache.cs, EmbeddingCache, GraphTokenCache, CacheModule.cs | FULL |
+| 004 | NEW infrastructure/bicep/alerts.bicep (3 cache alerts) + Deploy-RedisCache.ps1 `-DeployAlerts` flag | infrastructure/bicep/alerts.bicep (NEW), scripts/Deploy-RedisCache.ps1 | STANDARD |
+| 006 | UseAzureMonitor() fails-open guard in Program.cs | src/server/api/Sprk.Bff.Api/Program.cs + new unit test | FULL |
+
+**Note for task 002**: my task 001 added `FailuresCounter` to TenantCache. When task 002 promotes CacheMetrics to canonical static class, that Counter should move with the Hits/Misses/Histogram instruments.
 
 ---
 
 ## Resume Protocol
 
 If context is reset / new session:
-1. Read this file (current-task.md)
+1. Read this file
 2. Read `tasks/TASK-INDEX.md` for overall status
-3. Invoke `task-execute` with the active task file shown above
-4. `task-execute` will load `CLAUDE.md` + `spec.md` + applicable ADRs + the task POML
-
----
-
-*Updated by `task-execute` Step 1 + Step 6. Reset to next pending task per CLAUDE.md §7.*
+3. Dispatch Group A: ONE message with 3 Skill tool invocations (task-execute, one per POML)

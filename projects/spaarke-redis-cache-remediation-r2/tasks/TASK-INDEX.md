@@ -13,7 +13,7 @@ All BFF code (`bff-api` tag) → **FULL rigor**.
 
 | ID | Title | Status | Dependencies | Blocks | Hours | Rigor | Parallel |
 |---|---|---|---|---|---|---|---|
-| 001 | `cache.failures` Counter + try/finally + `ClassifyException` | 🔲 | — | 030 | 2 | FULL | Group 0 — foundational, serial |
+| 001 | `cache.failures` Counter + try/catch + `ClassifyException` | ✅ | — | 030 | 2 | FULL | Group 0 — foundational, serial. **Done 2026-06-26**: Added `FailuresCounter` to TenantCache.cs (same Meter); added try/catch + `RecordFailure` + `ClassifyException` switch (5 outcomes) to MetricsDistributedCache.cs all 8 public methods. Build clean (0 errors, 0 new warnings). RedisTimeoutException covered by TimeoutException arm (derives from it). |
 | 002 | Meter consolidation — single canonical `CacheMetrics` static class | 🔲 | — | 003, 005 | 3 | FULL | Group A — independent of 001 (different concern, different file scope) |
 | 003 | `cache.hits.by_resource` + `cache.misses.by_resource` at TenantCache | 🔲 | 002 | 030 | 2 | FULL | Group B — depends on 002 (uses canonical static class) |
 | 004 | NEW `infrastructure/bicep/alerts.bicep` (3 cache alerts) | 🔲 | — | 014, 030 | 3 | STANDARD | Group A — Bicep file; no BFF code change |

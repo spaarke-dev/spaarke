@@ -30,6 +30,13 @@ internal sealed class TenantCache : ITenantCache
     internal static readonly Counter<long> MissesCounter = Meter.CreateCounter<long>("cache.misses");
     internal static readonly Histogram<double> CallDurationHistogram =
         Meter.CreateHistogram<double>("cache.redis_call_duration_ms");
+    // FR-01 (spaarke-redis-cache-remediation-r2 task 001): cache.failures Counter
+    // dimensioned by outcome (timeout/canceled/connection/serialization/other) and op.
+    // Emitted by MetricsDistributedCache try/catch wrapper so Redis outages are observable.
+    internal static readonly Counter<long> FailuresCounter = Meter.CreateCounter<long>(
+        "cache.failures",
+        unit: "{failure}",
+        description: "Count of cache operation failures by outcome and op.");
 
     private readonly IDistributedCache _cache;
     private readonly ILogger<TenantCache> _logger;
