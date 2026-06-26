@@ -92,14 +92,12 @@ const DEFAULT_CONFIG: EntityNameValidatorConfig = {
 function parseConfig(json: string): EntityNameValidatorConfig {
   try {
     const parsed = JSON.parse(json) as Partial<EntityNameValidatorConfig>;
-    const scrubStrategy: ScrubStrategy =
-      parsed.scrubStrategy === 'phrase' ? 'phrase' : DEFAULT_CONFIG.scrubStrategy;
+    const scrubStrategy: ScrubStrategy = parsed.scrubStrategy === 'phrase' ? 'phrase' : DEFAULT_CONFIG.scrubStrategy;
     return {
       candidateText: typeof parsed.candidateText === 'string' ? parsed.candidateText : DEFAULT_CONFIG.candidateText,
       allowList: typeof parsed.allowList === 'string' ? parsed.allowList : DEFAULT_CONFIG.allowList,
       scrubStrategy,
-      outputVariable:
-        typeof parsed.outputVariable === 'string' ? parsed.outputVariable : DEFAULT_CONFIG.outputVariable,
+      outputVariable: typeof parsed.outputVariable === 'string' ? parsed.outputVariable : DEFAULT_CONFIG.outputVariable,
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -201,8 +199,8 @@ export const EntityNameValidatorForm = memo(function EntityNameValidatorForm({
           placeholder="e.g., {{names.output.result}}"
         />
         <Text className={styles.fieldHint}>
-          Template expression resolving to a string array of permitted entity names (e.g., loaded from a membership-scoped
-          query). Names not in this list are scrubbed from the candidate text.
+          Template expression resolving to a string array of permitted entity names (e.g., loaded from a
+          membership-scoped query). Names not in this list are scrubbed from the candidate text.
         </Text>
       </div>
 
