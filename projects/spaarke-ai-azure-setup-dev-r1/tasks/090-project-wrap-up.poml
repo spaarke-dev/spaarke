@@ -3,7 +3,7 @@
   <metadata>
     <title>Project Wrap-up: quality gates + repo cleanup + README update + lessons learned</title>
     <phase>Wrap-up</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>054</dependencies>
     <blocks>none</blocks>

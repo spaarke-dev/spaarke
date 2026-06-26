@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 001 — Pre-Phase-3 operational verification (🟡 BLOCKED — awaiting AI-1 + AI-2 decisions) |
-| **Step** | 10 of 10 (all checks run, evidence captured, findings documented) |
-| **Status** | blocked-with-findings |
-| **Next Action** | Owner decides AI-1 KV naming + admin-key rotation, AI-2 role-grant path; OR authorize parallel start of Phase 1 docs (002, 004, 005, 007 are NOT blocked) |
+| **Task** | none — PROJECT COMPLETE 2026-06-26 |
+| **Step** | — |
+| **Status** | complete |
+| **Next Action** | Run `/repo-cleanup projects/spaarke-ai-azure-setup-dev-r1` (optional cleanup), then `/merge-to-master` to ship the 28+ commits to master; downstream factory-r1 consumes the 6 deliverables documented in `notes/lessons-learned.md` § Handoff |
 
 ### Files Modified This Session
 

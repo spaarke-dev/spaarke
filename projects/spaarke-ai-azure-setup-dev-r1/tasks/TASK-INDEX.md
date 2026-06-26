@@ -1,8 +1,8 @@
 # Task Index — spaarke-ai-azure-setup-dev-r1
 
 > **Project**: Spaarke AI Search Azure Setup (Dev Restoration + Canonicalization)
-> **Status**: Ready for Implementation
-> **Total Tasks**: 25 (1 pre-flight + 7 docs + 7 schemas + 2 deploy + 9 code-refactor + 4 deploy-validate + 1 wrap-up)
+> **Status**: ✅ **COMPLETE** (2026-06-26)
+> **Total Tasks**: 30 (1 pre-flight + 6 docs + 7 schemas + 2 deploy + 10 code-refactor + 3 verify-gates + 4 deploy-validate + 1 wrap-up)
 > **Last Updated**: 2026-06-26
 
 ---
@@ -60,7 +60,7 @@
 | 051 | FR-17 verification: rag-references golden-reference roundtrip | 5 | ✅ | STANDARD | 016, 050 | Group E (verified via documentType filter spot-check — 2 hits returned) |
 | 052 | Data ingestion for 4 ingestible indexes (FR-18) | 5 | ✅ | STANDARD | 050, 051 | Group E (194 docs across 3 indexes: 67 records + 93 rag-references + 34 playbooks; insights deferred) |
 | 054 | Dev BFF functional verification (5 endpoints FR-19) | 5 | ✅ | FULL | 050, 051, 052 | — (healthz 200; 5 endpoints all 401-not-404 = registered; data layer verified via REST proxy) |
-| 090 | Project Wrap-up (quality gates + cleanup + README) | Wrap-up | 🔲 | FULL | 054 | — |
+| 090 | Project Wrap-up (quality gates + cleanup + README) | Wrap-up | ✅ | FULL | 054 | — (README → Complete, 100%, all 13 graduation criteria ✅; lessons-learned.md authored) |
 
 **Status legend**: 🔲 not-started · 🟡 in-progress / blocked · ✅ completed · ⏭️ deferred
 
