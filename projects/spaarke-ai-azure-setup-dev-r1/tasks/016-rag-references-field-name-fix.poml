@@ -3,7 +3,7 @@
   <metadata>
     <title>Fix spaarke-rag-references field-name bug: domain → documentType (FR-17)</title>
     <phase>2: Schema Preparation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>020, 051</blocks>
@@ -88,4 +88,16 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
   </execution>
+
+  <notes-results completed="2026-06-26" rigor="STANDARD">
+    <change file="infrastructure/ai-search/spaarke-rag-references.json" line="45">Field renamed `domain` → `documentType` (field def block, was line 39 per spec; actual line 45 due to comment lines)</change>
+    <change file="infrastructure/ai-search/spaarke-rag-references.json" line="172">Semantic config `prioritizedKeywordsFields[0].fieldName`: `domain` → `documentType` (was line 151 per spec; actual line 172)</change>
+    <change file="scripts/ai-search/Add-ReferenceToIndex.ps1" line="456">PS writer property `domain` → `documentType` (value still `$sourceDomain` — only key renamed)</change>
+    <verified file="src/server/api/Sprk.Bff.Api/Services/Ai/Indexing/KnowledgeDocumentSchemaMapper.cs" line="56">Already writes `DocumentType = domain;` C# property `DocumentType` → JSON `documentType` via `[JsonPropertyName("documentType")]` in KnowledgeDocument.cs:118. NO CHANGE.</verified>
+    <verified file="src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs" line="313">Already filters `documentType eq '...'`. NO CHANGE.</verified>
+    <verified file="scripts/ai-search/Index-AllReferences.ps1">No direct `domain` references — delegates to Add-ReferenceToIndex.ps1. NO CHANGE.</verified>
+    <build>dotnet build src/server/api/Sprk.Bff.Api/ — 0 Error(s), 18 Warning(s) (all pre-existing: CS0618 DemoExpirationService obsolete usage, CS8604/CS1998 ChatEndpoints + NullSessionSummarizeOrchestrator).</build>
+    <verification-grep>`grep "domain"` in scripts/ai-search/ + spaarke-rag-references.json — zero hits.</verification-grep>
+    <out-of-scope>TASK-INDEX.md update + git commit deferred to main session per task brief.</out-of-scope>
+  </notes-results>
 </task>

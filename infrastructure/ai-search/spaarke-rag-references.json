@@ -42,7 +42,7 @@
       "analyzer": "standard.lucene"
     },
     {
-      "name": "domain",
+      "name": "documentType",
       "type": "Edm.String",
       "searchable": false,
       "filterable": true,
@@ -169,7 +169,7 @@
           ],
           "prioritizedKeywordsFields": [
             {
-              "fieldName": "domain"
+              "fieldName": "documentType"
             },
             {
               "fieldName": "tags"
