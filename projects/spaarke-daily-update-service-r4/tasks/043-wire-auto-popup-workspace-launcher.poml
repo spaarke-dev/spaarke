@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Wire autoPopup preference to workspace launcher hook (FR-17d)</title>
+    <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>049</blocks>
+    <tags>pcf, react, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation in shell-level mount hook; cross-component behavior with UX-visible side effects</rigor-reason>
+    <parallel-group>E2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <completion-notes>
+      Modified shell file: `src/solutions/LegalWorkspace/src/hooks/useDailyDigestAutoPopup.ts` (the existing workspace launcher hook called by `WorkspaceGrid.tsx`). Rewired from legacy R1 preference type 100000001 / `{enabled: bool}` schema to the canonical R4 schema: type 100000002 (`PREFERENCE_TYPE_DAILY_DIGEST`) with `autoPopup` field on `DailyDigestPreferences`. The same `sprk_userpreference` row that the in-widget `PreferencesDropdown` writes via `saveDigestPreferences` is now what the auto-popup hook reads — they share ONE preference, not two parallel ones.
+
+      Architectural finding: WorkspaceShell does NOT have a "tab" model (it's a flat grid of sections — Daily Briefing is one section among many). The "auto-open Daily Briefing tab" behavior in spec assumption was reinterpreted as the existing R1 modal Code Page popup pattern (open standalone `sprk_dailyupdate` Code Page as 60×80% dialog) — which already hosts `DailyBriefingApp`. The hook surface, popup dialog UX, and SpaarkeAi-embedding suppression (via `suppressLegalWorkspaceDailyDigestAutoPopup` in SpaarkeAi `main.tsx`) all remain unchanged. Only the preference source flipped.
+
+      Added: a pure helper `parseAutoPopupFromPreferenceJson` (exported from the hook file for unit testability) that mirrors the `mergeWithDefaults` semantics from the canonical preferences service. Opt-out default preserved (missing record / missing field / malformed JSON → autoPopup=true).
+
+      Tests added at `src/client/shared/Spaarke.DailyBriefing.Components/test/autoPopupPreferenceContract.test.ts` (15 tests, all pass): canonical-constants contract, parser branches (true/false/missing/null/empty/malformed/non-boolean), and round-trip via `fetchDigestPreferences` (proves hook + widget share schema). Schema constants asserted (`PREFERENCE_TYPE_DAILY_DIGEST === 100000002`, `DEFAULT_DAILY_DIGEST_PREFERENCES.autoPopup === true`) — drift in those values would now break this test, alerting the LegalWorkspace hook owner.
+
+      Test status: 128/129 daily-briefing tests pass (the 1 pre-existing flake in `DailyBriefingApp.smoke.test.tsx` 5s timeout is unrelated to this task — fails in isolation too). New contract suite: 15/15 pass. TypeScript: no new errors in the hook or test (pre-existing "Cannot find module" errors are install-state, not code).
+
+      Per task constraint: no new NPM dependencies added; LegalWorkspace inlines the preference-type constant and parser helper rather than importing `@spaarke/daily-briefing-components`. Drift between the two copies is caught by the new contract test.
+
+      ADR-021 (Fluent v9 + semantic tokens): N/A — no UI primitives touched; only preference fetch + Xrm.Navigation popup wiring.
+    </completion-notes>
+  </metadata>
+  <prompt>The workspace launcher (`LegalWorkspaceApp` mount hook or equivalent) reads `autoPopup` preference on mount and opens the Daily Briefing tab automatically if true. Adjust if a different shell owns this — confirm during pre-flight inspection.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 + React hooks + Xrm.WebApi.</role>
+  <goal>When user lands on workspace with `autoPopup=true`, Daily Briefing tab is selected/opened automatically on mount. When `autoPopup=false`, default tab logic applies (no change from current behavior).</goal>
+  <context>
+    <background>FR-17d: `autoPopup` preference must produce a real workspace-mount-time behavior change. Per spec assumption, `LegalWorkspaceApp` mount hook is the integration point. Verify via Grep first.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/DailyBriefingApp.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components (LegalWorkspaceApp surface)</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; dark mode required</constraint>
+    <constraint source="ADR-024">Preserve useInlineTodoCreate + TODO_REGARDING_CATALOG in Add to To Do</constraint>
+    <constraint source="project">R3 PR #451 file overlap — see notes/risks.md R1; run conflict-check before merge</constraint>
+    <constraint source="project">Preserve R3 deliverables: schema, TTL=604800, read-state, 3 actions (now via overflow menu)</constraint>
+    <constraint source="project">If LegalWorkspaceApp mount hook is not the right surface, document the actual workspace shell owner in notes/ before changing</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-024-sprk-todo-polymorphic-resolver.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Grep for `LegalWorkspaceApp` mount hook + tab-selection logic to confirm integration point</step>
+    <step order="2">If LegalWorkspaceApp is correct surface, identify the mount useEffect or initial state hook; otherwise document actual shell in notes/ and adjust target</step>
+    <step order="3">Read `autoPopup` preference from preferences store (same source widget reads from)</step>
+    <step order="4">On mount, if `autoPopup === true`, set selected tab to Daily Briefing (use existing tab-selection mechanism — do NOT introduce a new API)</step>
+    <step order="5">Ensure behavior only fires on first mount, not on every render (use useEffect with empty dep or once-only ref)</step>
+    <step order="6">Add Jest test: mount LegalWorkspaceApp with autoPopup=true → assert Daily Briefing tab is active; with autoPopup=false → assert default behavior</step>
+    <step order="7">Run `npm test`; ensure all pass</step>
+    <step order="8">Run `npm run build` to confirm TypeScript compiles</step>
+    <step order="9">Update TASK-INDEX.md ✅</step>
+    <step order="10">Document the chosen integration point (and any deviation from spec assumption) in notes/</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/DailyBriefingApp.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/.../LegalWorkspaceApp.tsx (or equivalent shell)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">autoPopup=true → Daily Briefing tab auto-opens on workspace mount (FR-17d / AC-17d)</criterion>
+    <criterion testable="true">autoPopup=false → no behavior change vs current workspace launcher</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test>Set autoPopup=true; reload workspace; verify Daily Briefing tab is active without click</test>
+    <test>Set autoPopup=false; reload workspace; verify default tab logic applies</test>
+    <test>Toggle preference; reload; verify behavior switches per setting</test>
+    <test>Dark Mode Compliance: workspace + DB tab render in dark theme; ADR-021 semantic tokens used</test>
+    <test>Console Errors: no errors during workspace mount + auto-tab-selection</test>
+  </ui-tests>
+  <notes>Spec assumption is `LegalWorkspaceApp` — verify before editing. If wrong, document actual shell in notes/ and adjust. Mount-once is critical: don't re-trigger on re-render. R3 PR #451 file overlap — run conflict-check.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

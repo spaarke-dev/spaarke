@@ -146,6 +146,11 @@ export async function saveDigestPreferences(
 
 /**
  * Merge partial preferences with defaults, ensuring all fields have valid values.
+ *
+ * R4 task 044 / FR-17e (2026-06-26): an AI confidence threshold field was
+ * removed. Backward-compat for legacy persisted JSON: object destructure
+ * naturally ignores extra keys, so old records containing the removed field
+ * load without error — extra keys are silently dropped from the merge result.
  */
 function mergeWithDefaults(partial: Partial<DailyDigestPreferences>): DailyDigestPreferences {
   return {
@@ -158,10 +163,6 @@ function mergeWithDefaults(partial: Partial<DailyDigestPreferences>): DailyDiges
         : DEFAULT_DAILY_DIGEST_PREFERENCES.dueWithinDays,
     timeWindow:
       typeof partial.timeWindow === 'string' ? partial.timeWindow : DEFAULT_DAILY_DIGEST_PREFERENCES.timeWindow,
-    minConfidence:
-      typeof partial.minConfidence === 'number'
-        ? partial.minConfidence
-        : DEFAULT_DAILY_DIGEST_PREFERENCES.minConfidence,
     autoPopup: typeof partial.autoPopup === 'boolean' ? partial.autoPopup : DEFAULT_DAILY_DIGEST_PREFERENCES.autoPopup,
   };
 }

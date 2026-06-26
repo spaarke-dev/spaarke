@@ -1,8 +1,15 @@
 {
   "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "_correction": {
+    "date": "2026-06-25",
+    "by": "Claude Code task-015 entity-architecture correction + stub-to-full implementation (preparation for PR 3 W1 task 025)",
+    "reason": "Stub replaced with full implementation per R4 spec FR-9. Surfaces new sprk_workassignment records assigned to current user. Uses Spaarke custom sprk_workassignment entity (NOT OOB task activity).",
+    "previousState": "1-node stub (createNotification only, no query, no membership; referenced {{task.*}} variables that no upstream node materialized)",
+    "correctedState": "Full graph: Start -> LookupUserMembership -> Query sprk_workassignment (membership-scope union) -> Condition -> CreateNotification per FR-9 + AC-5b"
+  },
   "playbook": {
     "name": "New Work Assignments",
-    "description": "Notifies users when new tasks, action items, or work items are assigned to them since the last check.",
+    "description": "Notifies users when new sprk_workassignment records have been assigned to them since the last check. Uses Spaarke custom sprk_workassignment entity (NOT OOB task activity).",
     "isPublic": true,
     "sprk_playbooktype": 2,
     "capabilities": ["notify"],
@@ -26,32 +33,133 @@
           "description": "How far back to look for new assignments"
         }
       },
+      "category": "work-assignments",
       "channel": "work-assignments",
       "channelLabel": "New Work Assignments"
     }
   },
   "nodes": [
     {
-      "name": "Notify New Assignment",
+      "name": "Start",
+      "nodeType": "Control",
+      "actionType": null,
+      "canvasType": "start",
+      "outputVariable": "start",
+      "positionX": 100,
+      "positionY": 200,
+      "dependsOn": [],
+      "configJson": {
+        "__actionType": 33,
+        "scope": "user-matters",
+        "resolveUserId": true,
+        "description": "Scoped to current user's matters via LookupUserMembership"
+      }
+    },
+    {
+      "name": "Lookup My Matters",
+      "nodeType": "Workflow",
+      "actionType": 52,
+      "canvasType": "lookupUserMembership",
+      "outputVariable": "myMatters",
+      "positionX": 250,
+      "positionY": 200,
+      "dependsOn": ["Start"],
+      "configJson": {
+        "__actionType": 52,
+        "entityType": "sprk_matter",
+        "roles": ["owner", "assignedAttorney", "assignedParalegal"],
+        "includeRelated": false,
+        "description": "Resolve the executing user's matter memberships per ADR-034. Bound to `myMatters.ids` for downstream filtering."
+      }
+    },
+    {
+      "name": "Query New Work Assignments",
+      "nodeType": "Workflow",
+      "actionType": 51,
+      "canvasType": "queryDataverse",
+      "outputVariable": "workAssignmentsQuery",
+      "positionX": 450,
+      "positionY": 200,
+      "dependsOn": ["Lookup My Matters"],
+      "configJson": {
+        "__actionType": 51,
+        "queryMode": true,
+        "entityLogicalName": "sprk_workassignment",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_workassignment\"><attribute name=\"sprk_name\"/><attribute name=\"sprk_workassignmentid\"/><attribute name=\"sprk_workassignmentnumber\"/><attribute name=\"sprk_priority\"/><attribute name=\"sprk_responseduedate\"/><attribute name=\"sprk_assignedto\"/><attribute name=\"sprk_assignedtointernal\"/><attribute name=\"sprk_assignedattorney1\"/><attribute name=\"sprk_assignedparalegal1\"/><attribute name=\"createdon\"/><attribute name=\"modifiedon\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"statecode\" operator=\"eq\" value=\"0\"/><filter type=\"or\"><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"modifiedon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/></filter><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
+        "templateParameters": {
+          "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
+        },
+        "description": "New OR updated sprk_workassignment records (statecode=Active 0, createdon OR modifiedon in last {{timeWindowHours}}) where EITHER (a) sprk_regardingmatter IN myMatters.ids OR (b) record-owner OR (c) matter-owner = current user. Sort: createdon desc."
+      }
+    },
+    {
+      "name": "Has Assignments?",
+      "nodeType": "Control",
+      "actionType": 30,
+      "canvasType": "condition",
+      "outputVariable": "hasAssignments",
+      "positionX": 700,
+      "positionY": 200,
+      "dependsOn": ["Query New Work Assignments"],
+      "configJson": {
+        "__actionType": 30,
+        "condition": {
+          "operator": "gt",
+          "left": "{{workAssignmentsQuery.output.count}}",
+          "right": 0
+        },
+        "trueBranch": "Create Notification",
+        "description": "Check if any new work assignments were found"
+      }
+    },
+    {
+      "name": "Create Notification",
       "nodeType": "Workflow",
       "actionType": 50,
       "canvasType": "createNotification",
       "outputVariable": "workAssignmentNotification",
-      "positionX": 250,
-      "positionY": 200,
-      "dependsOn": [],
+      "positionX": 1000,
+      "positionY": 150,
+      "dependsOn": ["Has Assignments?"],
       "configJson": {
         "__actionType": 50,
-        "title": "New assignment: {{task.subject}}",
-        "body": "You have been assigned \"{{task.subject}}\" on {{task.matterName}}. Due: {{task.dueDate}}.",
-        "category": "work-assignment",
+        "title": "{{workAssignmentsQuery.output.count}} new work assignment(s)",
+        "body": "{{#each workAssignmentsQuery.output.items}}{{sprk_name}} on {{sprk_regardingrecordname}} (due {{sprk_responseduedate}}).\n{{/each}}",
+        "category": "work-assignments",
         "priority": 200000000,
-        "actionUrl": "/main.aspx?pagetype=entityrecord&etn=task&id={{task.id}}",
-        "regardingId": "{{task.id}}",
-        "regardingType": "task",
-        "recipientId": "{{run.userId}}"
+        "recipientId": "{{run.userId}}",
+        "regardingType": "sprk_workassignment",
+        "iterateItems": true,
+        "itemNotification": {
+          "title": "New assignment: {{item.sprk_name}}",
+          "body": "{{item.sprk_name}} on {{item.sprk_regardingrecordname}} (due {{item.sprk_responseduedate}})",
+          "category": "work-assignments",
+          "priority": 200000000,
+          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_workassignment&id={{item.sprk_workassignmentid}}",
+          "recipientId": "{{run.userId}}",
+          "regardingId": "{{item.sprk_workassignmentid}}",
+          "regardingType": "sprk_workassignment",
+          "dueDate": "{{item.sprk_responseduedate}}",
+          "regardingName": "{{item.sprk_name}}",
+          "sourceEntityType": "sprk_workassignment",
+          "sourceId": "{{item.sprk_workassignmentid}}",
+          "sourceModifiedOn": "{{item.modifiedon}}",
+          "sourceOwningUser": "{{item.ownerid}}",
+          "viaMatterId": "{{item.sprk_regardingmatter}}",
+          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterMembershipsVariable": "myMatters"
+        },
+        "deduplication": {
+          "enabled": true,
+          "key": "work-assignments:{{run.userId}}:{{item.sprk_workassignmentid}}"
+        }
       }
     }
   ],
-  "edges": []
+  "edges": [
+    { "source": "Start", "target": "Lookup My Matters" },
+    { "source": "Lookup My Matters", "target": "Query New Work Assignments" },
+    { "source": "Query New Work Assignments", "target": "Has Assignments?" },
+    { "source": "Has Assignments?", "target": "Create Notification", "condition": "true" }
+  ]
 }

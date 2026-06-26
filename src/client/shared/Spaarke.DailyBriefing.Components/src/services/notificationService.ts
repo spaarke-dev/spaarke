@@ -38,6 +38,8 @@ import type {
   NotificationPriority,
   ChannelGroup,
   ChannelFetchResult,
+  TimeWindow,
+  DueWindowDays,
 } from '../types/notifications';
 import { CHANNEL_REGISTRY, tryCatch, BRIEFING_STATE_CHECKED, BRIEFING_STATE_REMOVED } from '../types/notifications';
 import type { IResult } from '../types/notifications';
@@ -83,6 +85,101 @@ const TTL_EXTEND_SECONDS = 604800;
 
 /** Maximum notifications to fetch per query (unread, recent). */
 const MAX_NOTIFICATIONS = 200;
+
+// ---------------------------------------------------------------------------
+// Preference helpers (R4 task 040 / FR-17a + task 041 / FR-17b)
+// ---------------------------------------------------------------------------
+
+/** Map a `TimeWindow` setting to its delta in milliseconds. */
+const TIME_WINDOW_MS: Record<TimeWindow, number> = {
+  '12h': 12 * 60 * 60 * 1000,
+  '24h': 24 * 60 * 60 * 1000,
+  '48h': 48 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+};
+
+/** Default `timeWindow` when preference is missing or invalid (matches DEFAULT_DAILY_DIGEST_PREFERENCES). */
+const DEFAULT_TIME_WINDOW: TimeWindow = '24h';
+
+/**
+ * Compute the ISO-8601 boundary timestamp for a `timeWindow` preference.
+ *
+ * R4 task 040 / FR-17a:
+ *   Returns `new Date(Date.now() - delta).toISOString()` where `delta` is the
+ *   millisecond width of the configured window. Used to compose the
+ *   `createdon ge <iso>` clause in `fetchNotifications`'s OData `$filter`.
+ *
+ * Pure (no I/O) — keep this way for testability. Defaults to "24h" when the
+ * setting is missing or unrecognized (defensive — preferences read from
+ * Dataverse JSON can have any historical value).
+ */
+export function computeTimeWindowIso(setting: TimeWindow | undefined | null): string {
+  const key: TimeWindow = setting && setting in TIME_WINDOW_MS ? setting : DEFAULT_TIME_WINDOW;
+  const delta = TIME_WINDOW_MS[key];
+  return new Date(Date.now() - delta).toISOString();
+}
+
+/**
+ * Build the disabledChannels OData `$filter` clause (R4 task 042 / FR-17c).
+ *
+ * OData v4 has NO `not in` operator (and Dataverse rejects `in` against custom
+ * columns in practice — verified by spec line 361 fallback note), so this helper
+ * emits an AND-chained sequence of `sprk_category ne '<value>'` predicates.
+ *
+ * Examples:
+ *   - `[]` or `undefined`               → `null` (no clause; caller skips)
+ *   - `['new-emails']`                  → `sprk_category ne 'new-emails'`
+ *   - `['new-emails','tasks-overdue']`  → `(sprk_category ne 'new-emails' and sprk_category ne 'tasks-overdue')`
+ *
+ * Why `sprk_category` (column) and NOT `customData.category` (nested JSON):
+ *   Dataverse OData does NOT support `$filter` on nested JSON. Producer task 021
+ *   dual-writes `sprk_category` on every `appnotification` row precisely to make
+ *   this server-side filter possible. See project CLAUDE.md decision
+ *   "Use `sprk_category` column (not `customData.category`) for query filters"
+ *   (2026-06-25 owner Q&A).
+ *
+ * Single-quote escape: OData v4 doubles single quotes inside string literals
+ * (`it's` → `'it''s'`). NotificationCategory is a constrained enum (no apostrophes
+ * today), but we apply the standard escape defensively in case the enum widens.
+ *
+ * Pure (no I/O). Returns `null` (not empty string) for the empty case so the
+ * caller can cleanly skip appending without producing a `... and `-trailing
+ * artefact in the final filter string.
+ */
+export function buildDisabledChannelsFilter(disabled: NotificationCategory[] | undefined | null): string | null {
+  if (!disabled || disabled.length === 0) return null;
+  const clauses = disabled.map(cat => `sprk_category ne '${String(cat).replace(/'/g, "''")}'`);
+  return clauses.length === 1 ? clauses[0] : `(${clauses.join(' and ')})`;
+}
+
+/**
+ * Filter notifications by `dueWithinDays` preference (post-fetch client filter).
+ *
+ * R4 task 041 / FR-17b:
+ *   Dataverse OData cannot `$filter` on `customData.dueDate` (nested JSON),
+ *   so this filter runs client-side after `retrieveMultipleRecords` returns.
+ *
+ * Semantics:
+ *   - Items with no `dueDate` (null) pass through unchanged (FR-17b AC).
+ *   - Items with `dueDate <= now + days` are kept.
+ *   - Items with `dueDate >  now + days` are filtered out.
+ *   - Items with an unparseable `dueDate` string pass through (defensive).
+ *
+ * Pure (no I/O) — keep this way for testability.
+ */
+export function filterByDueWithinDays(
+  items: NotificationItem[],
+  days: DueWindowDays | undefined | null
+): NotificationItem[] {
+  if (days === undefined || days === null) return items;
+  const boundaryMs = Date.now() + days * 24 * 60 * 60 * 1000;
+  return items.filter(item => {
+    if (!item.dueDate) return true; // FR-17b: pass through items with no dueDate
+    const dueMs = Date.parse(item.dueDate);
+    if (Number.isNaN(dueMs)) return true; // defensive: unparseable → pass through
+    return dueMs <= boundaryMs;
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Parsing helpers
@@ -181,16 +278,43 @@ function toNotificationItem(entity: WebApiEntity): NotificationItem | null {
  *   - Current user is the owner (Xrm automatically scopes to current user)
  *   - Sorted by createdon desc
  *
+ * R4 task 040 / FR-17a:
+ *   When `options.timeWindow` is provided, appends `createdon ge <iso>` to the
+ *   OData `$filter` where `<iso>` is the boundary derived from the setting.
+ *   Defaults to "24h" if missing (matches `DEFAULT_DAILY_DIGEST_PREFERENCES`).
+ *
+ * R4 task 041 / FR-17b:
+ *   When `options.dueWithinDays` is provided, applies a post-fetch client
+ *   filter on `customData.dueDate` (nested JSON — not OData-filterable).
+ *   Items without a `dueDate` are kept (FR-17b AC).
+ *
+ * R4 task 042 / FR-17c:
+ *   When `options.disabledChannels` is non-empty, AND-joins a server-side
+ *   `sprk_category ne '<cat>'` predicate per disabled channel into the
+ *   `$filter`. Disabled channels do NOT reach the widget OR /narrate
+ *   (visibility-impacting). Producer task 021 dual-writes `sprk_category`
+ *   to make this filter possible. Empty / undefined arrays add no clause.
+ *
  * @param webApi - Xrm.WebApi reference (from xrmProvider)
- * @param options - Optional filters
+ * @param options - Optional filters + preferences
  * @returns IResult<NotificationItem[]>
  */
 export async function fetchNotifications(
   webApi: IWebApi,
-  options: { unreadOnly?: boolean; top?: number } = {}
+  options: {
+    unreadOnly?: boolean;
+    top?: number;
+    /** R4 FR-17a: recency window for createdon filter. Defaults to "24h". */
+    timeWindow?: TimeWindow;
+    /** R4 FR-17b: due-soon window in days for post-fetch client filter. No filter if undefined. */
+    dueWithinDays?: DueWindowDays;
+    /** R4 FR-17c: channels the user has disabled. Excluded server-side via `sprk_category ne '<cat>'`. */
+    disabledChannels?: NotificationCategory[];
+  } = {}
 ): Promise<IResult<NotificationItem[]>> {
   const top = options.top ?? MAX_NOTIFICATIONS;
   const unreadOnly = options.unreadOnly ?? false;
+  const timeWindow = options.timeWindow ?? DEFAULT_TIME_WINDOW;
 
   // Build OData query — appnotification is automatically scoped to the current user.
   //
@@ -202,11 +326,27 @@ export async function fetchNotifications(
   //     NOT `sprk_briefingstate = 1` (Checked) counts as unread for the digest,
   //     including nulls.
   //
+  // R4 task 040 / FR-17a:
+  //   - ALWAYS apply `createdon ge <iso>` boundary derived from `timeWindow`
+  //     preference (defaulted to "24h"). This makes the recency window a
+  //     visible-difference control rather than a no-op UI toggle.
+  //
+  // R4 task 042 / FR-17c:
+  //   - When disabledChannels is non-empty, AND-join a `sprk_category ne '<cat>'`
+  //     predicate per disabled channel. OData v4 has no `not in`, so we emit
+  //     AND-joined `ne` clauses. Producer task 021 dual-writes the column.
+  //     Empty / undefined arrays add no clause (no-op).
+  //
   // FR-7 invariant: filters do NOT read or write `toasttype` / `isread` for
   // read-state purposes — those are bell-panel concerns.
   const predicates: string[] = [EXCLUDE_REMOVED_FILTER];
   if (unreadOnly) {
     predicates.push('(sprk_briefingstate ne 1 or sprk_briefingstate eq null)');
+  }
+  predicates.push(`createdon ge ${computeTimeWindowIso(timeWindow)}`);
+  const disabledClause = buildDisabledChannelsFilter(options.disabledChannels);
+  if (disabledClause) {
+    predicates.push(disabledClause);
   }
   const filter = `&$filter=${predicates.join(' and ')}`;
 
@@ -223,7 +363,9 @@ export async function fetchNotifications(
       }
     }
 
-    return items;
+    // R4 task 041 / FR-17b: post-fetch client filter on customData.dueDate.
+    // Items without a dueDate pass through (FR-17b AC).
+    return filterByDueWithinDays(items, options.dueWithinDays);
   }, 'NOTIFICATIONS_FETCH_ERROR');
 }
 
