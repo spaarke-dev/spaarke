@@ -3,7 +3,9 @@
   <metadata>
     <title>Implement notification-matter-activity playbook (stub → full)</title>
     <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Deployed PB-017 sprk_configjson via MCP update_record (whole-doc replace). Pre-deploy state was 1-block stub (schedule + channel only, no nodes/edges). Post-deploy verified all 5 nodes (Start, Lookup My Matters, Query Matter Activity, Has Activity?, Create Notification) and 4 edges. ActionType 52 LookupUserMembership for sprk_matter entity present; QueryDataverse targets Spaarke custom sprk_event with link-entity sprk_matter and membership-scope union (sprk_regardingmatter IN myMatters.ids OR record-owner OR matter-owner = current user); CreateNotification regardingType=sprk_event with deduplication key matter-activity:{userId}:{eventId}:{modifiedon}; statecode=Active preserved. Component Justification: existing=PB-017 stub (no real query); extension=Yes (stub → full promotion of same row); cost-of-doing-nothing=users get zero matter-activity notifications, AC-8 fails by construction. Smoke notes: projects/spaarke-daily-update-service-r4/notes/smoke/024-matter-activity-deploy.md.</completion-notes>
     <estimated-hours>3</estimated-hours>
     <dependencies>020, 021</dependencies>
     <blocks>026</blocks>
