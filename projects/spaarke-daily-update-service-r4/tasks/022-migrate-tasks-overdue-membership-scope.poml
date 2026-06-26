@@ -3,7 +3,9 @@
   <metadata>
     <title>Migrate notification-tasks-overdue.json to membership-scope union FetchXml</title>
     <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>DEPLOYMENT DEFERRED (documented in notes/smoke/022-tasks-overdue-deploy.md). Repo JSON authoring intent COMPLETE (PR 2 task 015 corrected entity from OOB task → sprk_event with Task discriminator + added LookupUserMembership branch + membership-scope FetchXml union). Structural divergence discovered during deployment: the task recipe assumed full node graph lives in sprk_analysisplaybook.sprk_configjson, but the deployed Dataverse schema splits playbook-level config (sprk_analysisplaybook.sprk_configjson — schedule/category/parameters only) from node-level config (sprk_playbooknode rows — 4 deployed). Per constraint "document and defer rather than improvise", task deferred with carry-forward to a future task using the canonical scripts/Deploy-Playbook.ps1 -Force mechanism (script header confirms it handles both playbook + child node rows). Spec FR-7 wording bug noted: "Dedupe by activityid" is a spec error — the canonical Spaarke field is sprk_eventid (not OOB activityid), per CLAUDE.md § '2026-06-25 — Spaarke entity architecture' BINDING rule. Repo JSON correctly uses sprk_eventid in the dedupe key + actionUrl + regardingId. Pre-deploy state captured: PB-021 deployed GUID 4369cab2-5f2d-f111-88b5-7ced8d1dc988, Active, configjson 152 bytes (hourly frequency), 4 child nodes (no ActionType 52). Post-deploy state: UNCHANGED (deferred). AC-7 manual UAT not yet testable until proper redeploy path is invoked.</completion-notes>
     <estimated-hours>2.5</estimated-hours>
     <dependencies>020, 021</dependencies>
     <blocks>026</blocks>
