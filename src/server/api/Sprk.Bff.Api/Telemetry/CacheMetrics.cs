@@ -77,6 +77,30 @@ public static class CacheMetrics
         description: "Per-consumer cache operation latency in milliseconds.");
 
     /// <summary>
+    /// FR-03 (spaarke-redis-cache-remediation-r2 task 003): cache.hits.by_resource counter
+    /// dimensioned by the logical <c>resource</c> name from the TenantCache key shape
+    /// <c>tenant:{tid}:{resource}:{id}:v{n}</c>. Emitted at the <see cref="Sprk.Bff.Api.Infrastructure.Cache.TenantCache"/>
+    /// wrapper layer only — the primary <see cref="HitsCounter"/> at the decorator layer
+    /// remains undimensioned by resource (R1 amendment to ADR-009 dropped per-tag dims at
+    /// the decorator layer due to unbounded cardinality). At the wrapper layer, cardinality
+    /// is naturally bounded (~10-20 resource names per NFR-06).
+    /// </summary>
+    public static readonly Counter<long> HitsByResourceCounter = Meter.CreateCounter<long>(
+        name: "cache.hits.by_resource",
+        unit: "{hit}",
+        description: "Cache hits at the TenantCache wrapper layer, dimensioned by logical resource name.");
+
+    /// <summary>
+    /// FR-03 (spaarke-redis-cache-remediation-r2 task 003): cache.misses.by_resource counter
+    /// dimensioned by the logical <c>resource</c> name. See <see cref="HitsByResourceCounter"/>
+    /// for cardinality rationale.
+    /// </summary>
+    public static readonly Counter<long> MissesByResourceCounter = Meter.CreateCounter<long>(
+        name: "cache.misses.by_resource",
+        unit: "{miss}",
+        description: "Cache misses at the TenantCache wrapper layer, dimensioned by logical resource name.");
+
+    /// <summary>
     /// Record a cache hit. <paramref name="cacheType"/> tags the measurement so dashboards
     /// can break down hit rate by consumer (e.g. "graph", "embedding", "auth-access").
     /// </summary>

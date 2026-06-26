@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.Cache;
 
@@ -53,8 +54,17 @@ internal sealed class TenantCache : ITenantCache
 
         if (bytes is null || bytes.Length == 0)
         {
+            // FR-03 (task 003): secondary by_resource metric — wrapper layer only, primary
+            // cache.misses at decorator layer is unchanged. Resource cardinality bounded (~10-20).
+            CacheMetrics.MissesByResourceCounter.Add(
+                1,
+                new KeyValuePair<string, object?>("resource", resource));
             return default;
         }
+
+        CacheMetrics.HitsByResourceCounter.Add(
+            1,
+            new KeyValuePair<string, object?>("resource", resource));
 
         try
         {
@@ -153,8 +163,24 @@ internal sealed class TenantCache : ITenantCache
         ValidateArguments(tenantId, resource, id, cacheInstance);
 
         var key = BuildKey(tenantId, resource, id, version);
-        // Metrics emitted at IDistributedCache decorator layer (see GetAsync comment).
-        return await _cache.GetStringAsync(key, ct).ConfigureAwait(false);
+        // Primary cache.hits / cache.misses emitted at IDistributedCache decorator layer.
+        // FR-03 (task 003) secondary by_resource metric below.
+        var value = await _cache.GetStringAsync(key, ct).ConfigureAwait(false);
+
+        if (string.IsNullOrEmpty(value))
+        {
+            CacheMetrics.MissesByResourceCounter.Add(
+                1,
+                new KeyValuePair<string, object?>("resource", resource));
+        }
+        else
+        {
+            CacheMetrics.HitsByResourceCounter.Add(
+                1,
+                new KeyValuePair<string, object?>("resource", resource));
+        }
+
+        return value;
     }
 
     public async Task SetStringAsync(
