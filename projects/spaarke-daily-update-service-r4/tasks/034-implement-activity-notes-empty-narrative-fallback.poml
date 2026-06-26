@@ -3,7 +3,9 @@
   <metadata>
     <title>Implement ActivityNotesSection empty-narrative fallback (FR-16)</title>
     <phase>4: W2 Consumer — /narrate dispatch + cache + fallback (PR 4)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>FR-16 fallback rendering branch added to ActivityNotesSection.tsx. When channelNarratives is empty AND raw notifications exist, the component now renders an "AI summary unavailable. Showing raw notifications below." Fluent v9 MessageBar (intent="warning") above per-channel ChannelHeading + minimal RawNotificationCard rows (title + body + regarding link + timestamp). Both-empty case preserves null-return behavior. Errored + "system" channels are skipped (matches narrative-branch system filter). All styling uses semantic tokens (ADR-021) — verified via grep `#[0-9a-fA-F]{3,8}` → 0 raw hex matches in modified file (the single grep hit is `&#8599;` HTML entity for the ↗ arrow, not a color). Jest tests added at `test/ActivityNotesSection.fallback.test.tsx` (5 tests: RendersFallbackWhenNarrativesEmpty, RendersNarrativesWhenAvailable, HidesEverythingWhenZeroNotifications, SkipsErroredAndSystemChannels, DarkModeCompliance) — ALL PASS. Both ActivityNotesSection test files pass together (8/8). `npm run build` has 5 pre-existing peer-dep errors (none touch ActivityNotesSection.tsx, identical count before and after this change); documented at `notes/debug/034-test-infrastructure.md`. R3 PR #451 file overlap is RESOLVED (risks.md R1 closed 2026-06-25).</completion-notes>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>035</blocks>
