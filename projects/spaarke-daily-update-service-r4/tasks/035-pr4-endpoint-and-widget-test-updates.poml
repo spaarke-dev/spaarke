@@ -3,7 +3,9 @@
   <metadata>
     <title>Update xUnit + Jest tests for /narrate + useBriefingNarration + ActivityNotesSection</title>
     <phase>4: W2 Consumer — /narrate dispatch + cache + fallback (PR 4)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>Test coverage sweep across PR 4 surface. Added 3 edge-case xUnit tests to DailyBriefingEndpointsTests.cs covering uncovered exception paths: (1) HandleNarrate_Returns_503_When_InvokePlaybook_Throws_FeatureDisabledException (ADR-032 P3 Fail-Fast / NullInvokePlaybookAi kill-switch path), (2) HandleNarrate_Returns_500_When_InvokePlaybook_Throws_Generic_Exception (catch-all branch), (3) HandleNarrate_Propagates_OperationCanceledException_When_Caller_Cancels (cooperative cancellation). All 16 DailyBriefing tests pass (10 endpoint + 3 response shape + 3 new edge cases). Jest suite: 97 pass / 0 fail across 12 test suites (9 useBriefingNarration tests from task 033 + 5 ActivityNotesSection fallback tests from task 034 already cover refetch + fallback ACs; existing edge cases — mixed-state, system-channel filter, dark mode — already covered, no additional Jest tests needed). Full BFF suite: 7878 pass / 1 flaky-fail / 134 skip — the 1 failure does not reproduce in isolation (Api.Ai filter: 401/0/18; non-Api.Ai filter: 7478/0/116) and is not introduced by PR 4 changes.</completion-notes>
     <estimated-hours>3</estimated-hours>
     <dependencies>032, 033, 034</dependencies>
     <blocks>036</blocks>

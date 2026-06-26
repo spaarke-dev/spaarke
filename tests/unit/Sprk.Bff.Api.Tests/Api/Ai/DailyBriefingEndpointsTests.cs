@@ -6,6 +6,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
@@ -485,6 +487,78 @@ public sealed class DailyBriefingEndpointsTests
                 .Should().BeNull(because:
                     $"R4 task 031 removed the {name} helper — prompt construction now lives in the playbook + Action rows.");
         }
+    }
+
+    // ── Tests: exception paths — edge cases (R4 task 035) ─────────────────────
+
+    [Fact]
+    public async Task HandleNarrate_Returns_503_When_InvokePlaybook_Throws_FeatureDisabledException()
+    {
+        // Arrange — playbook resolves, but the AI kill-switch is OFF
+        // (ADR-032 NullInvokePlaybookAi P3 Fail-Fast surfaces this exception).
+        var request = BuildNonEmptyRequest();
+        var routing = BuildRoutingMock(Guid.NewGuid());
+
+        var invokePlaybookAi = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
+        invokePlaybookAi.Setup(i => i.InvokePlaybookAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyDictionary<string, string>?>(),
+                It.IsAny<PlaybookInvocationContext>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new FeatureDisabledException("ai.briefing.disabled", "AI disabled"));
+
+        // Act
+        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
+
+        // Assert — 503 (canonical kill-switch response, NOT 500).
+        var problem = result.Should().BeAssignableTo<IStatusCodeHttpResult>().Subject;
+        problem.StatusCode.Should().Be(503);
+    }
+
+    [Fact]
+    public async Task HandleNarrate_Returns_500_When_InvokePlaybook_Throws_Generic_Exception()
+    {
+        // Arrange — playbook resolves, but execution throws an unexpected
+        // exception (NOT one of the well-known recoverable types). Endpoint
+        // should NOT leak the inner exception text; should return 500 ProblemDetails.
+        var request = BuildNonEmptyRequest();
+        var routing = BuildRoutingMock(Guid.NewGuid());
+
+        var invokePlaybookAi = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
+        invokePlaybookAi.Setup(i => i.InvokePlaybookAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyDictionary<string, string>?>(),
+                It.IsAny<PlaybookInvocationContext>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("unexpected playbook engine failure"));
+
+        // Act
+        var result = await InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
+
+        // Assert — 500 (catch-all branch).
+        var problem = result.Should().BeAssignableTo<IStatusCodeHttpResult>().Subject;
+        problem.StatusCode.Should().Be(500);
+    }
+
+    [Fact]
+    public async Task HandleNarrate_Propagates_OperationCanceledException_When_Caller_Cancels()
+    {
+        // Arrange — caller cancels mid-dispatch. Endpoint must propagate the
+        // cancellation cleanly (NOT swallow into a 500 ProblemDetails).
+        var request = BuildNonEmptyRequest();
+        var routing = BuildRoutingMock(Guid.NewGuid());
+
+        var invokePlaybookAi = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
+        invokePlaybookAi.Setup(i => i.InvokePlaybookAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyDictionary<string, string>?>(),
+                It.IsAny<PlaybookInvocationContext>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException("caller cancelled"));
+
+        // Act + Assert — exception bubbles out (test framework observes it).
+        var act = () => InvokeHandleNarrateAsync(request, routing.Object, invokePlaybookAi.Object);
+        await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
