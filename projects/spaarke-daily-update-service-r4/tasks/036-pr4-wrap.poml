@@ -3,7 +3,9 @@
   <metadata>
     <title>PR 4 wrap — quality gates + conflict-check + open PR</title>
     <phase>4: W2 Consumer — /narrate dispatch + cache + fallback (PR 4)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>PR 4 wrap. Quality gates: dotnet build Release succeeded (0 errors, 17 pre-existing warnings). Full BFF test suite 7879 pass / 0 fail / 134 skip (re-run confirmed prior 1-failure was flaky and did not reproduce). Jest suite 97 pass / 0 fail across 12 suites. Publish-size 44.97 MB compressed (uncompressed 140.05 MB) — net REDUCTION of -1.34 MB vs PR 3 baseline 46.31 MB (task 031 removed 340 LOC of inline LLM-prompt construction). CVE scan: no new HIGH; single pre-existing HIGH on Microsoft.Kiota.Abstractions 1.21.2 carries forward unchanged. Conflict-check: PR #456 is only open R4 PR; no file-surface overlap with other open PRs (devops chores #452/#453, dependabot bumps). ADR-013 placement preserved (HandleNarrate uses Services/Ai/PublicContracts/ facades exclusively — no direct IOpenAiClient/IPlaybookService/IPlaybookOrchestrationService injection). ADR-021 semantic tokens preserved in ActivityNotesSection fallback. PR #456 description updated via gh pr edit to cover combined PR 1+2+3+4 scope with PR 4 section + cumulative §10 gates.</completion-notes>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>035</dependencies>
     <blocks>040</blocks>
