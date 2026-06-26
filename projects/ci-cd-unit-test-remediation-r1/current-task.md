@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-26 (Phase 1 complete; ready for Phase 2)
+> **Last Updated**: 2026-06-26 (Phase 2 complete; Phase 3 cutover next — calendar-gated)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,46 +10,52 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — Phase 1 complete; no Phase 2 task started |
+| **Task** | none — Phase 2 complete; Phase 3 next (calendar-gated) |
 | **Step** | — |
 | **Status** | between-phases |
 | **Mode** | 🤖 **AUTONOMOUS** — no approval gates (see CLAUDE.md) |
-| **Next Action** | Start Phase 2. Three lanes can run concurrently: PG-2 (workflows: `040, 041, 042, 043, 044`), PG-3 (skills sequential: `060, 061, 062`), SERIAL-DEL (deletion: `050 → 051 → 052 → 053`). Recommend launching PG-2 + SERIAL-DEL in parallel via sub-agents; PG-3 stays in main session. Sub-slicing 053a/b/c revised to single 053 per inventory findings (only 11 DELETE files). |
+| **Next Action** | **Phase 3 = cutover + monitoring**. Task 070 (pre-cutover branch-protection snapshot) is ready to run BUT **branch protection is currently DISABLED on master** (per task 001 finding) — the snapshot will capture an "off" state. Decision needed before 071 cutover: do we (a) restore branch protection from Jun-1 baseline first, then cutover replaces with `CI / Router` only, OR (b) treat the cutover as a fresh setup using the Jun-1 baseline as reference. Both paths achieve the same end-state. **No urgency** — Phase 3 is intentionally gated by shadow-phase observation of the new tier workflows. Recommend: open a draft PR from `work/ci-cd-unit-test-remediation-r1` → master so the new workflows run in shadow against real PRs for 2-3 weeks of data collection before flipping branch protection. |
 
-### Files Modified This Session (Phase 1 consolidated)
+### Files Modified This Session (Phase 2 consolidated)
 
 **Project artifacts**:
-- All 13 Phase 1 task POMLs — status flipped to `complete`
-- `projects/ci-cd-unit-test-remediation-r1/tasks/TASK-INDEX.md` — Phase 1 marked ✅; sub-slicing revision note added
+- All 12 Phase 2 task POMLs — statuses flipped (complete / complete-merged / complete-partial / cancelled-no-scope)
+- `projects/ci-cd-unit-test-remediation-r1/tasks/TASK-INDEX.md` — Phase 2 status markers
 - `projects/ci-cd-unit-test-remediation-r1/current-task.md` — this file
 
-**Notes folder** (Phase 1 outputs):
-- `notes/sdap-ci-failure-catalog.md` (task 010)
-- `notes/baseline-metrics.md` (task 011)
-- `notes/router-signal-model-decision.md` (task 012)
-- `notes/test-inventory.csv` + `notes/test-inventory-summary.md` (task 020)
-- `notes/branch-protection-current.json` + `notes/branch-protection-baseline-decision.md` (task 001)
-- `notes/phase1-dispatch-plan.md` (task 002)
+**Notes folder** (Phase 2 outputs):
+- `notes/deploy-bff-api-trigger-audit.md` (task 044 — confirms master-trigger)
+- `notes/path-reorganization-design.md` (task 050 — 3 strategy decisions documented for bulk-move follow-up)
+- `notes/post-deletion-summary.md` (task 053 — what was deleted, path-check verified, build green)
 
-**Persistent artifacts created**:
-- `docs/standards/TEST-ARCHITECTURE.md` (task 023)
-- `docs/adr/ADR-038-testing-strategy.md` (task 024 — STANDALONE, not supersession)
-- `projects/INDEX.md` (task 030)
+**Persistent artifacts created** (Phase 2):
+- `.github/workflows/ci-router.yml` (task 040 — 244 lines, single composite required check + alls-green aggregator)
+- `.github/workflows/ci-tier1-blocking.yml` (task 041 — 421 lines, 5 jobs, 6-fact MUST-NOT NetArchTest subset)
+- `.github/workflows/ci-tier2-advisory.yml` (task 042 — 612 lines, 8 jobs, PR-comment dedup verbatim)
+- `.github/workflows/deploy-spaarke-ai.yml` (task 044 — Dataverse web resource deploy target)
+- `scripts/validate-markdown-links.ps1` (task 044 — verified exit 0 clean / exit 1 broken)
+- `tests/integration/{auth,regression,data-mutation,tenant,contract}/README.md` (task 050 — 5 path anchors)
+- `tests/unit/domain/README.md` (task 050 — 1 path anchor; newly-created per spec UQ #3)
 
-**Persistent files modified**:
-- `tests/CLAUDE.md` — full rewrite (task 021)
-- `.claude/constraints/testing.md` — full rewrite, ADR-022 misattribution fixed (task 022)
-- `.claude/skills/conflict-check/SKILL.md` — Hot-Path Watchlist + auto-trigger section added (task 031)
-- `docs/adr/INDEX.md` — ADR-038 row added (task 024)
-- `.claude/adr/INDEX.md` — ADR-038 row added (task 024)
+**Persistent files modified** (Phase 2):
+- `.github/workflows/nightly-health.yml` (task 043 — +337 lines for Tier 3 augmentation: full-integration + coverage-observation + trivy-fs + dep-audit)
+- `.claude/skills/task-execute/SKILL.md` (task 060 — Step 0.5 hot-path auto-invoke + Step 9.5 test-PR override)
+- `.claude/skills/project-pipeline/SKILL.md` (task 061 — Step 2 INDEX.md overlap warning + Step 3 hot-path-declaration requirement)
+- `.claude/constraints/bff-extensions.md` (task 062 — §G Hot-Path Declaration added)
+- `CLAUDE.md` (root — task 062 — §8 test-modifying override row + §10 hot-path-declaration cross-ref + §17 three new pointer rows for ADR-038/TEST-ARCHITECTURE.md/INDEX.md)
+
+**Deleted** (task 053):
+- 11 wiring-test files under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` (9 HttpMessageHandler-mock + 2 DI-registration)
 
 ### Critical Context
 
-**Phase 1 surfaced 3 findings that affect Phase 2/3 planning**:
+**Phase 2 surfaced 3 findings affecting Phase 3 planning**:
 
-1. **Only 11 DELETE files** (task 020 inventory) vs spec's ~60% estimate. Recommendation: **collapse 053a/b/c into single 053 PR**. Critical path shortens 28d → ~26d. Tenant-isolation count is 1 — flag for ≥6-month backfill.
-2. **17 active worktrees** (task 030 INDEX.md) vs spec's 5-6 estimate. 13 of 17 touch BFF — hot-path coordination is more critical than spec assumed. **Skill-directive coordination**: 3 projects touch `.claude/skills/` — order serial PRs (devops-project-tracking-r1 → THIS PROJECT → customer-provisioning-orchestration-r1).
-3. **Branch protection currently DISABLED on master** (task 001 finding). The Jun-1 baseline is the only documented protected configuration. Task 070 (pre-cutover snapshot) and task 071 (cutover flip) will need to RESTORE protection, not just modify it.
+1. **Branch protection currently DISABLED on master** (task 001 Phase 1 finding, re-emphasized here). Task 070 snapshot will capture an "off" state. Decision needed before 071: restore-then-cut-over (a) vs fresh-setup using Jun-1 baseline (b). Both achieve the same end-state (`CI / Router` as sole required check after cutover).
+
+2. **Path reorganization (050) is scaffolded but bulk-moved deferred**. 6 canonical directories + READMEs exist; the path-MUST rules in `.claude/constraints/testing.md` are binding for NEW tests at canonical paths immediately. Existing 481 KEEP files remain at their current locations until a follow-up PR. This does NOT block Phase 3 cutover.
+
+3. **Sub-slicing 053a/b/c collapsed to single 11-file PR**. Build verified green. Tasks 051 + 052 + 053c cancelled-no-scope per inventory finding. Critical path SERIAL-DEL chain shortens significantly.
 
 ---
 
@@ -59,8 +65,8 @@
 |-------|-------|
 | **Task ID** | none |
 | **Task File** | — |
-| **Title** | Phase 1 → Phase 2 transition |
-| **Phase** | between (Phase 1 complete, Phase 2 not started) |
+| **Title** | Phase 2 → Phase 3 transition |
+| **Phase** | between (Phase 2 complete, Phase 3 calendar-gated) |
 | **Status** | none |
 | **Started** | — |
 
@@ -70,63 +76,44 @@
 
 ### Completed Steps
 
-Phase 1 (13 of 13 tasks):
-- [x] 001 — branch-protection-baseline-reuse-decision (2026-06-26)
-- [x] 002 — phase1-kickoff-coordination (2026-06-26)
-- [x] 010 — catalog-sdap-ci-failures (2026-06-26; 50 failures classified: 31 legitimate / 19 flaky / 0 infra / 0 false-positive; 5 top flakes identified)
-- [x] 011 — measure-baseline-p50-p95 (2026-06-26; n=326 PR-triggered runs; p50=14.57min, p95=23.05min; SC-01/02/03 achievability analysis)
-- [x] 012 — router-signal-model-spike (2026-06-26; Model A composite required check + alls-green aggregator chosen; 5 GitHub doc citations)
-- [x] 020 — test-inventory-csv (2026-06-26; 492 files classified; 11 DELETE; 481 KEEP; all 6 categories represented)
-- [x] 021 — rewrite-tests-CLAUDE-md (2026-06-26; integration-first template; ban list; cross-refs ADR-038)
-- [x] 022 — rewrite-constraints-testing-md (2026-06-26; 6 KEEP categories as MUST; ADR-022 misattribution fixed; coverage% dropped)
-- [x] 023 — draft-TEST-ARCHITECTURE-md (2026-06-26; 7 sections; concrete TimeProvider example; 6 categories with examples)
-- [x] 024 — draft-ADR-038-standalone (2026-06-26; standalone; evidence S-5+S-6; both ADR INDEX files updated)
-- [x] 030 — build-projects-INDEX-md (2026-06-26; 17 active worktrees; BFF=13, SpaarkeAi=8, Skills=3)
-- [x] 031 — update-conflict-check-skill-watchlist (2026-06-26; Hot-Path Watchlist + 3-tier auto-trigger criteria)
-- [⏭️] 000 — preflight-baseline-build (skipped; pipeline pre-flight covered)
+Phase 1 (13 tasks ✅) + Phase 2 (12 of 12 status-resolved):
+- ✅ 12 implementation tasks done (040, 041, 042, 043, 044, 050-scaffolded, 053-collapsed, 060, 061, 062)
+- 🚫 3 tasks cancelled-no-scope per inventory (051, 052, 053c)
+- ✅ 2 tasks complete-merged into 053 PR (053a, 053b)
 
-### Current Step
+### Decisions Made (Phase 2)
 
-*No active task — between phases.*
-
-### Decisions Made (Phase 1)
-
-- **2026-06-26**: 053a/b/c sub-slicing recommended COLLAPSED to single 053 (only 11 DELETE files vs ~280-300 estimated). See `notes/test-inventory-summary.md`.
-- **2026-06-26**: Branch protection currently DISABLED on master — task 070+071 must restore, not just modify (per task 001 finding).
-- **2026-06-26**: Router signal model = Model A (single composite required check `CI / Router` + `re-actors/alls-green` aggregator). Resolves spec UQ #1. Unblocks task 040.
-- **2026-06-26**: 17 active worktrees (vs spec's 5-6) — hot-path coordination more critical than spec assumed.
+- **2026-06-26**: Router signal model = Model A composite + `re-actors/alls-green@v1.2.2` aggregator (task 040)
+- **2026-06-26**: Tier 1 NetArchTest MUST-NOT subset = 6 facts (ADR-001, ADR-002, ADR-007×2, ADR-009×2) — see task 041 report
+- **2026-06-26**: Tier 2 dedup marker = `Tier 2 Advisory Report` (unique vs sdap-ci's `ADR Architecture Validation Report`)
+- **2026-06-26**: SpaarkeAi deploy target = Dataverse web resource `sprk_spaarkeai` (NOT Azure Static Web App) — leverages existing `scripts/Deploy-SpaarkeAi.ps1` per ADR-026
+- **2026-06-26**: Path reorganization bulk move DEFERRED with 3 documented strategy decisions (csproj architecture, namespace handling, PR sequencing) — see `notes/path-reorganization-design.md`
+- **2026-06-26**: 053 sub-slicing COLLAPSED to single 11-file PR per inventory finding; 051, 052, 053c cancelled-no-scope
 
 ---
 
 ## Next Action
 
-**Phase 2 launch**: three concurrent lanes per TASK-INDEX.md.
+**Phase 3 cutover sequence (calendar-gated)**:
 
-**Lane A** (PG-2: workflows; sub-agent safe, all parallel): dispatch `040, 041, 042, 043, 044` as 5 concurrent sub-agents. Note: 040 + 041 depend on 012 (resolved ✅).
+1. **Open draft PR from `work/ci-cd-unit-test-remediation-r1` → master** — lets the new tier workflows run in shadow against real PRs for 2-3 weeks of data collection
+2. **Observe**: confirm Tier 1 p95 < 3 min (NFR-01), Tier 1 flake rate < 1% (NFR-03), Tier 2 p95 < 8 min (NFR-02) via gh API analytics on the shadow runs
+3. **Task 070** (pre-cutover snapshot) — take `notes/branch-protection-pre-cutover.json` immediately before cutover
+4. **Task 071** (cutover ~4h window) — restore Release matrix in sdap-ci.yml; flip branch protection to require only `CI / Router`; enable merge queue (batch=1, no speculative, 30min timeout)
+5. **Task 075** (7-day soak gate) — observe surviving suite green ≥7 consecutive days
+6. **Task 077** (sdap-ci retirement) — at cutover+14d minimum per spec MUST rule; delete sdap-ci.yml
+7. **Task 076** (30-day SC measurements) — measure SC-01..SC-10 via gh API analytics at cutover+30d
+8. **Task 090** (wrap-up) — README → Complete; lessons-learned.md; repo-cleanup
 
-**Lane B** (PG-3: skills; main-session sequential due to `.claude/` writes): `060 → 061 → 062` in main session.
+**Why calendar gates matter**: spec MUST rules require 7-day soak before Release matrix lock-in (SC-06) AND 14-day stability before sdap-ci retirement. These are NOT skippable. The cutover window itself is ~4 hours; the monitoring tail is ~30 days.
 
-**Lane C** (SERIAL-DEL: tests; strict serial): `050 → 051 → 052 → 053` (053 is the revised single PR, NOT 053a/b/c). Lane C depends on tasks 020 + 022 (resolved ✅).
-
-All three lanes can proceed concurrently — different file domains, no overlap.
-
-**Pre-conditions for Phase 2**:
-- All Phase 1 tasks ✅ (verified)
-- Phase 1 commit + push to remote (pending — main-session action)
-- `projects/INDEX.md` live and consulted before any BFF/SpaarkeAi-touching task
-- ADR-038 + TEST-ARCHITECTURE.md + rewritten directive files in place (consumed by 050)
-
-**Key context for Phase 2**:
-- 11 DELETE files only — single 053 PR
-- Branch protection currently OFF on master — 070+071 must restore
-- 17 active worktrees coordinating — 062 (root CLAUDE.md edit) is the highest-coordination skill task
-- Router signal model resolved (Model A) — 040 can author directly
+**Recommended action this session**: open the draft PR (`gh pr create --draft`) and let the new workflows accumulate shadow-mode data. Resume Phase 3 work after 2-3 weeks when there's enough run history to commit to cutover.
 
 ---
 
 ## Blockers
 
-**Status**: None
+**Status**: None blocking. Phase 3 awaits calendar gates (shadow observation period; 7-day soak; 14-day stability) which are by design.
 
 ---
 
@@ -140,13 +127,15 @@ All three lanes can proceed concurrently — different file domains, no overlap.
 - **Branch**: `work/ci-cd-unit-test-remediation-r1`
 - **Portfolio Issue**: [#457](https://github.com/spaarke-dev/spaarke/issues/457) (Epic [#429](https://github.com/spaarke-dev/spaarke/issues/429))
 
-### Applicable ADRs (post-Phase 1)
-- ADR-028 (Spaarke Auth) — Tier 1 auth smoke aligns (relevant for 041)
-- ADR-030 (BFF feature flags) — path-aware dispatch interaction (relevant for 040)
-- ADR-032 (Null-Object kill-switch) — relevant if test PRs touch conditional services
-- **ADR-038 (Testing Strategy)** — NEW; load on all Phase 2 Stream B tasks (050, 051, 052, 053)
-- ADR-022 (PCF Platform Libraries) — UNCHANGED; not a testing ADR (misattribution corrected in 022)
+### Phase 2 deliverables shipped
+- 5 new workflows: ci-router.yml, ci-tier1-blocking.yml, ci-tier2-advisory.yml, deploy-spaarke-ai.yml + augmented nightly-health.yml
+- 3 skill-directive updates: task-execute, project-pipeline, conflict-check
+- 1 constraint update: bff-extensions.md §G Hot-Path Declaration
+- 1 root CLAUDE.md update: §8 rigor table override row + §10 hot-path cross-ref + §17 pointers
+- 6 KEEP path scaffolds: tests/integration/{auth,regression,data-mutation,tenant,contract}/ + tests/unit/domain/
+- 11-file deletion: wiring-test antipatterns removed from Sprk.Bff.Api.Tests/Services/Ai/
+- 1 script: scripts/validate-markdown-links.ps1
 
 ---
 
-*This file is the primary source of truth for active work state. Phase 1 consolidated 2026-06-26.*
+*Phase 2 consolidated 2026-06-26. Phase 3 awaits calendar gates.*

@@ -1,7 +1,8 @@
 <task id="CICD-051" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>DELETE PR 1/3: tests/unit/Spaarke.Plugins.Tests/ DELETE category (~2 files, lowest-risk first)</title>
-    <status>not-started</status>
+    <status>cancelled-no-scope</status>
+    <completion-note>2026-06-26: Cancelled. Per inventory (task 020): 0 DELETE files in Spaarke.Plugins.Tests (only 2 files total in this project, both KEEP). No deletion scope.</completion-note>
     <estimated-effort>1 hour</estimated-effort>
     <phase>2 - Stream B</phase>
     <stream>B - Test reset</stream>

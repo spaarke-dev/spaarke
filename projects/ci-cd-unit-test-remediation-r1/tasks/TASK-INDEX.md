@@ -17,11 +17,12 @@
 ## Status Summary
 
 - **Total tasks**: 25
-- **Completed**: 12 (48%) — all of Phase 1
+- **Completed**: 20 of 25 (80%) — Phase 1 + Phase 2 (with reorganization scope adjustments)
 - **In progress**: 0
 - **Blocked**: 0
-- **Not started**: 13 (Phase 2 + Phase 3 + wrap-up)
-- **Skipped**: 1 (000-preflight; pipeline pre-flight covered it)
+- **Not started**: 5 (Phase 3: 070, 071, 075, 076, 077 + wrap-up: 090)
+- **Skipped/cancelled**: 1 (000-preflight; pipeline covered) + 3 (051, 052, 053c — cancelled-no-scope per inventory finding)
+- **Complete-partial / complete-merged**: 1 (050 scaffolded; bulk move deferred) + 2 (053a/b merged into single 053 PR)
 
 ## Task Registry
 
@@ -63,36 +64,36 @@
 | 030 | build-projects-INDEX-md | STANDARD | ✅ | true | — | 061 |
 | 031 | update-conflict-check-skill-watchlist | FULL | ✅ | **false** (`.claude/` write) | — | 060 |
 
-### Phase 2 — Stream A (shadow workflows + Tier 3 + CD)
+### Phase 2 — Stream A (shadow workflows + Tier 3 + CD) ✅
 
 | # | Task | Rigor | Status | Parallel-safe | Dependencies | Blocks |
 |---|---|---|---|---|---|---|
-| 040 | build-ci-router-yml | FULL | 🔲 | true | 012 | — |
-| 041 | build-ci-tier1-blocking-yml | FULL | 🔲 | true | 012 | — |
-| 042 | build-ci-tier2-advisory-yml | FULL | 🔲 | true | — | — |
-| 043 | augment-nightly-health-tier3 | FULL | 🔲 | true | — | — |
-| 044 | build-deploy-spaarke-ai-yml-and-validate-bff | FULL | 🔲 | true | — | — |
+| 040 | build-ci-router-yml | FULL | ✅ | true | 012 | — |
+| 041 | build-ci-tier1-blocking-yml | FULL | ✅ | true | 012 | — |
+| 042 | build-ci-tier2-advisory-yml | FULL | ✅ | true | — | — |
+| 043 | augment-nightly-health-tier3 | FULL | ✅ | true | — | — |
+| 044 | build-deploy-spaarke-ai-yml-and-validate-bff | FULL | ✅ | true | — | — |
 
-### Phase 2 — Stream B (path reorg + sliced deletion, STRICT SERIAL)
-
-| # | Task | Rigor | Status | Parallel-safe | Dependencies | Blocks |
-|---|---|---|---|---|---|---|
-| 050 | fr-b05-path-reorganization | FULL | 🔲 | **false** (gates all deletion) | 020, 022 | 051, 052, 053a, 053b, 053c |
-| 051 | delete-plugins-tests | FULL | 🔲 | **false** | 050 | 052 |
-| 052 | delete-scheduling-tests | FULL | 🔲 | **false** | 051 | 053a |
-| 053a | delete-bff-mock-httpmessagehandler | FULL | 🔲 | **false** | 052 | 053b |
-| 053b | delete-bff-di-registration-and-null-checks | FULL | 🔲 | **false** | 053a | 053c |
-| 053c | delete-bff-remaining-by-directory | FULL | 🔲 | **false** | 053b | 070 |
-
-> **⚠️ Sub-slicing revision (per task 020 inventory)**: only 11 DELETE files exist (9 HttpMessageHandler-mock + 2 DI-registration; 0 constructor-null-check; 0 wiring-other). Spec's ~60% deletion estimate was off by ~30×. **Recommend collapsing 053a/b/c into a single PR** (`053a` with merged scope; mark `053b`/`053c` as ⏭️ "merged into 053a"). Critical path shortens from 28d to ~26d. See `notes/test-inventory-summary.md` §"Sub-slicing recommendation".
-
-### Phase 2 — Stream C (skill + bff-extensions + root CLAUDE)
+### Phase 2 — Stream B (path scaffold + deletion — collapsed per inventory)
 
 | # | Task | Rigor | Status | Parallel-safe | Dependencies | Blocks |
 |---|---|---|---|---|---|---|
-| 060 | update-task-execute-skill | FULL | 🔲 | **false** (`.claude/` write) | 031 | — |
-| 061 | update-project-pipeline-skill | FULL | 🔲 | **false** (`.claude/` write) | 030 | — |
-| 062 | update-bff-extensions-and-root-CLAUDE | FULL | 🔲 | **false** (`.claude/` + root write) | 030, 031, 060, 061 | — |
+| 050 | fr-b05-path-reorganization | FULL | ⚠️ **complete-partial** (scaffolded; bulk move deferred — see `notes/path-reorganization-design.md`) | **false** | 020, 022 | (deletion not blocked by reorg) |
+| 051 | delete-plugins-tests | FULL | 🚫 **cancelled-no-scope** (0 DELETE files per inventory) | — | — | — |
+| 052 | delete-scheduling-tests | FULL | 🚫 **cancelled-no-scope** (0 DELETE files per inventory; flakes addressed separately) | — | — | — |
+| 053a | delete-bff-mock-httpmessagehandler | FULL | ✅ **complete-merged** (9 files removed in single 053 PR) | **false** | 052 → bypassed | — |
+| 053b | delete-bff-di-registration-and-null-checks | FULL | ✅ **complete-merged** (2 files removed in single 053 PR) | **false** | — | — |
+| 053c | delete-bff-remaining-by-directory | FULL | 🚫 **cancelled-no-scope** (0 remaining DELETE files) | — | — | — |
+
+> **✅ Sub-slicing revision applied (2026-06-26)**: per task 020 inventory finding of only 11 DELETE files total, sub-slicing 053a/b/c collapsed to a single 053 PR; 051 and 052 cancelled (no DELETE scope). Build verified green (0 errors, 18 pre-existing warnings). Critical path SERIAL-DEL chain reduces from 6 PRs to ~1 PR (this PR). Full post-mortem: `notes/post-deletion-summary.md`. Bulk path move (the deferred portion of 050) is a clearly-flagged follow-up — see `notes/path-reorganization-design.md` for csproj/namespace/sequencing strategy decisions.
+
+### Phase 2 — Stream C (skill + bff-extensions + root CLAUDE) ✅
+
+| # | Task | Rigor | Status | Parallel-safe | Dependencies | Blocks |
+|---|---|---|---|---|---|---|
+| 060 | update-task-execute-skill | FULL | ✅ (Step 0.5 conflict-check auto-invoke + Step 9.5 test-PR override) | **false** (`.claude/` write) | 031 | — |
+| 061 | update-project-pipeline-skill | FULL | ✅ (Step 2 INDEX.md overlap + Step 3 hot-path-declaration requirement) | **false** (`.claude/` write) | 030 | — |
+| 062 | update-bff-extensions-and-root-CLAUDE | FULL | ✅ (bff-extensions §G + root CLAUDE.md §8 §10 §17) | **false** (`.claude/` + root write) | 030, 031, 060, 061 | — |
 
 ### Phase 3 — Cutover + monitoring (STRICT SERIAL)
 

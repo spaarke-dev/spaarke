@@ -1,7 +1,8 @@
 <task id="CICD-050" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>FR-B05: reorganize existing tests into 6 KEEP path conventions (move-and-rename; create tests/unit/domain from scratch)</title>
-    <status>not-started</status>
+    <status>complete-partial</status>
+    <completion-note>SCAFFOLDED 2026-06-26: 6 canonical directories + README anchors created; bulk move of 481 files deferred to follow-up task with documented csproj/namespace/sequencing strategy decisions per `notes/path-reorganization-design.md`. Path-MUST rules in `.claude/constraints/testing.md` are binding for NEW tests authored under canonical paths; existing tests remain at current locations until follow-up move lands. Task 053 (deletions) proceeds without dependency on full reorg.</completion-note>
     <estimated-effort>4 hours</estimated-effort>
     <phase>2 - Stream B</phase>
     <stream>B - Test reset</stream>

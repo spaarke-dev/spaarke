@@ -1,7 +1,7 @@
 <task id="CICD-044" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Build .github/workflows/deploy-spaarke-ai.yml (mirror of deploy-bff-api.yml) + audit deploy-bff-api.yml master-trigger + ship scripts/validate-markdown-links.ps1</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>2 - Stream A</phase>
     <stream>A - CI tiering</stream>

@@ -1,7 +1,7 @@
 <task id="CICD-040" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Build .github/workflows/ci-router.yml (always reports single required status check; path-aware dispatch)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>2 - Stream A</phase>
     <stream>A - CI tiering</stream>

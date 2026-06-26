@@ -1,7 +1,7 @@
 <task id="CICD-043" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Augment .github/workflows/nightly-health.yml with Tier 3 jobs (full integration + coverage observation + Trivy + dep audit)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>2 - Stream A</phase>
     <stream>A - CI tiering</stream>

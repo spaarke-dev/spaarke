@@ -1,7 +1,8 @@
 <task id="CICD-052" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>DELETE PR 2/3: tests/unit/Spaarke.Scheduling.Tests/ DELETE category (~8 files)</title>
-    <status>not-started</status>
+    <status>cancelled-no-scope</status>
+    <completion-note>2026-06-26: Cancelled. Per inventory (task 020): 0 DELETE files in Spaarke.Scheduling.Tests (all 8 files KEEP). Top-5 flaky test list from task 010 will be addressed via separate test stabilization work (not deletion).</completion-note>
     <estimated-effort>1.5 hours</estimated-effort>
     <phase>2 - Stream B</phase>
     <stream>B - Test reset</stream>

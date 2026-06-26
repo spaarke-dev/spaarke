@@ -1,7 +1,8 @@
 <task id="CICD-053a" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>DELETE PR 3a/3c: BFF.Api.Tests files using Mock&lt;HttpMessageHandler&gt; (38 occurrences in 9 files + dependency closure)</title>
-    <status>not-started</status>
+    <status>complete-merged</status>
+    <completion-note>2026-06-26: Per inventory (task 020) finding of only 11 DELETE files total, sub-slicing 053a/b/c collapsed into a single 053 PR. This task's scope (9 Mock&lt;HttpMessageHandler&gt; files) was executed inline with 053b's scope (2 DI-registration files) as a single 11-file deletion. Build verified green (0 errors).</completion-note>
     <estimated-effort>2 hours</estimated-effort>
     <phase>2 - Stream B</phase>
     <stream>B - Test reset</stream>

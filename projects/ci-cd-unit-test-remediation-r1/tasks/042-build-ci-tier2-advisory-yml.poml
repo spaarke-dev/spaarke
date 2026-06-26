@@ -1,7 +1,7 @@
 <task id="CICD-042" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Build .github/workflows/ci-tier2-advisory.yml (format + lint + full unit tests + ADR + markdown + Last Reviewed + plugin size; PR-comment dedup)</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>2.5 hours</estimated-effort>
     <phase>2 - Stream A</phase>
     <stream>A - CI tiering</stream>

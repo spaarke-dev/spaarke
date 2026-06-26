@@ -1,7 +1,8 @@
 <task id="CICD-053b" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>DELETE PR 3b/3c: BFF.Api.Tests DI-registration tests + constructor null-check tests (~150-180 files)</title>
-    <status>not-started</status>
+    <status>complete-merged</status>
+    <completion-note>2026-06-26: Merged into single 053 PR with 053a per inventory finding (only 11 DELETE files total). Executed inline. Build verified green.</completion-note>
     <estimated-effort>3 hours</estimated-effort>
     <phase>2 - Stream B</phase>
     <stream>B - Test reset</stream>
