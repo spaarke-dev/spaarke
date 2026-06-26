@@ -39,7 +39,7 @@
 | ID | Title | Status | Dependencies | Blocks | Parallel | Rigor |
 |----|-------|--------|--------------|--------|----------|-------|
 | 010 | Author DAILY-BRIEFING-NARRATE playbook sprk_configjson node graph | ✅ | 009 | 011 | — | FULL |
-| 011 | Deploy + validate DAILY-BRIEFING-NARRATE playbook to spaarkedev1 | 🔲 | 005, 006, 007, 010 | 017 | — | STANDARD |
+| 011 | Deploy + validate DAILY-BRIEFING-NARRATE playbook to spaarkedev1 | ✅ | 005, 006, 007, 010 | 017 | — | STANDARD |
 | 012 | Audit deployed sprk_configjson for PB-016, PB-018, PB-019 | 🔲 | 011 | 015 | Group C | STANDARD |
 | 013 | Audit PB-020, PB-021 (need W1 membership migration) | 🔲 | 011 | 015 | Group C | STANDARD |
 | 014 | Audit PB-017, PB-022 stub playbooks | 🔲 | 011 | 015 | Group C | STANDARD |

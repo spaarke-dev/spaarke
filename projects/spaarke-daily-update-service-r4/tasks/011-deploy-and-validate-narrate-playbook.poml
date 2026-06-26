@@ -3,7 +3,9 @@
   <metadata>
     <title>Deploy + validate DAILY-BRIEFING-NARRATE playbook to spaarkedev1</title>
     <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Deployed sprk_analysisplaybook row to spaarkedev1: id=7b5a6ed3-0271-f111-ab0e-000d3a13a4cd, statecode=0 (Active), AiAnalysis/NodeBased. Deviation: sprk_playbookcode truncated from canonical "BRIEF-NARRATE" (13 chars) to "BRIEF-NRRT" (10 chars) due to NVARCHAR(10) column constraint; canonical value preserved in deployed sprk_configjson.canonicalPlaybookCode + description (escalation flag in smoke notes for owner review). All 4 PR 1 Action GUIDs cross-referenced in configjson.actionRefs (BRIEF-NARRATE-TLDR, BRIEF-NARRATE-CHANNEL, BRIEF-VALIDATE-ENTITY-NAMES, SYS-LOOKUP-MEMBERSHIP). Repo source-of-truth vs deployed semantic equivalence verified after stripping repo-only annotation keys (_comment, _dataverseRow, componentJustification, metadata). jps-playbook-audit workflow returned ✅ CLEAN. Evidence: projects/spaarke-daily-update-service-r4/notes/smoke/011-daily-briefing-narrate-deploy.md.</completion-notes>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>005, 006, 007, 010</dependencies>
     <blocks>017</blocks>
