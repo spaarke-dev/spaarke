@@ -3,7 +3,9 @@
   <metadata>
     <title>Add ExecutorActionType 141 = EntityNameValidator to INodeExecutor enum</title>
     <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Added `EntityNameValidator = 141` to `ActionType` enum at `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs` line 244-area (after `ObservationEmit = 140`). XML doc comment matches sibling style — describes post-LLM output scrubber, references allow-list validation, hallucination_detected event emission, and §FR-3 / AC-3a provenance. Build succeeded: 0 errors, 17 pre-existing warnings (unchanged). Publish-size: 46.30 MB compressed (+0.65 MB vs §10 baseline 45.65 MB; within +5 MB binding threshold). CVE: no new HIGH-severity (pre-existing Microsoft.Kiota.Abstractions 1.21.2 transitive only). Full evidence at `projects/spaarke-daily-update-service-r4/notes/debug/002-publish-size.md`. Unblocks tasks 003, 004, 007.</completion-notes>
     <estimated-hours>1.5</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>003, 007</blocks>

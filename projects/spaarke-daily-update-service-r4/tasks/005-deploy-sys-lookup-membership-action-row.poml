@@ -3,7 +3,9 @@
   <metadata>
     <title>Deploy SYS-LOOKUP-MEMBERSHIP sprk_analysisaction row (ActionType 52)</title>
     <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Created sprk_analysisaction row `SYS-LOOKUP-MEMBERSHIP` (Dataverse GUID `ca44b7aa-fc70-f111-ab0e-7ced8ddc4cc6`) in spaarkedev1 via `mcp__dataverse__create_record`. statecode=Active, statuscode=Active, sprk_executoractiontype=52, sprk_temperature=0. Canonical JSON committed at `projects/spaarke-daily-update-service/notes/playbooks/actions/sys-lookup-membership.action.json`. AC-1 verified via `mcp__dataverse__read_query` (1 row returned with correct field values). Smoke notes at `projects/spaarke-daily-update-service-r4/notes/smoke/005-sys-lookup-membership-deploy.md`. Closes carry-forward from task 001's MCP-deferred note — MCP available + working against spaarkedev1.</completion-notes>
     <estimated-hours>2</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>011</blocks>
