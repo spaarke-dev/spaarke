@@ -50,7 +50,10 @@ on:
   push:
     branches: [master]
   merge_group:
-    branches: [master]
+    # NOTE: `merge_group` does NOT support a `branches:` filter per GitHub Actions
+    # schema (only `types:` is allowed). Adding `branches:` here causes workflow
+    # startup_failure on every push to master. Merge queue events only fire for
+    # the queue's target branch anyway, so no filter is needed.
 
 permissions:
   contents: read
