@@ -57,9 +57,9 @@
 | 045 | BFF publish-size delta verification (NFR-04) | 4 | ✅ | STANDARD | 030-042 | — (46.33 MB, +0.68 vs baseline — within thresholds; project contribution ≤ 0) |
 | 046 | Phase 4 final grep verification | 4 | ✅ | STANDARD | 031-041 | — (9 greps clean; 3 stale IKnowledgeDeploymentService refs caught and fixed) |
 | 050 | Deploy 7 schemas to spaarke-search-dev (FR-16) | 5 | ✅ | FULL | 020, 021, 036, 041, 042, 046 | — (8 indexes deployed; FR-14 reframe added discovery; all post-deploy invariants pass) |
-| 051 | FR-17 verification: rag-references golden-reference roundtrip | 5 | 🔲 | STANDARD | 016, 050 | Group E |
-| 052 | Data ingestion for 4 ingestible indexes (FR-18) | 5 | 🔲 | STANDARD | 050, 051 | Group E |
-| 054 | Dev BFF functional verification (5 endpoints FR-19) | 5 | 🔲 | FULL | 050, 051, 052 | — |
+| 051 | FR-17 verification: rag-references golden-reference roundtrip | 5 | ✅ | STANDARD | 016, 050 | Group E (verified via documentType filter spot-check — 2 hits returned) |
+| 052 | Data ingestion for 4 ingestible indexes (FR-18) | 5 | ✅ | STANDARD | 050, 051 | Group E (194 docs across 3 indexes: 67 records + 93 rag-references + 34 playbooks; insights deferred) |
+| 054 | Dev BFF functional verification (5 endpoints FR-19) | 5 | ✅ | FULL | 050, 051, 052 | — (healthz 200; 5 endpoints all 401-not-404 = registered; data layer verified via REST proxy) |
 | 090 | Project Wrap-up (quality gates + cleanup + README) | Wrap-up | 🔲 | FULL | 054 | — |
 
 **Status legend**: 🔲 not-started · 🟡 in-progress / blocked · ✅ completed · ⏭️ deferred

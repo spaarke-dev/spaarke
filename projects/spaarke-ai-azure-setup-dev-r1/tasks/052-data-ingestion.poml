@@ -3,7 +3,7 @@
   <metadata>
     <title>Data ingestion for 4 ingestible indexes (FR-18)</title>
     <phase>5: Deploy + Validate</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>050, 051</dependencies>
     <blocks>054</blocks>
