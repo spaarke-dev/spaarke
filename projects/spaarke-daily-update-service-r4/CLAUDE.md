@@ -162,6 +162,11 @@ Every BFF-touching task MUST:
 ### 2026-06-25 — Spec path correction: TTL fix lives at `CreateNotificationNodeExecutor.cs:490` (not `NotificationService.cs`)
 - **Reason**: Pre-flight verification showed `Services/Ai/NotificationService.cs` doesn't exist. The TTL fix (`ttlinseconds = 604800`) actually lives in `BuildNotificationEntity` at `CreateNotificationNodeExecutor.cs:490`. Tasks reference the correct path.
 
+### 2026-06-26 — Canonical-truth loop steps 1-3 complete; 4 new canonical docs live
+- **Reason**: R4 UAT defects traced to per-task-assumption drift on playbook runtime semantics + config-bag boundary. Loop step 1 (code archaeology) + step 2 (docs survey) + step 3 (write canonical docs) executed sequentially.
+- **Outputs**: `docs/architecture/ai-architecture-playbook-runtime.md` (load-bearing runtime contract), `ai-architecture-consumer-routing.md` (Path A.5 triangle), `ai-architecture-actions-nodes-scopes.md` (config-bag boundary decision tree), `docs/guides/ai-guide-playbook-deploy-recipe.md` (Deploy-Playbook.ps1 contract). `.claude/constraints/bff-extensions.md` §G added + checklist item 6. `playbook-architecture.md` now redirects; `AI-ARCHITECTURE.md` + `JPS-AUTHORING-GUIDE.md` + `PLAYBOOK-AUTHOR-GUIDE.md` differentiated; JPS §§6/9/10/14 stripped to skills.
+- **Next**: step 4 (JPS skill alignment), step 5 (R4 playbook deploy from canonical foundation).
+
 ### 🚨 2026-06-25 — Spaarke entity architecture (BINDING for every R4 task touching playbook entities)
 - **Owner clarification (verbatim)**: "we do not use OOB tasks / activities or email — our corresponding entities are Events (with event type = tasks, for tasks; but we track other event types too) and communications (with type = email). I'm surprised this has come up since this has been a core part of the design from the very beginning."
 - **Rule**:
