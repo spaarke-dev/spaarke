@@ -1,9 +1,10 @@
 # Task Index — Spaarke Daily Update Service R4
 
 > **Project**: spaarke-daily-update-service-r4
-> **Last Updated**: 2026-06-25 (scaffolded via `/project-pipeline`)
-> **Total Tasks**: 46 (45 implementation + 1 mandatory wrap-up)
+> **Last Updated**: 2026-06-26 (R4 graduation — all tasks complete)
+> **Total Tasks**: 46 (45 implementation + 1 mandatory wrap-up) — **46/46 ✅**
 > **Estimated Effort**: ~65 engineering hours across 5 phased PRs
+> **Status**: Complete — PR #456 graduation-ready; tag `daily-briefing-r4-complete`
 
 ---
 
@@ -94,7 +95,7 @@
 
 | ID | Title | Status | Dependencies | Blocks | Parallel | Rigor |
 |----|-------|--------|--------------|--------|----------|-------|
-| 090 | Project wrap-up — final quality gates, merge-to-master, lessons-learned, portfolio archive | 🔲 | 049 | none | — | STANDARD |
+| 090 | Project wrap-up — final quality gates, merge-to-master, lessons-learned, portfolio archive | ✅ | 049 | none | — | STANDARD |
 
 ---
 

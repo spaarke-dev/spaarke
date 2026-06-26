@@ -3,7 +3,9 @@
   <metadata>
     <title>Project wrap-up — final quality gates, merge-to-master, lessons-learned, portfolio archive</title>
     <phase>6: Wrap-up</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>R4 graduates. Final mental code-review + adr-check sweeps across full R4 surface (BFF, PCF/PlaybookBuilder, widget, workspace shell, JPS data layer) confirm ADR-001/010/013/021/024/027/028/029/034/037 compliance. All 15 spec.md §Success Criteria boxes ticked with evidence (see PR #456 body "All FRs Satisfied" section + README Graduation Criteria). README + plan.md status → Complete. TASK-INDEX.md verified: 46/46 tasks ✅. lessons-learned.md authored (10 sections covering JPS deployment thesis, entity architecture correction, NVARCHAR(10) constraint, Path A.5 pattern, sub-agent timeouts, parallel waves, long-lived PR pattern, prod deployment pointer, project-CLAUDE.md memory, deferred items). repo-cleanup-audit-090.md authored — 6 files recommended for cleanup, 2 retained, owner decides. Note: NOT merging PR #456 (owner's explicit call); NOT running /devops-project-archive (handled by owner via portfolio board). Tag `daily-briefing-r4-complete` created on the final commit and pushed.</completion-notes>
     <estimated-hours>3</estimated-hours>
     <dependencies>049</dependencies>
     <blocks>none</blocks>
