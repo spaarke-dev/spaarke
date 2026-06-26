@@ -135,7 +135,30 @@ The "🚨" prefix for binding-but-recently-discovered rules made them immediatel
 
 ---
 
-## 10. Outstanding items deferred (for owner / R5+)
+## 10. Task 004 verification gap: palette UI requires TWO surfaces (UAT 2026-06-26 hotfix)
+
+**The lesson**: Task 004 (R4 PR-1, AC-3c "PlaybookBuilder UI palette displays the Tool") needed to land changes on **two coordinated surfaces** to be functionally complete, and task 004 covered neither thoroughly:
+
+1. **Code-page `NODE_PALETTE` array** in `BuilderLayout.tsx` — the actual draggable-tile array rendered in the palette sidebar. Task 004 wired the new type in `types/playbook.ts` (enum + ActionType map + NodeTypeToDataverse map), `nodes/BaseNode.tsx` (color scheme), and `properties/EntityNameValidatorForm.tsx` (form) — but did NOT add the 10th entry to `NODE_PALETTE`. Result: type was internally registered but never user-draggable.
+2. **Dataverse `sprk_playbooknode.sprk_nodetype` OptionSet** — the MDA "Node Properties" form's Node Type dropdown. Without a distinct `EntityNameValidator` OptionSet value, `NodeTypeToDataverse` aliased the type to `Workflow` and the form surfaced "Workflow" instead of the distinct tool name. The MCP `update_table` tool cannot insert OptionSet values into an existing local Picklist — it only adds COLUMNS. The Dataverse Web API `InsertOptionValue` action is required (followed by `PublishXml`). Script: `scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1` (mirrors the `Add-NodeTypeChoiceOption.ps1` pattern from chat-routing-redesign-r1 / DeliverComposite).
+
+**Hotfix applied 2026-06-26 (08:28 UTC redeploy of `sprk_playbookbuilder`)**: NODE_PALETTE entry inserted, OptionSet value 100000005 added + published, `DataverseNodeType` enum extended (also captured the missing `DeliverComposite = 100_000_004` value that had been live in the OptionSet but never tracked in the TS enum). `NodeTypeToDataverse[entityNameValidator]` re-pointed `Workflow → EntityNameValidator`.
+
+**Implications for future projects**:
+
+- **Task POMLs targeting palette-UI changes MUST explicitly enumerate every surface the change touches** — not just "wire the type in shared types and a form". Specifically:
+  - Code-page palette/menu/picker arrays (BuilderLayout NODE_PALETTE, similar in other code pages)
+  - Dataverse local Picklist values backing any MDA form dropdown
+  - Mapping tables in shared types that translate between TS enum ↔ Dataverse OptionSet integer values
+  - Solution-aware promotion path for OptionSet changes (mention export inclusion)
+- **AC-3c-style "UI palette displays the Tool" acceptance criteria should require BOTH a screenshot AND a one-line Dataverse `read_query` showing the new OptionSet value** before the task can be marked complete. Task 004 satisfied neither.
+- **MCP tool boundary discovery**: `mcp__dataverse__update_table` is limited to column ADDITIONS (per its actual sql output: `ALTER TABLE ADD`). Local Picklist option insertions REQUIRE the Web API + `Add-*ChoiceOption.ps1` script pattern. Future projects should default to that script pattern when MCP is asked to "edit" a Picklist.
+
+This is a verification-completeness gap, not a design flaw — the architecture was correct, the implementation just stopped one wiring-surface short of being functional.
+
+---
+
+## 11. Outstanding items deferred (for owner / R5+)
 
 - **Production JPS deployment**: owner action (see lesson 8)
 - **`sprk_playbookcode` NVARCHAR expansion**: owner action (see lesson 3)

@@ -104,3 +104,44 @@ Each deploy returned `Updated` + `Published` from the Web API. Beyond the Datave
 ---
 
 *Generated 2026-06-26 by automated UAT deploy run for R4 (PR #456 / commit `072ba99e0`).*
+
+---
+
+## Hotfix 2026-06-26: NODE_PALETTE entry + OptionSet value for EntityNameValidator
+
+During UAT of PlaybookBuilder, two surfaces surfaced as missing despite R4 task 004 claiming `EntityNameValidator` was wired end-to-end:
+
+1. **Code-page NODE_PALETTE array** — `src/client/code-pages/PlaybookBuilder/src/components/BuilderLayout.tsx` lines 72–127 listed only 9 of 10 node types. Without the 10th entry the tool was never draggable from the palette, even though `types/playbook.ts` (enum + maps), `components/nodes/BaseNode.tsx` (color scheme), and `components/properties/EntityNameValidatorForm.tsx` (form) all existed and registered correctly.
+2. **Dataverse `sprk_playbooknode.sprk_nodetype` OptionSet** — the MDA "Node Properties" form's Node Type dropdown is backed by a local Picklist on `sprk_playbooknode`. Pre-hotfix values: `DeliverComposite (100000004)`, `AI Analysis (100000000)`, `Output (100000001)`, `Control (100000002)`, `Workflow (100000003)`. EntityNameValidator was not a distinct OptionSet value — `NodeTypeToDataverse` in `types/playbook.ts` aliased it to `Workflow`, so the form showed "Workflow" instead of a distinct EntityNameValidator entry.
+
+### What was applied
+
+| Fix | File / Surface | Detail |
+|---|---|---|
+| **Gap #1: palette entry** | `src/client/code-pages/PlaybookBuilder/src/components/BuilderLayout.tsx` lines 127–137 (new) | Inserted `{ type: 'entityNameValidator', label: 'Entity Name Validator', description: 'Scrub LLM-emitted entity names against allow-list', color: tokens.colorPaletteMagentaBackground2 }` between the `wait` item and the closing bracket. Color matches `BaseNode.tsx:141` magenta scheme. |
+| **Gap #2a: OptionSet value** | Dataverse `sprk_playbooknode.sprk_nodetype` on spaarkedev1 | Added `EntityNameValidator = 100000005` via `scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1` → Dataverse Web API `InsertOptionValue` → `PublishXml`. Idempotent + reproducible (mirrors `Add-NodeTypeChoiceOption.ps1` DeliverComposite predecessor pattern). |
+| **Gap #2b: enum + mapping** | `src/client/code-pages/PlaybookBuilder/src/types/playbook.ts` | Added `DataverseNodeType.DeliverComposite = 100_000_004` (was missing from prior commits despite live OptionSet value) and `DataverseNodeType.EntityNameValidator = 100_000_005`. Re-pointed `NodeTypeToDataverse[PlaybookNodeType.EntityNameValidator]` from `Workflow` → `EntityNameValidator`. |
+
+### Redeploy timestamp
+
+- **Build start**: 2026-06-26 08:26 (webpack production)
+- **Inline + deploy completed**: 2026-06-26 08:28:48
+- **Bundle size**: 2,975 KB (was 2,974 KB — +1 KB for the new palette entry)
+- **Web resource ID**: `3dfd3713-9515-f111-8343-7ced8d1dc988` (UPDATE + PublishXml) — confirmed via MCP `read_query` on `webresource` (`modifiedon` = 2026-06-26T08:28:47).
+- **OptionSet verification (post-publish)**: 6 values present, all confirmed via Web API `RetrieveAttributeRequest` re-read.
+
+### How UAT operator verifies the hotfix landed
+
+1. **Hard refresh** the PlaybookBuilder code page (Ctrl+Shift+R to bypass Dataverse static-asset cache).
+2. **Open the palette** (left sidebar). Confirm a 10th entry: **Entity Name Validator** with magenta accent — same color family as Wait.
+3. **Drag the Entity Name Validator** onto the canvas.
+4. **Open Node Properties** for the new node. The "Node Type" dropdown should show **EntityNameValidator** as the selected/current option (alongside AI Analysis, Output, Control, Workflow, DeliverComposite).
+5. **Save the playbook**. Open the underlying `sprk_playbooknode` record in the MDA and confirm `sprk_nodetype` = `EntityNameValidator (100000005)`.
+6. **Regression check**: drag any other tool type (e.g., Wait or AI Analysis); confirm existing nodes still save with their original `sprk_nodetype` values.
+
+### Notes
+
+- The OptionSet add was a metadata mutation on spaarkedev1 ONLY. To promote to higher environments, include `sprk_playbooknode` in the next solution export — the new option will travel as part of the entity metadata. The `Add-EntityNameValidatorNodeTypeOption.ps1` script is idempotent and safe to run on any target environment.
+- BFF + other code pages (DailyBriefing, SpaarkeAi) were NOT redeployed — they don't reference `entityNameValidator`.
+- The errant `sprk_node_type` column created during initial MCP `update_table` investigation was deleted before the live fix (Web API `DELETE` against the EntityDefinitions attribute path); confirmed not present in the post-publish describe.
+
