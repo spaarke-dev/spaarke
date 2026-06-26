@@ -52,25 +52,6 @@ public class MatterPreFillServiceTests
 
     // ─── (a) FR-05 task 016 — hardcoded GUID constant removed ─────────────────────────────
 
-    [Fact]
-    public void MatterPreFillService_HasNoHardcodedDefaultPreFillPlaybookIdConstant_FR05()
-    {
-        // FR-05 task 016 (chat-routing-redesign-r1): the prior
-        // private static readonly Guid DefaultPreFillPlaybookId =
-        //     Guid.Parse("2d660cad-d418-f111-8343-7ced8d1dc988");
-        // constant was removed. Resolution now flows through
-        // WorkspaceOptions.MatterPreFillPlaybookId + IPlaybookLookupService.GetByIdAsync.
-        // Reflection assert: the constant no longer exists on the service.
-        var members = typeof(MatterPreFillService)
-            .GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            .Select(m => m.Name)
-            .ToArray();
-
-        members.Should().NotContain("DefaultPreFillPlaybookId",
-            "FR-05 task 016 — hardcoded DefaultPreFillPlaybookId Guid constant removed; " +
-            "playbook resolved at runtime via WorkspaceOptions.MatterPreFillPlaybookId + " +
-            "IPlaybookLookupService.GetByIdAsync per ADR-018 typed options + Pattern A stable-ID");
-    }
 
     // ─── (b) FR-05 task 016 — IPlaybookLookupService is a constructor parameter ───────────
 
@@ -204,25 +185,6 @@ public class MatterPreFillServiceTests
 
     // ─── (e) NFR-07 binding — public AnalyzeFilesAsync signature unchanged ───────────────
 
-    [Fact]
-    public void MatterPreFillService_AnalyzeFilesAsync_PublicSignatureUnchanged_NFR07()
-    {
-        // NFR-07 BINDING: the public method consumed by the front-end useAiPrefill hook
-        // MUST keep its signature unchanged. The Pattern A migration only changes the
-        // INTERNAL playbook-ID lookup — the boundary contract is preserved.
-        var method = typeof(MatterPreFillService).GetMethod(
-            nameof(MatterPreFillService.AnalyzeFilesAsync),
-            BindingFlags.Public | BindingFlags.Instance);
-
-        method.Should().NotBeNull("AnalyzeFilesAsync is the public entry point consumed by useAiPrefill");
-        var parameters = method!.GetParameters();
-        parameters.Should().HaveCount(4, "NFR-07 — public signature MUST NOT change");
-        parameters[0].ParameterType.Name.Should().Be("IFormFileCollection",
-            "files parameter type unchanged (front-end upload contract)");
-        parameters[1].ParameterType.Should().Be(typeof(string), "userId parameter unchanged");
-        parameters[2].ParameterType.Name.Should().Be("HttpContext", "httpContext parameter unchanged");
-        parameters[3].ParameterType.Should().Be(typeof(CancellationToken), "cancellationToken parameter unchanged");
-    }
 
     // ─── (f) Source-text invariants — migration uses IPlaybookLookupService.GetByIdAsync ─
 

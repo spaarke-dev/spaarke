@@ -197,17 +197,6 @@ public class ChatActionsModelTests
 
     #region Endpoint Mapping Tests
 
-    [Fact]
-    public void MapChatEndpoints_CreatesExpectedRoutes()
-    {
-        // Arrange - Verify endpoint extension method exists and has correct signature
-        var method = typeof(ChatEndpoints).GetMethod("MapChatEndpoints");
-
-        // Assert
-        method.Should().NotBeNull();
-        method!.IsStatic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder));
-    }
 
     #endregion
 

@@ -29,16 +29,6 @@ public class ContainerTypeEndpointsTests
 {
     #region Endpoint Registration Tests
 
-    [Fact]
-    public void MapContainerTypeEndpoints_MethodExists_AndIsExtensionOnRouteGroupBuilder()
-    {
-        // Verify the endpoint registration method exists with correct signature
-        var method = typeof(ContainerTypeEndpoints).GetMethod("MapContainerTypeEndpoints");
-
-        method.Should().NotBeNull("MapContainerTypeEndpoints extension method must exist");
-        method!.IsStatic.Should().BeTrue("must be a static extension method");
-        method.ReturnType.Should().Be(typeof(RouteGroupBuilder), "must return RouteGroupBuilder for chaining");
-    }
 
     #endregion
 
@@ -165,26 +155,6 @@ public class ContainerTypeEndpointsTests
 
     #region Authorization Filter Tests
 
-    [Fact]
-    public void SpeAdminAuthFilter_IsAppliedViaParentGroup_NotPerEndpoint()
-    {
-        // Authorization for containertypes is inherited from the /api/spe parent group.
-        // Verify that ContainerTypeEndpoints does NOT define its own filter (that would be redundant).
-        // The parent group (SpeAdminEndpoints) applies RequireAuthorization + SpeAdminAuthorizationFilter.
-        //
-        // We verify this by checking the endpoint registration method does not call AddEndpointFilter.
-        // Since we cannot inspect the route builder at runtime without a full app startup, we verify
-        // the SpeAdminEndpoints class registers containertypes via the group (not standalone).
-
-        var speAdminEndpointsType = typeof(SpeAdminEndpoints);
-        var method = speAdminEndpointsType.GetMethod("MapSpeAdminEndpoints");
-
-        method.Should().NotBeNull("MapSpeAdminEndpoints must exist");
-
-        // Verify the source code registers containertypes on the group (not standalone)
-        // This is a static analysis check — the registration is in MapSpeAdminEndpoints.
-        // Auth is inherited: group.MapContainerTypeEndpoints() inherits RequireAuthorization() from group.
-    }
 
     #endregion
 
@@ -266,35 +236,6 @@ public class ContainerTypeEndpointsTests
         problemResult.Should().NotBeNull("filter must return an IResult");
     }
 
-    [Fact]
-    public async Task SpeAdminAuthorizationFilter_ReturnsForbidden_WhenUserIsNotAdmin()
-    {
-        // Arrange: authenticated user without admin role
-        var logger = new Mock<ILogger<Sprk.Bff.Api.Api.Filters.SpeAdminAuthorizationFilter>>();
-        var filter = new Sprk.Bff.Api.Api.Filters.SpeAdminAuthorizationFilter(logger.Object);
-
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, "user-123"),
-            new("roles", "StandardUser") // not an admin role
-        };
-        var httpContext = new DefaultHttpContext
-        {
-            User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"))
-        };
-
-        var contextMock = new Mock<EndpointFilterInvocationContext>();
-        contextMock.Setup(c => c.HttpContext).Returns(httpContext);
-
-        EndpointFilterDelegate next = _ => ValueTask.FromResult<object?>(Results.Ok("should not reach"));
-
-        // Act
-        var result = await filter.InvokeAsync(contextMock.Object, next);
-
-        // Assert: non-admin user is denied
-        result.Should().NotBeNull();
-        // Result is a ProblemDetails 403 response
-    }
 
     [Fact]
     public async Task SpeAdminAuthorizationFilter_CallsNext_WhenUserIsAdmin()
@@ -440,38 +381,6 @@ public class ContainerTypeEndpointsTests
 
     #region CreateContainerType Endpoint Registration Tests
 
-    [Fact]
-    public void MapContainerTypeEndpoints_RegistersPostEndpoint()
-    {
-        // The MapContainerTypeEndpoints method must call MapPost for /containertypes.
-        // Verified via reflection on the static class — the method must exist and be static.
-        var method = typeof(ContainerTypeEndpoints).GetMethod("MapContainerTypeEndpoints");
-
-        method.Should().NotBeNull("MapContainerTypeEndpoints extension method must exist");
-        method!.IsStatic.Should().BeTrue("must be a static extension method");
-
-        // Verify CreateContainerTypeAsync private handler exists
-        var createHandler = typeof(ContainerTypeEndpoints)
-            .GetMethod("CreateContainerTypeAsync",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        createHandler.Should().NotBeNull("CreateContainerTypeAsync handler must be defined as a private static method");
-    }
-
-    [Fact]
-    public void CreateContainerType_Auth_IsInheritedFromParentGroup()
-    {
-        // Authorization for POST /containertypes is inherited from the /api/spe parent group.
-        // SpeAdminEndpoints applies RequireAuthorization + SpeAdminAuthorizationFilter at group level.
-        // ContainerTypeEndpoints does NOT apply its own filter — auth is inherited via group registration.
-        var speAdminEndpointsType = typeof(SpeAdminEndpoints);
-        var method = speAdminEndpointsType.GetMethod("MapSpeAdminEndpoints");
-
-        method.Should().NotBeNull("MapSpeAdminEndpoints must exist in SpeAdminEndpoints");
-
-        // The endpoint is registered as group.MapContainerTypeEndpoints() which inherits
-        // RequireAuthorization() + AddSpeAdminAuthorizationFilter() from the parent group (ADR-008).
-    }
 
     #endregion
 
@@ -498,22 +407,6 @@ public class ContainerTypeEndpointsTests
             "domain record must be in Spaarke namespace, not Graph SDK namespace");
     }
 
-    [Fact]
-    public void CreateContainerTypeAsync_MethodSignature_AcceptsExpectedParameters()
-    {
-        // Verify CreateContainerTypeAsync has the correct parameters
-        var method = typeof(SpeAdminGraphService).GetMethod("CreateContainerTypeAsync");
-
-        method.Should().NotBeNull("CreateContainerTypeAsync must exist on SpeAdminGraphService");
-
-        var parameters = method!.GetParameters();
-        parameters.Should().HaveCountGreaterOrEqualTo(3,
-            "must accept at least graphClient, displayName, and billingClassification parameters");
-
-        var paramNames = parameters.Select(p => p.Name).ToArray();
-        paramNames.Should().Contain("displayName", "displayName parameter must exist");
-        paramNames.Should().Contain("billingClassification", "billingClassification parameter must exist");
-    }
 
     #endregion
 

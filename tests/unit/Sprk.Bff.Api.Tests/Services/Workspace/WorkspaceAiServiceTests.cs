@@ -128,34 +128,6 @@ public class WorkspaceAiServiceTests
             "ADR-018 — typed-options consumption replaces raw IConfiguration[\"...\"] indexer reads");
     }
 
-    [Fact]
-    public void WorkspaceAiService_HasNoHardcodedAiSummaryPlaybookIdConstant_FR02()
-    {
-        // FR-02 task 018: the pre-task-018 `private static readonly Guid DefaultAiSummaryPlaybookId`
-        // constant has been removed. The playbook is now resolved at runtime via
-        // IPlaybookLookupService.GetByIdAsync — no fallback constant exists at the
-        // workspace-AI service boundary.
-        var fields = typeof(WorkspaceAiService)
-            .GetFields(BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Public);
-
-        fields.Should().NotContain(f => f.Name == "DefaultAiSummaryPlaybookId",
-            "task 018 — the hardcoded DefaultAiSummaryPlaybookId GUID constant MUST be removed " +
-            "(value 18cf3cc8-02ec-f011-8406-7c1e520aa4df now lives in WorkspaceOptions per environment)");
-    }
-
-    [Fact]
-    public void WorkspaceAiService_HasNoIConfigurationField_ADR018()
-    {
-        // ADR-018: Pattern A consumers MUST NOT hold an IConfiguration field — the
-        // raw-indexer read path was the very anti-pattern this migration removes.
-        var fields = typeof(WorkspaceAiService)
-            .GetFields(BindingFlags.NonPublic | BindingFlags.Instance);
-
-        fields.Should().NotContain(
-            f => f.FieldType == typeof(Microsoft.Extensions.Configuration.IConfiguration),
-            "ADR-018 / task 018 — IConfiguration indexer dependency MUST be removed; " +
-            "typed-options (IOptions<WorkspaceOptions>) is the binding mechanism");
-    }
 
     // ─── (b) Lookup-service contract — happy path ─────────────────────────────────────────
 

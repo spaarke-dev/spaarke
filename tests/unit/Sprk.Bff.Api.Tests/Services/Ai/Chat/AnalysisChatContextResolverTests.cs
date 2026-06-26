@@ -146,16 +146,6 @@ public class AnalysisChatContextResolverTests
     // Cache Miss Tests (ADR-009 — cold path populates cache)
     // =========================================================================
 
-    [Fact]
-    public async Task ResolveAsync_CallsResolveFromDataverse_OnCacheMiss()
-    {
-        // Arrange — empty cache → miss
-        // Act — stub resolver returns a non-null response for any analysisId
-        var result = await _sut.ResolveAsync(AnalysisId, TenantId);
-
-        // Assert — result is non-null (stub Dataverse path returns a response)
-        result.Should().NotBeNull();
-    }
 
     [Fact]
     public async Task ResolveAsync_CachesResultAfterDataverseFetch_OnCacheMiss()

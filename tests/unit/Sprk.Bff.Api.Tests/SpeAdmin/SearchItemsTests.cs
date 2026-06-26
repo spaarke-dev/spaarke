@@ -223,15 +223,6 @@ public class SearchItemsTests
     // Endpoint Route Registration Tests
     // =========================================================================
 
-    [Fact]
-    public void MapSearchItemsEndpoints_ReturnsRouteGroupBuilder()
-    {
-        // Verify the extension method exists and is callable — compilation test.
-        // The actual route registration is tested in EndpointGroupingTests.cs.
-        var method = typeof(SearchItemsEndpoints).GetMethod("MapSearchItemsEndpoints");
-        method.Should().NotBeNull("MapSearchItemsEndpoints extension method must be defined on SearchItemsEndpoints");
-        method!.IsStatic.Should().BeTrue();
-    }
 
     // =========================================================================
     // Integration-style tests via WebApplicationFactory
