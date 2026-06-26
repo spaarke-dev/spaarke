@@ -22,12 +22,13 @@ internal sealed class TenantCache : ITenantCache
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
     // FR-16: Custom cache metrics. Hit-rate is computed downstream from hits/(hits+misses).
-    // The "Spaarke.Cache" meter is published via System.Diagnostics.Metrics and picked up
-    // by the OpenTelemetry pipeline (and from there, Application Insights).
-    internal static readonly Meter Meter = new("Spaarke.Cache", "1.0.0");
-    private static readonly Counter<long> HitsCounter = Meter.CreateCounter<long>("cache.hits");
-    private static readonly Counter<long> MissesCounter = Meter.CreateCounter<long>("cache.misses");
-    private static readonly Histogram<double> CallDurationHistogram =
+    // Meter name follows the BFF's "Sprk.Bff.Api.*" convention (matches the existing
+    // `metrics.AddMeter("Sprk.Bff.Api.Cache")` registration in `TelemetryModule.cs` so
+    // metrics flow to App Insights via OpenTelemetry without additional registration).
+    internal static readonly Meter Meter = new("Sprk.Bff.Api.Cache", "1.0.0");
+    internal static readonly Counter<long> HitsCounter = Meter.CreateCounter<long>("cache.hits");
+    internal static readonly Counter<long> MissesCounter = Meter.CreateCounter<long>("cache.misses");
+    internal static readonly Histogram<double> CallDurationHistogram =
         Meter.CreateHistogram<double>("cache.redis_call_duration_ms");
 
     private readonly IDistributedCache _cache;
