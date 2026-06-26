@@ -3,7 +3,7 @@
   <metadata>
     <title>appsettings + templates cleanup (FR-13 + FR-14 + FR-20)</title>
     <phase>4: Code + Config Refactor</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>030</dependencies>
     <blocks>046, 050</blocks>

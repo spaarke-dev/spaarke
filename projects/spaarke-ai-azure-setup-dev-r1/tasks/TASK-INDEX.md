@@ -49,8 +49,8 @@
 | 035 | BFF refactor: Job handlers (Rag + Invoice) | 4 | ✅ | FULL | 014, 030 | Group C (verified zero-match — task 014 covered code) |
 | 036 | BFF refactor: records-index tenantId writer + reader | 4 | ✅ | FULL | 015, 030 | Group C (C# done in 015; PS script tenantId added) |
 | 037 | BFF doc-comment cleanup (4 BFF files) | 4 | ✅ | MINIMAL | 030 | Group C (5 doc-comment edits) |
-| 038 | appsettings + templates cleanup (FR-13 + FR-14 + FR-20) | 4 | 🔲 | STANDARD | 030 | Group D |
-| 039 | Frontend doc-comments cleanup (4 client files) | 4 | 🔲 | MINIMAL | 011 | Group D |
+| 038 | appsettings + templates cleanup (FR-13 + FR-14 + FR-20) | 4 | ✅ | STANDARD | 030 | Group D (appsettings.template.json: KnowledgeIndexName + DiscoveryIndexName + AllowedIndexes deduped + EmbeddingModelName) |
+| 039 | Frontend doc-comments cleanup (4 client files) | 4 | ✅ | MINIMAL | 011 | Group D (SearchIndexResolver.ts doc-comment + searchIndexResolver.test.ts fixtures) |
 | 040 | .claude/ doc updates (FR-13) | 4 | 🔲 | MINIMAL | 011 | — (touches .claude/) |
 | 041 | Dev BFF KV-reference migration (FR-15) | 4 | 🔲 | FULL | 001, 030, 038 | — |
 | 042 | MANDATORY test-fixture sweep (NFR-14) | 4 | 🔲 | FULL | 030-041 | — (gate) |
