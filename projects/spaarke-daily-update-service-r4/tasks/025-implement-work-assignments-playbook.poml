@@ -3,7 +3,9 @@
   <metadata>
     <title>Implement notification-work-assignments playbook (stub → full)</title>
     <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Deployed full implementation to PB-022 (sprk_analysisplaybookid=be7874be-5f2d-f111-88b5-7ced8d1dc988) via mcp__dataverse__update_record. Stub (header-only, no nodes) → full 5-node graph (Start → Lookup My Matters [ActionType 52, sprk_matter] → Query New Work Assignments [ActionType 51, sprk_workassignment] → Has Assignments? [ActionType 30] → Create Notification [ActionType 50, iterateItems, dedup]). Filter: statecode=0 AND (createdon OR modifiedon last-x-hours {{timeWindowHours}} default 24h) AND (sprk_regardingmatter IN myMatters.ids OR matter-owner=eq-userid OR record-owner=eq-userid). Entity sprk_workassignment (custom Spaarke, NOT OOB task) used in 3 places: entityLogicalName, FetchXml entity name, CreateNotification regardingType. statecode=Active preserved. Smoke notes: notes/smoke/025-work-assignments-deploy.md. AC-9 UAT scripted. Parallel-safe (Group D, PB-022 only).</completion-notes>
     <estimated-hours>2.5</estimated-hours>
     <dependencies>020, 021</dependencies>
     <blocks>026</blocks>
