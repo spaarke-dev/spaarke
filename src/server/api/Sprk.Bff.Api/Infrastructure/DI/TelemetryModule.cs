@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Caching.Distributed;
+using OpenTelemetry.Trace;
 using Sprk.Bff.Api.Configuration;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -47,6 +48,14 @@ public static class TelemetryModule
                 // Insights Engine Widgets r1 ActivitySource (task 050): distributed-trace spans for
                 // InsightSummaryCard invocations through /api/insights/ask.
                 tracing.AddSource(Sprk.Bff.Api.Telemetry.InsightWidgetsTelemetry.MeterName);
+                // spaarke-redis-cache-remediation-r1 task 040 closure: capture
+                // StackExchange.Redis dependency calls so App Insights "Dependencies"
+                // surfaces Redis traffic. Without this, the default App Insights SDK
+                // does NOT auto-instrument StackExchange.Redis. The Redis instrumentation
+                // resolves `IConnectionMultiplexer` from DI at startup; in dev-fallback
+                // mode it picks up `NullConnectionMultiplexer` (per ADR-032 symmetric
+                // registration) and emits no spans, which is the intended no-op.
+                tracing.AddRedisInstrumentation();
             });
 
         // Circuit Breaker Registry

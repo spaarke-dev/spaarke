@@ -79,6 +79,9 @@ appsettings.Local.json
 *-registrations.local.json
 sharepoint-config.local.json
 functions-config.local.json
+# Materialized secrets from scripts/Sync-LocalConfig.ps1 — NEVER commit
+config/secrets.local.json
+secrets.local.json
 
 # Configuration files with sensitive data
 docs/CONFIGURATION_REQUIREMENTS.md
