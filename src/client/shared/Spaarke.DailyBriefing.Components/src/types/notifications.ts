@@ -325,14 +325,17 @@ export type DueWindowDays = 1 | 2 | 3 | 5 | 7;
 /** Time window options for recency filtering. */
 export type TimeWindow = '12h' | '24h' | '48h' | '7d';
 
-/** AI confidence threshold options (percentage). */
-export type AiConfidenceThreshold = 60 | 75 | 85 | 95;
-
 /**
  * User preferences for the Daily Digest, stored as JSON in
  * sprk_userpreference.sprk_preferencevalue.
  *
  * Opt-out model: all channels enabled by default. Only overrides are stored.
+ *
+ * R4 task 044 / FR-17e (2026-06-26): an AI confidence threshold preference
+ * was removed because the daily-briefing data is deterministic — there is no
+ * probabilistic scoring concept to threshold. Legacy persisted JSON
+ * containing the old field loads without error because `mergeWithDefaults`
+ * only destructures known fields (TypeScript ignores extra keys at runtime).
  */
 export interface DailyDigestPreferences {
   /** Channels the user has disabled (opt-out). Empty = all enabled. */
@@ -341,8 +344,6 @@ export interface DailyDigestPreferences {
   dueWithinDays: DueWindowDays;
   /** Recency time window (default: "24h"). */
   timeWindow: TimeWindow;
-  /** AI confidence threshold (default: 75). */
-  minConfidence: AiConfidenceThreshold;
   /** Whether to auto-popup the digest on workspace launch (default: true). */
   autoPopup: boolean;
 }
@@ -352,7 +353,6 @@ export const DEFAULT_DAILY_DIGEST_PREFERENCES: DailyDigestPreferences = {
   disabledChannels: [],
   dueWithinDays: 3,
   timeWindow: '24h',
-  minConfidence: 75,
   autoPopup: true,
 };
 

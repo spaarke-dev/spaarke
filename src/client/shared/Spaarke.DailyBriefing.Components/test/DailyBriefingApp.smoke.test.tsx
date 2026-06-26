@@ -46,7 +46,6 @@ jest.mock('../src/services/preferencesService', () => ({
           disabledChannels: [],
           dueWithinDays: 3,
           timeWindow: '24h',
-          minConfidence: 75,
           autoPopup: true,
         },
         recordId: 'rec-1',
