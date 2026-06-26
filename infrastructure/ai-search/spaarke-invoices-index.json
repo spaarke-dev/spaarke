@@ -1,5 +1,5 @@
 {
-  "name": "spaarke-invoices",
+  "name": "spaarke-invoices-index",
   "fields": [
     {
       "// override-sortable-facetable": "key field: Azure forbids sortable/facetable on the key",

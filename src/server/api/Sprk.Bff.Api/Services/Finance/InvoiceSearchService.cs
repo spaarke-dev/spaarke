@@ -13,7 +13,7 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// </summary>
 /// <remarks>
 /// Follows ADR-013: AI via BFF API (not separate service).
-/// Index schema defined in infrastructure/ai-search/invoice-index-schema.json.
+/// Index schema defined in infrastructure/ai-search/spaarke-invoices-index.json.
 /// </remarks>
 public interface IInvoiceSearchService
 {
@@ -41,8 +41,9 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
     private readonly IInvoiceAi? _invoiceAi;
     private readonly ILogger<InvoiceSearchService> _logger;
 
-    // Index name (MVP: single index, production: per-tenant)
-    private const string IndexName = "spaarke-invoices-dev";
+    // Canonical index name: spaarke-invoices-index (per AI-SEARCH-INDEX-CATALOG.md; FR-10 + NFR-03).
+    // MVP uses a single index; per-tenant fan-out is a future extension.
+    private const string IndexName = "spaarke-invoices-index";
 
     // Vector field name (3072-dim text-embedding-3-large)
     private const string VectorFieldName = "contentVector";
