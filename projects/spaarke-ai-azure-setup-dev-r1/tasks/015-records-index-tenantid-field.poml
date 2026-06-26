@@ -3,7 +3,7 @@
   <metadata>
     <title>Add tenantId field to spaarke-records-index schema (FR-12)</title>
     <phase>2: Schema Preparation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>0.5</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>020, 040</blocks>
@@ -13,6 +13,107 @@
     <parallel-group>B</parallel-group>
     <parallel-safe>true</parallel-safe>
   </metadata>
+
+  <notes-results>
+    <date>2026-06-26</date>
+    <status>completed</status>
+    <scope-note>Main session expanded scope beyond original POML (which deferred writers/reader to Phase 4 task 040) to match FR-12 acceptance criteria verbatim. All writer + reader updates landed in this task.</scope-note>
+
+    <schema-change>
+      Added `tenantId` field to `infrastructure/ai-search/spaarke-records-index.json` at
+      position 2 (between `id` and `recordType`). Config: Edm.String, key=false,
+      searchable=false, filterable=true, retrievable=true, sortable=true, facetable=true.
+      Matches FR-12 acceptance exactly. No NFR-09 override comment needed (canonical policy).
+    </schema-change>
+
+    <writers-updated>
+      <writer-1>
+        File: src/server/api/Sprk.Bff.Api/Services/RecordMatching/SearchIndexDocument.cs
+        Added TenantId property (SimpleField, JsonPropertyName="tenantId") at position 2.
+      </writer-1>
+      <writer-1-call-site>
+        File: src/server/api/Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs (TransformToDocument)
+        Resolves tenantId from `_configuration["AzureAd:TenantId"]` and populates document.TenantId.
+      </writer-1-call-site>
+      <writer-2>
+        File: src/server/api/Sprk.Bff.Api/Services/Jobs/RecordSyncJob.cs (RecordSearchDocument class)
+        Added TenantId property (JsonPropertyName="tenantId") at position 2.
+      </writer-2>
+      <writer-2-call-site>
+        File: src/server/api/Sprk.Bff.Api/Services/Jobs/RecordSyncJob.cs (SyncEntityAsync + MapToSearchDocument)
+        Resolves tenantId once per entity batch from `_configuration["AzureAd:TenantId"]`,
+        passes as new optional parameter to `MapToSearchDocument(record, entity, tenantId)`.
+        Parameter is optional (default "") to preserve existing test call sites.
+      </writer-2-call-site>
+    </writers-updated>
+
+    <reader-updated>
+      <auth-filter>
+        File: src/server/api/Sprk.Bff.Api/Api/Filters/RecordSearchAuthorizationFilter.cs
+        Removed misleading "no tenantId field" workaround comment. Filter remains as
+        authentication + audit gate. Replaced with note pointing to RecordSearchService
+        where the OData filter is now applied.
+      </auth-filter>
+      <odata-filter>
+        File: src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/RecordSearchService.cs
+        Updated BuildRecordFilter signature to accept tenantId. Added unconditional
+        `tenantId eq '...'` predicate as filter position 0 (ALWAYS first, ALWAYS present
+        per ADR-014 invariant — mirrors SearchFilterBuilder/SessionFilesCleanupJob pattern).
+        Source of tenantId: existing `tenantIdForCache` resolution at top of SearchAsync
+        (user 'tid' claim via IHttpContextAccessor; "system" fallback). Updated SelectFields
+        to include "tenantId" so retrievable=true is honored end-to-end. Updated class-level
+        remarks to remove "no tenantId field" wording and reference FR-12.
+      </odata-filter>
+    </reader-updated>
+
+    <judgment-call name="tenant-source">
+      Background services (DataverseIndexSyncService + RecordSyncJob) have NO user context.
+      Per existing pattern in Email/Workers-Office/Communication services, the canonical
+      tenant source for system-context services is `_configuration["AzureAd:TenantId"]`
+      (the Azure AD tenant the BFF App Service is bound to — single-tenant per Dataverse
+      environment by design). Reader path uses the user's 'tid' claim, which is correct
+      for user-context search.
+    </judgment-call>
+
+    <judgment-call name="reader-filter-placement">
+      User prompt said "update RecordSearchAuthorizationFilter.cs:43 to apply tenantId eq filter".
+      Structurally, that endpoint filter cannot inject OData filters — it runs BEFORE the
+      SearchOptions are constructed in RecordSearchService.BuildRecordFilter. The actual
+      OData filter MUST live in RecordSearchService. Resolved by: removing the misleading
+      comment in the auth filter (the workaround it claimed no longer applies) AND adding
+      the `tenantId eq '...'` predicate to BuildRecordFilter where it belongs. Both sides
+      of the user's instruction are addressed.
+    </judgment-call>
+
+    <judgment-call name="odata-syntax">
+      Followed existing Spaarke pattern: `tenantId eq '{EscapeODataValue(tenantId)}'`
+      (single-quote escaping via doubling, ADR-014 invariant). Mirrors
+      SearchFilterBuilder.cs:71 + SessionFilesCleanupJob.cs:386 + EmbeddingMigrationService.cs:309.
+    </judgment-call>
+
+    <build-verification>
+      Command: `dotnet build src/server/api/Sprk.Bff.Api/`
+      Result: Build succeeded — 0 Warning(s), 0 Error(s). Time elapsed 2.39s.
+    </build-verification>
+
+    <files-modified-count>5</files-modified-count>
+    <files-modified>
+      infrastructure/ai-search/spaarke-records-index.json
+      src/server/api/Sprk.Bff.Api/Services/RecordMatching/SearchIndexDocument.cs
+      src/server/api/Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs
+      src/server/api/Sprk.Bff.Api/Services/Jobs/RecordSyncJob.cs
+      src/server/api/Sprk.Bff.Api/Api/Filters/RecordSearchAuthorizationFilter.cs
+      src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/RecordSearchService.cs
+    </files-modified>
+
+    <not-touched>
+      TASK-INDEX.md (main session handles per instructions)
+      Git commit/push (main session handles per instructions)
+      Test fixtures (NFR-14 sweep is a separate concern — the static MapToSearchDocument
+      now has an optional tenantId parameter that defaults to "", so existing test call
+      sites continue to compile unchanged. Test updates per NFR-14 are out of scope here.)
+    </not-touched>
+  </notes-results>
 
   <prompt>
     Add `tenantId` field to `spaarke-records-index` schema: Edm.String, filterable=true, sortable=true, facetable=true, retrievable=true, searchable=false.

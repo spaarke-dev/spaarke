@@ -37,7 +37,7 @@
 | 012 | Consolidate schema files to infrastructure/ai-search/ | 2 | ✅ | STANDARD | 011 | — |
 | 013 | Atomic rename: playbook-embeddings → spaarke-playbook-embeddings | 2 | ✅ | STANDARD | 002, 010 | — (NFR-07 atomic) |
 | 014 | Atomic rename: spaarke-invoices-dev → spaarke-invoices-index | 2 | ✅ | STANDARD | 002, 010 | — (NFR-07 atomic) |
-| 015 | Add tenantId field to spaarke-records-index | 2 | 🔲 | STANDARD | 010 | Group B |
+| 015 | Add tenantId field to spaarke-records-index | 2 | ✅ | STANDARD | 010 | Group B |
 | 016 | Fix spaarke-rag-references field-name bug | 2 | ✅ | STANDARD | 010 | Group B |
 | 020 | Write Deploy-AllIndexes.ps1 | 3 | 🔲 | FULL | 001, 002, 003, 010-016 | — |
 | 021 | Validate Deploy-AllIndexes.ps1 (-DryRun + -VerifyOnly) | 3 | 🔲 | STANDARD | 020 | — |
