@@ -48,12 +48,7 @@ import {
   Divider,
 } from '@fluentui/react-components';
 import { Settings20Regular, CheckmarkCircleFilled, ErrorCircleFilled } from '@fluentui/react-icons';
-import type {
-  DailyDigestPreferences,
-  NotificationCategory,
-  DueWindowDays,
-  TimeWindow,
-} from '../types/notifications';
+import type { DailyDigestPreferences, NotificationCategory, DueWindowDays, TimeWindow } from '../types/notifications';
 import { CHANNEL_REGISTRY } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
@@ -370,7 +365,6 @@ export const PreferencesDropdown: React.FC<PreferencesDropdownProps> = ({ prefer
               ))}
             </Dropdown>
           </div>
-
         </div>
 
         <Divider />
