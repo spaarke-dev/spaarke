@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>Missed-rotation alert (>100 days) added to alerts.bicep</title>
+    <phase>2: Theme B — Redis key rotation automation</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>030</blocks>
+    <tags>bicep, azure, alerts, observability, rotation</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Extends existing alerts.bicep with a log alert; standard rigor.</rigor-reason>
+    <parallel-group>C-cont</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Same file as task 004 — runs AFTER 004 (dependency).</parallel-reason>
+  </metadata>
+  <prompt>Extend `infrastructure/bicep/alerts.bicep` (created in task 004) with a NEW scheduled-query log alert that fires when no `RedisKeyRotation` success custom event has been recorded in App Insights for >100 days for any env. Alert query: `customEvents | where name == 'RedisKeyRotation' and customDimensions.outcome == 'success' | summarize last_success = max(timestamp) by tostring(customDimensions.environment)` — fire if any env shows last_success older than 100 days. Use `Microsoft.Insights/scheduledQueryRules`. Route to same on-call action group as the Theme A alerts.</prompt>
+  <role>Spaarke infrastructure developer with Bicep + scheduled-query log alerts. Apply `task-execute` skill at STANDARD rigor.</role>
+  <goal>alerts.bicep now contains 3 metric alerts (from task 004) + 1 scheduled-query log alert (missed rotation). `az monitor scheduled-query list -g rg-spaarke-dev` will show the rule after task 030 deploy.</goal>
+  <context>
+    <background>Spec FR-11 — if the automation silently fails (workflow disabled, SP expired, script broken), we need to know within 100 days, not at the next compliance audit.</background>
+    <relevant-files>
+      <file>infrastructure/bicep/alerts.bicep (EXTEND — created in task 004)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-11 — alert if RedisKeyRotation success custom event missing >100 days for any env.</constraint>
+    <constraint source="azure-deployment.md">Idempotent deploy.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>infrastructure/bicep/alerts.bicep</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read alerts.bicep (from task 004) to understand existing structure.</step>
+    <step order="2">Author scheduledQueryRule resource targeting App Insights component. Query as specified above; threshold: any env with last_success > 100 days; severity: 2; window: 1 day.</step>
+    <step order="3">Add `appInsightsResourceId` param if not present (action group + AI resource ID).</step>
+    <step order="4">`az bicep build` validates.</step>
+    <step order="5">Update TASK-INDEX 🔲 → ✅.</step>
+  </steps>
+  <tools>
+    <tool name="Read">alerts.bicep</tool>
+    <tool name="Edit">alerts.bicep</tool>
+    <tool name="Bash">az bicep build</tool>
+  </tools>
+  <outputs>
+    <output type="infrastructure">infrastructure/bicep/alerts.bicep (EXTENDED with missed-rotation alert)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">alerts.bicep compiles (az bicep build).</criterion>
+    <criterion testable="true">scheduledQueryRule resource present with correct KQL.</criterion>
+    <criterion testable="true">Alert visible via `az monitor scheduled-query list` after task 030 deploy.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>Drop redisSku / redisCapacity from customer-template.bicepparam</title>
+    <phase>3: Theme C — R1 implementation gap closure</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>030</blocks>
+    <tags>bicep, bicepparam, cleanup</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Bicepparam cleanup consistent with task 020.</rigor-reason>
+    <parallel-group>D-cont</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct file from task 022 (deployment guide).</parallel-reason>
+  </metadata>
+  <prompt>Update `infrastructure/bicep/parameters/customer-template.bicepparam` (and any concrete `customer-*.bicepparam` files) to drop the `redisSku` and `redisCapacity` parameters consistent with task 020. Grep-audit any test fixture using `customer.bicep` to catch param-list mismatches.</prompt>
+  <role>Spaarke infrastructure developer. Apply `task-execute` skill at STANDARD rigor.</role>
+  <goal>customer-template.bicepparam no longer references redisSku / redisCapacity. `az bicep build` of customer.bicep with the param file succeeds. No fixture refers to deleted params.</goal>
+  <context>
+    <background>Spec FR-13 — consistent with FR-12 customer.bicep cleanup.</background>
+    <relevant-files>
+      <file>infrastructure/bicep/parameters/customer-template.bicepparam (MODIFY)</file>
+      <file>infrastructure/bicep/parameters/customer-*.bicepparam (GREP — any concrete files)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-13 — drop redisSku / redisCapacity from bicepparam consistent with FR-12.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>infrastructure/bicep/customer.bicep</file>
+      <file>infrastructure/bicep/parameters/customer-template.bicepparam</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">`ls infrastructure/bicep/parameters/customer-*.bicepparam` — list all concrete customer param files.</step>
+    <step order="2">Grep `redisSku` and `redisCapacity` across the param files + any test fixtures.</step>
+    <step order="3">Remove those param lines from each affected file.</step>
+    <step order="4">Run `az bicep build customer.bicep` with the updated param file to confirm.</step>
+    <step order="5">Update TASK-INDEX 🔲 → ✅.</step>
+  </steps>
+  <tools>
+    <tool name="Glob">find customer-*.bicepparam</tool>
+    <tool name="Grep">redisSku + redisCapacity audit</tool>
+    <tool name="Edit">customer-template.bicepparam + concrete files</tool>
+    <tool name="Bash">az bicep build</tool>
+  </tools>
+  <outputs>
+    <output type="infrastructure">infrastructure/bicep/parameters/customer-template.bicepparam (CLEANED)</output>
+    <output type="infrastructure">infrastructure/bicep/parameters/customer-*.bicepparam (CLEANED if any reference Redis)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">grep `redisSku` and `redisCapacity` in `infrastructure/bicep/parameters/` returns 0 matches.</criterion>
+    <criterion testable="true">az bicep build customer.bicep with updated param file succeeds.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

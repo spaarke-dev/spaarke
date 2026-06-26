@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>Runbook §6 update — automated rotation as primary, manual as emergency fallback</title>
+    <phase>2: Theme B — Redis key rotation automation</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>010,012</dependencies>
+    <blocks>030</blocks>
+    <tags>docs, runbook, rotation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Docs-only update.</rigor-reason>
+    <parallel-group>C-cont</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Depends on 010 + 012 but distinct file (same file as 012; coordinate ordering).</parallel-reason>
+  </metadata>
+  <prompt>Update `docs/guides/redis-cache-azure-setup.md` §6 (Secret Rotation Procedure) so the AUTOMATED workflow is the primary path. Retain the existing 5-step manual procedure as the EMERGENCY FALLBACK (suspected key compromise scenario where automation cannot run). Include the App Insights KQL verification query: `customEvents | where name == 'RedisKeyRotation' and outcome == 'success' | top 1 by timestamp desc | project environment, timestamp, duration_ms`.</prompt>
+  <role>Technical writer with operational runbook experience. Apply `task-execute` skill at MINIMAL rigor.</role>
+  <goal>§6 restructured: primary path = workflow + script invocation; emergency fallback = retained manual 5-step procedure with explicit "use ONLY when automation cannot run" caveat; KQL verification query added.</goal>
+  <context>
+    <background>Spec FR-10. The manual procedure has slipped historically (root of DEF-001). Automation is the primary mitigation; manual is for emergencies.</background>
+    <relevant-files>
+      <file>docs/guides/redis-cache-azure-setup.md (RESTRUCTURE §6)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-10 — automated path primary; manual fallback retained for emergencies.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>docs/guides/redis-cache-azure-setup.md</file>
+      <file>scripts/Rotate-RedisKey.ps1</file>
+      <file>.github/workflows/redis-key-rotation.yml</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read current §6 manual procedure.</step>
+    <step order="2">Restructure: add §6.1 "Automated rotation (primary)" describing workflow + script; move existing 5-step manual to §6.2 "Emergency fallback — manual rotation"; clearly mark when to use each.</step>
+    <step order="3">Add §6.3 "Verification" with the KQL query.</step>
+    <step order="4">Cross-link tasks 010, 011, 012 outputs.</step>
+    <step order="5">Update TASK-INDEX 🔲 → ✅.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Current §6</tool>
+    <tool name="Edit">redis-cache-azure-setup.md</tool>
+  </tools>
+  <outputs>
+    <output type="docs">docs/guides/redis-cache-azure-setup.md (§6 RESTRUCTURED)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">§6.1 = automated primary, §6.2 = manual emergency fallback, §6.3 = verification KQL.</criterion>
+    <criterion testable="true">Manual procedure preserved (not deleted).</criterion>
+    <criterion testable="true">KQL query exact (matches spec acceptance text).</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor.</protocol>
+  </execution>
+</task>

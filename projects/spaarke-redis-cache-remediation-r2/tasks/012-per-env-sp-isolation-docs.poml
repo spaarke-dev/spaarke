@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>Document per-env OIDC SP isolation procedure (operator provisions SPs)</title>
+    <phase>2: Theme B — Redis key rotation automation</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>013</blocks>
+    <tags>docs, security, devops</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Docs-only.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Docs-only; distinct file from script + workflow tasks.</parallel-reason>
+  </metadata>
+  <prompt>Add a new subsection to `docs/guides/redis-cache-azure-setup.md` §6 documenting the per-env OIDC service-principal provisioning procedure: 3 distinct SPs each scoped to a single env's KV + Redis + App Service. A compromised prod SP MUST NOT be able to rotate dev. Provide the exact `az role assignment` commands the operator runs.</prompt>
+  <role>Technical writer with Azure RBAC + GitHub Actions OIDC familiarity. Apply `task-execute` skill at MINIMAL rigor.</role>
+  <goal>New §6.x subsection in redis-cache-azure-setup.md showing: SP creation, federated identity credential setup against each GitHub Environment, role assignments (Key Vault Secrets Officer on env-specific KV; redis-cache-contributor or equivalent on env-specific Redis; App Service contributor on env-specific App Service), verification commands.</goal>
+  <context>
+    <background>Spec FR-09 + §Dependencies §External Dependencies: operator must provision 3 SPs BEFORE Theme B crons are enabled. R2 documents the procedure; does not provision (out of scope — Azure-side IAM work).</background>
+    <relevant-files>
+      <file>docs/guides/redis-cache-azure-setup.md (EXTEND §6)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-09 — per-env SP isolation; compromised env SP must not rotate other envs.</constraint>
+    <constraint source="spec">Acceptance: `az role assignment list --assignee {sp-id} --all` shows scoped permissions per env.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>docs/guides/redis-cache-azure-setup.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read current redis-cache-azure-setup.md §6 to find the insertion point (after rotation procedure, before fallback).</step>
+    <step order="2">Author §6.x "Per-environment service-principal provisioning" subsection with: rationale (why 3 distinct SPs), exact `az ad sp create-for-rbac` commands per env, federated identity credential setup with `gh secret set` syntax, role assignment commands, verification.</step>
+    <step order="3">Include the operator checklist: 3 GitHub Environment secrets named AZURE_CLIENT_ID_DEV / _STAGING / _PROD.</step>
+    <step order="4">Cross-reference task 011 workflow file.</step>
+    <step order="5">Update TASK-INDEX 🔲 → ✅.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Current runbook</tool>
+    <tool name="Edit">redis-cache-azure-setup.md</tool>
+  </tools>
+  <outputs>
+    <output type="docs">docs/guides/redis-cache-azure-setup.md (EXTENDED §6.x)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">New §6.x subsection exists with SP creation + role assignments + verification.</criterion>
+    <criterion testable="true">3 distinct AZURE_CLIENT_ID_* GitHub Environment secrets documented.</criterion>
+    <criterion testable="true">Operator can complete the procedure from documentation alone.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor.</protocol>
+  </execution>
+</task>

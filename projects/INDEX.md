@@ -46,6 +46,7 @@ Status legend:
 
 | Project | Branch | Worktree Path | BFF | SpaarkeAi | CI Workflows | Skill Directives | Last Commit | Status |
 |---|---|---|---|---|---|---|---|---|
+| `spaarke-redis-cache-remediation-r2` | `work/spaarke-redis-cache-remediation-r2` | `C:/code_files/spaarke-wt-spaarke-redis-cache-remediation-r2` | Y | N | Y | N | 2026-06-26 | Active |
 | `spaarke-redis-cache-remediation-r1` | `work/spaarke-redis-cache-remediation-r1` | `C:/code_files/spaarke-wt-spaarke-redis-cache-remediation-r1` | Y | N | N | N | 2026-06-26 | Active |
 | `spaarke-daily-update-service-r4` | `work/spaarke-daily-update-service-r4` | `C:/code_files/spaarke-wt-spaarke-daily-update-service-r4` | Y | Y | N | N | 2026-06-26 | Active |
 | `spaarke-ai-platform-unification-r6` | `work/spaarke-ai-platform-unification-r6` | `C:/code_files/spaarke-wt-spaarke-ai-platform-unification-r6` | Y | Y | N | N | 2026-06-26 | Active |
@@ -64,7 +65,7 @@ Status legend:
 | `email-communication-solution-r3` | `work/email-communication-solution-r3` | `C:/code_files/spaarke-wt-email-communication-solution-r3` | Y | N | N | N | 2026-06-05 | Recent |
 | `ai-spaarke-action-engine-r1` | `work/ai-spaarke-action-engine-r1` | `C:/code_files/spaarke-wt-ai-spaarke-action-engine-r1` | Y | Y | N | N | 2026-05-30 | Recent |
 
-**Count**: 17 active worktrees (exceeds spec's 5-6 estimate; this reflects current portfolio reality post-2026-05-20 ramp — flagged for spec refinement in `ci-cd-unit-test-remediation-r1` Phase 1 task `010`).
+**Count**: 18 active worktrees (R2 added 2026-06-26 by `project-pipeline`; exceeds spec's 5-6 estimate; this reflects current portfolio reality post-2026-05-20 ramp — flagged for spec refinement in `ci-cd-unit-test-remediation-r1` Phase 1 task `010`).
 
 ---
 
@@ -74,9 +75,10 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 
 ### BFF (`src/server/api/Sprk.Bff.Api/**`)
 
-**13 active projects touch BFF.** This is the single most-contested hot-path and the reason `.claude/constraints/bff-extensions.md` exists. Projects:
+**14 active projects touch BFF.** This is the single most-contested hot-path and the reason `.claude/constraints/bff-extensions.md` exists. Projects:
 
-- `spaarke-redis-cache-remediation-r1` (117 `IDistributedCache` call sites — broadest touch)
+- `spaarke-redis-cache-remediation-r2` (Theme A: `MetricsDistributedCache`, `TenantCache`, `CacheMetrics`, `Program.cs` — closure of R1 senior-review items DEF-007/008/009)
+- `spaarke-redis-cache-remediation-r1` (117 `IDistributedCache` call sites — broadest touch; closure shipped via PR #458 + #460)
 - `spaarke-daily-update-service-r4` (NotificationService, playbook membership queries)
 - `spaarke-ai-platform-unification-r6` (handler registry, 8 typed handlers, persona scope)
 - `spaarke-ai-platform-chat-routing-redesign-r1` (PlaybookDispatcher/CapabilityRouter unification, stateful chat memory)
@@ -112,11 +114,11 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 
 ### CI Workflows (`.github/workflows/**`)
 
-**1 active project touches CI workflows in scope**: `ci-cd-unit-test-remediation-r1` (this project).
+**2 active projects touch CI workflows in scope**: `ci-cd-unit-test-remediation-r1` (modifies existing workflows) and `spaarke-redis-cache-remediation-r2` (adds NEW `.github/workflows/redis-key-rotation.yml` — no existing-file conflict).
 
 `spaarke-devops-project-tracking-r1` design notes a Phase-5 polish workflow but explicitly out of r1 acceptance (D-22). No conflict.
 
-**Coordination action**: This project is the sole owner of CI workflow changes for the 28-day window. Any peer project needing a workflow change must coordinate via this project's branch.
+**Coordination action**: `ci-cd-unit-test-remediation-r1` owns existing CI workflow modifications for the 28-day window. R2 adds a NEW workflow file (`redis-key-rotation.yml`) — coordinate naming + OIDC pattern via `sdap-ci.yml` reference but no file collision.
 
 ### Skill Directives (`.claude/skills/**`, `.claude/constraints/**`)
 
