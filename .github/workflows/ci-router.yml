@@ -184,8 +184,16 @@ jobs:
     uses: ./.github/workflows/ci-tier2-advisory.yml
     secrets: inherit
     with:
-      bff_changed: ${{ needs.classify.outputs.bff }}
-      spaarke_ai_changed: ${{ needs.classify.outputs.spaarke_ai }}
+      # Map router classification → tier2's `run-*` toggles per its workflow_call contract.
+      # docs_only diffs never reach here (see `if:` above). For everything else, default-on.
+      # Skip client-side lint when no client files changed (no spaarke_ai/bff client paths).
+      run-lint: ${{ needs.classify.outputs.spaarke_ai == 'true' || needs.classify.outputs.bff == 'true' }}
+      run-format: true
+      run-unit-tests: ${{ needs.classify.outputs.bff == 'true' }}
+      run-adr-compliance: true
+      run-markdown: true
+      run-last-reviewed: true
+      run-plugin-size: ${{ needs.classify.outputs.bff == 'true' }}
 
   # ==========================================================================
   # JOB 4 — Router: THE single required status check (`CI / Router`)
