@@ -190,7 +190,7 @@ public class AppOnlyAnalysisServiceResolveTests
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid?)null); // ResolveAsync impl returns null in this case; verify
-                                         // behavior is consistent — the contract is "null on no match".
+                                        // behavior is consistent — the contract is "null on no match".
         _playbookLookupMock
             .Setup(p => p.GetByIdAsync(FallbackEmailAnalysisGuid.ToString(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PlaybookResponse

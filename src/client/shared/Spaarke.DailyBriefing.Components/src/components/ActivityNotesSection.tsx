@@ -101,6 +101,28 @@ export interface ActivityNotesSectionProps {
   getTodoError: (itemId: string) => string | undefined;
   /** Whether channel narratives are still loading. */
   isLoading: boolean;
+  /**
+   * R3 task 031 / FR-4 — per-item "Mark as read" callback.
+   * Wired from `DailyBriefingApp.handleCheck` which composes the `markChecked`
+   * hook handler with optimistic-update + toast callbacks.
+   *
+   * Optional for backward compatibility with consumers that have not yet
+   * adopted the R3 action layer; absent value hides the button per
+   * NarrativeBullet's defensive default.
+   */
+  onCheck?: (itemId: string) => void;
+  /**
+   * R3 task 031 / FR-5 — per-item "Remove from briefing" callback.
+   * Wired from `DailyBriefingApp.handleRemove` which composes `markRemoved`.
+   */
+  onRemove?: (itemId: string) => void;
+  /**
+   * R3 task 031 / FR-6 — per-item "Keep +7 days" callback.
+   * Wired from `DailyBriefingApp.handleKeep` which composes `extendTtl`.
+   * `currentTtlSeconds` is supplied by the bullet (currently 0 until the
+   * service layer surfaces `ttlinseconds` on `NotificationItem`).
+   */
+  onKeep?: (itemId: string, currentTtlSeconds: number) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +160,9 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
   isTodoPending,
   getTodoError,
   isLoading,
+  onCheck,
+  onRemove,
+  onKeep,
 }) => {
   const styles = useStyles();
 
@@ -237,6 +262,12 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
                   items={bulletItems}
                   onAddToTodoItem={itemId => onAddToTodo([itemId])}
                   onDismissItem={itemId => onDismiss([itemId])}
+                  // R3 task 031 — per-item action wiring (FR-4 / FR-5 / FR-6).
+                  // Passed straight through from DailyBriefingApp's hook-
+                  // composed handlers (handleCheck / handleRemove / handleKeep).
+                  onCheck={onCheck}
+                  onRemove={onRemove}
+                  onKeep={onKeep}
                 />
               );
             })}

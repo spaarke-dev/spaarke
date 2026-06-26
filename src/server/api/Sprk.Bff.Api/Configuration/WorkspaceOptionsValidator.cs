@@ -44,12 +44,12 @@ public class WorkspaceOptionsValidator : IValidateOptions<WorkspaceOptions>
     internal static readonly IReadOnlyDictionary<string, string> DeprecatedKeys =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            [nameof(WorkspaceOptions.PreFillPlaybookId)]        = "Workspace__PreFillPlaybookId",
-            [nameof(WorkspaceOptions.MatterPreFillPlaybookId)]  = "Workspace__MatterPreFillPlaybookId",
+            [nameof(WorkspaceOptions.PreFillPlaybookId)] = "Workspace__PreFillPlaybookId",
+            [nameof(WorkspaceOptions.MatterPreFillPlaybookId)] = "Workspace__MatterPreFillPlaybookId",
             [nameof(WorkspaceOptions.ProjectPreFillPlaybookId)] = "Workspace__ProjectPreFillPlaybookId",
-            [nameof(WorkspaceOptions.AiSummaryPlaybookId)]      = "Workspace__AiSummaryPlaybookId",
-            [nameof(WorkspaceOptions.SummarizePlaybookId)]      = "Workspace__SummarizePlaybookId",
-            [nameof(WorkspaceOptions.ChatSummarizePlaybookId)]  = "Workspace__ChatSummarizePlaybookId",
+            [nameof(WorkspaceOptions.AiSummaryPlaybookId)] = "Workspace__AiSummaryPlaybookId",
+            [nameof(WorkspaceOptions.SummarizePlaybookId)] = "Workspace__SummarizePlaybookId",
+            [nameof(WorkspaceOptions.ChatSummarizePlaybookId)] = "Workspace__ChatSummarizePlaybookId",
         };
 
     private readonly ILogger<WorkspaceOptionsValidator> _logger;

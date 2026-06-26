@@ -24,10 +24,17 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 // ----  test/__mocks__/spaarke-auth.ts exports a jest.fn() authenticatedFetch.
 
 // ---- Mock the data-layer services so the smoke test doesn't need Dataverse.
+// R3 task 031: the canonical service names are `markBriefingChecked` /
+// `markAllBriefingsChecked` (replaced the transitional aliases removed by
+// task 030). Additional R3 actions `markBriefingRemoved` + `extendBriefingTtl`
+// are mocked here so `useBriefingActions` does not pull a real import at
+// module-resolution time.
 jest.mock('../src/services/notificationService', () => ({
   fetchAndGroupNotifications: jest.fn(),
-  markNotificationRead: jest.fn(),
-  markAllNotificationsRead: jest.fn(),
+  markBriefingChecked: jest.fn(() => Promise.resolve({ success: true, data: undefined })),
+  markAllBriefingsChecked: jest.fn(() => Promise.resolve({ success: true, data: { succeeded: 0, failed: 0 } })),
+  markBriefingRemoved: jest.fn(() => Promise.resolve({ success: true, data: undefined })),
+  extendBriefingTtl: jest.fn(() => Promise.resolve({ success: true, data: 604800 })),
 }));
 
 jest.mock('../src/services/preferencesService', () => ({
@@ -59,6 +66,18 @@ import type { ChannelFetchResult } from '../src/types/notifications';
 // Test helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Two-item fixture covering both R3 `sprk_briefingstate` Choice values:
+ *   - n-1: Unread  (sprk_briefingstate = 0 → `isRead: false`)
+ *   - n-2: Checked (sprk_briefingstate = 1 → `isRead: true`)
+ *
+ * The smoke test mocks `fetchAndGroupNotifications` which returns parsed
+ * `NotificationItem[]` (not raw `appnotification` entities), so the Choice
+ * value is materialized into the `isRead` derived property by
+ * `toNotificationItem` in the real service. We mirror both states here so the
+ * R3 widget logic (`unreadCount` calc, "Mark as read" idempotence) renders
+ * against a representative dual-state set.
+ */
 const fakeChannels: ChannelFetchResult[] = [
   {
     status: 'success',
@@ -71,6 +90,7 @@ const fakeChannels: ChannelFetchResult[] = [
       },
       items: [
         {
+          // sprk_briefingstate = 0 (Unread) → isRead: false
           id: 'n-1',
           title: 'Review motion to dismiss',
           body: 'Motion is overdue.',
@@ -84,6 +104,26 @@ const fakeChannels: ChannelFetchResult[] = [
           isAiGenerated: false,
           createdOn: new Date().toISOString(),
           dueDate: null,
+          // R3 FR-6 follow-up: post-task-010 producer writes ttlinseconds=604800
+          ttlinseconds: 604800,
+        },
+        {
+          // sprk_briefingstate = 1 (Checked) → isRead: true
+          id: 'n-2',
+          title: 'Discovery deadline approaching',
+          body: 'Discovery deadline is on the calendar.',
+          category: 'tasks-overdue',
+          priority: 'normal',
+          actionUrl: '/main.aspx?etc=1&id=def',
+          regardingName: 'Acme Matter',
+          regardingEntityType: 'sprk_matter',
+          regardingId: '11111111-1111-1111-1111-111111111111',
+          isRead: true,
+          isAiGenerated: false,
+          createdOn: new Date().toISOString(),
+          dueDate: null,
+          // R3 FR-6 follow-up: pre-rollout row with no stored TTL (undefined)
+          ttlinseconds: undefined,
         },
       ],
       unreadCount: 1,
@@ -133,37 +173,51 @@ describe('DailyBriefingApp (smoke)', () => {
     (fetchAndGroupNotifications as jest.Mock).mockReset();
     (fetchAndGroupNotifications as jest.Mock).mockResolvedValue(fakeChannels);
     (authenticatedFetch as jest.Mock).mockReset();
-    (authenticatedFetch as jest.Mock).mockImplementation(() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({
-            tldr: {
-              summary: 'You have 1 overdue motion that needs immediate review.',
-              keyTakeaways: ['Acme Matter motion to dismiss is overdue.'],
-              topAction: 'Review the Acme Matter motion to dismiss.',
-              categoryCount: 1,
-              priorityItemCount: 1,
-            },
-            channelNarratives: [
+    // R3 task 031 — return a duck-typed Response shim instead of `new Response(...)`.
+    // jest-environment-jsdom v30 does NOT expose the WHATWG `Response`
+    // constructor as a global, so the original `new Response(...)` call in this
+    // mock factory threw a `ReferenceError: Response is not defined` at
+    // resolve-time. That swallowed exception caused `briefingService.fetchBriefingNarration`
+    // to enter its `catch` branch and return `status: 'error'`, leaving the
+    // narrative-bullet branch unrendered. Returning a plain object with
+    // `.status` / `.ok` / `.headers` / `.json()` (the only shape consumed by
+    // `briefingService.ts:325`) keeps the existing /narrate assertions intact
+    // AND lets the new "3 R3 buttons" test exercise the bullet render path.
+    const buildNarrateBody = (): string =>
+      JSON.stringify({
+        tldr: {
+          summary: 'You have 1 overdue motion that needs immediate review.',
+          keyTakeaways: ['Acme Matter motion to dismiss is overdue.'],
+          topAction: 'Review the Acme Matter motion to dismiss.',
+          categoryCount: 1,
+          priorityItemCount: 1,
+        },
+        channelNarratives: [
+          {
+            category: 'tasks-overdue',
+            bullets: [
               {
-                category: 'tasks-overdue',
-                bullets: [
-                  {
-                    narrative: 'Review motion to dismiss for Acme Matter.',
-                    itemIds: ['n-1'],
-                    primaryEntityType: 'sprk_matter',
-                    primaryEntityId: '11111111-1111-1111-1111-111111111111',
-                    primaryEntityName: 'Acme Matter',
-                  },
-                ],
+                narrative: 'Review motion to dismiss for Acme Matter.',
+                itemIds: ['n-1'],
+                primaryEntityType: 'sprk_matter',
+                primaryEntityId: '11111111-1111-1111-1111-111111111111',
+                primaryEntityName: 'Acme Matter',
               },
             ],
-            generatedAtUtc: new Date().toISOString(),
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        )
-      )
-    );
+          },
+        ],
+        generatedAtUtc: new Date().toISOString(),
+      });
+    (authenticatedFetch as jest.Mock).mockImplementation(() => {
+      const body = buildNarrateBody();
+      return Promise.resolve({
+        status: 200,
+        ok: true,
+        headers: { get: (k: string) => (k.toLowerCase() === 'content-type' ? 'application/json' : null) },
+        json: () => Promise.resolve(JSON.parse(body)),
+        text: () => Promise.resolve(body),
+      });
+    });
     installXrmGlobal();
   });
 
@@ -214,5 +268,28 @@ describe('DailyBriefingApp (smoke)', () => {
       },
       { timeout: 3000 }
     );
+  });
+
+  it('renders the 3 new R3 per-item action buttons + preserves Add to To Do (ADR-024)', async () => {
+    renderApp();
+
+    // Wait for the narrative bullet to mount (downstream of /narrate fetch).
+    await waitFor(
+      () => {
+        expect(screen.queryByRole('button', { name: /mark as read/i })).toBeInTheDocument();
+      },
+      { timeout: 5000 }
+    );
+
+    // R3 task 031 — 3 new per-item buttons with owner-specified tooltips:
+    //   1. "Mark as read"                          (CheckmarkRegular)
+    //   2. "Remove from briefing"                  (DismissRegular)
+    //   3. "Keep on briefing for 7 more days"      (CalendarAddRegular)
+    expect(screen.getByRole('button', { name: /mark as read/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /remove from briefing/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /keep on briefing for 7 more days/i })).toBeInTheDocument();
+
+    // ADR-024 regression-free: existing "Add to To Do" button still renders.
+    expect(screen.getByRole('button', { name: /add to to do/i })).toBeInTheDocument();
   });
 });

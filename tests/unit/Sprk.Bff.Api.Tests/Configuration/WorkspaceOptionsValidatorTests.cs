@@ -83,12 +83,12 @@ public sealed class WorkspaceOptionsValidatorTests
     // ── Each individual env var → WARN with that key ────────────────────────
 
     [Theory]
-    [InlineData(nameof(WorkspaceOptions.PreFillPlaybookId),         "Workspace__PreFillPlaybookId")]
-    [InlineData(nameof(WorkspaceOptions.MatterPreFillPlaybookId),   "Workspace__MatterPreFillPlaybookId")]
-    [InlineData(nameof(WorkspaceOptions.ProjectPreFillPlaybookId),  "Workspace__ProjectPreFillPlaybookId")]
-    [InlineData(nameof(WorkspaceOptions.AiSummaryPlaybookId),       "Workspace__AiSummaryPlaybookId")]
-    [InlineData(nameof(WorkspaceOptions.SummarizePlaybookId),       "Workspace__SummarizePlaybookId")]
-    [InlineData(nameof(WorkspaceOptions.ChatSummarizePlaybookId),   "Workspace__ChatSummarizePlaybookId")]
+    [InlineData(nameof(WorkspaceOptions.PreFillPlaybookId), "Workspace__PreFillPlaybookId")]
+    [InlineData(nameof(WorkspaceOptions.MatterPreFillPlaybookId), "Workspace__MatterPreFillPlaybookId")]
+    [InlineData(nameof(WorkspaceOptions.ProjectPreFillPlaybookId), "Workspace__ProjectPreFillPlaybookId")]
+    [InlineData(nameof(WorkspaceOptions.AiSummaryPlaybookId), "Workspace__AiSummaryPlaybookId")]
+    [InlineData(nameof(WorkspaceOptions.SummarizePlaybookId), "Workspace__SummarizePlaybookId")]
+    [InlineData(nameof(WorkspaceOptions.ChatSummarizePlaybookId), "Workspace__ChatSummarizePlaybookId")]
     public void Validate_SingleEnvVarSet_WarnsWithKeyNameOnly(string propertyName, string expectedKeyName)
     {
         var validator = CreateValidator();
