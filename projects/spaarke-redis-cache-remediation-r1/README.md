@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-06-26
 >
-> **Status**: Phase 1 + Phase 2 + Phase 5 (code, IaC, docs, ADR amendments) — **COMPLETE**. Phase 3 (live dev-environment cutover) + Phase 4 (live App Insights verification) — **DEFERRED to Azure operator** (require Azure CLI access not available in this session).
+> **Status**: ✅ **COMPLETE** — all 5 phases shipped via PRs #458 + #460. Telemetry pipeline closure (R7-S7) partially landed inline; two specific Redis observability sub-gaps deliberately deferred to R8 (documented in `notes/r7-backlog.md`).
 
 ## Overview
 
@@ -22,11 +22,20 @@ Fix the BFF's Redis/cache configuration drift (`Redis__Enabled=false` in a deplo
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Phase 1+2+3+5 complete (infrastructure level); Phase 4 partial — live metric/dependency verification awaits PR merge + `bff-deploy` |
-| **Progress** | ~92% (55/60 tasks ✅; 5 partial: tasks 035, 036, 040, 042 + 044 subsumed — all blocked on new BFF code deployment, not infrastructure) |
-| **Target Date** | Code-level smoke tests (035, 040, 042) post-PR-merge |
-| **Completed Date** | 2026-06-26 (code, IaC, docs, ADRs, dev infrastructure cutover including legacy tag + sister handoff) |
+| **Phase** | All 5 phases complete; R7-S7 telemetry pipeline closure landed (partial — see "Known follow-up" below) |
+| **Progress** | 100% (project deliverables) |
+| **PRs** | #458 (Phase 1+2+3+5, merged) + #460 (AI-Search handoff + R7-S7 OTel exporter, merged) |
+| **Completed Date** | 2026-06-26 |
 | **Owner** | spaarke-dev |
+
+### Known follow-up (R8 — NOT in this project)
+
+R7-S7 wired the OTel → Azure Monitor exporter (`UseAzureMonitor()`) inline, restoring custom Meter flow to App Insights (verified via KQL: HTTP server/client histograms + custom `circuit_breaker.open_count` counter now visible). Two specific Redis observability sub-gaps remain — both require deeper investigation, documented in [`notes/r7-backlog.md` §S7](notes/r7-backlog.md):
+
+1. `AddRedisInstrumentation()` not surfacing Redis dep spans — fix: wire `RedisCacheOptions.ConnectionMultiplexerFactory` in CacheModule so cache + telemetry share the same `IConnectionMultiplexer` (~1 line + redeploy).
+2. `cache.hits/misses/redis_call_duration_ms` Meter measurements not appearing — needs static-init vs MeterProvider ordering audit + call-site coverage audit.
+
+Neither is a regression — both were silent before this project. The project shipped the prep work (correct Meter name, Redis instrumentation registration, OTel exporter); R8 closes the last mile.
 
 ## Problem Statement
 
