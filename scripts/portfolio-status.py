@@ -47,7 +47,7 @@ def get_merge_state_for_branches(branches):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--epic', type=int, help='Show one Epic only')
-    ap.add_argument('--status', help='Filter Projects by Project Status field value')
+    ap.add_argument('--status', help='Filter Projects by Status field value')
     ap.add_argument('--verbose', action='store_true', help='Show field values per Project')
     ap.add_argument('--show-merges', action='store_true',
                     help='Show latest merged PR + merge date + archive-candidate flag per Project')
@@ -121,7 +121,7 @@ def main():
                 'number': num,
                 'title':  title.replace('[Project]:', '').strip(),
                 'type':   fv.get('Type', '-'),
-                'status': fv.get('Project Status', '-'),
+                'status': fv.get('Status', '-'),
                 'ptype':  fv.get('Project Type', '-'),
                 'worktree': fv.get('Worktree Path', ''),
                 'folder':   fv.get('Project Folder', ''),
@@ -184,7 +184,7 @@ def main():
                 p['open_pr'] = branch_to_open_pr[b]['number']
             else:
                 p['open_pr'] = None
-            # Archive candidate: merged + not yet archived (Project Status != Completed/Cancelled)
+            # Archive candidate: merged + not yet archived (Status != Completed/Cancelled)
             p['archive_candidate'] = (
                 p['merged_pr'] is not None
                 and p['status'] not in ('Completed', 'Cancelled')
