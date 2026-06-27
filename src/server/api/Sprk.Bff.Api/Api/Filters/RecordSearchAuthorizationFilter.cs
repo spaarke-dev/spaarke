@@ -40,9 +40,13 @@ public static class RecordSearchAuthorizationFilterExtensions
 /// </list>
 /// </para>
 /// <para>
-/// Note: The spaarke-records-index does NOT have a tenantId field.
-/// Tenant isolation is enforced at the Dataverse level, not at the search index level.
-/// The filter still validates tenant membership to ensure the caller is authenticated.
+/// Per FR-12 (spaarke-ai-azure-setup-dev-r1): tenant isolation is now enforced at the
+/// search index level — the spaarke-records-index has a tenantId field and
+/// <see cref="Sprk.Bff.Api.Services.Ai.RecordSearch.RecordSearchService"/> applies an
+/// unconditional <c>tenantId eq '...'</c> OData filter using the user's 'tid' claim
+/// resolved via <see cref="IHttpContextAccessor"/>. This filter remains as the
+/// authentication + audit gate; the OData filter itself lives in the service layer
+/// where SearchOptions are constructed.
 /// </para>
 /// </remarks>
 public class RecordSearchAuthorizationFilter : IEndpointFilter

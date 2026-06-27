@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Update xUnit + Jest tests for /narrate + useBriefingNarration + ActivityNotesSection</title>
+    <phase>4: W2 Consumer — /narrate dispatch + cache + fallback (PR 4)</phase>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>Test coverage sweep across PR 4 surface. Added 3 edge-case xUnit tests to DailyBriefingEndpointsTests.cs covering uncovered exception paths: (1) HandleNarrate_Returns_503_When_InvokePlaybook_Throws_FeatureDisabledException (ADR-032 P3 Fail-Fast / NullInvokePlaybookAi kill-switch path), (2) HandleNarrate_Returns_500_When_InvokePlaybook_Throws_Generic_Exception (catch-all branch), (3) HandleNarrate_Propagates_OperationCanceledException_When_Caller_Cancels (cooperative cancellation). All 16 DailyBriefing tests pass (10 endpoint + 3 response shape + 3 new edge cases). Jest suite: 97 pass / 0 fail across 12 test suites (9 useBriefingNarration tests from task 033 + 5 ActivityNotesSection fallback tests from task 034 already cover refetch + fallback ACs; existing edge cases — mixed-state, system-channel filter, dark mode — already covered, no additional Jest tests needed). Full BFF suite: 7878 pass / 1 flaky-fail / 134 skip — the 1 failure does not reproduce in isolation (Api.Ai filter: 401/0/18; non-Api.Ai filter: 7478/0/116) and is not introduced by PR 4 changes.</completion-notes>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>032, 033, 034</dependencies>
+    <blocks>036</blocks>
+    <tags>testing, unit-test, integration-test, pcf</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test updates only — STANDARD per CLAUDE.md §8 (testing tag).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Update Jest tests in `src/client/shared/Spaarke.DailyBriefing.Components/test/`: `useBriefingNarration.test.ts` (assert refetch on data change), `ActivityNotesSection.test.tsx` (assert empty-narrative fallback renders raw notifications with banner). Update xUnit test for `DailyBriefingEndpoints` Narrate endpoint to assert playbook dispatch wrapper behavior + response shape. Achieve ≥90% line coverage on changed files (NFR-03).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Test authoring across Jest (widget) + xUnit (BFF); raise coverage on files modified in tasks 031/033/034.</role>
+  <goal>Three test files updated with assertions covering: (a) refetch fires when channels or actionsRefresh change, (b) ActivityNotesSection empty-narrative fallback renders banner + raw cards, (c) HandleNarrate dispatches via playbook engine + preserves response shape. Line coverage on changed files ≥90% (NFR-03). All tests pass.</goal>
+  <context>
+    <background>Tasks 031, 033, 034 modify production code without authoring full test coverage (each was scoped to implementation). This task back-fills test coverage to NFR-03's ≥90% line threshold on changed files. xUnit covers BFF; Jest covers widget hook + component.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/test/useBriefingNarration.test.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/test/ActivityNotesSection.test.tsx</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Ai/DailyBriefingEndpointsTests.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">BFF AI placement — /narrate is thin wrapper dispatching to existing playbook engine</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — publish-size + CVE per task; placement justification in PR description</constraint>
+    <constraint source="project">Response shape backward compat — existing widget parser must work unchanged (NFR-05)</constraint>
+    <constraint source="project">No hardcoded LLM prompt strings remain in DailyBriefingEndpoints.cs (FR-12)</constraint>
+    <constraint source="project">NFR-03 — line coverage on changed files ≥90%</constraint>
+    <constraint source="CLAUDE.md §10 F">Test update obligation — PRs modifying BFF Services/ MUST add/update tests</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Update `useBriefingNarration.test.ts`: add tests asserting refetch on `channels` change, refetch on `actionsRefresh` change, no infinite-loop with stable deps, in-flight abort on dependency churn</step>
+    <step order="2">Update `ActivityNotesSection.test.tsx`: add tests for empty-channelNarratives + raw-notifications-present case (banner + cards rendered), both-empty case (returns null), dark mode theme tokens</step>
+    <step order="3">Update `DailyBriefingEndpointsTests.cs`: add tests asserting HandleNarrate invokes playbook dispatch service (mocked), response shape preserves tldr/channelNarratives/generatedUtc fields, no inline prompt strings reached in code path</step>
+    <step order="4">Run `npm test --workspace=@spaarke/daily-briefing-components`; all pass</step>
+    <step order="5">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/`; all pass</step>
+    <step order="6">Generate coverage reports for changed files (jest --coverage; coverlet for xUnit)</step>
+    <step order="7">Verify ≥90% line coverage on `useBriefingNarration.ts`, `ActivityNotesSection.tsx`, `DailyBriefingEndpoints.HandleNarrate`</step>
+    <step order="8">If coverage gaps exist, add targeted tests until threshold met</step>
+    <step order="9">Update TASK-INDEX.md ✅</step>
+    <step order="10">Document deviations + coverage percentages in notes/</step>
+  </steps>
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/test/useBriefingNarration.test.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/test/ActivityNotesSection.test.tsx</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/DailyBriefingEndpointsTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">NFR-03: Line coverage ≥90% on useBriefingNarration.ts, ActivityNotesSection.tsx, HandleNarrate</criterion>
+    <criterion testable="true">All Jest tests pass: `npm test --workspace=@spaarke/daily-briefing-components`</criterion>
+    <criterion testable="true">All xUnit tests pass: `dotnet test tests/unit/Sprk.Bff.Api.Tests/`</criterion>
+    <criterion testable="true">Test for AC-15 refetch behavior is present + passing</criterion>
+    <criterion testable="true">Test for AC-16 empty-narrative fallback is present + passing</criterion>
+  </acceptance-criteria>
+  <notes>If the Jest test files do not exist yet (new for this widget), create them per Spaarke testing conventions. Mock /narrate fetch via MSW or jest.spyOn(fetch) as the codebase pattern dictates. For xUnit, mock the playbook dispatch service to assert wrapper behavior without exercising the live AI pipeline.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

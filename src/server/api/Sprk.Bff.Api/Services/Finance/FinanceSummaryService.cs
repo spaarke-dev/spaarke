@@ -1,10 +1,9 @@
-using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Services.Finance;
 
@@ -53,12 +52,15 @@ public class FinanceSummaryService : IFinanceSummaryService
     // INTENTIONAL: Keeps IDataverseService — casts to DataverseServiceClientImpl for FetchXML queries.
     // Cannot use narrow interface until FetchXML support is added to IFieldMappingDataverseService.
     private readonly IDataverseService _dataverseService;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly FinanceOptions _options;
     private readonly ILogger<FinanceSummaryService> _logger;
 
-    // Cache key prefix following SDAP naming convention
-    private const string CacheKeyPrefix = "finance:summary:";
+    // Resource identifier for ITenantCache (FR-05). Cached value is per-matter financial
+    // summary data — not an authorization decision.
+    private const string FinanceSummaryResource = "finance-summary";
+    private const int CacheVersion = 1;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Entity and Field Constants
@@ -108,45 +110,58 @@ public class FinanceSummaryService : IFinanceSummaryService
     // Active signal threshold (signals created in last 30 days)
     private static readonly TimeSpan ActiveSignalThreshold = TimeSpan.FromDays(30);
 
-    // JSON serialization options for cache
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     public FinanceSummaryService(
         IDataverseService dataverseService,
-        IDistributedCache cache,
+        ITenantCache cache,
+        IHttpContextAccessor httpContextAccessor,
         IOptions<FinanceOptions> options,
         ILogger<FinanceSummaryService> logger)
     {
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Extracts the Azure AD tenant ID ('tid' claim) from the current HttpContext.
+    /// Returns null when no claim is present (in which case caching is skipped).
+    /// </summary>
+    private string? ExtractTenantId()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user is null) return null;
+        return user.FindFirst("tid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
     }
 
     /// <inheritdoc />
     public async Task<FinanceSummaryDto?> GetSummaryAsync(Guid matterId, CancellationToken ct = default)
     {
-        var cacheKey = $"{CacheKeyPrefix}{matterId}";
+        var tenantId = ExtractTenantId();
+        var idComponent = matterId.ToString();
 
-        try
+        // Try cache first (only if tenantId is available)
+        if (!string.IsNullOrEmpty(tenantId))
         {
-            // Try cache first
-            var cachedData = await _cache.GetStringAsync(cacheKey, ct);
-            if (cachedData != null)
+            try
             {
-                _logger.LogDebug("Finance summary cache HIT for matter {MatterId}", matterId);
-                return JsonSerializer.Deserialize<FinanceSummaryDto>(cachedData, JsonOptions);
-            }
+                var cached = await _cache.GetAsync<FinanceSummaryDto>(
+                    tenantId, FinanceSummaryResource, idComponent, CacheVersion, ct: ct);
+                if (cached != null)
+                {
+                    _logger.LogDebug("Finance summary cache HIT for matter {MatterId}", matterId);
+                    return cached;
+                }
 
-            _logger.LogDebug("Finance summary cache MISS for matter {MatterId}", matterId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error retrieving finance summary from cache for matter {MatterId}, will generate new", matterId);
-            // Continue to generate - cache failure shouldn't break functionality
+                _logger.LogDebug("Finance summary cache MISS for matter {MatterId}", matterId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error retrieving finance summary from cache for matter {MatterId}, will generate new", matterId);
+                // Continue to generate - cache failure shouldn't break functionality
+            }
         }
 
         // Generate summary from Dataverse
@@ -159,24 +174,25 @@ public class FinanceSummaryService : IFinanceSummaryService
         }
 
         // Cache the result
-        try
+        if (!string.IsNullOrEmpty(tenantId))
         {
-            var serialized = JsonSerializer.Serialize(summary, JsonOptions);
-            var cacheOptions = new DistributedCacheEntryOptions
+            try
             {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(_options.FinanceSummaryCacheTtlMinutes)
-            };
+                await _cache.SetAsync(
+                    tenantId, FinanceSummaryResource, idComponent, CacheVersion,
+                    summary,
+                    TimeSpan.FromMinutes(_options.FinanceSummaryCacheTtlMinutes),
+                    ct: ct);
 
-            await _cache.SetStringAsync(cacheKey, serialized, cacheOptions, ct);
-
-            _logger.LogDebug(
-                "Cached finance summary for matter {MatterId}, TTL={TTL} minutes",
-                matterId, _options.FinanceSummaryCacheTtlMinutes);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error caching finance summary for matter {MatterId}", matterId);
-            // Don't throw - caching is optimization, not requirement
+                _logger.LogDebug(
+                    "Cached finance summary for matter {MatterId}, TTL={TTL} minutes",
+                    matterId, _options.FinanceSummaryCacheTtlMinutes);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error caching finance summary for matter {MatterId}", matterId);
+                // Don't throw - caching is optimization, not requirement
+            }
         }
 
         return summary;
@@ -185,11 +201,20 @@ public class FinanceSummaryService : IFinanceSummaryService
     /// <inheritdoc />
     public async Task InvalidateSummaryAsync(Guid matterId, CancellationToken ct = default)
     {
-        var cacheKey = $"{CacheKeyPrefix}{matterId}";
+        var tenantId = ExtractTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            _logger.LogWarning(
+                "No tenant claim found — skipping finance summary cache invalidation for matter {MatterId}",
+                matterId);
+            return;
+        }
 
         try
         {
-            await _cache.RemoveAsync(cacheKey, ct);
+            await _cache.RemoveAsync(
+                tenantId, FinanceSummaryResource, matterId.ToString(), CacheVersion,
+                ct: ct);
             _logger.LogDebug("Invalidated finance summary cache for matter {MatterId}", matterId);
         }
         catch (Exception ex)

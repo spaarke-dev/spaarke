@@ -1,0 +1,63 @@
+<task id="CICD-060" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Update .claude/skills/task-execute/SKILL.md: Step 0.5 conflict-check auto-invoke + Step 9.5 test-PR rigor override</title>
+    <status>complete</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>2 - Stream C</phase>
+    <stream>C - Hot-path coordination</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>031</dependencies>
+    <tags>skill-directive, task-execute, conflict-check, rigor-override</tags>
+    <execution-note>Modifies .claude/ — MUST run in main session, not sub-agent</execution-note>
+  </metadata>
+
+  <prompt>
+    Per spec FR-C03 + FR-B07: Update `.claude/skills/task-execute/SKILL.md` in two places. (1) Step 0.5: add auto-invoke of `conflict-check` skill when changed-files match hot-path watchlist (from conflict-check SKILL.md updated in task 031). (2) Step 9.5: override the current STANDARD-rigor "skip quality gates" rule for test-modifying PRs — runs `code-review` + `adr-check` for ALL test PRs regardless of STANDARD-rigor classification (binding override per spec FR-B07).
+  </prompt>
+
+  <role>Skill author updating the most load-bearing harness skill.</role>
+
+  <goal>task-execute Step 0.5 auto-invokes conflict-check on hot-path matches; Step 9.5 always runs quality gates for test-modifying PRs.</goal>
+
+  <inputs>
+    <file purpose="pre-rewrite-source">.claude/skills/task-execute/SKILL.md (Steps 0.5 ~lines 126-156; Step 9.5 ~lines 616-663)</file>
+    <file purpose="dependency">.claude/skills/conflict-check/SKILL.md (extended in task 031 with watchlist)</file>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md (FR-C03 + FR-B07)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="root-CLAUDE-3">Modifies .claude/ — MUST run in main session.</constraint>
+    <constraint source="spec FR-C03">Step 0.5 auto-invokes conflict-check on hot-path watchlist match.</constraint>
+    <constraint source="spec FR-B07">Step 9.5 runs code-review for ALL test-modifying PRs (overrides STANDARD-rigor skip).</constraint>
+    <constraint source="project autonomous">FULL rigor — Step 9.5 binding on this PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>task-execute skill structure</topic>
+    <files>
+      <file>.claude/skills/task-execute/SKILL.md (current)</file>
+      <file>.claude/skills/conflict-check/SKILL.md (extended in 031)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current task-execute SKILL.md end-to-end. Locate Step 0.5 (rigor determination) and Step 9.5 (quality gates).</step>
+    <step order="2">Edit Step 0.5: insert (early in the step) a conditional that reads `conflict-check` SKILL.md's Hot-Path Watchlist; if changed-files match, invoke `conflict-check` skill before proceeding to rigor determination. Decision result feeds into rigor determination + dispatch decision.</step>
+    <step order="3">Edit Step 9.5: add a new branch BEFORE the existing "SKIP quality gates IF" block — "RUN quality gates UNCONDITIONALLY IF: task modifies tests/** OR task POML metadata indicates test-modifying (tags: testing, test-reset, deletion)". This overrides STANDARD-rigor skip. Reference spec FR-B07 as the rule source.</step>
+    <step order="4">Document the two changes in the file's "Changelog" footer if present, or add one</step>
+    <step order="5">Step 9.5 on this PR (meta — task-execute reviewing its own changes): code-review + adr-check</step>
+  </steps>
+
+  <outputs>
+    <output type="skill">.claude/skills/task-execute/SKILL.md (extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Step 0.5 contains conflict-check auto-invoke logic referencing the Hot-Path Watchlist</criterion>
+    <criterion testable="true">Step 9.5 contains test-PR rigor override (code-review + adr-check unconditional for test-modifying tasks)</criterion>
+    <criterion testable="true">Cross-references to spec FR-C03 + FR-B07 present</criterion>
+    <criterion testable="true">Step 9.5 review on this PR passes</criterion>
+  </acceptance-criteria>
+</task>

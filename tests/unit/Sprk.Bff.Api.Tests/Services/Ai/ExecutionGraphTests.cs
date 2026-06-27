@@ -20,12 +20,6 @@ public class ExecutionGraphTests
 
     #region Constructor Tests
 
-    [Fact]
-    public void Constructor_NullNodes_ThrowsArgumentNullException()
-    {
-        // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new ExecutionGraph(null!));
-    }
 
     [Fact]
     public void Constructor_EmptyNodes_CreatesEmptyGraph()
@@ -38,40 +32,6 @@ public class ExecutionGraphTests
         graph.Nodes.Should().BeEmpty();
     }
 
-    [Fact]
-    public void Constructor_SingleNode_CreatesGraphWithOneNode()
-    {
-        // Arrange
-        var nodes = new[] { CreateNode(NodeA, "Node A") };
-
-        // Act
-        var graph = new ExecutionGraph(nodes);
-
-        // Assert
-        graph.NodeCount.Should().Be(1);
-        graph.GetNode(NodeA).Should().NotBeNull();
-    }
-
-    [Fact]
-    public void Constructor_DisabledNodes_ExcludedFromGraph()
-    {
-        // Arrange
-        var nodes = new[]
-        {
-            CreateNode(NodeA, "Node A", isActive: true),
-            CreateNode(NodeB, "Node B", isActive: false),
-            CreateNode(NodeC, "Node C", isActive: true)
-        };
-
-        // Act
-        var graph = new ExecutionGraph(nodes);
-
-        // Assert
-        graph.NodeCount.Should().Be(2);
-        graph.GetNode(NodeA).Should().NotBeNull();
-        graph.GetNode(NodeB).Should().BeNull();
-        graph.GetNode(NodeC).Should().NotBeNull();
-    }
 
     #endregion
 

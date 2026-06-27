@@ -3,7 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -24,7 +24,7 @@ public static class IdempotencyFilterExtensions
     {
         return builder.AddEndpointFilter(async (context, next) =>
         {
-            var cache = context.HttpContext.RequestServices.GetRequiredService<IDistributedCache>();
+            var cache = context.HttpContext.RequestServices.GetRequiredService<ITenantCache>();
             var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<IdempotencyFilter>>();
             var filter = new IdempotencyFilter(cache, logger);
             return await filter.InvokeAsync(context, next);
@@ -41,7 +41,7 @@ public static class IdempotencyFilterExtensions
     {
         return builder.AddEndpointFilter(async (context, next) =>
         {
-            var cache = context.HttpContext.RequestServices.GetRequiredService<IDistributedCache>();
+            var cache = context.HttpContext.RequestServices.GetRequiredService<ITenantCache>();
             var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<IdempotencyFilter>>();
             var filter = new IdempotencyFilter(cache, logger, ttl);
             return await filter.InvokeAsync(context, next);
@@ -58,18 +58,19 @@ public static class IdempotencyFilterExtensions
 /// </summary>
 /// <remarks>
 /// Per ADR-008, this is implemented as an endpoint filter rather than global middleware.
-/// Per ADR-009, uses IDistributedCache (Redis) for cross-request caching.
+/// Per ADR-009 (amended), uses <see cref="ITenantCache"/> (Redis wrapper) for cross-request caching
+/// with mandatory tenant scoping (FR-05).
 /// </remarks>
 public class IdempotencyFilter : IEndpointFilter
 {
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ILogger<IdempotencyFilter> _logger;
     private readonly TimeSpan _ttl;
 
     private static readonly TimeSpan DefaultTtl = TimeSpan.FromHours(24);
     private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(2);
-    private const string CacheKeyPrefix = "idempotency:request:";
-    private const string LockKeyPrefix = "idempotency:lock:";
+    private const string IdempotencyRequestResource = "idempotency-request";
+    private const string IdempotencyLockResource = "idempotency-lock";
     private const string IdempotencyKeyHeader = "X-Idempotency-Key";
     private const string IdempotencyStatusHeader = "X-Idempotency-Status";
 
@@ -80,12 +81,12 @@ public class IdempotencyFilter : IEndpointFilter
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
-    public IdempotencyFilter(IDistributedCache cache, ILogger<IdempotencyFilter> logger)
+    public IdempotencyFilter(ITenantCache cache, ILogger<IdempotencyFilter> logger)
         : this(cache, logger, DefaultTtl)
     {
     }
 
-    public IdempotencyFilter(IDistributedCache cache, ILogger<IdempotencyFilter> logger, TimeSpan ttl)
+    public IdempotencyFilter(ITenantCache cache, ILogger<IdempotencyFilter> logger, TimeSpan ttl)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -112,6 +113,9 @@ public class IdempotencyFilter : IEndpointFilter
             return await next(context);
         }
 
+        // Extract tenant ID for cache scoping (FR-05).
+        var tenantId = GetTenantId(httpContext);
+
         // Check for client-provided idempotency key in header
         var clientProvidedKey = httpContext.Request.Headers[IdempotencyKeyHeader].FirstOrDefault();
 
@@ -136,14 +140,17 @@ public class IdempotencyFilter : IEndpointFilter
             idempotencyKey = generatedKey;
         }
 
-        var cacheKey = $"{CacheKeyPrefix}{idempotencyKey}";
-        var lockKey = $"{LockKeyPrefix}{idempotencyKey}";
         var correlationId = httpContext.TraceIdentifier;
 
         try
         {
             // Check for cached response
-            var cachedResponse = await _cache.GetStringAsync(cacheKey, httpContext.RequestAborted);
+            var cachedResponse = await _cache.GetAsync<string>(
+                tenantId,
+                resource: IdempotencyRequestResource,
+                id: idempotencyKey,
+                version: 1,
+                ct: httpContext.RequestAborted);
             if (cachedResponse != null)
             {
                 _logger.LogInformation(
@@ -158,7 +165,7 @@ public class IdempotencyFilter : IEndpointFilter
             }
 
             // Try to acquire lock to prevent race conditions
-            if (!await TryAcquireLockAsync(lockKey, httpContext.RequestAborted))
+            if (!await TryAcquireLockAsync(tenantId, idempotencyKey, httpContext.RequestAborted))
             {
                 _logger.LogWarning(
                     "Request already being processed: idempotency key {IdempotencyKey} is locked, CorrelationId={CorrelationId}",
@@ -186,7 +193,7 @@ public class IdempotencyFilter : IEndpointFilter
                 // Cache successful responses only
                 if (IsSuccessResponse(result))
                 {
-                    await CacheResponseAsync(cacheKey, result, httpContext.RequestAborted);
+                    await CacheResponseAsync(tenantId, idempotencyKey, result, httpContext.RequestAborted);
                     _logger.LogDebug(
                         "Cached response for idempotency key {IdempotencyKey}, TTL={TtlHours}h",
                         idempotencyKey,
@@ -201,7 +208,7 @@ public class IdempotencyFilter : IEndpointFilter
             finally
             {
                 // Release lock
-                await ReleaseLockAsync(lockKey, httpContext.RequestAborted);
+                await ReleaseLockAsync(tenantId, idempotencyKey, httpContext.RequestAborted);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -320,41 +327,60 @@ public class IdempotencyFilter : IEndpointFilter
             ?? httpContext.User.FindFirst("oid")?.Value;
     }
 
-    private async Task<bool> TryAcquireLockAsync(string lockKey, CancellationToken cancellationToken)
+    private static string GetTenantId(HttpContext httpContext)
+    {
+        var tid = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+        return string.IsNullOrWhiteSpace(tid) ? "anonymous" : tid;
+    }
+
+    private async Task<bool> TryAcquireLockAsync(string tenantId, string idempotencyKey, CancellationToken cancellationToken)
     {
         try
         {
-            var existingLock = await _cache.GetAsync(lockKey, cancellationToken);
-            if (existingLock != null)
+            var existingLock = await _cache.GetAsync<string>(
+                tenantId,
+                resource: IdempotencyLockResource,
+                id: idempotencyKey,
+                version: 1,
+                ct: cancellationToken);
+            if (!string.IsNullOrEmpty(existingLock))
             {
                 return false;
             }
 
-            var options = new DistributedCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = LockDuration
-            };
-
-            await _cache.SetAsync(lockKey, Encoding.UTF8.GetBytes("locked"), options, cancellationToken);
+            await _cache.SetAsync<string>(
+                tenantId,
+                resource: IdempotencyLockResource,
+                id: idempotencyKey,
+                version: 1,
+                value: "locked",
+                ttl: LockDuration,
+                ct: cancellationToken);
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to acquire idempotency lock for key {LockKey}", lockKey);
+            _logger.LogWarning(ex, "Failed to acquire idempotency lock for key {IdempotencyKey}", idempotencyKey);
             // Fail open - allow request to proceed
             return true;
         }
     }
 
-    private async Task ReleaseLockAsync(string lockKey, CancellationToken cancellationToken)
+    private async Task ReleaseLockAsync(string tenantId, string idempotencyKey, CancellationToken cancellationToken)
     {
         try
         {
-            await _cache.RemoveAsync(lockKey, cancellationToken);
+            await _cache.RemoveAsync(
+                tenantId,
+                resource: IdempotencyLockResource,
+                id: idempotencyKey,
+                version: 1,
+                ct: cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to release idempotency lock for key {LockKey}", lockKey);
+            _logger.LogWarning(ex, "Failed to release idempotency lock for key {IdempotencyKey}", idempotencyKey);
             // Lock will expire automatically
         }
     }
@@ -370,7 +396,7 @@ public class IdempotencyFilter : IEndpointFilter
         };
     }
 
-    private async Task CacheResponseAsync(string cacheKey, object? result, CancellationToken cancellationToken)
+    private async Task CacheResponseAsync(string tenantId, string idempotencyKey, object? result, CancellationToken cancellationToken)
     {
         try
         {
@@ -380,16 +406,18 @@ public class IdempotencyFilter : IEndpointFilter
                 return;
             }
 
-            var options = new DistributedCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = _ttl
-            };
-
-            await _cache.SetStringAsync(cacheKey, response, options, cancellationToken);
+            await _cache.SetAsync<string>(
+                tenantId,
+                resource: IdempotencyRequestResource,
+                id: idempotencyKey,
+                version: 1,
+                value: response,
+                ttl: _ttl,
+                ct: cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to cache response for idempotency key {CacheKey}", cacheKey);
+            _logger.LogWarning(ex, "Failed to cache response for idempotency key {IdempotencyKey}", idempotencyKey);
         }
     }
 

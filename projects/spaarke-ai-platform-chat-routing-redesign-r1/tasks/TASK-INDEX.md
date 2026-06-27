@@ -46,13 +46,14 @@ Task IDs use **10-gap convention** (001, 010, 020, 030, ...) leaving 9 slots per
 |---|---|---|---|---|---|
 | **0** | §1.7 Pattern C Cleanup + R6 readiness check | 000–004 | 5 | ~1–2 days | First. 000 is hard prereq gate. |
 | **1** | §1.7 Stable Codes Migration | 010–027 | 18 | ~1.5 weeks | Chat-summarize first (FR-05); WorkspaceOptions extended FIRST to enable parallel-safe migrations |
+| **1R** | `sprk_playbookconsumer` Routing Table (REVISED 2026-06-24) | 028, 028a–028e | 6 | ~3–4 days | Replaces `Workspace__*PlaybookId` env vars with Dataverse routing; owner creates the table, BFF builds service + migrates 6 consumers |
 | **2** | WP1.5 Index Governance | 030–040 | 11 | ~1 week | Dataverse schema first; UX + drift job parallel |
 | **3** | WP3 Destination Metadata Wiring | 045–055 | 11 | ~3–4 days | Additive; mostly parallel; can begin during Phase 2 (wave 3-A prereq is 1-J) |
 | **4** | WP5 6-Tier Memory Subsystem | 060–105 | 42 total / **12 MVP-active** (30 deferred ⏭️ — see banner) | ~1 week MVP (vs ~3-4 weeks original) | MVP cut 2026-06-22; substrate lock-ins preserved |
-| **5** | WP2 File-Aware Classification | 110–119 | 10 total / **6 MVP-active** (4 deferred ⏭️ — see banner) | ~3 days MVP (vs ~1 week original) | MVP cut 2026-06-22; suggested-playbooks UX retained, auto-routing engine deferred |
+| **5** | WP2 File-Aware Classification — **REVISED 2026-06-24 (Phase 5R)** | 110–119 + letter suffixes | **~18 active** (4 permanently dropped via 5R; see banner) | ~3.5–4 weeks (5R adds LLM intent + multi-node Output composition + chat link-buttons UX + session continuity) | Phase 5R 2026-06-24 owner decision post-UAT; supersedes 2026-06-22 MVP cut |
 | **6** | WP6 Specialized Playbooks + Path 3 | 120–132 | 13 | ~1.5 weeks | Dataverse audit first; then author |
 | **7** | WP4 Retirement + Project Wrap-up | 140–148, 150 | 10 | ~1 week | Depends on R6 PR #401 merge; quality gates BEFORE UAT; ends with 150 |
-| | **TOTAL** | | **120 / ~85 MVP-active** | **6–10 weeks original / 3.5–6 weeks MVP** | MVP cut 2026-06-22 owner decision; 1 cancelled (001) + 34 deferred (Phase 4 + 5) + 1 demoted-to-verify (030) |
+| | **TOTAL** | | **~128 / ~95 active after Phase 5R** (120 original + 12 new 5R tasks − 4 dropped 5R supersedes) | **6.5–10 weeks for 5R path** (3.5 weeks Phase 5R + remaining Phase 6/7) | MVP cut 2026-06-22 + Phase 5R revision 2026-06-24; 1 cancelled (001) + 30 still-deferred (Phase 4) + 1 demoted-to-verify (030); 4 5R-dropped (111/113/114/118 superseded by FR-46 hybrid); 12 5R-new (110a, 111R, 113R, 114R, 114a, 114b, 114c, 117a, 117b, 118R, 118a, 118b) |
 
 ---
 
@@ -187,9 +188,9 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | **7-A** | 140 | 6-G ✅ + **PR #401 merged to master** | HARD GATE: verify R6 hotfix PR #401 landed on master |
 | **7-B** | 141 | 7-A ✅ | **Delete `CapabilityRouter` + 10 supporting files + implement FR-23 per-playbook tool filtering replacement** (single agent — atomic commit; resolves CRIT-6) |
 | **7-C** | 142 | 7-B ✅ | Remove `SoftSlashRouter.SOFT_SLASH_TO_INTENT` dict from frontend (single agent) |
-| **7-D** | 143 | 7-C ✅ | Q20 binding test — CapabilityRouter dedup semantics preserved |
-| **7-E** | 144, 145 | 7-D ✅ | BFF publish-size net reduction + Insights regression suite (parallel verifications) |
-| **7-F** | 147, 148 | 7-E ✅ | **Final code-review + adr-check (parallel — BEFORE UAT)** — CRIT-7 fix |
+| **7-D** | 143 ✅ | 7-C ✅ | Q20 binding test — FR-24 dedup semantics preserved (10/10 tests pass; sanity-check confirms gate has teeth — 6 positive tests fail when dedup disabled) |
+| **7-E** | 144 ✅, 145 ✅ | 7-D ✅ | BFF publish-size net reduction + Insights regression suite (parallel verifications) |
+| **7-F** | 147 ✅, 148 ✅ | 7-E ✅ | **Final code-review + adr-check (parallel — BEFORE UAT)** — CRIT-7 fix (148 ✅ 2026-06-25 — 12/12 ADRs PASS, 6/6 special-case PASS, 0 CRITICAL, 1 MINOR backlog; 147 ✅ 2026-06-25 — Tier-1/2/3 review, 0 CRITICAL, 3 MAJOR (1 fixed in-line + 2 deferred), 6 MINOR (1 fixed in-line + 5 R7), exit-0 PASS for UAT) |
 | **7-G** | 146 | 7-F ✅ | Full UAT regression — T-001 through T-009 (after quality gates validate the build) |
 | **7-H** | 150 | 7-G ✅ | **Project wrap-up (mandatory)** — synthesize lessons-learned; R7 backlog; status flips |
 
@@ -256,6 +257,29 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 025 | Phase 1 stable-ID migration regression suite (10 facts × 9 consumer surfaces) | ✅ | STANDARD | true | 1-I | 023,024 | `testing`, `integration-test` — `Phase1StableIdMigrationSuite.cs`; 10/10 pass in 43ms; recommended as task 027 first gate check |
 | 026 | Deploy Phase 1 to bff-dev environment | ⏭️ DEFERRED | STANDARD | true | 1-I | 023,024 | `deploy`, `azure`, `bff-api` — **DEFERRED 2026-06-22 per owner**: deploy held until later managed window. Code/tests verified locally — Phase 1 work is solid in code regardless of when bff-dev catches up. Task 027 exit gate uses LOCAL test suite (task 025) instead of deployed smoke tests. |
 | 027 | Phase 1 exit gate — verify zero hardcoded GUIDs/names in `Services/Ai/` via grep | ✅ | MINIMAL | true | 1-J | 025,026 | `verification` — GO; strict `Guid.Parse(...)` returns 0; 10/10 tests pass 186ms; 2 const stable-IDs in `AppOnlyAnalysisService` are Pattern B execution-path consts (task 020 design); evidence: `notes/handoffs/027-phase-1-exit-gate-evidence.md` |
+
+## Phase 1R — `sprk_playbookconsumer` Routing Table (REVISED 2026-06-24)
+
+> **REVISED 2026-06-24** (owner decision — see [`spec.md` § Phase 1R](../spec.md#phase-1r--sprk_playbookconsumer-routing-table-owner-decision-2026-06-24)). The §1.7 Stable-ID migration ships consumers that resolve playbooks BY ID — but the binding *which playbook ID maps to which consumer code* still lives in `Workspace__*PlaybookId` env vars. UAT-2 failure on 2026-06-24 (Matter pre-fill broken because env var was set under legacy key on bff-dev) is the exact failure mode this anti-pattern produces. Phase 1R replaces env-var-based consumer→playbook routing with a Dataverse-backed `sprk_playbookconsumer` table. Owner creates the table; BFF builds the routing service + migrates 6 consumers.
+>
+> **Wave structure** (1-K through 1-N):
+> - **1-K** Foundation: 028 (gate: verify table created by owner), 028a (IConsumerRoutingService interface + impl + DI + cache)
+> - **1-L** Seed: 028b (Seed-PlaybookConsumers.ps1 + seed 6 records using current env-var GUIDs)
+> - **1-M** Consumer migrations (parallel-safe after 028a+028b): 028c (Pattern A — 4 Workspace__ consumers), 028d (Pattern B — chat-summarize + email-analysis)
+> - **1-N** Close: 028e (env-var deprecation telemetry + Phase 1R exit gate)
+>
+> **Active tasks** (6): 028, 028a, 028b, 028c, 028d, 028e
+>
+> **Dependency on owner**: 028 (verify table created) is a HARD GATE — downstream tasks block until the `sprk_playbookconsumer` table exists in Dev Dataverse with the 8-column contract from spec FR-1R-01. Owner-driven action; BFF tasks parallel to other project work until then.
+
+| ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
+|---|---|---|---|---|---|---|---|
+| 028 | **NEW (1R)**: HARD GATE — verify owner has created `sprk_playbookconsumer` table per spec FR-1R-01 (8 columns, alternate key, audit + change tracking) | ✅ | MINIMAL | true | 1-K | 027 | `dataverse`, `verification`, `gate` — **GO 2026-06-24**: 8 columns present (all wider than spec — headroom); change-tracking + audit + Org ownership ✅; 1 naming diff resolved (`sprk_playbook` lookup vs spec `sprk_playbookid` — spec updated in-place; OData accessor `_sprk_playbook_value`); alternate key `sprk_ConsumerTypeCodeEnvironment` as-built; 2 seed records correct (matter-pre-fill ✅ typo fixed, both Enabled=Yes); evidence: `notes/handoffs/028-table-verification-evidence.md` |
+| 028a | **NEW (1R)**: `IConsumerRoutingService` interface + impl + DI + 5-min TTL cache — FR-1R-02, FR-1R-03, FR-1R-04 | ✅ | FULL | false | 1-K | 028 | `bff-api`, `services`, `ai`, `routing`, `ADR-010`, `ADR-014` — **DONE 2026-06-24**: 5 files (interface, impl, RoutingModule, schema doc, Program.cs wire-up); 39/39 unit tests pass 68 ms; **PIVOT**: no `IDataverseService` composite in codebase → used `IGenericEntityService.RetrieveMultipleAsync(QueryExpression)`; no change-tracking infra → TTL-only invalidation (5-min); AiModule at 15/15 ADR-010 cap → new `RoutingModule.cs`; 0 MB publish delta (well under NFR-01 60 MB ceiling); evidence: `notes/handoffs/028a-bff-publish-delta.md` |
+| 028b | **NEW (1R)**: `Seed-PlaybookConsumers.ps1` + seed 6 initial records using current env-var GUIDs (idempotent UPSERT) — FR-1R-07 | ✅ | STANDARD | false | 1-L | 028a | `dataverse`, `scripts`, `data`, `seed` — **DONE 2026-06-24**: 6 routing records seeded (matter-pre-fill + project-pre-fill from owner Task 028 + ai-summary/summarize-file/chat-summarize/email-analysis via MCP); script + README authored. **PIVOTS**: no `Deploy-Playbook.ps1` template under `scripts/dataverse/` → modeled on `scripts/Create-DefaultPlaybook.ps1`; no `appsettings.json` in repo → GUIDs looked up from Dataverse via MCP + encoded in `$Records` hashtable with provenance comments; chat-summarize had `sprk_playbookcode=null` → resolved by name+id directly. Evidence: `notes/handoffs/028b-seed-verification-evidence.md` |
+| 028c | **NEW (1R)**: Migrate 4 Pattern A consumers to `IConsumerRoutingService.ResolveAsync` (`MatterPreFillService`, `ProjectPreFillService`, `WorkspaceAiService`, `WorkspaceFileEndpoints`) — FR-1R-05 | ✅ | FULL | true | 1-M | 028b | `bff-api`, `services`, `refactoring`, `NFR-07` — **DONE 2026-06-24**: 4 consumers + 4 test classes (40 tests passing, +17 vs Phase 1 baseline); `ConsumerTypes.*` compile-time constants per code-review S-5; `WorkspaceFileEndpoints` passes `RoutingContext.MimeType` for FR-1R-04 content-aware routing; env-var fallback retained in each consumer for FR-1R-06 deprecation window (deviation from POML step-9 zero-grep — 028e responsible for telemetry + final removal); NFR-07 invariants verified (45s timeout, public sigs, `useAiPrefill`/`$choices` unchanged); BFF publish-size 46.29 MB (+0.01 MB vs 46.28 MB baseline; well under 60 MB NFR-01); evidence: `notes/handoffs/028c-bff-publish-delta.md` |
+| 028d | **NEW (1R)**: Migrate 2 Pattern B consumers to `IConsumerRoutingService.ResolveAsync` (`SessionSummarizeOrchestrator`, `AppOnlyAnalysisService`) — FR-1R-05 | ✅ | FULL | true | 1-M | 028b | `bff-api`, `services`, `refactoring` — **DONE 2026-06-24** (commit `7c34bc1a9`): 2 services migrated + 1 new test file (`AppOnlyAnalysisServiceResolveTests.cs` 6 tests via reflection on `ResolvePlaybookAsync`) + 2 existing test classes updated (+3 SessionSummarizeOrchestrator routing tests; SummarizeSessionEndpointTests fixture DI surface); 45/45 targeted tests pass. **PIVOTS**: 2 const stable-IDs at `AppOnlyAnalysisService.cs:67,79` (POML said `:46,1068` — line drift since Phase 1 task 020 evidence); test file at `Services/Ai/AppOnlyAnalysisServiceResolveTests.cs` (no `Services/Ai/AppOnly/` dir per POML); service at `Services/Ai/AppOnlyAnalysisService.cs` (no `Services/Ai/AppOnly/` subdir); `IConsumerRoutingService` lives at `Services/Ai/PublicContracts/` (POML said `Services/Ai/Routing/`). Const fallbacks retained as `Fallback*PlaybookId` graceful-degrade fields per FR-1R-06 deprecation window. `ConsumerTypes.ChatSummarize` + `ConsumerTypes.EmailAnalysis` constants used (S-5 hardening). **DocumentProfile NOT migrated** — out of FR-1R-05 scope (no `ConsumerTypes.DocumentProfile` constant + no routing row); tracked as post-028e follow-up. BFF cumulative publish 46.29 MB (+0.01 MB vs baseline; well under NFR-01). Evidence: `notes/handoffs/028d-bff-publish-delta.md` |
+| 028e | **NEW (1R)**: Env-var deprecation telemetry (`WorkspaceOptionsValidator` warn on startup; Activity tag on runtime fallback read) + Phase 1R exit gate (grep zero `Workspace__.*PlaybookId` in `Services/`) — FR-1R-06 + FR-1R-08 | ✅ | STANDARD | true | 1-N | 028c,028d | `bff-api`, `telemetry`, `verification`, `ADR-015` — **DONE 2026-06-24**: `WorkspaceOptionsValidator` (6 deprecated keys; ADR-015 tier-1 logs key names only; 13/13 unit tests pass) registered in `ConfigurationModule.cs`; **S-5C bonus** — `RoutingConsumerTypeHealthCheck` IHostedService in `Services/Ai/PublicContracts/` registered in `RoutingModule.cs` diffs `ConsumerTypes.All` against Dataverse distinct values at startup (catches admin typos at deploy time). KQL dashboard queries doc (4 queries covering startup WARN, mismatch, runtime fallback, cache hit ratio) at `notes/handoffs/028e-deprecation-telemetry-kql.md`. Phase 1R exit gate evidence at `notes/handoffs/028e-phase-1r-exit-gate.md` with FR-by-FR coverage + grep verification (5 active env-var reads are intentional FR-1R-06 graceful-degrade fallbacks; final removal queued post-1R). Cumulative test suite **124/124 pass** across all Phase 1R consumer + routing + validator tests. **Phase 1R closed; Phase 2 unblocked.** |
 
 ## Phase 2 — WP1.5 Index Governance
 
@@ -377,32 +401,48 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 104 | Deploy Phase 4: `bff-deploy` + `code-page-deploy` SpaarkeAi | ⏭️ DEFERRED | STANDARD | true | 4-R | 103 | `deploy`, `bff-api`, `code-page-deploy` — **DEFERRED 2026-06-23 per task 026/054 owner pattern**; awaits managed deploy window. Phase 4 MVP code verified locally (BFF build 0 errors; 51+ new tests pass; 48.89 MB publish — 11.11 MB headroom under NFR-01 60 MB ceiling; binding-NEGATIVE guards in place; FR-45 invariant tests green). Deferred handlers will deploy in a future ramp. Evidence: `notes/handoffs/105-phase4-exit-gate.md` |
 | 105 | Phase 4 exit gate — all 25+ WP5 FRs satisfied; architecture §8 tool surface verified | ✅ | MINIMAL | true | 4-S | 104 | `verification`, `architecture-binding` — **MVP-CUT GO**; FR-45 invariant preserved (task 080 3/3 tests); FR-27 single-pipeline preserved (task 078); FR-29/30/31 covered (task 085); FR-36 covered (task 100 binding-NEGATIVE guard + grep zero hits in chat-memory paths); FR-32/33/34/35 🚫 deferred per Q5b; NFR-A1–A7 architectural principles upheld; cumulative BFF publish 48.89 MB; Phase 1 regression 10/10 green throughout. Evidence: `notes/handoffs/105-phase4-exit-gate.md` |
 
-## Phase 5 — WP2 File-Aware Classification
+## Phase 5 — WP2 File-Aware Classification — **REVISED 2026-06-24 (Phase 5R)**
 
-> **MVP Scope Cut applied 2026-06-22** (owner decision Q5a). Phase 5 reduced from 10 → **6 active tasks**; 4 tasks deferred ⏭️ (the auto-routing engine). Suggested-playbooks UX preserved via single-stage vector match.
+> **REVISED 2026-06-24** (owner decision post-UAT — see [`spec.md` § Phase 5+7 Revised Scope](../spec.md#phase-57-revised-scope-owner-decision-2026-06-24--post-mvp-uat)). The 2026-06-22 MVP cut shipped infrastructure but deferred the user-visible routing convergence the project was designed to deliver. UAT confirmed the gap. Phase 5 is RE-OPENED with revised scope: LLM-in-the-loop intent detection + chat link-buttons UX + multi-node Output composition + session continuity. New FR series **FR-46 through FR-59** is binding.
 >
-> **Active MVP tasks** (6): **110** (accept attachments in `PlaybookDispatcher.DispatchAsync`) + **112-simplified** (single-stage vector match via existing `PlaybookEmbeddingService`; skip the manifest-pre-filter that depends on deferred classification pipeline) + **115** (`commandIntent` as vector-query bias — cheap quality boost) + **116** (remove `SoftSlashIntentToCapabilityName` dict — hygiene) + **117** (routing telemetry ADR-015 tier-1 safe) + **119** (acceptance test).
+> **Wave structure** (revised 5-A through 5-F):
+> - **5-A** Foundation (existing): 110 (DispatchAsync signature), 112 (Phase B vector match)
+> - **5-B** Intent + matching (new): 111R (hybrid intent extraction), 113R (top-N confidence selector), 115 (commandIntent bias — existing)
+> - **5-C** Multi-node Output composition (new — THE BIG ONE): 114R (DeliverComposite NodeType), 114a (per-section SSE), 114b (widget rework), 114c (ADR)
+> - **5-D** Chat link-buttons UX (new): 117a (playbook_options SSE), 117b (FE link buttons + library link), 110a (library modal `toLowerCase` fix)
+> - **5-E** Migration + cleanup (new + existing): 118R (migrate summarize-document-for-workspace@v1), 116 (remove dict — existing)
+> - **5-F** Close: 117 (telemetry — existing), 118a (session continuity), 118b (workspace→memory), 119 (exit gate — existing scope expanded)
 >
-> **Deferred** (4 tasks; the 3-stage auto-routing engine — only valuable for AUTO-EXECUTE which MVP doesn't do):
-> - **111** Phase A fingerprint — cheap rejection stage; only useful when auto-routing
-> - **113** Phase C reconciliation — only matters when A and B disagree
-> - **114** gpt-4o-mini decider — the "skip the user click" stage; MVP keeps the user click
-> - **118** Load test p95 ≤1.5s — auto-routing latency target; not applicable to simpler suggestions UX
+> **Active tasks** (~13): 110, 110a, 111R, 112, 113R, 114R, 114a, 114b, 114c, 115, 116, 117, 117a, 117b, 118R, 118a, 118b, 119
 >
-> Tasks below retain their original row data; treat 111, 113, 114, 118 as ⏭️ deferred.
+> **Permanently DROPPED** (per Phase 5R FR-46 design choice — supersedes prior MVP-deferred state):
+> - **111** Phase A fingerprint (separate stage) — vector match IS phase A in revised design
+> - **113** Phase C reconciliation logic — replaced by FR-46 LLM rerank + FR-47 top-N
+> - **114** gpt-4o-mini standalone decider — folded into FR-46 hybrid path
+> - **118** Standalone load test — replaced by FR-117 telemetry + production signals
+>
+> Tasks numbered with `R` suffix are REVISED in-place (reuse the 111/113/114/118 slots with new content). Tasks with letter suffix (`a/b/c`) are NEW sub-tasks added by the revision.
 
 | ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
 |---|---|---|---|---|---|---|---|
-| 110 | `PlaybookDispatcher.DispatchAsync` accepts `IReadOnlyList<ChatMessageAttachment>` (backward-compat null/empty) | 🔲📝 | FULL | true | 5-A | 105 | `bff-api`, `services`, `ai` |
-| 111 | Phase A per-file fingerprint (filename tokens + content type + textLength + sha256) | 🔲📝 | FULL | false | 5-A | 110 | `bff-api`, `services`, `performance` |
-| 112 | Phase B vector match using manifest `documentType` as pre-filter (Hybrid C primary) | 🔲📝 | FULL | false | 5-B | 111 | `bff-api`, `services`, `ai`, `azure-openai` |
-| 113 | Phase C reconciliation logic | 🔲📝 | FULL | false | 5-B | 112 | `bff-api`, `services` |
-| 114 | gpt-4o-mini decider integration (structured output) | 🔲📝 | FULL | false | 5-B | 113 | `bff-api`, `services`, `ai` |
-| 115 | Integrate `commandIntent` as vector-query bias | 🔲📝 | FULL | true | 5-C | 114 | `bff-api`, `services` |
-| 116 | Remove `SoftSlashIntentToCapabilityName` dict (FE + BE) | 🔲📝 | FULL | true | 5-C | 115 | `bff-api`, `frontend`, `refactoring` |
-| 117 | Routing telemetry instrumentation (ADR-015 tier-1 safe) | 🔲📝 | STANDARD | true | 5-D | 116 | `bff-api`, `telemetry`, `ADR-015` |
-| 118 | Load test verification: p95 ≤1.5s for 1–3 files; ≤2s worst case 5 files | 🔲📝 | STANDARD | true | 5-D | 116 | `testing`, `performance` |
-| 119 | Acceptance test: "summarize this NDA" + NDA upload → Summarize-NDA top-1; Phase 5 exit gate | 🔲📝 | STANDARD | true | 5-E | 117,118 | `testing`, `e2e-test`, `verification` |
+| 110 | `PlaybookDispatcher.DispatchAsync` accepts `IReadOnlyList<ChatMessageAttachment>` (backward-compat null/empty) — FR-15 | ✅ | FULL | true | 5-A | 105 | `bff-api`, `services`, `ai` |
+| 110a | **NEW (5R)**: Library modal `Cannot read properties of null (reading 'toLowerCase')` bug fix — FR-59 | ✅ | STANDARD | true | 5-A | 105 | `frontend`, `bug-fix` |
+| 111R | **REVISED (5R)**: Hybrid intent-extraction service — vector match primary; gpt-4o-mini reranker ONLY when ambiguous; structured-output (top-3 of top-5); metadata-only LLM input (ADR-015) — FR-46 | ✅ | FULL | false | 5-B | 110,112 | `bff-api`, `services`, `ai`, `azure-openai`, `ADR-015` |
+| 112 | Phase B vector match using `sprk_jpsmatchingmetadata.documentTypes` pre-filter when classification available; per-file vector fallback otherwise — FR-17 (v2) | ✅ | FULL | true | 5-A | 110 | `bff-api`, `services`, `ai`, `azure-openai` |
+| 113R | **REVISED (5R)**: Confidence-based top-N return — `confidenceThreshold=0.85`, `secondaryThreshold=0.80`, `confidenceDeltaMargin=0.05`; always return top-3 (or all ≥ 0.80) — FR-47 | ✅ | FULL | false | 5-B | 111R | `bff-api`, `services`, `routing` |
+| 114R | **REVISED (5R)**: `NodeType.DeliverComposite` extension to `PlaybookExecutionEngine` — N upstream Action outputs keyed by `sectionName` → 1 composite Output Node — FR-52 | ✅ | FULL | false | 5-C | 113R | `bff-api`, `services`, `ai`, `playbook-engine` |
+| 114a | **NEW (5R)**: Per-section SSE streaming — `section_started` / `section_data` / `section_completed` events keyed by section name; backward-compat for `FieldDelta` preserved — FR-53 | ✅ | FULL | false | 5-C | 114R | `bff-api`, `streaming`, `ADR-033` |
+| 114b | **NEW (5R)**: `StructuredOutputStreamWidget` rework — section-name-keyed renderer; backward compat for unmigrated playbooks — FR-54 | ✅ | FULL | true | 5-C | 114a | `frontend`, `react`, `widget` |
+| 114c | **NEW (5R)**: ADR for multi-node Output composition pattern (`.claude/adr/` + `docs/adr/` + INDEX + CHANGELOG) — FR-55 | ✅ | STANDARD | false | 5-C | 114b | `documentation`, `adr`, `main-session-only` — **DONE 2026-06-25** (main session): `ADR-037 Multi-Node Output Composition` — concise (~115 lines) + full ADR with 5-coordination-point fragility analysis + 4 alternatives + per-playbook migration runbook. `.claude/adr/INDEX.md` updated; `.claude/CHANGELOG.md` entry added. Cross-references ADR-013/015/021/033. Captures pattern shipped by 114R + 114a + 114b. |
+| 115 | Integrate `commandIntent` (intentHint) as vector-query bias in Phase B composition — FR-20 | ✅ | FULL | true | 5-B | 112 | `bff-api`, `services` |
+| 116 | Remove `SoftSlashIntentToCapabilityName` dict (FE + BE) — FR-20 (cleanup) | ✅ | FULL | true | 5-E | 115,118R | `bff-api`, `frontend`, `refactoring` |
+| 117 | Routing telemetry instrumentation (ADR-015 tier-1 safe) — FR-117 baseline + new FR-46/47/48 telemetry tags | 🔲📝 | STANDARD | true | 5-F | 117b | `bff-api`, `telemetry`, `ADR-015` |
+| 117a | **NEW (5R)**: `playbook_options` SSE event contract — payload `{candidates[], libraryModalCta, sessionAttachmentIds, rerankInvoked, rerankReason}` tier-1 safe — FR-49 | ✅ | FULL | false | 5-D | 113R | `bff-api`, `streaming`, `contract`, `ADR-015` |
+| 117b | **NEW (5R)**: FE renders top-N as inline chat link buttons + "Open Library Modal" link; click → execute playbook with same session attachments — FR-50 + FR-51 | ✅ | FULL | true | 5-D | 117a,110a | `frontend`, `react`, `fluent-ui-v9` |
+| 118R | **REVISED (5R)**: Migrate `summarize-document-for-workspace@v1` to multi-node composition (Dataverse data update); chat sibling stays single-action — FR-58 | ⚠️📝 | FULL | false | 5-E | 114b,114c | `dataverse`, `data`, `migration`, `playbook` |
+| 118a | **NEW (5R)**: Session continuity test — `ChatSession.UploadedFiles[]` retained across 5+ turns; unit-test-fallback per POML Step 6 asserts no per-turn drop — FR-56 | ✅ | STANDARD | true | 5-F | 118R | `testing`, `integration-test`, `binding-invariant` |
+| 118b | **NEW (5R)**: Workspace output → AI memory round-trip — new handler `get_workspace_tab_content` (read-only; reuses Pillar 6b state plumbing) — FR-57 | ✅ | FULL | true | 5-F | 118R | `bff-api`, `services`, `handlers`, `T2`, `architecture-binding` |
+| 119 | Acceptance test: slash + NL parity, top-N link buttons, multi-node composite render, session continuity, workspace→memory round-trip; Phase 5R exit gate | ✅ | STANDARD | false | 5-F | 117,118a,118b | `testing`, `e2e-test`, `verification` — **DONE 2026-06-25** (main session): FR-46..FR-59 all implemented at code+test level (14/17 ✅ + 1 ⚠️📝 118R partial). **201/201 cumulative Phase 1R+5R tests pass** in 245 ms. **Build clean** (0 errors, 17 pre-existing warnings unchanged). **Final BFF publish 46.32 MB** (+0.04 vs 46.28 MB W1 baseline; **13.68 MB headroom** under NFR-01 60 MB ceiling). **GO verdict; Phase 7 unblocked.** Two production-smoke unblockers tracked as Phase 7 entry follow-ups (Dataverse `sprk_nodetype` choice option add + BFF orchestrator emit-point wiring + `/api/ai/playbook-dispatch/execute` endpoint). NFR-A1..A7 all preserved. Evidence: `notes/handoffs/119-phase-5r-exit-gate.md`. |
 
 ## Phase 6 — WP6 Specialized Playbooks + Path 3 JPS $ref Extension
 
@@ -426,14 +466,14 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 
 | ID | Title | Status | Rigor | Parallel-safe | Wave | Dependencies | Tags |
 |---|---|---|---|---|---|---|---|
-| 140 | Verify R6 PR #401 merged to master (HARD GATE) | 🔲📝 | MINIMAL | false | 7-A | 132 + **PR #401 merged** | `coordination`, `verification` |
-| 141 | **Delete `CapabilityRouter` + 10 supporting files + implement per-playbook tool filtering replacement (FR-23)** — single agent, atomic commit | 🔲📝 | FULL | false | 7-B | 140 | `bff-api`, `refactoring`, `legacy-removal` |
-| 142 | Remove `SoftSlashRouter.SOFT_SLASH_TO_INTENT` dict from frontend | 🔲📝 | STANDARD | false | 7-C | 141 | `frontend`, `refactoring`, `legacy-removal` |
-| 143 | Q20 binding test — CapabilityRouter dedup semantics preserved through new dispatcher | 🔲📝 | STANDARD | false | 7-D | 142 | `testing`, `regression`, `binding-invariant` |
-| 144 | BFF publish-size net reduction verification (expect NET REDUCTION from WP4 deletion) | 🔲📝 | MINIMAL | true | 7-E | 143 | `verification`, `ADR-029`, `NFR-01` |
-| 145 | Insights Engine regression suite — verify all binding-NEGATIVE components unchanged | 🔲📝 | STANDARD | true | 7-E | 143 | `testing`, `regression`, `architecture-binding` |
-| 147 | Final code-review pass across project surface (`/code-review`) | 🔲📝 | STANDARD | true | 7-F | 144,145 | `quality-gate` |
-| 148 | Final adr-check pass across project surface (`/adr-check`) | 🔲📝 | STANDARD | true | 7-F | 144,145 | `quality-gate` |
+| 140 | Verify R6 PR #401 merged to master (HARD GATE) | ✅ | MINIMAL | false | 7-A | 132 + **PR #401 merged** | `coordination`, `verification` |
+| 141 | **Delete `CapabilityRouter` + 10 supporting files + implement per-playbook tool filtering replacement (FR-23)** — single agent, atomic commit | ✅ | FULL | false | 7-B | 140 | `bff-api`, `refactoring`, `legacy-removal` |
+| 142 | Remove `SoftSlashRouter.SOFT_SLASH_TO_INTENT` dict from frontend — **subsumed by Phase 5R task 116** (dict already deleted; grep verified 0 active references, only stale provenance comments remain in `SoftSlashRouter.ts` which is fine per CLAUDE.md §10) | ✅ | STANDARD | false | 7-C | 141 | `frontend`, `refactoring`, `legacy-removal` |
+| 143 | Q20 binding test — CapabilityRouter dedup semantics preserved through new dispatcher | ✅ | STANDARD | false | 7-D | 142 | `testing`, `regression`, `binding-invariant` |
+| 144 | BFF publish-size net reduction verification (expect NET REDUCTION from WP4 deletion) | ✅ | MINIMAL | true | 7-E | 143 | `verification`, `ADR-029`, `NFR-01` |
+| 145 | Insights Engine regression suite — verify all binding-NEGATIVE components unchanged | ✅ | STANDARD | true | 7-E | 143 | `testing`, `regression`, `architecture-binding` |
+| 147 | Final code-review pass across project surface (`/code-review`) | ✅ | STANDARD | true | 7-F | 144,145 | `quality-gate` |
+| 148 | Final adr-check pass across project surface (`/adr-check`) | ✅ | STANDARD | true | 7-F | 144,145 | `quality-gate` |
 | 146 | Full UAT regression — T-001 through T-009 from spec.md Success Criteria — **AFTER quality gates** | 🔲📝 | STANDARD | false | 7-G | 147,148 | `testing`, `e2e-test`, `uat` |
 | 150 | **Project Wrap-up (mandatory)** — synthesize lessons-learned + R7 backlog + status flips | 🔲📝 | FULL | false | 7-H | 146 | `wrap-up`, `documentation`, `lessons-learned` |
 
@@ -445,10 +485,11 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 |---|---|---|
 | **0** | 000, 001, 002, 003, 004 (5/5) | — |
 | **1** | 010, 011, 012, 013, 014, 015, 016, 017, 018, 019, 020, 021, 022, 023, 024, 025, 026, 027 (18/18) | — |
+| **1R** | — | 028, 028a, 028b, 028c, 028d, 028e (6 new — POML stubs queued for authoring in W0 follow-up commit) |
 | **2** | 030–040 (11/11) | — |
 | **3** | 045–055 (11/11) | — |
 | **4** | 060–105 (42/42) | — |
-| **5** | 110–119 (10/10) | — |
+| **5** | 110, 112, 115, 116, 117, 119 (6/18 — original POMLs retained) | 110a, 111R, 113R, 114R, 114a, 114b, 114c, 117a, 117b, 118R, 118a, 118b (12 new — POML stubs queued for authoring in W0 follow-up commit) |
 | **6** | 120–132 (13/13) | — |
 | **7** | 140–148, 150 (10/10) | — |
 | **Total** | **120/120** | **0** |
@@ -464,6 +505,9 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 2026-06-21 | Main session (initial) | TASK-INDEX seeded with 82-task estimate; arithmetic later found wrong |
 | 2026-06-21 | Main session (audit pass) | **CRIT-1 through CRIT-7 race conditions + IMP-1 through IMP-8 corrections applied**. New tasks 000, 013, 070, 091 inserted. Renumber cascade in Phase 1 (013→014 etc.) + Phase 4d (091→092 etc.). Phase 7 reordered (code-review/adr-check BEFORE UAT). Total: 82 → 120. |
 | 2026-06-21 | Main session (post-generation validation) | **CRIT-8 fix**: Wave 3-B (tasks 048, 049, 050, 051) demoted from `parallel-safe: true` → `false` per task-create Step 3.8 file-overlap auto-demotion rule (all 4 edit `PlaybookOutputHandler.cs` switch). All 120 POML files materialized (113 generated by 6 parallel agents A–F + 7 pre-existing exemplars). |
+| 2026-06-22 | Main session (MVP scope cut) | Owner decision Q5a/Q5b: Phase 4 (42 → 12 active) + Phase 5 (10 → 6 active); substrate lock-ins (tasks 078, 080, lock-in spec artifacts) preserved to keep post-MVP work additive. Reasoning + cuts documented in `spec.md` § MVP Scope Cut. |
+| 2026-06-24 | Main session (Phase 5R revision post-UAT) | UAT exposed that the 2026-06-22 MVP cut deferred the user-visible routing convergence the project was designed to deliver (slash/NL parity, multi-node Output composition, chat link-button confirmation UX). Owner authorized Phase 5R revision: re-opened with FR-46 through FR-59 binding; ~13 new active tasks; permanently dropped 111/113/114/118 (replaced by 5R hybrid LLM design). Phase 7 sequence unchanged but Phase 7 task 141/142 now depends on Phase 5R slash/NL parity in production. R6 task 095, Phase 7 task 144 (publish-size baseline), Phase 7 task 145 (Insights regression baseline) approved to run in parallel during Phase 5R. Authoritative spec section: `spec.md` § Phase 5+7 Revised Scope. |
+| 2026-06-24 | Main session (Phase 1R retroactive addition) | UAT-2 failure (Matter pre-fill broken because `Workspace__MatterPreFillPlaybookId` was set under the legacy key on bff-dev) exposed that the §1.7 stable-ID work was incomplete — consumers resolve playbooks BY ID, but the consumer→playbook BINDING still lives in env vars. Owner authorized Phase 1R: new `sprk_playbookconsumer` Dataverse table (8 columns, alternate key, audit + change-tracking enabled) + `IConsumerRoutingService` + migrate 6 consumers + env-var deprecation telemetry. FR-1R-01 through FR-1R-08 binding. 6 new tasks (028, 028a-028e) inserted between Phase 1 exit gate (027) and Phase 2 schema verification (030). Owner creates the table; BFF tasks block on 028 gate. Authoritative spec section: `spec.md` § Phase 1R. |
 
 ---
 

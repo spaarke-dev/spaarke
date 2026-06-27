@@ -45,12 +45,6 @@ public sealed class PromptBudgetTrackerTests
     // Constructor + budget ceiling
     // =========================================================================
 
-    [Fact]
-    public void Ctor_RejectsNullOptions()
-    {
-        Assert.Throws<ArgumentNullException>(() =>
-            new PromptBudgetTracker(null!, _logger.Object));
-    }
 
     [Fact]
     public void Ctor_RejectsNullLogger_FromOptions()

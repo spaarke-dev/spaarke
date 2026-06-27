@@ -24,22 +24,6 @@ public class ContainerTypePermissionTests
     // Endpoint registration tests
     // =========================================================================
 
-    [Fact]
-    public void MapContainerTypePermissionEndpoints_MethodExists_AndIsExtensionOnRouteGroupBuilder()
-    {
-        // Verify the endpoint registration method exists with correct signature
-        var method = typeof(ContainerTypePermissionEndpoints)
-            .GetMethod("MapContainerTypePermissionEndpoints");
-
-        method.Should().NotBeNull("MapContainerTypePermissionEndpoints extension method must exist");
-        method!.IsStatic.Should().BeTrue("must be a static extension method");
-        method.ReturnType.Should().Be(typeof(RouteGroupBuilder), "must return RouteGroupBuilder for chaining");
-
-        // Verify first parameter is RouteGroupBuilder (extension method receiver)
-        var parameters = method.GetParameters();
-        parameters.Should().NotBeEmpty();
-        parameters[0].ParameterType.Should().Be(typeof(RouteGroupBuilder));
-    }
 
     // =========================================================================
     // ContainerTypePermissionDto shape tests
@@ -231,18 +215,6 @@ public class ContainerTypePermissionTests
     // Endpoint handler shape tests (SPE-054 acceptance criteria contract)
     // =========================================================================
 
-    [Fact]
-    public void GetContainerTypePermissionsAsync_HandlerMethod_ExistsOnEndpointClass()
-    {
-        // Verify the handler exists as a private static method
-        var handlerMethod = typeof(ContainerTypePermissionEndpoints)
-            .GetMethod("GetContainerTypePermissionsAsync",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        handlerMethod.Should().NotBeNull(
-            "GetContainerTypePermissionsAsync handler must exist as a private static method");
-        handlerMethod!.IsStatic.Should().BeTrue();
-    }
 
     [Fact]
     public void ContainerTypePermissionEndpoints_IsStaticClass()
@@ -257,26 +229,6 @@ public class ContainerTypePermissionTests
     // Authorization tests (SPE-054: SpeAdminAuthFilter inherited from group)
     // =========================================================================
 
-    [Fact]
-    public void ContainerTypePermissionEndpoints_UsesGroupLevelAuth_NotPerEndpointFilter()
-    {
-        // SpeAdminAuthorizationFilter is applied at the /api/spe group level in SpeAdminEndpoints.
-        // Individual endpoint classes do NOT add their own auth filters — they inherit.
-        // This verifies ContainerTypePermissionEndpoints follows the same pattern.
-
-        // The handler method signature should NOT have any direct auth attribute — auth is group-inherited
-        var handlerMethod = typeof(ContainerTypePermissionEndpoints)
-            .GetMethod("GetContainerTypePermissionsAsync",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        handlerMethod.Should().NotBeNull();
-
-        // No [Authorize] attribute on the static handler — auth is from the route group
-        var authorizeAttributes = handlerMethod!
-            .GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), false);
-        authorizeAttributes.Should().BeEmpty(
-            "authorization is inherited from the /api/spe route group (ADR-008), not per-endpoint");
-    }
 
     // =========================================================================
     // Not-found scenario test

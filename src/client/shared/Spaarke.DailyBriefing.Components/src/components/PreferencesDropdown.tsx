@@ -7,8 +7,13 @@
  *
  * Features:
  * - Switch per channel (opt-out toggles): enabled by default, user disables
- * - Dropdown per configurable parameter: dueWithinDays, timeWindow, minConfidence
+ * - Dropdown per configurable parameter: dueWithinDays, timeWindow
  * - Auto-open on workspace launch toggle
+ *
+ * R4 task 044 / FR-17e (2026-06-26): AI confidence threshold control removed.
+ * The setting was vestigial — daily-briefing data is deterministic, so there
+ * is no probabilistic AI scoring concept to threshold. See
+ * `types/notifications.ts` for the type-side removal.
  * - Changes persist to sprk_userpreference via onUpdatePreferences callback
  *
  * ADR-021: Fluent v9 components only, design tokens for theming, dark mode support.
@@ -43,13 +48,7 @@ import {
   Divider,
 } from '@fluentui/react-components';
 import { Settings20Regular, CheckmarkCircleFilled, ErrorCircleFilled } from '@fluentui/react-icons';
-import type {
-  DailyDigestPreferences,
-  NotificationCategory,
-  DueWindowDays,
-  TimeWindow,
-  AiConfidenceThreshold,
-} from '../types/notifications';
+import type { DailyDigestPreferences, NotificationCategory, DueWindowDays, TimeWindow } from '../types/notifications';
 import { CHANNEL_REGISTRY } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
@@ -154,13 +153,6 @@ const TIME_WINDOW_OPTIONS: { value: TimeWindow; label: string }[] = [
   { value: '7d', label: '7 days' },
 ];
 
-const CONFIDENCE_OPTIONS: { value: AiConfidenceThreshold; label: string }[] = [
-  { value: 60, label: '60% (more results)' },
-  { value: 75, label: '75% (balanced)' },
-  { value: 85, label: '85% (higher quality)' },
-  { value: 95, label: '95% (highest quality)' },
-];
-
 /**
  * Channel entries sorted by display order for the toggle list.
  * Excludes "system" since system notifications cannot be disabled.
@@ -259,12 +251,6 @@ export const PreferencesDropdown: React.FC<PreferencesDropdownProps> = ({ prefer
     if (!data.optionValue) return;
     const value = data.optionValue as TimeWindow;
     setPendingPrefs(prev => ({ ...prev, timeWindow: value }));
-  }, []);
-
-  const handleConfidenceChange = React.useCallback((_event: unknown, data: { optionValue?: string }) => {
-    if (!data.optionValue) return;
-    const value = Number(data.optionValue) as AiConfidenceThreshold;
-    setPendingPrefs(prev => ({ ...prev, minConfidence: value }));
   }, []);
 
   const handleAutoPopupToggle = React.useCallback((_ev: unknown, data: { checked: boolean }) => {
@@ -374,27 +360,6 @@ export const PreferencesDropdown: React.FC<PreferencesDropdownProps> = ({ prefer
             >
               {TIME_WINDOW_OPTIONS.map(opt => (
                 <Option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </Option>
-              ))}
-            </Dropdown>
-          </div>
-
-          {/* AI confidence threshold */}
-          <div className={styles.parameterRow}>
-            <Label htmlFor="pref-dd-confidence" className={styles.parameterLabel}>
-              AI confidence threshold
-            </Label>
-            <Dropdown
-              id="pref-dd-confidence"
-              className={styles.dropdown}
-              value={CONFIDENCE_OPTIONS.find(o => o.value === pendingPrefs.minConfidence)?.label ?? ''}
-              selectedOptions={[String(pendingPrefs.minConfidence)]}
-              onOptionSelect={handleConfidenceChange}
-              aria-label="AI confidence threshold"
-            >
-              {CONFIDENCE_OPTIONS.map(opt => (
-                <Option key={opt.value} value={String(opt.value)}>
                   {opt.label}
                 </Option>
               ))}

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Json.Schema;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -294,8 +295,39 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// <remarks>
     /// FR-10: this is the function name the LLM invokes. Sourced from the Dataverse
     /// <c>sprk_analysistool.sprk_name</c> column.
+    ///
+    /// R6 hotfix 2026-06-19 (UAT): OpenAI requires tool function names to match
+    /// the regex <c>^[a-zA-Z0-9_.-]+$</c> — spaces and most punctuation are NOT
+    /// allowed. Existing Dataverse <c>sprk_name</c> values follow the
+    /// human-readable convention "SYS-Display Name With Spaces". Sending those
+    /// raw produces a 400 from Azure OpenAI at tool-list build time, breaking
+    /// any chat turn that exposes a multi-tool list. We sanitise here so the LLM
+    /// sees a regex-safe identifier while the original display name remains in
+    /// <c>_tool.Name</c> for telemetry / logging / Description.
     /// </remarks>
-    public override string Name => _tool.Name;
+    public override string Name => SanitiseToolName(_tool.Name);
+
+    private static readonly Regex InvalidToolNameChars = new(@"[^a-zA-Z0-9_.-]", RegexOptions.Compiled);
+
+    /// <summary>
+    /// R6 hotfix 2026-06-19 — public so callers that compare against
+    /// AIFunction.Name (e.g., <c>SprkChatAgentFactory.BuildAllowedToolNames</c>'s
+    /// per-turn tool filter) can apply the same transform to their input. The
+    /// filter compares <c>AIFunction.Name</c> (this property is sanitised) to
+    /// the manifest-derived <c>allowedToolNames</c> HashSet (which carries raw
+    /// Dataverse <c>sprk_name</c> values with spaces). Without applying the same
+    /// sanitisation to the HashSet, every comparison fails and the agent ends
+    /// up with toolCount=0 — the LLM stalls because it has no tools to invoke.
+    /// </summary>
+    public static string SanitiseToolName(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return "unknown_tool";
+        }
+        // Replace each run of invalid characters with a single underscore.
+        return InvalidToolNameChars.Replace(raw.Trim(), "_");
+    }
 
     /// <inheritdoc />
     /// <remarks>

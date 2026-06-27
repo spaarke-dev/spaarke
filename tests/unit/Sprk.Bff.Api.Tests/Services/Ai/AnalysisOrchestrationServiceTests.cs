@@ -51,7 +51,8 @@ public class AnalysisOrchestrationServiceTests
         var httpContextAccessorMock = new Mock<IHttpContextAccessor>();
         var speFileOperationsMock = new Mock<ISpeFileOperations>();
         var textExtractorMock = new Mock<ITextExtractor>();
-        var distributedCacheMock = new Mock<IDistributedCache>();
+        // FR-05 redis remediation r1: AnalysisDocumentLoader + AnalysisRagProcessor now use ITenantCache.
+        var tenantCacheMock = new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
         var ragServiceMock = new Mock<IRagService>();
         var storageRetryPolicyMock = new Mock<IStorageRetryPolicy>();
         var exportRegistry = new ExportServiceRegistry(Array.Empty<IExportService>());
@@ -67,14 +68,14 @@ public class AnalysisOrchestrationServiceTests
             _dataverseServiceMock.Object,
             speFileOperationsMock.Object,
             textExtractorMock.Object,
-            distributedCacheMock.Object,
+            tenantCacheMock.Object,
             httpContextAccessorMock.Object,
             new Mock<ILogger<AnalysisDocumentLoader>>().Object);
 
         var ragProcessor = new AnalysisRagProcessor(
             ragServiceMock.Object,
             new RagQueryBuilder(),
-            distributedCacheMock.Object,
+            tenantCacheMock.Object,
             httpContextAccessorMock.Object,
             options,
             new Mock<ILogger<AnalysisRagProcessor>>().Object);
@@ -551,6 +552,44 @@ public class AnalysisOrchestrationServiceTests
 
         await act.Should().ThrowAsync<KeyNotFoundException>()
             .WithMessage("*not found*");
+    }
+
+    [Fact]
+    public async Task ExecutePlaybookAsync_EmptyDocumentIds_YieldsErrorChunk_Hotfix_2026_06_26()
+    {
+        // R4 hotfix regression test (narrate-503): empty DocumentIds reaches legacy mode
+        // when a playbook has no nodes (DAILY-BRIEFING-NARRATE in spaarkedev1). Prior
+        // behavior was IndexOutOfRangeException at `request.DocumentIds[0]`. New behavior
+        // is a clean error chunk that the orchestrator wrapper translates to RunFailed →
+        // PLAYBOOK_INVOCATION_FAILED → 503 ProblemDetails. See projects/spaarke-daily-update-
+        // service-r4/notes/uat/narrate-503-hotfix.md for the post-mortem.
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var request = new PlaybookExecuteRequest
+        {
+            PlaybookId = playbookId,
+            DocumentIds = Array.Empty<Guid>()
+        };
+
+        // Act
+        var chunks = new List<AnalysisStreamChunk>();
+        await foreach (var chunk in _service.ExecutePlaybookAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            chunks.Add(chunk);
+        }
+
+        // Assert: one error chunk, no crash.
+        chunks.Should().HaveCount(1);
+        chunks[0].Type.Should().Be("error");
+        chunks[0].Done.Should().BeTrue();
+        chunks[0].Error.Should().NotBeNullOrEmpty();
+        chunks[0].Error.Should().Contain("legacy mode");
+        chunks[0].Error.Should().Contain("nodes");
+
+        // Verify playbook was NOT loaded (we fail-fast before any Dataverse lookup).
+        _playbookServiceMock.Verify(
+            x => x.GetPlaybookAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact(Skip = "Requires complete mock setup for playbook execution pipeline including skill and knowledge scope resolution")]

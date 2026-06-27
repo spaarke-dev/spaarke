@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Extend RedisValidationTests.ps1 — tenant prefix + fail-fast checks</title>
+    <phase>2: Bicep + provisioning artifacts</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>025</dependencies>
+    <blocks>028</blocks>
+    <tags>testing, azure, infrastructure, script</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Extends existing test harness; binding NFR-02</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Extend `tests/manual/RedisValidationTests.ps1` with: (a) tenant-isolation key-format assertion (keys observed in Redis match `spaarke:tenant:{tenantId}:{resource}:{id}:v{version}` pattern), (b) fail-fast assertion (deployed BFF with bad Redis config errors at startup with expected message). Do NOT rewrite — extend.</prompt>
+  <role>Spaarke developer; PowerShell test harness.</role>
+  <goal>`RedisValidationTests.ps1` includes new test functions for tenant prefix + fail-fast. Existing tests preserved. Non-zero exit on failure (NFR-02).</goal>
+  <context><background>Per spec, existing `RedisValidationTests.ps1` is the post-deploy harness used by `Deploy-RedisCache.ps1 -VerifyOnly`. Extension adds the tenant-isolation invariant + fail-fast assertion.</background><relevant-files><file>tests/manual/RedisValidationTests.ps1</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">NFR-02 — fail-fast on key invariants; non-zero exit.</constraint>
+    <constraint source="spec">FR-05 — key format invariant.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>tests/manual/RedisValidationTests.ps1</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read existing `RedisValidationTests.ps1`. Identify test-function pattern.</step>
+    <step order="2">Add `Test-TenantPrefixInvariant` — scans Redis keys (best-effort `az redis cli keys '*'` or KEYS pattern) and verifies any non-system key matches `spaarke:tenant:...` pattern.</step>
+    <step order="3">Add `Test-FailFastBehavior` — point BFF at unreachable Redis (test harness only; mock connection string); start BFF; verify startup fails with expected error message.</step>
+    <step order="4">Ensure failures propagate non-zero exit code.</step>
+    <step order="5">Document the additions in script header.</step>
+    <step order="6">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">existing script</tool><tool name="Edit">Add functions</tool></tools>
+  <outputs><output type="test">tests/manual/RedisValidationTests.ps1 (modified — extended)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">New test functions present; existing functions preserved.</criterion>
+    <criterion testable="true">Non-zero exit on assertion failure.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

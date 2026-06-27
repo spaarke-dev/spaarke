@@ -1,17 +1,17 @@
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
 using System.Net;
-using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Azure.Cosmos;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Sessions;
@@ -291,7 +291,7 @@ public class UploadPipelineTelemetryTests
         const string databaseName = "spaarke-ai";
         const string cosmosEndpoint = "https://spaarke-cosmos-dev.documents.azure.com:443/";
 
-        var cacheMock = new Mock<IDistributedCache>();
+        var cache = new InMemoryTenantCache();
         var cosmosClientMock = new Mock<CosmosClient>();
         var containerMock = new Mock<Container>();
         var loggerMock = new Mock<ILogger<SessionPersistenceService>>();
@@ -332,12 +332,9 @@ public class UploadPipelineTelemetryTests
             LastActivity = DateTimeOffset.UtcNow.AddMinutes(-5),
             UploadedFiles = new List<StoredUploadedFile>()
         };
-        cacheMock
-            .Setup(c => c.GetAsync(SessionPersistenceService.BuildRedisKey(tenantId, sessionIdString), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(JsonSerializer.SerializeToUtf8Bytes(existing));
-        cacheMock
-            .Setup(c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
-            .Returns(System.Threading.Tasks.Task.CompletedTask);
+        // Seed the in-memory tenant cache at the FR-05 (resource, id) coordinates the service probes.
+        await cache.SetAsync<StoredSession>(
+            tenantId, "stored-session", sessionIdString, 1, existing);
 
         // Cosmos upsert — minimal valid response (fire-and-forget; we don't await it).
         // Mirrors SessionPersistenceServiceUploadedFilesTests.CreateFakeUpsertResponse —
@@ -355,7 +352,7 @@ public class UploadPipelineTelemetryTests
             .ReturnsAsync(upsertResponseMock.Object);
 
         var sut = new SessionPersistenceService(
-            cacheMock.Object,
+            cache,
             cosmosClientMock.Object,
             configuration,
             loggerMock.Object,

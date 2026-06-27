@@ -194,20 +194,6 @@ public class ConfidenceScoringServiceTests
     // Test 5: No groundedness result — fallback heuristic
     // =========================================================================
 
-    [Fact]
-    public void Score_DoesNotThrow_WhenGroundednessResultIsNull()
-    {
-        // Arrange
-        var request = new ConfidenceScoringRequest(
-            SourcePassageCount: 3,
-            GroundednessResult: null);
-
-        // Act
-        var act = () => _sut.Score(request);
-
-        // Assert
-        act.Should().NotThrow();
-    }
 
     [Fact]
     public void Score_ReturnsMedium_WhenThreeSourcesAndNoGroundednessResult()

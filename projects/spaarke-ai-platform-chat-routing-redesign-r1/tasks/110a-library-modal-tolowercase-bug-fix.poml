@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="110a" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Library modal toLowerCase null bug fix</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>105</dependencies>
+    <blocks>117b</blocks>
+    <tags>frontend, react, bug-fix</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Small front-end defensive-null bug fix; no architecture change. STANDARD per task-execute Step 0.5 (single-file edit + regression test).</rigor-reason>
+    <parallel-group>5-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Fix the Library modal runtime crash `Cannot read properties of null (reading 'toLowerCase')` (spec FR-59) by adding a defensive null guard in the search-filter normalization path. Root-cause the offending field (likely a nullable text column on `sprk_playbookdefinition` or a derived display field) and document the trigger in `notes/handoffs/110a-library-modal-null-rootcause.md`. This task unblocks 117b which renders the "Open Library Modal" link; the modal must open cleanly before downstream UX can ship.
+  </prompt>
+
+  <role>SPAARKE front-end developer. Expert in React 18, Fluent UI v9, and defensive normalization patterns for nullable Dataverse fields.</role>
+
+  <goal>
+    Library modal opens, search input accepts text, and filtered list renders without console errors when any indexed playbook record has a null name / code / description / tag field. A regression test (unit or e2e) covers the null-field path so the bug cannot silently recur.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-59. The Library modal is the existing playbook picker (Flow A) the chat link-buttons UX (FR-50 / FR-51) needs to be able to open via the "Open Library Modal" link. The crash trips during string normalization for case-insensitive search (`field.toLowerCase()`) when an indexed field is null. The fix is a single defensive guard (e.g. `(field ?? "").toLowerCase()`) at the normalization site, plus a root-cause note identifying which field(s) can legitimately be null in production data.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/library/ (Library modal — search + filter)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/ (any shared search/filter util used by the modal)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-59">Defensive null guard at the normalization site; root-cause analysis in handoff doc.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 only; no v8 fallbacks introduced by the fix.</constraint>
+    <constraint source="project">Use `npm install --legacy-peer-deps --no-audit --no-fund` for any Vite solutions touched.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep `toLowerCase` inside `src/solutions/SpaarkeAi/src/components/library/` and `src/client/shared/Spaarke.UI.Components/src/` to locate the offending normalization sites.</step>
+    <step order="2">Identify which input field is nullable in practice; cross-check the Dataverse column nullability for the indexed entity (likely `sprk_playbookdefinition`).</step>
+    <step order="3">Apply the defensive guard `(value ?? "").toLowerCase()` (or equivalent) at every normalization site touching playbook fields used in search/filter.</step>
+    <step order="4">Reproduce the original failure (e.g. seed one record with null field) and confirm fix resolves the crash; search + filter operate on remaining records.</step>
+    <step order="5">Add a unit/e2e regression test that exercises the null-field path so it cannot silently recur.</step>
+    <step order="6">Write `notes/handoffs/110a-library-modal-null-rootcause.md`: which field, why it can be null in production, and the defensive-guard pattern applied.</step>
+    <step order="7">Update TASK-INDEX.md: 110a → ✅; current-task.md cleared.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Locate `toLowerCase` sites</tool>
+    <tool name="Read">Library modal + shared search/filter utils</tool>
+    <tool name="Edit">Apply defensive guards; add regression test</tool>
+    <tool name="Bash">npm install + lint + test the touched solution</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/library/ (defensive null guards)</output>
+    <output type="test">Regression test covering null-field search path</output>
+    <output type="docs">notes/handoffs/110a-library-modal-null-rootcause.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Library modal opens with no `toLowerCase` console error against test data containing one null indexed field.</criterion>
+    <criterion testable="true">Search input filters remaining (non-null) records correctly.</criterion>
+    <criterion testable="true">Regression test (unit or e2e) exercises the null-field path and passes.</criterion>
+    <criterion testable="true">Root-cause note identifies the offending field(s) and explains nullability in production data.</criterion>
+    <criterion testable="true">No new Fluent v8 imports introduced; ADR-021 respected.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Blocks 117b — the "Open Library Modal" link cannot ship until the modal opens cleanly. Keep the diff minimal: defensive guard + test + handoff doc. Do not re-architect search/filter as part of this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — quality gates skipped per task-execute Step 0.5; lint + regression test enforced.</protocol>
+  </execution>
+</task>

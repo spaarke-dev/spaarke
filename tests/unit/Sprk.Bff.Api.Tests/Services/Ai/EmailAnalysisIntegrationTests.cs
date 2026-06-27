@@ -29,6 +29,7 @@ public class EmailAnalysisIntegrationTests
     private readonly Mock<ITextExtractor> _textExtractorMock;
     private readonly Mock<IPlaybookService> _playbookServiceMock;
     private readonly Mock<IPlaybookLookupService> _playbookLookupMock;
+    private readonly Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IConsumerRoutingService> _consumerRoutingMock;
     private readonly Mock<IScopeResolverService> _scopeResolverMock;
     private readonly Mock<IToolHandlerRegistry> _toolHandlerRegistryMock;
     private readonly Mock<INodeService> _nodeServiceMock;
@@ -43,6 +44,7 @@ public class EmailAnalysisIntegrationTests
         _textExtractorMock = new Mock<ITextExtractor>();
         _playbookServiceMock = new Mock<IPlaybookService>();
         _playbookLookupMock = new Mock<IPlaybookLookupService>();
+        _consumerRoutingMock = new Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IConsumerRoutingService>();
         _scopeResolverMock = new Mock<IScopeResolverService>();
         _toolHandlerRegistryMock = new Mock<IToolHandlerRegistry>();
         _nodeServiceMock = new Mock<INodeService>();
@@ -56,6 +58,7 @@ public class EmailAnalysisIntegrationTests
             _textExtractorMock.Object,
             _playbookServiceMock.Object,
             _playbookLookupMock.Object,
+            _consumerRoutingMock.Object,
             _scopeResolverMock.Object,
             _toolHandlerRegistryMock.Object,
             _nodeServiceMock.Object,

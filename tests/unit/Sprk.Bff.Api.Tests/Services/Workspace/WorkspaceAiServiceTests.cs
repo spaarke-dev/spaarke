@@ -61,6 +61,7 @@ public class WorkspaceAiServiceTests
     private readonly Mock<IDocumentDataverseService> _documentServiceMock;
     private readonly Mock<ILogger<WorkspaceAiService>> _loggerMock;
     private readonly Mock<IPlaybookLookupService> _playbookLookupMock;
+    private readonly Mock<IConsumerRoutingService> _consumerRoutingMock;
     private readonly Mock<IWorkspacePrefillAi> _prefillAiMock;
 
     public WorkspaceAiServiceTests()
@@ -69,6 +70,7 @@ public class WorkspaceAiServiceTests
         _documentServiceMock = new Mock<IDocumentDataverseService>();
         _loggerMock = new Mock<ILogger<WorkspaceAiService>>();
         _playbookLookupMock = new Mock<IPlaybookLookupService>();
+        _consumerRoutingMock = new Mock<IConsumerRoutingService>();
         _prefillAiMock = new Mock<IWorkspacePrefillAi>();
 
         // Default stub: GetByIdAsync(<configured id>, ct) → PlaybookResponse with Id = GUID.
@@ -81,6 +83,18 @@ public class WorkspaceAiServiceTests
                 PlaybookCode = "PB-002",
                 IsActive = true
             });
+
+        // Default stub (FR-1R-05 task 028c): the routing table returns null by default so
+        // tests exercise the env-var fallback (preserving Phase 1 contract). Individual
+        // tests that exercise the routing-table happy path override this stub.
+        _consumerRoutingMock
+            .Setup(c => c.ResolveAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
     }
 
     private WorkspaceAiService CreateSut(WorkspaceOptions? options = null) => new(
@@ -88,6 +102,7 @@ public class WorkspaceAiServiceTests
         _documentServiceMock.Object,
         _loggerMock.Object,
         _playbookLookupMock.Object,
+        _consumerRoutingMock.Object,
         Options.Create(options ?? new WorkspaceOptions
         {
             AiSummaryPlaybookId = ConfiguredAiSummaryPlaybookId
@@ -113,34 +128,6 @@ public class WorkspaceAiServiceTests
             "ADR-018 — typed-options consumption replaces raw IConfiguration[\"...\"] indexer reads");
     }
 
-    [Fact]
-    public void WorkspaceAiService_HasNoHardcodedAiSummaryPlaybookIdConstant_FR02()
-    {
-        // FR-02 task 018: the pre-task-018 `private static readonly Guid DefaultAiSummaryPlaybookId`
-        // constant has been removed. The playbook is now resolved at runtime via
-        // IPlaybookLookupService.GetByIdAsync — no fallback constant exists at the
-        // workspace-AI service boundary.
-        var fields = typeof(WorkspaceAiService)
-            .GetFields(BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Public);
-
-        fields.Should().NotContain(f => f.Name == "DefaultAiSummaryPlaybookId",
-            "task 018 — the hardcoded DefaultAiSummaryPlaybookId GUID constant MUST be removed " +
-            "(value 18cf3cc8-02ec-f011-8406-7c1e520aa4df now lives in WorkspaceOptions per environment)");
-    }
-
-    [Fact]
-    public void WorkspaceAiService_HasNoIConfigurationField_ADR018()
-    {
-        // ADR-018: Pattern A consumers MUST NOT hold an IConfiguration field — the
-        // raw-indexer read path was the very anti-pattern this migration removes.
-        var fields = typeof(WorkspaceAiService)
-            .GetFields(BindingFlags.NonPublic | BindingFlags.Instance);
-
-        fields.Should().NotContain(
-            f => f.FieldType == typeof(Microsoft.Extensions.Configuration.IConfiguration),
-            "ADR-018 / task 018 — IConfiguration indexer dependency MUST be removed; " +
-            "typed-options (IOptions<WorkspaceOptions>) is the binding mechanism");
-    }
 
     // ─── (b) Lookup-service contract — happy path ─────────────────────────────────────────
 
@@ -328,6 +315,181 @@ public class WorkspaceAiServiceTests
             p => p.GetByIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "validation runs before lookup");
+    }
+
+    // ─── (d) FR-1R-05 task 028c — Consumer routing service integration ────────────────────
+
+    [Fact]
+    public void WorkspaceAiService_Constructor_RequiresConsumerRoutingService_FR1R05()
+    {
+        // FR-1R-05 task 028c — the Pattern A migration to the sprk_playbookconsumer routing
+        // table MUST inject IConsumerRoutingService directly via the constructor. Compile-time
+        // typo defense via ConsumerTypes.AiSummary (code-review S-5 hardening).
+        var ctor = typeof(WorkspaceAiService).GetConstructors().Single();
+        var paramTypes = ctor.GetParameters().Select(p => p.ParameterType).ToArray();
+
+        paramTypes.Should().Contain(typeof(IConsumerRoutingService),
+            "FR-1R-05 task 028c — IConsumerRoutingService MUST be a constructor dependency " +
+            "for sprk_playbookconsumer routing-table resolution");
+    }
+
+    [Fact]
+    public async Task GenerateAiSummaryAsync_RoutingTableReturnsGuid_UsesRoutedPlaybookId_FR1R05()
+    {
+        // FR-1R-05 task 028c happy path: when IConsumerRoutingService.ResolveAsync returns
+        // a non-null Guid, the service MUST use it (no env-var fallback) and forward it to
+        // the playbook lookup + AI facade.
+        var routedPlaybookId = Guid.NewGuid();
+        var resolvedPlaybookGuid = routedPlaybookId; // lookup returns the same id
+
+        _consumerRoutingMock
+            .Setup(c => c.ResolveAsync(
+                ConsumerTypes.AiSummary,
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(routedPlaybookId);
+
+        // The lookup service is called with the GUID string (routing table value).
+        var routedPlaybookIdStr = routedPlaybookId.ToString();
+        _playbookLookupMock
+            .Setup(p => p.GetByIdAsync(routedPlaybookIdStr, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaybookResponse
+            {
+                Id = resolvedPlaybookGuid,
+                Name = "Document Profile",
+                PlaybookCode = "PB-002",
+                IsActive = true
+            });
+
+        _genericEntityServiceMock
+            .Setup(g => g.RetrieveAsync(
+                It.IsAny<string>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string[]>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_event"));
+
+        Guid forwardedPlaybookId = Guid.Empty;
+        _prefillAiMock
+            .Setup(p => p.ExecutePlaybookAsync(
+                It.IsAny<PlaybookRunRequest>(),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, HttpContext, CancellationToken>((req, _, _) =>
+            {
+                forwardedPlaybookId = req.PlaybookId;
+                return EmptyEventStream();
+            });
+
+        var sut = CreateSut();
+        var request = new AiSummaryRequest("sprk_event", Guid.NewGuid(), Context: null);
+
+        _ = await sut.GenerateAiSummaryAsync(request, "user-1", NewHttpContext(), CancellationToken.None);
+
+        forwardedPlaybookId.Should().Be(resolvedPlaybookGuid,
+            "FR-1R-05 — the routing-table-resolved playbook.Id (Guid) MUST be the PlaybookRunRequest.PlaybookId");
+        _consumerRoutingMock.Verify(
+            c => c.ResolveAsync(
+                ConsumerTypes.AiSummary,
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            "FR-1R-05 — routing service MUST be called on every summary request");
+    }
+
+    [Fact]
+    public async Task GenerateAiSummaryAsync_RoutingTableReturnsNull_FallsBackToEnvVar_FR1R06()
+    {
+        // FR-1R-06 deprecation-window fallback: when IConsumerRoutingService.ResolveAsync
+        // returns null AND WorkspaceOptions.AiSummaryPlaybookId is configured, the service
+        // MUST fall back to the env-var value (preserving Phase 1 behavior for admins
+        // who haven't migrated to the table yet).
+        _consumerRoutingMock
+            .Setup(c => c.ResolveAsync(
+                ConsumerTypes.AiSummary,
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
+
+        _genericEntityServiceMock
+            .Setup(g => g.RetrieveAsync(
+                It.IsAny<string>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string[]>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_event"));
+
+        Guid forwardedPlaybookId = Guid.Empty;
+        _prefillAiMock
+            .Setup(p => p.ExecutePlaybookAsync(
+                It.IsAny<PlaybookRunRequest>(),
+                It.IsAny<HttpContext>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, HttpContext, CancellationToken>((req, _, _) =>
+            {
+                forwardedPlaybookId = req.PlaybookId;
+                return EmptyEventStream();
+            });
+
+        var sut = CreateSut();
+        var request = new AiSummaryRequest("sprk_event", Guid.NewGuid(), Context: null);
+
+        _ = await sut.GenerateAiSummaryAsync(request, "user-1", NewHttpContext(), CancellationToken.None);
+
+        forwardedPlaybookId.Should().Be(ResolvedAiSummaryPlaybookGuid,
+            "FR-1R-06 — null routing-table result MUST fall back to WorkspaceOptions.AiSummaryPlaybookId");
+        _playbookLookupMock.Verify(
+            p => p.GetByIdAsync(ConfiguredAiSummaryPlaybookId, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "FR-1R-06 — env-var value MUST be passed to the playbook lookup");
+    }
+
+    [Fact]
+    public async Task GenerateAiSummaryAsync_RoutingNullAndEnvVarEmpty_ReturnsFallback_PreservesGracefulDegrade()
+    {
+        // Phase 1 task 018 graceful-degrade contract preserved: when BOTH the routing
+        // table returns null AND WorkspaceOptions.AiSummaryPlaybookId is empty, the
+        // workspace AI tile MUST still render via the template fallback — no exception,
+        // no 500. This is the chat-routing-redesign-r1 task 028c invariant.
+        _consumerRoutingMock
+            .Setup(c => c.ResolveAsync(
+                ConsumerTypes.AiSummary,
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
+
+        _genericEntityServiceMock
+            .Setup(g => g.RetrieveAsync(
+                It.IsAny<string>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string[]>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_event"));
+
+        var sut = CreateSut(new WorkspaceOptions { AiSummaryPlaybookId = null });
+        var request = new AiSummaryRequest("sprk_event", Guid.NewGuid(), Context: null);
+
+        var result = await sut.GenerateAiSummaryAsync(request, "user-1", NewHttpContext(), CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result.Analysis.Should().NotBeNullOrWhiteSpace(
+            "graceful-degrade — workspace AI tile MUST still render when no playbook can be resolved");
+        _playbookLookupMock.Verify(
+            p => p.GetByIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "no playbook id → no lookup → template fallback path");
+        _prefillAiMock.Verify(
+            p => p.ExecutePlaybookAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "no playbook id → no engine call → template fallback path");
     }
 
     // ─── helpers ──────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Deploy-RedisCache.ps1 -WhatIf integration check</title>
+    <phase>2: Bicep + provisioning artifacts</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>022,025,026</dependencies>
+    <blocks>none</blocks>
+    <tags>azure, deploy, testing, devops</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration smoke test; no Azure-side change</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Run `pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev -WhatIf`. Verify the produced plan: targets `spaarke-bff-redis-dev`, RG `spe-infrastructure-westus2`, Basic C0, KV upsert against canonical dev KV. Verify NFR-05 prod-gate: `pwsh ./scripts/Deploy-RedisCache.ps1 -Environment prod` (no `-Force`) exits non-zero with explanatory message.</prompt>
+  <role>Spaarke developer; integration smoke.</role>
+  <goal>`notes/deploy-script-whatif.md` documents both invocations + captured output + verdict (plan looks correct; prod-gate works).</goal>
+  <context><background>Sanity check before Phase 3 cutover.</background><relevant-files><file>scripts/Deploy-RedisCache.ps1</file><file>infrastructure/bicep/parameters/redis-dev.bicepparam</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">NFR-05 — prod gate.</constraint>
+    <constraint source="spec">NFR-06 — `-WhatIf` works.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>scripts/Deploy-RedisCache.ps1</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Run `pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev -WhatIf`. Capture output.</step>
+    <step order="2">Run `pwsh ./scripts/Deploy-RedisCache.ps1 -Environment prod` (no -Force). Capture stderr + exit code.</step>
+    <step order="3">Document both in `notes/deploy-script-whatif.md` with verdict.</step>
+    <step order="4">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">PowerShell invocations</tool><tool name="Write">notes</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/deploy-script-whatif.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Dev `-WhatIf` succeeds and the plan targets the canonical resource name + RG.</criterion>
+    <criterion testable="true">Prod without `-Force` exits non-zero with clear message.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

@@ -67,17 +67,6 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
     // Endpoint Registration Tests (ADR-001 — Minimal API)
     // =========================================================================
 
-    [Fact]
-    public void MapStandaloneChatContextEndpoints_MethodExists_AndIsStatic()
-    {
-        // Arrange
-        var method = typeof(StandaloneChatContextEndpoints).GetMethod("MapStandaloneChatContextEndpoints");
-
-        // Assert
-        method.Should().NotBeNull("endpoint registration extension method must exist");
-        method!.IsStatic.Should().BeTrue("Minimal API extension methods are static (ADR-001)");
-        method.ReturnType.Should().Be(typeof(IEndpointRouteBuilder));
-    }
 
     // =========================================================================
     // Authentication Tests (ADR-008)

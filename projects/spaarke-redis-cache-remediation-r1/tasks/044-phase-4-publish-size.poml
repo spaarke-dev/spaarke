@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Phase 4 publish-size delta</title>
+    <phase>4: Observability</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>041,043</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, ci-cd, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Per-task publish-size verification (CLAUDE.md §10 binding)</rigor-reason>
+    <parallel-group>Phase4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final Phase 4 gate</parallel-reason>
+  </metadata>
+  <prompt>Measure publish-size delta after Phase 4 metric emission code added. Append to `notes/phase-1-publish-size-delta.md` (or new file) as cumulative delta vs branch start.</prompt>
+  <role>Spaarke developer; deployment hygiene.</role>
+  <goal>Cumulative delta vs branch start ≤+1 MB (NFR-04); absolute ≤60 MB.</goal>
+  <context><background>Per CLAUDE.md §10, every BFF-touching task verifies publish-size. Phase 4 added metric emission code.</background><relevant-files><file>src/server/api/Sprk.Bff.Api/</file></relevant-files></context>
+  <constraints>
+    <constraint source="ADR-029">Publish-size delta ≤+1 MB.</constraint>
+    <constraint source="spec">NFR-04.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/phase-1-publish-size-delta.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.</step>
+    <step order="2">Compress and measure.</step>
+    <step order="3">Append delta to size-delta notes.</step>
+    <step order="4">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">publish + size</tool><tool name="Write">delta append</tool></tools>
+  <outputs><output type="notes">size-delta notes (appended)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Cumulative delta vs branch start ≤+1 MB compressed.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

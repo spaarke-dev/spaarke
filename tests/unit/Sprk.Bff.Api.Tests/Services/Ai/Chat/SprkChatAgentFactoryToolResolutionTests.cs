@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 /// </para>
 /// <para>
 /// Because <c>ResolveTools()</c> is private and the full <c>CreateAgentAsync()</c> flow
-/// requires extensive mocking (IChatClient, scope provider, ICapabilityRouter, etc.),
+/// requires extensive mocking (IChatClient, scope provider, etc.),
 /// this test class exercises the WIRING CONTRACT of the new block at the integration
 /// boundary that matters most:
 /// </para>

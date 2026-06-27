@@ -1,0 +1,112 @@
+<task id="CICD-081" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Build /test-diet skill — project-close test reconciliation (scaffolding vs maintain) per FR-B09</title>
+    <status>complete</status>
+    <estimated-effort>2.5 hours</estimated-effort>
+    <phase>2.5 - Build-vs-maintain codification</phase>
+    <stream>B - Test reset (extended)</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies></dependencies>
+    <blocks>090</blocks>
+    <tags>testing, skill, test-diet, project-close, build-vs-maintain</tags>
+    <execution-note>Modifies .claude/ — MUST run in main session</execution-note>
+  </metadata>
+
+  <prompt>
+    Per spec FR-B09: build a new `/test-diet` skill (or extension to `/repo-cleanup`) that runs as part of every project's wrap-up task (090). Protocol: for every test file added or modified during the project, apply build-vs-maintain criteria from FR-B08 → flag scaffolding tests for deletion in the wrap-up PR → confirm maintain tests live at correct KEEP path → document count delta. Wire into `task-execute` skill so 090 wrap-up REQUIRES `/test-diet` invocation. Tests this is doing for EVERY future project — the diet protocol is binding from now on.
+  </prompt>
+
+  <role>Skill author building a load-bearing project-close hygiene tool.</role>
+
+  <goal>New `/test-diet` skill exists; `task-execute` 090 wrap-up step modified to require its invocation; future projects automatically reconcile build-vs-maintain at close.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md (FR-B09)</file>
+    <file purpose="criteria-source">docs/adr/ADR-038-testing-strategy.md (post-080 — build-vs-maintain criteria)</file>
+    <file purpose="existing-skill">.claude/skills/repo-cleanup/SKILL.md (consider extension vs new skill)</file>
+    <file purpose="task-execute">.claude/skills/task-execute/SKILL.md (wrap-up step modification target)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="root-CLAUDE-3">Modifies `.claude/` — MUST run in main session.</constraint>
+    <constraint source="spec FR-B09">Skill is binding for every future project (not optional).</constraint>
+    <constraint source="design">Decide: new `/test-diet` skill vs extension to `/repo-cleanup`. New skill is cleaner separation of concerns; extension is fewer skills to maintain. Recommend NEW skill `/test-diet` with `/repo-cleanup` invoking it as a sub-step.</constraint>
+    <constraint source="spec FR-B07">FULL rigor — Step 9.5 binding.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Spaarke skill authoring + task-execute integration</topic>
+    <files>
+      <file>.claude/skills/repo-cleanup/SKILL.md (reference structure)</file>
+      <file>.claude/skills/task-execute/SKILL.md (Step 10 / wrap-up integration target)</file>
+      <file>.claude/skills/INDEX.md (skill registry — must add new skill)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md (criteria source — depends on 080)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Decide skill structure (new `/test-diet` vs extension to `/repo-cleanup`). Recommendation: new skill at `.claude/skills/test-diet/SKILL.md` invokable as `/test-diet`. `/repo-cleanup` calls it as a sub-step at project close.</step>
+    <step order="2">Author SKILL.md frontmatter per Spaarke convention (description, tags, techStack, appliesTo, alwaysApply: false, exemplar, last-reviewed).</step>
+    <step order="3">Author skill body sections:
+      - Purpose: reconcile scaffolding vs maintain tests at project close
+      - When to Load: trigger phrases include `/test-diet`, "test diet", "project close test review", invoked automatically by `/repo-cleanup` and `090-wrapup-*` tasks
+      - Workflow Steps:
+        (1) Identify scope: read `current-task.md` + git log for the project's branch → enumerate all test files added or modified during the project
+        (2) For each test file: apply build-vs-maintain criteria from ADR-038 → classify each test method as scaffolding / maintain / ambiguous
+        (3) Output `notes/test-diet-report.md` with: tests added, tests classified maintain (KEEP at canonical path), tests classified scaffolding (DELETE recommendation), ambiguous (requires manual judgment)
+        (4) For DELETE recommendations: emit `git rm` commands for review; do NOT auto-execute
+        (5) For maintain tests at wrong path: emit `git mv` commands for review
+        (6) Output count delta: "tests added: N; promoted to maintain: M; deleted as scaffolding: D; ambiguous awaiting judgment: A"
+      - Failure Modes: criteria are heuristics — final delete decision is reviewer's
+      - Related Skills: cross-link to `/repo-cleanup`, `/code-review`, `/adr-check`
+    </step>
+    <step order="4">Update `.claude/skills/INDEX.md` — add `test-diet` entry with description.</step>
+    <step order="5">Update `.claude/skills/task-execute/SKILL.md` Step 10 (or wrap-up section) — REQUIRE `/test-diet` invocation before `090-wrapup-*` task completes. Skill emits HARD WARNING if skipped.</step>
+    <step order="6">Update `.claude/skills/repo-cleanup/SKILL.md` to invoke `/test-diet` as a sub-step at project close.</step>
+    <step order="7">Update root CLAUDE.md §7 (task completion + transition) — mention the test diet as a binding step.</step>
+    <step order="8">Verify the skill loads correctly (the Skill tool will surface it in next conversation).</step>
+    <step order="9">Step 9.5: code-review + adr-check on all modified skill files.</step>
+  </steps>
+
+  <outputs>
+    <output type="skill">.claude/skills/test-diet/SKILL.md (new)</output>
+    <output type="skill">.claude/skills/INDEX.md (updated)</output>
+    <output type="skill">.claude/skills/task-execute/SKILL.md (wrap-up step modified)</output>
+    <output type="skill">.claude/skills/repo-cleanup/SKILL.md (calls /test-diet)</output>
+    <output type="root">CLAUDE.md §7 updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">.claude/skills/test-diet/SKILL.md exists with all required sections</criterion>
+    <criterion testable="true">.claude/skills/INDEX.md lists test-diet</criterion>
+    <criterion testable="true">.claude/skills/task-execute/SKILL.md wrap-up step requires /test-diet invocation</criterion>
+    <criterion testable="true">.claude/skills/repo-cleanup/SKILL.md invokes /test-diet at project close</criterion>
+    <criterion testable="true">Skill workflow produces a count-delta report (tests added/promoted/deleted/ambiguous)</criterion>
+    <criterion testable="true">Skill DOES NOT auto-delete — emits commands for reviewer judgment</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check pass</criterion>
+  </acceptance-criteria>
+
+  <notes status="completion-2026-06-26">
+    Executed in main session per parallel-safe=false (.claude/ + root CLAUDE.md modifications).
+
+    **Decision**: NEW skill at `.claude/skills/test-diet/SKILL.md` (NOT an extension of `/repo-cleanup`). Cleaner separation of concerns; `/repo-cleanup` invokes `/test-diet` as a Step 1.5 sub-step at project-completion mode.
+
+    **Deliverables**:
+    - `.claude/skills/test-diet/SKILL.md` — NEW skill, full workflow (6 steps); 12 per-method evaluation heuristics align with ADR-038 §7 17-ban list (B1-B17); read-only contract (emits `git rm`/`git mv`, never executes); failure modes + reviewer-judgment-final guarantees.
+    - `.claude/skills/INDEX.md` — added test-diet row after repo-cleanup with description + trigger phrases.
+    - `.claude/skills/task-execute/SKILL.md` Step 11 — added BINDING "Test Diet Gate at Project Close" block; HARD WARNING if 090-wrapup-* completes without `/test-diet`; skip requires logged rationale + PR description note.
+    - `.claude/skills/repo-cleanup/SKILL.md` Step 1.5 — added project-completion-mode `/test-diet` invocation (blocking; reviewer applies returned commands before Step 2).
+    - root `CLAUDE.md` §7 — added "Project-close test diet gate (BINDING)" subsection cross-referencing ADR-038 §7.
+
+    **Quality gates (BINDING per FR-B07)**:
+    - code-review: PASS (skill structure follows Spaarke convention; BINDING blocks integrate cleanly with existing Step 11 / Step 1 flows)
+    - adr-check: PASS (consistent with ADR-038 §7)
+    - Lint: N/A
+
+    **Verification**: System reminder after INDEX.md edit confirmed `/test-diet` is now visible to the harness skill-discovery layer.
+
+    **Outputs feed**: Future projects' 090-wrapup-* tasks will invoke `/test-diet` automatically per task-execute Step 11; sample report format is in test-diet SKILL.md Step 4 (will be exercised first when this project runs its own 090 task).
+  </notes>
+</task>

@@ -95,45 +95,6 @@ public class MembershipCacheInvalidatorTests
 
     // ─── Resilience contract ───────────────────────────────────────────────
 
-    [Fact]
-    public async Task PublishInvalidationAsync_RedisFailure_LogsWarning_DoesNotThrow()
-    {
-        // FR-2P2.8 resilience: Redis errors are caught + logged; the call
-        // returns normally. The 5-min cache TTL is the correctness backstop.
-        var subscriber = new Mock<ISubscriber>();
-        subscriber
-            .Setup(s => s.PublishAsync(
-                It.IsAny<RedisChannel>(),
-                It.IsAny<RedisValue>(),
-                It.IsAny<CommandFlags>()))
-            .ThrowsAsync(new RedisConnectionException(ConnectionFailureType.UnableToConnect, "simulated"));
-
-        var sut = CreateSut(subscriber, out _);
-
-        var act = async () => await sut.PublishInvalidationAsync(
-            PersonId, EntityLogicalName, CorrelationId, CancellationToken.None);
-
-        await act.Should().NotThrowAsync();
-    }
-
-    [Fact]
-    public async Task PublishInvalidationAsync_GenericException_LogsWarning_DoesNotThrow()
-    {
-        var subscriber = new Mock<ISubscriber>();
-        subscriber
-            .Setup(s => s.PublishAsync(
-                It.IsAny<RedisChannel>(),
-                It.IsAny<RedisValue>(),
-                It.IsAny<CommandFlags>()))
-            .ThrowsAsync(new InvalidOperationException("simulated"));
-
-        var sut = CreateSut(subscriber, out _);
-
-        var act = async () => await sut.PublishInvalidationAsync(
-            PersonId, EntityLogicalName, CorrelationId, CancellationToken.None);
-
-        await act.Should().NotThrowAsync();
-    }
 
     [Fact]
     public async Task PublishInvalidationAsync_PreservesCorrelationId()

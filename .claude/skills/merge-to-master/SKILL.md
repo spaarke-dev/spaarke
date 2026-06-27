@@ -467,3 +467,27 @@ CHECK 4: Build compiles
 ---
 
 *This skill ensures completed project work flows back into master, preventing code drift between branches and ensuring new projects always start from the latest codebase.*
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 038 · FR-24)
+
+**After merge succeeds**:
+
+1. Capture merged PR #M (`gh pr list --head <merged-branch>` if not already known).
+2. Add comment to the Project Issue: `Merged via PR #M (commit {hash})`.
+3. Invoke `/devops-project-sync` to refresh fields.
+
+**Conditional archive prompt** (per F3 — explicit gate, NOT auto-archive):
+
+If after sync `Tasks Completed == Task Count` AND PR merged → prompt:
+
+```
+All tasks complete + PR merged. Archive project? [y/N]
+```
+
+On explicit `y`: invoke `/devops-project-archive --status Completed --pr-number #M`. Default N. **Never auto-archives** (F3 binding).
+
+Silent on success when no archive needed. Failure degrades to ⚠️ warn.
+
+See: [`.claude/skills/devops-project-sync/SKILL.md`](../devops-project-sync/SKILL.md), [`.claude/skills/devops-project-archive/SKILL.md`](../devops-project-archive/SKILL.md).

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Migrate Office services to ITenantCache</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001,006,009</dependencies>
+    <blocks>011</blocks>
+    <tags>bff-api, cache, redis, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + .cs modifications + part of NFR-07 atomic migration</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>NFR-07 atomic single-PR migration — sequential ordering of 010–017 for review tractability + commit atomicity</parallel-reason>
+  </metadata>
+  <prompt>Migrate every direct `IDistributedCache.` call in BFF Office services (`Services/Office/`) to `ITenantCache`. Use inventory from task 001 to scope. Preserve existing functional behavior — each call's key now goes through the wrapper's `tenant:{tenantId}:` prefix.</prompt>
+  <role>Spaarke .NET developer. Apply `bff-extensions.md` §F.3 (empirical reproduction) for any call site whose tenant context is non-obvious.</role>
+  <goal>`grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/Services/Office/` returns ZERO matches outside the wrapper itself. All Office service tests pass.</goal>
+  <context>
+    <background>Part of NFR-07 atomic migration of ~199 sites. Sub-tasks 010–017 are split for review tractability but committed as ONE PR. Office services are migrated first because they typically have explicit tenant context already (JobId-bound).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Office/</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-06 + NFR-07 — atomic single-PR migration; partial migration prohibited.</constraint>
+    <constraint source="ADR-013">Preserve AI service rate-limit patterns where Office services interact with AI.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/ITenantCache.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Open `notes/cache-call-site-inventory.md` Office section. Identify all sites to migrate.</step>
+    <step order="2">For each call site: inject `ITenantCache` (replace `IDistributedCache`); rewrite call to use `tenantId`, `resource`, `id`, `version`. Derive `tenantId` from the existing context (user claim, job, request).</step>
+    <step order="3">If a call site has no obvious tenant context (system-level), flag for task 017 (allow-list) and leave the direct `IDistributedCache` call temporarily; document in `notes/cache-call-site-inventory.md`.</step>
+    <step order="4">Run `dotnet build src/server/api/Sprk.Bff.Api/`.</step>
+    <step order="5">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — focus on Office tests; fix breakages.</step>
+    <step order="6">Update inventory file with checkbox per call site.</step>
+    <step order="7">Update `TASK-INDEX.md` + `current-task.md`.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Inventory + each call site</tool>
+    <tool name="Edit">Per-file migration</tool>
+    <tool name="Grep">Per-task verification</tool>
+    <tool name="Bash">dotnet build + dotnet test</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/* (modified — multiple files)</output>
+    <output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md (checkboxes updated)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/Services/Office/` returns ZERO matches (or only allow-list-flagged sites with comment).</criterion>
+    <criterion testable="true">`dotnet build` succeeds; `dotnet test` Office-related tests pass.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor.</protocol>
+  </execution>
+</task>

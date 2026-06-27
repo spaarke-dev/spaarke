@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>redis.bicep parameter audit (FR-09)</title>
+    <phase>2: Bicep + provisioning artifacts</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>022,023,024</blocks>
+    <tags>azure, bicep, infrastructure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Audit + modify existing Bicep module; verifies parameter completeness</rigor-reason>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Audit `infrastructure/bicep/modules/redis.bicep`. Verify required parameters per FR-09: `name`, `location`, `sku` (object: name/family/capacity), `minimumTlsVersion` (default "1.2"), `enableNonSslPort` (default false), `redisVersion`, optional `vnetSubnetId`, optional `staticIP`, optional `tags`. Outputs: `name`, `hostName`, `sslPort`, resource ID, primary key. Add any missing parameter/output (extend; do not duplicate module). Exploration finding: current SKU param is a string + capacity int (not an object). Decide whether to migrate to object form OR document why string+int satisfies FR-09.</prompt>
+  <role>Spaarke infrastructure developer with Bicep familiarity.</role>
+  <goal>`redis.bicep` parameter surface complete per FR-09 list. Decision documented if SKU parameterization shape diverges from spec's "object" expectation.</goal>
+  <context><background>Spec describes SKU as object; current module uses string + int (per exploration). Both shapes can satisfy SKU configuration. Document the decision.</background><relevant-files><file>infrastructure/bicep/modules/redis.bicep</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">FR-09 — extend, don't duplicate.</constraint>
+    <constraint source="azure-deployment.md">Idempotent deploy.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>infrastructure/bicep/modules/redis.bicep</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read current `redis.bicep`. Enumerate parameters + outputs.</step>
+    <step order="2">Compare against FR-09 list. Identify gaps.</step>
+    <step order="3">If SKU is currently string+int and spec calls for object: evaluate impact. Decide: (a) refactor to object (preferred per spec); (b) keep string+int and document rationale (acceptable if it satisfies all use cases).</step>
+    <step order="4">Add any missing parameter (e.g., `staticIP`, `vnetSubnetId`, `tags` if not present).</step>
+    <step order="5">Verify outputs include `name`, `hostName`, `sslPort`, resource ID, primary key.</step>
+    <step order="6">`bicep build redis.bicep` — verify compiles.</step>
+    <step order="7">Document decision in `notes/redis-bicep-audit.md`.</step>
+    <step order="8">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">redis.bicep</tool><tool name="Edit">Module modifications</tool><tool name="Bash">bicep build</tool><tool name="Write">audit notes</tool></tools>
+  <outputs>
+    <output type="code">infrastructure/bicep/modules/redis.bicep (modified — extended)</output>
+    <output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/redis-bicep-audit.md (NEW)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All FR-09 parameters present (or documented decision why a subset suffices).</criterion>
+    <criterion testable="true">All FR-09 outputs present.</criterion>
+    <criterion testable="true">`bicep build` succeeds.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

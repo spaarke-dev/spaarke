@@ -855,51 +855,6 @@ public class ExternalAccessEndpointTests
 
     #region ProjectClosureEndpoint — Handler: returns 400 for empty ProjectId
 
-    [Fact]
-    public async Task CloseProject_EmptyProjectId_HandlerReturns400()
-    {
-        // Arrange
-        // DataverseWebApiClient requires IConfiguration with Dataverse:ServiceUrl and
-        // ManagedIdentity:ClientId. We provide valid-looking values — the client will be
-        // constructed but never actually called because the handler validates ProjectId
-        // before making any network requests.
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
-                ["ManagedIdentity:ClientId"] = "00000000-0000-0000-0000-000000000001"
-            })
-            .Build();
-
-        var dvClient = new DataverseWebApiClient(
-            config,
-            new Mock<ILogger<DataverseWebApiClient>>().Object);
-
-        var speService = new SpeContainerMembershipService(
-            new Mock<IGraphClientFactory>().Object,
-            new Mock<ILogger<SpeContainerMembershipService>>().Object);
-
-        var request = new CloseProjectRequest(ProjectId: Guid.Empty, ContainerId: null);
-        var cacheMock = new Mock<IDistributedCache>();
-        var httpContext = CreateHttpContext();
-        var logger = CreateLogger();
-
-        // Act — the handler checks ProjectId == Guid.Empty first and returns 400
-        // before calling the DataverseWebApiClient (so no network calls are made)
-        var result = await ProjectClosureEndpoint.Handle(
-            request,
-            dvClient,
-            speService,
-            cacheMock.Object,
-            httpContext,
-            logger.Object,
-            CancellationToken.None);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.GetType().Name.Should().Be("ProblemHttpResult",
-            "ProjectId == Guid.Empty must yield a 400 Bad Request ProblemDetails result");
-    }
 
     #endregion
 

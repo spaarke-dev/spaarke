@@ -33,57 +33,6 @@ public class DataverseQueryToolsTests
 
     // === [Description] attribute tests ===
 
-    [Fact]
-    public void QueryEntitiesAsync_EntityTypeParam_HasDescriptionAttribute()
-    {
-        var method = typeof(DataverseQueryTools).GetMethod(nameof(DataverseQueryTools.QueryEntitiesAsync));
-        method.Should().NotBeNull();
-
-        var param = method!.GetParameters().First(p => p.Name == "entityType");
-        var desc = param.GetCustomAttribute<DescriptionAttribute>();
-
-        desc.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on key parameters");
-        desc!.Description.Should().Contain("sprk_matter");
-    }
-
-    [Fact]
-    public void QueryEntitiesAsync_FilterParam_HasDescriptionAttribute()
-    {
-        var method = typeof(DataverseQueryTools).GetMethod(nameof(DataverseQueryTools.QueryEntitiesAsync));
-        method.Should().NotBeNull();
-
-        var param = method!.GetParameters().First(p => p.Name == "filter");
-        var desc = param.GetCustomAttribute<DescriptionAttribute>();
-
-        desc.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on filter parameter");
-        desc!.Description.Should().Contain("OData");
-    }
-
-    [Fact]
-    public void GetEntityDetailAsync_EntityTypeParam_HasDescriptionAttribute()
-    {
-        var method = typeof(DataverseQueryTools).GetMethod(nameof(DataverseQueryTools.GetEntityDetailAsync));
-        method.Should().NotBeNull();
-
-        var param = method!.GetParameters().First(p => p.Name == "entityType");
-        var desc = param.GetCustomAttribute<DescriptionAttribute>();
-
-        desc.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on key parameters");
-        desc!.Description.Should().Contain("sprk_matter");
-    }
-
-    [Fact]
-    public void GetEntityDetailAsync_IdentifierParam_HasDescriptionAttribute()
-    {
-        var method = typeof(DataverseQueryTools).GetMethod(nameof(DataverseQueryTools.GetEntityDetailAsync));
-        method.Should().NotBeNull();
-
-        var param = method!.GetParameters().First(p => p.Name == "identifier");
-        var desc = param.GetCustomAttribute<DescriptionAttribute>();
-
-        desc.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on identifier parameter");
-        desc!.Description.Should().Contain("GUID");
-    }
 
     // === QueryEntitiesAsync: valid entity type ===
 

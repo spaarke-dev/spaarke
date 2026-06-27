@@ -23,7 +23,7 @@ Implementing or debugging token caching for OBO flows (server-side Redis or clie
 - MUST hash tokens with SHA256 before using as cache keys — never store plaintext
 - MUST log only first 8 chars of hash for debugging
 - Server TTL: 55 minutes (5-min buffer before token expiry)
-- Cache key: `sdap:graph:token:{sha256hash}`
+- Cache key: `spaarke:graph-token:{sha256hash}` (system-level exception per ADR-009 amendment + `SystemCacheKeys.GraphToken` — keyed by SHA256(user-token), not tenant-scoped)
 - Fail gracefully: cache errors should not break the OBO flow
 
 ## Client-side (MSAL — v2, per ADR-028)

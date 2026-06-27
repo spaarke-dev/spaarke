@@ -484,7 +484,7 @@ public static class KnowledgeBaseEndpoints
             var result = new KnowledgeTestSearchResult
             {
                 Query = request.Query,
-                IndexName = request.IndexName ?? "spaarke-knowledge-index-v2",
+                IndexName = request.IndexName ?? "spaarke-files-index",
                 TenantId = tenantId,
                 ResultCount = response.Results.Count,
                 SearchDurationMs = response.SearchDurationMs,

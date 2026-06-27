@@ -135,6 +135,13 @@ export const nodeColorSchemes: Record<PlaybookNodeType, { background: string; ic
     background: tokens.colorPaletteGreenBackground3,
     iconColor: tokens.colorNeutralForegroundOnBrand,
   },
+  // R4 task 004: EntityNameValidator is a post-LLM Tool that scrubs hallucinated
+  // entity names. Reuse the magenta palette to signal "text-transform tool"
+  // alongside Wait (both Control/Workflow utility nodes).
+  entityNameValidator: {
+    background: tokens.colorPaletteMagentaBackground2,
+    iconColor: tokens.colorNeutralForegroundOnBrand,
+  },
   wait: {
     background: tokens.colorPaletteMagentaBackground2,
     iconColor: tokens.colorNeutralForegroundOnBrand,

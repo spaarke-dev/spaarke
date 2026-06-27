@@ -159,6 +159,7 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
               case 'createNotification':
                 return tokens.colorPaletteBerryBackground2;
               case 'wait':
+              case 'entityNameValidator':
                 return tokens.colorPaletteMagentaBackground2;
               default:
                 return tokens.colorNeutralBackground3;

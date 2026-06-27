@@ -82,6 +82,11 @@ export default defineConfig({
       "@spaarke/ui-components": path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
       "@spaarke/auth": path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
       "@spaarke/daily-briefing-components": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
+      // Pulled in transitively via @spaarke/ui-components/services/EntityCreationService.ts
+      // (Phase G of multi-container-multi-index-r1 / PR #369). Mirrors the alias
+      // already present in SpaarkeAi/LegalWorkspace/Create*Wizard/SmartTodo. DailyBriefing
+      // is the 8th surface needing this workaround pending project-wide tsconfig refs fix.
+      "@spaarke/sdap-client": path.resolve(__dirname, "../../client/shared/Spaarke.SdapClient/src"),
       "@fluentui/react-components": path.resolve(__dirname, "node_modules/@fluentui/react-components"),
       "@fluentui/react-icons": path.resolve(__dirname, "node_modules/@fluentui/react-icons"),
     },

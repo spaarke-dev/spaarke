@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Services.Ai.Memory;
 ///   <item><c>memory-composition</c> — hierarchical 4-layer memory block (task 067)</item>
 ///   <item><c>matter-memory</c> — cross-session structured matter facts</item>
 ///   <item><c>compact-formatting-directive</c> — Fluent markdown style directive</item>
-///   <item><c>dedup-directive</c> — CapabilityRouter dedup directive (task 042)</item>
+///   <item><c>dedup-directive</c> — FR-24 render-routing dedup directive</item>
 ///   <item><c>chat-ack-directive</c> — chat-ack directive (B-G9b hotfix)</item>
 /// </list>
 /// </para>

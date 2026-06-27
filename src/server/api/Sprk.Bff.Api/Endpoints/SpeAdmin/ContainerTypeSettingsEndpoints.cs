@@ -1,4 +1,3 @@
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 
@@ -151,12 +150,9 @@ public static class ContainerTypeSettingsEndpoints
 
         try
         {
-            // Get the Graph client authenticated for this config's app registration
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // PATCH container type settings via Graph API
-            var result = await graphService.UpdateContainerTypeSettingsAsync(
-                graphClient,
+            var result = await graphService.UpdateContainerTypeSettingsForConfigAsync(
+                config,
                 typeId,
                 request.SharingCapability,
                 request.IsVersioningEnabled,
@@ -187,13 +183,13 @@ public static class ContainerTypeSettingsEndpoints
                 CreatedDateTime = result.CreatedDateTime
             });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException sse)
         {
             logger.LogError(
-                odataError,
+                sse,
                 "Graph API error updating container type {TypeId} settings for config {ConfigId}. " +
                 "Status: {Status}. TraceId: {TraceId}",
-                typeId, configId, odataError.ResponseStatusCode, context.TraceIdentifier);
+                typeId, configId, sse.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 detail: "Failed to update container type settings via the Graph API. " +
