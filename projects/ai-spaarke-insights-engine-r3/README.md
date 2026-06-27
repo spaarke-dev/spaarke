@@ -1,9 +1,11 @@
 # Spaarke Insights Engine — Phase 2 (r3)
 
-> **Status**: 🆕 DESIGN PHASE (initiated 2026-06-04)
+> **Status**: ⏸ **PAUSED** as of 2026-06-10 — pending R6 ship + owner direction to resume.
+> **Pause context + resumption plan**: [`notes/pre-design-context-2026-06-10.md`](notes/pre-design-context-2026-06-10.md) — READ THIS FIRST if picking up r3 at any point in the future.
 > **Predecessor**: [`ai-spaarke-insights-engine-r2`](../ai-spaarke-insights-engine-r2/) (Phase 1.5 — ✅ Complete; 14/15 SCs met; PRs #330, #334, #336, #337, #339)
 > **Predecessor wrap-up**: [`r2/notes/lessons-learned.md`](../ai-spaarke-insights-engine-r2/notes/lessons-learned.md), [`r2/PHASE-2-OUTLINE.md`](../ai-spaarke-insights-engine-r2/PHASE-2-OUTLINE.md)
 > **Predecessor's predecessor**: [`ai-spaarke-insights-engine-r1`](../ai-spaarke-insights-engine-r1/) (Phase 1 plumbing — ✅ shipped + deployed)
+> **Parallel projects**: [`spaarke-ai-platform-unification-r6`](../spaarke-ai-platform-unification-r6/) (in design — r3 paused for R6), [`ai-spaarke-insights-engine-widgets-r1`](../ai-spaarke-insights-engine-widgets-r1/) (NEW 2026-06-10 — capacity pivoted here while r3 paused)
 
 ---
 
