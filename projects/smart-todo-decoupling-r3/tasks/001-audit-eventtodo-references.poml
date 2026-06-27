@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Audit all references to `sprk_eventtodo` and `sprk_event.sprk_todo*` fields</title>
+    <phase>Phase 1: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <blocks>002, 003, 004, 005, 010, 011, 020, 021, 030, 031, 040, 061</blocks>
+    <tags>dataverse, refactoring, audit</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Inventory + verification task; produces a single artifact (audit doc); no production code changes but its output gates the Phase 1 schema cut.</rigor-reason>
+    <parallel-group>P1-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Produce a complete inventory of every reference (code, form XML, ribbon XML, view XML, schema, docs) to `sprk_eventtodo` (the entity), the relationship `sprk_eventtodo_RegardingEvent_n1`, and the four `sprk_event` fields `sprk_todoflag`, `sprk_todostatus`, `sprk_todocolumn`, `sprk_todopinned`. Output a single audit doc that the schema-cut tasks (002–005) will use as their removal checklist. This task is the safety net against import-failure during Phase 1.
+  </prompt>
+
+  <role>Spaarke platform developer with Dataverse + repo-grep expertise. No production code changes — produce a single audit artifact only.</role>
+
+  <goal>`projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md` exists, enumerating every hit per category (TypeScript, C#, Form XML, Ribbon XML, View XML, Solution XML, Markdown), with file path + line number + verbatim match snippet. Sorted by removal complexity (high → low). Includes a final "removal order" recommendation for tasks 002–005.</goal>
+
+  <context>
+    <background>R1/R2 left `sprk_eventtodo` widely referenced. Deleting the entity before removing references causes solution-import failure with cryptic "dependency exists" errors. This audit unblocks Phase 1 and gives tasks 002–005 a concrete removal target.</background>
+    <relevant-files>
+      <file>projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md</file>
+      <file>src/</file>
+      <file>solutions/</file>
+      <file>docs/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">No code modifications in this task — audit only. Output is a single Markdown doc in `notes/`.</constraint>
+    <constraint source="FR-29">Tasks 002–005 will require zero remaining `src/` references before solution import.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/smart-todo-decoupling-r3/spec.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+      <file>projects/smart-todo-decoupling-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep the repo for `sprk_eventtodo` (all variants: `sprk_eventtodo`, `_sprk_eventtodo_value`, `sprk_eventtodos`, the relationship `sprk_eventtodo_RegardingEvent_n1`). Record file + line + snippet.</step>
+    <step order="2">Grep for each removed `sprk_event` field: `sprk_todoflag`, `sprk_todostatus`, `sprk_todocolumn`, `sprk_todopinned` (and their `_value` lookups). Record file + line + snippet.</step>
+    <step order="3">Grep for legacy helper names that imply two-entity logic: `loadTodoExtension`, `saveTodoExtensionFields`, `deactivateTodoExtension`, `_sprk_regardingevent_value`. Record file + line + snippet.</step>
+    <step order="4">Inspect solution metadata: search `*.xml` under `solutions/` for entity references, ribbon/view references, dependent relationships.</step>
+    <step order="5">Categorize hits into removal buckets: (a) **Schema** — to be removed by tasks 002–005; (b) **TS/TSX code paths** — to be removed by Phases 2–4 (Kanban hoist, code-page repoint, wizard rewrite); (c) **C# / plugin code paths** — to be removed by Phase 7; (d) **Docs** — to be updated by Phase 9.</step>
+    <step order="6">Recommend the removal order: schema dependencies first (views, forms, ribbons referencing the to-be-deleted entity/fields), then code paths, then the entity delete itself.</step>
+    <step order="7">Write the audit doc to `projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md` with the categories above + a "ready-to-cut" checklist for each downstream task (002–005).</step>
+    <step order="8">Update `projects/smart-todo-decoupling-r3/tasks/TASK-INDEX.md`: change this task's status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Repo-wide content search</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit doc exists at `notes/eventtodo-reference-audit.md` with at least four categorized sections (Schema / TS/TSX / C# / Docs).</criterion>
+    <criterion testable="true">Every grep hit cited in the doc resolves to an existing file + line in the current branch (no stale references).</criterion>
+    <criterion testable="true">A "removal order" recommendation is included and is consistent with tasks 002 → 005 dependency order.</criterion>
+    <criterion testable="true">TASK-INDEX.md status updated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This audit is the SAFETY GATE for Phase 1. If any unexpected non-Spaarke consumer (admin script, external integration) is discovered, escalate before tasks 002–005 cut the schema. Per spec OS-2 + NFR-12, no compat shims, no migration — but unknown consumers may need a heads-up.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load `spec.md` + `design.md` + this project's `CLAUDE.md`. Follow task-execute STANDARD-rigor protocol (Step 9.5 quality gates skipped for audit-only tasks).</protocol>
+  </execution>
+</task>

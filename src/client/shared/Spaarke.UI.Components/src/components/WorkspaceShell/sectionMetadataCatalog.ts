@@ -36,6 +36,10 @@ import {
   DocumentRegular,
   SparkleRegular,
   CalendarLtr24Regular,
+  FolderRegular,
+  ReceiptRegular,
+  BriefcaseRegular,
+  BriefcaseSearchRegular,
 } from '@fluentui/react-icons';
 import type { SectionCategory } from './types';
 
@@ -112,9 +116,46 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
   {
     id: 'documents',
     label: 'My Documents',
-    description: 'Recent documents with quick actions',
+    description: 'Your documents',
     category: 'data',
     icon: DocumentRegular,
+    defaultHeight: '480px',
+  },
+  // ai-spaarke-ai-workspace-UI-r1 #4 (2026-06-08): three new entity-view
+  // sections sharing <DataverseEntityViewWidget>. Each needs an operator-
+  // created sprk_gridconfiguration row (see each registration file's
+  // DEPLOYMENT REQUIREMENT note).
+  {
+    id: 'matters',
+    label: 'Matters',
+    description: 'Your matters',
+    category: 'data',
+    icon: BriefcaseSearchRegular,
+    defaultHeight: '480px',
+  },
+  {
+    id: 'projects',
+    label: 'Projects',
+    description: 'Your projects',
+    category: 'data',
+    icon: FolderRegular,
+    defaultHeight: '480px',
+  },
+  {
+    id: 'invoices',
+    label: 'Invoices',
+    description: 'Your invoices',
+    category: 'data',
+    icon: ReceiptRegular,
+    defaultHeight: '480px',
+  },
+  {
+    id: 'work-assignments',
+    label: 'Work Assignments',
+    description: 'Work assignments routed to you',
+    category: 'data',
+    icon: BriefcaseRegular,
+    defaultHeight: '480px',
   },
   {
     id: 'daily-briefing',

@@ -1,0 +1,100 @@
+<task id="067" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-20 — Hierarchical memory composition (recent verbatim + compressed mid + retrieved old)</title>
+    <status>pending</status>
+    <estimated-effort>1 day</estimated-effort>
+    <phase>Phase C — Cross-Conversation Memory (Pillar 7)</phase>
+    <wave>C-G2 (sequential after 064/065/066)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>064, 065, 066</dependencies>
+    <tags>bff-api, ai, services, memory</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Composition orchestrator combining 3 primitives; budget interaction critical; consumed by chat prompt assembly.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Build hierarchical memory composition that orchestrates the three primitives from
+    tasks 064 (compression), 065 (pinned context), 066 (selective recall) into a single
+    `IMemoryCompositionService` consumed by the chat prompt builder. Layers per spec
+    FR-44:
+    - **Recent verbatim**: last 10 turns as-is
+    - **Compressed mid-distance**: turns 10-50 as summary blocks (from task 064)
+    - **Retrieved old**: turns 50+ via similarity recall (from task 066)
+    - **Pinned context**: pinType-grouped items (from task 065) — always included
+    Respects 8K total budget (NFR-10) — when over budget, drops in priority order:
+    retrieved old → compressed mid → recent verbatim oldest first; pinned NEVER dropped.
+  </prompt>
+
+  <role>
+    Senior AI platform engineer with familiarity with token budget orchestration +
+    memory layering patterns.
+  </role>
+
+  <goal>
+    Composition service produces a single memory block consumed by chat prompt assembly;
+    correct layering; budget enforcement; pinned items always present.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="ai-arch">docs/architecture/AI-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Register in existing module.</constraint>
+    <constraint source="ADR-013">BFF-side AI service.</constraint>
+    <constraint source="ADR-029">Publish-size delta verified.</constraint>
+    <constraint source="spec FR-44">Hierarchical composition: recent verbatim + compressed mid + retrieved old.</constraint>
+    <constraint source="spec NFR-10">8K total budget; pinned never dropped.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/ai-memory-composition</topic>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — Composition orchestrator; budget enforcement critical."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 064/065/066 complete.</step>
+    <step order="2" name="Gather Resources">Read primitives + budget tracking patterns.</step>
+    <step order="3" name="Author Composition Service">`IMemoryCompositionService` + impl. Constructor injects compression + pinned + recall services.</step>
+    <step order="4" name="Implement Layering">Recent (last 10) + compressed (10-50) + retrieved (50+ by similarity) + pinned. Tag each layer in output.</step>
+    <step order="5" name="Implement Budget Enforcement">Drop priority order; pinned never dropped.</step>
+    <step order="6" name="Register in Module">Per ADR-010.</step>
+    <step order="7" name="Tests">Unit tests for each layer + budget enforcement + pinned-always-present.</step>
+    <step order="8" name="Publish-Size + CVE">dotnet publish + vulnerable check.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 067 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IMemoryCompositionService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryCompositionService.cs (NEW)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/MemoryCompositionServiceTests.cs (NEW)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 layers (recent + compressed + retrieved + pinned) present in composed output.</criterion>
+    <criterion testable="true">8K budget enforced; over-budget triggers priority drop (retrieved → compressed → recent oldest).</criterion>
+    <criterion testable="true">Pinned items NEVER dropped, even when over budget.</criterion>
+    <criterion testable="true">Unit tests cover all 4 layers + budget paths.</criterion>
+    <criterion testable="true">ZERO new Program.cs lines.</criterion>
+    <criterion testable="true">Publish-size delta within budget.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

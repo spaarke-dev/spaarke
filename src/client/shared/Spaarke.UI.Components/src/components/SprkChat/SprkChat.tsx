@@ -336,6 +336,14 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   injectLocalMessage,
   onLocalMessageInjected,
   onBeforeSendMessage,
+  // R6 Pillar 8 (tasks 080+) outbound-body decoration hook (optional; ADR-012
+  // context-agnostic). Existing consumers ignore.
+  onDecorateOutboundBody,
+  // chat-routing-redesign-r1 task 117a/117b — playbook-options forwarding +
+  // inline link-button click handlers. All optional; ADR-012 generic seam.
+  onPlaybookOptions: onPlaybookOptionsProp,
+  onSelectPlaybook,
+  onOpenLibraryModal,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -423,6 +431,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     clearPendingActionEvent,
     setOnDocumentStreamEvent,
     setOnPaneEvent,
+    setOnPlaybookOptions,
   } = sseStream;
 
   // Track current streaming state
@@ -963,6 +972,36 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     };
   }, [onPaneEventProp, setOnPaneEvent]);
 
+  // ── chat-routing-redesign-r1 task 117a/117b: register playbook_options callback ──
+  //
+  // Forwards the SSE `playbook_options` payload (top-N candidates +
+  // libraryModalCta + sessionAttachmentIds) to the host (typically
+  // ConversationPane). Synchronous callback-ref pattern — mirrors the
+  // setOnPaneEvent useEffect above. The host appends a structured chat message
+  // (responseType='playbook_options') so the candidates render as inline link
+  // buttons within the SprkChat thread (FR-50 + FR-51).
+  //
+  // ADR-015: SprkChat MUST NOT log the payload here. The wrapper only forwards.
+  React.useEffect(() => {
+    if (!onPlaybookOptionsProp) {
+      setOnPlaybookOptions(null);
+      return;
+    }
+
+    setOnPlaybookOptions(payload => {
+      try {
+        onPlaybookOptionsProp(payload);
+      } catch (err) {
+        // Per ADR-015: do NOT include the payload in the log line — only the error.
+        console.error('[SprkChat] Failed to forward playbook_options SSE event:', err);
+      }
+    });
+
+    return () => {
+      setOnPlaybookOptions(null);
+    };
+  }, [onPlaybookOptionsProp, setOnPlaybookOptions]);
+
   // Auto-scroll to bottom on new messages
   React.useEffect(() => {
     if (messageListRef.current) {
@@ -972,7 +1011,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
   // Send a message and start streaming the response
   const handleSend = React.useCallback(
-    (messageText: string) => {
+    async (messageText: string) => {
       if (!session || isStreaming) {
         return;
       }
@@ -1029,7 +1068,30 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           textContent: a.textContent,
         }));
       }
-      startStream(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`, body, getAccessToken);
+
+      // R6 Pillar 8 (task 080+) outbound-body decoration. Hosts wire CommandRouter
+      // + HardSlashExecutor + SoftSlashRouter + ReferenceResolver via this single
+      // seam. Returns null → cancel send (hard slash dispatched client-side).
+      // Throwing/rejecting → fall back to base body; send proceeds.
+      let finalBody: Record<string, unknown> = body;
+      if (onDecorateOutboundBody) {
+        try {
+          const decorated = await onDecorateOutboundBody(body);
+          if (decorated === null) {
+            // Host cancelled the send (e.g. `/clear`, `/help`). Reset streaming
+            // state set above and stop here.
+            isStreamingRef.current = false;
+            return;
+          }
+          if (decorated !== undefined) {
+            finalBody = decorated;
+          }
+        } catch {
+          // Host failures must not break the send lifecycle.
+        }
+      }
+
+      startStream(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/messages`, finalBody, getAccessToken);
     },
     [
       session,
@@ -1042,6 +1104,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       getAccessToken,
       chatAttachments,
       onBeforeSendMessage,
+      onDecorateOutboundBody,
     ]
   );
 
@@ -2197,6 +2260,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           // (task 072 will use this index when updating step execution state).
           const isPlanPreview = msg.metadata?.responseType === 'plan_preview';
           const isDocumentStatus = msg.metadata?.responseType === 'document_status';
+          // chat-routing-redesign-r1 task 117b — thread onSelectPlaybook +
+          // onOpenLibraryModal callbacks down so the inline link buttons in
+          // the playbook_options card can dispatch the right actions (FR-50 / 51).
+          const isPlaybookOptions = msg.metadata?.responseType === 'playbook_options';
 
           // ── FR-14: Merge persistence state into document_status messages ────
           // The persistence state is tracked locally in documentPersistenceState map
@@ -2242,6 +2309,14 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             ...(isDocumentStatus && {
               onSaveToMatterFiles: handleSaveToMatterFiles,
               hasContainerId,
+            }),
+            // chat-routing-redesign-r1 task 117b — wire link-button click handlers
+            // for the playbook_options card. When a host doesn't supply the
+            // callbacks, SprkChatMessageRenderer renders the buttons + link
+            // disabled (defensive). FR-50 + FR-51.
+            ...(isPlaybookOptions && {
+              onSelectPlaybook,
+              onOpenLibraryModal,
             }),
           };
 

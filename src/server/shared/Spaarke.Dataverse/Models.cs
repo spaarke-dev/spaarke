@@ -172,7 +172,10 @@ public class UpdateDocumentRequest
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// <summary>
+    /// LEGACY (preserved for dual-write transition per R3 FR-3H3.2 / spec assumption line 366):
     /// Whether the document has been indexed for semantic search. Maps to sprk_searchindexed.
+    /// Set to true at completion alongside <see cref="SearchIndexCompletedOn"/>.
+    /// Slated for removal after consumer migration confirmed in prod (post-R3).
     /// </summary>
     public bool? SearchIndexed { get; set; }
 
@@ -182,9 +185,25 @@ public class UpdateDocumentRequest
     public string? SearchIndexName { get; set; }
 
     /// <summary>
+    /// LEGACY (preserved for dual-write transition per R3 FR-3H3.2 / spec assumption line 366):
     /// Timestamp when document was last indexed. Maps to sprk_searchindexedon.
+    /// Mirrors <see cref="SearchIndexCompletedOn"/> while dual-write is in force.
     /// </summary>
     public DateTime? SearchIndexedOn { get; set; }
+
+    /// <summary>
+    /// Timestamp when the document was ENQUEUED for indexing (Service Bus publish or direct invocation).
+    /// Maps to sprk_searchindexqueuedon. Set to UtcNow at enqueue. R3 FR-3H3.2 / AC-H3.2.
+    /// Distinct from <see cref="SearchIndexCompletedOn"/> — fixes the long-standing "indexed = true means enqueued, not completed" misleading-status pitfall.
+    /// </summary>
+    public DateTime? SearchIndexQueuedOn { get; set; }
+
+    /// <summary>
+    /// Timestamp when the document was CONFIRMED indexed by AI Search.
+    /// Maps to sprk_searchindexcompletedon. Set to UtcNow at successful index callback. R3 FR-3H3.2 / AC-H3.2.
+    /// During dual-write transition, set alongside the legacy <see cref="SearchIndexed"/> = true.
+    /// </summary>
+    public DateTime? SearchIndexCompletedOn { get; set; }
 }
 
 /// <summary>
@@ -274,6 +293,47 @@ public class DocumentEntity
 
     /// <summary>Invoice display name. Maps to _sprk_invoice_value@OData.Community.Display.V1.FormattedValue.</summary>
     public string? InvoiceName { get; set; }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Search Index Tracking (multi-container-multi-index-r1)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// LEGACY (preserved for dual-write transition per R3 FR-3H3.2 / spec assumption line 366):
+    /// Whether the document has been indexed for semantic search. Maps to sprk_searchindexed.
+    /// Set to true by `RagEndpoints.IndexFile` after successful AI Search write.
+    /// During R3 transition, this is set alongside <see cref="SearchIndexCompletedOn"/>.
+    /// Slated for removal after consumer migration confirmed in prod (post-R3).
+    /// </summary>
+    public bool? SearchIndexed { get; set; }
+
+    /// <summary>
+    /// Name of the AI Search index where the document is stored. Maps to sprk_searchindexname.
+    /// Required for multi-index aware consumers (e.g., `VisualizationService` / Find Similar)
+    /// to bind the right SearchClient. Cascaded from the BU on wizard create.
+    /// </summary>
+    public string? SearchIndexName { get; set; }
+
+    /// <summary>
+    /// LEGACY (preserved for dual-write transition per R3 FR-3H3.2 / spec assumption line 366):
+    /// Timestamp when document was last indexed. Maps to sprk_searchindexedon.
+    /// Mirrors <see cref="SearchIndexCompletedOn"/> while dual-write is in force.
+    /// </summary>
+    public DateTime? SearchIndexedOn { get; set; }
+
+    /// <summary>
+    /// Timestamp when the document was ENQUEUED for indexing (Service Bus publish or direct invocation).
+    /// Maps to sprk_searchindexqueuedon. R3 FR-3H3.2 / AC-H3.2.
+    /// Distinct from <see cref="SearchIndexCompletedOn"/> — fixes the "indexed = true means enqueued, not completed" pitfall.
+    /// </summary>
+    public DateTime? SearchIndexQueuedOn { get; set; }
+
+    /// <summary>
+    /// Timestamp when the document was CONFIRMED indexed by AI Search.
+    /// Maps to sprk_searchindexcompletedon. R3 FR-3H3.2 / AC-H3.2.
+    /// During dual-write transition, set alongside the legacy <see cref="SearchIndexed"/> = true.
+    /// </summary>
+    public DateTime? SearchIndexCompletedOn { get; set; }
 }
 
 /// <summary>

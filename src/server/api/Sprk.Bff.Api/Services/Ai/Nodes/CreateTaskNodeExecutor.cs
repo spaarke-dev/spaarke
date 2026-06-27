@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
@@ -21,22 +23,28 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 ///   "dueDate": "{{dueDate}}"
 /// }
 /// </code>
+/// <para>
+/// Uses the canonical <see cref="IGenericEntityService"/> shared library
+/// (which forwards to <c>DataverseServiceClientImpl</c>) rather than an
+/// app-private named HttpClient. This gives correct BaseAddress + token
+/// acquisition + lifecycle management for app-only execution paths.
+/// </para>
 /// </remarks>
 public sealed class CreateTaskNodeExecutor : INodeExecutor
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     private readonly ITemplateEngine _templateEngine;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IGenericEntityService _entityService;
     private readonly ILogger<CreateTaskNodeExecutor> _logger;
 
     public CreateTaskNodeExecutor(
         ITemplateEngine templateEngine,
-        IHttpClientFactory httpClientFactory,
+        IGenericEntityService entityService,
         ILogger<CreateTaskNodeExecutor> logger)
     {
         _templateEngine = templateEngine;
-        _httpClientFactory = httpClientFactory;
+        _entityService = entityService;
         _logger = logger;
     }
 
@@ -121,15 +129,20 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
                 "Creating task with subject: {Subject}",
                 subject);
 
-            // Build task payload for Dataverse
-            var taskPayload = new Dictionary<string, object?>
+            // Build task entity
+            var entity = new Entity("task");
+            entity["subject"] = subject;
+            if (description is not null)
+                entity["description"] = description;
+
+            if (config.DueDate is not null)
             {
-                ["subject"] = subject,
-                ["description"] = description,
-                ["scheduledend"] = config.DueDate is not null
-                    ? _templateEngine.Render(config.DueDate, templateContext)
-                    : null
-            };
+                var dueDateStr = _templateEngine.Render(config.DueDate, templateContext);
+                if (DateTime.TryParse(dueDateStr, out var dueDate))
+                {
+                    entity["scheduledend"] = dueDate.ToUniversalTime();
+                }
+            }
 
             // Add regarding object if specified
             if (!string.IsNullOrWhiteSpace(config.RegardingObjectId) && !string.IsNullOrWhiteSpace(config.RegardingObjectType))
@@ -137,8 +150,7 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
                 var regardingId = _templateEngine.Render(config.RegardingObjectId, templateContext);
                 if (Guid.TryParse(regardingId, out var regardingGuid))
                 {
-                    var entitySetName = GetEntitySetName(config.RegardingObjectType);
-                    taskPayload[$"regardingobjectid_{config.RegardingObjectType}@odata.bind"] = $"/{entitySetName}({regardingGuid})";
+                    entity["regardingobjectid"] = new EntityReference(config.RegardingObjectType, regardingGuid);
                 }
             }
 
@@ -148,34 +160,22 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
                 var ownerId = _templateEngine.Render(config.OwnerId, templateContext);
                 if (Guid.TryParse(ownerId, out var ownerGuid))
                 {
-                    taskPayload["ownerid@odata.bind"] = $"/systemusers({ownerGuid})";
+                    entity["ownerid"] = new EntityReference("systemuser", ownerGuid);
                 }
             }
 
-            // Create the task record in Dataverse via Web API
-            var http = _httpClientFactory.CreateClient("DataverseApi");
-            var taskJson = JsonSerializer.Serialize(taskPayload, JsonOptions);
-            var requestContent = new StringContent(taskJson, System.Text.Encoding.UTF8, "application/json");
-
-            var response = await http.PostAsync("tasks", requestContent, cancellationToken);
-
+            // Create the task record via shared Dataverse client
             Guid taskId;
-            if (response.IsSuccessStatusCode)
+            try
             {
-                // Dataverse returns the new record ID in the OData-EntityId header
-                var entityIdHeader = response.Headers.Location?.AbsoluteUri
-                    ?? response.Headers.GetValues("OData-EntityId").FirstOrDefault();
-
-                taskId = Guid.TryParse(
-                    entityIdHeader?.Split('(').LastOrDefault()?.TrimEnd(')'),
-                    out var parsed) ? parsed : Guid.NewGuid();
+                taskId = await _entityService.CreateAsync(entity, cancellationToken);
             }
-            else
+            catch (Exception createEx)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 _logger.LogWarning(
-                    "Dataverse task creation returned {StatusCode} for node {NodeId}: {Error}",
-                    response.StatusCode, context.Node.Id, errorBody);
+                    createEx,
+                    "Dataverse task creation failed for node {NodeId}: {Error}",
+                    context.Node.Id, createEx.Message);
 
                 // Return a degraded success — the task payload was assembled correctly
                 // but Dataverse rejected it. Include the error for the user.
@@ -227,10 +227,13 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
 
         foreach (var (varName, output) in context.PreviousOutputs)
         {
+            // 2026-06-24 (bug #10 fix): use TemplateEngine.ConvertJsonElement so Handlebars
+            // can navigate nested paths like {{varName.output.field}}. See full rationale on
+            // the matching change in ConditionNodeExecutor.BuildTemplateContext.
             templateContext[varName] = new
             {
                 output = output.StructuredData.HasValue
-                    ? JsonSerializer.Deserialize<object>(output.StructuredData.Value.GetRawText())
+                    ? TemplateEngine.ConvertJsonElement(output.StructuredData.Value)
                     : null,
                 text = output.TextContent,
                 success = output.Success
@@ -255,24 +258,6 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
         };
 
         return templateContext;
-    }
-
-    /// <summary>
-    /// Gets the OData entity set name (plural) for a Dataverse entity.
-    /// </summary>
-    private static string GetEntitySetName(string entityLogicalName)
-    {
-        // Common entity mappings
-        return entityLogicalName switch
-        {
-            "sprk_document" => "sprk_documents",
-            "sprk_matter" => "sprk_matters",
-            "sprk_project" => "sprk_projects",
-            "account" => "accounts",
-            "contact" => "contacts",
-            "task" => "tasks",
-            _ => entityLogicalName.EndsWith("s") ? entityLogicalName : entityLogicalName + "s"
-        };
     }
 }
 

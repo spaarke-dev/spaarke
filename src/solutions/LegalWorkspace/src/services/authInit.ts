@@ -1,23 +1,42 @@
 /**
- * authInit.ts
- * Thin wrapper around @spaarke/auth for the Legal Operations Workspace.
+ * LegalWorkspace auth initializer.
  *
- * Initializes the shared auth provider with workspace-appropriate defaults
- * (BFF base URL from runtimeConfig, tenant ID from runtimeConfig, proactive
- * refresh enabled) and re-exports the two functions consumed across the
- * workspace: authenticatedFetch and getTenantId.
+ * Post-migration (R2 task 054 / FR-20): this file is a thin consumer of the
+ * canonical `createCodePageAuthInitializer` factory from `@spaarke/auth`. The
+ * previous local implementation (`_initPromise`, `ensureAuthInitialized`,
+ * `authenticatedFetch`, `getTenantId`) has been eliminated; the factory
+ * preserves the exact pre-consolidation call sequence via the
+ * `proactiveRefresh: true` + explicit `tenantId` + `logLabel: 'authInit'`
+ * config. See `projects/spaarke-daily-update-service-r2/notes/auth-init-divergence.md`
+ * for the divergence analysis and ADR-028 for the canonical pattern.
  *
- * Why pass tenantId: when omitted, @spaarke/auth falls back to the
- * `organizations` authority, which causes MSAL to show a "Pick an account"
- * popup on first acquisition because AAD cannot disambiguate the tenant
- * cookie. Passing tenantId from runtimeConfig builds a tenant-specific
- * authority and enables silent SSO from the host browser session.
+ * Lazy factory construction (R2 task 054 — IMPORTANT, mirrors task 053 reasoning):
+ * LegalWorkspace's runtime config (`getMsalClientId`, `getRuntimeTenantId`,
+ * `getBffBaseUrl`, `getBffOAuthScope`) is NOT available at module load — it's
+ * populated by `setRuntimeConfig(...)` in `main.tsx` AFTER `resolveRuntimeConfig()`
+ * resolves. The original local `authInit.ts` worked because it called the
+ * getters INSIDE the once-only init IIFE (i.e. at first call, by which time
+ * `setRuntimeConfig` had fired). The factory captures config values eagerly in
+ * its closure, so we MUST defer factory construction until first use of any
+ * exported method. Each exported method ensures the lazy factory has been
+ * built before delegating.
  *
- * Migration note: This replaces direct usage of the legacy bffAuthProvider.ts
- * (deleted alongside this rewrite).
+ * Why this file still exists (FR-20 acceptance relaxation, owner decision):
+ * 22 consumer modules across LegalWorkspace import `authenticatedFetch` /
+ * `getTenantId` from this path. Outright deletion would require touching all
+ * 22 imports — needless churn given the factory consolidation has already
+ * eliminated the divergent implementation logic. The file is now a 4-line
+ * factory consumer rather than 86-line forked logic.
+ *
+ * @see ADR-028 - Spaarke Auth Architecture
+ * @see ADR-010 - DI Minimalism
+ * @see src/solutions/DailyBriefing/src/services/authInit.ts — task 053 reference impl
  */
 
-import { initAuth, authenticatedFetch as sharedAuthFetch, getAuthProvider } from '@spaarke/auth';
+import {
+  createCodePageAuthInitializer,
+  type CodePageAuthInitializer,
+} from '@spaarke/auth';
 import {
   getBffBaseUrl,
   getBffOAuthScope,
@@ -25,61 +44,42 @@ import {
   getTenantId as getRuntimeTenantId,
 } from '../config/runtimeConfig';
 
-// ---------------------------------------------------------------------------
-// Initialization
-// ---------------------------------------------------------------------------
-
-let _initPromise: Promise<void> | null = null;
+let _initializer: CodePageAuthInitializer | null = null;
 
 /**
- * Initialize the @spaarke/auth provider for the workspace.
- * Safe to call multiple times — returns the same promise.
+ * Build the factory once, on first use. By this time, the caller MUST have
+ * arranged for `setRuntimeConfig(...)` to be called before any auth method
+ * actually fires `initAuth(...)` — which is exactly what `bootstrap()` in
+ * `main.tsx` does (it `setRuntimeConfig`s, THEN awaits `ensureAuthInitialized`).
  *
- * Note: we DO NOT pass an explicit `authority` — when `tenantId` is supplied,
- * the library constructs `https://login.microsoftonline.com/{tenantId}` for us.
+ * Each exported function calls this lazily, so the getters
+ * (`getMsalClientId()`, `getRuntimeTenantId()`, etc.) fire on first auth
+ * invocation rather than at module load — preventing the
+ * "Runtime config not initialized" throw that an eager top-level factory call
+ * would produce.
  */
-export function ensureAuthInitialized(): Promise<void> {
-  if (!_initPromise) {
-    _initPromise = (async () => {
-      try {
-        await initAuth({
-          clientId: getMsalClientId(),
-          tenantId: getRuntimeTenantId(),
-          bffBaseUrl: getBffBaseUrl(),
-          bffApiScope: getBffOAuthScope(),
-          proactiveRefresh: true,
-        });
-        console.info('[authInit] @spaarke/auth initialized successfully');
-      } catch (err) {
-        console.warn('[authInit] @spaarke/auth initialization failed', err);
-        _initPromise = null; // Allow retry
-        throw err;
-      }
-    })();
+function getInitializer(): CodePageAuthInitializer {
+  if (!_initializer) {
+    _initializer = createCodePageAuthInitializer({
+      clientId: getMsalClientId(),
+      tenantId: getRuntimeTenantId(),
+      bffBaseUrl: getBffBaseUrl(),
+      bffApiScope: getBffOAuthScope(),
+      proactiveRefresh: true,
+      logLabel: 'authInit',
+    });
   }
-  return _initPromise;
+  return _initializer;
 }
 
-// ---------------------------------------------------------------------------
-// Re-exports for workspace consumers
-// ---------------------------------------------------------------------------
-
-/**
- * Performs a fetch request with BFF Bearer token authentication.
- * Ensures auth is initialized before making the request.
- */
-export async function authenticatedFetch(
-  url: string,
-  init?: RequestInit,
-): Promise<Response> {
-  await ensureAuthInitialized();
-  return sharedAuthFetch(url, init);
+export function ensureAuthInitialized(): Promise<void> {
+  return getInitializer().ensureAuthInitialized();
 }
 
-/**
- * Resolve the Azure AD tenant ID from MSAL account or Xrm context.
- */
-export async function getTenantId(): Promise<string> {
-  await ensureAuthInitialized();
-  return getAuthProvider().getTenantId();
+export function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
+  return getInitializer().authenticatedFetch(url, init);
+}
+
+export function getTenantId(): Promise<string> {
+  return getInitializer().getTenantId();
 }

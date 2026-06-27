@@ -35,7 +35,15 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     private readonly IScopeResolverService _scopeResolver;
     private readonly IAnalysisContextBuilder _contextBuilder;
     private readonly IPlaybookService _playbookService;
-    private readonly IToolHandlerRegistry _toolHandlerRegistry;
+    // DI-cycle break (2026-06-08): IToolHandlerRegistry is resolved lazily via IServiceProvider.
+    // The auto-discovered IEnumerable<IToolHandler> backing IToolHandlerRegistry includes
+    // R6 handlers (AnalysisQueryHandler, WorkingDocumentHandler) that inject
+    // IAnalysisOrchestrationService — which previously injected IToolHandlerRegistry,
+    // creating a cycle in the DI graph. Lazy resolution defers the dependency edge until
+    // first use, after the container is fully built and no longer cycle-detecting.
+    private readonly IServiceProvider _serviceProvider;
+    private IToolHandlerRegistry ToolHandlerRegistryLazy =>
+        _serviceProvider.GetRequiredService<IToolHandlerRegistry>();
     private readonly INodeService _nodeService;
     private readonly AnalysisDocumentLoader _documentLoader;
     private readonly AnalysisRagProcessor _ragProcessor;
@@ -52,7 +60,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         IScopeResolverService scopeResolver,
         IAnalysisContextBuilder contextBuilder,
         IPlaybookService playbookService,
-        IToolHandlerRegistry toolHandlerRegistry,
+        IServiceProvider serviceProvider,
         INodeService nodeService,
         AnalysisDocumentLoader documentLoader,
         AnalysisRagProcessor ragProcessor,
@@ -63,7 +71,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _scopeResolver = scopeResolver;
         _contextBuilder = contextBuilder;
         _playbookService = playbookService;
-        _toolHandlerRegistry = toolHandlerRegistry;
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _nodeService = nodeService;
         _documentLoader = documentLoader;
         _ragProcessor = ragProcessor;
@@ -696,6 +704,29 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         HttpContext httpContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        // R4 hotfix (2026-06-26): empty DocumentIds is reachable from non-document
+        // dispatch paths (e.g. IInvokePlaybookAi facade used by /api/ai/daily-briefing/narrate
+        // — task 031 Path A.5). The legacy-mode entry point is structurally document-centric
+        // (loads the document via _documentLoader.GetDocumentAsync below), so empty
+        // DocumentIds cannot be made to work here — it would have to be a node-based
+        // playbook. We previously crashed with IndexOutOfRangeException at
+        // `request.DocumentIds[0]`. Convert to a clean error chunk that the orchestrator
+        // wrapper (PlaybookOrchestrationService.ExecuteLegacyModeAsync) translates to a
+        // PlaybookStreamEvent.RunFailed → PLAYBOOK_INVOCATION_FAILED at the facade boundary
+        // → 503 ProblemDetails at the /narrate endpoint. The error message tells the operator
+        // the actual fix: the playbook must have nodes (node-based execution) when invoked
+        // without a document context. See projects/spaarke-daily-update-service-r4/notes/uat/
+        // narrate-503-hotfix.md for the post-mortem.
+        if (request.DocumentIds is null || request.DocumentIds.Length == 0)
+        {
+            _logger.LogError(
+                "Legacy-mode playbook execution requires at least one DocumentId. Playbook {PlaybookId} likely has no nodes — node-based execution is required for non-document dispatch (e.g. daily-briefing narrate).",
+                request.PlaybookId);
+            yield return AnalysisStreamChunk.FromError(
+                $"Playbook {request.PlaybookId} cannot run in legacy mode without a document. Configure nodes in the Playbook Builder to enable non-document dispatch.");
+            yield break;
+        }
+
         var documentId = request.DocumentIds[0];
 
         _logger.LogInformation("Starting playbook execution: Playbook {PlaybookId}, Document {DocumentId}, AnalysisId {AnalysisId}",
@@ -1038,17 +1069,17 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
             if (!string.IsNullOrWhiteSpace(tool.HandlerClass))
             {
-                handler = _toolHandlerRegistry.GetHandler(tool.HandlerClass);
+                handler = ToolHandlerRegistryLazy.GetHandler(tool.HandlerClass);
 
                 if (handler == null)
                 {
-                    var availableHandlers = _toolHandlerRegistry.GetRegisteredHandlerIds();
+                    var availableHandlers = ToolHandlerRegistryLazy.GetRegisteredHandlerIds();
                     _logger.LogWarning(
                         "Custom handler '{HandlerClass}' not found for tool '{ToolName}'. " +
                         "Available handlers: [{AvailableHandlers}]. Falling back to GenericAnalysisHandler.",
                         tool.HandlerClass, tool.Name, string.Join(", ", availableHandlers));
 
-                    handler = _toolHandlerRegistry.GetHandler("GenericAnalysisHandler");
+                    handler = ToolHandlerRegistryLazy.GetHandler("GenericAnalysisHandler");
 
                     yield return AnalysisStreamChunk.TextChunk(
                         $"[Tool {tool.Name}: Handler '{tool.HandlerClass}' not found, using generic handler]\n");
@@ -1056,13 +1087,13 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             }
             else
             {
-                var handlers = _toolHandlerRegistry.GetHandlersByType(tool.Type);
+                var handlers = ToolHandlerRegistryLazy.GetHandlersByType(tool.Type);
                 handler = handlers.FirstOrDefault();
             }
 
             if (handler == null)
             {
-                var availableHandlers = _toolHandlerRegistry.GetRegisteredHandlerIds();
+                var availableHandlers = ToolHandlerRegistryLazy.GetRegisteredHandlerIds();
                 _logger.LogWarning(
                     "No handler found for tool '{ToolName}' (Type={ToolType}). " +
                     "Available handlers: [{AvailableHandlers}]. Skipping tool.",

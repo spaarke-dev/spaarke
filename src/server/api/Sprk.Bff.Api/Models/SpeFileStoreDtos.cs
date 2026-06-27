@@ -9,7 +9,13 @@ public record FileHandleDto(
     DateTimeOffset LastModifiedDateTime,
     string? ETag,
     bool IsFolder,
-    string? WebUrl);
+    string? WebUrl,
+    // multi-container-multi-index-r1 indexer-routing-fix: SPE drive ID resolved during upload.
+    // Carried in the response so post-upload pipelines (RAG indexing via /api/ai/rag/index-file)
+    // do not need a second round-trip to GET /api/obo/containers/{containerId}/drive. Required
+    // by `IFileIndexingService.IndexFileAsync`. Optional for backwards compatibility with
+    // pre-existing consumers that ignore it.
+    string? DriveId = null);
 
 public record UploadSessionDto(
     string UploadUrl,
@@ -57,3 +63,21 @@ public record OfficeViewerDto(
     string EditorUrl,
     string FileType,
     DateTimeOffset ExpiresAt);
+
+/// <summary>
+/// Lightweight Spaarke-domain summary of a SharePoint Embedded drive item — exposes only
+/// the fields that <c>FileAccessEndpoints</c> consumes, so that the Graph SDK <c>DriveItem</c>
+/// type stays inside <c>Infrastructure.Graph</c> per ADR-007 §1.
+///
+/// Added 2026-06-26 by ci-cd-unit-test-remediation-r1 task CICD-088b.
+/// </summary>
+public record SpeDriveItemSummary(
+    string Id,
+    string Name,
+    long? Size,
+    string? WebUrl,
+    string? WebDavUrl,
+    string? MimeType,
+    string? ParentReferencePath,
+    DateTimeOffset? LastModifiedDateTime,
+    DateTimeOffset? CreatedDateTime);

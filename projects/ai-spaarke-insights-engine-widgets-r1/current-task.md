@@ -1,65 +1,63 @@
 # Current Task — Insights Engine Widgets r1
 
-> **Purpose**: Active task state tracker. Managed by `task-execute` skill once task POMLs exist.
-> **Lifecycle**: Initial state — design iteration, no active implementation task.
+> **Purpose**: Active task state tracker. Managed by `task-execute` skill.
 
 ---
 
-## 🎯 Active task — Design iteration
+## Active task — none
 
-Project initiated 2026-06-10. Initial `design.md` draft is in place. Owner iteration is the immediate next step.
+### Task: none
 
-### What to do next
-
-1. Owner reviews [`design.md`](design.md) — particularly:
-   - §3 Framework abstractions (topic / subject / mode / `InsightSummaryCard`)
-   - §4.3 Insight candidates (14 candidates listed for owner selection)
-   - §6 Open questions (13 questions for owner decision)
-2. Owner iterates design with main session — refine until stable
-3. After design stabilizes → derive `spec.md` (concrete FRs/NFRs/SCs)
-4. After spec stabilizes → `plan.md` (wave breakdown)
-5. After plan exists → task POMLs in [`tasks/`](tasks/)
-6. After tasks exist → `task-execute` per task
+**Status**: Project complete; r1 graduated (2026-06-11)
+**Next Action**: Run `/repo-cleanup` to validate structure; then `/merge-to-master` to bring `work/ai-spaarke-insights-engine-widgets-r1` onto master. Owner walkthrough (SC-15) is the operator-side closure gate — see [`notes/handoffs/production-deploy.md`](notes/handoffs/production-deploy.md) §7.
 
 ---
 
-## Parallel streams (NOT this project's scope)
+## Prior task — Wave 8 sole (090) — ✅ completed
 
-| Stream | Owner | Why it matters to r1 |
-|---|---|---|
-| Files-index pipeline debugging | Current debugging stream | UAT realism — without healthy files-index → insights-index pipeline, narratives degrade to "insufficient evidence" Decline. r1 can demo with KPI roll-up data alone; full citations come when pipeline is healthy. |
-| `AiProcessingOptions:InsightsIngest=true` env config | DevOps | Same — D-P8 SPE-upload consumer must be enabled in target env for end-to-end UAT |
-| R5 grep — what shipped for sparkle-icon record-section AI? | Investigation task | If R5 already shipped record-section sparkle widgets, r1 may be enhancement (lower effort) vs net-new |
+### Task 090 — Project wrap-up (lessons-learned, README → Complete) (completed 2026-06-11)
+
+**Task File**: `tasks/090-project-wrap-up.poml`
+**Phase**: 7 (Project wrap)
+**Rigor Level**: STANDARD
+**Status**: completed
+**Started**: 2026-06-11
+**Completed**: 2026-06-11
+
+**Files Modified**:
+- `projects/ai-spaarke-insights-engine-widgets-r1/notes/lessons-learned.md` (NEW — 3 sections: shipped / changed / improve)
+- `projects/ai-spaarke-insights-engine-widgets-r1/README.md` (§Status banner + §4 status table + §5 working-artifacts column + footer line updated to Complete)
+- `projects/ai-spaarke-insights-engine-widgets-r1/tasks/TASK-INDEX.md` (Task 090 + Task 025 statuses → ✅)
+- `projects/ai-spaarke-insights-engine-widgets-r1/tasks/090-project-wrap-up.poml` (status → completed + notes appended)
+- `projects/ai-spaarke-insights-engine-widgets-r1/current-task.md` (this file — reset to "none")
+
+**Acceptance verdict**:
+- ✅ Criterion 1 (README status = Complete): PASS
+- ✅ Criterion 2 (lessons-learned.md with all 3 sections): PASS — §1 shipped (6 sub-sections), §2 changed (7 mid-flight changes), §3 improve (6 r2 backlog items)
+- ✅ Criterion 3 (14 of 15 SCs pass; SC-12 marked DEFERRED with r2+ pointer): PASS — full table in lessons-learned.md §4
+- 🟡 Criterion 4 (Owner sign-off recorded): READY — operator-side action; readiness checklist + walkthrough script at `notes/handoffs/production-deploy.md` §7. Not gating r1 close per orchestrator brief.
+
+**Completed Steps**:
+- [x] Step 0: Context recovery + Rigor declaration (STANDARD)
+- [x] Step 1: Load Task File (090 POML)
+- [x] Step 2: Initialize current-task.md (090 in-progress)
+- [x] Step 3: Context Budget Check (< 60%)
+- [x] Step 4: Author lessons-learned.md (3 sections)
+- [x] Step 5: Update README §4 status to Complete
+- [x] Step 6: Verify 14/15 SC acceptance + SC-12 DEFERRED
+- [x] Step 7: Reset current-task.md for "none" (project complete)
 
 ---
 
-## Status
+## Quick Recovery
 
-| Phase | Status |
+| Field | Value |
 |---|---|
-| Project initialized | ✅ 2026-06-10 |
-| README.md authored | ✅ 2026-06-10 |
-| CLAUDE.md authored | ✅ 2026-06-10 |
-| design.md initial draft | ✅ 2026-06-10 |
-| design.md owner iteration (Q&A captured) | ✅ 2026-06-10 |
-| spec.md generated via `/design-to-spec` | ✅ 2026-06-10 |
-| spec.md owner review | 🔄 next |
-| plan.md | 🔲 deferred |
-| Task POMLs | 🔲 deferred |
-| Implementation | 🔲 deferred |
+| **Task** | none — project complete |
+| **Step** | n/a |
+| **Status** | none |
+| **Next Action** | `/repo-cleanup` → `/merge-to-master`; owner walkthrough SC-15 (operator) per `notes/handoffs/production-deploy.md` §7 |
 
 ---
 
-## Recovery notes for next session
-
-If resuming in a fresh session:
-
-- Project root: `projects/ai-spaarke-insights-engine-widgets-r1/`
-- Status: design iteration; no implementation has started
-- Next action: owner iteration on `design.md` — see §6 Open Questions for the decision queue
-- No PRs opened, no branches created
-- Parallel streams (files-index pipeline, env config) are tracked but NOT owned by this project
-
----
-
-*Initial state authored 2026-06-10. Updates as design iterates.*
+*Updated 2026-06-11 by `task-execute` for task 090 completion + project close. r1 graduated; lessons captured in `notes/lessons-learned.md`.*

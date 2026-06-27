@@ -1,0 +1,62 @@
+<task id="051" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Emit widget.insightcard.invoked from invocation path</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>5</phase>
+    <tags>telemetry, event-emission</tags>
+    <dependencies>050</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Wire `InsightWidgetsTelemetry` into the `/api/insights/ask` invocation path so each call emits `widget.insightcard.invoked` with the bounded tag set. Verify events visible in dev App Insights.
+  </prompt>
+
+  <role>BFF telemetry integrator.</role>
+
+  <goal>
+    Per-invocation event emission; visible in App Insights query within ~2 min of invocation.
+  </goal>
+
+  <inputs>
+    <file purpose="telemetry">Task 050 output</file>
+    <file purpose="endpoint">existing /api/insights/ask handler</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-06">Tags: topic, mode, subject, duration, outcome, cacheHit (per spec; mapped to bounded set in Task 050)</constraint>
+    <constraint source="ADR-013">Stay in Zone A or facade-clean Zone B</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>insights ask endpoint, telemetry instrumentation</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/InsightsEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Inject InsightWidgetsTelemetry">Into endpoint handler</step>
+    <step order="2" name="Wrap invocation in Activity">Start, set tags, dispose at end</step>
+    <step order="3" name="Emit counter on success/error/decline">outcome tag accordingly</step>
+    <step order="4" name="Record duration">Histogram</step>
+    <step order="5" name="App Insights verification">Run a couple of invocations; query KQL</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/InsightsEndpoints.cs (telemetry hooked)</output>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/telemetry-events-verified.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Counter increments on each invocation</criterion>
+    <criterion testable="true">Duration histogram populated</criterion>
+    <criterion testable="true">App Insights KQL query returns events</criterion>
+  </acceptance-criteria>
+
+  <notes>
+2026-06-11 — Completed. Wired `InsightWidgetsTelemetry` into `Api/Insights/InsightEndpoints.cs` (singular — task POML referenced `Endpoints/InsightsEndpoints.cs` which doesn't exist; actual file is `Api/Insights/InsightEndpoints.cs`). Activity span wraps `IInsightsAi.AnswerQuestionAsync` carrying subject GUID + correlationId per task 050 cardinality discipline. Stopwatch measures end-to-end duration recorded on histogram. RecordInvocation emits on all four exit paths (kill_switched / failed / success+cache_hit / success); cancellation + validation paths intentionally skip telemetry (not invocation outcomes). Build clean (0 errors). DI registration re-uses task 050 singleton — no new DI churn. App Insights empirical verification deferred to task 066 SC-11 post-deploy gate. See `notes/handoffs/telemetry-events-verified.md` for full handoff (dim mapping table, KQL queries pre-staged for ops, ADR-013/014/015/018/032 compliance check).
+  </notes>
+</task>

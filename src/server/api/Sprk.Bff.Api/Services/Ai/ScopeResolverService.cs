@@ -20,6 +20,7 @@ public class ScopeResolverService : IScopeResolverService
     private readonly AnalysisSkillService _skillService;
     private readonly AnalysisKnowledgeService _knowledgeService;
     private readonly AnalysisToolService _toolService;
+    private readonly AnalysisPersonaService _personaService;
     private readonly ILogger<ScopeResolverService> _logger;
     private readonly HttpClient _httpClient;
     private readonly string _apiUrl;
@@ -32,6 +33,7 @@ public class ScopeResolverService : IScopeResolverService
         AnalysisSkillService skillService,
         AnalysisKnowledgeService knowledgeService,
         AnalysisToolService toolService,
+        AnalysisPersonaService personaService,
         HttpClient httpClient,
         IConfiguration configuration,
         TokenCredential credential,
@@ -42,6 +44,7 @@ public class ScopeResolverService : IScopeResolverService
         _skillService = skillService;
         _knowledgeService = knowledgeService;
         _toolService = toolService;
+        _personaService = personaService;
         _httpClient = httpClient;
         _logger = logger;
         _credential = credential;
@@ -366,6 +369,37 @@ public class ScopeResolverService : IScopeResolverService
     /// <inheritdoc />
     public Task<ScopeListResult<AnalysisAction>> ListActionsAsync(ScopeListOptions options, CancellationToken cancellationToken)
         => _actionService.ListActionsAsync(options, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<ScopeListResult<AnalysisPersona>> ListPersonasAsync(ScopeListOptions options, CancellationToken cancellationToken)
+        => _personaService.ListPersonasAsync(options, cancellationToken);
+
+    // ── Task 003 ownership boundary ─────────────────────────────────────────────
+    // The two persona resolution methods below (ResolvePersonaForChatAsync +
+    // GetEffectivePersonaAsync) are added to the IScopeResolverService surface by
+    // task 003 (D-A-03). Task 002 owns only the LIST surface (above). Task 003
+    // will replace these throw-stubs with the real most-specific-wins resolution
+    // (global SYS- < tenant CUST- < playbook-attached). Stubs are NotImplementedException
+    // (NOT NotSupportedException) so the failure mode is loud during the parallel
+    // wave window before task 003 lands its impl.
+    //
+    // Coordination: task 002 added these stubs ONLY to keep the build green during
+    // the parallel wave; task 003 has exclusive ownership of the bodies. Do NOT
+    // implement here.
+
+    /// <inheritdoc />
+    public Task<AnalysisPersona> ResolvePersonaForChatAsync(
+        string tenantId,
+        Guid? playbookId,
+        CancellationToken cancellationToken)
+        => _personaService.ResolvePersonaForChatAsync(tenantId, playbookId, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<AnalysisPersona?> GetEffectivePersonaAsync(
+        string tenantId,
+        Guid? playbookId,
+        CancellationToken cancellationToken)
+        => _personaService.GetEffectivePersonaAsync(tenantId, playbookId, cancellationToken);
 
     /// <inheritdoc />
     public Task<AnalysisAction> CreateActionAsync(CreateActionRequest request, CancellationToken cancellationToken)

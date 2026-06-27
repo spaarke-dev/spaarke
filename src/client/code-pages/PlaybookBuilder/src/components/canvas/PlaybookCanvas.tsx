@@ -22,6 +22,7 @@ import { getEffectiveDarkMode, setupCodePageThemeListener } from '@spaarke/ui-co
 import { useCanvasStore } from '../../stores/canvasStore';
 import { nodeTypes } from '../nodes';
 import { edgeTypes } from '../edges';
+import { BranchPickerDialog } from '../properties/BranchPickerDialog';
 import type { PlaybookNodeType, PlaybookNodeData } from '../../types/canvas';
 
 const useStyles = makeStyles({
@@ -110,6 +111,8 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
 
   return (
     <div ref={reactFlowWrapper} className={styles.container}>
+      {/* R3-092 (FR-3H2.2): branch picker for Condition→downstream edges */}
+      <BranchPickerDialog />
       <ReactFlow
         colorMode={isDark ? 'dark' : 'light'}
         nodes={nodes}
@@ -156,6 +159,7 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
               case 'createNotification':
                 return tokens.colorPaletteBerryBackground2;
               case 'wait':
+              case 'entityNameValidator':
                 return tokens.colorPaletteMagentaBackground2;
               default:
                 return tokens.colorNeutralBackground3;

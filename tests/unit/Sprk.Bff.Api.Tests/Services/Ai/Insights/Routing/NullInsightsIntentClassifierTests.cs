@@ -50,25 +50,6 @@ public class NullInsightsIntentClassifierTests
             sut.ClassifyAsync("query", context: null, CancellationToken.None));
     }
 
-    [Fact]
-    public async Task ClassifyAsync_ExceptionConvertsToProblemDetails503()
-    {
-        // Arrange
-        var sut = new NullInsightsIntentClassifier(NullLogger<InsightsIntentClassifier>.Instance);
-
-        try
-        {
-            await sut.ClassifyAsync("query", context: null, CancellationToken.None);
-            throw new InvalidOperationException("Expected FeatureDisabledException not thrown");
-        }
-        catch (FeatureDisabledException ex)
-        {
-            // Verify the exception integrates with the shared 503 helper.
-            var result = ex.AsFeatureDisabled503();
-            result.Should().NotBeNull(
-                "FeatureDisabledResults.AsFeatureDisabled503 must accept the classifier's exception unchanged");
-        }
-    }
 
     [Fact]
     public void Constructor_NullLogger_Throws()

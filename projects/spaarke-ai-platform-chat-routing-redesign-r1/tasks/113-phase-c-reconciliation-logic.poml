@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="113" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Phase C — reconciliation logic for cross-file conflicts</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>112</dependencies>
+    <blocks>114</blocks>
+    <tags>bff-api, services, ai, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'ai'; modifies `PlaybookDispatcher.cs`; reconciliation algorithm with telemetry binding (FR-18); FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same `PlaybookDispatcher.cs` file as task 112; sequential within wave 5-B.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement Phase C of WP2 Hybrid C file-aware classification: per-file top-K candidates from Phase B converge via reconciliation logic. Per spec FR-18: (a) zero files → existing message-only path; (b) 1 file → top-1 candidate; (c) 2+ files all-agree (same top-1) → use that playbook with NO decider call; (d) 2+ files top-3 intersection non-empty → take intersection's highest aggregate score; (e) true disagreement → falls through to gpt-4o-mini decider (task 114). This task handles cases (a)-(d) WITHOUT the decider; task 114 wires (e).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in reconciliation algorithms + multi-file decision logic.</role>
+
+  <goal>
+    `PlaybookDispatcher` Phase C reconciliation: classifies each multi-file dispatch as `AllAgree`, `IntersectionNonEmpty`, or `TrueDisagreement`. Returns `DispatchResult` directly for the first two cases without invoking a decider; flags true-disagreement cases for Phase 5 task 114 to consume. Unit tests cover all 5 branches; telemetry `decidersInvoked` count = 0 for cases (a)-(d).
+  </prompt>
+
+  <context>
+    <background>
+      Per spec FR-18 + design §1.2 Phase C. Cases (a)-(d) are the LLM-decider-free fast paths — they cover the common scenarios (single file, homogeneous file set, partial overlap). Case (e) — true disagreement — is the only path that pays the LLM-decider cost; per FR-18 acceptance, multi-file all-agree case logs `decidersInvoked = 0`. This task implements (a)-(d); task 114 wires (e) with structured-output gpt-4o-mini.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DispatchResult.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-18">Multi-file all-agree case logs `decidersInvoked = 0`; LLM decider invoked ONLY on true disagreement.</constraint>
+    <constraint source="spec FR-19">Total dispatch budget ≤2s; Phase C reconciliation ≤50ms on cases (a)-(d).</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary.</constraint>
+    <constraint source="ADR-015">Tier-1 logging: `(filesCount, reconciliationOutcome, topPlaybookId, decidersInvoked)`; NEVER playbook names content / user message text.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookDispatcher.cs` current state post-112. Note the per-file top-K candidate list shape returned from Phase B.</step>
+    <step order="2">Author Phase C reconciliation method `ReconcilePerFileCandidates(perFileResults : IReadOnlyList&lt;PerFilePlaybookCandidates&gt;) → ReconciliationOutcome`. Branches:
+      (a) `files.Count == 0` → return `Outcome.MessageOnly`
+      (b) `files.Count == 1` → return `Outcome.SingleFile(perFileResults[0].Top1)`
+      (c) `files.Count >= 2` AND all per-file Top-1 == same playbook → `Outcome.AllAgree(playbook)`
+      (d) intersection of per-file Top-3 sets non-empty → `Outcome.IntersectionWinner(highestAggregate)`
+      (e) else → `Outcome.TrueDisagreement(perFileTop3Lists)` (handed to task 114).</step>
+    <step order="3">Update `PlaybookDispatcher.DispatchAsync` to invoke Phase A → Phase B → Phase C in sequence. Return `DispatchResult` for cases (a)-(d) directly; flag case (e) for task 114 to consume.</step>
+    <step order="4">Emit ADR-015 tier-1 telemetry: `(filesCount, reconciliationOutcome, decidersInvoked = 0 for cases (a)-(d))`.</step>
+    <step order="5">Add unit tests covering all 5 branches:
+      (a) zero files dispatches identically to today (Phase 110 backward-compat preserved)
+      (b) 1 file uses top-1
+      (c) 3 files all top-1 = "summarize-nda" → outcome=AllAgree; `decidersInvoked=0`
+      (d) 3 files with top-3 overlap on "summarize-document-chat" → outcome=IntersectionWinner
+      (e) 3 files no overlap → outcome=TrueDisagreement; flag set.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`. All pass.</step>
+    <step order="7">Measure BFF publish size; report delta.</step>
+    <step order="8">code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="9">Update TASK-INDEX.md: task 113 → ✅; current-task.md → ready for 114.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookDispatcher post-112; DispatchResult shape</tool>
+    <tool name="Edit">Author reconciliation method; integrate into DispatchAsync</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs (Phase C added)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookDispatcherTests.cs (5 reconciliation branches)</output>
+    <output type="docs">notes/handoffs/113-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 reconciliation branches implemented and tested.</criterion>
+    <criterion testable="true">Multi-file all-agree case telemetry shows `decidersInvoked = 0`.</criterion>
+    <criterion testable="true">True-disagreement case flagged for task 114 consumption.</criterion>
+    <criterion testable="true">Telemetry tier-1 compliant.</criterion>
+    <criterion testable="true">Phase C reconciliation latency ≤50ms for cases (a)-(d).</criterion>
+    <criterion testable="true">BFF publish-size delta reported.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The reconciliation algorithm is the "fast path" — it minimizes LLM-decider cost. Most multi-file scenarios should land in cases (c) or (d) since users typically upload semantically related documents. True disagreement (case e) is the edge — patent + invoice + "review these" — and gets task 114's structured-output LLM decider.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

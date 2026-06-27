@@ -13,7 +13,7 @@
  * Independent query groups fired in parallel on mount:
  *   1. Matters list        — useMattersList (Xrm.WebApi: sprk_matter)
  *   2. Events feed         — useEvents      (Xrm.WebApi: sprk_event, top 500)
- *   3. To-do items         — useTodoItems   (Xrm.WebApi: sprk_event where todoflag=true)
+ *   3. To-do items         — useTodoItems   (Xrm.WebApi: sprk_todo — R3 FR-09)
  *   4. Notification count  — useNotifications (mock in R1; future: Xrm.WebApi poll)
  *
  * Portfolio Health (usePortfolioHealth) is NOT included here because it hits
@@ -52,7 +52,7 @@ import { useEvents, IUseEventsResult } from './useEvents';
 import { useTodoItems, IUseTodoItemsResult } from './useTodoItems';
 import { useNotifications, IUseNotificationsResult } from './useNotifications';
 import { EventFilterCategory } from '../types/enums';
-import { IMatter } from '../types/entities';
+import { IMatter, ITodo } from '../types/entities';
 import { IEvent } from '../types/entities';
 import type { IWebApi } from '../types/xrm';
 
@@ -85,7 +85,7 @@ export interface IUseParallelDataLoadOptions {
    */
   mockMatters?: IMatter[];
   mockEvents?: IEvent[];
-  mockTodos?: IEvent[];
+  mockTodos?: ITodo[];
 }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +156,8 @@ export function useParallelDataLoad(
   });
 
   // ── 3. To-do items ───────────────────────────────────────────────────────
-  // Fetches sprk_event where sprk_todoflag=true AND sprk_todostatus!=Dismissed.
+  // Fetches active `sprk_todo` records (statecode=0, statuscode in (Open, In Progress)).
+  // Per R3 FR-09 / FR-11 / FR-29: the legacy `sprk_event.sprk_todoflag` path is removed.
   const todosState = useTodoItems({
     webApi,
     userId,

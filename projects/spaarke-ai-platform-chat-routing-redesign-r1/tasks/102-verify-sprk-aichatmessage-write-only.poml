@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="102" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Verify sprk_aichatmessage is write-only via grep across Sprk.Bff.Api</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4f)</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>101</dependencies>
+    <blocks>103</blocks>
+    <tags>verification, dataverse, architecture-binding</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification/audit task; no code change; STANDARD per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>4-Q</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify post-rename (task 101) that `sprk_aichatmessage` is referenced ONLY in write paths across `src/server/api/Sprk.Bff.Api/`. Per FR-25 + architecture §7.2, `sprk_aichatmessage` is now a pure audit-write target; Cosmos `audit` is the canonical reader. Produce a written verification report listing each reference + classified as WRITE / WRITE-ADJACENT / READ-VIOLATION.
+  </prompt>
+
+  <role>SPAARKE platform BFF engineer performing a verification audit. No code changes expected; if a READ violation surfaces, escalate to human.</role>
+
+  <goal>
+    Verification report at `notes/handoffs/102-sprk-aichatmessage-write-only-audit.md` lists every `sprk_aichatmessage` reference + classification. Zero READ-VIOLATION findings expected (else task pivots to escalation per CLAUDE.md §6). Confirms FR-25 architectural-binding compliance before Phase 4 integration tests + deploy.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-25 + architecture §7.2 + §11.4: `sprk_aichatmessage` migrates to write-only audit role; Cosmos `audit` is sole reader. Task 101 renamed the repository interface and retired the placeholder read methods. This task is the verification gate before integration tests + deploy. Tier 5 retrieval handlers (task 100) and IChatAuditRepository rename (task 101) are upstream; this gates downstream test + deploy waves (4-R / 4-S).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-25">Grep confirms zero read consumers remain.</constraint>
+    <constraint source="architecture §7.2">Verify `sprk_aichatmessage` write-only role.</constraint>
+    <constraint source="architecture §11.4">Document `sprk_aichatmessage` as pure write-target; all reader paths removed.</constraint>
+    <constraint source="project">If a READ-violation surfaces, do NOT silently fix — escalate to human per CLAUDE.md §6.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep across `src/server/api/Sprk.Bff.Api/` for occurrences of `sprk_aichatmessage` (case-insensitive). Capture file path + line + surrounding context.</step>
+    <step order="2">Grep for related symbols: `ChatMessage` entity references, `MessageReader`, `GetMessages`, `LoadMessages`, `QueryMessages` — anything that smells like a read path against the entity.</step>
+    <step order="3">For each hit, classify: WRITE (insert/upsert/append), WRITE-ADJACENT (column-name string referenced in model/serialization), or READ-VIOLATION (any query/retrieve/select against the entity).</step>
+    <step order="4">If ANY READ-VIOLATION found, STOP and emit `🔔 Human Input Required` per CLAUDE.md §6 — DO NOT silently fix.</step>
+    <step order="5">Otherwise, write `notes/handoffs/102-sprk-aichatmessage-write-only-audit.md` with: total hit count, per-hit classification table, confirmed-clean statement.</step>
+    <step order="6">Also verify `IChatDataverseRepository` is no longer referenced in production code (zero hits) per task 101 acceptance.</step>
+    <step order="7">Verify the Cosmos `audit` container is the only reader path by inspecting `AuditLogService` + any chat-audit consumers.</step>
+    <step order="8">Update TASK-INDEX.md: task 102 → ✅; current-task.md → ready for 103.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Find all sprk_aichatmessage references; find related read-shape symbols</tool>
+    <tool name="Read">Inspect each hit's surrounding context for classification</tool>
+    <tool name="Write">Produce the verification report at notes/handoffs/</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/102-sprk-aichatmessage-write-only-audit.md — verification report with per-hit classification</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Verification report written; ALL hits classified WRITE or WRITE-ADJACENT.</criterion>
+    <criterion testable="true">Zero READ-VIOLATION classifications (or escalation issued).</criterion>
+    <criterion testable="true">`grep -rn "IChatDataverseRepository" src/server/api/Sprk.Bff.Api/` returns zero hits.</criterion>
+    <criterion testable="true">Cosmos `audit` container confirmed as sole reader via inspection of AuditLogService callers.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a pure verification task — no code edits should be needed if task 101 was completed correctly. If hits surface, they likely indicate task 101 missed a consumer. ESCALATE; do not silently patch.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — Step 9.5 quality gates skipped (verification-only).</protocol>
+  </execution>
+</task>

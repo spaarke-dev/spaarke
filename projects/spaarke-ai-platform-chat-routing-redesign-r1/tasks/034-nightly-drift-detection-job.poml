@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Nightly drift-detection background job for playbook index staleness</title>
+    <phase>2: WP1.5 Index Governance</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>032,033</dependencies>
+    <blocks>037,039</blocks>
+    <tags>bff-api, worker, job, ADR-004, ADR-017, ADR-029</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'worker'/'job'; modifies `.cs` files; ADR-004 + ADR-017 binding (background jobs)</rigor-reason>
+    <parallel-group>2-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement a nightly background job that iterates `sprk_analysisplaybook` rows, recomputes the embed-input hash (matching the algorithm used by `PlaybookEmbeddingService`), compares it to the stored `sprk_indexhash`, and sets `sprk_indexstatus = 'stale'` on mismatch. Per ADR-004, use the existing Service Bus job processor pattern (NOT in-process Timer). Implements spec FR-13.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer + background-job engineer. Expert in `ServiceBusJobProcessor` + Quartz scheduling + `PlaybookEmbeddingService` hash composition.</role>
+
+  <goal>
+    A new `PlaybookIndexDriftDetectionJob` runs nightly (cron / schedule expression configurable via typed options). It iterates active playbooks, recomputes the canonical embed-input hash, and updates `sprk_indexstatus = 'stale'` on rows where the recomputed hash differs from `sprk_indexhash`. Job emits structured telemetry: total scanned + total drift detected + duration. Integration test verifies the drift transition.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-13 + design.md WP1.5 "Automatic detection of staleness". The hash algorithm must match the exact composition used by `PlaybookEmbeddingService` after task 032 extension (otherwise drift detection produces false positives). Reuse a shared `IPlaybookEmbeddingHashCalculator` if one exists; otherwise factor one out of `PlaybookEmbeddingService` and inject into both. Job runs as a Service Bus message handler (ADR-004) — a separate scheduler component enqueues the job nightly.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Jobs/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Use Service Bus job processor; do NOT use in-process Timer or Quartz in-proc scheduler. Producer enqueues a scheduled message; processor handles it.</constraint>
+    <constraint source="ADR-013">Job lives in `Services/Ai/PlaybookEmbedding/` (AI-internal); telemetry exits via `Services/Ai/PublicContracts/` if any CRUD code observes.</constraint>
+    <constraint source="ADR-015">Telemetry tier-1 safe — no user-content; structured fields are `scannedCount`, `driftCount`, `durationMs`, `tenantId`.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta.</constraint>
+    <constraint source="spec">FR-13 acceptance: job logs delta count; admin view (task 035) shows stale rows.</constraint>
+    <constraint source="project">Hash composition algorithm must match `PlaybookEmbeddingService` (post-task-032). Extract a shared `IPlaybookEmbeddingHashCalculator` interface.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-004-service-bus-jobs.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-017-job-handlers.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `ServiceBusJobProcessor.cs` to confirm the job-handler registration pattern.</step>
+    <step order="2">Extract `IPlaybookEmbeddingHashCalculator` from `PlaybookEmbeddingService` (or create if absent) — shared by service + new drift job to guarantee identical hash composition.</step>
+    <step order="3">Create `PlaybookIndexDriftDetectionJob` class implementing the job-handler contract; inject `IPlaybookEmbeddingHashCalculator`, `IDataverseClient` (or playbook repository), `ITelemetryClient`, `ILogger`.</step>
+    <step order="4">Job logic: iterate active playbooks → for each, recompute hash → compare to `sprk_indexhash` → if mismatch, update `sprk_indexstatus = 'stale'`. Skip rows where `sprk_indexstatus IN ('pending', 'failed', 'not-indexed')`.</step>
+    <step order="5">Add cron-schedule producer (e.g., an Azure Function timer trigger OR Service Bus scheduled message) that enqueues the drift-detection message nightly.</step>
+    <step order="6">Register the handler in `AiModule.cs` (per ADR-010 DI minimalism; use Null-Object pattern if feature-gated per ADR-032).</step>
+    <step order="7">Add integration test: seed a playbook with a known `sprk_indexhash`, modify the playbook's `sprk_jpsmatchingmetadata`, run the job, assert status flips to 'stale'.</step>
+    <step order="8">Add tolerance for cross-tenant scoping (job processes per-tenant queries; do not leak rows across tenants).</step>
+    <step order="9">Run `dotnet build` + tests; measure publish-size delta.</step>
+    <step order="10">Quality gates: code-review + adr-check (Step 9.5).</step>
+    <step order="11">Update TASK-INDEX.md: task 034 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">ServiceBusJobProcessor + PlaybookEmbeddingService</tool>
+    <tool name="Edit">Apply changes</tool>
+    <tool name="Write">New job class + integration test</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexDriftDetectionJob.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/IPlaybookEmbeddingHashCalculator.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Modules/AiModule.cs — DI registration</output>
+    <output type="test">tests/integration/.../PlaybookIndexDriftDetectionJobTests.cs</output>
+    <output type="docs">notes/handoffs/034-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`PlaybookIndexDriftDetectionJob` registered + handler invoked by Service Bus message.</criterion>
+    <criterion testable="true">Integration test: modified playbook transitions to `sprk_indexstatus = 'stale'`.</criterion>
+    <criterion testable="true">Telemetry emits `scannedCount`, `driftCount`, `durationMs`, `tenantId` — no user-content.</criterion>
+    <criterion testable="true">`dotnet build` + tests exit 0.</criterion>
+    <criterion testable="true">BFF publish delta within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Hash composition MUST be identical to `PlaybookEmbeddingService` post-task-032. The extracted calculator is the binding contract — both the indexing path and the drift job consume it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

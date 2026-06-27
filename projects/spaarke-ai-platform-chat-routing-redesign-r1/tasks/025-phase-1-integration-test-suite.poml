@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Phase 1 integration test suite (9 consumer surfaces × pre/post)</title>
+    <phase>1: §1.7 Stable IDs Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>023,024</dependencies>
+    <blocks>027</blocks>
+    <tags>testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New integration tests for already-implemented refactors; tags include 'testing' + 'integration-test'; STANDARD per Step 0.5</rigor-reason>
+    <parallel-group>1-I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build a Phase 1 integration test suite covering the 9 consumer surfaces migrated in tasks 015–021, asserting each invokes `/by-id/` (not `/by-name/`) and produces the same output as pre-migration. The suite serves as the regression gate for Phase 1 deploy (task 026) and the verification basis for the exit gate (task 027).
+  </prompt>
+
+  <role>SPAARKE platform QA + integration-test developer. Expert in xUnit + WebApplicationFactory + integration test patterns for ASP.NET Core.</role>
+
+  <goal>
+    A new test class `tests/integration/Sprk.Bff.Api.IntegrationTests/Phase1StableIdMigrationSuite.cs` (or split per consumer) covering all 9 consumer surfaces:
+    1. `SessionSummarizeOrchestrator` (task 015)
+    2. `MatterPreFillService` (task 016)
+    3. `ProjectPreFillService` (task 017)
+    4. `WorkspaceAiService` (task 018)
+    5. `WorkspaceFileEndpoints` (task 019)
+    6. `AppOnlyAnalysisService:46` (task 020)
+    7. `AppOnlyAnalysisService:1068` (task 020)
+    8. `ChatContextMappingService` (task 020)
+    9. Frontend Pattern B sites (via E2E or mock — `useAiSummary.ts`, `DocumentEmailWizard.tsx`) (task 021)
+    Each test asserts the consumer uses `/by-id/`, returns expected output shape, AND `/by-name/` invocation count for that consumer is zero post-migration.
+  </goal>
+
+  <context>
+    <background>
+      Per spec §1.7 Test Strategy + FR-02 + FR-03 acceptance. The pre/post test pattern validates that migration preserved behavior. Each consumer surface gets ONE test asserting ID-based resolution + output equivalence. Frontend surfaces are tested via either E2E (Playwright) or by mocking the API and asserting the call URL.
+
+      **Refresh (Q&A 2026-06-22 Q1)**: This POML's language was refreshed to match the post-Q1 code reality — stable lookups go through `sprk_playbookid` (immutable opaque ID, GUID-format), NOT `sprk_playbookcode`. See spec.md § Canonical Field Naming for the corrected role table.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Phase1StableIdMigrationSuite.cs (new)</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Fixtures/ (existing test infrastructure)</file>
+      <file>tests/e2e/ (potential Playwright location for frontend tests)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-015">Test fixtures use synthetic tenant/session IDs; no real user content.</constraint>
+    <constraint source="ADR-029">Test artifacts not packaged in BFF publish; verify they don't leak into Release output.</constraint>
+    <constraint source="project">Test update obligation per CLAUDE.md §10 F — these tests CLOSE the obligation for tasks 015–021.</constraint>
+    <constraint source="project">Tests use `IPlaybookLookupService` mocking or in-memory test seed; do NOT depend on a live Dataverse for unit-level assertions.</constraint>
+    <constraint source="project">If frontend E2E tests are added, run via `npm run test:e2e` (if exists) or document the manual smoke-test procedure.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Inspect the existing `tests/integration/Sprk.Bff.Api.IntegrationTests/` folder for shared fixture / WebApplicationFactory patterns.</step>
+    <step order="2">Create `Phase1StableIdMigrationSuite.cs` (or per-consumer files) with one Fact per consumer surface.</step>
+    <step order="3">For each backend consumer (8 surfaces): seed a mock `IPlaybookLookupService` returning a typed playbook entity; invoke the consumer; assert (a) the call went through `GetByIdAsync` (verify via Moq Verify or test-double counter), (b) output shape matches pre-migration contract.</step>
+    <step order="4">For each frontend consumer (2 surfaces): either (a) write a Vitest test mocking fetch + asserting `/by-id/` URL pattern in the request; OR (b) document a manual smoke-test in `notes/handoffs/025-frontend-smoke-procedure.md`.</step>
+    <step order="5">Add a cross-cutting test asserting `/by-name/` invocation count is zero across the test run for the migrated consumers (use a counting decorator over `IPlaybookLookupService` mocking the by-name path).</step>
+    <step order="6">Run `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/`. All 9 tests pass.</step>
+    <step order="7">Run frontend tests (`npm run test`) for Vitest assertions if added.</step>
+    <step order="8">Measure BFF publish size (test artifacts NOT included); report delta.</step>
+    <step order="9">Update TASK-INDEX.md: task 025 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Existing integration test fixtures</tool>
+    <tool name="Write">New Phase1StableIdMigrationSuite + per-consumer test files</tool>
+    <tool name="Bash">dotnet test + npm run test</tool>
+    <tool name="Grep">Verify zero `/by-name/` URL in production code (sanity check)</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Phase1StableIdMigrationSuite.cs — 9 consumer-surface tests</output>
+    <output type="test">tests/vitest/.../useAiSummary.byId.test.ts — frontend URL assertion (or smoke-test note)</output>
+    <output type="test">tests/vitest/.../DocumentEmailWizard.byId.test.tsx — frontend URL assertion (or smoke-test note)</output>
+    <output type="docs">notes/handoffs/025-bff-publish-delta.md</output>
+    <output type="docs">notes/handoffs/025-frontend-smoke-procedure.md (if E2E deferred)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 9 consumer-surface tests exist and pass.</criterion>
+    <criterion testable="true">Each backend test verifies `GetByIdAsync` was invoked (Moq Verify or equivalent).</criterion>
+    <criterion testable="true">Each backend test asserts output shape matches pre-migration contract.</criterion>
+    <criterion testable="true">Frontend tests (or smoke-test note) confirm `/by-id/` URL pattern.</criterion>
+    <criterion testable="true">`/by-name/` invocation count is zero across migrated-consumer test runs.</criterion>
+    <criterion testable="true">`dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/` exits 0.</criterion>
+    <criterion testable="true">Publish-size delta within NFR-01 thresholds (test code not in publish).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 026 (deploy). The test suite serves as the gate the deploy must pass before promotion. If a consumer-surface test fails, the gate blocks; root-cause and patch BEFORE deploying.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — new tests for already-shipped refactors; build + test verification required.</protocol>
+  </execution>
+</task>

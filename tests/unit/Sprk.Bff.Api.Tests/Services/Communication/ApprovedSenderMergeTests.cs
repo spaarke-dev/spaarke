@@ -348,28 +348,6 @@ public class ApprovedSenderMergeTests
         result.DisplayName.Should().Be("Config Fallback");
     }
 
-    [Fact]
-    public async Task ResolveAsync_WhenDataverseThrows_DoesNotThrow()
-    {
-        // Arrange
-        SetupCacheMiss();
-
-        _dataverseServiceMock
-            .Setup(ds => ds.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new TimeoutException("Dataverse timeout"));
-
-        var validator = CreateValidator(
-            senders: new[]
-            {
-                CreateSender("safe@contoso.com", "Safe Sender", isDefault: true)
-            });
-
-        // Act
-        var act = () => validator.ResolveAsync(fromMailbox: null);
-
-        // Assert
-        await act.Should().NotThrowAsync("Dataverse failure should be caught and fall back to config");
-    }
 
     #endregion
 

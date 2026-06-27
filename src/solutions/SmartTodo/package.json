@@ -6,9 +6,14 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && node -e \"require('fs').renameSync('dist/index.html','dist/smarttodo.html')\"",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
+    "@azure/msal-browser": "^5.12.0",
+    "@fluentui/react-components": "^9.54.0",
+    "@fluentui/react-icons": "^2.0.0",
     "@lexical/code": "^0.42.0",
     "@lexical/html": "^0.42.0",
     "@lexical/link": "^0.42.0",
@@ -17,9 +22,9 @@
     "@lexical/react": "^0.42.0",
     "@lexical/rich-text": "^0.42.0",
     "@lexical/utils": "^0.42.0",
-    "@fluentui/react-components": "^9.54.0",
-    "@fluentui/react-icons": "^2.0.0",
     "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
+    "@spaarke/sdap-client": "file:../../client/shared/Spaarke.SdapClient",
+    "@spaarke/smart-todo-components": "file:../../client/shared/Spaarke.SmartTodo.Components",
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
     "d3-force": "^3.0.0",
     "lexical": "^0.42.0",
@@ -27,12 +32,18 @@
   },
   "devDependencies": {
     "@hello-pangea/dnd": "^17.0.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@types/jest": "^30.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.2.1",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "ts-jest": "^29.4.4",
     "typescript": "~5.7.0",
     "vite": "^5.4.0",
     "vite-plugin-singlefile": "^2.0.0"

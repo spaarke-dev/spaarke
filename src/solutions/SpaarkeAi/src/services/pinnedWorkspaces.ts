@@ -176,6 +176,38 @@ export function setPinnedWorkspacesOrder(list: PinnedWorkspace[]): void {
 }
 
 /**
+ * Drop pinned entries whose `layoutId` is not in `knownLayoutIds`. Persists the
+ * cleaned list back to localStorage if (and only if) any entries were removed.
+ * Returns the cleaned list (whether or not a write occurred).
+ *
+ * Use case: the auto-open effect should not dispatch `widget_load` for layouts
+ * that no longer exist server-side (e.g. another device deleted the layout, or
+ * the user removed it from Manage Workspaces in a parallel tab). Calling this
+ * function right before the dispatch loop both prevents stale dispatches AND
+ * heals the localStorage entry so the cleanup is sticky across reloads.
+ *
+ * No-op safe: empty `knownLayoutIds` means "everything is stale" and the
+ * pinned list is wiped — but the caller is expected to only invoke this AFTER
+ * the layouts list has been fetched (non-empty), so that scenario means the
+ * user genuinely has zero saved layouts.
+ */
+export function prunePinnedToKnown(
+  knownLayoutIds: ReadonlySet<string>,
+): PinnedWorkspace[] {
+  const current = getPinnedWorkspaces();
+  const kept = current.filter((p) => knownLayoutIds.has(p.layoutId));
+  if (kept.length === current.length) return current;
+  try {
+    window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(kept));
+  } catch {
+    /* localStorage unavailable / quota exceeded — fail silently. The in-memory
+       cleaned list is still returned so the caller sees the correct filter
+       result even when persistence failed. */
+  }
+  return kept;
+}
+
+/**
  * Convenience: pin (if not already) the workspace AND move it to index 0 of
  * the pinned list. The first entry of the list is the "default" by
  * convention — `WorkspacePane.tsx`'s auto-open effect dispatches

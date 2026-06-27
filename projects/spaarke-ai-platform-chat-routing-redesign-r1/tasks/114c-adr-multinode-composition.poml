@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="114c" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>ADR — Multi-node Output composition pattern</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>114b</dependencies>
+    <blocks>118R</blocks>
+    <tags>documentation, adr, main-session-only</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documentation-only task (ADR + INDEX + CHANGELOG); STANDARD per task-execute Step 0.5 (no `.cs`/`.ts` modification; doc-only).</rigor-reason>
+    <parallel-group>5-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author an ADR capturing the multi-node Output composition pattern landed in 114R/114a/114b. Two artifacts: (1) concise constraint version at `.claude/adr/ADR-NNN-multinode-output-composition.md`; (2) full version at `docs/adr/ADR-NNN-multinode-output-composition.md`. Then update `.claude/adr/INDEX.md` and add a `.claude/CHANGELOG.md` entry. **DO NOT hardcode the ADR number** — the implementer must check the next available number via `Glob` (`.claude/adr/ADR-*.md`) at execution time and pick the next ordinal.
+  </prompt>
+
+  <role>SPAARKE platform documentation author. Expert in ADR authoring conventions (concise `.claude/` form vs full `docs/adr/` form) per `.claude/skills/adr-aware/SKILL.md`.</role>
+
+  <goal>
+    Two ADR artifacts written; `.claude/adr/INDEX.md` updated to list the new ADR; `.claude/CHANGELOG.md` entry added. ADR captures: (a) the 5-coordination-point frailty being replaced (schema-on-action + schema-aware widget brittleness); (b) section-name-keyed routing rationale; (c) migration path (per-playbook incremental — pilot via FR-58 / task 118R); (d) when to NOT use composite (e.g., chat sibling stays single-action — no benefit from composition when only one output destination exists). Cross-references to 114R/114a/114b implementation tasks.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-55 + Phase 5R "Multi-node Output composition" cluster. The multi-node composition pattern is a load-bearing architectural shift in the JPS playbook engine — it deserves an ADR for future-author reference. This task is the documentation capstone of wave 5-C; it ALSO unblocks 118R (the per-playbook migration), which references the ADR as governing rationale.
+    </background>
+    <relevant-files>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/CHANGELOG.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>docs/adr/</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/114R-deliver-composite-nodetype.poml</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/114a-per-section-sse-streaming.poml</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/114b-structuredoutputstreamwidget-rework.poml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3">**main-session-only** — sub-agents CANNOT write to `.claude/` paths. The task-execute skill MUST route this task to the main session.</constraint>
+    <constraint source="CLAUDE.md §17">ADR authoring conventions — concise constraint version in `.claude/adr/` (≤80 lines, MUST/MUST NOT only); full version in `docs/adr/` (rationale, alternatives considered, consequences).</constraint>
+    <constraint source="project">ADR number is dynamic — implementer determines via `Glob '.claude/adr/ADR-*.md'` at execution time; pick the next ordinal. DO NOT hardcode.</constraint>
+    <constraint source="project">ADR cross-references implementation tasks 114R/114a/114b and the FR-58 migration pilot (task 118R).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/CHANGELOG.md</file>
+      <file>.claude/skills/adr-aware/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `Glob '.claude/adr/ADR-*.md'` (sorted) — identify the highest existing ADR ordinal. Pick the next available number (call it `NNN` for this POML).</step>
+    <step order="2">Read `.claude/adr/ADR-033-streaming-chat-tool-side-channel.md` and `.claude/adr/ADR-013-ai-architecture.md` to confirm ADR style + section conventions used in this repo's concise form.</step>
+    <step order="3">Read 114R/114a/114b POMLs (now ✅ in TASK-INDEX) to confirm the as-built behavior the ADR documents.</step>
+    <step order="4">Author `.claude/adr/ADR-NNN-multinode-output-composition.md` (concise, ≤80 lines): Status, Context (5-coordination-point frailty), Decision (section-name-keyed routing via `NodeType.DeliverComposite`), MUSTs / MUST NOTs, references to 114R/114a/114b + FR-52/53/54.</step>
+    <step order="5">Author `docs/adr/ADR-NNN-multinode-output-composition.md` (full): Status, Context, Decision, Alternatives Considered (e.g., per-Action streaming with no Output node; schema-position keyed with stricter naming), Consequences (positive: coordination 5→2; negative: migration cost per playbook), Migration Path (per-playbook incremental; pilot is `summarize-document-for-workspace@v1` via FR-58 / task 118R), When NOT to use (chat sibling stays single-action — no composition benefit when only one output destination).</step>
+    <step order="6">Update `.claude/adr/INDEX.md` — add the new ADR to the index with one-line summary.</step>
+    <step order="7">Add a `.claude/CHANGELOG.md` entry — dated, naming the project (`chat-routing-redesign-r1`), the new ADR number, and one-sentence summary.</step>
+    <step order="8">Validate cross-references render correctly (no broken links); validate markdown lints clean.</step>
+    <step order="9">Update TASK-INDEX.md: 114c → ✅; current-task.md → ready for 118R (the migration pilot consumer of this ADR).</step>
+  </steps>
+
+  <tools>
+    <tool name="Glob">Enumerate existing ADR ordinals</tool>
+    <tool name="Read">ADR style exemplars, 114R/114a/114b POMLs</tool>
+    <tool name="Write">Two new ADR markdown files</tool>
+    <tool name="Edit">.claude/adr/INDEX.md, .claude/CHANGELOG.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-NNN-multinode-output-composition.md (concise)</output>
+    <output type="docs">docs/adr/ADR-NNN-multinode-output-composition.md (full)</output>
+    <output type="docs">.claude/adr/INDEX.md (updated)</output>
+    <output type="docs">.claude/CHANGELOG.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Concise ADR exists at `.claude/adr/ADR-NNN-multinode-output-composition.md` (≤80 lines; MUST/MUST NOT form).</criterion>
+    <criterion testable="true">Full ADR exists at `docs/adr/ADR-NNN-multinode-output-composition.md` with Alternatives Considered + Migration Path + When NOT to use sections.</criterion>
+    <criterion testable="true">ADR captures the 5→2 coordination-point reduction rationale and the schema-on-action + schema-aware widget frailty being replaced.</criterion>
+    <criterion testable="true">Migration path explicitly names FR-58 / task 118R as the pilot (`summarize-document-for-workspace@v1`).</criterion>
+    <criterion testable="true">"When NOT to use composite" guidance includes the chat sibling single-action case.</criterion>
+    <criterion testable="true">`.claude/adr/INDEX.md` lists the new ADR; `.claude/CHANGELOG.md` entry added (dated, project-attributed).</criterion>
+    <criterion testable="true">ADR number is NOT hardcoded — implementer picked next available via Glob at execution time.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **MAIN-SESSION-ONLY task.** Per CLAUDE.md §3 sub-agent write boundary, sub-agents launched via the Agent tool CANNOT write to `.claude/` paths (skills, patterns, constraints, catalogs, agents, settings, ADRs, INDEX, CHANGELOG). This POML's body explicitly references `.claude/adr/` and `.claude/CHANGELOG.md` writes — therefore the task-execute skill MUST route this task to the MAIN session and NOT delegate to a sub-agent. If a sub-agent attempts this and reports "Edit denied on `.claude/...`" — that is the boundary working correctly; escalate to main session immediately. Wave 5-C documentation capstone; blocks 118R (migration pilot).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — documentation-only; code-review + adr-check NOT required at Step 9.5 (no code changes). MUST run via main session only.</protocol>
+  </execution>
+</task>

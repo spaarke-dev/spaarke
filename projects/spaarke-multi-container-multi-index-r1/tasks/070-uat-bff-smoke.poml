@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>UAT — BFF smoke (allow-list rejection + valid request routing)</title>
+    <phase>H: Deploy + UAT</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>018</dependencies>
+    <blocks>071, 072</blocks>
+    <tags>testing, integration-test, e2e-test, bff-api, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>End-to-end test against deployed BFF; verifies FR-BFF-02/03 acceptance + NFR-05 (response time). No source changes; testing-only task with explicit constraints.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential gate that blocks 071 and 072 — UAT order matters (BFF smoke first, then wizards, then PCF).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Smoke-test the deployed BFF per spec.md FR-BFF-02 + FR-BFF-03 acceptance criteria and NFR-05. Hit `/api/ai/search` (or the relevant equivalent) with: (1) an invalid `searchIndexName` to verify ProblemDetails 400 with type code `INDEX_NOT_ALLOWED`; (2) a valid `searchIndexName: "spaarke-file-index"` to verify 200 + Application Insights log shows the resolved Azure Search URL targeting that index; (3) no `searchIndexName` to verify fall-through to tenant default. Capture response times for NFR-05 (within 10% of baseline).
+  </prompt>
+
+  <role>
+    Spaarke QA / operator running smoke tests against a deployed BFF. Captures evidence to verification notes.
+  </role>
+
+  <goal>
+    Three test scenarios pass: invalid-index returns 400 ProblemDetails (ADR-019 + NFR-08 schema); valid-index returns 200 with index-bound results (verified by BFF log); empty-index falls through to tenant default. Response times within 10% of baseline (NFR-05). Evidence captured to verification notes.
+  </goal>
+
+  <context>
+    <background>
+      The BFF resolver extension landed in Phase B (tasks 010-018). This task verifies it works under realistic conditions: bad input (allow-list rejection), good input (routes to specified index), no input (backward-compatible fallback). Response time check guards against the allow-list lookup becoming a performance regression.
+
+      Run UI/test via curl or PowerShell `Invoke-RestMethod` directly — no client involvement at this layer. PCF + Code Page tests come later (tasks 072, 073).
+    </background>
+    <relevant-files>
+      <file>(testing only — no source changes)</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-BFF-02 acceptance">`POST /api/ai/search` with `searchIndexName: "not-a-real-index"` returns 400 with documented ProblemDetails (type code `INDEX_NOT_ALLOWED`).</constraint>
+    <constraint source="spec.md FR-BFF-03 acceptance">Request with `searchIndexName: "spaarke-file-index"` returns results scoped to that physical index (verified via App Insights / BFF log of issued Azure Search query URL).</constraint>
+    <constraint source="spec.md NFR-05">BFF response time for searches with explicit `searchIndexName` within 10% of today's baseline.</constraint>
+    <constraint source="spec.md NFR-08">400 ProblemDetails follows valid schema with extension members (ADR-019).</constraint>
+    <constraint source="ADR-019">All BFF error responses use ProblemDetails format.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="ProblemDetails 400 schema" location="ADR-019">
+        Response body has `type` (URI), `title`, `status: 400`, `detail`, plus extension members. For INDEX_NOT_ALLOWED, expect `type` to encode the error code and `detail` to name the offending value.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Obtain an OAuth token for the deployed BFF (via the standard Spaarke Auth v2 flow or test-only flow). Confirm the BFF base URL for the target environment (test / staging).</step>
+    <step order="2">Baseline run: hit `POST /api/ai/search` 5 times WITHOUT `searchIndexName` (fall-through to tenant default). Record response times; compute median = baseline.</step>
+    <step order="3">Bad-input run: hit `POST /api/ai/search` with body `{ "query": "test", "searchIndexName": "not-a-real-index", ... }`. Verify response status = 400; response body is valid ProblemDetails (NFR-08 schema); `type` or extension member encodes `INDEX_NOT_ALLOWED`; `detail` names the rejected value. Capture the full response body.</step>
+    <step order="4">Good-input run: hit `POST /api/ai/search` with body `{ "query": "test", "searchIndexName": "spaarke-file-index", ... }`. Verify response status = 200. Inspect Application Insights (or BFF stdout log) for the trace line showing the issued Azure Search URL — confirm the index segment is `spaarke-file-index`. Record response time.</step>
+    <step order="5">Performance comparison: take 5 timings with `searchIndexName` set vs baseline (no `searchIndexName`). Compute delta — must be &lt; 10% per NFR-05.</step>
+    <step order="6">Capture evidence (request bodies, response bodies, response times, App Insights log snippets) to `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/070-bff-smoke.md`. Update TASK-INDEX + current-task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">curl / PowerShell Invoke-RestMethod to hit BFF endpoints</tool>
+    <tool name="Write">Capture verification notes</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/070-bff-smoke.md (request/response captures + timings + log snippets)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-BFF-02 + NFR-08: 400 response with valid ProblemDetails schema, `type`/extension encodes `INDEX_NOT_ALLOWED`.</criterion>
+    <criterion testable="true">FR-BFF-03: 200 response with BFF log confirming Azure Search URL targets `spaarke-file-index`.</criterion>
+    <criterion testable="true">Backward-compat: request without `searchIndexName` returns 200 (tenant default fallback).</criterion>
+    <criterion testable="true">NFR-05: response time delta &lt; 10% (5-sample median compare).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Sequential — blocks tasks 071 and 072. Do not start them until this task passes.
+
+    The Application Insights log inspection is the critical step for FR-BFF-03. If App Insights is not available in the test env, the BFF must emit the resolved URL to stdout/file log at INFO level — verify that's the case during this test (or file a small follow-up task if not).
+
+    If response time delta exceeds 10%, file a remediation task and pause downstream UAT until resolved. NFR-05 is a hard gate.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load spec.md FR-BFF-02, FR-BFF-03, NFR-05, NFR-08 + ADR-019 before starting. Follow task-execute Step 0 (STANDARD rigor) before any test run. Capture every result to the verification notes as you go.
+    </protocol>
+  </execution>
+</task>

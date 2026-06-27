@@ -24,6 +24,12 @@ param(
     [string]$OpenAiEndpoint = "https://spaarke-openai-dev.openai.azure.com/",
     [string]$EmbeddingModel = "text-embedding-3-large",
     [string]$EmbeddingApiVersion = "2024-06-01",
+    # FR-12: populate tenantId on every indexed record so the records-index reader
+    # (RecordSearchAuthorizationFilter + RecordSearchService) can apply
+    # `tenantId eq '...'` filter. Defaults to current az session tenant — override
+    # if syncing into a non-default tenant's records-index. Mirrors C# writer
+    # (DataverseIndexSyncService: $_configuration["AzureAd:TenantId"]).
+    [string]$TenantId,
     [switch]$IncludeEmbeddings,
     [switch]$DryRun
 )
@@ -143,9 +149,12 @@ function Transform-ToIndexDocument {
     $modifiedOn = $Record.modifiedon
 
     # Build index document matching spaarke-records-index schema
+    # FR-12: tenantId required for tenant-isolation filter (RecordSearchAuthorizationFilter
+    # + RecordSearchService.BuildRecordFilter both emit `tenantId eq '...'`).
     $doc = @{
         "@search.action"    = "mergeOrUpload"
         id                  = "${entityName}_${recordId}"
+        tenantId            = $script:ResolvedTenantId
         recordType          = $entityName
         dataverseEntityName = $entityName
         dataverseRecordId   = $recordId
@@ -233,6 +242,18 @@ Write-Host ""
 Write-Host "[1/4] Authenticating to Dataverse..." -ForegroundColor Cyan
 $dvToken = Get-DataverseToken -EnvironmentUrl $EnvironmentUrl
 Write-Host "  Authenticated" -ForegroundColor Green
+
+# FR-12: resolve tenantId from current az session if not explicitly provided.
+# Mirrors C# writer (DataverseIndexSyncService → _configuration["AzureAd:TenantId"]).
+if (-not $TenantId) {
+    $TenantId = az account show --query tenantId -o tsv 2>$null
+    if (-not $TenantId) {
+        Write-Error "TenantId not provided and could not be resolved from `az account show`. Pass -TenantId explicitly."
+        exit 1
+    }
+}
+$script:ResolvedTenantId = $TenantId
+Write-Host "  TenantId: $TenantId (FR-12 tenant-isolation filter source)" -ForegroundColor Gray
 
 # Step 2: Fetch records from Dataverse
 Write-Host "[2/4] Fetching records from Dataverse..." -ForegroundColor Cyan

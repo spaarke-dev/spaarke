@@ -12,6 +12,7 @@ import {
   getUserThemePreference,
   THEME_CHANGE_EVENT,
 } from "@spaarke/ui-components";
+import type { SectionRegistration } from "@spaarke/ui-components";
 import { PageHeader } from "./components/Shell/PageHeader";
 import { WorkspaceGrid } from "./components/Shell/WorkspaceGrid";
 import type { WorkspaceHeaderState } from "./components/Shell/WorkspaceGrid";
@@ -45,6 +46,18 @@ export interface ILegalWorkspaceAppProps {
    * preserving FR-25 / NFR-10 (byte-identical bundle behaviour).
    */
   embedded?: boolean;
+  /**
+   * Optional custom section registry (R2 Option D, 2026-06-18). When omitted,
+   * the default `SECTION_REGISTRY` is used (standalone LegalWorkspace behavior).
+   * Embedding consumers (SpaarkeAi) pass a registry built via
+   * `createLegalWorkspaceSectionRegistry({...})` to inject per-widget
+   * customization (e.g. SpaarkeAi's `loadSpaarkeAiNotificationContext` for
+   * Daily Briefing).
+   *
+   * Replaces the R2 task 002 module-mutation slot pattern — see
+   * `projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md`.
+   */
+  sections?: readonly SectionRegistration[];
 }
 
 const useStyles = makeStyles({
@@ -86,6 +99,7 @@ export const LegalWorkspaceApp: React.FC<ILegalWorkspaceAppProps> = ({
   userId,
   initialWorkspaceId,
   embedded = false,
+  sections,
 }) => {
   const { theme } = useTheme();
   const styles = useStyles();
@@ -136,10 +150,12 @@ export const LegalWorkspaceApp: React.FC<ILegalWorkspaceAppProps> = ({
     /*
      * FeedTodoSyncProvider is placed at the top of the app tree so that
      * Block 3 (ActivityFeed / FeedItemCard) and Block 4 (SmartToDo) both
-     * share the same flag state instance and receive cross-block updates
-     * via the subscribe() mechanism without prop-drilling.
+     * share the same cross-block todo-lifecycle bus and receive change
+     * notifications via subscribe() without prop-drilling. The provider
+     * holds no persistence state — producers write to Dataverse and then
+     * call notifyTodoChange(todoId, isActive). See FeedTodoSyncContext.tsx.
      */
-    <FeedTodoSyncProvider webApi={webApi}>
+    <FeedTodoSyncProvider>
       <div className={styles.root}>
         {/* Embedded mode skips the LegalWorkspace internal PageHeader.
             Standalone mode renders the full header with workspace dropdown. */}
@@ -162,6 +178,7 @@ export const LegalWorkspaceApp: React.FC<ILegalWorkspaceAppProps> = ({
             userId={userId}
             initialWorkspaceId={initialWorkspaceId}
             embedded={embedded}
+            sections={sections}
             onHeaderReady={!embedded ? setHeaderState : undefined}
           />
         </main>

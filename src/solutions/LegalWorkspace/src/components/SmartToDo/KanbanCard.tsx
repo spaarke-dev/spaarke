@@ -17,7 +17,7 @@ import {
   mergeClasses,
 } from "@fluentui/react-components";
 import { PinRegular, PinFilled } from "@fluentui/react-icons";
-import { IEvent } from "../../types/entities";
+import { ITodo } from "../../types/entities";
 import { computeDueLabel, parseDueDate, DueUrgency } from "../../utils/dueLabelUtils";
 import { computeTodoScore } from "../../utils/todoScoreUtils";
 import { RecordCardShell, CardIcon } from "@spaarke/ui-components";
@@ -110,9 +110,9 @@ function scoreCircleColors(score: number): { bg: string; fg: string } {
 // ---------------------------------------------------------------------------
 
 export interface IKanbanCardProps {
-  event: IEvent;
-  onPinToggle?: (eventId: string) => void;
-  onClick?: (eventId: string) => void;
+  todo: ITodo;
+  onPinToggle?: (todoId: string) => void;
+  onClick?: (todoId: string) => void;
   accentColor?: string;
 }
 
@@ -121,28 +121,29 @@ export interface IKanbanCardProps {
 // ---------------------------------------------------------------------------
 
 export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
-  ({ event, onPinToggle, onClick, accentColor }) => {
+  ({ todo, onPinToggle, onClick, accentColor }) => {
     const styles = useStyles();
 
-    const dueDate = parseDueDate(event.sprk_duedate);
+    const dueDate = parseDueDate(todo.sprk_duedate);
     const dueLabel = computeDueLabel(dueDate);
-    const { todoScore } = computeTodoScore(event);
+    const { todoScore } = computeTodoScore(todo);
     const roundedScore = Math.round(todoScore);
-    const isCompleted = event.sprk_todostatus === 100000001;
-    const isPinned = event.sprk_todopinned === true;
+    // Completed = statuscode 2 (per task 009 mapping).
+    const isCompleted = todo.statuscode === 2;
+    const isPinned = todo.sprk_todopinned === true;
     const dueDateFormatted = dueDate ? formatDueDate(dueDate) : null;
     const colors = scoreCircleColors(roundedScore);
 
     const handlePinClick = React.useCallback(() => {
-      onPinToggle?.(event.sprk_eventid);
-    }, [onPinToggle, event.sprk_eventid]);
+      onPinToggle?.(todo.sprk_todoid);
+    }, [onPinToggle, todo.sprk_todoid]);
 
     const handleCardClick = React.useCallback(() => {
-      onClick?.(event.sprk_eventid);
-    }, [onClick, event.sprk_eventid]);
+      onClick?.(todo.sprk_todoid);
+    }, [onClick, todo.sprk_todoid]);
 
     const ariaLabel = [
-      event.sprk_eventname,
+      todo.sprk_name,
       isCompleted ? "Completed." : "Open.",
       isPinned ? "Pinned." : "",
       dueDateFormatted ? `Due: ${dueDateFormatted}.` : "",
@@ -173,10 +174,10 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
             )}
           </div>
         )}
-        {event.assignedToName && (
+        {todo.assignedToName && (
           <div className={styles.metadataRow}>
             <span className={styles.fieldLabel}>Assigned:</span>
-            <span className={styles.fieldValue}>{event.assignedToName}</span>
+            <span className={styles.fieldValue}>{todo.assignedToName}</span>
           </div>
         )}
       </>
@@ -198,7 +199,7 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
         accentColor={accentColor ?? "none"}
         primaryContent={
           <Text as="span" size={300} className={mergeClasses(styles.title, isCompleted && styles.titleCompleted)}>
-            {event.sprk_eventname}
+            {todo.sprk_name}
           </Text>
         }
         secondaryContent={secondaryContent}
@@ -208,7 +209,7 @@ export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
             size="small"
             icon={isPinned ? <PinFilled /> : <PinRegular />}
             onClick={handlePinClick}
-            aria-label={isPinned ? `Unpin "${event.sprk_eventname}"` : `Pin "${event.sprk_eventname}"`}
+            aria-label={isPinned ? `Unpin "${todo.sprk_name}"` : `Pin "${todo.sprk_name}"`}
             title={isPinned ? "Unpin from column" : "Pin to column"}
           />
         }

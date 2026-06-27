@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Phase 3 retro — runbook deviations documented</title>
+    <phase>3: Dev environment cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>038</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, retro</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation; feeds Phase 5 lessons-learned</rigor-reason>
+    <parallel-group>Phase3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase 3 sequence close</parallel-reason>
+  </metadata>
+  <prompt>Document any deviations from the planned cutover sequence — surprises, manual fixes, KV name verification outcomes, etc. Feeds the operational-guide lessons-learned section (task 056).</prompt>
+  <role>Spaarke developer; reflective documentation.</role>
+  <goal>`notes/phase-3-retro.md` captures: what went per-plan, what diverged, what to bake into the operational guide.</goal>
+  <context><background>Cutover is the most volatile phase. Retro captures process knowledge for the operational guide before it fades.</background><relevant-files><file>projects/spaarke-redis-cache-remediation-r1/notes/</file></relevant-files></context>
+  <constraints><constraint source="project">Feeds task 051 + 056.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cutover-deploy-log.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/24hr-window-report.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Review cutover log + window report.</step>
+    <step order="2">Write `notes/phase-3-retro.md` — sections: Per-plan, Deviations, Runbook updates needed.</step>
+    <step order="3">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">notes</tool><tool name="Write">retro</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/phase-3-retro.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Retro file exists with the three sections.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>MINIMAL rigor.</protocol></execution>
+</task>

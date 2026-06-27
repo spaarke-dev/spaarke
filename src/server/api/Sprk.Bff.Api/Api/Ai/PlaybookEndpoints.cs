@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Security.Claims;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Caching;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 
@@ -56,6 +58,21 @@ public static class PlaybookEndpoints
             .WithName("GetPlaybookByName")
             .WithSummary("Get a playbook by name")
             .WithDescription("Retrieves playbook details by name. Used by PCF for resolving system playbooks like 'Document Profile'.")
+            .Produces<PlaybookResponse>()
+            .ProducesProblem(401)
+            .ProducesProblem(404);
+
+        // GET /api/ai/playbooks/by-id/{id} - Get playbook by stable-ID alternate key (FR-01)
+        // Cached 5 min per ADR-014, tenant-scoped per ADR-008.
+        // Per Q&A 2026-06-22 Q1: uses sprk_playbookid (GUID-format stable-ID alt-key).
+        group.MapGet("/by-id/{id}", GetPlaybookById)
+            .WithName("GetPlaybookById")
+            .WithSummary("Get a playbook by stable-ID alternate key (sprk_playbookid)")
+            .WithDescription(
+                "Retrieves a playbook by its sprk_playbookid alternate key (GUID-format opaque ID; " +
+                "value mirrors the row's sprk_analysisplaybookid PK per Q&A 2026-06-22 Q1). " +
+                "Result is cached for 5 minutes per (tenantId, id) per ADR-014. " +
+                "Tenant scoping is enforced via the JWT 'tid' claim per ADR-008.")
             .Produces<PlaybookResponse>()
             .ProducesProblem(401)
             .ProducesProblem(404);
@@ -289,14 +306,50 @@ public static class PlaybookEndpoints
     }
 
     /// <summary>
-    /// Get a playbook by name.
+    /// Get a playbook by name. DEPRECATED — migrate callers to <see cref="GetPlaybookById"/>
+    /// (FR-03 / spec §1.7). The endpoint stays mapped during the deprecation stabilization
+    /// window so legacy clients keep working while the call-rate-to-zero gate is measured.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Per task 024 (FR-03 acceptance): every call emits a warning-level log entry +
+    /// <see cref="Activity"/> tag <c>deprecated.endpoint = "playbooks-by-name"</c> so the
+    /// stabilization-window owner can dashboard the call-rate decay. See
+    /// <c>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/024-deprecation-dashboard.md</c>
+    /// for the App Insights KQL queries.
+    /// </para>
+    /// <para>
+    /// ADR-015 tier-1 audit: payload contains ONLY (a) the endpoint identifier, (b) the
+    /// playbook-name parameter (a stable identifier, NOT user content), (c) the tenant id
+    /// from the JWT <c>tid</c> claim, and (d) the caller User-Agent. No user message text,
+    /// no document content, no memory facts, no recall results.
+    /// </para>
+    /// </remarks>
     private static async Task<IResult> GetPlaybookByName(
         string name,
         IPlaybookService playbookService,
+        HttpContext httpContext,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
+
+        // ── Deprecation telemetry (FR-03 / task 024 / ADR-015 tier-1 safe). ────────────
+        // Tenant id from JWT 'tid' claim (mirrors GetPlaybookById's tenant resolution).
+        var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? "unknown-tenant";
+        var userAgent = httpContext.Request.Headers.UserAgent.ToString();
+        if (string.IsNullOrEmpty(userAgent))
+        {
+            userAgent = "unknown-ua";
+        }
+
+        logger.LogWarning(
+            "Deprecated endpoint /api/ai/playbooks/by-name/ called for {PlaybookName} by tenant {TenantId} ua={UserAgent}",
+            name, tenantId, userAgent);
+        Activity.Current?.SetTag("deprecated.endpoint", "playbooks-by-name");
+        Activity.Current?.SetTag("deprecated.name", name);
+        // ───────────────────────────────────────────────────────────────────────────────
 
         try
         {
@@ -319,6 +372,106 @@ public static class PlaybookEndpoints
                 statusCode: 500,
                 title: "Internal Server Error",
                 detail: $"Failed to get playbook: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Get a playbook by stable-ID alternate key (FR-01).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Per Q&amp;A 2026-06-22 Q1, uses the <c>sprk_playbookid</c> alternate key (GUID-format
+    /// opaque ID; value mirrors the row's <c>sprk_analysisplaybookid</c> PK). The admin-facing
+    /// <c>sprk_playbookcode</c> slug is NOT consumed here.
+    /// </para>
+    /// <para>
+    /// Tenant-scoped 5-min cache (ADR-014) is layered on top of the service's 1-hour global cache
+    /// to ensure tenant isolation per ADR-008. Cache key shape: <c>"playbook-by-id:{tenantId}:{id-upper-invariant}"</c>
+    /// (GUID strings are case-insensitive; the upper-invariant call is defensive).
+    /// </para>
+    /// <para>
+    /// 404 returns a full RFC 7807 ProblemDetails payload (ADR-019) with all 5 fields:
+    /// <c>type</c> (Spaarke convention URI), <c>title</c>, <c>status</c>, <c>detail</c> (includes the
+    /// requested id per ADR-015 — id is user-supplied input, not memory content), and <c>instance</c>
+    /// (the request URI). Refined by task 011.
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> GetPlaybookById(
+        string id,
+        IPlaybookLookupService playbookLookup,
+        IEndpointResponseCache cache,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
+
+        // RFC 7807 ProblemDetails fields for 404 (ADR-019). Spaarke convention for the `type` URI is
+        // `https://spaarke.com/problems/<slug>` — see OwnershipValidator.cs for prior art.
+        const string PlaybookNotFoundType = "https://spaarke.com/problems/playbook-not-found";
+        const string PlaybookNotFoundTitle = "Playbook Not Found";
+
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Playbook id is required");
+        }
+
+        // Tenant scoping (ADR-008): resolve tid claim. Falls back to "unknown-tenant" for local-dev
+        // schemes that may not emit tid; the cache key still differs from real-tenant entries.
+        var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? "unknown-tenant";
+
+        // Cache key: tenant + id (case-insensitive — GUID strings are case-insensitive by convention) per ADR-014.
+        var cacheKey = $"playbook-by-id:{tenantId}:{id.ToUpperInvariant()}";
+        var instance = $"/api/ai/playbooks/by-id/{id}";
+
+        try
+        {
+            // Cache wrapper (ADR-009 / CICD-087) preserves GetOrCreateAsync semantics
+            // including the Size=1 cache-entry hint for size-limited MemoryCache configs.
+            var playbook = await cache.GetOrCreateAsync<PlaybookResponse>(
+                cacheKey,
+                TimeSpan.FromMinutes(5),
+                async ct => await playbookLookup.GetByIdAsync(id, ct),
+                cancellationToken);
+
+            if (playbook is null)
+            {
+                // Defensive — GetByIdAsync should throw on miss, but guard against null cache entry.
+                logger.LogWarning("Playbook by-id lookup returned null for id '{Id}' (tenant {TenantId})", id, tenantId);
+                return Results.Problem(
+                    type: PlaybookNotFoundType,
+                    title: PlaybookNotFoundTitle,
+                    statusCode: 404,
+                    detail: $"Playbook with id '{id}' not found.",
+                    instance: instance);
+            }
+
+            return Results.Ok(playbook);
+        }
+        catch (PlaybookNotFoundException)
+        {
+            logger.LogWarning("Playbook not found by id '{Id}' for tenant {TenantId}", id, tenantId);
+            // ADR-019: full RFC 7807 ProblemDetails. ADR-015: `detail` may include the requested
+            // id (user-supplied input), MUST NOT include user message content or memory facts.
+            return Results.Problem(
+                type: PlaybookNotFoundType,
+                title: PlaybookNotFoundTitle,
+                statusCode: 404,
+                detail: $"Playbook with id '{id}' not found.",
+                instance: instance);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to get playbook by id '{Id}' for tenant {TenantId}", id, tenantId);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to get playbook by id");
         }
     }
 

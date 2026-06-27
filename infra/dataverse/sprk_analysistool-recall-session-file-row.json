@@ -1,0 +1,66 @@
+{
+  "_comment_top": "chat-routing-redesign-r1 task 085 — seed row for the RecallSessionFileHandler chat tool. Single LLM-facing function: recall_session_file(fileId, purpose, query, scope, maxTokens?, requireCitations?). The LOAD-BEARING T2+T5 retrieval tool for the legal-domain trust framing — its requireCitations: true default + the persona instruction injected by TrustFrameInstructionInjector (task 077) ensure the agent uses citations rather than quoting the precomputed (NOT authoritative) summary. Architecture §8.1 + §8.3.",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'RecallSessionFileHandler' (= nameof handler class). Auto-discovered via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) — ZERO new top-level DI line.",
+  "_comment_index_binding": "Architecture §5.2.1 BINDING: this tool reads ONLY from the spaarke-session-files Azure AI Search index. NEVER spaarke-insights-index. The handler enforces this by setting RagSearchOptions.SessionId on every retrieval call — the underlying RagService session-scoped branch resolves the spaarke-session-files SearchClient directly (RagService.SearchAsync lines 218-224) and ANDs the tenant filter with sessionId (ADR-014 isolation invariant). NOT routing through SearchIndexName.",
+  "_comment_mode_dispatch": "Architecture §6.3: scope=summary reads ChatSessionFile.SummaryText directly (hot 5ms path; no RagService call); scope=relevant_sections / tables / citations issue session-scoped RAG searches with topK=3 (default) or topK=5 (verify/summarize purpose); scope=full_text concats top-K chunks within an 8K-token budget (32K char approx), else returns summary + first 2K chars + truncation_reason='exceeded_8K'.",
+  "_comment_citation_enforcement": "Architecture §8.3 trust-framing: requireCitations DEFAULT is true and is the load-bearing principle for legal-domain accuracy. When requireCitations=true AND scope != 'summary' AND the recall produces ZERO citations, the handler returns ToolResult.Error with ErrorCode='NO_CITATIONS_AVAILABLE' so the orchestrator can prompt the agent to retry with a different scope. The trust frame requires citation-bearing answers; precomputed summaries are NOT authoritative.",
+  "_comment_per_purpose_semantics": "FR-31 — minimal first-cut purpose biases (sophisticated NLP deferred per task 091+ MVP scope): answer_question = standard semantic top-3 sections; quote = post-filter results to those containing exact-phrase substring of query (case-insensitive); compare = top-3 sections (multi-file extension is task 091+); summarize = top-5 sections (precomputed used only when scope=summary); extract_dates = post-process content for ISO-8601 \\b\\d{4}-\\d{2}-\\d{2}\\b matches + common formats; verify = topK=5 broader net.",
+  "_comment_graceful_errors": "Architecture §9.2: fileId not present in ChatSession.UploadedFiles returns structured payload { scope_truncated: true, truncation_reason: 'not_found' } — NEVER throws; full_text exceeded 8K returns the documented summary + first 2K chars + truncation_reason='exceeded_8K'; AI Search failure surfaces as truncation_reason='search_unavailable' (architecture §9.1 T5 graceful degradation).",
+  "_comment_recently_discussed_mark": "After any successful recall (except not_found), the handler marks the file as recently-discussed via IRecentlyDiscussedTracker.Mark(sessionId, fileId). Task 091 owns the canonical IRecentlyDiscussedTracker interface + DI registration; until then the handler injects an optional defensive-shim dependency (IRecentlyDiscussedTrackerLike) so this task lands green per the POML notes — the mark call is null-safe.",
+  "_comment_telemetry": "ADR-015 BINDING: emits context.tool_call_completed via IContextEventEmitter.ToolCallCompleted. Tier-1 safe payload: tool name + decisionId + sessionId + tenantId + outcome enum ('ok' | 'not_found' | 'exceeded_8K' | 'no_citations' | 'validation_failed' | 'cancelled' | 'exception' | 'search_unavailable') + durationMs. NEVER content text, citation excerpts, query strings, or summary text. The IContextEventEmitter signature is structurally constrained — no string content / object payload parameters that could carry recall body. Query text MAY appear at LogLevel.Debug only; query LENGTH only at Info.",
+  "_comment_placement_boundary": "ADR-013 binding: the handler injects IRagService + ChatSessionManager + TimeProvider + IContextEventEmitter directly — BFF-internal AI plumbing per the 2026-05-20 refined ADR-013 boundary rule (no PublicContracts facade for BFF-internal chat handlers). Mirrors the direct-injection pattern in DocumentSearchHandler (IRagService) and ManagePinnedContextHandler (IPinnedContextRepository).",
+  "_comment_security": "sprk_requiredcapability = null (intentional). recall_session_file is an ALWAYS-ON tool when the chat session has uploaded files (architecture §8.2). The handler's own gates (TenantId required; closed purpose+scope enums; session-scoped RagService route binds to ChatSession.SessionId; file lookup against ChatSession.UploadedFiles) are the authorization surface.",
+  "_comment_tenant_isolation": "ADR-014 binding: the chat session's TenantId is forwarded into every RagService.SearchAsync call via RagSearchOptions.TenantId. Under session-scoped routing (SessionId set), RagService applies BOTH 'tenantId eq ...' AND 'sessionId eq ...' clauses — cross-session reads are structurally impossible (RagService.cs lines 1081-1092).",
+  "_comment_description_loadbearing": "sprk_description is LOAD-BEARING per NFR-12: the LLM uses the description text to decide WHEN to invoke this tool. The phrasing makes the trust frame explicit (precomputed summary is NOT authoritative; cite via this tool with requireCitations=true for any legally-precise answer) so the LLM grounds responses in citation-bearing recall rather than quoting the summary.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_toolcode + sprk_name 'SYS-%' filter; UPSERTs.",
+  "sprk_name": "SYS-Recall Session File",
+  "sprk_toolcode": "RECALL-SESSION-FILE",
+  "sprk_description": "Recall content from a session-uploaded file by scope + purpose; returns citation-bearing content. Use this tool for ANY legally-precise question (specific clauses, exact wording, dates, parties, dollar amounts). The file's precomputed summary is NOT authoritative — DO NOT quote it as if it were the source. Call this tool with requireCitations=true (the default) for any answer that uses recalled content, and cite the returned citations explicitly. Scope choices: 'summary' for high-level framing only (NEVER cite); 'relevant_sections' for targeted semantic search (default); 'full_text' for the whole document (auto-truncates at 8K tokens to summary + first 2K chars); 'tables' for tabular data; 'citations' for already-cited material. Purpose biases retrieval semantics: 'answer_question' (default semantic), 'quote' (exact-phrase substring filter), 'compare' (multi-file), 'summarize' (broader top-K), 'extract_dates' (date-token post-processing), 'verify' (broader top-K with citation markers). Architecture §8.1.",
+  "sprk_handlerclass": "RecallSessionFileHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only. Session files are a chat-context affordance — playbook nodes do not read from ChatSession.UploadedFiles. Mirrors the chat-only scoping of ManagePinnedContextHandler (task 069) and the workspace-write handlers (tasks 054/055).",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "RecallSessionFileHandler Request",
+    "description": "Argument shape for chat-driven invocation of the recall_session_file tool. Reads from the spaarke-session-files index (NEVER spaarke-insights-index) scoped to the chat session.",
+    "type": "object",
+    "required": ["fileId", "purpose", "query"],
+    "properties": {
+      "fileId": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Stable session-scoped file identifier (the FileId from ChatSession.UploadedFiles produced at upload time)."
+      },
+      "purpose": {
+        "type": "string",
+        "enum": ["answer_question", "quote", "compare", "summarize", "extract_dates", "verify"],
+        "description": "Closed enum. Biases retrieval semantics per FR-31: 'answer_question' (default semantic), 'quote' (exact-phrase substring filter), 'compare' (multi-file extension; minimal in MVP), 'summarize' (broader top-K), 'extract_dates' (post-process content for ISO-8601 date tokens), 'verify' (broader top-K with citation markers)."
+      },
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Search query text. Used as the semantic anchor for relevant_sections / tables / citations / full_text scopes; ignored for the summary scope."
+      },
+      "scope": {
+        "type": "string",
+        "enum": ["summary", "relevant_sections", "full_text", "tables", "citations"],
+        "default": "relevant_sections",
+        "description": "Closed enum. 'summary' reads the precomputed file summary (NEVER quote as source); 'relevant_sections' is the default targeted semantic search; 'full_text' concats top-K chunks within an 8K-token budget else returns summary + first 2K chars + truncation_reason='exceeded_8K'; 'tables' / 'citations' are semantic-search variants for tabular and citation-bearing chunks."
+      },
+      "maxTokens": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Optional cap on returned content size. Defaults to 8K (32K chars approx) when omitted."
+      },
+      "requireCitations": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether the recall must include citations. DEFAULT TRUE (architecture §8.3 trust-frame, non-negotiable for legally-precise answers). When true AND the recall produces zero citations AND scope != 'summary', the tool returns an error (NO_CITATIONS_AVAILABLE) so the orchestrator can retry with a different scope."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — this row exposes a single LLM-facing function. Empty object reserved for future per-row defaults (e.g., per-tenant top-K caps)."
+  }
+}

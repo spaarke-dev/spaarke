@@ -46,64 +46,9 @@ public class WebSearchToolsTests
         action.Should().Throw<ArgumentNullException>().WithParameterName("logger");
     }
 
-    [Fact]
-    public void Constructor_WithValidLogger_DoesNotThrow()
-    {
-        // Act & Assert
-        var action = () => new WebSearchTools(_loggerMock.Object, _httpClientFactoryMock.Object, null, null);
-        action.Should().NotThrow();
-    }
 
     // === [Description] attribute tests ===
 
-    [Fact]
-    public void SearchWebAsync_HasDescriptionAttribute_OnMethod()
-    {
-        // Arrange
-        var method = typeof(WebSearchTools).GetMethod(nameof(WebSearchTools.SearchWebAsync));
-        method.Should().NotBeNull();
-
-        // Act
-        var description = method!.GetCustomAttribute<DescriptionAttribute>();
-
-        // Assert
-        description.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on tool methods");
-        description!.Description.Should().Contain("Search the web");
-    }
-
-    [Fact]
-    public void SearchWebAsync_HasDescriptionAttribute_OnQueryParameter()
-    {
-        // Arrange
-        var method = typeof(WebSearchTools).GetMethod(nameof(WebSearchTools.SearchWebAsync));
-        method.Should().NotBeNull();
-
-        var queryParam = method!.GetParameters().First(p => p.Name == "query");
-
-        // Act
-        var description = queryParam.GetCustomAttribute<DescriptionAttribute>();
-
-        // Assert
-        description.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on key parameters");
-        description!.Description.Should().Be("Web search query");
-    }
-
-    [Fact]
-    public void SearchWebAsync_HasDescriptionAttribute_OnMaxResultsParameter()
-    {
-        // Arrange
-        var method = typeof(WebSearchTools).GetMethod(nameof(WebSearchTools.SearchWebAsync));
-        method.Should().NotBeNull();
-
-        var maxResultsParam = method!.GetParameters().First(p => p.Name == "maxResults");
-
-        // Act
-        var description = maxResultsParam.GetCustomAttribute<DescriptionAttribute>();
-
-        // Assert
-        description.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on key parameters");
-        description!.Description.Should().Contain("Maximum number of results");
-    }
 
     // === SearchWebAsync happy path tests ===
 

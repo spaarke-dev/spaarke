@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="100" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Tier 5 retrieval wrapper handlers over chat-domain AI Search indexes ONLY</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4f)</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>099</dependencies>
+    <blocks>101</blocks>
+    <tags>bff-api, services, azure-search, architecture-binding, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'ai' + 'architecture-binding'; new service files for retrieval over Azure AI Search; binding-NEGATIVE rule on spaarke-insights-index; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>4-O</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author Tier 5 retrieval wrapper handlers that read ONLY from the three chat-domain AI Search indexes — `spaarke-session-files`, `spaarke-files-index`, `spaarke-rag-references`. These handlers back the recall-tool surface (mode='section' on `RecallSessionFileHandler`, plus `document_search` + `knowledge_retrieval` paths). Per architecture §5.2.1 and FR-36, you MUST NOT read from `spaarke-insights-index` from chat-memory paths — that index is Insights-domain (Observations/Precedents) and using it from chat-memory tools is a categorical-mismatch binding-NEGATIVE.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer with Azure AI Search expertise. Expert in architecture §5 (Insights-vs-Chat reuse boundary).</role>
+
+  <goal>
+    Tier 5 wrapper handlers (or extension methods on existing `RagService`/handler stack) live in `src/server/api/Sprk.Bff.Api/Services/Ai/Memory/` (or `Services/Ai/Retrieval/`). They expose tenant-scoped, session-scoped, or matter-scoped queries over `spaarke-session-files`, `spaarke-files-index`, `spaarke-rag-references`. Grep confirms ZERO reads of `spaarke-insights-index` from any chat-memory code path. Recall integration tests pass against the 3 chat-domain indexes.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture/stateful-chat-architecture.md §5.2.1 the Insights audit recommended wrapping `spaarke-insights-index` for chat T5 recall — that recommendation was REJECTED because the Insights index holds derived knowledge artifacts (Observations, Precedents) and is owned by the Insights subsystem. Forcing chat memory through it would (a) pollute Insights with chat-specific records, (b) confuse retrieval ranking, (c) couple two unrelated domains, (d) force the Insights team to support chat-memory queries. Per FR-36, chat memory uses chat-domain indexes exclusively. Per architecture §4.5, MUST NOT add a new chat-memory index either — the existing three suffice.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/RecallSessionFileHandler.cs</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="architecture §5.2.1">MUST NOT use `spaarke-insights-index` for chat memory retrieval — categorical mismatch.</constraint>
+    <constraint source="architecture §4.5">MUST NOT add a new chat-memory AI Search index — wrap existing three.</constraint>
+    <constraint source="architecture §7.3">Allowed indexes: `spaarke-session-files` (primary T2-scoped recall), `spaarke-files-index` (T3-matter-scoped), `spaarke-rag-references` (T4-org-scoped knowledge).</constraint>
+    <constraint source="spec FR-36">Code review must confirm zero `spaarke-insights-index` reads from chat-memory tools.</constraint>
+    <constraint source="ADR-013">Cross facade boundary via `Services/Ai/PublicContracts/` when CRUD code consumes; AI-internal direct injection in CRUD code NOT allowed.</constraint>
+    <constraint source="ADR-014">5-minute TTL cache on stable-key queries where appropriate; tenant-scoped.</constraint>
+    <constraint source="ADR-015">Tier-1 logging — log query lengths + result counts; NEVER log query text content, returned chunks, or retrieved file content.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs prior Phase 4 baseline.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>knowledge/azure-ai-search/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read architecture §5.2.1, §4.5, §7.3 to internalize the binding-NEGATIVE list before authoring any code.</step>
+    <step order="2">Inspect existing `RagService.cs` to understand the current query/filter/topK shape and reuse where possible.</step>
+    <step order="3">Author wrapper handler(s) under `Services/Ai/Memory/` (e.g., `SessionFileRetrievalHandler`, `MatterFileRetrievalHandler`, `KnowledgeRetrievalHandler`) — each binds to ONE of the three allowed indexes via constructor injection of `RagService` or `SearchClient`.</step>
+    <step order="4">Each handler exposes a tenant-scoped query method returning `(content, citations[], scope_truncated, truncation_reason)` shape per architecture §6.3.</step>
+    <step order="5">Wire `RecallSessionFileHandler` mode='section' path through the new `SessionFileRetrievalHandler` if not already.</step>
+    <step order="6">Grep prove: `grep -r "spaarke-insights-index" src/server/api/Sprk.Bff.Api/Services/Ai/Memory/` returns ZERO hits; `grep -r "spaarke-insights-index" src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Recall*` returns ZERO hits.</step>
+    <step order="7">Emit context.tool_call_completed audit event per ADR-015 — tier-1 fields only (handler name, sessionId/matterId, durationMs, resultCount); NEVER query text or returned content.</step>
+    <step order="8">Add unit tests under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/` for each retrieval handler — assert tenant scoping, index targeting, and that the handler refuses to be configured against `spaarke-insights-index` (fail-fast guard).</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` + tests — must pass.</step>
+    <step order="10">Measure BFF publish size: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report delta vs prior Phase 4 baseline.</step>
+    <step order="11">code-review + adr-check (FULL rigor Step 9.5 quality gates).</step>
+    <step order="12">Update TASK-INDEX.md: task 100 → ✅; update current-task.md per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Architecture doc + existing RagService + handler files</tool>
+    <tool name="Grep">Verify zero spaarke-insights-index references; confirm binding-NEGATIVE</tool>
+    <tool name="Edit">Add wrapper handler files + tests</tool>
+    <tool name="Bash">dotnet build / test / publish; publish-size report</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/SessionFileRetrievalHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterFileRetrievalHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/KnowledgeRetrievalHandler.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/ — handler tests</output>
+    <output type="docs">notes/handoffs/100-bff-publish-delta.md — publish size delta vs prior baseline</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -r "spaarke-insights-index" src/server/api/Sprk.Bff.Api/Services/Ai/Memory/` returns ZERO hits.</criterion>
+    <criterion testable="true">`grep -r "spaarke-insights-index" src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Recall*` returns ZERO hits.</criterion>
+    <criterion testable="true">Each new retrieval handler targets ONE of the three chat-domain indexes only.</criterion>
+    <criterion testable="true">Unit tests pass; tenant scoping enforced; fail-fast guard against spaarke-insights-index configuration.</criterion>
+    <criterion testable="true">ADR-015 tier-1 logging verified — no query text or returned content in logs.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative within NFR-01 ceiling.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Per architecture §5.5 — when a reviewer asks "why aren't we wrapping spaarke-insights-index for chat T5?" the answer is in §5.2.1. Cite that section in the PR description. The fail-fast guard (step 8) is defense-in-depth: if a future contributor tries to configure a chat-memory handler against the Insights index, the constructor should throw.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

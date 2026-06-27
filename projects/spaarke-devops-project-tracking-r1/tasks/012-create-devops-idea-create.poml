@@ -1,0 +1,69 @@
+<task id="DEVOPS-012" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Create /devops-idea-create skill</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <estimated-effort>1.5 hours</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>skill-creation, devops, idea, capture, gh-cli</tags>
+    <dependencies>010</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Author `/devops-idea-create` skill per FR-08. Takes one-line summary + optional tentative Epic. Creates an Idea Issue with `Type=Idea`, label `backlog`. **DOES NOT create a local folder or worktree** — this is the cheap-capture surface; promotion to a Project happens via `/devops-idea-promote` (task 013).
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill author. Idea capture should be friction-free: a single summary line + (optional) tentative Epic should be enough.</role>
+
+  <goal>
+Skill creates an Idea Issue on Project #2 in <2 seconds. Issue has `Type=Idea`, label `backlog`, body populated from the `idea.yml` template, and NO local folder is created at `projects/{name}/`.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-07">Spaarke skill convention</constraint>
+    <constraint source="spec FR-08">No local folder/worktree side-effects (this is capture-only)</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+    <constraint source="convention">Accept flags: `--summary` (required), `--epic` (optional Issue #), `--why-it-matters`, `--originating-source`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>.claude/skills/INDEX.md</file>
+      <file>.github/ISSUE_TEMPLATE/idea.yml</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm task 010 ✅. Load idea.yml template fields.</step>
+    <step order="1" name="Author SKILL.md">Frontmatter + Prerequisites + Purpose + Steps + Failure-Modes. Steps: validate `--summary` required; compose body from idea template; `gh issue create` with label `backlog`; add to Project #2; set `Type=Idea` field; if `--epic` provided, set `Parent issue` to that Epic; emit Issue URL.</step>
+    <step order="2" name="Explicit non-side-effects">SKILL.md MUST contain a "What this skill does NOT do" section per Spaarke convention: (1) no folder creation, (2) no worktree creation, (3) no design.md drafting. Promotion happens via `/devops-idea-promote`.</step>
+    <step order="3" name="Update INDEX.md">Add row.</step>
+    <step order="4" name="Smoke test">Capture + delete a throwaway Idea. Verify: Issue exists with `Type=Idea`, label `backlog`; `projects/` is unchanged (no new folder).</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/* files</tool>
+    <tool name="Write">New SKILL.md</tool>
+    <tool name="gh">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="skill">.claude/skills/devops-idea-create/SKILL.md</output>
+    <output type="config">.claude/skills/INDEX.md (one new row)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase2-idea-create-smoke-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SKILL.md exists with NFR-07 sections + explicit non-side-effects section</criterion>
+    <criterion testable="true">Smoke test creates an Idea Issue with `Type=Idea`, label `backlog`</criterion>
+    <criterion testable="true">No `projects/{name}/` folder created during smoke test</criterion>
+    <criterion testable="true">Optional `--epic` flag sets Parent issue correctly</criterion>
+    <criterion testable="true">INDEX.md updated</criterion>
+  </acceptance-criteria>
+</task>

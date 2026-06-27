@@ -1,0 +1,61 @@
+<task id="050" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>InsightWidgetsTelemetry.cs — meter Sprk.Bff.Api.InsightWidgets</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>5</phase>
+    <tags>telemetry, bff, dotnet</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Author `InsightWidgetsTelemetry.cs` in `src/server/api/Sprk.Bff.Api/Telemetry/` modeled on `R5SummarizeTelemetry.cs`. Meter name `Sprk.Bff.Api.InsightWidgets` per Q-U8 resolution (NOT the spec's earlier `Spaarke.InsightWidgets`). Bounded dimensions only — no unbounded tag values.
+  </prompt>
+
+  <role>BFF telemetry developer.</role>
+
+  <goal>
+    New telemetry source registered in `Sprk.Bff.Api`. Meter + activity source defined. Counter for `widget.insightcard.invoked` with bounded tags `{topic, mode, outcome, cacheHit, tenantId}`.
+  </goal>
+
+  <inputs>
+    <file purpose="template">src/server/api/Sprk.Bff.Api/Telemetry/R5SummarizeTelemetry.cs</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (NFR-06)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="Q-U8">Meter name = `Sprk.Bff.Api.InsightWidgets` (matches all 9 existing BFF meters)</constraint>
+    <constraint source="ADR-014/015">Bounded dimensions only (cardinality safety)</constraint>
+    <constraint source="audit">No new Zone B AI imports</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>system.diagnostics.metrics, meter, activitysource, bounded dimensions</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/R5SummarizeTelemetry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/InsightsCacheMetrics.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Author InsightWidgetsTelemetry.cs">Mirror R5SummarizeTelemetry structure</step>
+    <step order="2" name="Meter name">"Sprk.Bff.Api.InsightWidgets"</step>
+    <step order="3" name="Counter widget.insightcard.invoked">Bounded tags</step>
+    <step order="4" name="Histogram widget.insightcard.duration">Bounded tags</step>
+    <step order="5" name="Register in DI">Via existing pattern</step>
+    <step order="6" name="ADR-check: no new Zone B AI imports">Verify grep</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Telemetry/InsightWidgetsTelemetry.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File compiles</criterion>
+    <criterion testable="true">Meter name exactly "Sprk.Bff.Api.InsightWidgets"</criterion>
+    <criterion testable="true">No "Spaarke.InsightWidgets" reference</criterion>
+    <criterion testable="true">All tag values come from a finite enum or bounded set</criterion>
+  </acceptance-criteria>
+</task>

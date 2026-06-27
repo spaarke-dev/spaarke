@@ -256,6 +256,125 @@ describe('useRecordSearch', () => {
       expect(result.current.hasMore).toBe(false);
     });
 
+    // FR-CP-04 — searchIndexName forwarding (Task 042)
+
+    it('should include searchIndexName in request body when non-empty', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useRecordSearch());
+
+      await act(async () => {
+        result.current.search('contracts', matterTypes, defaultFilters, 'spaarke-matter-index');
+      });
+
+      const callArg = mockSearch.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg.searchIndexName).toBe('spaarke-matter-index');
+    });
+
+    it('should trim searchIndexName before forwarding', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useRecordSearch());
+
+      await act(async () => {
+        result.current.search('test', matterTypes, defaultFilters, '  spaarke-matter-index  ');
+      });
+
+      const callArg = mockSearch.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg.searchIndexName).toBe('spaarke-matter-index');
+    });
+
+    it('should omit searchIndexName from request body when empty string', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useRecordSearch());
+
+      await act(async () => {
+        result.current.search('test', matterTypes, defaultFilters, '');
+      });
+
+      const callArg = mockSearch.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg).not.toHaveProperty('searchIndexName');
+    });
+
+    it('should omit searchIndexName from request body when whitespace-only', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useRecordSearch());
+
+      await act(async () => {
+        result.current.search('test', matterTypes, defaultFilters, '   ');
+      });
+
+      const callArg = mockSearch.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg).not.toHaveProperty('searchIndexName');
+    });
+
+    it('should omit searchIndexName from request body when undefined', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useRecordSearch());
+
+      await act(async () => {
+        result.current.search('test', matterTypes, defaultFilters);
+      });
+
+      const callArg = mockSearch.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg).not.toHaveProperty('searchIndexName');
+    });
+
+    it('should omit searchIndexName from request body when null', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useRecordSearch());
+
+      await act(async () => {
+        result.current.search('test', matterTypes, defaultFilters, null);
+      });
+
+      const callArg = mockSearch.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg).not.toHaveProperty('searchIndexName');
+    });
+
+    it('should reuse searchIndexName in loadMore() request body', async () => {
+      // First page — captures searchIndexName into the ref
+      const page1 = makeResponse(
+        Array.from({ length: 20 }, (_, i) => makeResult(`rec-${i}`)),
+        50
+      );
+      mockSearch.mockResolvedValueOnce(page1);
+      const { result } = renderHook(() => useRecordSearch());
+
+      await act(async () => {
+        result.current.search('test', matterTypes, defaultFilters, 'spaarke-matter-index');
+      });
+
+      // Second page — loadMore should reuse the captured index
+      mockSearch.mockResolvedValueOnce(makeResponse([], 50));
+      await act(async () => {
+        result.current.loadMore();
+      });
+
+      const secondCall = mockSearch.mock.calls[1][0] as Record<string, unknown>;
+      expect(secondCall.searchIndexName).toBe('spaarke-matter-index');
+    });
+
+    it('should not leak searchIndexName from prior search after reset()', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useRecordSearch());
+
+      // First search with a searchIndexName
+      await act(async () => {
+        result.current.search('test', matterTypes, defaultFilters, 'spaarke-matter-index');
+      });
+
+      // Reset, then search without index — must not carry over
+      act(() => {
+        result.current.reset();
+      });
+
+      await act(async () => {
+        result.current.search('test2', matterTypes, defaultFilters);
+      });
+
+      const secondCall = mockSearch.mock.calls[1][0] as Record<string, unknown>;
+      expect(secondCall).not.toHaveProperty('searchIndexName');
+    });
+
     it('should use hybridMode from filters', async () => {
       const vectorFilters: SearchFilters = {
         ...defaultFilters,

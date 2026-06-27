@@ -1,0 +1,64 @@
+<task id="011" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Deploy sprk_aitopicregistry entity to dev Dataverse</title>
+    <status>completed</status>
+    <estimated-effort>1h</estimated-effort>
+    <phase>1</phase>
+    <tags>dataverse, deploy, schema, deploy</tags>
+    <dependencies>010</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Execute Task 010's deploy script against dev Dataverse. Verify entity created with all 9 attributes + alternate key. Verify SME accessibility via App Designer.
+  </prompt>
+
+  <role>Dataverse deployment engineer.</role>
+
+  <goal>
+    Entity `sprk_aitopicregistry` deployed to dev Dataverse and queryable via Web API + MCP describe.
+  </goal>
+
+  <inputs>
+    <file purpose="deploy-script">scripts/temp/Deploy-AiTopicRegistryEntity.ps1</file>
+    <file purpose="metadata">scripts/temp/Create-AiTopicRegistryEntity.json</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="dataverse-create-schema">Idempotent deploy; if entity exists, skip creation</constraint>
+    <constraint source="environment">Deploy to Spaarke Dev only</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse deployment, metadata service, web api</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Run deploy script">PowerShell Deploy-AiTopicRegistryEntity.ps1</step>
+    <step order="2" name="Verify via mcp__dataverse__describe">Confirm 9 fields + alternate key</step>
+    <step order="3" name="Web API query test">GET /api/data/v9.2/sprk_aitopicregistries — empty collection expected</step>
+    <step order="4" name="Document deploy">notes/handoffs/topic-registry-deploy-2026-MM-DD.md with output</step>
+  </steps>
+
+  <outputs>
+    <output type="deployment">Entity sprk_aitopicregistry live in dev Dataverse</output>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/topic-registry-deploy.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">mcp__dataverse__describe('sprk_aitopicregistry') returns expected metadata</criterion>
+    <criterion testable="true">Web API list endpoint returns 200 with empty value array</criterion>
+    <criterion testable="true">Alternate key (topicname, mode) is enforced (attempt duplicate insert fails)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-10. Entity sprk_aitopicregistry live in spaarkedev1. All 3 acceptance criteria PASS:
+    (1) MCP describe shows all 10 sprk_ fields with correct types/sizes; (2) Web API list returns HTTP 200 + empty value; (3) duplicate insert on (topicname, mode) returned HTTP 412 Precondition Failed.
+    Idempotency confirmed: first real run had metadata-propagation race after entity-create (first attribute add failed with 0x80060888); second idempotent run skipped entity create and added all 9 attributes + alt key + published. Handoff: notes/handoffs/topic-registry-deploy.md.
+  </notes>
+</task>

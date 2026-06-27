@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="120" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Dataverse audit document for PB-009 / PB-012 / PB-015 / PB-017</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>119</dependencies>
+    <blocks>121,122,123,124,125,126,127,128,129,130,131,132</blocks>
+    <tags>dataverse, audit, documentation</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documentation + Dataverse query task; no code modification; Q17 owner directive requires written findings BEFORE any playbook deletion or remediation</rigor-reason>
+    <parallel-group>6-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single document authored sequentially; later tasks (121, 130) depend on its findings</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Produce a Dataverse-level audit document covering PB-009, PB-012, PB-015, and PB-017 per spec FR-42. The audit MUST go BEYOND repo grep — query Dataverse for `sprk_aichatcontextmapping` references, audit Power Automate flows that may invoke these playbooks, and pull `sprk_analysisrun` history showing any production executions. Per Q17 owner directive: review and remediate, do NOT delete unless truly duplicative. Findings preserved as a written artifact in `notes/handoffs/120-pb-audit.md`.
+  </prompt>
+
+  <role>SPAARKE platform developer with Dataverse / Power Platform audit expertise. Document-first investigator.</role>
+
+  <goal>
+    A complete written audit at `notes/handoffs/120-pb-audit.md` covering each of the 4 playbooks (PB-009, PB-012, PB-015, PB-017) with sections: (1) Dataverse row details (id, name, sprk_playbookcode, sprk_playbooktype, description, configJson, scopes, isSystemPlaybook), (2) `sprk_aichatcontextmapping` consumer rows referencing it, (3) Power Automate flow audit results, (4) `sprk_analysisrun` execution history (count, last-run, success rate), (5) Recommendation per Q17 (keep + rewrite | retire + replace | retire + remove). PB-009 specifically must surface its actual node graph for downstream task 130 to consume.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-42 + design §1.5 reconciliation candidates table. The chat-routing redesign cannot safely deprecate any existing production playbook without a Dataverse-level audit; repo grep found zero production consumers for these 4 playbooks but name-collision and Power Automate flow risk is non-trivial. Owner clarification Q17: do NOT delete unless truly duplicative; review and remediate. This audit document gates tasks 121 (PB-009 remediation plan) and 130 (PB-009 rewrite).
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-42 acceptance — written audit findings preserved in project notes; remediation plan documented per playbook.</constraint>
+    <constraint source="owner-clarification">Q17 — review and remediate; do NOT delete unless truly duplicative.</constraint>
+    <constraint source="ADR-015">If audit pulls `sprk_analysisrun` history, MUST NOT log run input/output content into the audit doc — count + timestamps + status only.</constraint>
+    <constraint source="project">Do NOT modify Dataverse data in this task — read-only audit. Modifications happen in tasks 121, 130.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Query Dataverse `sprk_analysisplaybook` for each of the 4 IDs (PB-009, PB-012, PB-015, PB-017). Capture full row metadata: name, sprk_playbookcode, sprk_playbooktype, description, sprk_configjson, scopes, isSystemPlaybook, createdOn, modifiedOn.</step>
+    <step order="2">For each playbook, query `sprk_aichatcontextmapping` for any rows where the playbook is referenced. Document hits.</step>
+    <step order="3">Audit Power Automate flows in the production environment for any flow that invokes one of these 4 playbooks (search flow definitions for the playbook GUIDs or codes).</step>
+    <step order="4">Query `sprk_analysisrun` history for each playbook — count of executions in last 90 days, last successful run timestamp, last failed run timestamp. Do NOT log run input/output content.</step>
+    <step order="5">For PB-009 specifically: capture the actual node graph (node count, action codes per node, configJson per node). This becomes input for task 130.</step>
+    <step order="6">Write the audit document at `notes/handoffs/120-pb-audit.md` with the 5 required sections per playbook (4 playbooks × 5 sections).</step>
+    <step order="7">For each playbook, add a Recommendation block: (a) keep + rewrite description + extend via `$ref` (PB-009 expected here), (b) retire + replace with new specialized playbook, or (c) retire + remove (only if zero consumers AND truly duplicative).</step>
+    <step order="8">Update TASK-INDEX.md: task 120 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Dataverse MCP queries (read_query, search_data, describe)</tool>
+    <tool name="Write">notes/handoffs/120-pb-audit.md</tool>
+    <tool name="Edit">TASK-INDEX.md status flip</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/120-pb-audit.md — complete audit document</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit document exists at the specified path.</criterion>
+    <criterion testable="true">Each of PB-009, PB-012, PB-015, PB-017 has all 5 sections populated.</criterion>
+    <criterion testable="true">Each playbook has a per-Q17 Recommendation block (keep+rewrite | retire+replace | retire+remove with justification).</criterion>
+    <criterion testable="true">PB-009 node graph captured in detail (action codes, configJson per node).</criterion>
+    <criterion testable="true">No ADR-015 violation — audit doc contains no run input/output content.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the FIRST Phase 6 task. Findings drive everything downstream. Be thorough. If a playbook has Power Automate consumers, that materially changes the remediation plan for tasks 121 + 130.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol. No code-review/adr-check gates (no .cs/.ts changes).</protocol>
+  </execution>
+</task>

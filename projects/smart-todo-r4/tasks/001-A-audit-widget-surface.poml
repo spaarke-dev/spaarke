@@ -1,0 +1,114 @@
+<task id="R4-001" project="smart-todo-r4">
+  <metadata>
+    <title>A — Audit failing workspace widget surface(s)</title>
+    <phase>Phase 0: Foundation</phase>
+    <workstream>A</workstream>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>audit, widget, smart-todo, legacyworkspace, dataverse, spaarkeai</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <relevant-files>
+      <file>projects/smart-todo-r4/notes/widget-surface-audit.md (new)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Identify exactly which deployed surface(s) emit the `Could not find a property named 'sprk_todoflag' on type 'sprk_event'` OData error reported by R3 UAT. This audit gates task 020 (workspace widget rebuild) — without this we don't know what to rebuild.
+  </prompt>
+
+  <role>
+React + Dataverse audit engineer. You read deployed bundles + source maps + OData traces; you don't write production code in this task.
+  </role>
+
+  <goal>
+A written audit at `projects/smart-todo-r4/notes/widget-surface-audit.md` that:
+1. Names the exact deployed solution(s), web resource path(s), and source file(s) emitting the legacy query.
+2. Confirms whether BOTH the "system widget" load path (workspace cold-load) AND the user-added widget load path are affected, or only one.
+3. Recommends a rebuild scope for task 020: rebuild in `@spaarke/smart-todo-components` peer package (if Pattern D), rebuild in-place in `LegalWorkspace/src/components/SmartToDo/`, or both.
+4. Clarifies coordination with PR #372 (`feature/ai-spaarke-ai-workspace-UI-r1`) which touches the same workspace area.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="design">projects/smart-todo-r4/design.md</file>
+    <file purpose="project-plan">projects/smart-todo-r4/plan.md</file>
+    <file purpose="project-claude">projects/smart-todo-r4/CLAUDE.md</file>
+    <file purpose="widget-pattern">docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    <file purpose="architecture">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    <file purpose="architecture">docs/architecture/spaarke-todo-architecture.md</file>
+    <file purpose="architecture">docs/architecture/LEGALWORKSPACE-RETIREMENT.md</file>
+    <file purpose="suspected-source">src/solutions/LegalWorkspace/src/components/SmartToDo/</file>
+    <file purpose="suspected-source">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">UI Surface Architecture decision tree; widget placement must conform</constraint>
+    <constraint source="ADR-012">Shared primitives MUST ship from `@spaarke/ui-components` (or peer `@spaarke/smart-todo-components` if Pattern D)</constraint>
+    <constraint source="ADR-030">If widget dispatches workspace events, must use PaneEventBus typed contract</constraint>
+    <constraint source="spec">MUST NOT query `sprk_event` for `sprk_todoflag` (field removed in R3)</constraint>
+    <constraint source="spec FR-01">Audit MUST name the file(s) AND cover both system widget AND user-added widget paths</constraint>
+    <constraint source="spec FR-03">Recommendation MUST follow BUILD-A-NEW-WORKSPACE-WIDGET decision tree</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>workspace/widget-architecture</topic>
+    <files>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-RETIREMENT.md</file>
+      <file>docs/architecture/event-to-do-architecture.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+    <patterns>
+      <pattern name="Pattern D dual-use widget" location="docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md §2A">
+        Calendar widget is the canonical worked example: shared-lib widget + thin LegalWorkspace shim. If R4 A chooses Pattern D, A creates new `@spaarke/smart-todo-components` peer package.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R3 retired `sprk_event.sprk_todoflag` when `sprk_todo` was decoupled. A deployed widget bundle still queries the old shape, breaking the SpaarkeAi workspace mount.</background>
+    <related-work>
+      <item>PR #372 (`feature/ai-spaarke-ai-workspace-UI-r1`) is actively modifying `Spaarke.AI.Widgets` — coordinate ownership at audit time.</item>
+      <item>LegalWorkspace standalone Code Page is being retired (OC-R4-05); audit must clarify whether the failing widget lives in retired or current code paths.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 70%. Load this task, spec.md, plan.md.</step>
+    <step order="1" name="Review widget architecture">Read BUILD-A-NEW-WORKSPACE-WIDGET.md, SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md, LEGALWORKSPACE-RETIREMENT.md.</step>
+    <step order="2" name="Search source for legacy query">grep -r "sprk_todoflag" src/ — list every file. Distinguish source files from compiled bundle outputs.</step>
+    <step order="3" name="Identify deployed surfaces">For each source file found, identify which deployed solution(s) include it. Check if PR #372 touches the same file paths.</step>
+    <step order="4" name="Trace runtime mount paths">Read SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md §2-3 to identify if SmartToDo mounts via Dashboard wrapper, Direct wrapper, both, or via LegalWorkspace.</step>
+    <step order="5" name="Apply BUILD-A-NEW-WORKSPACE-WIDGET decision tree">Pick the rebuild archetype (Pattern A composable section, Pattern D dual-use, or other) with rationale.</step>
+    <step order="6" name="Write audit doc">Author `notes/widget-surface-audit.md` with: failing files list, mount path map, recommended rebuild archetype, scope for task 020, PR #372 coordination plan.</step>
+    <step order="7" name="Verify acceptance criteria">All criteria addressed; doc reviewable in &lt;10 min.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Source search for `sprk_todoflag`, widget mount calls</tool>
+    <tool name="Glob">Locate widget source files</tool>
+    <tool name="Read">Architecture docs, source files</tool>
+    <tool name="gh">Optional: inspect PR #372 file list for overlap</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/smart-todo-r4/notes/widget-surface-audit.md</output>
+    <output type="report">Task completion report — short summary of recommended archetype + rebuild scope</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/widget-surface-audit.md` exists and names at least one source file emitting the legacy query</criterion>
+    <criterion testable="true">Audit confirms whether system widget path, user-added widget path, or both are affected (with evidence)</criterion>
+    <criterion testable="true">Recommended rebuild archetype follows BUILD-A-NEW-WORKSPACE-WIDGET decision tree (Pattern A / Pattern D / other) with stated rationale</criterion>
+    <criterion testable="true">PR #372 coordination plan documented (file ownership / rebase strategy)</criterion>
+    <criterion testable="true">Task 020 scope is clear after reading the audit (rebuild location + archetype + dependencies)</criterion>
+  </acceptance-criteria>
+</task>

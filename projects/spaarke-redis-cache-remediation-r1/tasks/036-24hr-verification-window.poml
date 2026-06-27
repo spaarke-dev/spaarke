@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>24-hr verification window — telemetry + zero errors</title>
+    <phase>3: Dev environment cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>035</dependencies>
+    <blocks>037</blocks>
+    <tags>azure, testing, verification, monitoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Time-window verification; mostly waiting + checking</rigor-reason>
+    <parallel-group>Phase3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase 3 cutover sequence — strictly serial</parallel-reason>
+  </metadata>
+  <prompt>Open a 24-hr verification window (per FR-15 Q3 — shortened from 48 because legacy is empty). At window close: query App Insights for errors, dependency failures, and any in-memory warnings during the window. Verify zero issues.</prompt>
+  <role>Spaarke operator; monitoring.</role>
+  <goal>`notes/24hr-window-report.md` documents the window (start, end) + zero errors / zero in-memory warnings / Redis dependency success rate ≥ 99.5%.</goal>
+  <context><background>Window starts immediately after task 035 smoke test passes. Wall-clock 24 hours. This task captures verification at the END of the window — but the work plan for this task is short (look at telemetry, write report).</background><relevant-files><file>App Insights (spaarke-bff-dev)</file></relevant-files></context>
+  <constraints><constraint source="spec">FR-15 / Q3 — 24-hr window.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cutover-deploy-log.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Record window-start timestamp (from task 035 completion).</step>
+    <step order="2">After 24 hours wall-clock: query App Insights for errors, exceptions, dependency failures with `name == "Redis"` during the window.</step>
+    <step order="3">Search for `"In-memory mode enabled"` log warnings during the window — expect ZERO.</step>
+    <step order="4">Compute Redis dependency success rate; expect ≥99.5%.</step>
+    <step order="5">Write `notes/24hr-window-report.md` with the verification.</step>
+    <step order="6">If issues found: escalate; do not proceed to task 037 (decommission).</step>
+    <step order="7">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">App Insights queries</tool><tool name="Write">window report</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/24hr-window-report.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Window report exists with start + end timestamps + telemetry summary.</criterion>
+    <criterion testable="true">Zero in-memory warning log lines during window.</criterion>
+    <criterion testable="true">Redis dependency success rate ≥99.5% during window.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

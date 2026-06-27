@@ -1,0 +1,94 @@
+<task id="R4-098" project="smart-todo-r4">
+  <metadata>
+    <title>Project wrap-up — lessons-learned + README status + repo-cleanup + PR open</title>
+    <phase>Phase 4: Wrap-up</phase>
+    <workstream>cross-cutting</workstream>
+    <status>not-started</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>wrap-up, docs, repo-cleanup, pr, retro</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>R4-092, R4-093, R4-094</dependencies>
+    <relevant-files>
+      <file>projects/smart-todo-r4/notes/lessons-learned.md (new)</file>
+      <file>projects/smart-todo-r4/README.md (status → Complete)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Final wrap-up: capture lessons learned, update README status to Complete, run repo-cleanup, open the R4 PR with deployed-surface inventory and smoke-test result. Once merged via `/merge-to-master`, the R4 work is graduated.
+  </prompt>
+
+  <role>Project owner / closeout engineer.</role>
+
+  <goal>
+1. `notes/lessons-learned.md` written — captures what worked, what didn't, what to do differently in R5.
+2. README status → Complete; "Completed Date" filled.
+3. repo-cleanup skill removes ephemeral notes/debug artifacts.
+4. R4 PR opened with full context: deployed-surface inventory, smoke-test result, NFR evidence, grep-sweep result.
+5. PR ready for review.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="readme">projects/smart-todo-r4/README.md</file>
+    <file purpose="plan">projects/smart-todo-r4/plan.md</file>
+    <file purpose="ui-test-report">projects/smart-todo-r4/notes/ui-test-report.md</file>
+    <file purpose="grep-sweep">projects/smart-todo-r4/notes/grep-sweep-result.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec graduation criteria">All 13 success criteria verified before PR open</constraint>
+    <constraint source="repo-cleanup skill">Remove `notes/debug/*`, `notes/scratch.md`, etc. before closeout</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project/wrap-up</topic>
+    <files>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/merge-to-master/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R4-092" status="must-complete">Deployment + smoke test</dependency>
+      <dependency task="R4-093" status="must-complete">NFR validation report</dependency>
+      <dependency task="R4-094" status="must-complete">Grep sweep result</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Verify all 13 graduation criteria">Walk through README list; mark each ✅ or ❌. If any ❌, do not proceed — fix first.</step>
+    <step order="2" name="Write lessons-learned.md">Sections: What worked (architectural keystone validated, audits gated implementation correctly, etc.). What didn't (postMessage spike outcome, parallel branch conflicts, etc.). What to do differently in R5.</step>
+    <step order="3" name="Update README status → Complete">"Completed Date" field; phase = Complete.</step>
+    <step order="4" name="Update current-task.md">Status: none; next action: "R4 complete — see lessons-learned + PR".</step>
+    <step order="5" name="Run repo-cleanup">Invoke `repo-cleanup` skill to remove ephemeral notes (debug/, spikes/, drafts/, handoffs/).</step>
+    <step order="6" name="Update task-execute task statuses">All R4 tasks marked Complete in TASK-INDEX.md.</step>
+    <step order="7" name="Open R4 PR">Title: "feat(smart-todo-r4): Smart To Do UX enhancement (R4)". Body: deployed-surface inventory, NFR evidence, grep-sweep, smoke-test, lessons-learned link, graduation criteria checklist.</step>
+    <step order="8" name="Coordinate with PR #372 + datagrid-framework before merge">Per plan.md parallel-branch coordination.</step>
+  </steps>
+
+  <tools>
+    <tool name="repo-cleanup">Skill for cleanup</tool>
+    <tool name="merge-to-master">Skill for final merge (after PR review)</tool>
+    <tool name="gh">Open PR</tool>
+    <tool name="git">Commit final state</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/smart-todo-r4/notes/lessons-learned.md</output>
+    <output type="docs">projects/smart-todo-r4/README.md (status → Complete)</output>
+    <output type="docs">projects/smart-todo-r4/current-task.md (status: none, project complete)</output>
+    <output type="pr">R4 PR opened on GitHub</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 13 graduation criteria verified (or PR blocked)</criterion>
+    <criterion testable="true">notes/lessons-learned.md written</criterion>
+    <criterion testable="true">README status → Complete; Completed Date set</criterion>
+    <criterion testable="true">repo-cleanup run; ephemeral notes removed</criterion>
+    <criterion testable="true">TASK-INDEX.md: all tasks marked ✅</criterion>
+    <criterion testable="true">R4 PR opened with full deployed-surface + NFR + smoke-test inventory</criterion>
+  </acceptance-criteria>
+</task>

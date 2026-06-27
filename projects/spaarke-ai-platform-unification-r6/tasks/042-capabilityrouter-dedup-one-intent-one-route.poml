@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-B-09 CapabilityRouter dedup — one user intent → one route → one playbook → one render (eliminates R5 duplicate-fire)</title>
+    <phase>Phase B — Schema-Aware Output</phase>
+    <status>completed</status>
+    <estimated-effort>5-7 hours</estimated-effort>
+    <dependencies>041, 025</dependencies>
+    <blocks>048</blocks>
+    <tags>bff-api, ai, chat, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF code refactoring at the routing surface (`CapabilityRouter`); touches conversational primacy (NFR-01 binding); structurally fixes R5 lessons-learned Gap A (path A vs path B parallelism is a smell); requires comprehensive regression test of every CapabilityRouter route. 6+ steps; FULL rigor mandatory.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the central `CapabilityRouter` surface — single point of routing for all chat intents. Sequential with the rest of Phase B; cannot parallelize. Also depends on Phase A task 025 (PlaybookExecutionEngine FK fix + orchestrator refactor) for the canonical route surface to exist.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Refactor `CapabilityRouter` so that one user intent maps to one route, one playbook,
+    one `DeliverOutput` call, and one rendered output. This structurally eliminates the
+    R5 duplicate-fire bug: typing `/summarize` no longer produces a parallel chat-agent
+    response AND a workspace summary; it produces exactly ONE rendering per the
+    playbook node's `destination` (set by tasks 032 + 033). R5 lessons-learned Gap A
+    identified path A vs path B parallelism as a SMELL — this task structurally enforces
+    "one intent → one path".
+
+    This task depends on Phase A task 025 (Pillar 4 PlaybookExecutionEngine routing —
+    chat `/summarize` routes through the engine instead of the alternate-key bypass) and
+    Phase B tasks 032 + 033 (action `outputSchema` populated + node `destination`
+    populated) and task 041 (schema-aware widget). The CapabilityRouter consults the
+    chosen playbook's node config `destination` and picks ONE rendering surface
+    (chat vs workspace vs form-prefill). The 3-tier capability routing
+    (deterministic → LLM → fallback) is preserved; the FIX is at the OUTPUT routing,
+    not the INTENT routing.
+
+    NFR-01 BINDING: conversational primacy preserved. CapabilityRouter restricts the
+    tool list per context but never prevents conversational ability. The dedup applies
+    to OUTPUT routing only — refinement, follow-up, comparison, and context injection
+    all continue to work via full conversation history.
+
+    BFF code change: verify publish-size; report delta vs prior baseline; ≤+5 MB R6
+    total budget per NFR-02.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Senior backend engineer with deep familiarity with
+    `CapabilityRouter`, the 3-tier intent classification (deterministic / LLM /
+    fallback), `PlaybookExecutionEngine`, `DeliverOutput` node executor, the
+    `SprkChatAgentFactory` middleware pipeline, and the conversational primacy NFR-01
+    binding. Capable of refactoring central routing logic without regressing tool
+    behavior or conversational ability.
+  </role>
+
+  <goal>
+    `CapabilityRouter` enforces one-intent-one-route-one-render structurally. Typing
+    `/summarize` produces exactly ONE rendered output (per the playbook node's
+    `destination`). The legacy duplicate-fire (chat ack + parallel workspace artifact
+    via TWO LLM calls) is eliminated by collapsing the routing into a single
+    decision: read playbook node `destination`; emit ONE PaneEventBus event /
+    DeliverOutput call. Unit tests + integration test demonstrate ONE render per
+    intent. Conversational primacy is preserved (NFR-01) — refinement, follow-up,
+    comparison continue to work normally.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="capability-router">src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+    <file purpose="agent-factory">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="ai-architecture">docs/architecture/AI-ARCHITECTURE.md</file>
+    <file purpose="chat-architecture">docs/architecture/chat-architecture.md</file>
+    <file purpose="r5-lessons">projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-01">**Conversational primacy preserved (BINDING)** — LLM responds conversationally for most turns. CapabilityRouter restricts the tool list per context but never prevents conversational ability. Refinement, follow-up, comparison, context injection all work via full conversation history + memory. THE DEDUP APPLIES TO OUTPUT ROUTING ONLY; the LLM's conversational surface is unchanged.</constraint>
+    <constraint source="project">**R5 Lessons-Learned Gap A (Path A vs Path B parallelism is a smell)** — this task structurally enforces "one intent → one path". Cross-reference `projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md` Gap A. Document the structural fix in task notes.</constraint>
+    <constraint source="ADR-013">AI as BFF extension + PublicContracts facade boundary — if the dedup requires a new facade method, it goes through `Services/Ai/PublicContracts/`; do NOT inject AI-internal types into CRUD-side code.</constraint>
+    <constraint source="ADR-010">DI minimalism — no new top-level DI registrations; new services register inside existing modules.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — measure delta vs prior baseline; report in task notes; ≤+5 MB R6 total budget per NFR-02.</constraint>
+    <constraint source="ADR-015">AI data governance — execution events log tool names + decisions + timestamps ONLY; never user message text. If CapabilityRouter telemetry is touched, preserve this.</constraint>
+    <constraint source="ADR-030">PaneEventBus 4-channel preserved; no 5th channel. CapabilityRouter consults node config but does NOT add new channels.</constraint>
+    <constraint source="spec NFR-13">Safety pipeline preserved (PromptShield + Groundedness + Citations + Privilege + Cross-matter via SafetyPipelineMiddleware). CapabilityRouter changes flow through the existing middleware chain unchanged.</constraint>
+    <constraint source="spec FR-30">CapabilityRouter dedup — `chat` returns text/markdown inline; `workspace` publishes PaneEventBus events with configured widgetType; `form-prefill` routes to wizard via `IWorkspacePrefillAi`. Each intent → ONE LLM call → ONE rendering.</constraint>
+    <constraint source="project">Comprehensive regression test required — every existing CapabilityRouter route (the 4 intent capabilities + the 10 chat tools) MUST be verified post-refactor; no behavior regression beyond the duplicate-fire fix.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="CapabilityRouter 3-tier" location="src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs">
+        Tier 1: deterministic regex / keyword match. Tier 2: LLM intent classification.
+        Tier 3: fallback. Preserve intent-detection tiers UNCHANGED. The fix is at the
+        OUTPUT routing — after the intent + playbook are resolved, the router consults
+        node config `destination` and dispatches to ONE render path.
+      </pattern>
+      <pattern name="Path A vs Path B parallelism smell (R5 Gap A)" location="projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md">
+        When you see two parallel paths handling the "same" user intent, one of them
+        is wrong. The structural fix is to collapse into ONE canonical path with the
+        rendering destination as data-driven config (not parallel hardcoded paths).
+        This task is that collapse.
+      </pattern>
+      <pattern name="PlaybookExecutionEngine routing" location="src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/">
+        After task 025 (Phase A Pillar 4), the engine is the canonical routing surface
+        for chat `/summarize`. CapabilityRouter dispatches into the engine; the engine
+        executes the playbook; `DeliverOutput` reads node config `destination` and
+        publishes to ONE surface.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 SC-18 surfaced that typing `/summarize` produced both a chat-agent
+      acknowledgement AND a workspace artifact rendering, AND the chat agent emitted a
+      duplicate "Here's the summary..." inline. Two LLM calls, two renderings. R5
+      lessons-learned Gap A diagnosed this as parallel-path smell: the chat tool
+      bridge invoked a playbook AND the chat agent emitted a duplicate text response.
+
+      Q5 re-shape (this R6 session) put the fix STRUCTURALLY at CapabilityRouter — not at
+      the action level via metadata. The router, after resolving intent + playbook,
+      consults the playbook node's `destination` (set by tasks 032 + 033) and dispatches
+      to ONE render path. The 3-tier intent classification is preserved. The legacy
+      "chat acks while workspace also fires" path is removed.
+
+      This depends on Phase A task 025 (which puts `SessionSummarizeOrchestrator` on the
+      engine instead of the alternate-key bypass) — without that, CapabilityRouter has
+      two routing surfaces to coordinate. With task 025 landed + tasks 032/033/040/041
+      landed, the canonical route is single-surface and dedup is a clean collapse.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs (MODIFIED — main implementation)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs (potentially MODIFIED — dedup path; verify already-task-025 changes)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (potentially MODIFIED — middleware reordering)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/CapabilityRouterDedupTests.cs (NEW)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-042-dedup-refactor-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Phase A task 025 (Pillar 4 PlaybookExecutionEngine FK fix + orchestrator refactor) is a HARD prerequisite.</item>
+      <item>Tasks 032 + 033 populate node `destination` — required for the dedup to read.</item>
+      <item>Task 041 (schema-aware widget) is the consumer; this task ensures it is the SOLE render path.</item>
+      <item>Task 048 Phase B integration test validates dedup end-to-end.</item>
+      <item>R5 lessons-learned Gap A is the architectural diagnosis this task structurally fixes.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: BFF code refactoring at central routing surface; NFR-01 binding sensitivity
+                 (conversational primacy); R5 Gap A structural fix; comprehensive regression
+                 test required
+      📖 PROTOCOL STEPS: all 12 steps below INCLUDING Step 9.5 quality gates
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress + Confirm Prerequisites">
+      Read TASK-INDEX.md; confirm 042 status 🔲. Verify deps complete: Phase A task 025
+      (engine routing); Phase B 041 (widget). Verify Spaarke Dev has action `outputSchema`
+      + node `destination` populated for migrated actions (smoke query).
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Read `CapabilityRouter.cs`, `SessionSummarizeOrchestrator.cs`,
+      `SprkChatAgentFactory.cs` IN FULL. Read R5 lessons-learned Gap A in full. Read
+      AI-ARCHITECTURE.md and chat-architecture.md for the routing flow contract.
+    </step>
+    <step order="3" name="Map the Existing Duplicate-Fire Paths">
+      Identify the TWO paths that currently produce parallel output for `/summarize`:
+      (a) chat-agent's text response;
+      (b) the chat tool bridge → playbook → workspace artifact.
+      Document the call chain for each in `notes/task-042-dedup-refactor-evidence.md`.
+      Confirm task 025 already routes the playbook chain via the engine (no alternate
+      key bypass).
+    </step>
+    <step order="4" name="Design the One-Intent-One-Route Surface">
+      Design the dedup: after intent resolution + playbook selection, CapabilityRouter
+      consults the playbook node's `destination`. If `destination = chat`: the chat-agent
+      handles rendering inline; DO NOT also fire workspace artifact. If
+      `destination = workspace`: emit PaneEventBus workspace event ONCE; SUPPRESS the
+      chat-agent's parallel text response (or, equivalently, emit a thin chat
+      acknowledgement that does NOT re-execute the playbook). If
+      `destination = form-prefill`: route through `IWorkspacePrefillAi`; chat displays
+      a transparent progress indicator only.
+    </step>
+    <step order="5" name="Implement the Dedup">
+      Refactor `CapabilityRouter` per the design. Preserve the 3-tier intent
+      classification UNCHANGED (Tier 1 deterministic / Tier 2 LLM / Tier 3 fallback).
+      The change is in the OUTPUT routing only. Verify the existing middleware pipeline
+      (Safety pipeline) is unchanged.
+    </step>
+    <step order="6" name="Comprehensive Regression Test Plan">
+      Build a regression test plan covering EVERY existing CapabilityRouter route:
+      (a) `/summarize` (chat destination) — ONE render in chat;
+      (b) `/summarize` (workspace destination if a test playbook is bound) — ONE render
+          in workspace;
+      (c) All 10 chat tools — no behavior regression;
+      (d) Conversational refinement after a playbook output — works normally;
+      (e) Follow-up + comparison + context injection — works normally;
+      (f) `/clear` and other hard slashes (Phase D) — pass-through unchanged;
+      (g) Natural-language summarization (no slash) — same dedup behavior.
+
+      Author unit tests in `CapabilityRouterDedupTests.cs` covering at least cases (a),
+      (b), (d).
+    </step>
+    <step order="7" name="Build + Verify BFF Publish-Size">
+      Per CLAUDE.md §10 bullet 4: `dotnet build src/server/api/Sprk.Bff.Api/` succeeds
+      with 0 errors. `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o
+      deploy/api-publish/`; measure compressed output; report delta vs prior baseline.
+      Expect near-zero delta for a refactor; flag if &gt;+1 MB.
+    </step>
+    <step order="8" name="Run Regression Test Suite">
+      Run the test plan from Step 6. Capture results in
+      `notes/task-042-dedup-refactor-evidence.md`. ANY regression in cases (c)-(g)
+      requires diagnosis + fix BEFORE marking complete.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below. Record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the refactor. Run `adr-check`; verify NFR-01
+      (conversational primacy preserved), NFR-13 (safety pipeline preserved), ADR-013
+      (facade boundary), ADR-010 (no new top-level DI), ADR-015 (no user message text in
+      telemetry), ADR-029 (publish-size delta within budget), ADR-030 (PaneEventBus
+      channels unchanged), R5 Gap A (path A/B parallelism eliminated). Both gates MUST
+      pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update TASK-INDEX.md: 042 🔲 → ✅. Reset `current-task.md`. Report completion with
+      explicit confirmation of: (a) duplicate-fire eliminated; (b) conversational
+      primacy preserved; (c) all 10 chat tools regression-clean; (d) BFF publish-size
+      delta within budget.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish BFF</tool>
+    <tool name="git">Stage + commit on R6 worktree branch</tool>
+    <tool name="code-review">Quality gate (Step 9.5)</tool>
+    <tool name="adr-check">ADR compliance gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs (MODIFIED — main refactor)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs (potentially MODIFIED)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (potentially MODIFIED)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/CapabilityRouterDedupTests.cs (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-042-dedup-refactor-evidence.md (call chain analysis, regression test results, BFF size delta)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status 042 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="report">Task completion report with explicit dedup + conversational primacy confirmation</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CapabilityRouter enforces one-intent-one-route-one-render: typing `/summarize` produces exactly ONE rendered output (per playbook node `destination`).</criterion>
+    <criterion testable="true">Duplicate-fire eliminated: NO parallel chat-agent text response AND workspace artifact for the same user intent.</criterion>
+    <criterion testable="true">3-tier intent classification (deterministic / LLM / fallback) is UNCHANGED — verified by reading the routing tier methods.</criterion>
+    <criterion testable="true">Safety pipeline (PromptShield + Groundedness + Citations + Privilege + Cross-matter) is UNCHANGED — verified by middleware chain inspection (NFR-13 binding).</criterion>
+    <criterion testable="true">NFR-01 conversational primacy preserved: refinement, follow-up, comparison, context injection all work via full conversation history (verified by regression test plan cases d/e).</criterion>
+    <criterion testable="true">All 10 chat tools regression-clean: tool invocations work as before the refactor (verified by regression test plan case c).</criterion>
+    <criterion testable="true">Unit tests in `CapabilityRouterDedupTests.cs` cover: chat destination one-render, workspace destination one-render, conversational refinement works after playbook output. All pass.</criterion>
+    <criterion testable="true">ADR-015 binding: telemetry logs tool names + decisions + timestamps ONLY; no user message text in any new logging path.</criterion>
+    <criterion testable="true">ADR-030 binding: no new PaneEventBus channels; CapabilityRouter consults node config but does not add channels.</criterion>
+    <criterion testable="true">R5 Gap A structurally fixed: path A vs path B parallelism eliminated; documented in task notes.</criterion>
+    <criterion testable="true">BFF builds with 0 errors; publish-size delta reported vs prior baseline; within ≤+5 MB R6 total budget per NFR-02.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+    <criterion testable="true">TASK-INDEX.md updated (042 🔲 → ✅) and `current-task.md` reset.</criterion>
+  </acceptance-criteria>
+</task>

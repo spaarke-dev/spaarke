@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>UAT — Filter-parity walkthrough (PCF vs code page side-by-side)</title>
+    <phase>H: Deploy + UAT</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>044, 072</dependencies>
+    <blocks>090</blocks>
+    <tags>testing, e2e-test, pcf, code-page, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>End-to-end filter-parity verification — FR-PARITY-02 is the load-bearing acceptance criterion for Phase D.1. Testing-only.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential UAT step — depends on both PCF deploy (035, via 072) and code-page deploy (044). The walkthrough exercises both surfaces simultaneously.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filter-parity walkthrough per spec.md FR-PARITY-02. Open a Matter with the PCF. Apply: Threshold=50%, Mode=Hybrid, Associated Only=true. Record document IDs + order + count in the PCF. Click "Open in Semantic Search". In the launched code-page modal, capture document IDs + order + count. Compare side-by-side — must be identical (same titles, same order, same count). Capture screenshots and a comparison table.
+  </prompt>
+
+  <role>
+    Spaarke QA / operator running an end-user UAT walkthrough across two UI surfaces (PCF embedded in form + Code Page launched via navigateTo).
+  </role>
+
+  <goal>
+    PCF and Code Page show identical document sets when invoked with the same filters from the same Matter. FR-PARITY-02 acceptance proven via side-by-side comparison.
+  </goal>
+
+  <context>
+    <background>
+      Phase D.1 (folded scope per design.md §10.1) added full filter parity in the PCF &#8594; Code Page navigateTo envelope. FR-PARITY-02 is the acceptance gate: when the user clicks "Open in Semantic Search" from a PCF showing a filtered result set, the launched modal must show the SAME documents — same titles, same order, same count. Any mismatch is a defect.
+
+      This walkthrough is operator-facing and screenshot-driven; capture evidence sufficient for a non-developer reviewer to confirm parity.
+    </background>
+    <relevant-files>
+      <file>(testing only)</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-PARITY-02">PCF and Code Page show identical document set (same titles, same order, same count) when invoked with the same filters from the same Matter.</constraint>
+    <constraint source="spec.md FR-PARITY-01">All filter state must flow through the navigateTo envelope: query, scope, entityId, threshold, searchMode, fileTypes, dateFrom, dateTo, tags, associatedOnly (plus theme + searchIndexName).</constraint>
+    <constraint source="spec.md FR-CP-03">Code page seeds filter state BEFORE the auto-search effect fires — the first search uses the envelope filters.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open a test Matter that has multiple known Documents (preferably one with diverse content so filters can discriminate). Verify the PCF SemanticSearchControl renders.</step>
+    <step order="2">In the PCF, enter a query (e.g., "contract" or any term known to return at least 5 documents). Apply Threshold=50%, Mode=Hybrid, Associated Only=true. Note total result count, top 5 document IDs/titles, and their order.</step>
+    <step order="3">Click "Open in Semantic Search" in the PCF. The Code Page modal launches. Wait for the auto-search to complete (first network trace).</step>
+    <step order="4">In the Code Page, capture the result set: total count, top 5 document IDs/titles, order. Compare to Step 2.</step>
+    <step order="5">Side-by-side compare: count matches; IDs match; order matches. If any differs, flag as a defect and capture the divergence specifically (e.g., "PCF returned 12 results; Code Page returned 11 — document X missing in Code Page").</step>
+    <step order="6">Take screenshots of both surfaces (PCF + Code Page) showing the result sets. Save to `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/073-filter-parity.md` along with a comparison table. Update TASK-INDEX + current-task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Browser-based testing (manual or scripted)</tool>
+    <tool name="Write">Capture verification notes + comparison table</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/073-filter-parity.md (screenshots + comparison table)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-PARITY-02: PCF and Code Page show identical document set (count, IDs, order) when invoked with the same filters.</criterion>
+    <criterion testable="true">All applied filters flow through the navigateTo envelope (verified by Code Page showing the same filter values pre-populated in its UI).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Sequential — depends on 044 (code-page deploy) and 072 (PCF smoke). Blocks 090 (wrap-up).
+
+    If results diverge, the failure mode is almost always in the Code Page side — either `parseUrlParams` is dropping a parameter, `App.tsx` is not seeding filter state before the auto-search, or the hooks aren't including `searchIndexName`. Triage by inspecting the Code Page's first network POST and comparing to the PCF's.
+
+    If results match in count but order differs, investigate the BFF's sort stability — same query + same filters + same index should produce deterministic ordering. File a follow-up if observed.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load spec.md FR-PARITY-01, FR-PARITY-02, FR-CP-01..04 before starting. Follow task-execute Step 0 (STANDARD rigor).
+    </protocol>
+  </execution>
+</task>

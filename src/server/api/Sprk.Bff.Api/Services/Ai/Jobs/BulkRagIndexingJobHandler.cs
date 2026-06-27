@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Azure.Core;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Services.Ai;
@@ -32,6 +33,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
     private readonly IFileIndexingService _fileIndexingService;
     private readonly BatchJobStatusStore _statusStore;
     private readonly IIdempotencyService _idempotencyService;
+    private readonly ISearchIndexNameResolver _searchIndexNameResolver;
     private readonly RagTelemetry _telemetry;
     private readonly IConfiguration _configuration;
     private readonly ILogger<BulkRagIndexingJobHandler> _logger;
@@ -55,6 +57,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
         IFileIndexingService fileIndexingService,
         BatchJobStatusStore statusStore,
         IIdempotencyService idempotencyService,
+        ISearchIndexNameResolver searchIndexNameResolver,
         RagTelemetry telemetry,
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
@@ -64,6 +67,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
         _statusStore = statusStore ?? throw new ArgumentNullException(nameof(statusStore));
         _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
+        _searchIndexNameResolver = searchIndexNameResolver ?? throw new ArgumentNullException(nameof(searchIndexNameResolver));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -279,6 +283,17 @@ public class BulkRagIndexingJobHandler : IJobHandler
             }
 
 
+            // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — resolve per-record
+            // sprk_searchindexname so bulk-reindexed documents land in the correct index
+            // (same precedence as single-document jobs: document → parent → BU). Bulk jobs
+            // do not have a payload-level SearchIndexName (they iterate many documents); the
+            // resolver is always consulted.
+            var resolvedSearchIndexName = await _searchIndexNameResolver.ResolveAsync(
+                doc.DocumentId,
+                parentEntity?.EntityType,
+                parentEntity?.EntityId,
+                ct);
+
             // Build the file index request
             var request = new FileIndexRequest
             {
@@ -288,6 +303,7 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 FileName = doc.FileName,
                 DocumentId = doc.DocumentId,
                 ParentEntity = parentEntity,
+                SearchIndexName = resolvedSearchIndexName,
                 Metadata = new Dictionary<string, string>
                 {
                     ["source"] = "BulkIndexing",
@@ -295,8 +311,25 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 }
             };
 
-            // Call FileIndexingService using app-only authentication
-            var result = await _fileIndexingService.IndexFileAppOnlyAsync(request, ct);
+            // Call FileIndexingService using app-only authentication.
+            // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — background-job
+            // default-fall-back: on INDEX_NOT_ALLOWED rejection, log WARN and retry the call
+            // with SearchIndexName=null so the document still gets indexed into the tenant
+            // default. Bulk jobs SHOULD NOT fail wholesale on a single stale per-record value.
+            FileIndexingResult result;
+            try
+            {
+                result = await _fileIndexingService.IndexFileAppOnlyAsync(request, ct);
+            }
+            catch (SdapProblemException ex) when (ex.Code == "INDEX_NOT_ALLOWED")
+            {
+                _logger.LogWarning(
+                    "Bulk RAG indexing rejected by AI Search allow-list: requested SearchIndexName={RejectedIndex} (DocumentId={DocumentId}, BatchJobId={BatchJobId}). Falling back to tenant default.",
+                    request.SearchIndexName ?? "(null)", doc.DocumentId, batchJob.JobId);
+
+                var fallbackRequest = request with { SearchIndexName = null };
+                result = await _fileIndexingService.IndexFileAppOnlyAsync(fallbackRequest, ct);
+            }
 
             if (!result.Success)
             {

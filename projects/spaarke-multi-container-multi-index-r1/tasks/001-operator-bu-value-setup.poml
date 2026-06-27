@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Operator BU value setup + MCP verification</title>
+    <phase>A.5: Operator BU value setup (Prerequisite)</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>020, 021, 022, 023, 024, 025, 026, 027, 029, 050, 051, 071</blocks>
+    <tags>dataverse, operations, mcp, prerequisite</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Touches Dataverse production records via MCP; idempotent setup with explicit MCP verification gate. Not code implementation (no .cs/.ts/.tsx); not vague docs — has explicit constraints.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Prerequisite — must complete before Phase A wizards deploy</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Populate `businessunit.sprk_searchindexname` on the two known production BUs per design.md §5.0 and spec.md FR-OPS-01. This is a one-time operator setup that MUST complete BEFORE Phase A wizards deploy — wizards inherit empty strings otherwise. Verify each set via MCP query before marking complete.
+  </prompt>
+
+  <role>
+    Spaarke operator with Dataverse maker-portal access and MCP query familiarity. Read the field values from design.md §5.0 exactly — do not improvise.
+  </role>
+
+  <goal>
+    `businessunit.sprk_searchindexname` set on Spaarke Demo BU = `spaarke-knowledge-index-v2` and Spaarke BU = `spaarke-file-index`. MCP verification query returns those exact values. Spaarke Dev 1 and Spaarke Test 1 may remain NULL (operator-determined — design.md §5.0).
+  </goal>
+
+  <context>
+    <background>
+      Spaarke documents route to AI Search indexes via Business Unit. Spec FR-OPS-01 sets the two known BUs; without these values, the Phase A wizards (which cascade from BU at create time) write empty strings. This task is the prerequisite that unblocks Phase A.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-OPS-01">Spaarke Demo BU `sprk_searchindexname` = `spaarke-knowledge-index-v2`</constraint>
+    <constraint source="spec.md FR-OPS-01">Spaarke BU `sprk_searchindexname` = `spaarke-file-index`</constraint>
+    <constraint source="design.md §5.0">Spaarke Dev 1 and Spaarke Test 1 may stay NULL — tenant default applies</constraint>
+    <constraint source="design.md INV-5">Never overwrite an existing non-null value — verify each BU is empty before setting</constraint>
+    <constraint source="project">MCP verification query is the gate that unblocks Phase A — do not mark complete without it</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="MCP read-then-write" location=".claude/skills/dataverse-mcp-usage/SKILL.md">
+        Read current value via `mcp__dataverse__read_query` BEFORE writing — confirms record exists and value is currently NULL (INV-5 honored).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Use MCP `mcp__dataverse__read_query` to list all Business Units with their current `sprk_searchindexname` value: `SELECT businessunitid, name, sprk_searchindexname FROM businessunit`.</step>
+    <step order="2">Identify the businessunitid for Spaarke Demo BU and Spaarke BU. Confirm `sprk_searchindexname` is NULL on both (INV-5 — abort if non-null and flag for operator review).</step>
+    <step order="3">Use MCP `mcp__dataverse__update_record` to set Spaarke Demo BU `sprk_searchindexname` = `spaarke-knowledge-index-v2`.</step>
+    <step order="4">Use MCP `mcp__dataverse__update_record` to set Spaarke BU `sprk_searchindexname` = `spaarke-file-index`.</step>
+    <step order="5">Re-run the read query from Step 1 to verify both values are set correctly. Capture the verification output to `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/001-bu-setup-verification.md`.</step>
+    <step order="6">Update `TASK-INDEX.md` status: 🔲 → ✅. Update `current-task.md` to reflect completion + advance to task 010 as next action.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp__dataverse__read_query">Read BU records with current values</tool>
+    <tool name="mcp__dataverse__update_record">Update each BU's `sprk_searchindexname`</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: `businessunit` records updated (2 records)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/001-bu-setup-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">MCP read-query of Spaarke Demo BU returns `sprk_searchindexname = "spaarke-knowledge-index-v2"`.</criterion>
+    <criterion testable="true">MCP read-query of Spaarke BU returns `sprk_searchindexname = "spaarke-file-index"`.</criterion>
+    <criterion testable="true">INV-5 honored — neither BU had a non-null value overwritten (verified by Step 2 read).</criterion>
+    <criterion testable="true">Verification file `notes/handoffs/001-bu-setup-verification.md` exists with MCP query output captured.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The two SPE container IDs corresponding to these indexes are documented in design.md §5.1. This task does NOT touch containers — only the AI Search index identifier on the BU. Phase A wizards will read these BU values via Xrm.WebApi at create time and cascade onto each new parent record.
+
+    If the operator hasn't authorized MCP write access, fall back to the maker portal (Power Apps → Business Units → edit each BU's `sprk_searchindexname` field). Verification via MCP read remains the gate either way.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load `spec.md` §FR-OPS-01 and `design.md` §5.0 for canonical values. Follow task-execute Step 0 (rigor declaration → STANDARD) before any MCP write.
+    </protocol>
+  </execution>
+</task>

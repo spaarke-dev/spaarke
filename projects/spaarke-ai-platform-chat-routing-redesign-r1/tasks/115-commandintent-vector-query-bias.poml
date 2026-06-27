@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="115" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Integrate commandIntent as vector-query bias</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>114</dependencies>
+    <blocks>117</blocks>
+    <tags>bff-api, services, ai, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'ai'; modifies routing logic; binding test (FR-20: slash + NL same routing); FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Integrate `commandIntent` (slash-bias signal) as a VECTOR-QUERY BIAS in Phase B query composition, NOT a separate routing layer. Per spec FR-20: slash + NL flows produce identical routing for same query text once bias applied. This is the binding-precondition for FR-22 (CapabilityRouter retirement in Phase 7) — the slash signal must remain effective without `SoftSlashIntentToCapabilityName` dict.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Familiar with chat-routing dispatcher + softslash mapping retirement plan.</role>
+
+  <goal>
+    `PlaybookDispatcher` Phase B query composition incorporates `commandIntent` as a query prefix bias when present, e.g., `queryText = $"{commandIntent} {userMessage} | Document: ..."`. Acceptance test: slash + NL flows route to the same playbook for the same query text. This task is task 116's prerequisite (removes dict).
+  </prompt>
+
+  <context>
+    <background>
+      Per spec FR-20 + design §1.2 "Slash-bias integration". Today `SoftSlashIntentToCapabilityName` dict maps slash commands ("/summarize") to capability names → tied to `CapabilityRouter`. Removing the dict (task 116) is part of WP4 retirement. To preserve UX, `commandIntent` becomes a vector-query bias: prefix the query with the intent so embedding-side semantics shift the match. Eliminates the dict while preserving slash-as-strong-signal.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatRequest.cs (or wherever commandIntent flows)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-20">`SoftSlashIntentToCapabilityName` dict removed (task 116); slash + NL flows produce identical routing for same query text.</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary.</constraint>
+    <constraint source="ADR-015">Tier-1 logging: log `commandIntent` value (it's a controlled enum; not user content) + biasApplied flag; user message text still NOT logged.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate the `commandIntent` field on chat request DTOs (post-task 022 the wire-format may have a new name).</step>
+    <step order="2">In `PlaybookDispatcher.cs` Phase B query composition (added in task 112), wrap query text construction: if `commandIntent` non-empty, prefix the per-file queryText with `$"{commandIntent} "`. E.g., commandIntent="summarize" → `"summarize summarize this NDA | Document: nda.pdf | ..."`.</step>
+    <step order="3">Apply same bias in the manifest-absent fallback path (task 112).</step>
+    <step order="4">Add unit test asserting `commandIntent` prefix in composed queryText.</step>
+    <step order="5">Add integration test asserting: slash flow `/summarize this NDA` + NL flow `summarize this NDA` route to the SAME playbook for the same attachment context. This is the FR-20 binding acceptance test.</step>
+    <step order="6">Verify telemetry: `commandIntent` value (enum) logged + `biasApplied` boolean; user message text NEVER logged.</step>
+    <step order="7">Run `dotnet build` + `dotnet test`. All pass.</step>
+    <step order="8">Measure BFF publish size; report delta.</step>
+    <step order="9">code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="10">Update TASK-INDEX.md: task 115 → ✅; current-task.md → update.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookDispatcher post-114 + ChatRequest DTO</tool>
+    <tool name="Edit">Add commandIntent bias to Phase B query composition; add unit + integration tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs (commandIntent bias added)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookDispatcherTests.cs (bias unit cases)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/PlaybookDispatcherSlashVsNlTests.cs (FR-20 binding test)</output>
+    <output type="docs">notes/handoffs/115-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`commandIntent` prefixed onto queryText in Phase B when non-empty.</criterion>
+    <criterion testable="true">FR-20 binding test: slash + NL flows produce identical playbook routing.</criterion>
+    <criterion testable="true">Telemetry tier-1 compliant — `commandIntent` enum + biasApplied logged; user content NOT logged.</criterion>
+    <criterion testable="true">BFF publish-size delta reported.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is task 116's binding precondition: with the bias in place, removing the `SoftSlashIntentToCapabilityName` dict is safe because the routing semantics are preserved via vector-query bias. Don't merge task 116 without 115 landing first.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

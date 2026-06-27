@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -27,6 +28,8 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     private readonly ISpeFileOperations _speFileOperations;
     private readonly ITextExtractor _textExtractor;
     private readonly IPlaybookService _playbookService;
+    private readonly IPlaybookLookupService _playbookLookup;
+    private readonly IConsumerRoutingService _consumerRouting;
     private readonly IScopeResolverService _scopeResolver;
     private readonly IToolHandlerRegistry _toolHandlerRegistry;
     private readonly INodeService _nodeService;
@@ -43,7 +46,54 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     /// Default playbook name for Document Profile analysis.
     /// This playbook is loaded by name rather than hardcoded ID for flexibility.
     /// </summary>
+    /// <remarks>
+    /// Retained as the public name-based contract for backward compatibility with callers
+    /// (<c>ProfileSummaryWorker</c>, <c>ProfileSummaryJobHandler</c>, <c>AppOnlyDocumentAnalysisJobHandler</c>)
+    /// during the FR-03 deprecation window. Internal playbook resolution uses
+    /// <see cref="FallbackDocumentProfilePlaybookId"/> via <see cref="IPlaybookLookupService.GetByIdAsync"/>
+    /// (chat-routing-redesign-r1 task 020 Pattern B; deprecated by task 028d FR-1R-05 routing-table
+    /// migration — kept as graceful-degrade fallback for the deprecation window).
+    /// </remarks>
     public const string DefaultPlaybookName = "Document Profile";
+
+    // ──────────────────────────────────────────────────────────────────────
+    // FR-1R-05 routing-table migration (chat-routing-redesign-r1 task 028d)
+    //
+    // The 2 Pattern B execution-path consts flagged by task 027 exit-gate
+    // evidence (the `private const string ...PlaybookId` declarations
+    // previously at lines 67 and 79 — "Document Profile" + "Email Analysis")
+    // have been REPLACED by IConsumerRoutingService.ResolveAsync calls into
+    // the owner-managed `sprk_playbookconsumer` Dataverse routing table
+    // (seeded by task 028b). The constants below are RETAINED ONLY as
+    // graceful-degrade fallbacks for the FR-1R-06 deprecation window
+    // (deprecation telemetry tags the fallback path in task 028e).
+    //
+    // DO NOT add new code paths that read these values. New consumer-type
+    // routes belong in `sprk_playbookconsumer`. These will be deleted
+    // entirely at the FR-1R-08 exit gate.
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// FR-1R-05 fallback only — was the Pattern B const for "Document Profile"
+    /// (sprk_playbookid). Read only when IConsumerRoutingService returns null
+    /// during the FR-1R-06 deprecation window. To be deleted at the FR-1R-08
+    /// exit gate. New code: do NOT read this; call
+    /// <see cref="IConsumerRoutingService.ResolveAsync"/> with a stable
+    /// <see cref="ConsumerTypes"/> constant instead.
+    /// </summary>
+    private static readonly Guid FallbackDocumentProfilePlaybookId =
+        Guid.Parse("18cf3cc8-02ec-f011-8406-7c1e520aa4df");
+
+    /// <summary>
+    /// FR-1R-05 fallback only — was the Pattern B const for "Email Analysis"
+    /// (sprk_playbookid). Read only when IConsumerRoutingService returns null
+    /// during the FR-1R-06 deprecation window. To be deleted at the FR-1R-08
+    /// exit gate. New code: do NOT read this; call
+    /// <see cref="IConsumerRoutingService.ResolveAsync"/> with
+    /// <see cref="ConsumerTypes.EmailAnalysis"/> instead.
+    /// </summary>
+    private static readonly Guid FallbackEmailAnalysisPlaybookId =
+        Guid.Parse("bc71facf-6af1-f011-8406-7ced8d1dc988");
 
     public AppOnlyAnalysisService(
         IDocumentDataverseService documentService,
@@ -51,6 +101,8 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         ISpeFileOperations speFileOperations,
         ITextExtractor textExtractor,
         IPlaybookService playbookService,
+        IPlaybookLookupService playbookLookup,
+        IConsumerRoutingService consumerRouting,
         IScopeResolverService scopeResolver,
         IToolHandlerRegistry toolHandlerRegistry,
         INodeService nodeService,
@@ -62,11 +114,95 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         _speFileOperations = speFileOperations;
         _textExtractor = textExtractor;
         _playbookService = playbookService;
+        _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
+        _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
         _scopeResolver = scopeResolver;
         _toolHandlerRegistry = toolHandlerRegistry;
         _nodeService = nodeService;
         _playbookOrchestrator = playbookOrchestrator;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Resolves a playbook by name using the FR-1R-05 routing-table facade
+    /// (<see cref="IConsumerRoutingService.ResolveAsync"/>) for well-known playbook
+    /// names, with graceful-degrade fallbacks to the prior FR-03 Pattern B stable-ID
+    /// path (now retained only as <see cref="FallbackDocumentProfilePlaybookId"/> /
+    /// <see cref="FallbackEmailAnalysisPlaybookId"/>) during the FR-1R-06 deprecation
+    /// window. Custom names fall back to <see cref="IPlaybookService.GetByNameAsync"/>
+    /// during the FR-03 deprecation window. Task 024 owns deprecation telemetry on the
+    /// legacy <c>/by-name/</c> endpoint; task 028e owns the routing-table fallback
+    /// telemetry.
+    /// </summary>
+    /// <remarks>
+    /// This is the single resolution point in this service — both
+    /// <see cref="AnalyzeDocumentAsync"/> and <see cref="ExecutePlaybookAnalysisAsync"/>
+    /// delegate here so both the FR-03 and FR-1R-05 migrations take effect in one place.
+    ///
+    /// <para>
+    /// Hardening (code-review S-5): the well-known playbook routes call
+    /// <c>ResolveAsync(ConsumerTypes.EmailAnalysis)</c>, never the literal string
+    /// <c>"email-analysis"</c> — compile-time typo defense.
+    /// </para>
+    /// </remarks>
+    private async Task<Models.Ai.PlaybookResponse> ResolvePlaybookAsync(
+        string playbookName,
+        CancellationToken cancellationToken)
+    {
+        // FR-1R-05 routing-table path: well-known playbook names route through
+        // IConsumerRoutingService.ResolveAsync first. When the routing table returns
+        // null (no matching row), fall back to the FR-03 Pattern B GUID (now retained
+        // only as a `static readonly Guid` for the FR-1R-06 deprecation window).
+
+        if (string.Equals(playbookName, DefaultPlaybookName, StringComparison.Ordinal))
+        {
+            // NOTE: there is no `ConsumerTypes` entry for Document Profile today; this
+            // path stays on the FR-03 stable-ID fallback until the document-profile
+            // routing record + consumer-type constant are introduced (planned post-028e).
+            // Mirrors the AppOnlyDocumentAnalysisJobHandler path used by ProfileSummaryWorker.
+            return await _playbookLookup
+                .GetByIdAsync(FallbackDocumentProfilePlaybookId.ToString(), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (string.Equals(playbookName, EmailAnalysisPlaybookName, StringComparison.Ordinal))
+        {
+            var routedPlaybookId = await _consumerRouting
+                .ResolveAsync(ConsumerTypes.EmailAnalysis, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (routedPlaybookId.HasValue && routedPlaybookId.Value != Guid.Empty)
+            {
+                _logger.LogDebug(
+                    "FR-1R-05: AppOnlyAnalysisService resolved email-analysis playbook via " +
+                    "IConsumerRoutingService (playbookId={PlaybookId})",
+                    routedPlaybookId.Value);
+                return await _playbookLookup
+                    .GetByIdAsync(routedPlaybookId.Value.ToString(), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            // Graceful-degrade: 028e will tag this fallback with deprecation telemetry.
+            _logger.LogDebug(
+                "FR-1R-05 fallback: IConsumerRoutingService returned null for email-analysis; " +
+                "resolving via FR-03 stable-ID const (playbookId={PlaybookId})",
+                FallbackEmailAnalysisPlaybookId);
+            return await _playbookLookup
+                .GetByIdAsync(FallbackEmailAnalysisPlaybookId.ToString(), cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        // Legacy by-name path retained for the FR-03 deprecation window. Custom playbook
+        // overrides (test fixtures, future custom playbooks) still resolve here. Task 024
+        // adds deprecation telemetry; this site does NOT call the deprecated endpoint
+        // directly — it goes through IPlaybookService.GetByNameAsync which task 024 owns.
+        _logger.LogInformation(
+            "AppOnlyAnalysisService: resolving custom playbook '{PlaybookName}' via legacy " +
+            "by-name path (not a well-known stable-ID-mapped playbook).",
+            playbookName);
+
+        return await _playbookService
+            .GetByNameAsync(playbookName, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -159,11 +295,13 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 "Extracted {CharCount} characters from document {DocumentId}",
                 extractionResult.Text.Length, documentId);
 
-            // 5a. Load playbook by name to get its ID for the Analysis record
+            // 5a. Load playbook to get its ID for the Analysis record (FR-03 Pattern B:
+            // well-known names resolve via stable-ID lookup; custom names fall back to
+            // legacy by-name during the deprecation window).
             Guid? playbookId = null;
             try
             {
-                var playbook = await _playbookService.GetByNameAsync(effectivePlaybookName, cancellationToken);
+                var playbook = await ResolvePlaybookAsync(effectivePlaybookName, cancellationToken);
                 playbookId = playbook.Id;
                 _logger.LogInformation(
                     "Loaded playbook '{PlaybookName}' with ID {PlaybookId}",
@@ -357,11 +495,12 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         string? graphDriveId = null,
         string? graphItemId = null)
     {
-        // 1. Load playbook by name
+        // 1. Load playbook — FR-03 Pattern B: well-known names resolve via stable-ID
+        //    lookup (sprk_playbookid alt-key); custom names fall back to legacy by-name.
         Models.Ai.PlaybookResponse playbook;
         try
         {
-            playbook = await _playbookService.GetByNameAsync(playbookName, cancellationToken);
+            playbook = await ResolvePlaybookAsync(playbookName, cancellationToken);
             _logger.LogDebug(
                 "Loaded playbook '{PlaybookName}' (Id={PlaybookId}) with {ToolCount} tools",
                 playbook.Name, playbook.Id, playbook.ToolIds?.Length ?? 0);

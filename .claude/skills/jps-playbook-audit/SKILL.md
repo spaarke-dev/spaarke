@@ -109,6 +109,22 @@ FOR EACH playbook:
     - Are outputVariable names unique within the playbook?
     - Is there a canvas layout saved?
 
+  CHECK 3.5 — Repo-vs-Deployed Reconciliation (BINDING per canonical-truth loop 2026-06-26)
+    Per ai-guide-playbook-deploy-recipe.md, the runtime reads sprk_playbooknode rows, NOT canvas JSON.
+    Audit MUST surface drift between repo definition files and deployed rows.
+    - For each playbook with a repo-side definition JSON at projects/{project}/notes/playbooks/{name}.json:
+      a. COMPARE definition.nodes.length vs deployed sprk_playbooknode row count
+         FLAG 🔴 if mismatch (deploy gap — runtime will hit Legacy mode if count is 0)
+      b. For each repo node: COMPARE repo.actionCode vs deployed _sprk_actionid_value
+         RESOLVE deployed FK via sprk_analysisaction lookup → sprk_actioncode
+         FLAG 🔴 if actionCode mismatch (FK is canonical dispatch axis per ai-architecture-playbook-runtime.md §5)
+      c. For each deployed node: VERIFY sprk_isactive=true
+         FLAG 🔴 if false (load-bearing per Deploy-Playbook.ps1:823 comment;
+         the column's default is false → row exists but runtime filter excludes it → Legacy mode)
+    - Check for ORPHANED nodes (sprk_playbooknode rows where playbook was deleted but nodes remain)
+      QUERY: sprk_playbooknodes where _sprk_playbookid_value not in (active playbook IDs)
+      FLAG 🔴 if any found — these consume storage + may surface in stale queries
+
   CHECK 4 — Standards Compliance:
     - Does the playbook have a description?
     - Is it marked public/private appropriately?

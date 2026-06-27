@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Project wrap-up — quality gates, repo cleanup, doc updates, lessons-learned, completion</title>
+    <phase>Phase 9: Cleanup & Documentation (Final)</phase>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>085, 081, 083, 084, 024, 072</dependencies>
+    <blocks>none</blocks>
+    <tags>cleanup, docs, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final gate. Runs `code-review` + `adr-check` + `repo-cleanup`. FULL rigor.</rigor-reason>
+    <parallel-group>P9-W5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final wrap-up depends on every other Phase 9 task; main-session-only.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Final project wrap-up — execute the mandatory wrap-up checklist: (1) run `/code-review` on all project code; (2) run `/adr-check`; (3) run `/repo-cleanup projects/smart-todo-decoupling-r3`; (4) update `README.md` Status → Complete + check all Graduation Criteria; (5) update `plan.md` Status → Complete + mark all phases ✅; (6) write `notes/lessons-learned.md` covering implementation surprises + decisions revised + advice for R4 (or follow-on projects); (7) final TASK-INDEX.md status check — every task ✅; (8) verify no critical code-review issues remain.
+  </prompt>
+
+  <role>Spaarke project closer.</role>
+
+  <goal>Project marked Complete with all graduation criteria verified. Lessons-learned written. Repo clean. No critical code-review issues.</goal>
+
+  <constraints>
+    <constraint source="task-create §3.7">Mandatory wrap-up steps: quality gates → repo-cleanup → README → plan → lessons-learned → verification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>projects/smart-todo-decoupling-r3/README.md</file>
+      <file>projects/smart-todo-decoupling-r3/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/code-review` against all project-touched code. Fix any critical issues identified. Re-run until clean.</step>
+    <step order="2">Run `/adr-check` against all project code. Fix any ADR violations. Re-run until clean.</step>
+    <step order="3">Run `/repo-cleanup projects/smart-todo-decoupling-r3` to audit + remove ephemeral files. Review the cleanup report; approve removals (notes/debug, notes/spikes, notes/drafts). Archive handoffs if any.</step>
+    <step order="4">Update `README.md`: Status → Complete; Last Updated → today; Phase → Complete; Progress → 100%; Completed Date filled; all Graduation Criteria checked.</step>
+    <step order="5">Update `plan.md`: Status → Complete; mark every phase Deliverable as ✅.</step>
+    <step order="6">Write `projects/smart-todo-decoupling-r3/notes/lessons-learned.md`: implementation surprises, decisions revised vs. original spec, tooling gotchas, advice for follow-on projects (especially Microsoft Planner integration if reconsidered, Outlook v2 with edit flow, mobile-native deferred work).</step>
+    <step order="7">Verify TASK-INDEX.md: every task marked ✅.</step>
+    <step order="8">Final smoke test: BFF boots cleanly with feature flag both ON and OFF; SmartTodo loads + queries `sprk_todo`; Outlook ribbon + indicator work; round-trip sync round-trips within 60s.</step>
+    <step order="9">Add a Changelog entry in `README.md` marking completion.</step>
+    <step order="10">Update TASK-INDEX.md status to ✅ completed for this task.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">`README.md` Status → Complete</output>
+    <output type="docs">`plan.md` Status → Complete; phases ✅</output>
+    <output type="docs">`projects/smart-todo-decoupling-r3/notes/lessons-learned.md`</output>
+    <output type="docs">`projects/smart-todo-decoupling-r3/tasks/TASK-INDEX.md` (all ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Graduation Criteria in README.md checked.</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md marked ✅.</criterion>
+    <criterion testable="true">`/code-review` reports zero critical issues.</criterion>
+    <criterion testable="true">`/adr-check` passes.</criterion>
+    <criterion testable="true">`/repo-cleanup` reports no orphan files.</criterion>
+    <criterion testable="true">Lessons-learned written.</criterion>
+    <criterion testable="true">Smoke tests pass (BFF boot both flag states; UI surfaces; round-trip sync).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. This is the final gate. Use `code-review`, `adr-check`, `repo-cleanup` skills explicitly.</protocol>
+  </execution>
+</task>

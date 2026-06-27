@@ -1,0 +1,187 @@
+<task id="083" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-D-04 References Resolver — `#scope`, `@&lt;entity&gt;`, `#&lt;filename&gt;` resolved at parse time</title>
+    <phase>Phase D — Command Router + Integration + Closeout</phase>
+    <status>not-started</status>
+    <estimated-effort>7 hours</estimated-effort>
+    <dependencies>080</dependencies>
+    <blocks>084</blocks>
+    <tags>frontend, typescript, ai-widgets, command-router</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>References resolve to context the agent uses; touches scope library + session file index + workspace tab registry; spec FR-51 binding; Phase D exit criterion 4 binding.</rigor-reason>
+    <parallel-group>D-G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>ReferenceResolver lives in its own file; works alongside HardSlashExecutor (081) and SoftSlashRouter (082) without file overlap.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the references resolver per spec FR-51 — resolves `#scope`, `@&lt;entity&gt;`, and
+    `#&lt;filename&gt;` at PARSE TIME so the agent receives resolved entities in its prompt
+    (no extra LLM round-trips for disambiguation).
+
+    Per Q6 + FR-51 the 3 reference types are:
+    - `#scope` → resolves to a scope library reference (uses existing `IScopeResolverService`
+      via BFF endpoint `/api/ai/scopes/*`). Examples: `#summarize-action`, `#engagement-letter-skill`.
+    - `@&lt;entity&gt;` → resolves to matter/person/organization (Dataverse polymorphic).
+      Examples: `@matter`, `@opposing-counsel`, `@acme-corp`.
+    - `#&lt;filename&gt;` → resolves to a session file (Pillar 4 session-files index) or open
+      workspace tab. Examples: `#engagement-letter.docx`, `#motion-to-dismiss.pdf`.
+
+    Build `ReferenceResolver.ts` that takes `Intent.references[]` (raw tokens) and returns
+    `ResolvedReference[]` with each token expanded to: type + canonical ID + display name +
+    metadata. Resolved references are added to the agent prompt as known entities
+    (FR-51 acceptance: "resolved entities appear in agent prompt").
+
+    Resolver caches resolutions per session (avoid re-resolving the same `@matter` repeatedly).
+    Unresolved references degrade gracefully — pass the raw token to the agent with `resolved: false`
+    flag so the agent can ask for clarification. NFR-01 binding: resolver never blocks the
+    conversation.
+
+    Frontend-only task; BFF publish-size delta = 0 MB.
+  </prompt>
+
+  <role>
+    Senior frontend engineer with familiarity with Dataverse polymorphic resolution, scope library
+    endpoints, and session-files / workspace-tab registries. Comfortable with caching strategies
+    + graceful degradation for unresolved references.
+  </role>
+
+  <goal>
+    `ReferenceResolver.ts` exists and resolves 3 reference types. Resolved references appear in
+    the chat message payload so the agent prompt includes them as known entities. Caching
+    prevents redundant resolution. Unresolved references degrade gracefully without breaking
+    the conversation. Tests cover each reference type + caching + degraded path.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="command-router">src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="workspace-architecture">docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-51">References resolve at parse time + included in agent prompt as known entities. 3 reference types: `#scope`, `@&lt;entity&gt;`, `#&lt;filename&gt;`.</constraint>
+    <constraint source="spec Phase D exit criterion 4">Verifiable: `@matter` resolves to matter record; `#contract.docx` resolves to session file; resolved entities appear in agent prompt.</constraint>
+    <constraint source="spec NFR-01">Resolver never blocks the conversation. Unresolved refs degrade with `resolved: false`.</constraint>
+    <constraint source="ADR-013">Use existing PublicContracts facades (scope endpoints, polymorphic resolvers); no new facade added.</constraint>
+    <constraint source="ADR-014">Cache resolutions per session with `tenantId` in keys (use existing Redis pattern if BFF cache; or in-memory frontend cache).</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB.</constraint>
+    <constraint source="project Pillar 8">Q6 reference types closed at exactly 3 — do NOT extend.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/reference-resolver</topic>
+    <files>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/architecture/scope-architecture.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="ResolvedReference shape" location="src/solutions/SpaarkeAi/src/components/conversation/ReferenceResolver.ts (new)">
+        Export `ResolvedReference { type: 'scope' | 'entity' | 'file'; rawToken: string; canonicalId: string | null; displayName: string; metadata: unknown; resolved: boolean }`. Async `resolveAll(refs: Reference[], ctx): Promise&lt;ResolvedReference[]&gt;`.
+      </pattern>
+      <pattern name="Session-files registry" location="task 050s output (Pillar 6a workspace state)">
+        File-name references first check open workspace tabs (in-memory state); fall back to session-files Azure Search index via BFF endpoint. Use cached `WorkspaceState` from Pillar 6a.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. Output: "🔒 RIGOR LEVEL: FULL — Reference resolution surfaces to agent prompt; FR-51 + Phase D exit 4 binding".
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 083 status is 🔲, dep 080 is ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read scope-architecture.md + polymorphic-resolver.md pattern + WORKSPACE-ARCHITECTURE.md. Identify the BFF endpoints to use for each resolver type (scope endpoint, polymorphic entity endpoint, session-files endpoint from Pillar 6a).
+    </step>
+    <step order="3" name="Author ReferenceResolver">
+      Create `src/solutions/SpaarkeAi/src/components/conversation/ReferenceResolver.ts`. Implement `resolveAll(refs, ctx)`. Per-type resolvers: scope (uses scope endpoint), entity (uses polymorphic-resolver), file (checks open tabs first, then session-files endpoint).
+    </step>
+    <step order="4" name="Caching">
+      Implement per-session in-memory cache keyed by `tenantId:sessionId:rawToken`. Cache TTL matches session lifecycle. Invalidate on `/clear` (task 081 signals via PaneEventBus existing channel).
+    </step>
+    <step order="5" name="Graceful Degradation">
+      Unresolved references return `{ resolved: false, rawToken, displayName: rawToken }`. Conversation never blocks. Agent prompt receives unresolved tokens so the agent can ask for clarification.
+    </step>
+    <step order="6" name="Wire into ConversationPane Send Path">
+      In `ConversationPane.tsx`, when `intent.references.length > 0`, await `ReferenceResolver.resolveAll(intent.references, ctx)` before sending. Attach `resolvedReferences` to message payload metadata.
+    </step>
+    <step order="7" name="Tests">
+      Cover: each reference type resolves correctly; cache hits don't re-fetch; cache invalidation on `/clear`; unresolved refs degrade gracefully; mixed resolved + unresolved in one message.
+    </step>
+    <step order="8" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Verify ADR-013 (uses existing facades), ADR-014 (tenantId in cache keys), ADR-029 (size 0 MB), NFR-01 (never blocks). Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status. Update TASK-INDEX.md: 083 🔲 → ✅. Reset `current-task.md`. Report completion + downstream unblock (084).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Frontend build + test runner</tool>
+    <tool name="git">Stage + commit ReferenceResolver.ts + ConversationPane changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ReferenceResolver.ts (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ReferenceResolver.test.ts (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (MODIFIED — await resolution before send)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 083 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ReferenceResolver.ts` resolves all 3 reference types (`#scope`, `@&lt;entity&gt;`, `#&lt;filename&gt;`).</criterion>
+    <criterion testable="true">`@matter` resolves to a matter record with canonical ID + display name (Phase D exit criterion 4).</criterion>
+    <criterion testable="true">`#contract.docx` resolves to a session file (or open workspace tab) with canonical ID (Phase D exit criterion 4).</criterion>
+    <criterion testable="true">Resolved references appear in chat message payload metadata; verifiable in BFF prompt construction (Phase D exit criterion 4).</criterion>
+    <criterion testable="true">Cache hits avoid redundant resolution; cache keys include `tenantId` per ADR-014.</criterion>
+    <criterion testable="true">Unresolved references degrade gracefully with `resolved: false` flag; conversation never blocks.</criterion>
+    <criterion testable="true">Mixed resolved + unresolved references in one message work correctly.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (frontend-only task).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Entity Reference Resolves">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=control&amp;controlName=spaarke_SpaarkeAi</url>
+      <steps>
+        <step>Open conversation pane in active matter context</step>
+        <step>Type "tell me about @matter" and submit</step>
+        <step>Verify reference resolves to current matter; agent prompt includes matter ID + name</step>
+        <step>Verify agent response references the specific matter</step>
+      </steps>
+      <expected>`@matter` resolves to canonical matter record; response is matter-specific</expected>
+    </test>
+    <test name="File Reference Resolves">
+      <steps>
+        <step>Upload a session file (e.g., contract.pdf)</step>
+        <step>Type "summarize #contract.pdf" (composition with soft slash)</step>
+        <step>Verify file reference resolves to session file ID</step>
+        <step>Verify summarize playbook receives the resolved file as input</step>
+      </steps>
+      <expected>File reference resolves; playbook receives canonical file ID</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Type a message with `@matter` reference; verify any UI affordance (autocomplete dropdown if present) adapts to dark mode</step>
+      </steps>
+      <expected>Reference affordances use Fluent v9 semantic tokens; no hardcoded colors</expected>
+    </test>
+  </ui-tests>
+</task>

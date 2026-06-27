@@ -4,11 +4,6 @@ module.exports = {
   testEnvironment: 'jsdom',
   roots: ['<rootDir>/shared'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
-  moduleNameMapper: {
-    '^@shared/(.*)$': '<rootDir>/shared/$1',
-    '^@outlook/(.*)$': '<rootDir>/outlook/$1',
-    '^@word/(.*)$': '<rootDir>/word/$1',
-  },
   transform: {
     '^.+\\.tsx?$': [
       'ts-jest',
@@ -29,8 +24,13 @@ module.exports = {
   coverageDirectory: '<rootDir>/coverage',
   coverageReporters: ['text', 'lcov', 'html'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
-  // Mock CSS modules
+  // Combined: TypeScript path aliases + CSS mocking.
+  // (Prior version had two `moduleNameMapper` keys — the second overrode the
+  // first, wiping out path aliases. Fixed for smart-todo-decoupling-r3 task 071.)
   moduleNameMapper: {
+    '^@shared/(.*)$': '<rootDir>/shared/$1',
+    '^@outlook/(.*)$': '<rootDir>/outlook/$1',
+    '^@word/(.*)$': '<rootDir>/word/$1',
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
   },
   // Ignore transforming node_modules except for specific packages

@@ -18,8 +18,8 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// </para>
 /// <para>
 /// Construction: uses the protected base ctor that only requires <c>ILogger</c> — none of the
-/// production AI dependencies (<c>IChatClient</c>, raw chat client, <c>ICapabilityRouter</c>)
-/// are resolved, which keeps the DI graph valid when those services are absent.
+/// production AI dependencies (<c>IChatClient</c>, raw chat client) are resolved, which keeps
+/// the DI graph valid when those services are absent.
 /// </para>
 /// <para>
 /// Registered in <c>AnalysisServicesModule.AddNullObjectsForCompoundOff</c> via the same
@@ -53,7 +53,8 @@ public sealed class NullSprkChatAgentFactory : SprkChatAgentFactory
         string? latestUserMessage = null,
         IReadOnlyList<string>? previousTurnToolNames = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? intentHint = null)
     {
         LogDisabled(nameof(CreateAgentAsync));
         throw new FeatureDisabledException(ErrorCode, DetailMessage);

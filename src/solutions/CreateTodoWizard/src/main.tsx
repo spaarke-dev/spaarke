@@ -6,7 +6,75 @@ import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
 import { CreateTodoWizard } from "@spaarke/ui-components/components/CreateTodoWizard";
+import type { IDataService } from "@spaarke/ui-components/types/serviceInterfaces";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
+
+// ---------------------------------------------------------------------------
+// R4 task 100 (W-2) — post-wizard-close refetch BroadcastChannel contract.
+//
+// After a successful `sprk_todo` create we post a `{ type: SPRK_TODO_CREATED }`
+// message on the SPRK_TODO_CHANNEL_NAME channel. The LegalWorkspace SmartTodo
+// widget shim (`src/solutions/LegalWorkspace/src/sections/todo.registration.ts`)
+// subscribes and invokes its captured `refetch` ref so the list refreshes
+// without a page reload — closes UAT issue 1 from the 2026-06-18 widget-parity
+// audit.
+//
+// Contract: constants MUST stay in lockstep with the shim's matching constants.
+// They are intentionally inlined on both sides because the wizard Code Page
+// does not depend on `@spaarke/smart-todo-components`; introducing a shared
+// constants module just to share two strings would couple the wizard's
+// minimal build graph to a peer package it otherwise doesn't need.
+//
+// Defensive: BroadcastChannel is widely supported in modern Chromium-based MDA
+// runtimes; on the rare hostile sandbox where it isn't, the wrapper silently
+// no-ops (the create still succeeds; only the cross-iframe refetch is missed,
+// and a manual refresh recovers).
+// ---------------------------------------------------------------------------
+
+const SPRK_TODO_ENTITY = "sprk_todo";
+const SPRK_TODO_CHANNEL_NAME = "sprk_todo:lifecycle";
+const SPRK_TODO_CREATED = "sprk_todo:created";
+
+/**
+ * Wrap an `IDataService` so successful `sprk_todo` creates broadcast a
+ * `sprk_todo:created` message on the shared BroadcastChannel. All other
+ * operations pass through unmodified.
+ *
+ * @param inner - The underlying IDataService (e.g., XrmDataServiceAdapter).
+ * @returns A wrapped IDataService instance.
+ */
+function wrapDataServiceForCreateBroadcast(inner: IDataService): IDataService {
+  if (typeof BroadcastChannel === "undefined") {
+    // No-op wrapper — host environment doesn't support BroadcastChannel.
+    return inner;
+  }
+
+  return {
+    ...inner,
+    createRecord: async (entityName, data) => {
+      const result = await inner.createRecord(entityName, data);
+      if (entityName === SPRK_TODO_ENTITY && result) {
+        try {
+          const channel = new BroadcastChannel(SPRK_TODO_CHANNEL_NAME);
+          try {
+            channel.postMessage({ type: SPRK_TODO_CREATED, todoId: result });
+          } finally {
+            channel.close();
+          }
+        } catch (err) {
+          // Non-fatal — the create succeeded; only the cross-iframe refetch
+          // signal failed. Log + continue so the user still sees the success
+          // screen.
+          console.warn(
+            "[CreateTodoWizard] Failed to broadcast sprk_todo:created — widget will need manual refresh",
+            err,
+          );
+        }
+      }
+      return result;
+    },
+  };
+}
 
 function App() {
   const [theme, setTheme] = React.useState(resolveCodePageTheme);
@@ -43,7 +111,12 @@ function App() {
     return () => { cancelled = true; };
   }, []);
 
-  const dataService = React.useMemo(() => createXrmDataService(), []);
+  // R4 task 100 (W-2) — wrap the dataService so successful sprk_todo creates
+  // broadcast on the shared BroadcastChannel for cross-iframe refetch wiring.
+  const dataService = React.useMemo(
+    () => wrapDataServiceForCreateBroadcast(createXrmDataService()),
+    [],
+  );
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
 
   const handleClose = React.useCallback(() => {
@@ -77,6 +150,7 @@ function App() {
       <CreateTodoWizard
         open={true}
         dataService={dataService}
+        navigationService={navigationService}
         embedded={true}
         onClose={handleClose}
         authenticatedFetch={authenticatedFetch}

@@ -1,0 +1,100 @@
+<task id="R4-011" project="smart-todo-r4">
+  <metadata>
+    <title>Refactor RichFilePreviewDialog to consume &lt;RecordNavigationModalShell&gt; (regression-safety check)</title>
+    <phase>Phase 1: Shared-lib hoist</phase>
+    <workstream>C (validation)</workstream>
+    <status>complete</status>
+    <estimated-effort>0.5-1 day</estimated-effort>
+    <tags>shared-lib, ui-components, file-preview, regression-safety, fluent-v9</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>R4-010</dependencies>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Refactor `RichFilePreviewDialog` to consume the new `<RecordNavigationModalShell>`. This is the regression-safety check on the shell abstraction — if file preview still works after the refactor, the shell is correctly extracted. Visual diff target: ≤5px per spec FR-15.
+  </prompt>
+
+  <role>
+React + Fluent v9 engineer refactoring shared-lib consumer code without changing user-visible behavior.
+  </role>
+
+  <goal>
+`RichFilePreviewDialog.tsx` refactored to consume `<RecordNavigationModalShell>` instead of inline navigation logic. Existing file preview flows (Document viewer, attachment preview, any other consumer) pass visual + functional regression: ≤5px diff, no functional regression, same callbacks fire.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="refactor-target">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx</file>
+    <file purpose="new-shell">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/</file>
+    <file purpose="package-claude">src/client/shared/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-15">Refactor MUST NOT regress existing file preview flows. Visual diff ≤5px.</constraint>
+    <constraint source="ADR-021">Fluent v9 + Griffel only</constraint>
+    <constraint source="ADR-012">Use shared-lib component, don't reimplement</constraint>
+    <constraint source="project">If shell abstraction is wrong, fix the shell (task 010), don't work around in the dialog.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>shared-lib/refactor</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="Consumer refactor pattern" location="ui-components dialog consumers">
+        Replace inline state with shell-driven state; pass file-preview-specific props as `children` slot; map file-preview action bar (download, close) into shell's `actionBar` slot.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>The RichFilePreview navigation logic IS the canonical pattern. Extracting it into the shell preserves the pattern; refactoring the consumer validates the extraction. If we skip this task, we discover shell bugs in SmartTodo modal context (task 040) instead of file preview context — losing the regression-safety gate.</background>
+    <dependencies>
+      <dependency task="R4-010" status="must-complete">RecordNavigationModalShell extracted + exported from @spaarke/ui-components</dependency>
+    </dependencies>
+    <related-work>
+      <item>RichFilePreviewDialog consumers: Document viewer (`src/client/shared/Spaarke.UI.Components/src/components/FilePreview/*`), any attachment preview in solutions/code-pages.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 70%.</step>
+    <step order="1" name="Verify task 010 complete">Confirm `<RecordNavigationModalShell>` is exported from `@spaarke/ui-components` and unit tests pass.</step>
+    <step order="2" name="Read RichFilePreviewDialog">Map current state to shell props: `currentIndex`, `navigationTotal`, `onNavigate`, action bar items, title, file-preview body becomes `children`.</step>
+    <step order="3" name="Identify consumers">grep for `RichFilePreviewDialog` usage across `src/` to know what to regression-test.</step>
+    <step order="4" name="Capture baseline screenshots">Before refactor: capture screenshots of file preview in each consumer (per ui-test skill) for ≤5px diff target.</step>
+    <step order="5" name="Refactor RichFilePreviewDialog">Replace inline nav chrome with `<RecordNavigationModalShell>`. Map props. Move file-preview body to `children`. Map download/close buttons into `actionBar`.</step>
+    <step order="6" name="Build verification">`npm run build` — no TS errors.</step>
+    <step order="7" name="Run existing tests">`npm test` — all RichFilePreview tests pass without modification.</step>
+    <step order="8" name="Visual regression">Re-screenshot each consumer; diff vs baseline; verify ≤5px.</step>
+    <step order="9" name="Functional regression">Open each consumer in spaarkedev1 (or local dev): nav `<` `>`, download, close — all callbacks fire as before.</step>
+    <step order="10" name="Update task status">Mark complete; flag any shell-API bugs back to task 010 for amendment.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="ui-test">Visual regression screenshots</tool>
+    <tool name="Grep">Find RichFilePreviewDialog consumers</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx (modified)</output>
+    <output type="docs">projects/smart-todo-r4/notes/debug/richfilepreview-regression.md (if any shell-API bugs found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RichFilePreviewDialog consumes `<RecordNavigationModalShell>` — no inline nav logic remains</criterion>
+    <criterion testable="true">All existing RichFilePreview unit tests pass without modification</criterion>
+    <criterion testable="true">Visual regression: ≤5px diff vs baseline for all consumers</criterion>
+    <criterion testable="true">Functional regression: nav `<` `>`, download, close all fire correct callbacks</criterion>
+    <criterion testable="true">No new compiler warnings or eslint errors</criterion>
+  </acceptance-criteria>
+</task>

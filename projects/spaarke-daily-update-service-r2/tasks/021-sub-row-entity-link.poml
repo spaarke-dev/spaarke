@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Sub-row entity link via supplied `regardingId` + `Xrm.Navigation.navigateTo` (FR-12)</title>
+    <phase>P2a: Hybrid Aggregation UX</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>024</blocks>
+    <tags>frontend, react, fluent-ui, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code change in NarrativeBullet; Xrm.Navigation integration</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Default serial within Group C — all three (021/022/023) edit NarrativeBullet.tsx regions; promote to parallel only if 020 laid clearly-separated slot files</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per FR-12: each sub-row's entity link uses the supplied `regardingEntityType` + `regardingId` from the underlying `NotificationItem` (NO AI involvement; this fixes the dead-link defect for sub-rows). On click, opens the entity record in a Dataverse modal dialog via `Xrm.Navigation.navigateTo({ pageType: "entityrecord", entityName, entityId }, { target: 2, width: "80%", height: "80%" })`.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in `Xrm.Navigation.navigateTo` modal dialog patterns + Fluent v9 link components.</role>
+
+  <goal>Every sub-row link opens the correct record (entity + id pulled directly from the underlying `NotificationItem`); zero dead links per FR-12 acceptance.</goal>
+
+  <context>
+    <background>
+      Per FR-12: sub-row links MUST use `regardingId` directly. This eliminates the entire class of dead-link defects for sub-rows (the BFF `/narrate` AI-derived `primaryEntityId` is only used for the aggregated narrative's main link — task 030 fixes that path).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Sub-row links use supplied `regardingId`, NOT AI-derived `primaryEntityId`.</constraint>
+    <constraint source="project">Open in modal dialog (target: 2, 80%/80%) per FR-12.</constraint>
+    <constraint source="ADR-021">Fluent v9 Link component; semantic tokens.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-021-fluent-ui-v9-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">In `NarrativeBullet.tsx`, populate the sub-row link slot (added in task 020) with a Fluent v9 `Link` component.</step>
+    <step order="2">Link `onClick` calls `Xrm.Navigation.navigateTo({ pageType: "entityrecord", entityName: item.regardingEntityType, entityId: item.regardingId }, { target: 2, width: "80%", height: "80%" })`.</step>
+    <step order="3">Link text is the item's display name (e.g., `item.title` or `item.regardingDisplayName`); add an entity icon hint per spec FR-12 ("entity icon hint").</step>
+    <step order="4">Guard against missing `regardingId`: if missing, render the text without a link.</step>
+    <step order="5">Run `npm run build` + dev serve; manual smoke: click 5 sub-row links, verify modals open with correct records.</step>
+    <step order="6">Update TASK-INDEX.md: change task 021 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + dev server.</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="Sub-row entity link opens record (FR-12)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_dailyupdate</url>
+      <steps>
+        <step>Find an aggregated bullet with N&gt;1 underlying items</step>
+        <step>Click the first sub-row link</step>
+        <step>Verify modal dialog opens (target: 2)</step>
+        <step>Verify the opened record is the correct one (matches the underlying item's `regardingId`)</step>
+        <step>Close modal; click two more sub-row links from different bullets — verify same behavior</step>
+      </steps>
+      <expected>Every sub-row link opens the correct record in a modal dialog</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every sub-row link opens the correct record (verified by clicking 5+ links across categories).</criterion>
+    <criterion testable="true">Modal dialog opens at 80%/80% size (target: 2).</criterion>
+    <criterion testable="true">No AI-derived field used for the link target.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If task 020 used a clearly-separated slot file or sub-component, you can run this in parallel with 022/023. Default: serial after 020.
+
+    Completion (2026-06-18, Wave 9 parallel batch):
+    - Implemented in `src/client/shared/Spaarke.DailyBriefing.Components/src/components/SubRowLink.tsx` (NOT NarrativeBullet.tsx — task 020's Wave-8 refactor introduced the slot pattern, so this task fills only the SubRowLink slot file; zero overlap with parallel tasks 022/SubRowTodo + 023/SubRowDismiss).
+    - Fluent v9 `Link` component when target available; falls back to `Text` plain-text rendering when `regardingEntityType` or `regardingId` is missing.
+    - Click handler resolves `Xrm` via `window`/`window.parent`/`window.top` (mirrors NarrativeBullet host-context fallback); calls `Xrm.Navigation.navigateTo({ pageType: "entityrecord", entityName: item.regardingEntityType, entityId: item.regardingId }, { target: 2, width: { value: 80, unit: "%" }, height: { value: 80, unit: "%" } })`. Promise `.catch` swallows user-cancelled navigations.
+    - Guarded against `window.Xrm?.Navigation?.navigateTo` undefined (test + standalone environments).
+    - Display text: `item.title || item.regardingName || "(untitled)"`; ARIA label + title attribute for accessibility.
+    - Keyboard support: Enter / Space invokes the same handler.
+    - ADR-021 semantic tokens (`colorBrandForeground1`, `colorNeutralForeground2`, `fontSizeBase200`, `lineHeightBase200`); dark-mode parity via tokens.
+    - Build: `npm run build` — SubRowLink.tsx compiles with zero errors. The 4 module-resolution errors in NarrativeBullet/SubRowTodo/useInlineTodoCreate/briefingService are PRE-EXISTING (verified by stash + rebuild on baseline) and unrelated to this task's scope.
+    - Tests: `npm test` — all 19 tests pass across 4 suites.
+    - TASK-INDEX.md update: deferred per Wave-9 orchestrator instructions (orchestrator owns the index update after the parallel batch completes).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

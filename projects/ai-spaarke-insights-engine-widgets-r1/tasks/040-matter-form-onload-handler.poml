@@ -1,0 +1,83 @@
+<task id="040" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Author Matter form OnLoad handler (net-new per Task 002)</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <phase>4</phase>
+    <tags>form, javascript, xrm</tags>
+    <dependencies>002, 042</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Per FR-17: author a Matter form OnLoad handler that reads `sprk_performancesummary`, parses as JSON, checks `generatedAt`. Handle non-JSON content (legacy R5 text) by treating as "no stored summary". Task 002 baseline established whether this is REPLACEMENT or NET-NEW; defaults to net-new per plan-time research.
+  </prompt>
+
+  <role>Power Apps form scripting developer.</role>
+
+  <goal>
+    TypeScript handler bundled as web resource, registered on Matter form OnLoad event. Reads field, parses, decides whether pre-warm is needed (Task 041 fires it).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-17)</file>
+    <file purpose="baseline">projects/ai-spaarke-insights-engine-widgets-r1/notes/r5-sparkle-wiring-baseline.md (Task 002)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-17">Read via Xrm.WebApi or equivalent; graceful non-JSON handling</constraint>
+    <constraint source="Q-U6">Power Apps form OnLoad mechanism — NOT Power Automate, NOT React Code Page wrapper</constraint>
+    <constraint source="NFR-03">Do not block form TTI</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>xrm form context, addonload, xrm.webapi, sprk_performancesummary</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/notes/r5-sparkle-wiring-baseline.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Scaffold TypeScript handler file">src/dataverse/forms/sprk_matter/insightWidgetOnLoad.ts</step>
+    <step order="2" name="Read sprk_performancesummary via Xrm.WebApi">No await blocking form load</step>
+    <step order="3" name="Try JSON.parse">If throws, treat as no-summary (R5 legacy placeholder)</step>
+    <step order="4" name="Compute staleness">Compare generatedAt to now - 1 hour</step>
+    <step order="5" name="Hand off to Task 041 logic">Pre-warm decision</step>
+    <step order="6" name="Bundle as web resource">TypeScript → JS web resource</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/dataverse/forms/sprk_matter/insightWidgetOnLoad.ts</output>
+    <output type="code">src/dataverse/forms/sprk_matter/insightWidgetOnLoad.js (compiled web resource)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler loads without throwing on form open</criterion>
+    <criterion testable="true">Non-JSON sprk_performancesummary content handled gracefully</criterion>
+    <criterion testable="true">Form TTI unaffected (manual NFR-03 verification)</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="OnLoad fires on Matter form open">
+      <steps>
+        <step>Open Matter form in browser</step>
+        <step>Verify handler invoked (console log)</step>
+        <step>Verify form TTI unblocked</step>
+      </steps>
+      <expected>Handler runs; form interactive immediately</expected>
+    </test>
+  </ui-tests>
+
+  <notes completed="2026-06-11" rigor="FULL">
+    Authored `insightWidgetOnLoad.ts` (12,213 bytes) + compiled `insightWidgetOnLoad.js` (9,867 bytes) under `src/dataverse/forms/sprk_matter/`.
+    Local `tsconfig.json` added (ES5 target, strict mode, no @types/xrm dep — minimal ambient Xrm namespace declared inline).
+    Namespace: `Spaarke.MatterInsight` (coexists with pre-existing `Spaarke.MatterKpi` per Task 002 baseline).
+    Non-blocking design: `Xrm.WebApi.retrieveRecord(...).then(...)` fire-and-forget; outer `onLoad` returns synchronously (NFR-03).
+    Graceful FR-17 handling: `_parseEnvelope` catches `JSON.parse` errors AND rejects non-object JSON primitives → null; decision distinguishes `absent` (null/empty) vs `unparseable` (legacy R5 text) for telemetry.
+    Staleness: `_computeDecision` returns one of `absent | unparseable | fresh | stale`. Threshold 60 min (overridable; matches FR-18 default).
+    Task 041 hand-off: `_firePrewarm(formContext, decision)` is a logged no-op; Task 041 replaces body with `fetch('/api/insights/ask', ...)`.
+    Verification: 12/12 unit tests pass (parse: null/empty/legacy text/JSON primitive/object; decision: absent/unparseable/no generatedAt/90min old/10min old/bad date). `npx tsc -p .` clean (strict mode, noImplicitAny, strictNullChecks).
+    No new ADRs, no BFF code, no UI rendering — handler is pure logic + Xrm.WebApi.
+  </notes>
+</task>

@@ -4,6 +4,7 @@
  *
  * @see ADR-012 — Shared Component Library (reusable across all create wizards)
  * @see ADR-021 — Fluent UI v9 design system
+ * @see ADR-024 — Polymorphic Resolver Pattern
  */
 
 import type { INavigationService } from '../../types/serviceInterfaces';
@@ -36,6 +37,80 @@ export interface EntityTypeOption {
    */
   defaultViewId?: string;
 }
+
+// ---------------------------------------------------------------------------
+// RegardingTarget — canonical entry for ADR-024 multi-entity resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * A regarding-target descriptor used by entities that follow the
+ * ADR-024 polymorphic resolver pattern (e.g., `sprk_todo`, `sprk_communication`).
+ *
+ * Extends {@link EntityTypeOption} with the entity-specific lookup attribute name
+ * (e.g., `sprk_regardingmatter`). The lookup attribute is informational metadata
+ * for callers that need to map the selected target onto the resolver service —
+ * the `AssociateToStep` component itself does not use it.
+ *
+ * The component invokes `PolymorphicResolverService.applyResolverFields` is the
+ * caller's responsibility — `AssociateToStep` is a pure UI shell per ADR-024.
+ *
+ * @example
+ * ```typescript
+ * const todoTargets: RegardingTarget[] = TODO_REGARDING_TARGETS;
+ *
+ * <AssociateToStep
+ *   entityTypes={todoTargets}
+ *   navigationService={navigationService}
+ *   value={association}
+ *   onChange={(result) => {
+ *     // Caller invokes PolymorphicResolverService.applyResolverFields(...)
+ *     setAssociation(result);
+ *   }}
+ * />
+ * ```
+ */
+export interface RegardingTarget extends EntityTypeOption {
+  /**
+   * Logical name of the entity-specific regarding lookup attribute on the
+   * child entity (e.g., `sprk_regardingmatter` for the Matter target on `sprk_todo`).
+   * Used by callers to map the user's selection onto the correct lookup field
+   * when invoking `PolymorphicResolverService.applyResolverFields`.
+   */
+  lookupAttribute: string;
+}
+
+// ---------------------------------------------------------------------------
+// TODO_REGARDING_TARGETS — canonical list of the 11 sprk_todo regarding targets
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical list of the eleven entity targets supported for `sprk_todo`
+ * regarding associations per spec.md FR-07 / ADR-024 / entity-schema.md.
+ *
+ * Order matches the schema doc presentation order. The first entry is shown
+ * as the default selection in the picker.
+ *
+ * Note: `Contact` uses the OOB `contact` logical name (not `sprk_contact`).
+ * Per design.md row 97 + entity-schema.md note, the lookup attribute is
+ * `sprk_regardingcontact` and the target entity is OOB `contact`.
+ *
+ * @see spec.md FR-07
+ * @see src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md
+ * @see .claude/adr/ADR-024-polymorphic-resolver-pattern.md
+ */
+export const TODO_REGARDING_TARGETS: ReadonlyArray<RegardingTarget> = [
+  { label: 'Matter', entityType: 'sprk_matter', lookupAttribute: 'sprk_regardingmatter' },
+  { label: 'Project', entityType: 'sprk_project', lookupAttribute: 'sprk_regardingproject' },
+  { label: 'Event', entityType: 'sprk_event', lookupAttribute: 'sprk_regardingevent' },
+  { label: 'Communication', entityType: 'sprk_communication', lookupAttribute: 'sprk_regardingcommunication' },
+  { label: 'Work Assignment', entityType: 'sprk_workassignment', lookupAttribute: 'sprk_regardingworkassignment' },
+  { label: 'Invoice', entityType: 'sprk_invoice', lookupAttribute: 'sprk_regardinginvoice' },
+  { label: 'Budget', entityType: 'sprk_budget', lookupAttribute: 'sprk_regardingbudget' },
+  { label: 'Analysis', entityType: 'sprk_analysis', lookupAttribute: 'sprk_regardinganalysis' },
+  { label: 'Organization', entityType: 'sprk_organization', lookupAttribute: 'sprk_regardingorganization' },
+  { label: 'Contact', entityType: 'contact', lookupAttribute: 'sprk_regardingcontact' },
+  { label: 'Document', entityType: 'sprk_document', lookupAttribute: 'sprk_regardingdocument' },
+] as const;
 
 // ---------------------------------------------------------------------------
 // AssociationResult

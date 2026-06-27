@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="110" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Post-soak cleanup: drop text-to-text field mappings; drop `sprk_searchindexname` text col on 7 entities; remove BFF text-fallback; remove `AiSearch__AllowedIndexes__*` App Service config</title>
+    <phase>G: Lookup-driven multi-index</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>103, 105, 107, 109 + 24–48 hr soak</dependencies>
+    <blocks>111</blocks>
+    <tags>dataverse, schema, bff-api, deploy, cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Destructive operations on shared schema + production code path. Multiple irreversible steps. Each step has a rollback gate per spec §11.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Strictly sequential with rollback gates between steps.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Verify the 24–48 hr soak shows zero "PhaseG.TextFallback" hits in App Insights. Then execute the cleanup in order: (1) drop text-to-text field mappings inventoried in task 105's notes/phase-g/field-mappings-added.md; (2) drop `sprk_searchindexname` text column from all 7 entities (BU, Matter, Project, Invoice, Event, WorkAssignment, Document); (3) remove the BFF text-fallback code path in `SearchIndexNameResolver` + the appsettings-array fallback in `DataverseAllowedIndexesProvider`; redeploy BFF; (4) remove `AiSearch__AllowedIndexes__0/__1` from `spaarke-bff-dev` App Service config; (5) confirm searches still work end-to-end.
+  </prompt>
+
+  <role>
+    BFF developer + Dataverse maker + Azure ops. Comfortable with destructive schema operations, BFF redeploy, App Service config edits.
+  </role>
+
+  <goal>
+    Migration complete: text column gone from all 7 entities; BFF code reads only lookup path; allow-list is purely Dataverse-driven; App Service config no longer has the AllowedIndexes array. End-to-end search works for all index targets.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/field-mappings-added.md (from task 105)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SearchIndexNameResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DataverseAllowedIndexesProvider.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md §11 rollback gate">BEFORE step 12 (drop text column): App Insights shows zero "PhaseG.TextFallback" warnings over a 24–48 hr window AND every search via every entity surface succeeds. If non-zero, abort and investigate.</constraint>
+    <constraint source="spec.md §10 step 12">Dropping the text column is IRREVERSIBLE — column metadata + data both gone. Dataverse allows the drop only after all field mappings referencing the column are removed.</constraint>
+    <constraint source="spec.md §10 step 13">After BFF text-fallback removal redeploys, log message "PhaseG.TextFallback hit" no longer exists in the codebase.</constraint>
+    <constraint source="CLAUDE.md §10 bullet 4">BFF publish-size verification after the redeploy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/field-mappings-added.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Soak verification: kusto in App Insights — `traces | where timestamp > ago(48h) | where message has "PhaseG.TextFallback" | count`. MUST be 0. If &gt; 0, STOP — investigate the source records (likely missed by migration task 104); fix data; restart 48-hr soak.</step>
+    <step order="2">Soak verification (search smoke): from a PCF + from standalone code page, run a search against each of the 4 distinct index targets (Document on each of 2 file indexes; Matter, Project, etc. on records index). All return 200 OK with expected results.</step>
+    <step order="3">Drop text-to-text field mappings. Open `notes/phase-g/field-mappings-added.md` from task 105 for the inventory of mappings to remove. For each entry, open the parent relationship → Mappings → remove the `sprk_searchindexname → sprk_searchindexname` mapping. Keep the `sprk_aisearchindexid → sprk_aisearchindexid` mapping.</step>
+    <step order="4">Drop the `sprk_searchindexname` text column from all 7 entities. Power Apps maker → entity → Columns → `sprk_searchindexname` → Delete. Confirm. Repeat for all 7. (If Dataverse blocks the drop because of remaining references, identify them; the most common is form placement — remove from forms first.)</step>
+    <step order="5">Remove the BFF text-fallback path: edit `SearchIndexNameResolver.cs` to remove the `if (parent.Contains("sprk_searchindexname")) ... fallback` branches; keep ONLY the lookup-via-link-entity path. Edit `DataverseAllowedIndexesProvider.cs` to remove the appsettings-array fallback (Dataverse-only). Delete the "PhaseG.TextFallback" log strings.</step>
+    <step order="6">Update unit tests: remove tests that exercise the text-fallback path (now obsolete). Run `dotnet test` — all green.</step>
+    <step order="7">Verify BFF publish size still ≤ 60 MB. Deploy via `/bff-deploy`. Healthz verifies.</step>
+    <step order="8">App Insights search smoke: confirm searches still return results post-cleanup. No new warnings.</step>
+    <step order="9">Remove App Service config: `az webapp config appsettings delete -g rg-spaarke-dev -n spaarke-bff-dev --setting-names AiSearch__AllowedIndexes__0 AiSearch__AllowedIndexes__1`. App Service auto-restarts.</step>
+    <step order="10">Final smoke: search end-to-end works after App Service restart.</step>
+    <step order="11">Run code-review + adr-check on the BFF cleanup. Update `TASK-INDEX.md`: 110 🔲 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Kusto via az monitor; az webapp config appsettings delete; dotnet test; deploy script</tool>
+    <tool name="Edit">Resolver + provider cleanup</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">7 entities no longer have sprk_searchindexname text column</output>
+    <output type="code">SearchIndexNameResolver.cs + DataverseAllowedIndexesProvider.cs cleaned of text-fallback paths</output>
+    <output type="config">App Service AllowedIndexes__N entries removed</output>
+    <output type="deploy">BFF redeployed; healthz verified</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">App Insights shows zero PhaseG.TextFallback hits in the last 48 hr.</criterion>
+    <criterion testable="true">`describe tables/sprk_matter` (and 6 other entities) shows ONLY `sprk_aisearchindexid` (not `sprk_searchindexname`).</criterion>
+    <criterion testable="true">`grep -r "PhaseG.TextFallback\|sprk_searchindexname" src/server/api/Sprk.Bff.Api/Services/Ai/` returns zero matches in production code (test files acceptable to grep-cleanup).</criterion>
+    <criterion testable="true">`az webapp config appsettings list ... --query "[?starts_with(name, 'AiSearch__AllowedIndexes')]"` returns empty array.</criterion>
+    <criterion testable="true">End-to-end search works post-cleanup on at least 4 distinct index targets.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the most destructive task in Phase G. Each step has a rollback gate per spec §11. If ANY post-cleanup smoke test fails, STOP — the soak verification was insufficient.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <deploy-skill>.claude/skills/bff-deploy/SKILL.md</deploy-skill>
+  </execution>
+</task>

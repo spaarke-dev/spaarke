@@ -1,0 +1,138 @@
+<task id="CICD-088b" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Push GraphServiceClient resolution into Infrastructure.Graph — eliminate IL-level GraphServiceClient locals in 14 endpoints + FileAccessEndpoints gap — UNBLOCKS SC-12</title>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <phase>2.5 - Pre-cutover BFF ADR remediation</phase>
+    <stream>A - CI tiering remediation</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>088</dependencies>
+    <blocks>071</blocks>
+    <tags>bff-api, adr-007, spe, graph-sdk, hot-path, FR-A06, structural-refactor</tags>
+    <execution-note>088 mechanical refactor was necessary prep but insufficient — NetArchTest's `HaveDependencyOn` is IL-level, so the `var graphClient = await graphService.GetClientForConfigAsync(...)` local in 14 endpoints still references GraphServiceClient. 088b pushes that resolution into Infrastructure.Graph so endpoints never hold the typed local.</execution-note>
+  </metadata>
+
+  <prompt>
+    Per spec FR-A06 / SC-12. Task CICD-088 removed all `using Microsoft.Graph*` directives and `catch (ODataError)` blocks from 17 endpoint files, but `EndpointsShouldNotReferenceGraphSdk` still fails because endpoint methods declare `var graphClient = await graphService.GetClientForConfigAsync(config, ct)` — the inferred local type is `GraphServiceClient` from Microsoft.Graph, which NetArchTest catches at IL level.
+
+    Fix: add a `GraphCallScope.RunForConfig<T>(...)` helper in `Infrastructure.Graph` that internally resolves the graph client + executes the wrapped call, so endpoints pass the `config` and a `Func<GraphServiceClient, CancellationToken, Task<T>>` instead of holding a `GraphServiceClient` local. Plus handle FileAccessEndpoints' 3 raw Graph client usages by adding SpeFileStore facade methods (per `notes/088-fileaccess-gap.md`).
+  </prompt>
+
+  <role>BFF engineer applying a focused structural refactor to push Graph client resolution out of the API layer per ADR-007 §1.</role>
+
+  <goal>NetArchTest `EndpointsShouldNotReferenceGraphSdk` PASSES on master (all 14 currently-failing endpoints + FileAccessEndpoints). Build succeeds. Existing behavioural tests continue to pass.</goal>
+
+  <inputs>
+    <file purpose="failing-test">tests/Spaarke.ArchTests/ADR007_GraphIsolationTests.cs (line 96-117)</file>
+    <file purpose="088-prep">commit on `fix/adr-007-009-bff-remediation` branch — foundation (SpaarkeStorageException, GraphErrorTranslator, GraphCallScope) + 17 endpoints refactored</file>
+    <file purpose="gap">projects/ci-cd-unit-test-remediation-r1/notes/088-fileaccess-gap.md (FileAccessEndpoints scope)</file>
+    <file purpose="helper">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphCallScope.cs (extend with RunForConfig overload)</file>
+    <file purpose="facade">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs (extend with 3 new methods for FileAccessEndpoints)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-A06">SC-12 requires the arch test passing. 088b is the final gate.</constraint>
+    <constraint source="ADR-007">Microsoft.Graph types stay isolated to Infrastructure.Graph + SpeFileStore. GraphServiceClient locals in Api/ violate this.</constraint>
+    <constraint source="behaviour">Preserve all 17 endpoints' existing behaviour exactly — only the call shape changes, not the response semantics.</constraint>
+    <constraint source="testing">175 BFF unit tests passed after 088 prep — 088b must not regress.</constraint>
+  </constraints>
+
+  <design>
+    **Step A — Extend GraphCallScope with `RunForConfig`**:
+
+    ```csharp
+    // In Infrastructure/Graph/GraphCallScope.cs
+    public static async Task<T> RunForConfig<T>(
+        SpeAdminGraphService graphService,
+        SpeAdminGraphService.ContainerTypeConfig config,
+        Func<Microsoft.Graph.GraphServiceClient, CancellationToken, Task<T>> graphCall,
+        CancellationToken ct,
+        string? context = null)
+    {
+        var graphClient = await graphService.GetClientForConfigAsync(config, ct);
+        try { return await graphCall(graphClient, ct).ConfigureAwait(false); }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) { throw ex.ToSpaarkeStorageException(context); }
+    }
+
+    // Non-generic overload for void-returning calls
+    public static async Task RunForConfig(
+        SpeAdminGraphService graphService,
+        SpeAdminGraphService.ContainerTypeConfig config,
+        Func<Microsoft.Graph.GraphServiceClient, CancellationToken, Task> graphCall,
+        CancellationToken ct,
+        string? context = null)
+    {
+        var graphClient = await graphService.GetClientForConfigAsync(config, ct);
+        try { await graphCall(graphClient, ct).ConfigureAwait(false); }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) { throw ex.ToSpaarkeStorageException(context); }
+    }
+    ```
+
+    **Step B — 14 endpoint refactors (mechanical pattern)**:
+
+    ```csharp
+    // BEFORE (post-088):
+    var graphClient = await graphService.GetClientForConfigAsync(config, ct);  // GraphServiceClient local!
+    var result = await GraphCallScope.Run(
+        () => graphService.SearchAsync(graphClient, request, ct),
+        "SearchContainers");
+
+    // AFTER (post-088b):
+    var result = await GraphCallScope.RunForConfig(
+        graphService,
+        config,
+        (client, t) => graphService.SearchAsync(client, request, t),
+        ct,
+        "SearchContainers");
+    ```
+
+    Endpoint no longer declares `GraphServiceClient` local. Helper does it inside `Infrastructure.Graph` (allowed).
+
+    **Step C — FileAccessEndpoints (3 new SpeFileStore methods per gap notes)**:
+
+    Add to SpeFileStore:
+    - `Task&lt;string&gt; GetPreviewUrlAsync(string driveId, string itemId, CancellationToken ct)`
+    - `Task&lt;SpeDriveItemSummary&gt; GetDriveItemMetadataAsync(string driveId, string itemId, CancellationToken ct)` (with new domain DTO `SpeDriveItemSummary` in Models/SpeFileStoreDtos.cs)
+    - `Task&lt;Stream&gt; GetItemContentStreamAsync(string driveId, string itemId, CancellationToken ct)`
+
+    FileAccessEndpoints' 6 affected methods (GetPreviewUrl, GetPreview, GetContent, GetOffice, GetOpenLinks, GetViewUrl) refactor to inject SpeFileStore + call these facade methods. Remove `IGraphClientFactory` injection + all `using Microsoft.Graph.*` imports.
+
+    **Step D — Verify**:
+    - `dotnet build src/server/api/Sprk.Bff.Api/` PASS
+    - `dotnet test tests/Spaarke.ArchTests/ --filter "FullyQualifiedName~ADR007"` → all 3 facts PASS (GraphTypes... is pre-existing scope; if it stays failing on Services/Communication that's documented baseline; if it fails on any *Endpoints* type, that's a new violation)
+    - `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Container|Upload|Documents|FileAccess|OBO|RecycleBin|Search"` → all pass
+  </design>
+
+  <steps>
+    <step order="1">Extend GraphCallScope.cs with RunForConfig overloads (Step A).</step>
+    <step order="2">For each of 14 EndpointsShouldNotReferenceGraphSdk-failing endpoints: replace `var graphClient = await graphService.GetClientForConfigAsync(config, ct)` + subsequent GraphCallScope.Run wraps with single GraphCallScope.RunForConfig calls (Step B).</step>
+    <step order="3">After every 3-4 endpoints: `dotnet build` to catch issues early.</step>
+    <step order="4">Tackle FileAccessEndpoints — add 3 SpeFileStore facade methods + SpeDriveItemSummary domain DTO. Refactor FileAccessEndpoints' 6 methods to use SpeFileStore (Step C).</step>
+    <step order="5">Run ADR-007 arch tests: `dotnet test tests/Spaarke.ArchTests/ --no-build --filter "FullyQualifiedName~ADR007"` → EndpointsShouldNotReferenceGraphSdk MUST PASS.</step>
+    <step order="6">Run BFF unit test sampler: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --no-build --filter "..."` → MUST PASS for affected endpoints.</step>
+    <step order="7">Run full BFF build + tests one more time: `dotnet build src/server/api/Sprk.Bff.Api/` + arch test suite. Zero new errors.</step>
+    <step order="8">Step 9.5: code-review + adr-check on modified files (FULL rigor binding).</step>
+    <step order="9">Commit on `fix/adr-007-009-bff-remediation` branch: `fix(bff)(088b): push GraphServiceClient resolution into Infrastructure.Graph — ADR-007 endpoint test PASS`. Push to origin.</step>
+  </steps>
+
+  <outputs>
+    <output type="extended-helper">GraphCallScope.cs (+2 RunForConfig overloads)</output>
+    <output type="modified">14 endpoint files (call-site refactors)</output>
+    <output type="extended-facade">SpeFileStore.cs (+3 facade methods)</output>
+    <output type="new-dto">Models/SpeFileStoreDtos.cs (+ SpeDriveItemSummary record)</output>
+    <output type="modified">FileAccessEndpoints.cs (full refactor; IGraphClientFactory → SpeFileStore)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GraphCallScope.RunForConfig overloads exist and compile</criterion>
+    <criterion testable="true">No *Endpoints*.cs file declares `var ...= await graphService.GetClientForConfigAsync(...)` or similar GraphServiceClient-typed local</criterion>
+    <criterion testable="true">FileAccessEndpoints no longer injects IGraphClientFactory; no longer imports Microsoft.Graph.*</criterion>
+    <criterion testable="true">NetArchTest `EndpointsShouldNotReferenceGraphSdk` PASSES</criterion>
+    <criterion testable="true">`ControllersShouldNotReferenceGraphSdk` PASSES (preserved from 088)</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds</criterion>
+    <criterion testable="true">BFF unit tests for refactored endpoints PASS (sampler: Container, Upload, Documents, FileAccess, OBO, RecycleBin, Search)</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check PASS</criterion>
+  </acceptance-criteria>
+</task>

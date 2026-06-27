@@ -1,0 +1,110 @@
+<task id="R4-082" project="smart-todo-r4">
+  <metadata>
+    <title>G — Add Visual Host "Upcoming To Dos" to Project main form</title>
+    <phase>Phase 2: Wave 2c</phase>
+    <workstream>G</workstream>
+    <status>complete</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>dataverse, form-designer, visual-host, deploy, project</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-051, R4-080</dependencies>
+    <relevant-files>
+      <file>Dataverse sprk_project main form (form-designer change)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Add Visual Host control bound to the Project chart def (`Upcoming To Dos — Project`) on the sprk_project main form. Same pattern as task 081. Drill-through opens SmartTodo Code Page modal pre-filtered to current Project.
+  </prompt>
+
+  <role>Dataverse form-designer.</role>
+
+  <goal>Open a Project record in spaarkedev1; "Upcoming To Dos" section renders Visual Host card; drill-through opens SmartTodo Code Page modal with `?regardingType=sprk_project&regardingId=<currentId>` pre-filter.</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="reference-task">projects/smart-todo-r4/tasks/081-G-visualhost-on-matter-form.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-36">Visual Host added to Project main form</constraint>
+    <constraint source="spec FR-34">Drill-through opens SmartTodo modal</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/form-designer</topic>
+    <files>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R4-080" status="must-complete">Project chart def record exists</dependency>
+      <dependency task="R4-051" status="must-complete">Resolver pattern in place on To Do form</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Open sprk_project main form">Form designer.</step>
+    <step order="2" name="Add "Upcoming To Dos" section + Visual Host control">Bind to Project chart def. Context = current record id.</step>
+    <step order="3" name="Publish + export + commit + deploy">Same flow as task 081.</step>
+    <step order="4" name="Smoke test">Open Project record; verify card + drill-through.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-deploy">Solution operations</tool>
+    <tool name="ui-test">Card + drill-through</tool>
+  </tools>
+
+  <outputs>
+    <output type="form-update">sprk_project main form modified</output>
+    <output type="solution-xml">Committed</output>
+    <output type="deploy">spaarkedev1</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Card + drill-through on Project form">
+      <steps>
+        <step>Open Project record</step>
+        <step>Verify "Upcoming To Dos" + Visual Host card</step>
+        <step>Click card → SmartTodo Code Page modal pre-filtered to Project</step>
+      </steps>
+      <expected>Functional; pre-filter works</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Section visible on sprk_project main form</criterion>
+    <criterion testable="true">Visual Host card renders</criterion>
+    <criterion testable="true">Drill-through opens SmartTodo modal</criterion>
+    <criterion testable="true">Pre-filter to current Project id works</criterion>
+  </acceptance-criteria>
+
+  <notes>
+**Completion (2026-06-10, Wave B parallel execution)**
+
+Deliverable: `projects/smart-todo-r4/notes/g-project-form-visualhost-instructions.md` (form-designer instructions doc for `sprk_project` main form Visual Host mount).
+
+Cloned from the Matter template `projects/smart-todo-r4/notes/g-matter-form-visualhost-instructions.md` (R4-081 deliverable) with the four substitutions from the Matter doc §10:
+
+- Entity: `sprk_matter` → `sprk_project`
+- Chart def name: `Upcoming To Dos — Matter` → `Upcoming To Dos — Project`
+- `contextFieldName` input: `sprk_matterid` → `sprk_projectid`
+- Owning solution (verify in env): `Spaarke.Matter` → `Spaarke.Project`
+- Section title kept as `Upcoming To Dos` (universal across all 4 parent forms per FR-36)
+
+Additional Project-specific adjustments beyond the §10 mechanical substitutions:
+
+- §0 prereq table: legacy chart-visual-instance row reworded ("if any" — Matter is the canonical legacy host; Project may not have a legacy `UPCOMING TASKS` visual)
+- §1 reference note: legacy-removal step in §6 noted as conditional
+- §6: full section reworded to "if present" — Project form may not have the legacy visual at all
+- §9 drill-through isolation: added Project-specific symptom hint (Kanban filtered by wrong parent type → suspect `contextFieldName` is not `sprk_projectid`)
+- §10: Project doc explicitly noted as the worked substitution result for tasks 083 + 084 to use as reference alongside the Matter template
+
+Live form-designer execution deferred to user (per spec NFR-09 deploy convention). R4-082 ✅ when this doc is committed; live deploy + solution XML capture happens in R4-092.
+
+**Source code unchanged.** No `.cs` / `.ts` / `.tsx` files modified. Zero file conflict with parallel-wave tasks 042, 060, 052, 083, 084.
+  </notes>
+</task>

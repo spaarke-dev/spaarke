@@ -6,19 +6,22 @@ using Sprk.Bff.Api.Models.Ai;
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
-/// Cached lookup service for playbooks using portable alternate keys.
+/// Cached lookup service for playbooks using the stable-ID alternate key
+/// (<c>sprk_playbookid</c>) per Q&amp;A 2026-06-22 Q1.
 /// Minimizes Dataverse queries in high-volume scenarios (1000+ lookups/hour).
 /// </summary>
 /// <remarks>
 /// Performance characteristics:
 /// - First lookup: ~50-100ms (Dataverse query + cache write)
-/// - Cached lookups: <1ms (in-memory)
+/// - Cached lookups: &lt;1ms (in-memory)
 /// - Cache TTL: 1 hour (playbook configs rarely change)
 /// - Memory usage: ~1KB per cached playbook (negligible)
 ///
 /// SaaS multi-environment support:
-/// Same code works in DEV/QA/PROD without config changes.
-/// Alternate keys travel with solution imports, GUIDs regenerate.
+/// Same code works in DEV/QA/PROD without config changes. The stable-ID alt-key
+/// <c>sprk_playbookid</c> mirrors the row's <c>sprk_analysisplaybookid</c> PK and
+/// is immutable across environments (admin-facing slug <c>sprk_playbookcode</c> is
+/// NOT used by code per Q&amp;A 2026-06-22 Q1).
 /// </remarks>
 public class PlaybookLookupService : IPlaybookLookupService
 {
@@ -27,7 +30,7 @@ public class PlaybookLookupService : IPlaybookLookupService
     private readonly ILogger<PlaybookLookupService> _logger;
 
     private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(1);
-    private const string CacheKeyPrefix = "playbook:code:";
+    private const string CacheKeyPrefix = "playbook:id:";
 
     public PlaybookLookupService(
         IGenericEntityService genericEntityService,
@@ -39,21 +42,21 @@ public class PlaybookLookupService : IPlaybookLookupService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<PlaybookResponse> GetByCodeAsync(string playbookCode, CancellationToken ct = default)
+    public async Task<PlaybookResponse> GetByIdAsync(string playbookId, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(playbookCode))
+        if (string.IsNullOrWhiteSpace(playbookId))
         {
-            throw new ArgumentException("Playbook code cannot be null or empty", nameof(playbookCode));
+            throw new ArgumentException("Playbook id cannot be null or empty", nameof(playbookId));
         }
 
-        var cacheKey = GetCacheKey(playbookCode);
+        var cacheKey = GetCacheKey(playbookId);
 
         // Try cache first
         if (_memoryCache.TryGetValue<PlaybookResponse>(cacheKey, out var cachedPlaybook))
         {
             _logger.LogDebug(
-                "Playbook {PlaybookCode} retrieved from cache (ID: {PlaybookId})",
-                playbookCode,
+                "Playbook {PlaybookId} retrieved from cache (rowId: {RowId})",
+                playbookId,
                 cachedPlaybook?.Id);
 
             return cachedPlaybook!;
@@ -61,15 +64,15 @@ public class PlaybookLookupService : IPlaybookLookupService
 
         // Cache miss - query Dataverse using alternate key
         _logger.LogInformation(
-            "Playbook {PlaybookCode} not in cache, querying Dataverse by alternate key",
-            playbookCode);
+            "Playbook {PlaybookId} not in cache, querying Dataverse by alternate key",
+            playbookId);
 
         try
         {
-            // Build alternate key lookup
+            // Build alternate key lookup on the stable-ID column per Q&A 2026-06-22 Q1.
             var alternateKeyValues = new KeyAttributeCollection
             {
-                { "sprk_playbookcode", playbookCode }
+                { "sprk_playbookid", playbookId }
             };
 
             // Columns needed to build PlaybookResponse
@@ -80,6 +83,7 @@ public class PlaybookLookupService : IPlaybookLookupService
                 "sprk_description",
                 "sprk_configjson",
                 "sprk_playbookcode",
+                "sprk_playbookid",
                 "statecode",
                 "statuscode"
             };
@@ -102,8 +106,8 @@ public class PlaybookLookupService : IPlaybookLookupService
             _memoryCache.Set(cacheKey, playbook, cacheOptions);
 
             _logger.LogInformation(
-                "Playbook {PlaybookCode} retrieved from Dataverse and cached (ID: {PlaybookId})",
-                playbookCode,
+                "Playbook {PlaybookId} retrieved from Dataverse and cached (rowId: {RowId})",
+                playbookId,
                 playbook.Id);
 
             return playbook;
@@ -111,39 +115,39 @@ public class PlaybookLookupService : IPlaybookLookupService
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found"))
         {
             _logger.LogError(
-                "Playbook not found with code '{PlaybookCode}'. " +
-                "Verify alternate key exists and field sprk_playbookcode is populated.",
-                playbookCode);
+                "Playbook not found with id '{PlaybookId}'. " +
+                "Verify alternate key exists and field sprk_playbookid is populated.",
+                playbookId);
 
             throw new PlaybookNotFoundException(
-                $"Playbook with code '{playbookCode}' not found. " +
+                $"Playbook with id '{playbookId}' not found. " +
                 $"Verify alternate key configuration and data integrity.");
         }
         catch (Exception ex)
         {
             _logger.LogError(
                 exception: ex,
-                message: "Failed to retrieve playbook by code '{PlaybookCode}'",
-                playbookCode);
+                message: "Failed to retrieve playbook by id '{PlaybookId}'",
+                playbookId);
 
             throw new InvalidOperationException(
-                $"Failed to retrieve playbook with code '{playbookCode}': {ex.Message}", ex);
+                $"Failed to retrieve playbook with id '{playbookId}': {ex.Message}", ex);
         }
     }
 
-    public void ClearCache(string playbookCode)
+    public void ClearCache(string playbookId)
     {
-        if (string.IsNullOrWhiteSpace(playbookCode))
+        if (string.IsNullOrWhiteSpace(playbookId))
         {
-            throw new ArgumentException("Playbook code cannot be null or empty", nameof(playbookCode));
+            throw new ArgumentException("Playbook id cannot be null or empty", nameof(playbookId));
         }
 
-        var cacheKey = GetCacheKey(playbookCode);
+        var cacheKey = GetCacheKey(playbookId);
         _memoryCache.Remove(cacheKey);
 
         _logger.LogInformation(
-            "Cleared cache for playbook {PlaybookCode}",
-            playbookCode);
+            "Cleared cache for playbook {PlaybookId}",
+            playbookId);
     }
 
     public void ClearAllCache()
@@ -155,13 +159,13 @@ public class PlaybookLookupService : IPlaybookLookupService
         _logger.LogWarning(
             "ClearAllCache called, but IMemoryCache has no clear-all API. " +
             "Cache will expire naturally after {CacheDuration}. " +
-            "For immediate clear, restart application or use ClearCache(code) per playbook.",
+            "For immediate clear, restart application or use ClearCache(id) per playbook.",
             CacheDuration);
     }
 
-    private static string GetCacheKey(string playbookCode)
+    private static string GetCacheKey(string playbookId)
     {
-        return $"{CacheKeyPrefix}{playbookCode.ToUpperInvariant()}";
+        return $"{CacheKeyPrefix}{playbookId.ToUpperInvariant()}";
     }
 
     private PlaybookResponse MapEntityToPlaybookResponse(Entity entity)

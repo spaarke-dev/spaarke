@@ -191,6 +191,51 @@ FOR each task identified:
 REFERENCE: See .claude/skills/task-execute/SKILL.md Step 0.5 for full decision tree
 ```
 
+### Step 3.5.6: Component Justification Gate (REQUIRED per CLAUDE.md §11)
+
+**This step enforces the universal rule from root CLAUDE.md §11 "Component Justification — Default to Reuse."**
+
+For every task that introduces a NEW component (service, abstraction, interface, endpoint, route, DI registration, package dependency, Dataverse column, file path under `src/`), add a `<justification>` element answering the three-question template:
+
+```xml
+<justification>
+  <existing>Closest existing neighbor — cite file:line from Grep evidence (or "none found" with grep command shown)</existing>
+  <extension>Yes/No + reason in ≤2 sentences. "Cleaner separation" is NOT a reason.</extension>
+  <cost-of-doing-nothing>Concrete behavior or contract that fails without this. NOT "scalability" / "abstraction layer" / "future flexibility."</cost-of-doing-nothing>
+</justification>
+```
+
+**Decision logic during decomposition**:
+
+```
+FOR each new-component task:
+  EVALUATE the three answers:
+
+  IF <extension> is "Yes → can extend existing":
+    → REWRITE the task to "Extend `<existing>` with …" instead of "Build new `<new-component>`"
+    → Continue with the rewritten task
+
+  IF <cost-of-doing-nothing> cannot name a concrete behavior or contract that fails:
+    → DEMOTE the task (mark as "deferred — needs concrete failure mode") OR DROP
+
+  IF all three answers are concrete + extension genuinely impossible:
+    → PROCEED with new-component task
+
+  Reviewer flag: hollow / boilerplate answers ("for separation of concerns", "for testability", "for future flexibility") fail this gate.
+```
+
+**Scope of this gate** — applies to tasks that ADD surface:
+- New `.cs` / `.ts` / `.tsx` file
+- New endpoint route / handler
+- New DI registration
+- New package reference (`<PackageReference>` / `dependencies` entry)
+- New Dataverse column / entity / alternate key
+- New skill / agent / pattern / constraint file
+
+**NOT required for**: tasks that ONLY modify existing files (edit, refactor, fix bug, add tests for existing surface, rename, format). The rule applies to NEW surface, not modification.
+
+**Audit trail**: tasks with hollow or missing `<justification>` are blocked from code review per CLAUDE.md §11. The `code-review` skill Step 6.6 verifies justification concreteness at PR time.
+
 ### Step 3.6: Add Deployment Tasks (REQUIRED)
 
 ```
@@ -719,3 +764,15 @@ Before completing task-create, verify:
 - [ ] Each task has `<parallel-group>` and `<parallel-safe>` in metadata
 - [ ] TASK-INDEX.md includes "Parallel Execution Groups" section
 - [ ] No tasks in same parallel group modify the same files
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 032 · FR-18)
+
+**At end of skill** (after all task POMLs scaffolded): invoke `/devops-project-sync` to set the `Task Count` field on the Project Issue.
+
+`Task Count = ls projects/{name}/tasks/*.poml | wc -l` (computed by /devops-project-sync from local state).
+
+Silent on success. Hook is a no-op if `projects/{name}/README.md` lacks the portfolio pointer block (project not registered).
+
+See: [`.claude/skills/devops-project-sync/SKILL.md`](../devops-project-sync/SKILL.md).

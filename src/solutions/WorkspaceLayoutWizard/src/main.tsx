@@ -16,6 +16,7 @@ import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
+import { AppErrorBoundary } from "@spaarke/ui-components";
 import type { LayoutTemplateId } from "@spaarke/ui-components";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -144,6 +145,18 @@ function Root() {
           bffApiScope: config.bffOAuthScope,
           tenantId: config.tenantId || undefined,
           proactiveRefresh: true,
+          // ai-spaarke-ai-workspace-UI-r1 #5 (2026-06-08):
+          // The wizard is launched via `Xrm.Navigation.navigateTo({ target: 2 })`
+          // (popup window) whose MSAL cache is isolated from the SpaarkeAi
+          // host window. On first open the silent paths
+          // (acquireTokenSilent, ssoSilent) frequently fail because the
+          // popup has no cached accounts; the default fallback to
+          // acquireTokenPopup surfaces an involuntary AAD sign-in. ADR-028
+          // INV-5 forbids popups except on explicit user action. Setting
+          // requireSilentOnly accepts a degraded steady state (Save may 401
+          // once and rely on authenticatedFetch's retry) in exchange for no
+          // surprise sign-in dialogs.
+          requireSilentOnly: true,
         });
         if (!cancelled) {
           setIsAuthReady(true);
@@ -187,7 +200,9 @@ if (rootElement) {
   const root = createRoot(rootElement);
   root.render(
     <React.StrictMode>
-      <Root />
+      <AppErrorBoundary surfaceName="Workspace Layout Wizard">
+        <Root />
+      </AppErrorBoundary>
     </React.StrictMode>
   );
 } else {

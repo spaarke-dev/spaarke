@@ -83,8 +83,15 @@ export interface IThresholdSettingsProps {
   onOpenChange: (open: boolean) => void;
   /** Current preferences. */
   preferences: ITodoKanbanPreferences;
-  /** Called when user saves new thresholds. */
-  onSave: (prefs: ITodoKanbanPreferences) => void;
+  /**
+   * Called when user saves new thresholds.
+   *
+   * Receives only the threshold fields — the consumer is expected to merge
+   * with any other preference fields the JSON record may carry (e.g. future
+   * additions). `updatePreferences` accepts a Partial, so passing just the
+   * threshold pair is correct.
+   */
+  onSave: (prefs: Pick<ITodoKanbanPreferences, 'todayThreshold' | 'tomorrowThreshold'>) => void;
   /** The trigger element (settings button). */
   children: React.ReactElement;
 }

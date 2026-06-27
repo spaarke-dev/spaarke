@@ -23,10 +23,28 @@
  *
  * @see ADR-012 — Shared Component Library (reusable across all create wizards)
  * @see ADR-021 — Fluent UI v9 design system; semantic tokens only
+ * @see ADR-024 — Polymorphic Resolver Pattern. This component is a pure UI shell —
+ *                it returns the (entityType, recordId, recordName) triple to the caller.
+ *                The caller (e.g., CreateTodoWizard) invokes
+ *                `PolymorphicResolverService.applyResolverFields` with the triple.
+ *
+ * For the eleven canonical `sprk_todo` regarding targets, callers should pass the
+ * exported `TODO_REGARDING_TARGETS` preset:
+ *
+ * ```tsx
+ * import { AssociateToStep, TODO_REGARDING_TARGETS } from '@spaarke/ui-components';
+ *
+ * <AssociateToStep
+ *   entityTypes={TODO_REGARDING_TARGETS as EntityTypeOption[]}
+ *   navigationService={navigationService}
+ *   value={association}
+ *   onChange={setAssociation}
+ * />
+ * ```
  */
 
 import * as React from 'react';
-import { Button, Dropdown, MessageBar, MessageBarBody, Option, Spinner, Text } from '@fluentui/react-components';
+import { Button, Dropdown, Label, MessageBar, MessageBarBody, Option, Spinner, Text } from '@fluentui/react-components';
 import { CheckmarkCircleRegular, DismissRegular, SearchRegular } from '@fluentui/react-icons';
 
 import type { AssociateToStepProps, AssociationResult, EntityTypeOption } from './types';
@@ -65,9 +83,16 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
   const styles = useAssociateToStepStyles();
 
   // ── State ────────────────────────────────────────────────────────────────
-  const [selectedEntityType, setSelectedEntityType] = React.useState<string>(() =>
-    entityTypes.length > 0 ? entityTypes[0].entityType : ''
-  );
+  // Initial entity type: if a `value` is pre-supplied (R3 task 032 / FR-16
+  // launch-context pre-fill), seed `selectedEntityType` from value.entityType so
+  // the dropdown reflects the pre-filled record's parent type. Otherwise default
+  // to the first available target.
+  const [selectedEntityType, setSelectedEntityType] = React.useState<string>(() => {
+    if (value?.entityType && entityTypes.some(et => et.entityType === value.entityType)) {
+      return value.entityType;
+    }
+    return entityTypes.length > 0 ? entityTypes[0].entityType : '';
+  });
   const [isLookupPending, setIsLookupPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -176,12 +201,14 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
       )}
 
       {/* Record type dropdown + Select Record button */}
-      <div className={styles.formRow}>
+      <div className={styles.formRow} data-testid="associate-to-step-form-row">
         <div className={styles.dropdownWrapper}>
-          <Text size={200} weight="semibold" className={styles.fieldLabel}>
+          <Label id="associate-to-step-record-type-label" size="small" weight="semibold" className={styles.fieldLabel}>
             Record Type
-          </Text>
+          </Label>
           <Dropdown
+            aria-labelledby="associate-to-step-record-type-label"
+            data-testid="associate-to-step-entity-type-dropdown"
             value={selectedTypeDef?.label ?? ''}
             selectedOptions={selectedEntityType ? [selectedEntityType] : []}
             onOptionSelect={handleEntityTypeChange}
@@ -196,6 +223,7 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
         </div>
 
         <Button
+          data-testid="associate-to-step-select-record-button"
           appearance="primary"
           icon={isLookupPending ? <Spinner size="tiny" /> : <SearchRegular />}
           onClick={handleSelectRecord}

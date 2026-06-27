@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Telemetry;
@@ -29,6 +30,7 @@ public class RagIndexingJobHandler : IJobHandler
     private readonly IFileIndexingService _fileIndexingService;
     private readonly IIdempotencyService _idempotencyService;
     private readonly IDocumentDataverseService _documentService;
+    private readonly ISearchIndexNameResolver _searchIndexNameResolver;
     private readonly AnalysisOptions _analysisOptions;
     private readonly RagTelemetry _telemetry;
     private readonly ILogger<RagIndexingJobHandler> _logger;
@@ -42,6 +44,7 @@ public class RagIndexingJobHandler : IJobHandler
         IFileIndexingService fileIndexingService,
         IIdempotencyService idempotencyService,
         IDocumentDataverseService documentService,
+        ISearchIndexNameResolver searchIndexNameResolver,
         IOptions<AnalysisOptions> analysisOptions,
         RagTelemetry telemetry,
         ILogger<RagIndexingJobHandler> logger)
@@ -49,6 +52,7 @@ public class RagIndexingJobHandler : IJobHandler
         _fileIndexingService = fileIndexingService ?? throw new ArgumentNullException(nameof(fileIndexingService));
         _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
+        _searchIndexNameResolver = searchIndexNameResolver ?? throw new ArgumentNullException(nameof(searchIndexNameResolver));
         _analysisOptions = analysisOptions?.Value ?? throw new ArgumentNullException(nameof(analysisOptions));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -113,6 +117,22 @@ public class RagIndexingJobHandler : IJobHandler
 
             try
             {
+                // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — resolve the
+                // per-record sprk_searchindexname for the indexing batch. Precedence:
+                //   (a) payload.SearchIndexName (set by enqueueing site — preferred);
+                //   (b) ISearchIndexNameResolver chain (document → parent → BU) — defensive
+                //       fall-back when enqueueing site did not set it;
+                //   (c) null → tenant default (FR-BFF-04 backward-compat).
+                var resolvedSearchIndexName = payload.SearchIndexName;
+                if (string.IsNullOrWhiteSpace(resolvedSearchIndexName))
+                {
+                    resolvedSearchIndexName = await _searchIndexNameResolver.ResolveAsync(
+                        payload.DocumentId,
+                        payload.ParentEntity?.EntityType,
+                        payload.ParentEntity?.EntityId,
+                        ct);
+                }
+
                 // Build the file index request
                 var request = new FileIndexRequest
                 {
@@ -124,11 +144,31 @@ public class RagIndexingJobHandler : IJobHandler
                     KnowledgeSourceId = payload.KnowledgeSourceId,
                     KnowledgeSourceName = payload.KnowledgeSourceName,
                     Metadata = payload.Metadata,
-                    ParentEntity = payload.ParentEntity
+                    ParentEntity = payload.ParentEntity,
+                    SearchIndexName = resolvedSearchIndexName
                 };
 
-                // Call FileIndexingService using app-only authentication
-                var result = await _fileIndexingService.IndexFileAppOnlyAsync(request, ct);
+                // Call FileIndexingService using app-only authentication.
+                // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — per the user-
+                // confirmed decision in the task brief, background jobs default-fall-back when
+                // the allow-list rejects the resolved searchIndexName: log a WARN and retry the
+                // call with SearchIndexName=null so the batch still lands in the tenant-default
+                // index. The OBO path (RagEndpoints.IndexFile) still hard-fails — that contract
+                // (400 ProblemDetails INDEX_NOT_ALLOWED) is preserved upstream.
+                FileIndexingResult result;
+                try
+                {
+                    result = await _fileIndexingService.IndexFileAppOnlyAsync(request, ct);
+                }
+                catch (SdapProblemException ex) when (ex.Code == "INDEX_NOT_ALLOWED")
+                {
+                    _logger.LogWarning(
+                        "RAG indexing rejected by AI Search allow-list: requested SearchIndexName={RejectedIndex} (DocumentId={DocumentId}). Falling back to tenant default for job {JobId}.",
+                        request.SearchIndexName ?? "(null)", payload.DocumentId ?? "(null)", job.JobId);
+
+                    var fallbackRequest = request with { SearchIndexName = null };
+                    result = await _fileIndexingService.IndexFileAppOnlyAsync(fallbackRequest, ct);
+                }
 
                 if (!result.Success)
                 {
@@ -161,23 +201,31 @@ public class RagIndexingJobHandler : IJobHandler
                     ct);
 
                 // Update Dataverse tracking fields when DocumentId is provided
-                // Same pattern as RagEndpoints.cs manual indexing
+                // Same pattern as RagEndpoints.cs manual indexing.
+                // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
+                // sprk_searchindexed=true + sprk_searchindexedon for the transition window
+                // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
                 if (!string.IsNullOrEmpty(payload.DocumentId))
                 {
                     try
                     {
+                        var completedAt = DateTime.UtcNow;
                         var updateRequest = new UpdateDocumentRequest
                         {
+                            // New canonical lifecycle marker (R3+)
+                            SearchIndexCompletedOn = completedAt,
+                            // Legacy dual-write (preserved during transition)
                             SearchIndexed = true,
-                            SearchIndexName = _analysisOptions.SharedIndexName,
-                            SearchIndexedOn = DateTime.UtcNow
+                            SearchIndexedOn = completedAt,
+                            // Index routing (unchanged)
+                            SearchIndexName = _analysisOptions.SharedIndexName
                         };
 
                         await _documentService.UpdateDocumentAsync(payload.DocumentId, updateRequest, ct);
 
                         _logger.LogInformation(
-                            "Updated Dataverse search index tracking for document {DocumentId}: SearchIndexed=true, IndexName={IndexName}",
-                            payload.DocumentId, _analysisOptions.SharedIndexName);
+                            "Updated Dataverse search index tracking for document {DocumentId}: SearchIndexCompletedOn={CompletedAt}, SearchIndexed=true (dual-write), IndexName={IndexName}",
+                            payload.DocumentId, completedAt, _analysisOptions.SharedIndexName);
                     }
                     catch (Exception ex)
                     {
@@ -335,4 +383,18 @@ public class RagIndexingJobPayload
     /// When the job was enqueued.
     /// </summary>
     public DateTimeOffset? EnqueuedAt { get; set; }
+
+    /// <summary>
+    /// multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — optional explicit
+    /// Azure AI Search index name to route this batch to. When set by the enqueueing site
+    /// (e.g., Office Add-in's UploadFinalizationWorker or the Email-to-Document
+    /// IncomingCommunicationProcessor), the handler passes it verbatim to
+    /// <see cref="FileIndexRequest.SearchIndexName"/>. When null/empty, the handler invokes
+    /// <see cref="ISearchIndexNameResolver"/> as a defensive fall-back (chain:
+    /// sprk_document → parent record → parent's owning BU). Allow-list validation surfaces
+    /// in <see cref="IKnowledgeDeploymentService"/> (FR-BFF-02 / NFR-08); the handler's
+    /// per-task brief mandates default-fall-back behavior for background jobs (catch
+    /// SdapProblemException(INDEX_NOT_ALLOWED) and retry with SearchIndexName=null).
+    /// </summary>
+    public string? SearchIndexName { get; set; }
 }

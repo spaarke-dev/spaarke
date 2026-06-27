@@ -1,0 +1,201 @@
+<task id="001" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-01 Create `sprk_aipersona` Dataverse Entity (Pillar 1 foundation)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>completed</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <blocks>002, 003, 004, 005</blocks>
+    <tags>dataverse, scope, schema, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Foundational schema change with downstream blocker impact (gates Pillar 1 endpoint, resolver, seed, agent factory wiring) + production Dataverse entity creation per Confirmation Trigger.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Foundation task; no other Phase A task touches Dataverse schema at this point.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create the `sprk_aipersona` Dataverse entity — the 5th scope library entity introduced by R6 Pillar 1.
+    This entity makes the chat-agent persona data-driven instead of hardcoded
+    in `SprkChatAgentFactory.BuildDefaultSystemPrompt()`. Schema mirrors the existing 4
+    scope entities (Actions / Skills / Knowledge / Tools) per Q2: SYS-/CUST- prefix
+    enforcement, `parentScopeId` inheritance for most-specific-wins resolution per Q1,
+    `description`, `systemPrompt` text field, `scopeType` (global / tenant / playbook-attached).
+
+    Critical-path context: this task blocks (002) `GET /api/ai/scopes/personas` endpoint,
+    (003) persona resolution methods in `IScopeResolverService`, (004) default SYS- persona
+    seed row, and (005) agent factory wiring. The entire Pillar 1 deliverable chain depends
+    on this entity landing first. The task itself ships ONLY the Dataverse schema —
+    no BFF code changes here, so BFF publish-size delta = 0 MB.
+
+    Follow the existing `scope-architecture.md` pattern verbatim: same SYS-/CUST- ownership
+    enforcement, same `parentScopeId` self-relationship for inheritance chains, same
+    pagination/filter-friendly indexed columns as `sprk_analysisaction` etc. The Power Apps
+    Dataverse forms (Q3) auto-generate from the entity definition — no custom form authoring
+    in R6.
+  </prompt>
+
+  <role>
+    Senior Dataverse engineer with Spaarke scope-library schema experience. Deep familiarity
+    with `sprk_analysisaction` / `sprk_analysisskill` / `sprk_analysisknowledge` / `sprk_analysistool`
+    entity patterns, Web API entity definitions, and PowerShell-driven schema deployment.
+  </role>
+
+  <goal>
+    The `sprk_aipersona` entity exists in the Spaarke Dev Dataverse environment with all
+    required fields, primary key strategy, indexes, self-referential `parentScopeId`
+    relationship, and SYS-/CUST- prefix enforcement matching the existing 4 scope entities.
+    The schema definition (XML or PS1 deployment script) is committed to the repo.
+    Schema is verifiable via `pac` / Web API. All acceptance criteria green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="scope-architecture-reference">docs/architecture/scope-architecture.md</file>
+    <file purpose="scope-configuration-guide">docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-027">Follow unmanaged solution conventions for the new entity; logical name `sprk_aipersona`; publisher prefix `sprk_`.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB for this task (no BFF code change). Report explicitly in task notes.</constraint>
+    <constraint source="ADR-018">No new feature flags introduced.</constraint>
+    <constraint source="spec FR-01">Schema MUST enforce SYS-/CUST- prefix on persona name + include `parentScopeId` self-relationship for inheritance + `description` + `systemPrompt` (text, multi-line) + `scopeType` option-set (global / tenant / playbook-attached).</constraint>
+    <constraint source="spec NFR-14">All scope CRUD operations honor SYS-/CUST- ownership boundary per `scope-architecture.md`. Persona entity follows the same enforcement model as the existing 4 scopes.</constraint>
+    <constraint source="project CLAUDE.md Pillar 1">Mirror the existing 4-scope schema verbatim. Do NOT invent a parallel schema.</constraint>
+    <constraint source="Confirmation Trigger">Schema change to production Dataverse — pause for user confirmation before deploying to Spaarke Dev per project CLAUDE.md §Confirmation Triggers.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/scope-entity-creation</topic>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/architecture/scope-architecture.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Scope entity schema canonical reference" location="existing `sprk_analysisaction` / `sprk_analysisskill` / `sprk_analysistool` Dataverse entities">
+        Use these as the schema template. Copy field set: scope name (SYS-/CUST- prefix
+        enforced), `parentScopeId` self-relationship (inheritance), `description`,
+        `scopeType` option-set, audit fields. Replace action/skill-specific payload field
+        with persona-specific `systemPrompt` (multi-line text, ~8KB max per NFR-10 budget).
+      </pattern>
+      <pattern name="SYS-/CUST- prefix enforcement" location="docs/architecture/scope-architecture.md">
+        Enforce via plugin (validate on create/update) or business rule. Follow the existing
+        pattern used by the 4 production scope entities.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. Output the mandatory declaration: "🔒 RIGOR LEVEL: FULL — Foundational schema change + downstream blocker for 4 Pillar 1 tasks". Read project CLAUDE.md + spec.md FR-01 + plan.md §4 Phase A.
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` (if exists) and confirm task 001 status is 🔲, dependencies are empty. Update `current-task.md` to task 001.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read scope-architecture.md + SCOPE-CONFIGURATION-GUIDE.md in full. Inspect the 4 existing scope entity definitions (via `pac org list-tables` or Web API) to extract the canonical schema shape: field set, key strategy, self-relationship pattern, prefix enforcement mechanism.
+    </step>
+    <step order="3" name="Author Schema Definition">
+      Create schema definition (XML for solution packaging OR PowerShell script using Web API per `dataverse-create-schema` skill). Fields: `sprk_name` (primary; enforces SYS-/CUST- prefix), `sprk_description` (text), `sprk_systemprompt` (multi-line text), `sprk_scopetype` (option-set: 1=Global, 2=Tenant, 3=PlaybookAttached), `sprk_parentscopeid` (self-lookup → `sprk_aipersona`), audit fields. Decide create approach: extend existing unmanaged solution OR sibling solution following ADR-027 conventions.
+    </step>
+    <step order="4" name="Implement Prefix Enforcement">
+      Implement SYS-/CUST- prefix enforcement (plugin OR business rule) mirroring the existing scope entities. Validate on create/update; reject names not starting with SYS- or CUST-.
+    </step>
+    <step order="5" name="🛑 Confirmation Gate — Schema Deployment">
+      PAUSE per project CLAUDE.md §Confirmation Triggers (schema change to production Dataverse entity). Present the schema definition to user and request approval to deploy to Spaarke Dev.
+    </step>
+    <step order="6" name="Deploy to Spaarke Dev">
+      After confirmation: deploy via `dataverse-deploy` skill / `pac solution import`. Verify entity exists in Power Apps maker portal. Capture deployment evidence in task notes.
+    </step>
+    <step order="7" name="Smoke Test the Entity">
+      Verify via Web API or `pac`: list `sprk_aipersona` entity metadata; confirm field definitions match the schema; confirm Power Apps auto-form is generated; attempt to create a placeholder row with name "SYS-TEST-PERSONA" (then delete) to confirm prefix enforcement allows valid prefix.
+    </step>
+    <step order="8" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is testable + passing. Record evidence per criterion in task notes.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the schema files (PS1 / XML). Run `adr-check` against same; verify ADR-027 (solution conventions), ADR-029 (BFF size — N/A 0 MB), ADR-018 (no new flags), spec NFR-14 (SYS-/CUST- enforcement). Both gates MUST pass before complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 001 🔲 → ✅. Reset `current-task.md` to next pending task (002). Note BFF publish-size delta = 0 MB. Report task completion + downstream unblock list.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI — schema deployment + entity verification</tool>
+    <tool name="az">Azure CLI — Key Vault for Web API credentials if needed</tool>
+    <tool name="git">Stage + commit schema definition files on the R6 worktree branch</tool>
+    <tool name="dataverse-create-schema">Skill for Web API + PowerShell entity creation</tool>
+    <tool name="dataverse-deploy">Skill for solution deployment to Spaarke Dev</tool>
+    <tool name="mcp__dataverse__describe">MCP — verify entity metadata after deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">solutions/{solution}/Entities/sprk_aipersona/Entity.xml OR scripts/Create-AiPersonaEntity.ps1 (NEW)</output>
+    <output type="schema">prefix-enforcement plugin OR business rule (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 001 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-001-schema-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_aipersona` entity exists in Spaarke Dev and is visible via Power Apps maker portal.</criterion>
+    <criterion testable="true">Schema fields match canonical: `sprk_name` (primary, SYS-/CUST- enforced), `sprk_description`, `sprk_systemprompt` (multi-line text), `sprk_scopetype` (option-set with 3 values), `sprk_parentscopeid` (self-lookup), audit fields.</criterion>
+    <criterion testable="true">SYS-/CUST- prefix enforcement rejects an entity row with name "INVALID-PERSONA" and accepts "SYS-DEFAULT" / "CUST-ACME-LEGAL".</criterion>
+    <criterion testable="true">Self-referential `parentScopeId` relationship supports inheritance chain queries (Web API navigation works).</criterion>
+    <criterion testable="true">Power Apps auto-generates a working form for the new entity (Q3 compliance — no custom UI needed).</criterion>
+    <criterion testable="true">Schema definition committed to repo follows ADR-027 unmanaged solution conventions.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (no BFF code changed; recorded in task notes).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+    <criterion testable="true">Downstream tasks (002, 003, 004, 005) unblocked — TASK-INDEX updated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completed-on>2026-06-07</completed-on>
+    <completion-summary>
+      `sprk_aipersona` entity deployed to Spaarke Dev (`spaarkedev1.crm.dynamics.com`) via new
+      `scripts/Create-AiPersonaEntity.ps1` (idempotent PowerShell deployment script following
+      `Deploy-ChartDefinitionEntity.ps1` exemplar pattern).
+
+      **Schema (MCP-verified via describe_table)**: `sprk_aipersona` collection `sprk_aipersonas`,
+      primary key `sprk_aipersonaid` GUID. Attributes: `sprk_name` (NVARCHAR(200) NOT NULL primary),
+      `sprk_personacode` (NVARCHAR(10)), `sprk_description` (MULTILINE TEXT), `sprk_systemprompt`
+      (MULTILINE TEXT), `sprk_scopetype` (CHOICE Global=100000000 / Tenant=100000001 /
+      PlaybookAttached=100000002, NOT NULL), `sprk_tags` (NVARCHAR(1000)), `sprk_availableadhoc`
+      (BIT), `sprk_parentpersonaid` (LOOKUP → sprk_aipersona self). Audit fields auto-added.
+
+      **Prefix enforcement**: API-side via existing `OwnershipValidator.cs` (matches canonical
+      4-scope pattern; verified via MCP describe — `sprk_analysisaction`/skill/knowledge/tool
+      have NO Dataverse-side enforcement; lives in BFF `ScopeManagementService.cs`). Task 002
+      will wire it.
+
+      **Deployment evidence**: First run created entity + sprk_personacode, then transient
+      "An unexpected error occurred" on sprk_description (known pattern per
+      dataverse-create-schema skill — entity propagation timing). Second run (idempotency
+      proven): skipped existing sprk_personacode; added remaining 5 attributes; created
+      self-lookup relationship; published customizations; smoke test PASSED (collection
+      endpoint reachable, 0 records).
+
+      **Quality gates**: code-review PASS (0 critical / 0 warning / 0 AI smells); adr-check
+      PASS (18 ADRs+NFRs compliant, 0 violations, 0 warnings). All ADR-027 / ADR-029
+      (0 MB delta) / ADR-018 / NFR-04 / NFR-07 / NFR-08 / NFR-14 honored.
+
+      **Downstream unblocked**: tasks 002 (persona endpoint), 003 (persona resolver methods
+      in IScopeResolverService), 004 (SYS- seed row), 005 (factory wiring) — all dependencies
+      satisfied.
+    </completion-summary>
+    <files-created>
+      <file>scripts/Create-AiPersonaEntity.ps1 (NEW — 537 lines, idempotent PS deployment script)</file>
+    </files-created>
+    <bff-publish-size-delta>0 MB (no BFF code changed)</bff-publish-size-delta>
+  </notes>
+</task>

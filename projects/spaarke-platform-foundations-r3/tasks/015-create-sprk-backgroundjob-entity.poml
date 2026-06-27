@@ -1,0 +1,46 @@
+<task id="R3-015" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Create `sprk_backgroundjob` Dataverse entity</title>
+    <status>completed</status>
+    <phase>P2</phase>
+    <parallel-group>E (with 016)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>dataverse,schema,entity-creation</tags>
+    <relevant-files>
+      <file>scripts/Create-BackgroundJobEntity.ps1</file>
+      <file>docs/data-model/sprk_backgroundjob.md (new)</file>
+    </relevant-files>
+    <dependencies>010</dependencies>
+  </metadata>
+  <prompt>Create `sprk_backgroundjob` Dataverse entity (job definitions) with 11 columns per spec.md FR-2.4. Use the dataverse-create-schema skill or scripted PowerShell. Deploy to spaarkedev1.</prompt>
+  <goal>Entity created in spaarkedev1 with all columns per spec; unique key on sprk_jobid; OptionSets defined (sprk_lastrunstatus: Success/Failed/Running/Cancelled).</goal>
+  <constraints>
+    <constraint source="spec">11 columns exactly per spec.md FR-2.4</constraint>
+    <constraint source="naming-collision">DO NOT extend sprk_processingjob (Office-scoped); this is a parallel entity per design</constraint>
+  </constraints>
+  <knowledge>
+    <topic>dataverse-entity-creation</topic>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2.4</step>
+    <step order="1">Define OptionSet sprk_lastrunstatus (Success=1, Failed=2, Running=3, Cancelled=4)</step>
+    <step order="2">Create entity via dataverse-create-schema skill or scripted Web API call</step>
+    <step order="3">Add 11 columns with correct types per spec</step>
+    <step order="4">Unique key on sprk_jobid</step>
+    <step order="5">Deploy to spaarkedev1 + verify via maker portal</step>
+    <step order="6">Document in `docs/data-model/sprk_backgroundjob.md`</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Entity exists in spaarkedev1 with all 11 columns</criterion>
+    <criterion testable="true">Unique key on sprk_jobid enforced</criterion>
+    <criterion testable="true">OptionSet sprk_lastrunstatus has 4 values</criterion>
+    <criterion testable="true">Data-model doc created</criterion>
+  </acceptance-criteria>
+</task>

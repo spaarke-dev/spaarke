@@ -114,7 +114,18 @@ public static class SearchFilterBuilder
             throw new ArgumentException("entityId is required when scope is 'entity'.", nameof(entityId));
         }
 
-        return $"parentEntityType eq '{EscapeODataValue(entityType.ToLowerInvariant())}' and parentEntityId eq '{EscapeODataValue(entityId)}'";
+        // multi-container-multi-index-r1 UAT 2026-06-09: accept both the
+        // canonical un-prefixed form ("matter") AND the Dataverse logical-name
+        // prefixed form ("sprk_matter"). Different upload paths historically
+        // wrote different forms — DocumentUploadWizard strips the prefix
+        // (uploadOrchestrator.ts:497) but the Create* wizards' first iteration
+        // wrote `sprk_matter` verbatim. This OR clause makes both forms findable
+        // so existing chunks remain searchable without a backfill pass.
+        // (Client-side fix in EntityCreationService.indexUploadedFiles now strips
+        // the prefix for new uploads — this clause is permanent backward-compat.)
+        var normalized = EscapeODataValue(entityType.ToLowerInvariant());
+        var prefixed = EscapeODataValue($"sprk_{entityType.ToLowerInvariant()}");
+        return $"(parentEntityType eq '{normalized}' or parentEntityType eq '{prefixed}') and parentEntityId eq '{EscapeODataValue(entityId)}'";
     }
 
     /// <summary>

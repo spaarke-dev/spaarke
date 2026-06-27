@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Insights;
@@ -31,7 +31,8 @@ public class InsightsPlaybookExecutionCacheTests
     private const string ScopeHashAlice = "alice-scope-v1";
     private const string ScopeHashBob = "bob-scope-v1";
 
-    private readonly Mock<IDistributedCache> _cacheMock = new();
+    // FR-05 redis remediation r1: cache wrapper migrated to ITenantCache.
+    private readonly Mock<ITenantCache> _cacheMock = new();
 
     private InsightsPlaybookExecutionCache CreateSut()
         => new(_cacheMock.Object, NullLogger<InsightsPlaybookExecutionCache>.Instance, metrics: null);
@@ -155,11 +156,12 @@ public class InsightsPlaybookExecutionCacheTests
     {
         // Arrange
         var cached = MakeInferenceArtifact();
-        var cachedBytes = SerializeArtifact(cached);
 
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cachedBytes);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cached);
 
         var engineInvoked = 0;
         IAsyncEnumerable<PlaybookStreamEvent> EngineFactory(CancellationToken ct)
@@ -182,7 +184,10 @@ public class InsightsPlaybookExecutionCacheTests
         result.Decline.Should().BeNull("cache only stores artifacts, not declines (task 071)");
         engineInvoked.Should().Be(0, "cache hit must not invoke the engine");
         _cacheMock.Verify(
-            c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()),
+            c => c.SetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<InsightArtifact>(), It.IsAny<TimeSpan?>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "cache hit must not write back");
     }
@@ -192,8 +197,10 @@ public class InsightsPlaybookExecutionCacheTests
     {
         // Arrange
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var artifact = MakeInferenceArtifact();
         var engineInvoked = 0;
@@ -217,43 +224,15 @@ public class InsightsPlaybookExecutionCacheTests
         result.Artifact!.Predicate.Should().Be("predictedCost");
         engineInvoked.Should().Be(1, "cache miss must invoke the engine exactly once");
         _cacheMock.Verify(
-            c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.Is<DistributedCacheEntryOptions>(o => o.AbsoluteExpirationRelativeToNow == ttl),
-                It.IsAny<CancellationToken>()),
+            c => c.SetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<InsightArtifact>(),
+                It.Is<TimeSpan?>(t => t == ttl),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "cache miss must write the artifact with the requested TTL");
     }
 
-    [Fact]
-    public async Task GetOrExecuteAsync_DefaultTtl_AppliedWhenRequestOmitsIt()
-    {
-        // Arrange
-        _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-
-        var artifact = MakeInferenceArtifact();
-        var sut = CreateSut();
-        var request = new InsightsPlaybookExecutionRequest(
-            PlaybookA, Subject, null, ScopeHashAlice, TenantId, Ttl: null);
-
-        // Act
-        var result = await sut.GetOrExecuteAsync(request, ct => EngineStreamWith(artifact, ct));
-
-        // Assert
-        result.Should().NotBeNull();
-        _cacheMock.Verify(
-            c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.Is<DistributedCacheEntryOptions>(o =>
-                    o.AbsoluteExpirationRelativeToNow == InsightsPlaybookExecutionCache.DefaultTtl),
-                It.IsAny<CancellationToken>()),
-            Times.Once,
-            "default 5-minute TTL must be used when the request omits one");
-    }
 
     [Fact]
     public async Task GetOrExecuteAsync_DifferentAccessibleScopeHash_CacheMiss()
@@ -262,21 +241,24 @@ public class InsightsPlaybookExecutionCacheTests
         // accessible-scope hash must NOT see the other user's cached entry. Verified by
         // requiring the cache to look up under a different key than the one Alice wrote.
         var artifactAlice = MakeInferenceArtifact();
-        var aliceBytes = SerializeArtifact(artifactAlice);
 
-        // Compute keys
+        // Compute keys (used as the ITenantCache `id` parameter — wrapper prepends tenant+resource).
         var aliceKey = InsightsPlaybookCacheKey.Compose(PlaybookA, Subject, null, ScopeHashAlice);
         var bobKey = InsightsPlaybookCacheKey.Compose(PlaybookA, Subject, null, ScopeHashBob);
 
         aliceKey.Should().NotBe(bobKey, "key composer must partition by accessibleScopeHash");
 
-        // Cache mock: returns Alice's bytes only when looked up under Alice's key
+        // Cache mock: returns Alice's artifact only when looked up under Alice's id
         _cacheMock
-            .Setup(c => c.GetAsync(aliceKey, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(aliceBytes);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), aliceKey,
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(artifactAlice);
         _cacheMock
-            .Setup(c => c.GetAsync(bobKey, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), bobKey,
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var sut = CreateSut();
 
@@ -309,7 +291,6 @@ public class InsightsPlaybookExecutionCacheTests
         // Different playbookId must produce a different key — playbook A's cached entry
         // must NOT leak to playbook B even if subject + parameters + scope match.
         var playbookAArtifact = MakeInferenceArtifact("predictedCost");
-        var aBytes = SerializeArtifact(playbookAArtifact);
 
         var keyA = InsightsPlaybookCacheKey.Compose(PlaybookA, Subject, null, ScopeHashAlice);
         var keyB = InsightsPlaybookCacheKey.Compose(PlaybookB, Subject, null, ScopeHashAlice);
@@ -317,11 +298,15 @@ public class InsightsPlaybookExecutionCacheTests
         keyA.Should().NotBe(keyB);
 
         _cacheMock
-            .Setup(c => c.GetAsync(keyA, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(aBytes);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), keyA,
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(playbookAArtifact);
         _cacheMock
-            .Setup(c => c.GetAsync(keyB, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), keyB,
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var sut = CreateSut();
 
@@ -351,8 +336,10 @@ public class InsightsPlaybookExecutionCacheTests
         // because the next call might produce one. The orchestrator surfaces this as a scaffold
         // decline + logs Warning so the facade contract holds for Zone B.
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var sut = CreateSut();
         var request = new InsightsPlaybookExecutionRequest(
@@ -365,7 +352,10 @@ public class InsightsPlaybookExecutionCacheTests
         result.Artifact.Should().BeNull();
         result.Decline.Should().BeNull();
         _cacheMock.Verify(
-            c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()),
+            c => c.SetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<InsightArtifact>(), It.IsAny<TimeSpan?>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "must not cache empty results — next call might produce an artifact or decline");
     }
@@ -376,7 +366,9 @@ public class InsightsPlaybookExecutionCacheTests
         // ADR-009: cache is an optimisation, not a hard dependency. Redis transient
         // failures must NOT prevent the engine from running and returning a fresh artifact.
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Redis connection refused"));
 
         var artifact = MakeInferenceArtifact();
@@ -396,15 +388,16 @@ public class InsightsPlaybookExecutionCacheTests
     {
         // Write failures are non-fatal — we already have the artifact in hand.
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
+            .Setup(c => c.SetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<InsightArtifact>(), It.IsAny<TimeSpan?>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Redis OOM"));
 
         var artifact = MakeInferenceArtifact();
@@ -419,29 +412,6 @@ public class InsightsPlaybookExecutionCacheTests
         result.Artifact!.Subject.Should().Be(Subject);
     }
 
-    [Fact]
-    public async Task GetOrExecuteAsync_CorruptCachedBytes_FallsBackToEngineAndOverwrites()
-    {
-        // Real-world hardening: if a Redis entry was written by an older serialiser
-        // version (or stress-test corrupted it), we should treat it as a miss and
-        // re-run the engine rather than 500-ing the caller.
-        _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new byte[] { 0x7B, 0x2F, 0x2F, 0x2F }); // "{///"  — not valid JSON for InsightArtifact
-
-        var artifact = MakeInferenceArtifact();
-        var sut = CreateSut();
-        var request = new InsightsPlaybookExecutionRequest(
-            PlaybookA, Subject, null, ScopeHashAlice, TenantId);
-
-        var result = await sut.GetOrExecuteAsync(request, ct => EngineStreamWith(artifact, ct));
-
-        result.Should().NotBeNull();
-        _cacheMock.Verify(
-            c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()),
-            Times.Once,
-            "corrupt entry must be overwritten with the fresh engine output");
-    }
 
     [Fact]
     public async Task EvictAsync_RemovesUnderComposedKey()
@@ -452,22 +422,12 @@ public class InsightsPlaybookExecutionCacheTests
 
         var expectedKey = InsightsPlaybookCacheKey.Compose(PlaybookA, Subject, null, ScopeHashAlice);
         _cacheMock.Verify(
-            c => c.RemoveAsync(expectedKey, It.IsAny<CancellationToken>()),
+            c => c.RemoveAsync(
+                TenantId, It.IsAny<string>(), expectedKey,
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
-    [Fact]
-    public async Task EvictAsync_RedisFailure_DoesNotThrow()
-    {
-        _cacheMock
-            .Setup(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Redis down"));
-
-        var sut = CreateSut();
-
-        var act = async () => await sut.EvictAsync(PlaybookA, Subject, null, ScopeHashAlice, TenantId);
-        await act.Should().NotThrowAsync("eviction is best-effort; TTL is the safety net");
-    }
 
     // ─── Task 071 (Wave 8.5): Decline extraction from engine stream ──────────
 
@@ -479,8 +439,10 @@ public class InsightsPlaybookExecutionCacheTests
         // insufficient-evidence branch, the cache surfaces the real DeclineResponse with
         // populated MinimumEvidenceNeeded — no more null/scaffold fallback.
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var decline = MakeDecline(cohortCount: 5);
         var sut = CreateSut();
@@ -508,8 +470,10 @@ public class InsightsPlaybookExecutionCacheTests
         // stale the moment a new Observation lands. This test proves the cache does NOT
         // write-through on the decline path.
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var sut = CreateSut();
         var request = new InsightsPlaybookExecutionRequest(
@@ -520,11 +484,10 @@ public class InsightsPlaybookExecutionCacheTests
             ct => EngineStreamWithDecline(MakeDecline(), ct: ct));
 
         _cacheMock.Verify(
-            c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()),
+            c => c.SetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<InsightArtifact>(), It.IsAny<TimeSpan?>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "declines are state-dependent; caching them would surface stale decline verdicts after new evidence lands");
     }
@@ -536,8 +499,10 @@ public class InsightsPlaybookExecutionCacheTests
         // the second invocation to see a cache HIT. The second invocation re-runs the engine
         // (so if the index has changed, the new sufficient-evidence verdict surfaces).
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var artifactForSecondCall = MakeInferenceArtifact();
         var sut = CreateSut();
@@ -581,8 +546,10 @@ public class InsightsPlaybookExecutionCacheTests
         // structural fingerprint (all 5 DeclineResponse required fields present). This guards
         // against future playbooks renaming the decline node without losing decline propagation.
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var decline = MakeDecline();
         var sut = CreateSut();

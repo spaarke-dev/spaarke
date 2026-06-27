@@ -1,0 +1,156 @@
+<task id="070" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-24 + D-C-25 — **Q7 SCOPE EXPANSION**: Pinned Memory CRUD + Visualization UI in Context pane</title>
+    <status>pending</status>
+    <estimated-effort>1-2 weeks</estimated-effort>
+    <phase>Phase C — Cross-Conversation Memory (Pillar 7) — Q7 EXPANSION</phase>
+    <wave>C-G3 (sequential after 065/069)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>065 (pinned-context entity), 069 (voice command recognition)</dependencies>
+    <tags>frontend, react, fluent-ui, ai-widgets, context-pane, memory</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Full UI component suite; large surface area; UX-critical; Q7 scope-expansion task — was R7-deferred, promoted to R6 per session decision.</rigor-reason>
+    <parallel-group>C-G3</parallel-group>
+  </metadata>
+
+  <prompt>
+    Build the full Pinned Memory Management UI in the Context pane per Q7 scope
+    expansion. Components:
+    1. **PinnedMemoryListWidget** — Context pane widget showing all pinned items
+       grouped by `pinType` (user-preference / system-rule / matter-fact). Filter by
+       pinType + matter. Search by title.
+    2. **PinnedMemoryEditDialog** — Fluent v9 dialog for create / edit pinned items.
+       Fields: title, content (multi-line), pinType (radio), matterId (lookup, optional
+       for matter-fact only).
+    3. **PinnedMemoryDeleteConfirmation** — confirm before delete; emphasize
+       cross-session impact.
+    4. **PinnedMemoryProvenanceBadge** — on each item, show "Created via chat: 'remember
+       X'" vs "Created via UI" so users understand source.
+
+    All components in `@spaarke/ai-widgets` per ADR-012; Fluent v9; light + dark mode
+    parity per ADR-021. Consumes `IPinnedContextService` via a thin BFF endpoint pair
+    (add to `WorkspaceStateEndpoints.cs` or sibling). Integrated with Pillar 6a workspace
+    state — pinned items DO appear in agent prompt assembly per task 067 composition.
+
+    **SCOPE EXPANSION NOTE**: Per spec Q7 + plan.md §2 Decision Q7, full memory UI was
+    originally R7-deferred. Owner approved scope expansion to R6 (2026-06-07); Phase C
+    +1-2 weeks. This task is the single largest Phase C frontend task.
+  </prompt>
+
+  <role>
+    Senior React/Fluent-v9 engineer with experience in CRUD UI patterns + dialog
+    workflows + accessibility + dark-mode component design.
+  </role>
+
+  <goal>
+    Full Pinned Memory UI shipped; users can create/edit/delete pinned items via UI
+    (in addition to voice commands from task 069); list view shows all items grouped +
+    filterable; persistence verified; dark-mode parity verified; integrates with workspace
+    state model.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="workspace-arch">docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    <file purpose="dashboard-widget-model">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    <file purpose="pinned-context-svc">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IPinnedContextService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-008">Endpoint pair (GET/POST/PUT/DELETE) wired with auth filter + ai-context rate limit.</constraint>
+    <constraint source="ADR-010">BFF endpoints registered in existing module.</constraint>
+    <constraint source="ADR-012">Components in shared lib; Fluent v9 conventions.</constraint>
+    <constraint source="ADR-013">UI consumes BFF endpoints via standard HTTP; BFF endpoints route through service contract.</constraint>
+    <constraint source="ADR-021">Light + dark mode parity verified per dark-mode audit.</constraint>
+    <constraint source="ADR-029">Publish-size delta verified.</constraint>
+    <constraint source="ADR-030">UI emits events on existing channels only; no new channel.</constraint>
+    <constraint source="spec FR-47 (expanded per Q7)">R6 ships full Pinned Memory CRUD + visualization (NOT R7-deferred).</constraint>
+    <constraint source="project Q7 SCOPE EXPANSION binding">Task adds 1-2 weeks to Phase C calendar. Re-defer to R7 only if Phase B slipped >5 days per plan.md risk R4.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/context-pane-memory-ui</topic>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-dark-mode-compliance.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — Q7 scope expansion; large component suite; UX-critical."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 065 + 069 complete.</step>
+    <step order="2" name="Gather Resources">Read SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL + Fluent v9 patterns + IPinnedContextService API.</step>
+    <step order="3" name="Add BFF Endpoint Pair">`GET /api/memory/pinned`, `POST /api/memory/pinned`, `PUT /api/memory/pinned/{id}`, `DELETE /api/memory/pinned/{id}` per ADR-008 + ADR-016. Register in existing module.</step>
+    <step order="4" name="Build PinnedMemoryListWidget">Context-pane widget; groups by pinType; filter + search.</step>
+    <step order="5" name="Build PinnedMemoryEditDialog">Fluent v9 dialog; controlled form; validation.</step>
+    <step order="6" name="Build PinnedMemoryDeleteConfirmation">Confirmation dialog with cross-session impact warning.</step>
+    <step order="7" name="Build PinnedMemoryProvenanceBadge">Source attribution badge.</step>
+    <step order="8" name="Register with ContextWidgetRegistry">List widget registered.</step>
+    <step order="9" name="Light/Dark Parity Audit">ADR-021 audit on every component; capture screenshots.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check (ADR-008/010/012/013/021/029/030).</step>
+    <step order="10" name="UI Tests + Integration Test">Per ui-test skill: each component renders correctly + functional flows work + dark mode passes. Integration test: voice-command-created items appear in UI + UI-created items appear in subsequent chat session memory composition.</step>
+    <step order="11" name="Document + Complete">TASK-INDEX 070 ✅. Q7 expansion status noted.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + type-check + lint</tool>
+    <tool name="dotnet">Build + test + publish (for BFF endpoint pair)</tool>
+    <tool name="fluent-v9-component">Component authoring</tool>
+    <tool name="ui-test">UI verification</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Memory/PinnedMemoryEndpoints.cs (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/PinnedMemoryListWidget.tsx (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/memory/PinnedMemoryEditDialog.tsx (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/memory/PinnedMemoryDeleteConfirmation.tsx (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/memory/PinnedMemoryProvenanceBadge.tsx (NEW)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Api/Memory/PinnedMemoryEndpointsTests.cs (NEW)</output>
+    <output type="tests">Integration test: voice-created items appear in UI; UI-created items appear in chat memory composition</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF endpoint pair functional (GET/POST/PUT/DELETE) with auth + rate limit.</criterion>
+    <criterion testable="true">PinnedMemoryListWidget renders in Context pane; groups by pinType; filter + search work.</criterion>
+    <criterion testable="true">PinnedMemoryEditDialog create + edit flows functional.</criterion>
+    <criterion testable="true">Delete confirmation shows cross-session impact warning.</criterion>
+    <criterion testable="true">Provenance badge shows source ("chat" vs "UI").</criterion>
+    <criterion testable="true">Voice-command-created items (task 069) appear in UI.</criterion>
+    <criterion testable="true">UI-created items appear in subsequent chat session memory composition (task 067).</criterion>
+    <criterion testable="true">Light + dark mode parity verified per ADR-021.</criterion>
+    <criterion testable="true">Fluent v9 conventions per ADR-012.</criterion>
+    <criterion testable="true">ZERO new top-level Program.cs lines.</criterion>
+    <criterion testable="true">Publish-size delta within R6 budget.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <note>**Q7 SCOPE EXPANSION**: This task represents the single largest Phase C frontend deliverable. Original spec.md Q7 deferred full memory UI to R7; owner approved expansion to R6 on 2026-06-07. Adds 1-2 weeks to Phase C calendar. Re-defer fallback per plan.md risk R4.</note>
+  </notes>
+
+  <ui-tests>
+    <test>Render PinnedMemoryListWidget with 6 mock items (2 of each pinType); verify grouping.</test>
+    <test>Filter by pinType; verify only matching items shown.</test>
+    <test>Search by title; verify case-insensitive matching.</test>
+    <test>Open PinnedMemoryEditDialog; create new item; verify it appears in list + Cosmos persisted.</test>
+    <test>Edit existing item; verify update persists.</test>
+    <test>Delete item; verify confirmation shown + item removed.</test>
+    <test>Render in dark mode; verify ADR-021 token usage.</test>
+    <test>Provenance badge correctly distinguishes chat-created vs UI-created items.</test>
+  </ui-tests>
+</task>

@@ -1,0 +1,254 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-B-01 Add `outputSchema` JSON field to `sprk_analysisaction` Dataverse entity</title>
+    <phase>Phase B — Schema-Aware Output</phase>
+    <status>complete</status>
+    <completed-on>2026-06-08</completed-on>
+    <outcome-note>
+      Option A reshape applied: the column already existed on `sprk_analysisaction` as
+      `sprk_outputschemajson` (Memo, MaxLength 1,048,576, RequiredLevel None, IsCustomAttribute true)
+      and is in production use by `PlaybookExecutionEngine.cs` for Structured Outputs binding. Per
+      project CLAUDE.md "ADRs Are Defaults" + dispatch-prompt Confirmation Trigger ("column already
+      exists with different metadata"), sub-agent stopped and surfaced 3 options (A=reuse,
+      B=add-duplicate, C=rename). Main session approved Option A. Deliverables shifted from "deploy
+      new column" to "verify existing column + document discovery":
+        - scripts/Verify-OutputSchemaField.ps1 (NEW; idempotent read-only verification script)
+        - infra/dataverse/sprk_analysisaction-outputschemajson.json (NEW; metadata-of-record)
+        - projects/spaarke-ai-platform-unification-r6/notes/task-030-schema-deployment-evidence.md
+      Verification PASSED. BFF publish-size delta = 0 MB. Quality Gates: code-review PASS (0
+      findings), adr-check PASS (0 violations, 0 warnings, 11 compliant). Downstream POMLs 032-035,
+      040, 042, 048 reference `sprk_outputschema` as a placeholder; main session will batch-rename
+      to `sprk_outputschemajson` before dispatching Wave B-G2.
+    </outcome-note>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>029</dependencies>
+    <blocks>032, 033, 034, 035</blocks>
+    <tags>dataverse, schema, scope</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production Dataverse entity schema change; gates 4 downstream data migrations; FULL-rigor per CLAUDE.md Confirmation Triggers (schema change to production entity).</rigor-reason>
+    <parallel-group>B-G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `sprk_analysisaction` entity only; sibling task 031 touches the playbook node config schema — independent file targets.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a new `outputSchema` JSON field to the production `sprk_analysisaction` Dataverse
+    entity. This field declares the action's INTRINSIC output data shape (action-fixed,
+    per-action). Q5 was re-shaped this session: `outputSchema` is on the ACTION (intrinsic
+    data shape); `destination` + `widgetType` go on the playbook NODE config (per-playbook
+    routing — see sibling task 031). The combination lets `StructuredOutputStreamWidget`
+    render schema-aware output (array → bullets; object → labeled key-value blocks) and
+    lets `DeliverOutput` route per-playbook without changing the action.
+
+    This is a schema-only addition. No existing column or relationship is modified. The
+    field is `Edm.String` (or `Memo`) holding a JSON Schema document describing the
+    action's output fields. Existing actions default to NULL during deployment; tasks 032
+    through 035 populate the field for the 4 actions in the Q5 migration scope
+    (`summarize-document-for-chat@v1`, `summarize-document-for-workspace@v1`,
+    matter-prefill, project-prefill).
+
+    Schema change to a production Dataverse entity is a CLAUDE.md Confirmation Trigger.
+    The agent MUST pause and confirm with the user before applying the change. The
+    migration script MUST be idempotent — re-running on an environment that already has
+    the column is a no-op. This task does NOT modify BFF code, so publish-size delta is
+    zero (confirm in task notes).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Senior Dataverse schema engineer with deep familiarity
+    with `sprk_analysisaction`, the existing scope library (Actions/Skills/Knowledge/Tools),
+    the JPS pipeline, and the existing scope schema conventions (SYS-/CUST-/inheritance).
+    Comfortable applying Web API + PowerShell schema mutations via the
+    `dataverse-create-schema` skill against production-shape entities.
+  </role>
+
+  <goal>
+    `sprk_analysisaction` entity has a new `sprk_outputschema` column (Memo / Edm.String
+    holding JSON Schema) deployed to Spaarke Dev. The migration script is committed
+    to the repo, idempotent (safe to re-run), and ships with a verification query
+    (`/api/data/v9.2/sprk_analysisactions?$select=sprk_actioncode,sprk_outputschema&amp;$top=5`)
+    that confirms the field is present and queryable. Existing rows have NULL in the
+    new field; downstream tasks 032-035 populate it.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="scope-architecture">docs/architecture/scope-architecture.md</file>
+    <file purpose="playbook-architecture">docs/architecture/playbook-architecture.md</file>
+    <file purpose="dataverse-schema-skill">.claude/skills/dataverse-create-schema/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">**Schema change escalation gate per CLAUDE.md Confirmation Triggers; user confirmation required at start of task.** Production Dataverse entity (`sprk_analysisaction`) is being modified — agent MUST pause and confirm with the user before applying the schema change.</constraint>
+    <constraint source="ADR-027">Dataverse solution management — `sprk_outputschema` field added via unmanaged solution conventions; deployment script under `scripts/` or `infra/dataverse/`; idempotent.</constraint>
+    <constraint source="ADR-014">Tenant isolation — `outputSchema` is action-scoped (action-fixed shape) and not tenant-keyed; no `tenantId` required on this field. Standard scope SYS-/CUST- ownership applies via existing `sprk_analysisaction.sprk_scopetype` and ownership columns; do NOT add a parallel ownership column.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — this task adds Dataverse schema only; no BFF code or NuGet package change. Publish-size delta = 0 MB; confirm in task notes.</constraint>
+    <constraint source="ADR-010">DI minimalism — no service registration changes; confirmed N/A.</constraint>
+    <constraint source="spec FR-27">Q5 RE-SHAPED: `outputSchema` is on the ACTION (intrinsic data shape) — NOT on node config. `destination` + `widgetType` go on node config (task 031). This task adds ONLY `outputSchema` to `sprk_analysisaction`.</constraint>
+    <constraint source="spec NFR-08">11 production node executors UNMODIFIED. `DeliverOutput` is the consumer of node config `destination`/`widgetType` (task 031); the executor itself is not modified.</constraint>
+    <constraint source="project">Migration script MUST be idempotent — re-running on an environment where the column already exists succeeds with no destructive effect.</constraint>
+    <constraint source="project">Field type: JSON content stored as `Edm.String` / Memo (length sufficient for non-trivial JSON Schema, e.g., 10K-100K chars). Document the chosen length and rationale in task notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/architecture/scope-architecture.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse column add via Web API" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Use Web API + PowerShell to add columns the PAC CLI cannot create. Pattern: build
+        a `Microsoft.Dynamics.CRM.MemoAttributeMetadata` payload with SchemaName
+        `sprk_OutputSchema`, LogicalName `sprk_outputschema`, MaxLength sufficient for
+        JSON Schema documents, RequiredLevel = None. POST to
+        `/api/data/v9.2/EntityDefinitions(LogicalName='sprk_analysisaction')/Attributes`.
+        Check existence first with a GET; if present, skip POST (idempotency).
+      </pattern>
+      <pattern name="Idempotent migration script" location="scripts/">
+        Schema migrations under `scripts/` follow the pattern: load environment via
+        Connect-MgGraph or PAC CLI; query existing metadata; conditionally apply changes;
+        log results. Re-running MUST be safe.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Q5 was re-shaped this session in R6 design refinement. The original spec FR-27 put
+      `renderingDestination`/`widgetType`/`widgetSchema` all on `sprk_analysisaction`. The
+      re-shape splits this cleanly: actions have an intrinsic OUTPUT shape (`outputSchema`)
+      that is the SAME for every playbook using the action; playbook NODES route to a
+      destination (chat / workspace / form-prefill / side-effect) and pick a `widgetType`
+      where applicable — that is per-playbook config, not per-action. This task ships ONLY
+      the action-side field. Task 031 ships the node-side fields.
+
+      R5 SC-18 surfaced two rendering bugs the schema-aware widget will fix:
+      `tldr: string[]` rendered as raw streaming JSON tokens; `entities: { orgs, persons }`
+      rendered as raw JSON object literal. With `outputSchema` declared per action and a
+      schema-aware widget (task 040 + 041), the renderer accumulates token deltas, parses
+      on `streaming_complete`, and dispatches per-field-type formatting.
+    </background>
+    <relevant-files>
+      <file>scripts/Add-OutputSchemaField.ps1 (NEW — migration script)</file>
+      <file>infra/dataverse/sprk_analysisaction-outputschema.json (NEW — column metadata)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-030-schema-deployment-evidence.md (NEW — deployment evidence)</file>
+    </relevant-files>
+    <related-work>
+      <item>Sibling task 031 (B-G1) adds `destination` + `widgetType` to playbook NODE config schema — independent surface; runs in parallel with this task.</item>
+      <item>Downstream tasks 032-035 populate `outputSchema` on 4 existing actions; depend on this column existing.</item>
+      <item>Task 040 + 041 update `StructuredOutputStreamWidget` to READ `outputSchema` at render time and dispatch array/object rendering.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context usage. If &gt;70%, run `context-handoff` then request `/compact`.
+      Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Production Dataverse entity schema change; CLAUDE.md Confirmation Trigger;
+                 gates 4 downstream data migrations
+      📖 PROTOCOL STEPS TO EXECUTE: all 11 steps below including Step 9.5 quality gates
+      Proceeding with Step 0...
+      ```
+
+      Read project CLAUDE.md "Confirmation Triggers" section. **PAUSE and confirm with
+      user before proceeding** that adding `sprk_outputschema` to `sprk_analysisaction`
+      is approved.
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`; confirm task 030 status is 🔲; dependencies (029) is
+      complete. Read `current-task.md` to verify no prior R6 task is in flight.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract from
+      `scope-architecture.md`: how Memo columns are typed in scope entities. Read
+      ADR-027 for solution management conventions. Read the dataverse-create-schema skill
+      for the Web API + PowerShell pattern.
+    </step>
+    <step order="3" name="Design the Field Metadata">
+      Determine: SchemaName = `sprk_OutputSchema`; LogicalName = `sprk_outputschema`;
+      Type = Memo; MaxLength = e.g. 100000 (justify in notes); RequiredLevel = None;
+      DisplayName = "Output Schema (JSON)"; Description = "JSON Schema describing the
+      action's intrinsic output data shape; consumed by StructuredOutputStreamWidget for
+      schema-aware rendering". Document choices in task notes.
+    </step>
+    <step order="4" name="Author Migration Script">
+      Create `scripts/Add-OutputSchemaField.ps1` (or equivalent). Script: (a) connects to
+      Spaarke Dev; (b) GETs existing column metadata to check idempotency; (c) if absent,
+      POSTs the new column definition to the entity Attributes endpoint; (d) verifies the
+      column is queryable; (e) logs result.
+    </step>
+    <step order="5" name="Apply to Spaarke Dev">
+      Run the script against Spaarke Dev. Capture deployment output + the verification
+      query response in `notes/task-030-schema-deployment-evidence.md`.
+    </step>
+    <step order="6" name="Verify Idempotency">
+      Re-run the script. Confirm: no error; no destructive effect; existing data
+      preserved. Capture the second run output.
+    </step>
+    <step order="7" name="Verify Query Surface">
+      Issue `GET /api/data/v9.2/sprk_analysisactions?$select=sprk_actioncode,sprk_outputschema&amp;$top=5`
+      via PAC CLI or `Invoke-RestMethod`. Confirm response shape: `sprk_outputschema` field
+      present, NULL for all existing rows.
+    </step>
+    <step order="8" name="Confirm BFF Publish-Size Delta">
+      Confirm in task notes: BFF publish-size delta = 0 MB. No BFF code modified; no
+      NuGet package added.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and record evidence in task
+      notes.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the migration script + metadata JSON. Run
+      `adr-check` skill; verify ADR-027 (solution management), ADR-029 (publish hygiene
+      delta = 0), ADR-010 (DI minimalism — N/A). Both gates MUST pass before marking
+      complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 030 🔲 → ✅. Reset
+      `current-task.md` to next pending task per CLAUDE.md §7. Report completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI — environment selection, authentication, optional schema export verification</tool>
+    <tool name="pwsh">PowerShell 7+ — runs the migration script via Invoke-RestMethod against the Web API</tool>
+    <tool name="git">Stage + commit script + metadata JSON + task notes on the R6 worktree branch</tool>
+    <tool name="dataverse-create-schema">Skill for the Web API + PowerShell schema-mutation recipe</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/Add-OutputSchemaField.ps1 (NEW)</output>
+    <output type="metadata">infra/dataverse/sprk_analysisaction-outputschema.json (NEW — column metadata definition for repeatability)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-030-schema-deployment-evidence.md (deployment output, verification query response, idempotency-run evidence)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status 030 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="report">Task completion report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">User confirmed (per CLAUDE.md Confirmation Triggers) that the schema change is approved before deployment.</criterion>
+    <criterion testable="true">Column `sprk_outputschema` (Memo, MaxLength documented in notes, RequiredLevel = None) is present on `sprk_analysisaction` on Spaarke Dev.</criterion>
+    <criterion testable="true">Migration script `scripts/Add-OutputSchemaField.ps1` is committed, idempotent (second run succeeds without destructive effect), and includes a pre-check via GET before POST.</criterion>
+    <criterion testable="true">Verification GET against `/api/data/v9.2/sprk_analysisactions?$select=sprk_actioncode,sprk_outputschema&amp;$top=5` returns rows with `sprk_outputschema = null` (existing rows unaffected).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in task notes; no BFF code modified).</criterion>
+    <criterion testable="true">Task notes record field metadata rationale (MaxLength chosen, display name, description) and the per-tenant/scope-ownership decision (uses existing scope SYS-/CUST- columns; no parallel ownership added).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+    <criterion testable="true">TASK-INDEX.md updated (030 🔲 → ✅) and `current-task.md` reset.</criterion>
+  </acceptance-criteria>
+</task>

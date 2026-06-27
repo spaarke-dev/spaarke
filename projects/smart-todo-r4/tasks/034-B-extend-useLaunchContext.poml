@@ -1,0 +1,147 @@
+<task id="R4-034" project="smart-todo-r4">
+  <metadata>
+    <title>B — Extend useLaunchContext with `openTodos` action + parseDataParams() envelope (R4-003 + R4-004 follow-up)</title>
+    <phase>Phase 2: Wave 2a</phase>
+    <workstream>B (cross-cutting with G)</workstream>
+    <status>complete</status>
+    <estimated-effort>0.5-1 day</estimated-effort>
+    <tags>smart-todo, hook, launch-context, url-params, react, code-page</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <blocks>R4-081, R4-082, R4-083, R4-084</blocks>
+    <added-by>Phase 0 audit aggregation 2026-06-10 — combines R4-003 + R4-004 findings</added-by>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/hooks/useLaunchContext.ts (extended)</file>
+      <file>src/solutions/SmartTodo/src/hooks/__tests__/useLaunchContext.test.ts (extended)</file>
+      <file>src/solutions/SmartTodo/src/utils/parseDataParams.ts (consumer of shared utility)</file>
+      <file>src/solutions/SmartTodo/src/components/SmartTodoApp.tsx (existing consumer line 169 — verify no regression)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Extend the existing `useLaunchContext` hook (R3 task 070b, 235 LOC) to handle BOTH discriminator actions per R4-004 decision AND VisualHost's `data`-envelope payloads per R4-003 spike findings. Without this task, the R4-G drill-through (tasks 081-084) opens the modal correctly but the Kanban does NOT pre-filter to the parent record — UAT-breaking regression.
+
+This task closes the **contract gap** surfaced by the R4-003 spike: VisualHost auto-injects keys `entityName / filterField / filterValue / mode=dialog` wrapped in `?data=<urlencoded>`, but the current `useLaunchContext` only reads RAW query keys (`action / regardingType / regardingId / regardingName`).
+  </prompt>
+
+  <role>
+React + TypeScript engineer maintaining SmartTodo Code Page hooks. Familiar with discriminated unions + parser-utility refactor patterns.
+  </role>
+
+  <goal>
+1. `useLaunchContext` returns a discriminated union with two action branches:
+   - `{ action: 'createTodo', initialRegarding }` (existing R3 behavior — no regression)
+   - `{ action: 'openTodos', regardingFilter: { entityType, recordId, recordName? } }` (new — R4 G drill-through)
+2. The parser consumes `parseDataParams()` (shared utility — see `src/solutions/SmartTodo/src/utils/parseDataParams.ts` or grep for it) to handle BOTH raw query keys AND VisualHost's `?data=<envelope>` envelope.
+3. VisualHost's auto-inject keys are recognized: `filterField=sprk_regarding<X>` → strip `sprk_regarding` prefix → derive `regardingFilter.entityType = "<X>"` (lowercase); `filterValue` → `regardingFilter.recordId`; `entityName` ignored (we always open sprk_todo modal); `mode=dialog` ignored (just signals VisualHost-context).
+4. Existing R3 `createTodo` flow at `SmartTodoApp.tsx:169` continues to work — Outlook ribbon launch unchanged.
+5. Unit tests cover: createTodo (existing), openTodos via raw keys, openTodos via VisualHost `?data=` envelope, unknown action returns undefined.
+  </goal>
+
+  <inputs>
+    <file purpose="audit-outcome">projects/smart-todo-r4/notes/launch-context-decision.md (R4-004 decision doc)</file>
+    <file purpose="spike-outcome">projects/smart-todo-r4/notes/drill-through-spike.md (R4-003 contract-gap finding)</file>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md (FR-34)</file>
+    <file purpose="target">src/solutions/SmartTodo/src/hooks/useLaunchContext.ts (R3 task 070b, 235 LOC)</file>
+    <file purpose="target-test">src/solutions/SmartTodo/src/hooks/__tests__/useLaunchContext.test.ts (R3, 217 LOC)</file>
+    <file purpose="existing-consumer">src/solutions/SmartTodo/src/components/SmartTodoApp.tsx (line 169 — regression-safety check)</file>
+    <file purpose="shared-utility">src/solutions/SmartTodo/src/utils/parseDataParams.ts (grep for it; shared `data` envelope parser)</file>
+    <file purpose="project-claude">projects/smart-todo-r4/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R4-004 decision">REPURPOSE + EXTEND existing hook; do NOT create a new hook; do NOT rename existing file or exports (Outlook ribbon flow depends on stable contract)</constraint>
+    <constraint source="R4-003 finding">MUST consume `parseDataParams()` shared utility for envelope handling — do NOT reimplement</constraint>
+    <constraint source="R4-003 finding">MUST recognize VisualHost's wire format: `entityName/filterField/filterValue/mode=dialog` keys, optionally inside `?data=<envelope>`</constraint>
+    <constraint source="R4-004 rejected">DO NOT add `mode?: 'modal'|'fullpage'` field — modes are caller-side `Xrm.Navigation.navigateTo` options, not URL data</constraint>
+    <constraint source="ADR-021">Fluent v9 + Griffel for any UI changes (none expected — this is a pure-hook change)</constraint>
+    <constraint source="ADR-026">React 19 + Vite Code Page boundaries</constraint>
+    <constraint source="spec NFR-03">No hardcoded environment values</constraint>
+    <constraint source="regression-safety">Existing `createTodo` flow at `SmartTodoApp.tsx:169` MUST continue to work; no behavior change to Outlook ribbon launch</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/url-params</topic>
+    <files>
+      <file>projects/smart-todo-r4/notes/launch-context-decision.md</file>
+      <file>projects/smart-todo-r4/notes/drill-through-spike.md</file>
+      <file>.claude/adr/ADR-026-code-page-build-standard.md</file>
+      <file>.claude/patterns/webresource/code-page-wizard-wrapper.md</file>
+    </files>
+    <patterns>
+      <pattern name="Discriminated union for action types" location="TypeScript convention">
+        type LaunchContext = { action: 'createTodo'; ... } | { action: 'openTodos'; ... }; consumer narrows via `if (ctx.action === 'openTodos')`.
+      </pattern>
+      <pattern name="parseDataParams envelope handling" location="src/solutions/SmartTodo/src/utils/parseDataParams.ts (verify path)">
+        Handles both `?key=value&key=value` (raw) and `?data=<urlencoded(key=value&key=value)>` (envelope). Returns flat key→value map. Reuse — don't reimplement.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+R3 task 070b shipped `useLaunchContext` for the Outlook ribbon's "Create todo from email" flow. Initial R4 project discovery missed this file; tasks 020, 030, 060, and 081-084 in TASK-INDEX listed dependencies on a presumed-new hook. R4-004 corrected the state: hook exists; only tasks 030 + 081-084 actually consume it. R4-003 then surfaced a separate contract gap: VisualHost auto-inject keys differ from the raw-key format the hook currently parses. This task closes BOTH gaps in one go (parallel-safe; isolated to the hook + its tests).
+    </background>
+    <dependencies></dependencies>
+    <related-work>
+      <item>Tasks 081-084 (G drill-through) depend on this — without it, drill-through doesn't pre-filter</item>
+      <item>Task 030 (B 4-row layout) consumes the hook indirectly via SmartTodoApp.tsx — no behavior change expected</item>
+      <item>Outlook ribbon flow (R3) — regression-safety check (existing createTodo action MUST still work)</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify &lt; 70% context.</step>
+    <step order="1" name="Load decision + spike docs">Read R4-004 + R4-003 outcome docs to internalize the parser contract.</step>
+    <step order="2" name="Read existing hook + tests">`src/solutions/SmartTodo/src/hooks/useLaunchContext.ts` (235 LOC); existing test file (217 LOC). Understand current shape + test coverage.</step>
+    <step order="3" name="Locate parseDataParams shared utility">grep for `parseDataParams` in `src/solutions/SmartTodo/src/`. Confirm path + signature. If it doesn't exist exactly, identify the closest equivalent.</step>
+    <step order="4" name="Read SmartTodoApp.tsx:169">Verify how the hook's return value is consumed today; ensure the new discriminated-union shape doesn't break the consumer (narrowing patterns).</step>
+    <step order="5" name="Design extended interface">Discriminated union: `createTodo` (existing) + `openTodos` (new). Document JSDoc.</step>
+    <step order="6" name="Refactor parser to consume parseDataParams()">Replace existing raw-query parsing with `parseDataParams(window.location.search)` call. Verify parseDataParams handles both raw + envelope.</step>
+    <step order="7" name="Implement openTodos branch">If `action === 'openTodos'` OR VisualHost auto-inject keys detected (`entityName/filterField/filterValue` present): derive `regardingFilter`. Strip `sprk_regarding` prefix from `filterField` for `entityType`.</step>
+    <step order="8" name="Preserve createTodo branch">Existing R3 logic untouched at the return-shape level.</step>
+    <step order="9" name="Extend tests">Add cases: openTodos via raw keys; openTodos via `?data=<envelope>`; VisualHost auto-inject keys without explicit `action` param; unknown action returns undefined; existing createTodo cases all pass.</step>
+    <step order="10" name="Build + test">`npm run build:prod` (per CLAUDE.md AP-1); `npm test` — all green.</step>
+    <step order="11" name="Verify SmartTodoApp.tsx consumer">Open in editor; confirm narrowing pattern still type-checks against new union.</step>
+    <step order="12" name="Quality gates">code-review + adr-check.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">build:prod + test</tool>
+    <tool name="git">Stage + commit</tool>
+    <tool name="Grep">Find parseDataParams + verify SmartTodoApp consumer</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/hooks/useLaunchContext.ts (modified — discriminated union + parseDataParams consumer)</output>
+    <output type="test">src/solutions/SmartTodo/src/hooks/__tests__/useLaunchContext.test.ts (extended — openTodos branches)</output>
+    <output type="docs">If SmartTodoApp consumer needs adjustment, mention in commit message</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Outlook ribbon createTodo still works (regression)">
+      <steps>
+        <step>Open Outlook web; trigger "Create todo from email" action</step>
+        <step>Verify SmartTodo Code Page opens; verify createTodo flow with initial regarding preserved</step>
+      </steps>
+      <expected>No regression vs R3 behavior</expected>
+    </test>
+    <test name="openTodos via VisualHost data envelope works">
+      <steps>
+        <step>From a Matter form (after task 081), drill through Visual Host card</step>
+        <step>Verify SmartTodo modal opens with Kanban pre-filtered to that Matter record</step>
+      </steps>
+      <expected>Pre-filter works; cards visible are scoped to current Matter</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">useLaunchContext returns discriminated union: `createTodo` | `openTodos`</criterion>
+    <criterion testable="true">parseDataParams() shared utility is consumed (verify by import statement)</criterion>
+    <criterion testable="true">VisualHost auto-inject keys (entityName/filterField/filterValue) recognized, with or without `?data=` envelope</criterion>
+    <criterion testable="true">filterField=sprk_regarding&lt;X&gt; → derives regardingFilter.entityType correctly (strip prefix)</criterion>
+    <criterion testable="true">Existing createTodo flow at SmartTodoApp.tsx:169 unchanged (regression-safety)</criterion>
+    <criterion testable="true">All existing tests pass; new openTodos tests added + green</criterion>
+    <criterion testable="true">No new compiler warnings; eslint clean</criterion>
+  </acceptance-criteria>
+</task>

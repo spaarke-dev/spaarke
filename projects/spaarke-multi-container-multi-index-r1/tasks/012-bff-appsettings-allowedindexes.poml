@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Add `AiSearch.AllowedIndexes` to appsettings + startup INFO log</title>
+    <phase>B: BFF resolver extension</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>017</blocks>
+    <tags>bff-api, config, settings</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Config + small startup log line. Not core impl. New file creation pattern; tasks with constraints.</rigor-reason>
+    <parallel-group>B1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>File-disjoint with task 011 (DTOs in Models/) — touches appsettings + startup wiring only.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add `AiSearch.AllowedIndexes` (string array) to `appsettings.template.json` and all per-environment appsettings files (`appsettings.Development.json`, `appsettings.Production.json`). Default value: `["spaarke-knowledge-index-v2", "spaarke-file-index", "discovery-index", "spaarke-rag-references"]`. Bind to `AiSearchOptions`. Add a startup `LogInformation` line emitting the allow-list at INFO level so operators can verify the deployed config.
+  </prompt>
+
+  <role>
+    BFF developer familiar with `Sprk.Bff.Api/Program.cs` startup, options binding, and appsettings structure. Read `.claude/constraints/bff-extensions.md` for the binding pre-merge checklist.
+  </role>
+
+  <goal>
+    `AiSearch.AllowedIndexes` is present in every appsettings file with the four default values. `AiSearchOptions.AllowedIndexes` binds to it. BFF startup logs the allow-list at INFO level. No secrets in code (NFR-09).
+  </goal>
+
+  <context>
+    <background>
+      Task 010 added allow-list validation in the resolver. The resolver consumes `IOptions&lt;AiSearchOptions&gt;.AllowedIndexes`. This task sources that config from appsettings, binds it, and surfaces it at startup so operators can verify per-environment values without redeploying for debug.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.template.json</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.Development.json</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.Production.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-BFF-06">`AiSearch.AllowedIndexes` (string array) MUST be added with default `["spaarke-knowledge-index-v2", "spaarke-file-index", "discovery-index", "spaarke-rag-references"]`. Template + per-environment files updated. Startup logs at INFO level.</constraint>
+    <constraint source="spec.md NFR-09">No secrets in code — `AllowedIndexes` are index identifiers (not secrets); they belong in appsettings. No tokens or keys added.</constraint>
+    <constraint source="ADR-001">Minimal-API startup conventions; options pattern via `services.Configure&lt;AiSearchOptions&gt;()`.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Binding pre-merge checklist for any BFF addition.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-bff-minimal-api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Options binding" location="ADR-001">
+        `services.Configure&lt;AiSearchOptions&gt;(config.GetSection("AiSearch"))` — bind array property `AllowedIndexes` automatically; consume via `IOptions&lt;AiSearchOptions&gt;`.
+      </pattern>
+      <pattern name="Startup INFO log" location="ADR-001">
+        After `var app = builder.Build();`, get `IOptions&lt;AiSearchOptions&gt;` and `logger.LogInformation("AiSearch allow-list: {Indexes}", options.AllowedIndexes)`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate `AiSearchOptions` class (likely `src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs` or similar). If it has no `AllowedIndexes` property yet, add `public string[] AllowedIndexes { get; init; } = Array.Empty&lt;string&gt;();`.</step>
+    <step order="2">Add `AllowedIndexes` array to `appsettings.template.json` under the `AiSearch` section with the four default values from FR-BFF-06.</step>
+    <step order="3">Repeat for `appsettings.Development.json` and `appsettings.Production.json` (and any other per-environment appsettings discovered).</step>
+    <step order="4">In `Program.cs` (or the relevant startup file), after the app is built, emit `logger.LogInformation("AiSearch allow-list: {Indexes}", options.Value.AllowedIndexes)` so operators see the loaded list at startup.</step>
+    <step order="5">Build + start the BFF locally; verify the startup log shows the allow-list at INFO level. Capture a snippet of the log output to task notes.</step>
+    <step order="6">Update `TASK-INDEX.md` status: 🔲 → ✅. Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing appsettings + Program.cs</tool>
+    <tool name="Edit">Add config entries + startup log</tool>
+    <tool name="Bash">Build + start BFF locally to capture startup log</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.template.json (AllowedIndexes added)</output>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.Development.json</output>
+    <output type="config">src/server/api/Sprk.Bff.Api/appsettings.Production.json</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (startup INFO log)</output>
+    <output type="notes" ephemeral="true">Startup log snippet captured to task notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-BFF-06: `AllowedIndexes` array present in template + per-env appsettings with the four default values.</criterion>
+    <criterion testable="true">BFF startup log at INFO level shows the allow-list (verified by local run + captured snippet).</criterion>
+    <criterion testable="true">`AiSearchOptions.AllowedIndexes` binds correctly (verified by the startup log showing the parsed values).</criterion>
+    <criterion testable="true">NFR-09: No secrets added (index names are non-sensitive identifiers).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 011. Both should run concurrently; downstream tasks 013/014/015 depend on both completing.
+
+    The startup log is operationally important — it's how operators verify per-environment allow-list config without inspecting source. Keep the log line short and parseable (single line, structured logging template).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute Step 0 (rigor declaration: STANDARD) before any code change.
+    </protocol>
+  </execution>
+</task>

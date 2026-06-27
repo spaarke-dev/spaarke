@@ -1,24 +1,30 @@
 /**
  * useFeedTodoSync — convenient hook to access FeedTodoSyncContext.
  *
- * Returns a no-op fallback when consumed outside FeedTodoSyncProvider,
- * allowing SmartToDo (and other consumers) to work independently in any
- * context — workspace with ActivityFeed, without ActivityFeed, or
- * standalone Code Page.
+ * Returns a no-op fallback when consumed outside FeedTodoSyncProvider so any
+ * consumer (ActivityFeed, SmartToDo widget, TodoDetail panel, standalone
+ * surfaces) can render independently without crashing or branching on
+ * provider presence.
+ *
+ * R3 contract (FR-14 / OS-1):
+ *   - Notifications carry `todoId` (sprk_todoid) + `isActive` boolean.
+ *   - The legacy `(eventId, flagged)` shape backed by `Map<eventId, boolean>`
+ *     is removed in R3 — no compat shim.
  *
  * Usage:
- *   const { isFlagged, toggleFlag, isPending, getError } = useFeedTodoSync();
+ *   // Producer (after a successful Dataverse mutation):
+ *   const { notifyTodoChange } = useFeedTodoSync();
+ *   await dataverse.dismissTodo(todoId);
+ *   notifyTodoChange(todoId, false);
  *
- *   // In FeedItemCard — wire flag button:
- *   const flagged = isFlagged(event.sprk_eventid);
- *   const handleFlagClick = () => void toggleFlag(event.sprk_eventid);
- *
- *   // In SmartToDo (Block 4) — subscribe to cross-block changes:
- *   React.useEffect(() => {
- *     return subscribe((eventId, flagged) => {
- *       // Update local to-do list when feed flag changes
- *     });
- *   }, [subscribe]);
+ *   // Consumer (subscribe to cross-block changes):
+ *   const { subscribe } = useFeedTodoSync();
+ *   React.useEffect(
+ *     () => subscribe((todoId, isActive) => {
+ *       // Refresh / insert / remove based on isActive
+ *     }),
+ *     [subscribe]
+ *   );
  */
 
 import { useContext } from 'react';
@@ -29,28 +35,23 @@ import {
 
 /**
  * No-op fallback returned when the hook is consumed outside of a
- * FeedTodoSyncProvider. Every method is a safe stub that does nothing,
- * so SmartToDo can render independently without crashing.
+ * FeedTodoSyncProvider. Calls to `notifyTodoChange` are silently dropped and
+ * `subscribe` registers a listener that never fires — so consumers can be
+ * mounted in surfaces that don't host the provider (e.g. the standalone
+ * SmartTodo Code Page) without needing null checks.
  */
 const NOOP_SYNC: IFeedTodoSyncContextValue = {
-  isFlagged: () => false,
-  toggleFlag: async () => {},
-  getFlaggedCount: () => 0,
-  isPending: () => false,
-  getError: () => undefined,
+  notifyTodoChange: () => {},
   subscribe: () => () => {},
-  initFlags: () => {},
-  _flagsSnapshot: new Map(),
 };
 
 /**
  * Access the FeedTodoSyncContext value.
  *
  * When a FeedTodoSyncProvider is present in the tree the real context is
- * returned. Otherwise a safe no-op fallback ({@link NOOP_SYNC}) is
- * returned so consumers do not need to guard against missing providers.
+ * returned. Otherwise a safe no-op fallback ({@link NOOP_SYNC}) is returned.
  *
- * @returns IFeedTodoSyncContextValue — the full context API (or no-op stubs)
+ * @returns IFeedTodoSyncContextValue — the full notification-bus API.
  */
 export function useFeedTodoSync(): IFeedTodoSyncContextValue {
   const ctx = useContext(FeedTodoSyncContext);

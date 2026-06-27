@@ -33,7 +33,7 @@ import {
   ArrowClockwiseRegular,
   SettingsRegular,
 } from "@fluentui/react-icons";
-import { MicrosoftToDoIcon } from "../icons/MicrosoftToDoIcon";
+import { MicrosoftToDoIcon } from "@spaarke/ui-components";
 import { AddTodoBar } from "./AddTodoBar";
 
 // ---------------------------------------------------------------------------
@@ -100,6 +100,15 @@ export interface IKanbanHeaderProps {
   onSettingsOpen: () => void;
   /** When true, hides the header (matching existing SmartToDo embedded pattern). */
   embedded?: boolean;
+  /**
+   * Optional slot rendered in the right-action group, just BEFORE the
+   * Recalculate + Settings buttons. R4 task 070 mounts the shared
+   * `<OrientationToggle>` here so the user can flip the Kanban board
+   * between horizontal columns and vertical stacked sections (FR-28 /
+   * FR-29). Passing `undefined` leaves the right group unchanged
+   * (regression-safe for any consumer that hasn't adopted the slot yet).
+   */
+  orientationSlot?: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +124,7 @@ export const KanbanHeader: React.FC<IKanbanHeaderProps> = React.memo(
     isAdding,
     onSettingsOpen,
     embedded = false,
+    orientationSlot,
   }) => {
     const styles = useStyles();
 
@@ -123,6 +133,7 @@ export const KanbanHeader: React.FC<IKanbanHeaderProps> = React.memo(
       return (
         <div className={styles.header} role="banner" style={{ justifyContent: "flex-end" }}>
           <div className={styles.rightGroup}>
+            {orientationSlot}
             <Button
               appearance="subtle"
               size="small"
@@ -164,13 +175,20 @@ export const KanbanHeader: React.FC<IKanbanHeaderProps> = React.memo(
           </Badge>
         </div>
 
+        {/* R4 task 031 / FR-07 / OD-2 — the R3 inline `<MyTasksFilter>`
+            three-mode radio group is removed; the SmartTodo Code Page Header
+            (Row 3) now renders a single non-dismissible "Assigned to Me"
+            scope Tag instead. The kanban-only KanbanHeader carries no
+            filter-mode UI of its own. */}
+
         {/* Center group: add bar (flex-grow) */}
         <div className={styles.centerGroup}>
           <AddTodoBar onAdd={onAdd} isAdding={isAdding} />
         </div>
 
-        {/* Right group: recalculate + settings */}
+        {/* Right group: orientation toggle (R4 task 070) + recalculate + settings */}
         <div className={styles.rightGroup}>
+          {orientationSlot}
           <Button
             appearance="subtle"
             size="small"

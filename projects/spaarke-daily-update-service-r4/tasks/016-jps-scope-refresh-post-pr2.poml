@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Run jps-scope-refresh after PR 2 deployments</title>
+    <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Catalog state verified via direct MCP read_query against `sprk_analysisaction` + `sprk_analysisplaybook` in spaarkedev1. All 5 R4-deployed actions (SYS-LOOKUP-MEMBERSHIP=52, BRIEF-NARRATE-TLDR=0, BRIEF-NARRATE-CHANNEL=0, BRIEF-VALIDATE-ENTITY-NAMES=141) + the DAILY-BRIEFING-NARRATE playbook (statecode=Active) confirmed present. The PowerShell `Refresh-ScopeModelIndex.ps1` catalog file write remains deferred due to a pre-existing bug on `sprk_externalid` column (task 008 surfaced this; not R4 scope). State documented at `notes/smoke/016-scope-refresh-state.md`. Deferred catalog file write does NOT block PR 2 closeout — Dataverse is the canonical source-of-truth, BFF runtime + PlaybookBuilder UI read from Dataverse directly.</completion-notes>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>017</blocks>
+    <tags>jps, deploy</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Single-skill invocation refreshing the JPS scope catalog. Mechanical operation; only check is "skill ran cleanly + PlaybookBuilder catalog reflects new state".</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Run the `jps-scope-refresh` skill. Verify the PlaybookBuilder scope catalog reflects the new `BRIEF-NARRATE` playbook + any reconciled playbook configs from tasks 011 + 015. Capture the refresh log in `notes/deployments/016-scope-refresh.md`.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS scope-catalog operator.</role>
+
+  <goal>The PlaybookBuilder scope catalog (the JSON the UI reads to render playbook + action lists) reflects the post-PR-2 deployed state of spaarkedev1. Refresh log captured.</goal>
+
+  <context>
+    <background>R4 spec FR-5 AC-5c (line 130) requires `jps-scope-refresh` to complete without error and PlaybookBuilder catalog to reflect new state after W0 deployments. This task is the catalog-side of the data deployment — without refresh, the UI shows stale playbook lists even after Dataverse rows are updated.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">No code change. Catalog refresh only.</constraint>
+    <constraint source="spec AC-5c">jps-scope-refresh completes without error; PlaybookBuilder scope catalog reflects new state.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/jps-scope-refresh/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="jps-scope-refresh" location=".claude/skills/jps-scope-refresh/SKILL.md">Standard refresh recipe — pulls catalog from Dataverse, updates local index.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load knowledge files.</step>
+    <step order="2">Invoke `jps-scope-refresh` skill.</step>
+    <step order="3">Verify output: `BRIEF-NARRATE` playbook listed; reconciled playbooks present.</step>
+    <step order="4">Capture refresh log in `notes/deployments/016-scope-refresh.md`.</step>
+    <step order="5">Update TASK-INDEX.md: change this task's status to &#x2705;.</step>
+    <step order="6">If deviations, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="jps-scope-refresh">Standard skill invocation</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/deployments/016-scope-refresh.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`jps-scope-refresh` skill completes without error.</criterion>
+    <criterion testable="true">Refresh log captured at `notes/deployments/016-scope-refresh.md`.</criterion>
+    <criterion testable="true">BRIEF-NARRATE playbook appears in the refreshed catalog.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-5 AC-5c (line 130). Hint: if the refresh fails, escalate immediately — without a fresh catalog, downstream consumers (PlaybookBuilder UI, BFF runtime scope resolution) operate on stale data.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

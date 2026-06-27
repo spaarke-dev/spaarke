@@ -1,0 +1,75 @@
+<task id="R3-081" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Wire event-publishing into matter mutation endpoints</title>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+Wave 21 (2026-06-22). Authored cross-cutting MembershipEventPublisher infrastructure for FR-2P2.6 fire-and-forget event publishing, plus matter cluster wiring per event-source-inventory §3A.
+
+Files created (5 src + 1 test):
+- Services/Ai/Membership/Events/IMembershipEventPublisher.cs — fire-and-forget contract (PublishAsync NEVER throws)
+- Services/Ai/Membership/Events/MembershipEventPublisher.cs — real impl; per-call sender; JSON via canonical SerializerOptions; CorrelationId on envelope + ApplicationProperties (schemaVersion/mutationType/entityLogicalName)
+- Services/Ai/Membership/Events/NullMembershipEventPublisher.cs — ADR-032 P2 Quiet no-op peer; logs Information + returns
+- Services/Ai/Membership/Events/MembershipEventPublisherOptions.cs — Enabled (default false) + TopicName (default sprk-membership-changes per D3)
+- Infrastructure/DI/MembershipModule.cs — SYMMETRIC ADR-032 registration: real when Enabled=true, Null when false
+- tests/Services/Ai/Membership/Events/MembershipEventPublisherTests.cs — 10 unit tests (transport failure swallowed; correlationId preserved; serialization canonical; null-peer behavior)
+
+Matter cluster wired (per inventory §3A): Office QuickCreate matter endpoint publishes Added event for implicit ownerid Lookup. Fire-and-forget via discard (_ = publisher.PublishAsync(...)) — 201 Created NOT blocked by Service Bus latency; mutation succeeds even on publish failure (Q2).
+
+NFR-08 (correlationId) wired through endpoint traceId → MembershipChangedEvent.CorrelationId → ServiceBusMessage.CorrelationId + payload.
+
+Operator-deploy gap: task 071 still blocked-operator. Default Membership:EventPublisher:Enabled=false registers Null peer — NO Azure dependency runtime today. Operator flips flag AFTER topic provisioned per task 071 runbook.
+
+Cross-cutting: publisher infrastructure ready for reuse by sibling tasks 082 (document/event cluster) + 083 (task/opportunity cluster — empty per inventory §3D/E).
+
+Tests: 10/10 new pass. Full BFF test suite zero regressions.
+Build: 0 errors / 16 warnings (no new).
+Publish: 44.89 MB (+0.01 vs 44.88 Wave 20 baseline; well under 60 MB ceiling).
+CVE: no new HIGH (pre-existing Kiota CVE unrelated).
+ADR-032 binding satisfied — Null-Object peer mandatory for topic-gated state.
+
+Parallel coordination with sibling 084 (MembershipJunctionUpdater consumer): NO file overlap; 081 owns Events/* + Membership:EventPublisher:* config; 084 owns MembershipJunctionUpdater* + Membership:JunctionUpdater:* config; both sections coexist in MembershipModule.cs.
+    </completion-notes>
+    <phase>P8</phase>
+    <parallel-group>R (with 082, 083)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>3-4h</estimated-effort>
+    <tags>bff-api,membership,event-publishing,phase2</tags>
+    <relevant-files>
+      <file>(per inventory — matter cluster endpoints)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Events/MembershipEventPublisher.cs (new)</file>
+    </relevant-files>
+    <dependencies>080</dependencies>
+  </metadata>
+  <prompt>Per inventory, add MembershipChangedEvent publishing to matter mutation endpoints. Fire-and-forget per Q2 — publish failure logs structured warning but does NOT roll back mutation.</prompt>
+  <goal>Matter cluster endpoints publish events on lookup mutations. Tests confirm publish.</goal>
+  <constraints>
+    <constraint source="spec Q2">Fire-and-forget semantics; publish failure logs warning + nightly recon backstop</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+    <constraint source="NFR-08">correlationId carried in published event</constraint>
+  </constraints>
+  <knowledge>
+    <topic>event-publishing-service-bus</topic>
+    <files>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/notes/event-source-inventory.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2P2.6 + Q2</step>
+    <step order="1">Create MembershipEventPublisher (Singleton) that wraps Service Bus topic client</step>
+    <step order="2">For each matter mutation endpoint per inventory: detect lookup mutation in request → publish event after successful mutation</step>
+    <step order="3">Fire-and-forget: publish exceptions logged as warnings (do NOT throw)</step>
+    <step order="4">Unit tests: detect mutation, publish event, fire-and-forget on publisher failure</step>
+    <step order="5">Integration test: end-to-end mutation → event published to topic</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Matter lookup mutations publish events</criterion>
+    <criterion testable="true">Publish failure logs warning but mutation succeeds</criterion>
+    <criterion testable="true">Integration test passes</criterion>
+  </acceptance-criteria>
+</task>

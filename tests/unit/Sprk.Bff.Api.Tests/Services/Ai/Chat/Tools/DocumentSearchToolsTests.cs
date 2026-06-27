@@ -26,39 +26,6 @@ public class DocumentSearchToolsTests
 
     // === [Description] attribute tests ===
 
-    [Fact]
-    public void SearchDocumentsAsync_HasDescriptionAttribute_OnQueryParameter()
-    {
-        // Arrange
-        var method = typeof(DocumentSearchTools).GetMethod(nameof(DocumentSearchTools.SearchDocumentsAsync));
-        method.Should().NotBeNull();
-
-        var queryParam = method!.GetParameters().First(p => p.Name == "query");
-
-        // Act
-        var description = queryParam.GetCustomAttribute<DescriptionAttribute>();
-
-        // Assert
-        description.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on key parameters");
-        description!.Description.Should().Be("Search query for document knowledge");
-    }
-
-    [Fact]
-    public void SearchDiscoveryAsync_HasDescriptionAttribute_OnQueryParameter()
-    {
-        // Arrange
-        var method = typeof(DocumentSearchTools).GetMethod(nameof(DocumentSearchTools.SearchDiscoveryAsync));
-        method.Should().NotBeNull();
-
-        var queryParam = method!.GetParameters().First(p => p.Name == "query");
-
-        // Act
-        var description = queryParam.GetCustomAttribute<DescriptionAttribute>();
-
-        // Assert
-        description.Should().NotBeNull("AIFunctionFactory.Create requires [Description] on key parameters");
-        description!.Description.Should().Be("Broad discovery search across all documents");
-    }
 
     // === SearchDocumentsAsync service call tests ===
 

@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="076" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>LayeredContextCardBuilder — structured per-file card ~150–250 tok (NEW)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4c)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>074</dependencies>
+    <blocks>080</blocks>
+    <tags>bff-api, services, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF service in hot path (per-turn assembly); tags include `bff-api`, `ai`; architecture P4 + P5 binding</rigor-reason>
+    <parallel-group>4-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>NEW file; no overlap with peer 4-E tasks 077, 078, 079 — each authors a different NEW file or extends a different existing service</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author `LayeredContextCardBuilder` (NEW) per architecture P4 + §4.4 + §6.2. Produces a structured per-file context card (~150-250 tokens) carrying: `{ id, fileName, contentType, classifiedDocType, classifiedConfidence, precomputedSummary (NOT authoritative), detectedSections, tables, citationsReferencedInThisConversation, recentlyDiscussedFlag }`. NOT 1-line summaries (user's explicit guidance per architecture P4: "1-line summaries every turn is too thin for Spaarke"). Card is INPUT to static prefix composition (task 079).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in per-turn prompt-assembly hot path + token-budget management + architecture P4 layered-context binding.</role>
+
+  <goal>
+    `LayeredContextCardBuilder.cs` exists with `ILayeredContextCardBuilder` interface + `BuildAsync(string sessionId, ChatSession session, CancellationToken ct) → IReadOnlyList&lt;LayeredContextCard&gt;`. Produces structured cards from `ChatSession.UploadedFiles[]` enriched fields (task 071's shape). Each card ~150-250 tokens; total card section budget ≤2K tokens (≤6 files visible).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer.</role>
+
+  <goal>
+    Per-file context card builder ships with structured shape per architecture P4. The cards flow into static prefix (task 079) via `MemoryCompositionService` unification (task 078). Backward-compat with the existing 1-line file mention in `SprkChatAgentFactory` is preserved during transition (task 078 swaps the call site).
+  </goal>
+
+  <context>
+    <background>
+      Per architecture P4 + §4.4 + §6.2 + §10.3 (cache hit rate considerations). The "recently discussed" flag may flip per turn — open question §12.1.1 — handle as a STABLE field at build time; main session decides post-benchmark whether to move recently-discussed into the dynamic suffix.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryCompositionService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/PromptBudgetTracker.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Chat/ChatSessionFile.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="architecture P4">Structured cards (~150-250 tok each); NOT 1-line summaries.</constraint>
+    <constraint source="architecture P3">Card's `precomputedSummary` MUST be marked "NOT authoritative" — actual marking text lives in the persona / trust-frame (task 077); card's field is just labeled accurately.</constraint>
+    <constraint source="ADR-013">Service lives in `Services/Ai/Memory/` — within AI module.</constraint>
+    <constraint source="ADR-015">Tier-1 logging: sessionId, fileCount, totalTokens. NEVER card content body.</constraint>
+    <constraint source="ADR-029">Per-task publish-size measurement.</constraint>
+    <constraint source="architecture §10.2">Static prefix ~6K total budget; card section ≤2K (≤6 file cards max).</constraint>
+    <constraint source="project">If more than 6 files in session, prioritize: pinned > recentlyDiscussed > most-cited > recent-upload-order. Truncate excess into a "and N more files" summary line.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `MemoryCompositionService.cs` + `PromptBudgetTracker.cs` + `SprkChatAgentFactory.cs` for current per-turn assembly seam.</step>
+    <step order="2">Read `ChatSessionFile.cs` post-task-071 extension for enriched-field shape.</step>
+    <step order="3">Define `ILayeredContextCardBuilder` + `LayeredContextCard` record per architecture P4:
+      ```
+      record LayeredContextCard(
+        string FileId,
+        string FileName,
+        string ContentType,
+        string ClassifiedDocType,
+        double ClassifiedConfidence,
+        string PrecomputedSummary,    // labeled NOT authoritative in trust frame
+        IReadOnlyList&lt;string&gt; DetectedSections,
+        IReadOnlyList&lt;string&gt; Tables,
+        IReadOnlyList&lt;CitationRef&gt; CitationsReferenced,
+        bool RecentlyDiscussed
+      )
+      ```</step>
+    <step order="4">Implement `BuildAsync`:
+      - Read `session.UploadedFiles`
+      - For each file, build card with enriched fields
+      - If &gt;6 files, prioritize per rule; emit "and N more files" line
+      - Estimate token count per card (~chars/4)
+      - Log sessionId, fileCount, totalTokens (tier-1 safe)</step>
+    <step order="5">Add `Render(LayeredContextCard) → string` helper producing the static-prefix line(s) per card.</step>
+    <step order="6">Author unit test stub asserting card shape + 6-file truncation logic + budget assertion (total &lt;2K tok).</step>
+    <step order="7">Run `dotnet build` + `dotnet test`.</step>
+    <step order="8">Measure BFF publish size.</step>
+    <step order="9">code-review + adr-check.</step>
+    <step order="10">Update TASK-INDEX.md: 076 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">MemoryCompositionService + PromptBudgetTracker + SprkChatAgentFactory + ChatSessionFile</tool>
+    <tool name="Write">LayeredContextCardBuilder + interface + record + test stub</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/LayeredContextCardBuilder.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/ILayeredContextCardBuilder.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Chat/LayeredContextCard.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/LayeredContextCardBuilderTests.cs (NEW)</output>
+    <output type="docs">notes/handoffs/076-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`LayeredContextCard` record has all 10 architecture-P4 fields.</criterion>
+    <criterion testable="true">Build returns ≤6 cards (with "and N more" overflow line if more files).</criterion>
+    <criterion testable="true">Per-card token estimate ~150-250 tokens; total ≤2K.</criterion>
+    <criterion testable="true">No log statement carries card content body.</criterion>
+    <criterion testable="true">`dotnet build` + tests exit 0.</criterion>
+    <criterion testable="true">BFF publish delta &lt;0.3 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 4-E parallel-safe: 076 + 077 + 078 + 079 each author/extend a different file. Task 078 (composition unification) is the integration point — it consumes this builder's output.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol with code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

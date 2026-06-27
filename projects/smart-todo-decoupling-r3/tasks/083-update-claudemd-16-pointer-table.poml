@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="083" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Update root `CLAUDE.md` §16 pointer table to reference new `spaarke-todo-architecture.md`</title>
+    <phase>Phase 9: Cleanup & Documentation</phase>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>082</dependencies>
+    <blocks>085</blocks>
+    <tags>docs</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation pointer update. MINIMAL rigor.</rigor-reason>
+    <parallel-group>P9-W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches root `CLAUDE.md` — main-session-only per the `.claude/` permission boundary.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update `CLAUDE.md` §16 "Pointers — Where to find everything" table: change the row pointing to `event-to-do-architecture.md` so it now points at `spaarke-todo-architecture.md`. Update the description to reflect the broader scope (custom entity + bidirectional sync + Outlook add-in surfaces).
+  </prompt>
+
+  <role>Spaarke documentation maintainer.</role>
+
+  <goal>`CLAUDE.md` §16 references the new doc; the old doc is mentioned only as a "(superseded)" pointer if at all.</goal>
+
+  <constraints>
+    <constraint source="FR-30">CLAUDE.md §16 pointer table updated.</constraint>
+    <constraint source="project">Touches `CLAUDE.md` in repo root — main-session-only per CLAUDE.md "Sub-Agent Write Boundary".</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Locate the row in `CLAUDE.md` §16 pointing at `event-to-do-architecture.md`.</step>
+    <step order="2">Update the path to `spaarke-todo-architecture.md`; refresh the description.</step>
+    <step order="3">Add a separate "(superseded)" entry for the old doc if useful for archaeology.</step>
+    <step order="4">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">`CLAUDE.md` §16 updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CLAUDE.md §16 references `spaarke-todo-architecture.md`.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor. Main-session-only (touches `CLAUDE.md`).</protocol>
+  </execution>
+</task>

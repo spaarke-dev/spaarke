@@ -33,8 +33,8 @@ import {
   ArrowUndoRegular,
   DismissRegular,
 } from "@fluentui/react-icons";
-import { IEvent } from "../types/entities";
-import { PriorityLevel, EffortLevel, TodoSource } from "../types/enums";
+import { ITodo } from "../types/entities";
+import { PriorityLevel, EffortLevel } from "../types/enums";
 import { computeDueLabel, parseDueDate, DueUrgency } from "../utils/dueLabelUtils";
 
 // ---------------------------------------------------------------------------
@@ -98,14 +98,16 @@ const DUE_BADGE_STYLE: Record<Exclude<DueUrgency, "none">, React.CSSProperties> 
 // Derivation helpers (mirrors TodoItem.tsx)
 // ---------------------------------------------------------------------------
 
-function derivePriorityLevel(priority: number | undefined): PriorityLevel | null {
-  switch (priority) {
-    case 0: return "Low";
-    case 1: return "Normal";
-    case 2: return "High";
-    case 3: return "Urgent";
-    default: return null;
-  }
+/**
+ * Map `sprk_todo.sprk_priorityscore` (0-100) to a PriorityLevel label.
+ *   ≥75 = Urgent, ≥50 = High, ≥25 = Normal, <25 = Low.
+ */
+function derivePriorityLevel(priorityScore: number | undefined): PriorityLevel | null {
+  if (priorityScore === undefined || priorityScore === null) return null;
+  if (priorityScore >= 75) return "Urgent";
+  if (priorityScore >= 50) return "High";
+  if (priorityScore >= 25) return "Normal";
+  return "Low";
 }
 
 function deriveEffortLevel(effortScore: number | undefined): EffortLevel | null {
@@ -113,15 +115,6 @@ function deriveEffortLevel(effortScore: number | undefined): EffortLevel | null 
   if (effortScore >= 70) return "High";
   if (effortScore >= 35) return "Med";
   return "Low";
-}
-
-function deriveSourceType(source: number | undefined): TodoSource {
-  switch (source) {
-    case 100000000: return "System";
-    case 100000001: return "User";
-    case 100000002: return "AI";
-    default:        return "User";
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -304,32 +297,23 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 interface IDismissedItemProps {
-  event: IEvent;
-  onRestore: (eventId: string) => void;
+  todo: ITodo;
+  onRestore: (todoId: string) => void;
   isRestoring: boolean;
 }
 
 const DismissedItem: React.FC<IDismissedItemProps> = React.memo(
-  ({ event, onRestore, isRestoring }) => {
+  ({ todo, onRestore, isRestoring }) => {
     const styles = useStyles();
 
-    const priorityLevel = derivePriorityLevel(event.sprk_priority);
-    const effortLevel = deriveEffortLevel(event.sprk_effortscore);
-    const dueDate = parseDueDate(event.sprk_duedate);
+    const priorityLevel = derivePriorityLevel(todo.sprk_priorityscore);
+    const effortLevel = deriveEffortLevel(todo.sprk_effortscore);
+    const dueDate = parseDueDate(todo.sprk_duedate);
     const dueLabel = computeDueLabel(dueDate);
-    // source kept for aria label but icon not shown in dismissed view
-    const sourceType = deriveSourceType(event.sprk_todosource);
-    const sourceLabel =
-      sourceType === "System"
-        ? "System-generated"
-        : sourceType === "AI"
-        ? "AI-generated"
-        : "Manually created";
 
     const rowAriaLabel = [
       "Dismissed.",
-      event.sprk_eventname,
-      sourceLabel,
+      todo.sprk_name,
       priorityLevel ? `Priority: ${priorityLevel}.` : "",
       effortLevel ? `Effort: ${effortLevel}.` : "",
       dueLabel.label ? `Due: ${dueLabel.label}.` : "",
@@ -346,11 +330,11 @@ const DismissedItem: React.FC<IDismissedItemProps> = React.memo(
         {/* Title + context */}
         <div className={styles.contentColumn}>
           <Text as="span" size={300} className={styles.title}>
-            {event.sprk_eventname}
+            {todo.sprk_name}
           </Text>
-          {(event.sprk_priorityreason || event.sprk_effortreason) && (
+          {todo.sprk_description && (
             <Text as="span" size={200} className={styles.context}>
-              {event.sprk_priorityreason ?? event.sprk_effortreason}
+              {todo.sprk_description}
             </Text>
           )}
         </div>
@@ -391,9 +375,9 @@ const DismissedItem: React.FC<IDismissedItemProps> = React.memo(
             appearance="subtle"
             size="small"
             icon={<ArrowUndoRegular />}
-            onClick={() => onRestore(event.sprk_eventid)}
+            onClick={() => onRestore(todo.sprk_todoid)}
             disabled={isRestoring}
-            aria-label={`Restore "${event.sprk_eventname}"`}
+            aria-label={`Restore "${todo.sprk_name}"`}
             title="Restore to active list"
           />
         </div>
@@ -409,16 +393,16 @@ DismissedItem.displayName = "DismissedItem";
 // ---------------------------------------------------------------------------
 
 export interface IDismissedSectionProps {
-  /** Dismissed to-do events */
-  items: IEvent[];
+  /** Dismissed to-do items */
+  items: ITodo[];
   /**
    * Called when the user clicks the restore button on a dismissed item.
    * Parent handles the Dataverse update + optimistic list move.
    */
-  onRestore: (eventId: string) => void;
+  onRestore: (todoId: string) => void;
   /**
-   * Set of event IDs currently being restored (to disable their restore buttons
-   * while the async operation is in-flight).
+   * Set of sprk_todoid values currently being restored (to disable their
+   * restore buttons while the async operation is in-flight).
    */
   restoringIds?: Set<string>;
 }
@@ -484,10 +468,10 @@ export const DismissedSection: React.FC<IDismissedSectionProps> = React.memo(
           >
             {items.map((item) => (
               <DismissedItem
-                key={item.sprk_eventid}
-                event={item}
+                key={item.sprk_todoid}
+                todo={item}
                 onRestore={onRestore}
-                isRestoring={restoringIds.has(item.sprk_eventid)}
+                isRestoring={restoringIds.has(item.sprk_todoid)}
               />
             ))}
           </div>

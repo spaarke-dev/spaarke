@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Phase 2 exit gate — verify FR-08 through FR-14 satisfied</title>
+    <phase>2: WP1.5 Index Governance</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>038,039</dependencies>
+    <blocks>060</blocks>
+    <tags>verification, gate</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Verification only; no source modification; MINIMAL per Step 0.5</rigor-reason>
+    <parallel-group>2-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify Phase 2 exit criteria: all WP1.5 FRs (FR-08 through FR-14) satisfied per spec.md acceptance text. Capture summary in `notes/handoffs/040-phase-2-exit.md`. On any failure, do NOT advance to Phase 3 — file a remediation task.
+  </prompt>
+
+  <role>SPAARKE QA / project gatekeeper. Verifies FR-level acceptance.</role>
+
+  <goal>
+    Documented confirmation that Phase 2 is complete: 5 new fields live; embedding extension live; drift job scheduled; admin view + button operational; validation gate working; 6 playbooks indexed; benchmark passing.
+  </goal>
+
+  <context>
+    <background>
+      Per spec.md Phase 2 acceptance + design §1.4. Exit-gate verification is a brief checklist run — no new artifacts beyond the summary doc.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Every FR-08 through FR-14 acceptance criterion must be visibly satisfied.</constraint>
+    <constraint source="project">Phase 3 may have started in parallel (wave 3-A prereq is 1-J, not 2-E). Exit gate failure does NOT auto-block Phase 3 progress that ran independently — but flag to owner.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">FR-08: confirm Dataverse describe shows all 5 fields on `sprk_analysisplaybook`. Verify CDS-Solution export contains them.</step>
+    <step order="2">FR-09: confirm JPS matching metadata schema doc exists; spot-validate a backfilled playbook payload.</step>
+    <step order="3">FR-10: re-run benchmark from task 038 — confirm NDA query top-1.</step>
+    <step order="4">FR-11: trigger "Send to Index" on a sample playbook in dev — confirm 60s status flip.</step>
+    <step order="5">FR-12: send a malformed POST (missing description) — confirm 400 ProblemDetails with `MissingFields`.</step>
+    <step order="6">FR-13: confirm drift job exists + scheduled. Manually trigger it; verify telemetry shows scan count.</step>
+    <step order="7">FR-14: confirm "Playbook Index Drift" view appears in dev; filter logic correct.</step>
+    <step order="8">Summarize results in `notes/handoffs/040-phase-2-exit.md`. Mark each FR pass/fail.</step>
+    <step order="9">If all pass: update TASK-INDEX.md task 040 → ✅; Phase 2 complete. If any fail: file remediation task + flag owner.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">spec.md acceptance criteria</tool>
+    <tool name="Bash">curl / PowerShell for endpoint checks</tool>
+    <tool name="Write">exit-gate summary</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/040-phase-2-exit.md — FR-08 through FR-14 pass/fail summary</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 FRs (FR-08 through FR-14) marked PASS in the summary doc.</criterion>
+    <criterion testable="true">Any FAIL has a corresponding remediation task filed.</criterion>
+    <criterion testable="true">TASK-INDEX.md reflects Phase 2 ✅ status when all pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor protocol.</protocol>
+  </execution>
+</task>

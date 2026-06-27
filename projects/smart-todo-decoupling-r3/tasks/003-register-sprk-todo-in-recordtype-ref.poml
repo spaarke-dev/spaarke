@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Register `sprk_todo` in `sprk_recordtype_ref` per polymorphic-resolver convention</title>
+    <phase>Phase 1: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>002</dependencies>
+    <blocks>040</blocks>
+    <tags>dataverse, solution</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Single row insert into a reference table. Modifies Dataverse data but no `.cs`/`.ts` code; tags include `dataverse`. STANDARD rigor.</rigor-reason>
+    <parallel-group>P1-W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Insert a row into `sprk_recordtype_ref` with `sprk_recordlogicalname = "sprk_todo"` so existing entities can reference `sprk_todo` via the polymorphic-resolver convention. Future-proofs `sprk_todo` as a valid regarding target if any other entity needs to point at it.
+  </prompt>
+
+  <role>Spaarke Dataverse data developer.</role>
+
+  <goal>One row exists in `sprk_recordtype_ref` with `sprk_recordlogicalname = "sprk_todo"`. Verified via Web API query.</goal>
+
+  <context>
+    <background>The `sprk_recordtype_ref` table is the registry consulted by `PolymorphicResolverService` and `AssociateToStep` when enumerating valid regarding targets. Per spec FR-04, register `sprk_todo` for future-proofing.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">Polymorphic-resolver registry must list every entity that participates as a regarding target.</constraint>
+    <constraint source="FR-04">`sprk_recordtype_ref` row with `sprk_recordlogicalname = "sprk_todo"` required.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Query `sprk_recordtype_refs` to confirm no existing row for `sprk_todo`.</step>
+    <step order="2">Create the row via Web API or MCP `mcp__dataverse__create_record` with `sprk_recordlogicalname = "sprk_todo"` + any required display-name / metadata fields per existing schema convention.</step>
+    <step order="3">Verify the row by re-querying. Confirm GUID + logical name.</step>
+    <step order="4">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-mcp">`mcp__dataverse__create_record`, `mcp__dataverse__read_query`</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">One `sprk_recordtype_ref` row with `sprk_recordlogicalname = "sprk_todo"`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Query `sprk_recordtype_refs?$filter=sprk_recordlogicalname eq 'sprk_todo'` returns exactly one row.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor; no Step 9.5 quality gates required.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,50 @@
+<task id="R3-083" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Wire event-publishing into remaining entity mutation endpoints (per inventory)</title>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <phase>P8</phase>
+    <parallel-group>R (with 081, 082)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-4h (varies by inventory)</estimated-effort>
+    <tags>bff-api,membership,event-publishing,phase2</tags>
+    <relevant-files>
+      <file>(per inventory — task / opportunity / other entity cluster endpoints)</file>
+    </relevant-files>
+    <dependencies>080, 081</dependencies>
+  </metadata>
+  <prompt>Per inventory, hook MembershipChangedEvent publishing into any remaining mutation endpoints (e.g., task, opportunity, contact relationships). Same pattern as 081.</prompt>
+  <goal>All inventoried endpoints publish events. Coverage matches inventory checklist 100%.</goal>
+  <constraints>
+    <constraint source="spec Q2">Fire-and-forget</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>event-publishing-service-bus</topic>
+    <files>
+      <file>.claude/patterns/api/error-handling.md</file>
+      <file>projects/spaarke-platform-foundations-r3/notes/event-source-inventory.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + inventory remaining clusters</step>
+    <step order="1">Hook each endpoint per task 081 pattern</step>
+    <step order="2">Tests + checklist verification</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">All inventory items addressed (AC-1P2.4)</criterion>
+  </acceptance-criteria>
+  <completion-notes>
+Verify-empty close-out per task 080 inventory §3.D + §3.E + §6.2 recommendation. Re-grep on 2026-06-22 confirmed inventory holds: 0 `sprk_task` references + 0 `sprk_opportunity` references in src/server/api/Sprk.Bff.Api/ (4 grep passes: logical-name scan, MapPost/Put/Patch/Delete + entity-name combo, Api/ subtree, Endpoints/ subtree — all 0 matches).
+
+No source code changes. No tests added. No publish-size impact. No CVE delta.
+
+Decision record authored at `projects/spaarke-platform-foundations-r3/notes/task-083-verify-empty.md` (new) documenting: grep evidence, cross-reference to inventory, cross-reference to task 085 recon-path handoff, explicit no-op decision, FR-2P2.6 + AC-1P2.4 vacuous-satisfaction acceptance for empty clusters.
+
+Load-bearing junction-freshness path for `sprk_task` + `sprk_opportunity` in R3 is the nightly `MembershipReconciliationJob` (task 085, FR-2P2.7) — operator expectation: 24h max staleness, not real-time, consistent with the §6.1 `sprk_assigned*` matter-cluster finding.
+
+No overlap with parallel siblings 082 (Document + Event clusters) or 085 (recon job — explicit handoff target).
+  </completion-notes>
+</task>

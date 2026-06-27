@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Outbound sync pipeline: `SprkTodoSyncPlugin` + Service Bus route + `TodoGraphSyncHandler`</title>
+    <phase>Phase 7: Graph Sync Engine</phase>
+    <status>not-started</status>
+    <estimated-effort>6-8 hours</estimated-effort>
+    <dependencies>002, 016, 018, 060</dependencies>
+    <blocks>062, 064, 065, 068</blocks>
+    <tags>bff-api, api, backend, plugin, dataverse, worker</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New plugin + `.cs` services + ServiceBus message route. Tags include `bff-api` + `plugin` + `worker`; modifies multiple files. FULL rigor.</rigor-reason>
+    <parallel-group>P7-W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Multiple parts of the same pipeline; sequential within this task ensures coherent design.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the outbound sync pipeline: (1) Dataverse plugin `SprkTodoSyncPlugin` on `sprk_todo` Create/Update enqueues a Service Bus message `{ todoId, userId, op, timestamp }`. (2) `ServiceBusJobProcessor` routes the new `TodoSync` message type to `TodoGraphSyncHandler`. (3) `TodoGraphSyncHandler` performs Graph PATCH/POST via OBO, populates `linkedResources[0]` with `{ webUrl: DeepLinkBuilder.BuildTodoUrl(todoId), externalId: todoId.ToString(), applicationName: "Spaarke" }`. Honors the feature flag — Null-Object impl no-ops when flag off (per task 018 scaffolding).
+  </prompt>
+
+  <role>Spaarke BFF API + Dataverse plugin developer with Service Bus + Microsoft Graph SDK + OBO expertise.</role>
+
+  <goal>Plugin enqueues on `sprk_todo` Create/Update. Service Bus processor routes `TodoSync` messages. Handler PATCHes Graph todoTask with field mapping + `linkedResources[0]`. Feature flag off → Null-Object path. Tests cover the full happy path + error paths.</goal>
+
+  <context>
+    <background>This is the outbound half of the bidirectional sync. Inbound (webhook) is task 066. Loop prevention (task 064) layers on top.</background>
+    <relevant-files>
+      <file>src/dataverse/plugins/Sprk.Dataverse.Plugins/SprkTodoSyncPlugin.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Todo/TodoGraphSyncHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Todo/ITodoGraphSyncHandler.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Todo/TodoGraphSyncHandlerTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-21">Plugin → Service Bus → Handler → Graph PATCH/POST with `linkedResources[0]` populated.</constraint>
+    <constraint source="FR-24">Field mapping per design §6.3.</constraint>
+    <constraint source="ADR-028">Use cached OBO token flow for Graph calls.</constraint>
+    <constraint source="ADR-032">Honor feature flag — Null-Object impl no-ops when flag off.</constraint>
+    <constraint source="NFR-05">Exponential backoff on 429 (1→2→4→8→cap 30s); circuit breaker (5 consecutive 429s → 5-min pause).</constraint>
+    <constraint source="NFR-06">Audit-log every sync op with correlation id.</constraint>
+    <constraint source="bff-extensions.md §F">Test obligation: unit tests for the handler.</constraint>
+    <constraint source="CLAUDE.md §10">BFF publish-size verification.</constraint>
+    <constraint source="project">Plugin assembly placement decision (UQ-1) — DEFAULT: existing `Sprk.Dataverse.Plugins` assembly unless deploy-bundle composition argues for a new assembly. Document choice in task notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/plugin-structure.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-plugin-enqueue-only" location=".claude/patterns/dataverse/plugin-structure.md">Plugins should enqueue, never call HTTP. ADR-002 binding.</pattern>
+      <pattern name="servicebus-message-routing" location="src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs">Existing message-type dispatch pattern.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Choose plugin assembly (UQ-1 resolution) — default `Sprk.Dataverse.Plugins`. Document decision in task notes.</step>
+    <step order="2">Author `SprkTodoSyncPlugin` (registered on `sprk_todo` Create + Update, Post-Operation, async). Plugin builds `TodoSyncMessage { todoId, userId, op, timestamp }` and enqueues to Service Bus.</step>
+    <step order="3">Extend `ServiceBusJobProcessor` to recognize `TodoSync` message type; route to `ITodoGraphSyncHandler.SyncAsync(...)`.</step>
+    <step order="4">Implement `TodoGraphSyncHandler.SyncAsync`: read `sprk_todo` from Dataverse; check feature flag (Null-Object handles flag-off — this real impl runs only when flag on); compute Graph PATCH/POST body per design §6.3 field mapping; populate `linkedResources[0]` via `IDeepLinkBuilder`; call Graph via OBO; persist `sprk_graphtodotaskid` + `sprk_lastsyncedutc` + `sprk_synchash` back to Dataverse.</step>
+    <step order="5">Add exponential-backoff + circuit-breaker policies (Polly or similar) for Graph 429 handling per NFR-05.</step>
+    <step order="6">Add audit logging with correlation id per NFR-06.</step>
+    <step order="7">Unit tests for handler: happy create path, happy update path, 429 retry behavior, circuit-breaker activation, field-mapping correctness.</step>
+    <step order="8">DI registration: replace the Null-Object binding for `ITodoGraphSyncHandler` with `TodoGraphSyncHandler` when feature flag on. Verify symmetric registration (no `if (flag) { Register... }`).</step>
+    <step order="9">Run `dotnet build` + `dotnet test`. BFF publish-size + CVE checks.</step>
+    <step order="10">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/dataverse/plugins/Sprk.Dataverse.Plugins/SprkTodoSyncPlugin.cs`</output>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Services/Todo/TodoGraphSyncHandler.cs`</output>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` (extended)</output>
+    <output type="test">`tests/unit/Sprk.Bff.Api.Tests/Services/Todo/TodoGraphSyncHandlerTests.cs`</output>
+    <output type="docs">`projects/smart-todo-decoupling-r3/notes/plugin-assembly-decision.md` (UQ-1)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Plugin enqueues a message on `sprk_todo` Create + Update.</criterion>
+    <criterion testable="true">`ServiceBusJobProcessor` routes `TodoSync` to handler.</criterion>
+    <criterion testable="true">Handler PATCHes/POSTs Graph todoTask with correct field mapping + `linkedResources[0]`.</criterion>
+    <criterion testable="true">Feature flag off → Null-Object no-op (no Graph calls).</criterion>
+    <criterion testable="true">429 triggers exponential backoff; 5 consecutive 429s open circuit.</criterion>
+    <criterion testable="true">Every sync op produces an audit log entry with correlation id.</criterion>
+    <criterion testable="true">Unit tests pass; BFF publish-size delta justified.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check (ADR-001 / ADR-028 / ADR-032) + code-review.</protocol>
+  </execution>
+</task>

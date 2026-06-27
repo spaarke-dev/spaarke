@@ -61,6 +61,54 @@ export type {
 // Required by WorkspaceWidgetRegistry.registerWorkspaceWidget().
 export type { WidgetMetadata } from './types/shared';
 
+// ---------------------------------------------------------------------------
+// Types — Canonical WorkspaceTab (R6 Pillar 6a gate; FR-31)
+//
+// Shared contract for Pillars 6a (state model), 6b (chat tools that mutate
+// tabs), 6c (workspace events), 7 (memory composition), and 9 (visibility
+// contract). See `./types/WorkspaceTab.ts` for the full design rationale.
+// ---------------------------------------------------------------------------
+
+export type {
+  WorkspaceTab,
+  WorkspaceTabWidgetType,
+  WorkspaceTabWidgetData,
+  SummaryTabWidgetData,
+  DocumentViewerTabWidgetData,
+  DashboardTabWidgetData,
+  TableTabWidgetData,
+  WorkspaceTabSourceProvenance,
+  WorkspaceTabMatterContext,
+} from './types/WorkspaceTab';
+
+// ---------------------------------------------------------------------------
+// Types — Pillar 9 Widget Visibility Contract (R6 task 071; FR-55)
+//
+// Discriminated union (4 variants — Summary, DocumentViewer, Dashboard, Table)
+// describing the agent-visible state each widget MAY opt into exposing to
+// Pillar 9's prompt builder. Consumed by:
+//   - task 072 (WorkspaceWidgetRegistry getVisibleState extension)
+//   - task 073 (per-widget implementations)
+//   - task 074 (Pillar 9 prompt builder — per-turn system-prompt snippet)
+//
+// Privacy default per ADR-015: widgets that don't implement
+// `getAgentVisibleState()` contribute nothing to the prompt. Opt-in is
+// explicit. See `./types/SerializedWidgetState.ts` for full per-variant
+// rationale.
+// ---------------------------------------------------------------------------
+
+export type {
+  SerializedWidgetState,
+  SerializedSummaryState,
+  SerializedDocumentViewerState,
+  SerializedDashboardState,
+  SerializedTableState,
+  GetAgentVisibleState,
+  _DiscriminatorAlignment,
+} from './types/SerializedWidgetState';
+
+export { assertNeverSerializedState } from './types/SerializedWidgetState';
+
 export * from './types/event-types';
 
 // ---------------------------------------------------------------------------
@@ -73,12 +121,14 @@ export {
   replaceWorkspaceWidget,
   resolveWorkspaceWidget,
   getWorkspaceWidgetMetadata,
+  getWorkspaceWidgetVisibleStateFn,
   getAllWorkspaceWidgetTypes,
   hasWorkspaceWidget,
   clearWorkspaceRegistry,
 } from './registry/WorkspaceWidgetRegistry';
 
-export type { WorkspaceWidgetRegistration } from './registry/WorkspaceWidgetRegistry';
+// Task 072 (D-C-27) — Pillar 9 visibility extension.
+export type { WorkspaceWidgetRegistration, RegistryGetAgentVisibleState } from './registry/WorkspaceWidgetRegistry';
 
 // ContextWidgetRegistry — lazy-load with null-return for unknown types
 export {
@@ -154,7 +204,11 @@ export type {
   StructuredOutputField,
   StructuredOutputDisplayHint,
 } from './widgets/workspace/StructuredOutputStreamWidget';
-export { SUMMARIZE_SCHEMA, INSIGHTS_PLAYBOOK_SCHEMA } from './widgets/workspace/StructuredOutputStreamWidget';
+export {
+  SUMMARIZE_SCHEMA,
+  INSIGHTS_PLAYBOOK_SCHEMA,
+  SUM_CHAT_OUTPUT_SCHEMA,
+} from './widgets/workspace/StructuredOutputStreamWidget';
 export { STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE } from './widgets/workspace/register-structured-output-stream-widget';
 
 // ---------------------------------------------------------------------------
@@ -431,6 +485,43 @@ registerContextWidget('file-preview', {
 });
 
 // ---------------------------------------------------------------------------
+// Widgets: ExecutionTraceWidget (context pane — Claude-Code-like trace)
+//
+// R6 task 061 / D-C-14. Subscribes to the six `context.*` trace event types
+// added by R6 task 059 (D-C-12) and renders an ordered timeline of the chat
+// agent's deterministic activity (tool calls, knowledge retrievals,
+// playbook-node executions, decisions). Per ADR-015 BINDING: renders only
+// the typed enumerated fields from each event payload (tool name + decision
+// + timestamp + numeric metrics) — NEVER user message text or document
+// content. Per ADR-030 + NFR-05: subscribes to the existing `context`
+// channel — no new channel introduced.
+//
+// NOTE: registration in ContextWidgetRegistry is performed by task 062 — this
+// task only exposes the widget + its types via the package barrel.
+// ---------------------------------------------------------------------------
+
+export { default as ExecutionTraceWidget } from './widgets/context/ExecutionTraceWidget';
+export type { ExecutionTraceData, ExecutionTraceWidgetProps } from './widgets/context/ExecutionTraceWidget';
+export { EXECUTION_TRACE_WIDGET_TYPE, MAX_TRACE_ENTRIES } from './widgets/context/ExecutionTraceWidget';
+
+// R6 task 062 / D-C-15: register the widget so the SpaarkeAi shell can mount it
+// as the Context-pane primary widget via `resolveContextWidget('execution-trace')`.
+// Registration is idempotent (the registry is first-wins; the parallel inline
+// path in `src/registry/register-context-widgets.ts` is the mirror call for
+// shell entry points that bypass this barrel — both call sites are deliberate
+// per the FilePreviewContextWidget pattern above).
+registerContextWidget('execution-trace', {
+  factory: () =>
+    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
+    // widget's default export is typed ContextWidgetComponent<ExecutionTraceData>.
+    // Generic variance at the registry boundary — see PlaybookGalleryWidget
+    // registration above for the same pattern.
+    import('./widgets/context/ExecutionTraceWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
+});
+
+// ---------------------------------------------------------------------------
 // Hooks: useWorkspaceLayouts (R4 task 051 / C-3 — consolidated workspace-layouts hook)
 //
 // Single shared-lib hook replacing the two divergent copies that previously
@@ -460,6 +551,30 @@ export { AI_SESSION_CHAT_SESSION_KEY, AI_SESSION_PLAYBOOK_KEY } from './provider
 
 // useAiSession — consumer hook for AiSessionContext (replaces R1 useStandaloneAi)
 export { useAiSession } from './providers/useAiSession';
+
+// ---------------------------------------------------------------------------
+// Components: InsightSummaryCard (Insights Engine Widgets r1 — Task 030 scaffold)
+//
+// Per-record AI insight surface composed of a Fluent v9 Card (inline) with an
+// optional manual modal expand (Dialog — wired in Task 031). FR-01 contract:
+//   { topic, subject, mode?, parameters?, kpiSlot?, onCitationClick? }
+//
+// Q-U3 (owner deferral): NO `onFeedback` prop. Feedback affordance deferred to
+// r2+ pending AIPU2 Cosmos `feedback` container landing on master (ADR-015).
+//
+// See projects/ai-spaarke-insights-engine-widgets-r1/decisions/DR-001-component-reuse.md
+// for the package-home + reuse-anchors rationale (ratified 2026-06-10).
+// ---------------------------------------------------------------------------
+
+export { InsightSummaryCard } from './components/InsightSummaryCard';
+export type { InsightSummaryCardProps, InsightCitationRef } from './components/InsightSummaryCard';
+
+// Task 035 — SC-01 dev sandbox (Storybook-equivalent). Renders all 6 FR-06
+// states in a responsive grid with a light/dark theme toggle and an inline
+// props table. Importable by any host (dev playground, internal admin page).
+// See src/components/InsightSummaryCard/README.md for the "why no Storybook"
+// rationale (DR-001 §Negative).
+export { InsightSummaryCardSandbox } from './components/InsightSummaryCard';
 
 // ---------------------------------------------------------------------------
 // Components: ConfidenceIndicator (AIPU2-091)

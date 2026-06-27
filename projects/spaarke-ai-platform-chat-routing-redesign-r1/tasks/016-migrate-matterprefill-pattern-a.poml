@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Migrate MatterPreFillService to stable ID (Pattern A — consumes MatterPreFillPlaybookId)</title>
+    <phase>1: §1.7 Stable IDs Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>020,021</blocks>
+    <tags>bff-api, refactoring, services, NFR-07</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; refactors hot pre-fill path; NFR-07 binding — pre-fill flow signatures + 45s timeout + $choices contract preserved; FULL per Step 0.5</rigor-reason>
+    <parallel-group>1-E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Replace the hardcoded GUID at `MatterPreFillService.cs:43-44` with a stable-ID lookup via `IPlaybookLookupService.GetByIdAsync(WorkspaceOptions.MatterPreFillPlaybookId, tenantId)`. Per Pattern A, the typed option is already pre-added in task 013, so this migration only modifies `MatterPreFillService.cs` + its tests — no `WorkspaceOptions.cs` edit needed. NFR-07 BINDING: do NOT modify the pre-fill flow signature, `useAiPrefill` consumer, 45s timeout, or `$choices` output contract.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in pre-fill orchestration + NFR-07 binding invariants.</role>
+
+  <goal>
+    `MatterPreFillService.cs` resolves the pre-fill playbook via `IPlaybookLookupService.GetByIdAsync(options.MatterPreFillPlaybookId, tenantId)`. The hardcoded GUID is removed. The pre-fill flow signature, 45s timeout, `useAiPrefill` consumer, and `$choices` output schema are unchanged. Unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` updated to use stable ID. Integration test for matter pre-fill end-to-end passes.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-02 + §1.7 Pattern A + NFR-07. `MatterPreFillService.cs:43-44` carries the hardcoded GUID for the matter pre-fill playbook. Pattern A migration shape: inject `IOptions&lt;WorkspaceOptions&gt;`, read `MatterPreFillPlaybookId` (added in task 013), call `IPlaybookLookupService.GetByIdAsync()`. The service's PUBLIC contract (method signature, timeout, output shape consumed by `useAiPrefill`) is BINDING — must remain unchanged.
+
+      **Refresh (Q&A 2026-06-22 Q1)**: This POML's language was refreshed to match the post-Q1 code reality — stable lookups go through `sprk_playbookid` (immutable opaque ID, GUID-format), NOT `sprk_playbookcode`. See spec.md § Canonical Field Naming for the corrected role table.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/MatterPreFillService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Options/WorkspaceOptions.cs (read-only — set in task 013)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookLookupService.cs (read-only — existing)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/MatterPreFillServiceTests.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/MatterPreFillIntegrationTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — inject `IOptions&lt;WorkspaceOptions&gt;` + `IPlaybookLookupService` directly.</constraint>
+    <constraint source="ADR-013">`MatterPreFillService` is inside `Services/Ai/`; consumer (CRUD code) goes through the AI facade — preserve current public contract.</constraint>
+    <constraint source="ADR-014">Lookup uses the 5-min cached `IPlaybookLookupService`.</constraint>
+    <constraint source="ADR-018">Read `WorkspaceOptions.MatterPreFillPlaybookId` via `IOptions&lt;T&gt;`; do NOT use raw `IConfiguration[]` indexer.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect ≤0.1 MB delta.</constraint>
+    <constraint source="spec">NFR-07 BINDING: pre-fill flow signature, 45s timeout, `useAiPrefill` consumer contract, `$choices` output unchanged.</constraint>
+    <constraint source="spec">NFR-02: production-bound playbook `"Create New Matter Pre-Fill"` (now `sprk_playbookid = "create-matter-prefill"` per task 014) unchanged.</constraint>
+    <constraint source="project">DO NOT modify `WorkspaceOptions.cs` (task 013 owns); DO NOT modify any of the 3 sibling Pattern A migration target files (017/018/019).</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10 F): update unit tests + add integration regression test asserting `useAiPrefill` consumer contract preserved.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `MatterPreFillService.cs:43-44` — locate the hardcoded GUID. Trace its use through the resolution path.</step>
+    <step order="2">Verify task 013 populated `WorkspaceOptions.MatterPreFillPlaybookId = "create-matter-prefill"`.</step>
+    <step order="3">Verify task 014 backfilled `sprk_playbookid = "create-matter-prefill"` on the production playbook (run `GET /api/ai/playbooks/by-id/create-matter-prefill`).</step>
+    <step order="4">Refactor `MatterPreFillService.cs`: inject `IOptions&lt;WorkspaceOptions&gt;` + `IPlaybookLookupService` via constructor; replace hardcoded GUID with `await _playbookLookup.GetByIdAsync(_options.Value.MatterPreFillPlaybookId, tenantId, ct)`.</step>
+    <step order="5">Verify the public method signature (the one `useAiPrefill` calls) is unchanged. Verify the timeout (45s) is unchanged. Verify the `$choices` output shape is unchanged.</step>
+    <step order="6">Update `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/MatterPreFillServiceTests.cs` — fixtures use stable ID, mocks return the typed playbook entity.</step>
+    <step order="7">Add/update integration test `tests/integration/Sprk.Bff.Api.IntegrationTests/MatterPreFillIntegrationTests.cs` asserting end-to-end pre-fill returns `$choices`-shaped output with timeout ≤45s.</step>
+    <step order="8">Run `dotnet build` + `dotnet test`. Pass.</step>
+    <step order="9">Measure publish size; report delta.</step>
+    <step order="10">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="11">Update TASK-INDEX.md: task 016 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">MatterPreFillService.cs + WorkspaceOptions.cs + PlaybookLookupService.cs</tool>
+    <tool name="Edit">Apply Pattern A migration + update tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+    <tool name="Grep">Verify zero hardcoded GUID remains in MatterPreFillService.cs</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/MatterPreFillService.cs — refactored to stable ID</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/MatterPreFillServiceTests.cs — fixtures use stable ID</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/MatterPreFillIntegrationTests.cs — NFR-07 regression test</output>
+    <output type="docs">notes/handoffs/016-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`MatterPreFillService.cs` injects `IOptions&lt;WorkspaceOptions&gt;` + `IPlaybookLookupService`.</criterion>
+    <criterion testable="true">No hardcoded GUID for matter pre-fill playbook remains in the service.</criterion>
+    <criterion testable="true">`grep "2d660cad" src/server/api/Sprk.Bff.Api/Services/Ai/MatterPreFillService.cs` returns zero matches (assumed GUID prefix; verify in code).</criterion>
+    <criterion testable="true">Public method signature consumed by `useAiPrefill` unchanged.</criterion>
+    <criterion testable="true">45s timeout invariant preserved.</criterion>
+    <criterion testable="true">`$choices` output shape preserved.</criterion>
+    <criterion testable="true">Unit tests + integration test exit 0.</criterion>
+    <criterion testable="true">Publish-size delta within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with tasks 017, 018, 019 in wave 1-E because each consumes a DIFFERENT typed option pre-added in task 013 and modifies a DIFFERENT service file. Do not touch other Pattern A files. If you discover a shared private helper that would force a multi-file edit, STOP and escalate — that signals the wave's parallel-safe assumption is wrong.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

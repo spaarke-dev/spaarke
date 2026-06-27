@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/matter-prefill.schema.json",
+  "title": "New Matter Field Extraction — Output Schema (ACT-023)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='ACT-023' (sprk_name='New Matter Field Extraction'), referenced by playbook PB-008 'Create New Matter Pre-Fill' (id 2d660cad-d418-f111-8343-7ced8d1dc988). R6 task 034 (D-B-05) — populates sprk_outputschemajson on the existing action row. NFR-07 BINDING: the schema MIRRORS VERBATIM the existing wizard consumer contract defined by the AiPreFillResult internal DTO in src/server/api/Sprk.Bff.Api/Services/Workspace/MatterPreFillService.cs (lines 678-703) and consumed by the useAiPrefill React hook in src/client/shared/Spaarke.UI.Components/src/hooks/useAiPrefill.ts. The pre-fill flow signatures, the 45s timeout in MatterPreFillService.ExtractFieldsViaPlaybookAsync (line 311), and the useAiPrefill hook contract REMAIN UNCHANGED — this schema is metadata-only (declares the same data shape that already flows through the pipeline today). All fields are nullable to match the existing behavior: the LLM may omit a field when the source document does not contain it; the wizard's BuildPreFillResponse (line 621-647) gracefully handles missing fields by leaving them out of PreFilledFields.",
+  "type": "object",
+  "additionalProperties": true,
+  "$comment-additional-properties": "additionalProperties=true (NOT false) — the wizard consumer is RESILIENT to extra fields per MatterPreFillService.ParseAiResponse (line 406-455): it tries direct schema first (HasAnyField check at line 477-481), then falls back to entity-extraction format ({entities[], keyValuePairs[]}), then to regex-based extraction. Setting additionalProperties=true preserves this resilience and matches the existing AiPreFillResult JsonSerializer.Deserialize behavior (System.Text.Json default UnmappedMemberHandling.Skip silently ignores extras). Tightening to additionalProperties=false here would break the existing fallback paths that handle entity-extraction-format responses from the LLM.",
+  "$comment-nullable-fields": "All 7 string fields are nullable. AiPreFillResult declares each as 'string?' init-only. The Confidence number is also nullable (line 701-702). When the LLM emits a field, it can be either a string value or null/missing — both are valid. The wizard's BuildPreFillResponse handles nulls by simply not adding the field to PreFilledFields (line 624-630).",
+  "$comment-property-order": "Property declaration order matches the AiPreFillResult DTO declaration order (matterTypeName, practiceAreaName, matterName, matterDescription, assignedAttorneyName, assignedParalegalName, assignedOutsideCounselName, confidence). Unlike SUM-CHAT@v1 where declaration order is load-bearing for streaming UX, pre-fill is consumed as a single completed JSON object via PlaybookEventType.NodeCompleted (MatterPreFillService line 338-345) — streaming order is not user-visible.",
+  "$comment-consumer-contract": "Field names match EXACTLY the JsonPropertyName attributes on AiPreFillResult (camelCase). The useAiPrefill hook's fieldExtractor receives the parsed object and splits it into textFields + lookupFields (line 8-30 of useAiPrefill.ts JSDoc example). Matter wizard fieldExtractor maps: matterName→form.matterName, summary←matterDescription, matterTypeName→matterType lookup, practiceAreaName→practiceArea lookup, assignedAttorneyName→Contact lookup, etc.",
+  "properties": {
+    "matterTypeName": {
+      "type": ["string", "null"],
+      "description": "Suggested matter type display name (e.g., 'Litigation', 'Transactional', 'IP'). Resolved against sprk_mattertype Dataverse rows via findBestLookupMatch in the useAiPrefill hook (lookupResolvers.matterTypeName)."
+    },
+    "practiceAreaName": {
+      "type": ["string", "null"],
+      "description": "Suggested practice area display name (e.g., 'Commercial Litigation', 'Patent Prosecution'). Resolved against sprk_practicearea Dataverse rows via lookupResolvers.practiceAreaName."
+    },
+    "matterName": {
+      "type": ["string", "null"],
+      "description": "Suggested matter name (e.g., 'Acme Corp v. Smith', 'XYZ Patent Application'). Direct text field — no lookup resolution."
+    },
+    "matterDescription": {
+      "type": ["string", "null"],
+      "description": "Suggested matter description / summary text. Mapped to the wizard's 'summary' form field in fieldExtractor (NOT matterDescription — naming difference between AI output and form field is intentional per BuildPreFillResponse line 627)."
+    },
+    "assignedAttorneyName": {
+      "type": ["string", "null"],
+      "description": "Suggested lead attorney display name. Resolved against contact Dataverse rows via lookupResolvers.assignedAttorneyName (searchContactsAsLookup)."
+    },
+    "assignedParalegalName": {
+      "type": ["string", "null"],
+      "description": "Suggested paralegal display name. Resolved against contact Dataverse rows via lookupResolvers.assignedParalegalName."
+    },
+    "assignedOutsideCounselName": {
+      "type": ["string", "null"],
+      "description": "Suggested outside counsel display name. Resolved against contact / account Dataverse rows via lookupResolvers.assignedOutsideCounselName."
+    },
+    "confidence": {
+      "type": ["number", "null"],
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Overall extraction confidence in [0.0, 1.0]. MatterPreFillService BuildPreFillResponse clamps to [0, 1] (line 632). When null, the per-node Confidence from PlaybookStreamEvent.NodeOutput.Confidence is used as fallback (line 344)."
+    }
+  }
+}

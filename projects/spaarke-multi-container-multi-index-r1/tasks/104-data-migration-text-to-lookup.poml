@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="104" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Data migration: `Migrate-SearchIndexLookup.ps1` (text → lookup on 7 entities) + count verification</title>
+    <phase>G: Lookup-driven multi-index</phase>
+    <status>completed</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>103</dependencies>
+    <blocks>105, 110</blocks>
+    <tags>dataverse, data-migration, powershell</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Data integrity-critical. Touches production records on 7 entities. Idempotency + count verification mandatory. Code-review at Step 9.5.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential — depends on BFF (102/103) being live with text-fallback so a partial migration doesn't break searches mid-flight.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create `scripts/phase-g-lookup-migration/Migrate-SearchIndexLookup.ps1`. For each of the 7 entities (BU, Matter, Project, Invoice, Event, WorkAssignment, Document), find records where `sprk_searchindexname` is non-empty AND `sprk_aisearchindexid` is null. For each matched record, look up the `sprk_aisearchindex` row whose `sprk_searchindexname` equals the source value AND `sprk_targetentitytype` matches the entity (e.g., text value `spaarke-file-index` on a Matter → look up the row with that index name AND target=Matter... but if there's no Matter-targeted row for that index, fall through to a Document-targeted row matching the index name). Set `sprk_aisearchindexid` lookup on the source record. Idempotent (re-runnable safely). Outputs a summary report: per-entity counts (source text-populated count, migrated count, skipped-mismatch count).
+  </prompt>
+
+  <role>
+    Dataverse ops engineer comfortable with PowerShell + the `Microsoft.Xrm.Data.PowerShell` module (or Web API via `Invoke-RestMethod`). Familiar with the `sprk_aisearchindex` schema and Choice values from spec §4.
+  </role>
+
+  <goal>
+    All records on the 7 entities that had `sprk_searchindexname` text set now ALSO have `sprk_aisearchindexid` lookup set to the matching catalog row. Counts verified per entity: `text_set == lookup_set`. Script is idempotent so re-runs are safe.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+      <file>scripts/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md §9">Script paths: `scripts/phase-g-lookup-migration/Migrate-SearchIndexLookup.ps1`. Verification queries are in §9 (text_set == lookup_set per entity).</constraint>
+    <constraint source="spec.md §10 step 5">After this task, both text + lookup columns hold equivalent data per entity. No drops yet.</constraint>
+    <constraint source="design.md INV-5 spirit">Script MUST NOT overwrite an existing `sprk_aisearchindexid` value (mirrors the wizard cascade convention). Only sets the lookup when it's null AND the text column has a value.</constraint>
+    <constraint source="spec.md §3">Choice match strategy: prefer a row where `sprk_targetentitytype` matches the source entity logical name; if no match exists, log a "no target row" warning and skip that record (manual intervention).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+      <file>scripts/Backfill-MultiContainerMultiIndex-ParentRecords.ps1</file>
+      <file>scripts/Backfill-MultiContainerMultiIndex-Documents.ps1</file>
+    </files>
+    <patterns>
+      <pattern name="Idempotent migration" location="standard">
+        Filter source query to `sprk_searchindexname NOT NULL AND sprk_aisearchindexid IS NULL`. Re-runs of the script only touch records that haven't been migrated yet.
+      </pattern>
+      <pattern name="Halt-loud on mismatch" location="Backfill-MultiContainerMultiIndex-*.ps1">
+        Same convention as existing backfill scripts: when no catalog row matches the source text value (or no row matches the source entity type), log a clear WARNING with record ID + reason. Do not silently default.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create directory `scripts/phase-g-lookup-migration/`. Create `Migrate-SearchIndexLookup.ps1`.</step>
+    <step order="2">Script structure: (a) connect to Dataverse (param: `-DataverseUrl`); (b) fetch all active `sprk_aisearchindex` rows into a lookup dict keyed by `(sprk_searchindexname, sprk_targetentitytype-label)`; (c) loop over 7 entities; (d) per entity, fetch records where text col is non-empty + lookup is null; (e) for each record, match a catalog row by (text value, entity type); (f) set lookup; (g) emit per-record OK / SKIP-no-target / SKIP-no-match lines.</step>
+    <step order="3">Add `-DryRun` switch: skips the actual update, just logs the intended actions. Default = dry-run on first invocation, requires `-Apply` to commit (defensive UX).</step>
+    <step order="4">Add summary block at end: per-entity counts (text_set, lookup_set_pre, lookup_set_post, migrated, skipped-no-target, skipped-no-match).</step>
+    <step order="5">Run with `-DryRun` first against `spaarkedev1.crm.dynamics.com`. Verify counts match expectations (recall: ~11 Matters with file-index, ~4 with knowledge-index-v2, 32 null; plus similar for the other entities).</step>
+    <step order="6">Run with `-Apply`. Confirm summary shows `text_set == lookup_set_post` per entity.</step>
+    <step order="7">Verification queries from spec §9 — Dataverse MCP `read_query` to confirm `(SELECT COUNT(*) FROM sprk_matter WHERE sprk_searchindexname IS NOT NULL) == (SELECT COUNT(*) FROM sprk_matter WHERE _sprk_aisearchindexid_value IS NOT NULL)`. Repeat for all 7 entities.</step>
+    <step order="8">Run code-review skill on the PowerShell script. Update `TASK-INDEX.md`: 104 🔲 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create the new PowerShell script</tool>
+    <tool name="Bash">Run script with -DryRun then -Apply</tool>
+    <tool name="Bash">Verification via Dataverse MCP read_query</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/phase-g-lookup-migration/Migrate-SearchIndexLookup.ps1</output>
+    <output type="data">All 7 entities have lookup populated wherever text was populated (counts match)</output>
+    <output type="report">Migration summary (logged + saved to notes/phase-g/migration-run-{timestamp}.log)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For each of the 7 entities: `COUNT(text NOT NULL) == COUNT(lookup NOT NULL)` after migration.</criterion>
+    <criterion testable="true">Re-running the script with `-Apply` reports zero new migrations (idempotency verified).</criterion>
+    <criterion testable="true">Any "no target row" or "no match" SKIP lines are reviewed manually; either the catalog gets a missing row added (then re-run) or the source record is flagged for ops review.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    Completed 2026-06-10. Two deliverables:
+
+    1. **Script**: `scripts/phase-g-lookup-migration/Migrate-SearchIndexLookup.ps1` (336 lines).
+       - Default = dry-run; `-Apply` required to commit.
+       - Halt-loud on unmapped text values (yellow WARN + exit code 2).
+       - Idempotency by OData filter (`sprk_searchindexname ne null and _sprk_ai_search_index_value eq null`).
+       - Markdown log written to `notes/phase-g/migration-run-{timestamp}.log`.
+
+    2. **Live migration via MCP**: 196 records updated across 5 entities
+       (sprk_invoice + sprk_event had zero text-set records).
+
+       | Entity | text_set | lookup_set (post) | migrated |
+       |---|---:|---:|---:|
+       | businessunit | 2 | 2 | 2 |
+       | sprk_matter | 15 | 15 | 15 |
+       | sprk_project | 3 | 3 | 3 |
+       | sprk_workassignment | 2 | 2 | 2 |
+       | sprk_document | 174 | 174 | 174 |
+       | **Total** | **196** | **196** | **196** |
+
+       Verification (text_set == lookup_set): PASS on all 5 entities.
+       Mapping: `spaarke-file-index` → `dd04e55f-dd64-f111-ab0c-7ced8ddc4a05` (Document-targeted),
+       `spaarke-knowledge-index-v2` → `c104e55f-dd64-f111-ab0c-7ced8ddc4a05` (Document-targeted).
+       Zero SKIP-no-match cases (all text values mapped cleanly).
+
+    Code-review: PASS (no critical issues; 336 lines justified by inline help + per-record reporting).
+    INV-5 honored — script never writes to records where the lookup is already set.
+  </notes>
+</task>

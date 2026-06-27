@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-B-03 Migrate `summarize-document-for-chat@v1` action: populate outputSchema + node destination = chat</title>
+    <phase>Phase B — Schema-Aware Output</phase>
+    <status>completed</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>030, 031</dependencies>
+    <blocks>040, 048</blocks>
+    <tags>dataverse, seed, migration</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Data migration on existing production action; tags include `migration` (STANDARD per Step 3.5.5 decision tree); no code change; idempotency required.</rigor-reason>
+    <parallel-group>B-G2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `sprk_analysisaction` row for `summarize-document-for-chat@v1` only + the matching playbook node. Sibling tasks 033/034/035 migrate different actions/nodes — no row overlap.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Populate the new `outputSchema` field on the existing `summarize-document-for-chat@v1`
+    `sprk_analysisaction` row, and set the playbook node `destination = chat`. The
+    outputSchema is derived from the action's current `$choices`-constrained output
+    contract (today the action produces a streaming JSON object with at least `summary:
+    string` and `tldr: string[]`; inspect the existing JPS / action definition for the
+    exact fields). The chat destination preserves current behavior (output renders inline
+    in chat). This migration is the chat-side counterpart to task 033 (workspace-side).
+
+    The migration script MUST be idempotent — re-running it on a row that already has
+    `outputSchema` populated MUST succeed without destructive effect. Use a guard query
+    (GET the row; check if `sprk_outputschemajson` is null) before applying the update. Same
+    pattern applies for the node-level `destination` change.
+
+    No BFF code changes here. This task seeds data only. The downstream
+    `StructuredOutputStreamWidget` (task 040) reads the populated outputSchema at render
+    time. The CapabilityRouter dedup (task 042) uses the chat destination to enforce
+    one-route-per-intent for `/summarize` natural-language path.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Familiar with the existing JPS pipeline + `$choices`
+    output contract for `summarize-document-for-chat@v1`, the scope library schema, and
+    the Dataverse Web API for record updates. Comfortable composing JSON Schema documents
+    that mirror an existing JPS output shape.
+  </role>
+
+  <goal>
+    `sprk_analysisaction` row for action code `summarize-document-for-chat@v1` has
+    `sprk_outputschemajson` populated with a valid JSON Schema describing the action's
+    current output shape (at minimum the `tldr: string[]` and `summary: string` fields
+    that R5 SC-18 surfaced). The playbook node referencing this action has its
+    `destination` set to `chat`. Migration script is committed + idempotent + applied to
+    Spaarke Dev. Existing chat `/summarize` behavior is preserved (regression-checked by
+    invoking `/summarize` in chat and confirming the output continues to render inline as
+    today).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="jps-guide">docs/guides/JPS-AUTHORING-GUIDE.md</file>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+    <file purpose="playbook-architecture">docs/architecture/playbook-architecture.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-027">Dataverse data migration via Web API; script committed to `scripts/`; idempotent.</constraint>
+    <constraint source="ADR-029">No BFF code modified; publish-size delta = 0 MB; confirm in task notes.</constraint>
+    <constraint source="spec FR-27">Q5 RE-SHAPED: populate `outputSchema` on ACTION row (the data shape the action produces). The `destination = chat` goes on the PLAYBOOK NODE (per-playbook routing), NOT the action.</constraint>
+    <constraint source="spec NFR-11">Backward compatibility — existing chat `/summarize` behavior MUST be preserved. Schema declaration is additive; today's renderer (the not-yet-schema-aware widget) continues to receive the same streaming JSON shape.</constraint>
+    <constraint source="project">Migration script MUST be idempotent (guard with GET before PATCH) and committed to `scripts/`.</constraint>
+    <constraint source="project">outputSchema MUST be a syntactically valid JSON Schema document (validate against draft-07 or compatible meta-schema in script).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Action row PATCH via Web API" location=".claude/patterns/dataverse/web-api-client.md">
+        Pattern: query action row by alternate key (`sprk_actioncode = 'summarize-document-for-chat@v1'`);
+        GET current `sprk_outputschemajson` value; if null, PATCH with the new schema; if
+        non-null AND matches expected schema, skip; if non-null AND mismatches, fail
+        with conflict message (manual intervention required).
+      </pattern>
+      <pattern name="JPS output contract inspection" location="docs/guides/JPS-AUTHORING-GUIDE.md">
+        The existing `$choices`-constrained output for SUM-CHAT@v1 enumerates the JSON
+        fields the action emits. Walk through the action's JPS source (likely in
+        `infra/dataverse/` or seeded data) to extract the exact field types. Build a JSON
+        Schema describing those fields.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      `summarize-document-for-chat@v1` (action code `SUM-CHAT@v1`) is the chat-side
+      summarization action exercised by R5 SC-18. R5 surfaced two rendering bugs the
+      schema-aware widget (tasks 040, 041) will fix — `tldr: string[]` rendering as raw
+      JSON tokens; `entities: { orgs, persons }` rendering as raw JSON literal. This
+      migration declares the output shape as data so the widget can dispatch on field
+      type at render time.
+
+      The playbook node referencing this action also gets `destination = chat`, which is
+      consumed by `DeliverOutput` (NFR-08 unmodified) to confirm the output is delivered
+      to chat (the current behavior). When task 042 CapabilityRouter dedup lands, the
+      chat destination on this node is what proves "/summarize natural-language path
+      routes to ONE rendering — chat".
+    </background>
+    <relevant-files>
+      <file>scripts/Migrate-SumChatActionOutputSchema.ps1 (NEW)</file>
+      <file>infra/dataverse/outputschemas/sum-chat-v1.schema.json (NEW — versioned schema document referenced by migration script)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-032-migration-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Sibling tasks 033 (workspace), 034 (matter-prefill), 035 (project-prefill) migrate the other 3 actions in parallel (B-G2).</item>
+      <item>Task 040 widget array-rendering depends on this migration being applied.</item>
+      <item>Task 042 CapabilityRouter dedup relies on the chat destination set here.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: STANDARD
+      📋 REASON: Data migration on production action; idempotency required; no code change;
+                 tag `migration`
+      📖 PROTOCOL STEPS: 8 steps; Step 9.5 quality gates SKIPPED per STANDARD rigor
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 032 status 🔲; deps (030, 031) complete. Verify
+      `sprk_outputschemajson` column exists on `sprk_analysisaction` (deployed by task 030).
+      Verify node config supports `destination` (task 031).
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge files. Inspect the JPS source for SUM-CHAT@v1 (search
+      `infra/dataverse/` or `src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/`
+      seed data for the action definition). Identify the concrete output fields
+      (at minimum `summary: string`, `tldr: string[]`; inspect for entities or other
+      array/object-typed fields).
+    </step>
+    <step order="3" name="Author the JSON Schema Document">
+      Create `infra/dataverse/outputschemas/sum-chat-v1.schema.json` — a draft-07 JSON
+      Schema document describing the SUM-CHAT@v1 output. Validate it against the
+      meta-schema. Diff against any matter/project pre-fill action outputSchema (tasks
+      034, 035) for consistency in style.
+    </step>
+    <step order="4" name="Author Migration Script">
+      Create `scripts/Migrate-SumChatActionOutputSchema.ps1`. Script:
+      (a) connects to Spaarke Dev;
+      (b) GETs action row by alternate key `sprk_actioncode = 'summarize-document-for-chat@v1'`
+          (or equivalent — verify actual code in JPS source);
+      (c) checks `sprk_outputschemajson` — if null, PATCHes with schema content; if matches,
+          skip; if mismatches, FAIL with conflict;
+      (d) GETs the playbook node referencing the action; PATCHes node config to set
+          `destination = chat` (per task 031 storage surface);
+      (e) logs all actions taken.
+    </step>
+    <step order="5" name="Apply to Spaarke Dev">
+      Run the migration script. Capture output + the post-migration GET response showing
+      `sprk_outputschemajson` populated + node `destination = chat`. Record in
+      `notes/task-032-migration-evidence.md`.
+    </step>
+    <step order="6" name="Verify Idempotency">
+      Re-run script. Confirm: no error; no destructive effect.
+    </step>
+    <step order="7" name="Regression Smoke Test">
+      Invoke chat `/summarize` against a test document. Confirm output continues to
+      render in chat (existing behavior preserved). The widget is NOT yet schema-aware
+      (that's task 040), so rendering looks identical to today — the schema is declared
+      but not yet consumed by the renderer.
+    </step>
+    <step order="8" name="Confirm Acceptance + Complete">
+      Walk through acceptance criteria. Update TASK-INDEX.md: 032 🔲 → ✅. Reset
+      `current-task.md`. Report completion. Note BFF publish-size delta = 0 MB.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Power Platform CLI — environment selection, metadata verification</tool>
+    <tool name="pwsh">PowerShell 7+ — runs migration script via Invoke-RestMethod</tool>
+    <tool name="git">Stage + commit script + schema + notes on R6 worktree branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/Migrate-SumChatActionOutputSchema.ps1 (NEW)</output>
+    <output type="schema">infra/dataverse/outputschemas/sum-chat-v1.schema.json (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-032-migration-evidence.md (script output, before/after row state, idempotency-run evidence, regression smoke test confirmation)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status 032 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="report">Task completion report</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_analysisaction` row for `summarize-document-for-chat@v1` has `sprk_outputschemajson` populated with a valid draft-07 JSON Schema describing at minimum `summary: string` and `tldr: string[]` (and any other emitted fields).</criterion>
+    <criterion testable="true">Playbook node referencing this action has `destination = chat` per task 031's storage surface.</criterion>
+    <criterion testable="true">Migration script is idempotent — second run succeeds without destructive effect; conflict mismatch (existing non-null mismatching schema) FAILS loudly.</criterion>
+    <criterion testable="true">JSON Schema document validates against draft-07 meta-schema.</criterion>
+    <criterion testable="true">Regression smoke test: invoking chat `/summarize` continues to render inline as today (widget not yet schema-aware; schema declared but unconsumed).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in task notes).</criterion>
+    <criterion testable="true">TASK-INDEX.md updated (032 🔲 → ✅) and `current-task.md` reset.</criterion>
+  </acceptance-criteria>
+</task>

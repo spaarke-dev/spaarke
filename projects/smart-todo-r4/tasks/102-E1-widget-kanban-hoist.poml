@@ -1,0 +1,228 @@
+<task id="R4-102" project="smart-todo-r4">
+  <metadata>
+    <title>E-1 — Widget Kanban hoist (drag-drop + orientation + multi-select + card tools)</title>
+    <phase>Phase 2: Wave E (post-Wave-D widget/app parity)</phase>
+    <workstream>W</workstream>
+    <status>complete</status>
+    <estimated-effort>1.5-2 days</estimated-effort>
+    <tags>widget, smart-todo, peer-package, hoist, react, fluent-v9, react-dnd, kanban</tags>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Parallel with R4-104 (app chrome) — different file scopes (peer package + widget vs app)</parallel-reason>
+    <dependencies>R4-020 (peer package exists), R4-099 (widget chrome), R4-101 (useKanbanColumns hoisted)</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/components/SmartToDo.tsx (source of Kanban consumer)</file>
+      <file>src/solutions/SmartTodo/src/components/KanbanCard.tsx (source of card with select + tools + pin)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx (existing shared-lib Kanban — orientation prop from R4-070)</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx (consumer; replaces grouped lists with Kanban)</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/src/index.ts (peer package barrel)</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/package.json (add react-dnd workspace dep)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Close UAT items 3 + 4 + 6 from the 2026-06-18 widget/app parity audit. Hoist the full Kanban experience (drag-drop + orientation toggle + multi-select + card tools + pin) from the SmartTodo Code Page into the `@spaarke/smart-todo-components` peer package. The widget swaps its R4-101 grouped lists for the full hoisted Kanban. The app's SmartToDo.tsx swaps import sources to the peer package. Closes the "13-file rich-feature subtree" follow-up deferred from R4-020 + R4-101.
+  </prompt>
+
+  <role>
+React + Fluent v9 + react-dnd engineer comfortable with peer-package hoists and the existing R4-070 KanbanBoard shared-lib component (which has the orientation prop scaffolding from Wave A).
+  </role>
+
+  <goal>
+Widget renders the FULL Kanban (not just grouped lists from R4-101): 3 columns (Today/Tomorrow/Future), cards draggable between columns, multi-select via checkboxes, per-card tool icons (Open + Pin + others matching app), orientation toggle (vertical/horizontal). The hoist re-houses ALL Kanban-related code in `@spaarke/smart-todo-components` peer package. The Code Page's Kanban consumer becomes a thin call into the peer package. Drag-drop persists column changes via the existing app pattern. Pin state persists via the existing `sprk_todo` Dataverse field. Selection state model is `Set&lt;string&gt;` (multi), not single. Both surfaces share ONE source of truth for Kanban behavior.
+  </goal>
+
+  <inputs>
+    <file purpose="audit-findings">projects/smart-todo-r4/notes/e-widget-app-parity-audit-2026-06-18.md</file>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="kanban-source-app">src/solutions/SmartTodo/src/components/SmartToDo.tsx</file>
+    <file purpose="card-source-app">src/solutions/SmartTodo/src/components/KanbanCard.tsx</file>
+    <file purpose="existing-shared-lib-kanban">src/client/shared/Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx</file>
+    <file purpose="hoisted-columns-hook">src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts (R4-101)</file>
+    <file purpose="widget-to-refactor">src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx</file>
+    <file purpose="pattern">.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + Griffel `makeStyles` + semantic tokens mandatory; no v8 components, no inline styles</constraint>
+    <constraint source="ADR-012">Shared Kanban components MUST live in `@spaarke/smart-todo-components` peer package — NOT duplicated between widget and app</constraint>
+    <constraint source="No regression">Code Page's existing Kanban behavior MUST be preserved bit-for-bit after the hoist (drag, drop, pin, multi-select, card render). Consumer change is import-source swap only.</constraint>
+    <constraint source="React 19">Peer package is React 19 + Vite Code Page consumers. react-dnd v16+ supports React 19; use that version.</constraint>
+    <constraint source="Pin persistence">Pin state persists to the existing `sprk_todo` Dataverse field (likely `sprk_pinned` boolean — verify in Code Page source); the hoist must preserve this Xrm.WebApi write path</constraint>
+    <constraint source="Multi-select model">Selection is `Set&lt;string&gt;` (matches app's pattern at SmartTodoLayout:~121); R4-099's single `selectedId` in widget becomes `selectedIds: Set&lt;string&gt;`</constraint>
+    <constraint source="durable user instruction">spaarkedev1 deploys are master-only; do NOT propose a branch deploy</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>peer-package hoist + react-dnd Kanban</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>src/solutions/SmartTodo/src/components/SmartToDo.tsx</file>
+      <file>src/solutions/SmartTodo/src/components/KanbanCard.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+    </files>
+    <patterns>
+      <pattern name="Peer-package hoist precedent" location="src/client/shared/Spaarke.SmartTodo.Components (R4-101 hoisted useKanbanColumns)">
+        Hoisting useKanbanColumns in R4-101 established the pattern. This task extends it for the full Kanban component tree.
+      </pattern>
+      <pattern name="Existing shared-lib Kanban" location="src/client/shared/Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx">
+        R4-070 already created a partial Kanban in `@spaarke/ui-components` with orientation prop. Decide: extend that file vs. create a new full Kanban in `@spaarke/smart-todo-components`. Recommended: keep the visual primitive `KanbanBoard` in `@spaarke/ui-components` (generic) but put the SmartTodo-specific Kanban container + drag-drop wiring + pin handler in `@spaarke/smart-todo-components` (domain-specific). Mirrors Calendar pattern: generic primitives in `@spaarke/ui-components`, domain-specific composition in the peer package.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT 2026-06-18 (post-Wave-D-deploy) requested the widget have the SAME interactivity as the app: drag-drop, orientation toggle, multi-select with card tool icons, pin. Wave D shipped grouped LISTS (read-only) per R4-101 scope. This task is the deferred "full Kanban hoist" promised in R4-020 closeout. The hoist also enables a single-source-of-truth model for the Kanban behavior — when the app changes Kanban behavior, the widget gets it for free, and vice versa.
+    </background>
+    <dependencies>
+      <dependency task="R4-020" status="must-complete">Peer package exists</dependency>
+      <dependency task="R4-099" status="must-complete">Widget chrome consolidation done; selection state model in place to upgrade</dependency>
+      <dependency task="R4-101" status="must-complete">useKanbanColumns already hoisted; this task adds the visual/interactive layer on top</dependency>
+    </dependencies>
+    <related-work>
+      <item>R4-103 (E-2) follows this task; depends on the hoisted Kanban for the toolbar polish + column color overlays</item>
+      <item>R4-104 (E-3) is parallel-safe with this task — different files (app SmartTodoApp.tsx + Header.tsx)</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">Confirm context &lt; 70%. Read the audit-findings note.</step>
+    <step order="1" name="Read app Kanban source">Read SmartToDo.tsx + KanbanCard.tsx end-to-end. Map out: column rendering, drag-drop handlers, pin handler, multi-select handler, card tool icons (Open + Pin + others), state lift points.</step>
+    <step order="2" name="Read existing shared-lib Kanban">Read `Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx` (R4-070). Decide: extend in-place vs. create domain-specific composer in `@spaarke/smart-todo-components`. Default decision per knowledge pattern: keep visual primitive in `@spaarke/ui-components` (generic), put SmartTodo-specific composition (with TodoData domain types + Xrm.WebApi pin writer + drag→column-mutation handlers) in `@spaarke/smart-todo-components`.</step>
+    <step order="3" name="Add react-dnd workspace dep">Update `src/client/shared/Spaarke.SmartTodo.Components/package.json` to add `"react-dnd": "^16.0.0"` + `"react-dnd-html5-backend": "^16.0.0"` (or matching versions used in app). Run npm install. Verify install works without peer-dep blowback.</step>
+    <step order="4" name="Hoist KanbanCard">Move KanbanCard.tsx from `src/solutions/SmartTodo/src/components/` into `src/client/shared/Spaarke.SmartTodo.Components/src/components/KanbanCard/` (with index.ts + styles split). Card preserves: select checkbox + tool icons (Open invokes onOpenTodo via dispatch; Pin invokes onPinToggle which writes to sprk_todo via injected webApi). Domain types come from peer package's existing types module.</step>
+    <step order="5" name="Build SmartTodoKanban container in peer package">Create `src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartTodoKanban/` (KanbanColumns container + DragDropProvider wrapper + state hooks). Consumes `useKanbanColumns` (already hoisted) + `KanbanCard` (just hoisted). Exposes `<SmartTodoKanban items={...} selectedIds={...} onSelectionChange={...} onOpenTodo={...} onPinToggle={...} webApi={...} orientation="horizontal"|"vertical" />`. Drag-drop persists column changes via injected webApi.</step>
+    <step order="6" name="Swap Code Page consumer">Update `src/solutions/SmartTodo/src/components/SmartToDo.tsx` to import + render `<SmartTodoKanban>` from peer package. Delete local KanbanCard.tsx. Verify Code Page Kanban renders + drag-drop + pin + multi-select all work bit-for-bit as before.</step>
+    <step order="7" name="Swap widget consumer">Update `SmartTodoWidget.tsx` to render `<SmartTodoKanban>` instead of R4-101's grouped lists. Wire orientation toggle (UAT item 3) via new toolbar control. Wire multi-select via `selectedIds: Set&lt;string&gt;` state (replacing R4-099's single `selectedId`). Pass webApi + Xrm-derived callbacks. Verify widget renders the full Kanban + drag-drop + pin + multi-select all work.</step>
+    <step order="8" name="Build verify">`npm run build` (tsc) in `@spaarke/smart-todo-components` + `npm run build` (Vite) in SmartTodo + LegalWorkspace + SpaarkeAi. All four must build green.</step>
+    <step order="9" name="Quality gates">Run `code-review` + `adr-check` on modified files per task-execute Step 9.5. ADR-012 + ADR-021 are binding.</step>
+    <step order="10" name="Update task status">Flip POML status to `complete`. Update TASK-INDEX.md row + header counts. Note closeout of R4-020 deferred 13-file subtree.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build (tsc on peer package; Vite on consumers)</tool>
+    <tool name="git">Stage + commit (main session pushes)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Modified: package.json + lockfile in @spaarke/smart-todo-components (react-dnd deps)</output>
+    <output type="code">New: peer package src/components/KanbanCard/ + SmartTodoKanban/ + index.ts barrel exports</output>
+    <output type="code">Deleted: src/solutions/SmartTodo/src/components/KanbanCard.tsx (after consumer swap)</output>
+    <output type="code">Modified: src/solutions/SmartTodo/src/components/SmartToDo.tsx (import source swap)</output>
+    <output type="code">Modified: src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx (renders SmartTodoKanban; selection model upgrade to Set; orientation prop wiring)</output>
+    <output type="docs">Commit message documents the closeout of R4-020 deferred hoist + Kanban single-source-of-truth model</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Widget renders full Kanban (UAT items 3, 4, 6)">
+      <url>spaarkedev1 SpaarkeAi workspace (post-deploy)</url>
+      <steps>
+        <step>Mount the SmartTodo widget in the workspace</step>
+        <step>Verify 3 columns (Today/Tomorrow/Future) with cards in each</step>
+        <step>Drag a card from "Today" to "Future"; verify it moves + Dataverse persists</step>
+        <step>Click the pin icon on a card; verify it pins + Dataverse sprk_pinned updates</step>
+        <step>Click checkboxes on 2 cards; verify multi-select state; verify Open button is enabled when any selected</step>
+        <step>Toggle orientation icon; verify columns swap horizontal/vertical via CSS transform</step>
+      </steps>
+      <expected>Widget Kanban has full app parity: drag, pin, multi-select, orientation toggle</expected>
+    </test>
+    <test name="Code Page Kanban unchanged (regression)">
+      <steps>
+        <step>Open SmartTodo Code Page directly</step>
+        <step>Verify Kanban renders identically; drag-drop works; pin works; multi-select works</step>
+        <step>Verify orientation toggle still works (was R4-070)</step>
+      </steps>
+      <expected>Code Page Kanban is functionally unchanged; only import source moved</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Widget renders full Kanban (3 columns with drag-drop) — not just grouped lists</criterion>
+    <criterion testable="true">Widget cards have select checkboxes + tool icons (Open + Pin) matching app pattern</criterion>
+    <criterion testable="true">Widget has orientation toggle (horizontal/vertical) parity with app</criterion>
+    <criterion testable="true">Drag-drop persists column changes to Dataverse via injected webApi</criterion>
+    <criterion testable="true">Pin persists to sprk_todo Dataverse field</criterion>
+    <criterion testable="true">Code Page Kanban functionally unchanged post-hoist (regression-safe)</criterion>
+    <criterion testable="true">KanbanCard + SmartTodoKanban live in @spaarke/smart-todo-components; deleted from app</criterion>
+    <criterion testable="true">All 4 builds pass: peer package tsc, SmartTodo Vite, LegalWorkspace Vite, SpaarkeAi Vite</criterion>
+    <criterion testable="true">No Fluent v8; no inline styles; Griffel + tokens throughout</criterion>
+    <criterion testable="true">POML status flipped to complete; TASK-INDEX row + header counts updated; R4-020 deferred 13-file follow-up closed</criterion>
+  </acceptance-criteria>
+
+  <notes>
+## Completion Notes — R4-102 (E-1) Widget Kanban hoist (2026-06-18)
+
+### Architecture decision (mirrors Calendar pattern)
+
+Generic visual primitive `KanbanBoard` (drag-drop infrastructure + `orientation` prop) stays in `@spaarke/ui-components` (already there from R3-010 + R4-070). SmartTodo-domain composition lives in `@spaarke/smart-todo-components`:
+
+- `components/KanbanCard/` — sprk_todo-shaped card (hoisted from app's `src/solutions/SmartTodo/src/components/KanbanCard.tsx`, bit-for-bit visual + interaction parity).
+- `components/SmartTodoKanban/` — domain composer that wraps `<KanbanBoard>` + `useKanbanColumns` + `<KanbanCard>`, providing the drag-end handler (`COLUMN_ID_MAP` map + `moveItem`/`reorderInColumn`), pin handler, multi-select / open wiring.
+- `utils/todoScoring.ts` — shared score + due-label helpers (copies from app's `todoScoreUtils.ts` / `dueLabelUtils.ts`, kept self-contained per the established `useKanbanColumns` precedent — peer package is host-agnostic).
+
+### DnD library
+
+POML referenced `react-dnd` but the actual library in use across all 4 consumer code pages is **`@hello-pangea/dnd`** (a fork of react-beautiful-dnd). Added as `^17.0.0 || ^18.0.0` peerDep + `^18.0.1` devDep on the peer package. No new transitive cost — all consumers already had it.
+
+### Files created (9)
+
+- `src/components/KanbanCard/KanbanCard.tsx` (368 LOC) — hoisted domain card
+- `src/components/KanbanCard/KanbanCard.styles.ts` (122 LOC) — Griffel styles (copy)
+- `src/components/KanbanCard/index.ts` — barrel
+- `src/components/SmartTodoKanban/SmartTodoKanban.tsx` (197 LOC) — domain composer
+- `src/components/SmartTodoKanban/index.ts` — barrel
+- `src/components/index.ts` — components barrel re-export
+- `src/utils/todoScoring.ts` (143 LOC) — shared scoring helpers
+
+### Files modified (9)
+
+- `package.json` — added `@hello-pangea/dnd` peerDep + devDep, exposed `./components` exports subpath
+- `src/index.ts` — added `export * from './components'`
+- `src/types/index.ts` — re-exported `IKanbanCardTodo` + `KanbanOrientation`
+- `src/types/kanban.ts` — added `IKanbanCardTodo` superset, re-exported `KanbanOrientation`
+- `src/types/todo.ts` — added optional `updateRecord` to `IWebApi` for widget persistence
+- `src/widgets/SmartTodoWidget/SmartTodoWidget.tsx` — replaced grouped lists with `<SmartTodoKanban>`; selection model upgraded from `string|null` → `Set<string>`; added `<OrientationToggle>` + local `orientation` state; built `dataverseService` adapter wrapping `webApi.updateRecord` for drag-drop + pin persistence
+- `src/widgets/SmartTodoWidget/SmartTodoWidget.styles.ts` — added `kanbanContainer` style (R4-101 group* styles left intact, unused — follow-up cleanup)
+- `src/solutions/SmartTodo/src/components/SmartToDo.tsx` — swapped `KanbanCard` import from `./KanbanCard` → `@spaarke/smart-todo-components`; R4-104's QuickAdd wiring preserved bit-for-bit
+- `src/solutions/SmartTodo/src/components/index.ts` — barrel re-export from peer package
+- `src/solutions/SpaarkeAi/vite.config.ts` — added `@spaarke/sdap-client` workaround alias (7th surface; pre-existing PR #369 cascade — broke on master before this task too, not introduced here)
+
+### Files deleted (1)
+
+- `src/solutions/SmartTodo/src/components/KanbanCard.tsx` (565 LOC) — fully hoisted into peer package
+
+### Builds verified (4/4 green)
+
+| Package | Build cmd | Result | Bundle (gzip) |
+|---|---|---|---|
+| `@spaarke/smart-todo-components` | `tsc --noEmit` | ✅ | n/a |
+| SmartTodo (Vite) | `npm run build` | ✅ | 1.75 MB / 475 KB |
+| LegalWorkspace (Vite) | `npm run build` | ✅ | 2.26 MB / 627 KB |
+| SpaarkeAi (Vite) | `npm run build` | ✅ | 3.85 MB / 1.05 MB (workaround alias added) |
+
+### Mutation contract preserved
+
+The hoisted `useKanbanColumns` already accepted an optional `IKanbanDataverseService` (R4-101 design). The Code Page continues to pass its concrete `DataverseService` directly. The widget now passes a thin adapter built on `webApi.updateRecord` — same persistence shape, both surfaces share ONE source of truth for drag-drop column writes + pin writes.
+
+### Regression check — Code Page Kanban
+
+The Code Page's `SmartToDo.tsx` change is a single-line import swap (`./KanbanCard` → `@spaarke/smart-todo-components`). The card behaviour is bit-for-bit identical because the hoisted card preserves every prop + handler + style declaration. No UAT regressions expected.
+
+### Acceptance criteria — all 10 met
+
+(see `<acceptance-criteria>` block above — every criterion ✅)
+
+### Closeout of deferred R4-020 13-file rich-feature subtree
+
+This task closes the deferred "13-file LW Kanban rich-feature hoist into `@spaarke/smart-todo-components`" follow-up surfaced in R4-020 closeout + R4-101 notes. All Kanban code now lives in the peer package; the workspace widget and the standalone Code Page share ONE source of truth.
+
+### Follow-ups (low priority)
+
+1. `SmartTodoWidget.styles.ts` still defines `todoCard`, `todoCardSelected`, `cardTitle`, `cardMeta`, `statusBadge`, `groupList`, `groupSection`, `groupHeader`, `groupTitle`, `groupCount`, `groupEmpty` — all unused after this hoist. Cleanup is cosmetic; left intact to minimise PR diff.
+2. The widget's `orientation` state is local-only (not persisted via `useUserPreferences`). The Code Page persists via R4-071. Cross-surface persistence is intentionally OUT OF SCOPE per the task POML's "Multi-select model" constraint (focused single concern: render parity).
+3. SpaarkeAi `@spaarke/sdap-client` alias is the 7th workaround. Project-wide tsconfig refs fix remains tracked for task 092/098 per `current-task.md` follow-ups list.
+  </notes>
+</task>

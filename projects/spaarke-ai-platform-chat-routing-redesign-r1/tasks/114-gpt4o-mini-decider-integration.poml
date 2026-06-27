@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="114" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>gpt-4o-mini decider integration (structured output: chosen playbook + confidence + reason)</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>113</dependencies>
+    <blocks>115</blocks>
+    <tags>bff-api, services, ai, azure-openai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'ai' + 'azure-openai'; modifies `PlaybookDispatcher.cs`; adds LLM call with structured-output binding; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same `PlaybookDispatcher.cs` file as task 113; sequential within wave 5-B.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Wire the gpt-4o-mini decider for Phase C case (e) true-disagreement scenarios from task 113. Per spec FR-18: structured output returns `{ selectedPlaybook, selectionConfidence, reason, isMultiPlaybookScenario }`. Input is CONSTRAINED to `(userMessage, per-file (filename + contentType + top-3 playbook names with scores))` — NOT file text. If `isMultiPlaybookScenario AND selectionConfidence < 0.7`, propose user-disambiguation; else execute selected playbook. Decider call budget ≤500ms.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer with Azure OpenAI Structured Outputs expertise.</role>
+
+  <goal>
+    Phase C true-disagreement path invokes gpt-4o-mini with structured output (JSON Schema). Decider returns `selectedPlaybook + selectionConfidence + reason + isMultiPlaybookScenario`. Low-confidence multi-playbook returns a `RequiresUserDisambiguation` DispatchResult flavor; high-confidence returns `DispatchResult` for the chosen playbook. Telemetry logs `decidersInvoked` count. Per FR-18 acceptance: input grep confirms NO file text in decider payload.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-18 + design §1.2 Phase C. The decider is the ONLY path that pays an LLM-call cost in routing. Input is metadata-only — never file text — to keep latency + cost bounded and to prevent content leakage per ADR-015. Structured output via JSON Schema ensures deterministic parsing. Budget per design: 500ms for decider call. The `isMultiPlaybookScenario` flag enables the user-disambiguation path (e.g., "I see [N] document types in this upload. Run [playbook A] for [file X], or [playbook B] for [file Y], or both?").
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DispatchResult.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-18">Decider input limited to `(userMessage, per-file filename + contentType + top-3 playbook names)`, NOT file text. Acceptance: telemetry shows `decidersInvoked` count; multi-file all-agree case shows 0.</constraint>
+    <constraint source="spec FR-19">Total dispatch budget ≤2s; decider call ≤500ms.</constraint>
+    <constraint source="spec FR-21">Embedding stays `text-embedding-3-large`; decider uses gpt-4o-mini (Azure OpenAI, not external).</constraint>
+    <constraint source="ADR-013">Use existing `IOpenAiClient` via `Services/Ai/PublicContracts/` facade.</constraint>
+    <constraint source="ADR-015">Tier-1 logging: log `(decidersInvoked, selectedPlaybookId, selectionConfidence, isMultiPlaybookScenario, durationMs)`. NEVER log user message text, reason text, or playbook content.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="design §1.2">`selectionConfidence &lt; 0.7` triggers user disambiguation — start with this threshold; calibrate later.</constraint>
+    <constraint source="project">Backward-compat: existing tests pass; new tests cover true-disagreement → decider → result.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookDispatcher.cs` post-113 state. Identify the `Outcome.TrueDisagreement(perFileTop3Lists)` branch from Phase C.</step>
+    <step order="2">Author `DispatcherDeciderRequest` and `DispatcherDeciderResponse` records. Response shape: `{ selectedPlaybook : string, selectionConfidence : double (0.0-1.0), reason : string, isMultiPlaybookScenario : bool }`.</step>
+    <step order="3">Author `BuildDeciderPrompt(userMessage, perFileTop3)` method that composes input strictly limited to: user message + per-file (filename + contentType + top-3 playbook names with similarity scores). Critical: NO file text content.</step>
+    <step order="4">Wire `IOpenAiClient` (or appropriate facade per ADR-013) to invoke gpt-4o-mini with Azure OpenAI Structured Outputs feature (JSON Schema mode). Pass the JSON Schema for `DispatcherDeciderResponse`.</step>
+    <step order="5">Parse the structured response. If `isMultiPlaybookScenario && selectionConfidence &lt; 0.7`, return a `DispatchResult` with a `RequiresUserDisambiguation = true` flag + the candidate list. Else return `DispatchResult` for the chosen playbook.</step>
+    <step order="6">Emit ADR-015 tier-1 telemetry: `(decidersInvoked = 1, selectedPlaybookId, selectionConfidence, isMultiPlaybookScenario, durationMs)`. NEVER log reason text or user message.</step>
+    <step order="7">Add unit tests: (a) true-disagreement → decider mocked to return high-confidence single playbook → DispatchResult; (b) true-disagreement → decider returns low-confidence multi-playbook → RequiresUserDisambiguation result; (c) verify decider request payload contains NO file text (grep assertion on serialized payload).</step>
+    <step order="8">Run `dotnet build` + `dotnet test`. All pass.</step>
+    <step order="9">Measure BFF publish size; report delta.</step>
+    <step order="10">code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="11">Update TASK-INDEX.md: task 114 → ✅; current-task.md → ready for 115.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookDispatcher post-113 + IOpenAiClient facade</tool>
+    <tool name="Edit">Author decider request/response records; wire LLM call; integrate Phase C case (e)</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs (decider integration)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DispatcherDeciderRequest.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/DispatcherDeciderResponse.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookDispatcherTests.cs (decider cases + payload-content assertion)</output>
+    <output type="docs">notes/handoffs/114-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Decider invoked ONLY on Phase C true-disagreement (`decidersInvoked` count matches case distribution).</criterion>
+    <criterion testable="true">Decider input grep / serialization assertion: ZERO file text in payload.</criterion>
+    <criterion testable="true">Structured Outputs (JSON Schema) used; response parsing deterministic.</criterion>
+    <criterion testable="true">Low-confidence multi-playbook returns `RequiresUserDisambiguation` flavor.</criterion>
+    <criterion testable="true">High-confidence single playbook returns standard `DispatchResult`.</criterion>
+    <criterion testable="true">Decider call latency ≤500ms in test (mocked).</criterion>
+    <criterion testable="true">Telemetry tier-1 compliant.</criterion>
+    <criterion testable="true">BFF publish-size delta reported.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The "no file text in decider payload" assertion is critical for ADR-015 compliance — the decider is the cheapest LLM call in the routing path BECAUSE it only sees metadata. Adding file text would defeat both the cost model AND the privacy guarantee. The `selectionConfidence &lt; 0.7` threshold starts as a guess; FR-18 calibration is a Phase 5 telemetry task (task 117).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

@@ -63,6 +63,7 @@ public class GraphTokenCache
 
         try
         {
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): OBO token cache is keyed by SHA256(user-token); the user-token implicitly identifies its issuing tenant — adding a tenantId prefix would not add isolation and the caller (GraphClientFactory) does not have tenantId in scope.
             var cachedToken = await _cache.GetStringAsync(cacheKey);
             sw.Stop();
 
@@ -109,6 +110,7 @@ public class GraphTokenCache
 
         try
         {
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): OBO token cache is keyed by SHA256(user-token); the user-token implicitly identifies its issuing tenant — adding a tenantId prefix would not add isolation and the caller (GraphClientFactory) does not have tenantId in scope.
             await _cache.SetStringAsync(
                 cacheKey,
                 graphToken,
@@ -143,6 +145,7 @@ public class GraphTokenCache
 
         try
         {
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): OBO token cache is keyed by SHA256(user-token); removal mirrors set/get path.
             await _cache.RemoveAsync(cacheKey);
             _logger.LogDebug("Removed cached token for hash {Hash}...", tokenHash[..Math.Min(8, tokenHash.Length)]);
         }

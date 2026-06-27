@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="097" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Dispatch memory.promotion_resolved + memory.fact_promoted on Approve/Reject</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4e)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>093,094,095</dependencies>
+    <blocks>098</blocks>
+    <tags>bff-api, services, ADR-030</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; modifies `.cs`; ADR-030 v2 binding (memory channel + 2 event payloads); ADR-015 binding; also emits context.decision_made for T6 audit</rigor-reason>
+    <parallel-group>4-L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add dispatch of `memory.promotion_resolved` from `MatterMemoryPromotionService.ApproveAsync` AND `RejectAsync` (after the Cosmos status-update succeeds), plus `memory.fact_promoted` from `ApproveAsync` only (after the durable T3 `IMatterMemoryService.AppendFactAsync` write succeeds), per architecture §6.4 + ADR-030 v2 amendment + spec FR-32. Also emit `context.decision_made { decision: "promotion_approved" | "promotion_rejected" }` for T6 audit per architecture §6.4. Payload shapes match architecture §6.4 verbatim; ADR-015 tier-1 safe (no fact content beyond the original 80-char `factSummary` preview if echoed).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in PaneEventBus dispatch + ADR-015 tier-1 audit + ADR-030 v2 memory channel semantics.</role>
+
+  <goal>
+    `MatterMemoryPromotionService.ApproveAsync` emits TWO events on success: `memory.fact_promoted { factId, matterId, source }` (after `AppendFactAsync` succeeds) and `memory.promotion_resolved { promotionId, decision: 'approved', factId }` (after status update succeeds). Both emit `context.decision_made` for T6 audit. `RejectAsync` emits ONE event: `memory.promotion_resolved { promotionId, decision: 'rejected' }` (no `fact_promoted`); also emits `context.decision_made`. Unit tests cover all four emission sites + ordering invariants (e.g., `fact_promoted` emitted only AFTER `AppendFactAsync` returns success). Parallel-safe with task 096 — different dispatch sites (Queue vs Approve/Reject).
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §6.4 (promote-to-matter flow — Accept + Reject paths emit `memory.promotion_resolved`; Accept additionally emits `memory.fact_promoted`; both emit `context.decision_made` for T6), ADR-030 v2 (memory channel), spec FR-32 (canonical payloads). T6 audit (`context.decision_made`) is tier-1-safe (no fact text) per ADR-015.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryPromotionService.cs (from task 093)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Audit/AuditLogService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">No new endpoint.</constraint>
+    <constraint source="ADR-010">Inject existing event-emitter + audit-log contracts directly.</constraint>
+    <constraint source="ADR-013">Service is BFF-internal.</constraint>
+    <constraint source="ADR-015">Payloads carry: promotionId + factId (deterministic GUIDs) + decision discriminator + matterId + source. NEVER fact content. T6 `context.decision_made` carries decision discriminator + IDs only.</constraint>
+    <constraint source="ADR-029">≤+0.05 MB delta.</constraint>
+    <constraint source="ADR-030">v2 amendment: `memory` channel; discriminants `promotion_resolved` + `fact_promoted`.</constraint>
+    <constraint source="architecture">§6.4 ordering — on Approve: AppendFactAsync first → `memory.fact_promoted` → Cosmos status update → `memory.promotion_resolved`. If any step fails before resolved emission, NO resolved event emitted.</constraint>
+    <constraint source="architecture">§6.4 — Reject path: status update → `memory.promotion_resolved { decision: 'rejected' }` + `context.decision_made`. No `fact_promoted` event on reject.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §6.4 (Approve + Reject branches) + ADR-030 v2 + ADR-015 (T6 audit shape).</step>
+    <step order="2">Read `MatterMemoryPromotionService.cs` — locate Approve + Reject success paths.</step>
+    <step order="3">In `ApproveAsync` success path, AFTER `IMatterMemoryService.AppendFactAsync` returns success:
+      - Emit `memory.fact_promoted { factId, matterId, source }` on `memory` channel.
+      AFTER Cosmos pending-record status updated to `approved`:
+      - Emit `memory.promotion_resolved { promotionId, decision: 'approved', factId }` on `memory` channel.
+      - Emit `context.decision_made { decision: "promotion_approved", promotionId, factId, matterId }` on `context` channel (T6 audit).
+    </step>
+    <step order="4">In `RejectAsync` success path, AFTER Cosmos pending-record status updated to `rejected`:
+      - Emit `memory.promotion_resolved { promotionId, decision: 'rejected' }` on `memory` channel.
+      - Emit `context.decision_made { decision: "promotion_rejected", promotionId, matterId }` on `context` channel (T6 audit).
+    </step>
+    <step order="5">Extend unit tests at `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/MatterMemoryPromotionServiceTests.cs`:
+      - Approve emits `fact_promoted` then `promotion_resolved` (assert ordering)
+      - Approve emits `context.decision_made` with `promotion_approved`
+      - Reject emits `promotion_resolved { decision: 'rejected' }` only — assert NO `fact_promoted`
+      - Reject emits `context.decision_made` with `promotion_rejected`
+      - AppendFactAsync failure → no events emitted (Approve aborts)
+      - All payloads omit fact text (ADR-015 enforcement)
+    </step>
+    <step order="6">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="7">Measure BFF publish-size delta; write `notes/handoffs/097-bff-publish-delta.md`.</step>
+    <step order="8">Run code-review + adr-check (Step 9.5 FULL).</step>
+    <step order="9">Update TASK-INDEX.md: 097 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">MatterMemoryPromotionService, event emitter contracts</tool>
+    <tool name="Edit">Add dispatch sites + tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryPromotionService.cs (Approve + Reject dispatch)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/MatterMemoryPromotionServiceTests.cs (extended)</output>
+    <output type="docs">notes/handoffs/097-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Approve path emits `memory.fact_promoted` THEN `memory.promotion_resolved { decision: 'approved' }` THEN `context.decision_made { decision: "promotion_approved" }` — assert ordering via captured event list.</criterion>
+    <criterion testable="true">Reject path emits ONLY `memory.promotion_resolved { decision: 'rejected' }` + `context.decision_made { decision: "promotion_rejected" }` — no `fact_promoted`.</criterion>
+    <criterion testable="true">AppendFactAsync failure during Approve → NO `memory.*` events emitted (transactional ordering).</criterion>
+    <criterion testable="true">All payloads carry no fact content (ADR-015 tier-1 safety).</criterion>
+    <criterion testable="true">BFF publish delta ≤+0.05 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 096 — different dispatch sites. Ordering is binding per architecture §6.4 (fact_promoted only AFTER AppendFactAsync success). The companion T6 audit emission ensures the promotion is auditable in `context.*` events stream consumed by ExecutionTraceWidget.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5. ADR-015 + ADR-030 v2 are binding.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="000" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>R6 closeout readiness check — verify tasks 089 + 090 complete + UAT regression passed</title>
+    <phase>0: §1.7 Pattern C Cleanup + R6 readiness check</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>001,002,003</blocks>
+    <tags>verification, coordination</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Read-only verification + handoff note; no code edits; coordination task per task-execute Step 0.5 decision tree</rigor-reason>
+    <parallel-group>0-A0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify that parallel project `spaarke-ai-platform-unification-r6` has completed its closeout tasks 089 (R6 PCF redeploy) and 090 (R6 UAT regression) before this project begins Phase 0 cleanup. This is a HARD GATE: if R6 closeout is incomplete, downstream code edits in this worktree risk colliding with R6 hotfix commits. Produce a handoff confirmation note documenting evidence.
+  </prompt>
+
+  <role>SPAARKE platform coordinator. Verifies cross-project prerequisites via TASK-INDEX inspection + git log + PR status.</role>
+
+  <goal>
+    A confirmation handoff note at `projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/000-r6-readiness-confirmation.md` stating: (a) R6 task 089 status, (b) R6 task 090 status, (c) UAT regression test outcome, (d) any open R6 hotfix PRs (especially PR #401) and their merge ETA. If any prerequisite is incomplete, this task BLOCKS waves 0-A and downstream phases until cleared.
+  </goal>
+
+  <context>
+    <background>
+      Per CLAUDE.md §3 (project context) and TASK-INDEX cross-wave dependency exceptions table, R6 closeout is a hard prereq before this project edits files in `src/server/api/Sprk.Bff.Api/Services/Ai/` or `src/solutions/SpaarkeAi/`. R6 PR #401 is also a Phase 7 cutover gate. Verifying R6 status early surfaces blockers before parallel Phase 0/1 waves dispatch.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Read-only — DO NOT modify any R6 project files or its TASK-INDEX.</constraint>
+    <constraint source="project">If R6 task 089 or 090 status is not ✅, STOP and escalate to owner before any downstream task in this project begins.</constraint>
+    <constraint source="project">PR #401 (R6 hotfix series) blocks Phase 7 but NOT Phase 0/1; record its status for handoff but do not gate Phase 0 on it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/TASK-INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md` and locate tasks 089 + 090. Record their status symbols.</step>
+    <step order="2">Run `gh pr view 401 --json state,title,mergeable,statusCheckRollup` to capture R6 hotfix PR status.</step>
+    <step order="3">Run `git log --oneline -n 20 master` (or `origin/master`) to check whether R6 closeout commits have landed.</step>
+    <step order="4">Inspect any R6 UAT regression evidence — typically `projects/spaarke-ai-platform-unification-r6/notes/uat/` or PR #401 description.</step>
+    <step order="5">Create `projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/000-r6-readiness-confirmation.md` summarizing findings. Mark GO / NO-GO.</step>
+    <step order="6">If NO-GO: update `current-task.md` with blocker; escalate to owner. If GO: update TASK-INDEX task 000 → ✅; current-task.md → ready for wave 0-A.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">R6 TASK-INDEX + this project's TASK-INDEX</tool>
+    <tool name="Bash">gh pr view + git log</tool>
+    <tool name="Write">Create handoff note</tool>
+    <tool name="Edit">Update TASK-INDEX status + current-task.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/000-r6-readiness-confirmation.md — R6 closeout readiness evidence + GO/NO-GO decision</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handoff note file exists at the declared path with R6 task 089 + 090 status recorded.</criterion>
+    <criterion testable="true">PR #401 status documented (state, mergeable).</criterion>
+    <criterion testable="true">Note carries explicit "GO" or "NO-GO" decision marker.</criterion>
+    <criterion testable="true">If NO-GO: blocker documented in current-task.md and escalation noted.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a coordination gate, not a code change. Keep the handoff note concise (≤1 page). The note will be re-referenced by the Phase 7 task 140 gate (PR #401 merge verification).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor protocol — read-only verification + handoff note; no quality gates required at Step 9.5.</protocol>
+  </execution>
+</task>

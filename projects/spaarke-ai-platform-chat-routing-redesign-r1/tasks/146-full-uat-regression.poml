@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="146" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Full UAT regression — T-001 through T-009 from spec.md Success Criteria — AFTER quality gates</title>
+    <phase>7: WP4 Retirement + Project Closeout</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>147,148</dependencies>
+    <blocks>150</blocks>
+    <tags>testing, e2e-test, uat</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>End-to-end UAT scenarios; depends on code-review + adr-check exit-0 (147, 148); STANDARD per task-execute Step 0.5</rigor-reason>
+    <parallel-group>7-G</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after quality gates per CRIT-7 fix — UAT validates a clean, reviewed build; runs single-track to capture full session UX</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec Success Criteria + CRIT-7 reordering: execute the full UAT regression suite covering T-001 (slash vs NL "summarize" same destination — closes R6 flagship bug), T-002 ("Do you have the document?" without re-asking), T-003 (precomputed summary never quoted authoritatively), and the rest of the project's UAT scenarios T-004 through T-009. UAT runs AFTER tasks 147 + 148 quality gates to validate a reviewed build. Document outcomes at `notes/handoffs/146-uat-regression.md`.
+  </prompt>
+
+  <role>SPAARKE UAT operator. Executes scripted scenarios against a deployed environment.</role>
+
+  <goal>
+    All UAT scenarios T-001 through T-009 executed against the post-Phase-7 build deployed to bff-dev (or designated UAT env). Each scenario marked Pass / Fail / Partial with evidence (screenshots, telemetry IDs, response payloads). Failures triaged: critical → task 150 wrap-up blocked + fix; minor → R7 backlog. Report at `notes/handoffs/146-uat-regression.md`.
+  </prompt>
+
+  <role>SPAARKE UAT operator + product validator.</role>
+
+  <goal>
+    Full T-001 through T-009 UAT regression complete. Critical scenarios (T-001 R6 flagship, T-002 document recall, T-003 precomputed-summary-never-authoritative) PASS. Outcomes documented for task 150 wrap-up. Project ready for merge.
+  </goal>
+
+  <context>
+    <background>
+      Per spec Success Criteria 2, 10, 12 + CRIT-7 reordering (quality gates BEFORE UAT). T-001 closes the R6 flagship "soft-slash divergence" bug — `/summarize` must produce the same destination as NL "summarize". T-002 verifies the stateful-chat (WP5) memory wiring — agent recalls uploaded document without re-asking. T-003 verifies the trust framing — agent never quotes precomputed summary as authoritative; quotes always cite recall output. T-004 through T-009 are project-wide regression scenarios.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Success criteria 2, 10, 12 — T-001/T-002/T-003 are flagship scenarios.</constraint>
+    <constraint source="project">UAT runs AFTER tasks 147 + 148 quality gates per CRIT-7.</constraint>
+    <constraint source="ADR-015">UAT operator does NOT capture user-content telemetry; capture deterministic IDs + outcomes only.</constraint>
+    <constraint source="project">Critical-scenario failures BLOCK task 150 wrap-up — escalate per CLAUDE.md §6.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm deployed environment is the Phase 7 build with tasks 141 + 142 + 143 changes deployed (verify via build commit SHA).</step>
+    <step order="2">Execute T-001 (slash vs NL "summarize" same destination): open chat, upload an NDA, type "summarize this document" → record destination; new session, upload same NDA, type "/summarize" → record destination. Assert same destination.</step>
+    <step order="3">Execute T-002 ("Do you have the document?"): upload doc, ask "Do you have the document?" — assert agent responds with file recall confirmation, NOT re-asking for upload.</step>
+    <step order="4">Execute T-003 (precomputed-summary-not-authoritative): upload doc with notable specific clause; ask agent to quote that specific clause — assert response cites `recall_session_file` output, NOT the precomputed summary card.</step>
+    <step order="5">Execute T-004 through T-009: scenarios from spec Success Criteria + project regression (e.g., NDA routing, patent routing, invoice routing, dedup test, persona binding, evidence precheck).</step>
+    <step order="6">Capture per-scenario Pass/Fail/Partial + evidence (deterministic IDs, telemetry trace links, screenshots if available).</step>
+    <step order="7">Triage failures: critical → escalate + block task 150; minor → R7 backlog.</step>
+    <step order="8">Author report at `notes/handoffs/146-uat-regression.md` with per-scenario outcome table + evidence references + failure triage.</step>
+    <step order="9">Update TASK-INDEX.md: task 146 → ✅ (if all critical scenarios pass).</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Deployed-env smoke verification</tool>
+    <tool name="Write">notes/handoffs/146-uat-regression.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/146-uat-regression.md — full UAT regression report</output>
+    <output type="docs">notes/r7-backlog.md — appended minor UAT findings</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">T-001 PASS (slash vs NL same destination — R6 flagship bug closed).</criterion>
+    <criterion testable="true">T-002 PASS (document recall without re-ask).</criterion>
+    <criterion testable="true">T-003 PASS (no authoritative precomputed-summary quotes).</criterion>
+    <criterion testable="true">T-004 through T-009 documented Pass / Fail / Partial with evidence.</criterion>
+    <criterion testable="true">Critical failures escalated; minor failures in R7 backlog.</criterion>
+    <criterion testable="true">UAT report complete.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    UAT is THE acceptance test for the project. T-001 closes the R6 flagship deferred bug — that scenario is the most visible win. Allow time for thorough exploration; UAT is not a checkbox exercise.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

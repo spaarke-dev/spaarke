@@ -40,4 +40,17 @@ public class FinanceOptions
     /// Azure OpenAI deployment name for extraction (Playbook B). gpt-4o for accuracy.
     /// </summary>
     public string ExtractionDeploymentName { get; set; } = "gpt-4o";
+
+    /// <summary>
+    /// Stable opaque ID of the Finance Invoice Processing playbook (sprk_playbookid, GUID-format).
+    /// </summary>
+    /// <remarks>
+    /// Per Q&amp;A 2026-06-22 Q1: code resolves playbooks by <c>sprk_playbookid</c> (immutable opaque ID,
+    /// mirrors the row's <c>sprk_analysisplaybookid</c> PK GUID). Value formerly was the literal
+    /// slug <c>"PB-013"</c> (a <c>sprk_playbookcode</c> admin-facing value), which silently broke
+    /// when the lookup column changed under the Q1 refactor.
+    /// DEV environment value: <c>1e657651-9308-f111-8407-7c1e520aa4df</c> (Finance Invoice Processing).
+    /// Higher environments populate at deploy time via per-env config.
+    /// </remarks>
+    public string InvoiceExtractionPlaybookId { get; set; } = string.Empty;
 }

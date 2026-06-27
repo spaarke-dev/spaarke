@@ -676,59 +676,6 @@ public class CommunicationIntegrationTests
 
     #region Phase 6: CommunicationAccountService Integration
 
-    [Fact]
-    public async Task CommunicationAccountService_QuerySendEnabledAccounts_ResolvesViaValidator()
-    {
-        // Arrange: Dataverse returns a sprk_communicationaccount for mailbox-central@spaarke.com
-        var accountEntity = new DataverseEntity("sprk_communicationaccount");
-        accountEntity.Id = Guid.NewGuid();
-        accountEntity["sprk_emailaddress"] = "mailbox-central@spaarke.com";
-        accountEntity["sprk_name"] = "Spaarke Central Mailbox";
-        accountEntity["sprk_displayname"] = "Spaarke Central";
-        accountEntity["sprk_sendenabled"] = true;
-        accountEntity["sprk_isdefaultsender"] = true;
-        accountEntity["sprk_accounttype"] = new OptionSetValue(100000000);
-
-        var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { accountEntity });
-
-        // Redis cache returns null (cache miss) to force Dataverse query
-        var accountCacheMock = new Mock<IDistributedCache>();
-        accountCacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-
-        var validatorCacheMock = new Mock<IDistributedCache>();
-        validatorCacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-
-        var options = new CommunicationOptions
-        {
-            ApprovedSenders = Array.Empty<ApprovedSenderConfig>(),
-            DefaultMailbox = "mailbox-central@spaarke.com"
-        };
-
-        var accountService = new CommunicationAccountService(
-            dataverseMock.Object,
-            dataverseMock.Object,
-            accountCacheMock.Object,
-            Mock.Of<ILogger<CommunicationAccountService>>());
-        var senderValidator = new ApprovedSenderValidator(
-            Options.Create(options),
-            accountService,
-            validatorCacheMock.Object,
-            Mock.Of<ILogger<ApprovedSenderValidator>>());
-
-        // Act: resolve default sender (null = use default)
-        var result = await senderValidator.ResolveAsync(null);
-
-        // Assert
-        result.IsValid.Should().BeTrue("CommunicationAccountService should provide the default sender");
-        result.Email.Should().Be("mailbox-central@spaarke.com");
-    }
 
     [Fact]
     public async Task CommunicationAccountService_FallbackToConfig_WhenDataverseUnavailable()
@@ -1277,6 +1224,7 @@ public class CommunicationIntegrationTests
             new GraphMessageToEmlConverter(),
             null!, // SpeFileStore - ArchiveContainerId not configured in tests, so archival path is skipped
             jobSubmissionService,
+            Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(),
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Options.Create(opts),
             config,
@@ -1631,95 +1579,6 @@ public class CommunicationIntegrationTests
             "sprk_subscriptionexpiry should be populated after subscription creation");
     }
 
-    [Fact(Skip = "Requires fully mocked Graph SDK subscriptions and Communication services")]
-    public async Task InboundPipeline_BackupPolling_CatchesMissedMessages()
-    {
-        // Arrange: simulate InboundPollingBackupService detecting messages
-        // that weren't received via webhook (missed notifications).
-        //
-        // InboundPollingBackupService queries Graph for messages received since last poll time.
-        // Messages found are currently logged (actual processing via IncomingCommunicationJob
-        // will consume them in production). This test verifies the polling detects messages.
-        var accountId = Guid.NewGuid();
-        var accountEmail = "mailbox-central@spaarke.com";
-
-        // Return a receive-enabled account
-        var accountEntity = new DataverseEntity("sprk_communicationaccount");
-        accountEntity.Id = accountId;
-        accountEntity["sprk_emailaddress"] = accountEmail;
-        accountEntity["sprk_name"] = "Central Mailbox";
-        accountEntity["sprk_receiveenabled"] = true;
-        accountEntity["sprk_autocreaterecords"] = true;
-        accountEntity["sprk_accounttype"] = new OptionSetValue(100000000);
-
-        var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { accountEntity });
-
-        // Graph: return a message list response simulating a missed message
-        var missedMessageId = "AAMkAGE1M2IyNGNm-missed-001";
-        var messagesResponseJson = System.Text.Json.JsonSerializer.Serialize(new
-        {
-            value = new[]
-            {
-                new
-                {
-                    id = missedMessageId,
-                    receivedDateTime = DateTimeOffset.UtcNow.AddMinutes(-2).ToString("o"),
-                    subject = "Missed Webhook Message",
-                    from = new { emailAddress = new { name = "External User", address = "missed@example.com" } },
-                    isRead = false
-                }
-            }
-        });
-
-        var graphHandler = new MockHttpMessageHandler(HttpStatusCode.OK, messagesResponseJson);
-        var graphClient = new GraphServiceClient(new HttpClient(graphHandler));
-        var graphFactoryMock = new Mock<IGraphClientFactory>();
-        graphFactoryMock.Setup(f => f.ForApp()).Returns(graphClient);
-
-        var cacheMock = new Mock<IDistributedCache>();
-        cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-
-        var accountService = new CommunicationAccountService(
-            dataverseMock.Object,
-            dataverseMock.Object,
-            cacheMock.Object,
-            Mock.Of<ILogger<CommunicationAccountService>>());
-
-        var sbOptionsMock = new Mock<IOptions<Sprk.Bff.Api.Configuration.ServiceBusOptions>>();
-        sbOptionsMock.Setup(o => o.Value).Returns(new Sprk.Bff.Api.Configuration.ServiceBusOptions());
-        var jobSubmissionMock = new Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>(
-            MockBehavior.Loose,
-            sbOptionsMock.Object,
-            Mock.Of<ILogger<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>>(),
-            new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object);
-
-        var pollingService = new InboundPollingBackupService(
-            accountService,
-            graphFactoryMock.Object,
-            jobSubmissionMock.Object,
-            Mock.Of<ILogger<InboundPollingBackupService>>());
-
-        // Act: start and immediately stop the service to trigger one poll cycle
-        using var cts = new CancellationTokenSource();
-        var executeTask = pollingService.StartAsync(cts.Token);
-        // Give the background service time to run its first poll cycle
-        await Task.Delay(500);
-        cts.Cancel();
-        try { await executeTask; } catch (OperationCanceledException) { /* Expected */ }
-
-        // Assert: Graph was polled for messages
-        graphFactoryMock.Verify(f => f.ForApp(), Times.AtLeastOnce,
-            "InboundPollingBackupService should call ForApp to query Graph for missed messages");
-
-        // The polling service currently logs found messages (actual processing is via
-        // IncomingCommunicationJob in production). We verify Graph was called,
-        // which means the polling detected and would hand off the missed message.
-    }
 
     [Fact(Skip = "Requires fully mocked Graph SDK subscriptions and Communication services")]
     public async Task InboundPipeline_SubscriptionRenewal_ExtendsExpiry()

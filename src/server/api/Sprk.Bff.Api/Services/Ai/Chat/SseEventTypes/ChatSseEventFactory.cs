@@ -124,6 +124,161 @@ public static class ChatSseEventFactory
     }
 
     /// <summary>
+    /// Creates a "playbook_options" <see cref="ChatSseEvent"/> carrying the top-N candidate
+    /// playbooks surfaced to the chat user after file-aware classification
+    /// (chat-routing-redesign-r1 task 117a / FR-49).
+    ///
+    /// <para>
+    /// The <paramref name="data"/> shape is locked by FR-49 — the test suite enforces the
+    /// field set. The factory wraps the payload in the standard
+    /// <see cref="ChatSseEvent"/> envelope; the existing chat SSE writer pipeline
+    /// (<c>ChatEndpoints.WriteChatSSEAsync</c>) handles framing + serialization.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>FR-48 invariant</b>: this event NEVER carries an auto-execute flag.
+    /// <b>FR-51 invariant</b>: <see cref="PlaybookOptionsSseEventData.LibraryModalCta"/>
+    /// is always <c>true</c> on the event the
+    /// <see cref="PlaybookOptionsEventBuilder"/> produces.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>ADR-019 error handling</b>: parity with the pane factories — on serialization
+    /// failure a terminal <c>error</c> event is returned rather than throwing through the
+    /// SSE connection.
+    /// </para>
+    /// </summary>
+    /// <param name="data">
+    /// The structured payload (built by <see cref="PlaybookOptionsEventBuilder"/>). Shape
+    /// is locked by FR-49.
+    /// </param>
+    /// <returns>
+    /// A <see cref="ChatSseEvent"/> with <c>Type</c> = "playbook_options" and <c>Data</c>
+    /// containing <paramref name="data"/>, or a terminal error event on serialization
+    /// failure.
+    /// </returns>
+    public static ChatSseEvent CreatePlaybookOptionsEvent(PlaybookOptionsSseEventData data)
+    {
+        try
+        {
+            // Round-trip through the standard serializer to (a) validate the shape eagerly,
+            // and (b) match the wire format produced by ChatEndpoints.WriteChatSSEAsync.
+            // We pass the typed record straight through as Data — ChatEndpoints' default
+            // serializer (camelCase, WhenWritingNull) is configured to emit the locked shape
+            // verbatim.
+            _ = JsonSerializer.SerializeToUtf8Bytes(data, SerializerOptions);
+            return new ChatSseEvent(PlaybookOptionsSseEvent.EventType, null, data);
+        }
+        catch (JsonException ex)
+        {
+            return CreateSerializationErrorEvent(PlaybookOptionsSseEvent.EventType, ex);
+        }
+    }
+
+    /// <summary>
+    /// Creates a <c>section_started</c> <see cref="ChatSseEvent"/> announcing that a section
+    /// in a composite output payload has begun composition. FR-53 /
+    /// chat-routing-redesign-r1 task 114a.
+    ///
+    /// <para>
+    /// <b>FR-53 binding</b>: <see cref="SectionStartedSseEventData.SectionName"/> is the
+    /// stable correlation key; subsequent <c>section_data</c> + <c>section_completed</c>
+    /// events for the same section MUST carry the same exact name. The event is emitted
+    /// keyed by section name, NOT by schema position.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>ADR-019 error handling</b>: parity with the pane factories — on serialization
+    /// failure a terminal <c>error</c> event is returned rather than throwing through the
+    /// SSE connection.
+    /// </para>
+    /// </summary>
+    /// <param name="data">
+    /// The structured payload identifying the section + its position in the composite.
+    /// </param>
+    /// <returns>
+    /// A <see cref="ChatSseEvent"/> with <c>Type</c> = "section_started" and <c>Data</c>
+    /// containing <paramref name="data"/>, or a terminal error event on serialization
+    /// failure.
+    /// </returns>
+    public static ChatSseEvent CreateSectionStartedEvent(SectionStartedSseEventData data)
+    {
+        try
+        {
+            _ = JsonSerializer.SerializeToUtf8Bytes(data, SerializerOptions);
+            return new ChatSseEvent(SectionStartedSseEvent.EventType, null, data);
+        }
+        catch (JsonException ex)
+        {
+            return CreateSerializationErrorEvent(SectionStartedSseEvent.EventType, ex);
+        }
+    }
+
+    /// <summary>
+    /// Creates a <c>section_data</c> <see cref="ChatSseEvent"/> carrying section content
+    /// (incremental delta or consolidated emission). FR-53 / chat-routing-redesign-r1
+    /// task 114a.
+    ///
+    /// <para>
+    /// <b>Phase A</b>: one consolidated emission per section between
+    /// <c>section_started</c> and <c>section_completed</c>. Future incremental phases
+    /// emit multiple deltas per section, all sharing the same <c>SectionName</c>.
+    /// </para>
+    /// </summary>
+    /// <param name="data">
+    /// The section content payload — text delta and/or structured data.
+    /// </param>
+    /// <returns>
+    /// A <see cref="ChatSseEvent"/> with <c>Type</c> = "section_data" and <c>Data</c>
+    /// containing <paramref name="data"/>, or a terminal error event on serialization
+    /// failure.
+    /// </returns>
+    public static ChatSseEvent CreateSectionDataEvent(SectionDataSseEventData data)
+    {
+        try
+        {
+            _ = JsonSerializer.SerializeToUtf8Bytes(data, SerializerOptions);
+            return new ChatSseEvent(SectionDataSseEvent.EventType, null, data);
+        }
+        catch (JsonException ex)
+        {
+            return CreateSerializationErrorEvent(SectionDataSseEvent.EventType, ex);
+        }
+    }
+
+    /// <summary>
+    /// Creates a <c>section_completed</c> <see cref="ChatSseEvent"/> announcing that a
+    /// section's composition is finalized. FR-53 / chat-routing-redesign-r1 task 114a.
+    ///
+    /// <para>
+    /// <b>Idempotent re-emission</b>: this event carries the FINAL consolidated text +
+    /// structured data so a frontend that dropped the intermediate <c>section_data</c>
+    /// can still render the section correctly. Frontends that track incremental updates
+    /// MUST treat <c>section_completed</c> as the authoritative final state.
+    /// </para>
+    /// </summary>
+    /// <param name="data">
+    /// The section completion payload — final text, structured data, and source node ID.
+    /// </param>
+    /// <returns>
+    /// A <see cref="ChatSseEvent"/> with <c>Type</c> = "section_completed" and <c>Data</c>
+    /// containing <paramref name="data"/>, or a terminal error event on serialization
+    /// failure.
+    /// </returns>
+    public static ChatSseEvent CreateSectionCompletedEvent(SectionCompletedSseEventData data)
+    {
+        try
+        {
+            _ = JsonSerializer.SerializeToUtf8Bytes(data, SerializerOptions);
+            return new ChatSseEvent(SectionCompletedSseEvent.EventType, null, data);
+        }
+        catch (JsonException ex)
+        {
+            return CreateSerializationErrorEvent(SectionCompletedSseEvent.EventType, ex);
+        }
+    }
+
+    /// <summary>
     /// Serializes <paramref name="value"/> to a <see cref="JsonElement"/> using the shared
     /// camelCase serializer options.
     ///

@@ -1,0 +1,58 @@
+{
+  "_comment_top": "R6 task 103 (D-H-03, FR-16) — seed row for the ClauseComparisonHandler typed handler.",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'ClauseComparisonHandler' (= nameof handler class).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_toolcode first; UPSERTs.",
+  "_comment_toolcode": "R6 audit item 4 (2026-06-07): sprk_toolcode column extended manually from 10 to 100 chars. Renamed from 'CLAUSE-CMP@v1' to descriptive 'CLAUSE-COMPARISON'. NO @v1 suffix per cross-environment migration policy.",
+  "sprk_name": "SYS-Clause Comparison",
+  "sprk_toolcode": "CLAUSE-COMPARISON",
+  "sprk_description": "Pure-deterministic structural text-diff between two clauses (clauseA + clauseB) at configurable granularity (word / sentence / paragraph). Emits ordered segments (added / removed / unchanged / modified) plus a normalized similarity score [0.0, 1.0]. Case- + punctuation- + whitespace-normalization configurable. NO LLM call.",
+  "sprk_handlerclass": "ClauseComparisonHandler",
+  "sprk_availableincontexts": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat) per user direction 2026-06-08 (audit item 4 Finding B override) — consistent with FR-13..FR-20 acceptance that all 8 typed handlers are chat-exposable. R6 audit item 4 also renamed key from sprk_availableincontexts_value (OData read-only annotation) to sprk_availableincontexts (writable column) per Finding A.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "ClauseComparisonHandler Request",
+    "type": "object",
+    "required": ["clauseA", "clauseB"],
+    "properties": {
+      "clauseA": {
+        "type": "string",
+        "description": "Original / baseline clause text.",
+        "maxLength": 50000
+      },
+      "clauseB": {
+        "type": "string",
+        "description": "Proposed / revised clause text.",
+        "maxLength": 50000
+      },
+      "granularity": {
+        "type": "string",
+        "enum": ["word", "sentence", "paragraph"],
+        "default": "sentence",
+        "description": "Diff granularity. Sentence and paragraph preserve structural boundaries; word is the finest."
+      },
+      "caseSensitive": {
+        "type": "boolean",
+        "default": false,
+        "description": "When false (default), 'Agreement' and 'agreement' compare equal."
+      },
+      "punctuationSensitive": {
+        "type": "boolean",
+        "default": true,
+        "description": "When false, '.', ',', ';' etc. are stripped before token comparison."
+      },
+      "normalizeWhitespace": {
+        "type": "boolean",
+        "default": true,
+        "description": "When true (default), runs of whitespace collapse to a single space before tokenization."
+      }
+    }
+  },
+  "sprk_configuration": {
+    "granularity": "sentence",
+    "caseSensitive": false,
+    "punctuationSensitive": true,
+    "normalizeWhitespace": true
+  },
+  "_comment_configuration": "Default policy: sentence-level granularity, case-insensitive, whitespace-normalized, punctuation-aware. Per-invocation requests supply clauseA + clauseB and may override granularity / sensitivity flags."
+}

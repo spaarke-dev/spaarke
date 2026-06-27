@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>E2E verification — SC1–SC14 in spaarkedev1</title>
+    <phase>Phase7: Deployment + Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>060, 061, 024, 018, 051</dependencies>
+    <blocks>090</blocks>
+    <tags>e2e-test, testing, integration-test, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification of 14 SCs; closes spec acceptance</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final integration check; requires all upstream tasks complete</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Manually verify all 14 Success Criteria from spec.md §Success Criteria in spaarkedev1 environment. For each SC, run the verification step + check off the criterion in `notes/sc-verification.md`. Any failure triggers a defect file in `notes/handoffs/` and blocks task 090 (wrap-up).
+  </prompt>
+
+  <role>SPAARKE platform developer. Performing comprehensive E2E acceptance testing.</role>
+
+  <goal>All 14 SCs verified passing in spaarkedev1; documented in `notes/sc-verification.md`; ready for project wrap-up.</goal>
+
+  <context>
+    <background>
+      Final acceptance gate. SCs cover SpaarkeAi rendering, no dead links, aggregated bullets, To-Do creation, BFF prompt + validation, MDA bell, standalone parity, DD verifications, package build, dark mode, publish size, doc updates.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/notes/sc-verification.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All 14 SCs must pass before task 090 (wrap-up).</constraint>
+    <constraint source="project">Verify in spaarkedev1 (per spec dependency).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r2/notes/p3-e2e-test-plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">SC1: Sign in as `ralph.schroeder@spaarke.com` (or user with N&gt;0 unread); open SpaarkeAi workspace; verify Daily Briefing pane shows real bullets.</step>
+    <step order="2">SC2: Grep both hosts for `DailyBriefingApp` imports — both resolve to `@spaarke/daily-briefing-components`.</step>
+    <step order="3">SC3: Click 10 random hyperlinks across categories (aggregated + sub-rows) — verify 10/10 open correct records.</step>
+    <step order="4">SC4: Visual inspection of a briefing with at least one aggregated bullet — verify per-item sub-list rendered.</step>
+    <step order="5">SC5: Click one sub-row Add-to-To-Do; query Dataverse — confirm `sprk_todo` field-level fidelity to underlying notification.</step>
+    <step order="6">SC6: Inspect BFF logs for `regardingId=` emission in `/narrate` prompt; run mocked LLM test for validation pass.</step>
+    <step order="7">SC7: Trigger a notification (upload document); open MDA bell; click "Open" — verify routes correctly.</step>
+    <step order="8">SC8: Visual comparison of standalone code page pre/post hoist — document any deviations.</step>
+    <step order="9">SC9: `find src/solutions -name "MicrosoftToDoIcon.tsx" -o -name "authInit.ts" -o -name "runtimeConfig.ts"` returns zero.</step>
+    <step order="10">SC10: Grep new package for `useNotificationData` — zero hits; 3 split hooks exported.</step>
+    <step order="11">SC11: `npm run build` in `@spaarke/daily-briefing-components` succeeds; subpath imports resolve.</step>
+    <step order="12">SC12: Toggle dark mode in all 3 surfaces; verify parity.</step>
+    <step order="13">SC13: Compare `bff-size-p2b.md` + `bff-size-p3.md` to baseline — delta ≤ +1 MB.</step>
+    <step order="14">SC14: Confirm `SPAARKEAI-COMPONENT-MODEL.md` + `SPAARKEAI-WORKSPACE-ARCHITECTURE.md` + `BUILD-A-NEW-WORKSPACE-WIDGET.md` updated (task 063 produces).</step>
+    <step order="15">Write `notes/sc-verification.md` checking off each SC.</step>
+    <step order="16">If ANY SC fails: file defect in `notes/handoffs/` and STOP — do not advance to task 090.</step>
+    <step order="17">Update TASK-INDEX.md: change task 062 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Grep, find, dotnet, queries.</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="SC1 — SpaarkeAi Daily Briefing renders for user with unread notifications">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={spaarke-ai-app-id}</url>
+      <steps>
+        <step>Sign in as user with N&gt;0 unread `appnotification`</step>
+        <step>Open SpaarkeAi workspace → Daily Briefing pane</step>
+        <step>Verify TL;DR + bullets render</step>
+      </steps>
+      <expected>Pane shows real notifications matching standalone code page</expected>
+    </test>
+    <test name="SC3 — No dead hyperlinks (10/10)">
+      <steps>
+        <step>Click 10 random links across aggregated bullets + sub-rows</step>
+        <step>Verify each opens the correct record (modal dialog)</step>
+      </steps>
+      <expected>10/10 open correct record</expected>
+    </test>
+    <test name="SC7 — MDA bell shows clickable Open buttons">
+      <steps>
+        <step>Trigger a notification (upload a document)</step>
+        <step>Open MDA bell icon</step>
+        <step>Verify "Open" button visible and clickable</step>
+        <step>Click; verify routes to correct record</step>
+      </steps>
+      <expected>Open button works as expected</expected>
+    </test>
+    <test name="SC12 — Dark mode parity (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Visit standalone code page → verify parity</step>
+        <step>Visit SpaarkeAi workspace → verify parity</step>
+      </steps>
+      <expected>All hoisted components use semantic tokens; no hard-coded colors</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r2/notes/sc-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 14 SCs verified pass in spaarkedev1.</criterion>
+    <criterion testable="true">`notes/sc-verification.md` written with per-SC outcome.</criterion>
+    <criterion testable="true">No SC failures; if any: defect filed + task 090 blocked.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the final gate before wrap-up. Take it slow. Document each verification step's evidence (screenshot, log line, query result).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

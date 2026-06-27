@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Index 6 production-bound playbooks and verify "summarize this NDA" returns Summarize-NDA top-1</title>
+    <phase>2: WP1.5 Index Governance</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>037</dependencies>
+    <blocks>039,040</blocks>
+    <tags>testing, ai, benchmark, azure-search</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test + verification work; no .cs/.tsx source modification; STANDARD per Step 0.5</rigor-reason>
+    <parallel-group>2-D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on serialized backfill in 037; index updates global — do not interleave with other indexing tasks</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Trigger indexing for all 6 production-bound playbooks via the "Send to Index" UX (task 033) or direct API call. After indexing completes, run the FR-10 benchmark: query the playbook-embeddings index with "summarize this NDA" and verify the Summarize-NDA playbook (or the chat-summarize playbook with NDA-tagged metadata) returns as the top-1 hit. Capture latency + ranking metrics for the project notes.
+  </prompt>
+
+  <role>SPAARKE platform AI / search engineer + test engineer. Expert in `PlaybookEmbeddingService` + Azure AI Search query patterns.</role>
+
+  <goal>
+    All 6 production-bound playbooks have `sprk_indexstatus = 'indexed'` with populated `sprk_lastindexedat` + `sprk_indexhash`. Benchmark query "summarize this NDA" returns the NDA-targeted playbook as top-1 (per FR-10 acceptance). Metrics: ranking scores for top-3 hits, query latency, total tokens consumed by the embedding call.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-10 + FR-13 acceptance. This task is the routing-quality litmus test for WP1.5: did the JPS matching metadata extension + backfill actually improve match precision? If "summarize this NDA" does NOT return the NDA playbook top-1 after task 032 + 037, root-cause the metadata composition before deploying (task 039).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-10 acceptance: "summarize this NDA" returns Summarize-NDA top-1 on 100-doc Spaarke corpus benchmark.</constraint>
+    <constraint source="spec">FR-11 acceptance: status flips to 'indexed' within 60s of successful index trigger.</constraint>
+    <constraint source="project">If Summarize-NDA playbook is NOT yet authored (per spec PB-009 / task 130 in Phase 6), the benchmark uses the chat-summarize playbook with NDA documentTypes in its backfilled JPS metadata as the proxy target.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">For each of the 6 playbooks: click "Send to Index" (task 033) OR call the BFF endpoint directly. Confirm `sprk_indexstatus` transitions: 'not-indexed' → 'pending' → 'indexed' within 60s.</step>
+    <step order="2">Verify all 6 rows have non-null `sprk_lastindexedat` + `sprk_indexhash`.</step>
+    <step order="3">Construct the benchmark query: "summarize this NDA". Call the playbook search service.</step>
+    <step order="4">Capture top-5 results with similarity scores. The NDA-targeted playbook MUST be top-1.</step>
+    <step order="5">If top-1 is NOT NDA-targeted: inspect `sprk_jpsmatchingmetadata` of the NDA playbook, the embed-input composition for that playbook (task 032 logic), and the actual indexed document. Root-cause before deployment (task 039).</step>
+    <step order="6">Capture metrics in `notes/handoffs/038-index-benchmark.md`: per-playbook hash, indexed timestamp, top-3 result similarity scores for the NDA query.</step>
+    <step order="7">Update TASK-INDEX.md: task 038 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">curl / PowerShell to call BFF endpoints</tool>
+    <tool name="Read">PlaybookEmbeddingService.cs (for hash verification)</tool>
+    <tool name="Write">benchmark notes</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">6 playbooks in `sprk_indexstatus = 'indexed'`</output>
+    <output type="docs">notes/handoffs/038-index-benchmark.md — top-5 scores for "summarize this NDA"</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 playbooks have `sprk_indexstatus = 'indexed'` + non-null `sprk_lastindexedat` + `sprk_indexhash`.</criterion>
+    <criterion testable="true">Benchmark query "summarize this NDA" returns NDA-targeted playbook as top-1.</criterion>
+    <criterion testable="true">Metrics captured: top-3 scores, query latency, total tokens.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If Summarize-NDA-specific playbook (PB-009) is deferred to Phase 6, use the chat-summarize playbook with NDA documentTypes in its JPS metadata as the proxy. Document this in the benchmark notes — Phase 6 task 130 rewrites PB-009 to take ownership of the NDA query path.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

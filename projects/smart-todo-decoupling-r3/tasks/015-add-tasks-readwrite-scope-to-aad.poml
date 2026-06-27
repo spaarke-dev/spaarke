@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Add `Tasks.ReadWrite` delegated scope to Azure AD app registration</title>
+    <phase>Phase 6: Graph Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <blocks>016, 061, 063</blocks>
+    <tags>auth, azure, oauth, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>AAD config change; no code modification but external dependency satisfaction. STANDARD rigor.</rigor-reason>
+    <parallel-group>P6-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add the delegated `Microsoft Graph → Tasks.ReadWrite` permission scope to the Azure AD app registration used by Sprk.Bff.Api for OBO. Obtain tenant admin consent. Verify a token issued with the scope can call `/me/todo/lists`.
+  </prompt>
+
+  <role>Spaarke platform deployment engineer.</role>
+
+  <goal>AAD app registration has `Tasks.ReadWrite` delegated scope; tenant admin consent granted; smoke-test OBO call to `/me/todo/lists` returns 200 (per spec D-1, FR-18).</goal>
+
+  <context>
+    <background>The Graph `/me/todo` endpoint requires `Tasks.ReadWrite` delegated permission. Without it, OBO calls fail with 403 even when authentication succeeds. This task satisfies spec D-1 and unblocks Phase 6 and Phase 7 sync work.</background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Reuse cached OBO token flow; do not introduce a new auth path for this scope.</constraint>
+    <constraint source="D-1">Tenant admin consent required for delegated `Tasks.ReadWrite`.</constraint>
+    <constraint source="FR-18">Token issued with `Tasks.ReadWrite` claim; OBO call to `/me/todo/lists` succeeds in smoke test.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify the AAD app registration used by Sprk.Bff.Api (per `auth-azure-resources.md`).</step>
+    <step order="2">Add Microsoft Graph → Delegated → `Tasks.ReadWrite` permission.</step>
+    <step order="3">Request tenant admin consent. Confirm consent granted.</step>
+    <step order="4">Smoke test: obtain an OBO token for a test user; call `GET /me/todo/lists`; verify 200 response.</step>
+    <step order="5">Document the change in `projects/smart-todo-decoupling-r3/notes/aad-config-changes.md` for the deploy team.</step>
+    <step order="6">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI for AAD operations</tool>
+    <tool name="curl">Token + Graph smoke tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">`projects/smart-todo-decoupling-r3/notes/aad-config-changes.md`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AAD app shows `Tasks.ReadWrite` delegated permission with admin-consent granted.</criterion>
+    <criterion testable="true">OBO smoke test: token includes `Tasks.ReadWrite` scope claim; `/me/todo/lists` returns 200.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor. Coordinate with deploy team for tenant-admin consent step (may require human approval).</protocol>
+  </execution>
+</task>

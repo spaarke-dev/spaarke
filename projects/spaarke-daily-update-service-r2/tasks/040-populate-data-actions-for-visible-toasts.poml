@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>`CreateNotificationNodeExecutor` populates `data.actions[]` for visible-toasttype (FR-18)</title>
+    <phase>P3: MDA Bell Deep-Links</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>041</blocks>
+    <tags>bff-api, api, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api triggers FULL; producer-layer modification with visible UX impact</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per FR-18: modify `CreateNotificationNodeExecutor` to populate `appnotification.data.actions = [{ title: "Open", data: { url: actionUrl } }]` when (a) `actionUrl` is present AND (b) `toasttype` indicates a visible toast (NOT "Hidden"). Both the `iterateItems` per-item creation path and the standard single-notification path covered. The existing `customData.actionUrl` is populated regardless of `toasttype` (consumed by Daily Briefing UI, not MDA bell).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in `CreateNotificationNodeExecutor` + `appnotification` Dataverse schema + MDA bell native UX.</role>
+
+  <goal>Freshly-created `appnotification` rows with visible `toasttype` have `data.actions[0].data.url == customData.actionUrl`; hidden-toast rows have `data.actions` null/absent; existing `customData.actionUrl` behavior unchanged.</goal>
+
+  <context>
+    <background>
+      Per spec FR-18: MDA native bell icon currently shows notifications but NOT clickable "Open" buttons because `data.actions[]` is not populated. Adding it (only for visible toasts) makes the bell actionable without changing existing UI.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">BFF Minimal API; producer-layer code in `Services/Ai/Nodes/`.</constraint>
+    <constraint source="ADR-013">AI-orchestrated executor stays in BFF.</constraint>
+    <constraint source="project">FR-18: `data.actions[]` populated ONLY when `toasttype != Hidden`; hidden toasts skip.</constraint>
+    <constraint source="project">Both `iterateItems` and standard creation paths covered.</constraint>
+    <constraint source="project">`customData.actionUrl` populated regardless of `toasttype` (existing behavior).</constraint>
+    <constraint source="project">CLAUDE.md §10: tests in 041; publish-size + CVE in 042.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `CreateNotificationNodeExecutor.cs` and identify both creation paths (iterateItems + standard).</step>
+    <step order="2">For each path: when `actionUrl` is present AND `toasttype != Hidden`, set `data.actions = [{ title: "Open", data: { url: actionUrl } }]`.</step>
+    <step order="3">When `toasttype == Hidden`: skip `data.actions` (leave null/absent).</step>
+    <step order="4">Preserve `customData.actionUrl` population in all cases.</step>
+    <step order="5">Run `dotnet build`; verify green.</step>
+    <step order="6">Update TASK-INDEX.md: change task 040 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Visible-toast notifications: `data.actions[0].data.url == customData.actionUrl`.</criterion>
+    <criterion testable="true">Hidden-toast notifications: `data.actions` null/absent.</criterion>
+    <criterion testable="true">Both `iterateItems` + standard creation paths covered.</criterion>
+    <criterion testable="true">`customData.actionUrl` behavior unchanged.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec assumption: schema `{ actions: [{ title, data: { url } }] }`. If platform docs differ, surface in `notes/` and reconcile.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

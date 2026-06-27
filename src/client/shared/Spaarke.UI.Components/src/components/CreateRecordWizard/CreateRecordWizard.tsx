@@ -140,7 +140,11 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   });
 
   // -- Association state (AssociateToStep -- optional step 1) --
-  const [association, setAssociation] = React.useState<AssociationResult | null>(null);
+  // Initialised from config.associateToStep?.initialAssociation when set
+  // (smart-todo-decoupling-r3 task 032 / FR-16 — launch-context pre-fill).
+  const [association, setAssociation] = React.useState<AssociationResult | null>(
+    config.associateToStep?.initialAssociation ?? null
+  );
 
   // -- Follow-on step selections --
   const [selectedActions, setSelectedActions] = React.useState<FollowOnActionId[]>([]);
@@ -191,7 +195,9 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
   React.useEffect(() => {
     if (open) {
       fileDispatch({ type: 'RESET' });
-      setAssociation(null);
+      // FR-16: when the wizard opens (or re-opens), seed the association with
+      // the launch-context pre-fill if one was provided (null otherwise).
+      setAssociation(config.associateToStep?.initialAssociation ?? null);
       setSelectedActions([]);
       setAssignWorkName('');
       setAssignWorkDescription('');
@@ -218,6 +224,11 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
       setEmailSubject('');
       setEmailBody('');
     }
+    // Intentionally depends on `open` only — re-running on every `config` change
+    // would clobber in-progress wizard state. The initial-association seed is read
+    // from closure at the open→true transition (sufficient for FR-16 launch-context
+    // pre-fill where the consumer sets the prop before opening the wizard).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   // -- Refs for stale closure prevention in dynamic step renderContent --

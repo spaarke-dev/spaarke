@@ -18,6 +18,29 @@ public interface IGenericEntityService
     Task<LookupNavigationMetadata> GetLookupNavigationAsync(string childEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default);
     Task<string> GetCollectionNavigationAsync(string parentEntityLogicalName, string relationshipSchemaName, CancellationToken ct = default);
     Task<EntityCollection> RetrieveMultipleAsync(QueryExpression query, CancellationToken ct = default);
+
+    /// <summary>
+    /// Executes a FetchXML query and returns the matching <see cref="EntityCollection"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added 2026-06-10 for multi-container-multi-index-r1 Phase G (task 102) to support the
+    /// lookup-first <see cref="Sprk.Bff.Api.Services.Ai.SearchIndexNameResolver"/> chain and the
+    /// new <see cref="Sprk.Bff.Api.Services.Ai.DataverseAllowedIndexesProvider"/> allow-list lookup.
+    /// Both consumers need FetchXml <c>link-entity</c> support (outer-join cascade across the
+    /// doc → parent → BU chain projecting <c>idx.sprk_searchindexname</c>), which
+    /// <see cref="QueryExpression"/> cannot express ergonomically.
+    /// </para>
+    /// <para>
+    /// Implementations delegate to the SDK <c>ServiceClient.RetrieveMultipleAsync(FetchExpression, ct)</c>
+    /// overload. The Web API implementation throws <c>NotImplementedException</c> (existing pattern —
+    /// the BFF runtime always resolves <see cref="DataverseServiceClientImpl"/>).
+    /// </para>
+    /// </remarks>
+    /// <param name="fetch">A SDK <see cref="FetchExpression"/> wrapping a FetchXml payload.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default);
+
     Task DeleteAsync(string entityLogicalName, Guid id, CancellationToken ct = default);
 
     /// <summary>

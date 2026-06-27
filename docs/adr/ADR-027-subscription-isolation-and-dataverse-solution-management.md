@@ -118,7 +118,7 @@ All solutions **MUST** be imported in this order:
 
 1. **SpaarkeCore** (Tier 1) — Base entities, option sets, security roles
 2. **SpaarkeWebResources** (Tier 2) — JS files and icons used by feature solutions
-3. **Tier 3 feature solutions** (any order) — AnalysisBuilder, CalendarSidePane, DocumentUploadWizard, EventCommands, EventDetailSidePane, EventsPage, LegalWorkspace, TodoDetailSidePane
+3. **Tier 3 feature solutions** (any order) — AnalysisBuilder, CalendarSidePane, DocumentUploadWizard, EventCommands, EventDetailSidePane, EventsPage, LegalWorkspace
 
 ### Dev → Production Pipeline
 

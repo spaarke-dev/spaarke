@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Caching.Memory;
+using Sprk.Bff.Api.Infrastructure.Caching;
 using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api.Ai;
@@ -126,13 +126,13 @@ public static class HandlerEndpoints
     /// </summary>
     private static IResult GetHandlers(
         IToolHandlerRegistry registry,
-        IMemoryCache cache,
+        IEndpointResponseCache cache,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("HandlerEndpoints");
 
         // Try to get from cache first
-        if (cache.TryGetValue(HandlersCacheKey, out HandlersResponse? cachedResponse) && cachedResponse != null)
+        if (cache.TryGet<HandlersResponse>(HandlersCacheKey, out var cachedResponse) && cachedResponse != null)
         {
             logger.LogDebug("[HANDLERS] Returning {Count} handlers from cache", cachedResponse.Handlers.Length);
             return Results.Ok(cachedResponse);
@@ -161,12 +161,8 @@ public static class HandlerEndpoints
 
         var response = new HandlersResponse(handlers);
 
-        // Cache the response
-        var cacheOptions = new MemoryCacheEntryOptions()
-            .SetAbsoluteExpiration(CacheDuration)
-            .SetPriority(CacheItemPriority.Normal);
-
-        cache.Set(HandlersCacheKey, response, cacheOptions);
+        // Cache the response via the wrapper (ADR-009 — see IEndpointResponseCache)
+        cache.Set(HandlersCacheKey, response, CacheDuration);
 
         logger.LogInformation("[HANDLERS] Loaded {Count} handlers from registry, cached for {Minutes} minutes",
             handlers.Length, CacheDuration.TotalMinutes);
