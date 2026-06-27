@@ -3,7 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
@@ -19,7 +19,16 @@ public class PlaybookService : IPlaybookService
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<PlaybookService> _logger;
-    private readonly IDistributedCache? _cache;
+    private readonly ITenantCache _cache;
+
+    // NFR-08 system-level cache allow-listed (FR-05 redis remediation r1):
+    // IPlaybookService.GetByNameAsync(name) has no tenantId in scope — playbook-by-name lookup
+    // is org-wide per ADR-029 (single Redis instance per BFF org). Using the "system" sentinel
+    // as the ITenantCache tenant scope preserves the wrapper invariant while documenting the
+    // system-level cache exception. On-wire key: spaarke:tenant:system:playbook-by-name:{name}:v1
+    private const string SystemTenantSentinel = "system";
+    private const string CacheResource = "playbook-by-name";
+    private const int CacheVersion = 1;
     private AccessToken? _currentToken;
 
     private const string EntitySetName = "sprk_analysisplaybooks";
@@ -58,11 +67,11 @@ public class PlaybookService : IPlaybookService
         IConfiguration configuration,
         TokenCredential credential,
         ILogger<PlaybookService> logger,
-        IDistributedCache? cache = null)
+        ITenantCache cache)
     {
         _httpClient = httpClient;
         _logger = logger;
-        _cache = cache;
+        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _credential = credential;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
@@ -354,29 +363,21 @@ public class PlaybookService : IPlaybookService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        // Cache key following SDAP naming convention
-        var cacheKey = $"sdap:playbook:name:{name}";
-
-        // Try cache first (if available)
-        if (_cache != null)
+        // NFR-08 system-level allow-listed: tenant scope = "system" (see class header).
+        // The cache id is the playbook name itself.
+        try
         {
-            var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
-            if (cached != null)
+            var cachedPlaybook = await _cache.GetAsync<PlaybookResponse>(
+                SystemTenantSentinel, CacheResource, name, CacheVersion, ct: cancellationToken);
+            if (cachedPlaybook != null)
             {
-                try
-                {
-                    var cachedPlaybook = JsonSerializer.Deserialize<PlaybookResponse>(cached, JsonOptions);
-                    if (cachedPlaybook != null)
-                    {
-                        _logger.LogDebug("[PLAYBOOK] Cache HIT for playbook name '{Name}'", name);
-                        return cachedPlaybook;
-                    }
-                }
-                catch (JsonException ex)
-                {
-                    _logger.LogWarning(ex, "[PLAYBOOK] Cache deserialization failed for '{Name}'", name);
-                }
+                _logger.LogDebug("[PLAYBOOK] Cache HIT for playbook name '{Name}'", name);
+                return cachedPlaybook;
             }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PLAYBOOK] Cache read failed for '{Name}'", name);
         }
 
         _logger.LogDebug("[PLAYBOOK] Cache MISS for playbook name '{Name}', querying Dataverse", name);
@@ -463,23 +464,18 @@ public class PlaybookService : IPlaybookService
             ModifiedOn = entity.ModifiedOn ?? DateTime.UtcNow
         };
 
-        // Cache result for 24 hours (playbooks are relatively stable)
-        if (_cache != null)
+        // Cache result for 24 hours (playbooks are relatively stable).
+        // NFR-08 system-level allow-listed: tenant scope = "system" (see class header).
+        try
         {
-            try
-            {
-                var serialized = JsonSerializer.Serialize(playbook, JsonOptions);
-                var cacheOptions = new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24)
-                };
-                await _cache.SetStringAsync(cacheKey, serialized, cacheOptions, cancellationToken);
-                _logger.LogDebug("[PLAYBOOK] Cached playbook '{Name}' for 24 hours", name);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[PLAYBOOK] Failed to cache playbook '{Name}'", name);
-            }
+            await _cache.SetAsync(
+                SystemTenantSentinel, CacheResource, name, CacheVersion,
+                playbook, TimeSpan.FromHours(24), ct: cancellationToken);
+            _logger.LogDebug("[PLAYBOOK] Cached playbook '{Name}' for 24 hours", name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PLAYBOOK] Failed to cache playbook '{Name}'", name);
         }
 
         _logger.LogInformation("[PLAYBOOK] Retrieved playbook '{Name}' (ID: {Id})", name, playbook.Id);
@@ -708,11 +704,9 @@ public class PlaybookService : IPlaybookService
 
     /// <summary>
     /// Detects whether a non-success Dataverse response indicates the queried entity
-    /// (table) does not exist in this environment. Mirrors the helper in
-    /// <see cref="Sprk.Bff.Api.Services.Ai.Capabilities.DataverseCapabilityManifestLoader"/>.
-    /// Treated as a graceful "no results" condition rather than an error so the chat
-    /// pipeline and Daily Briefing can degrade gracefully when fresh environments lack
-    /// schema.
+    /// (table) does not exist in this environment. Treated as a graceful "no results"
+    /// condition rather than an error so the chat pipeline and Daily Briefing can
+    /// degrade gracefully when fresh environments lack schema.
     /// </summary>
     internal static bool IsMissingEntityResponse(System.Net.HttpStatusCode statusCode, string body)
     {

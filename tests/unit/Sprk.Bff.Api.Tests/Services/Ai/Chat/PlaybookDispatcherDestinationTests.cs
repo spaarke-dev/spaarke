@@ -4,7 +4,8 @@ using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Models.Ai;
@@ -60,7 +61,7 @@ public class PlaybookDispatcherDestinationTests
 
     private readonly Mock<IChatClient> _executionClientMock;
     private readonly Mock<INodeService> _nodeServiceMock;
-    private readonly Mock<IDistributedCache> _cacheMock;
+    private readonly InMemoryTenantCache _cache;
     private readonly Mock<ILogger<PlaybookDispatcher>> _loggerMock;
     private readonly Mock<IOpenAiClient> _openAiClientMock;
     private readonly Mock<SearchIndexClient> _searchIndexClientMock;
@@ -71,7 +72,7 @@ public class PlaybookDispatcherDestinationTests
     {
         _executionClientMock = new Mock<IChatClient>();
         _nodeServiceMock = new Mock<INodeService>();
-        _cacheMock = new Mock<IDistributedCache>();
+        _cache = new InMemoryTenantCache();
         _loggerMock = new Mock<ILogger<PlaybookDispatcher>>();
         _openAiClientMock = new Mock<IOpenAiClient>();
         _searchIndexClientMock = new Mock<SearchIndexClient>(MockBehavior.Loose);
@@ -90,9 +91,7 @@ public class PlaybookDispatcherDestinationTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ReadOnlyMemory<float>(new float[3072]));
 
-        _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+        // InMemoryTenantCache returns null/default by default — no cache-miss setup required.
     }
 
     private PlaybookDispatcher CreateDispatcher()
@@ -106,7 +105,7 @@ public class PlaybookDispatcherDestinationTests
             embeddingService,
             _executionClientMock.Object,
             _nodeServiceMock.Object,
-            _cacheMock.Object,
+            _cache,
             TestTenantId,
             _loggerMock.Object);
     }

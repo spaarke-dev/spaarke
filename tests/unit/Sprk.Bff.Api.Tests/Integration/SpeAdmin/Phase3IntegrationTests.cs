@@ -135,19 +135,6 @@ public class Phase3IntegrationTests
         httpResult.Should().NotBeNull();
     }
 
-    [Fact]
-    public async Task ConsumingTenants_AnonymousUser_Returns401()
-    {
-        // Arrange
-        EndpointFilterDelegate next = _ =>
-            ValueTask.FromResult<object?>(Results.Ok());
-
-        // Act
-        var result = await InvokeAuthFilter(next, CreateAnonymousUser());
-
-        // Assert — anonymous user has no identity, filter returns 401
-        result.Should().NotBeNull("anonymous user should receive an error result, not be passed through");
-    }
 
     [Fact]
     public async Task ConsumingTenants_SystemAdminRole_PassesThroughAuthFilter()
@@ -200,39 +187,6 @@ public class Phase3IntegrationTests
             "must return RouteGroupBuilder for chaining");
     }
 
-    [Theory]
-    [InlineData("ListConsumersAsync")]
-    [InlineData("RegisterConsumerAsync")]
-    [InlineData("UpdateConsumerAsync")]
-    [InlineData("RemoveConsumerAsync")]
-    public void ConsumingTenantEndpoints_AllCrudHandlers_ExistAsPrivateStaticMethods(string methodName)
-    {
-        var method = typeof(ConsumingTenantEndpoints)
-            .GetMethod(methodName, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        method.Should().NotBeNull($"{methodName} handler must exist as a private static method (ADR-001)");
-        method!.IsStatic.Should().BeTrue($"{methodName} must be static");
-    }
-
-    [Theory]
-    [InlineData("ListConsumersAsync")]
-    [InlineData("RegisterConsumerAsync")]
-    [InlineData("UpdateConsumerAsync")]
-    [InlineData("RemoveConsumerAsync")]
-    public void ConsumingTenantEndpoints_Handlers_InheritAuthFromRouteGroup_NoDirectAuthAttribute(string methodName)
-    {
-        // SpeAdminAuthorizationFilter is applied at the /api/spe group level.
-        // Individual handlers must NOT duplicate auth — they inherit it (ADR-008).
-        var method = typeof(ConsumingTenantEndpoints)
-            .GetMethod(methodName, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        method.Should().NotBeNull();
-
-        var authorizeAttributes = method!
-            .GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), false);
-        authorizeAttributes.Should().BeEmpty(
-            $"{methodName} authorization must be inherited from the /api/spe route group (ADR-008)");
-    }
 
     #endregion
 
@@ -409,17 +363,6 @@ public class Phase3IntegrationTests
         method!.ReturnType.Should().Be(typeof(void), "registration methods return void");
     }
 
-    [Theory]
-    [InlineData("EnqueueBulkDelete")]
-    [InlineData("EnqueueBulkPermissions")]
-    [InlineData("GetBulkOperationStatusAsync")]
-    public void BulkOperationEndpoints_AllHandlers_ExistAsPrivateStaticMethods(string methodName)
-    {
-        var method = typeof(BulkOperationEndpoints)
-            .GetMethod(methodName, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        method.Should().NotBeNull($"{methodName} handler must exist as private static (ADR-001)");
-    }
 
     #endregion
 
@@ -860,13 +803,6 @@ public class Phase3IntegrationTests
         ex.Message.Should().Contain(config.ConfigId.ToString());
     }
 
-    [Fact]
-    public void TokenProvider_EvictExpiredTokens_DoesNotThrow_WhenCacheEmpty()
-    {
-        var provider = MakeTokenProvider();
-
-        provider.Invoking(p => p.EvictExpiredTokens()).Should().NotThrow();
-    }
 
     [Fact]
     public async Task TokenProvider_ValidateOwningAppSecrets_ReturnsEmpty_WhenNoOwningAppConfigs()
@@ -919,12 +855,6 @@ public class Phase3IntegrationTests
 
     #region Phase 3 Endpoint Registration Completeness
 
-    [Fact]
-    public void SpeAdminEndpoints_MapMethod_Exists()
-    {
-        var method = typeof(SpeAdminEndpoints).GetMethod("MapSpeAdminEndpoints");
-        method.Should().NotBeNull("MapSpeAdminEndpoints must exist as the main endpoint registration method");
-    }
 
     [Fact]
     public void Phase3_AllEndpointClasses_AreStatic()

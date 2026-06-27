@@ -704,6 +704,29 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         HttpContext httpContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        // R4 hotfix (2026-06-26): empty DocumentIds is reachable from non-document
+        // dispatch paths (e.g. IInvokePlaybookAi facade used by /api/ai/daily-briefing/narrate
+        // — task 031 Path A.5). The legacy-mode entry point is structurally document-centric
+        // (loads the document via _documentLoader.GetDocumentAsync below), so empty
+        // DocumentIds cannot be made to work here — it would have to be a node-based
+        // playbook. We previously crashed with IndexOutOfRangeException at
+        // `request.DocumentIds[0]`. Convert to a clean error chunk that the orchestrator
+        // wrapper (PlaybookOrchestrationService.ExecuteLegacyModeAsync) translates to a
+        // PlaybookStreamEvent.RunFailed → PLAYBOOK_INVOCATION_FAILED at the facade boundary
+        // → 503 ProblemDetails at the /narrate endpoint. The error message tells the operator
+        // the actual fix: the playbook must have nodes (node-based execution) when invoked
+        // without a document context. See projects/spaarke-daily-update-service-r4/notes/uat/
+        // narrate-503-hotfix.md for the post-mortem.
+        if (request.DocumentIds is null || request.DocumentIds.Length == 0)
+        {
+            _logger.LogError(
+                "Legacy-mode playbook execution requires at least one DocumentId. Playbook {PlaybookId} likely has no nodes — node-based execution is required for non-document dispatch (e.g. daily-briefing narrate).",
+                request.PlaybookId);
+            yield return AnalysisStreamChunk.FromError(
+                $"Playbook {request.PlaybookId} cannot run in legacy mode without a document. Configure nodes in the Playbook Builder to enable non-document dispatch.");
+            yield break;
+        }
+
         var documentId = request.DocumentIds[0];
 
         _logger.LogInformation("Starting playbook execution: Playbook {PlaybookId}, Document {DocumentId}, AnalysisId {AnalysisId}",

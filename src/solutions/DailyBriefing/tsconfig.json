@@ -10,8 +10,16 @@
       "@spaarke/daily-briefing-components": ["../../client/shared/Spaarke.DailyBriefing.Components/src/index.ts"],
       "@spaarke/daily-briefing-components/*": ["../../client/shared/Spaarke.DailyBriefing.Components/src/*"],
       "@spaarke/ui-components": ["../../client/shared/Spaarke.UI.Components/src/index.ts"],
-      "@spaarke/ui-components/*": ["../../client/shared/Spaarke.UI.Components/src/*"]
-    }
+      "@spaarke/ui-components/*": ["../../client/shared/Spaarke.UI.Components/src/*"],
+      "@azure/msal-browser": ["./node_modules/@azure/msal-browser"],
+      "@fluentui/react-components": ["./node_modules/@fluentui/react-components"],
+      "@fluentui/react-icons": ["./node_modules/@fluentui/react-icons"],
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"]
+    },
+    "typeRoots": ["./node_modules/@types"]
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]

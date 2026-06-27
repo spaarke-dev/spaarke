@@ -7,7 +7,7 @@ param(
     [string]$SearchServiceName = "spaarke-search-dev",
 
     [Parameter(Mandatory = $false)]
-    [string]$IndexName = "spaarke-knowledge-index-v2",
+    [string]$IndexName = "spaarke-files-index",
 
     [Parameter(Mandatory = $false)]
     [string]$ResourceGroup = "spe-infrastructure-westus2"

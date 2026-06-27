@@ -26,6 +26,7 @@ export type PlaybookNodeType =
   | 'sendEmail'
   | 'createNotification'
   | 'lookupUserMembership'
+  | 'entityNameValidator'
   | 'wait';
 
 /**

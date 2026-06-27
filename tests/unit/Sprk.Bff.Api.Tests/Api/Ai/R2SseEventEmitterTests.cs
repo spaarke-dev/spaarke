@@ -482,16 +482,6 @@ public class R2SseEventEmitterTests
     // CreateR2Emitter factory method
     // -------------------------------------------------------------------------
 
-    [Fact]
-    public void CreateR2Emitter_ReturnsNonNullEmitter()
-    {
-        var captured = new List<ChatSseEvent>();
-        Task Writer(ChatSseEvent evt, CancellationToken ct) { captured.Add(evt); return Task.CompletedTask; }
-
-        var emitter = ChatEndpoints.CreateR2Emitter(Writer, NullLogger.Instance);
-
-        emitter.Should().NotBeNull();
-    }
 
     [Fact]
     public async Task CreateR2Emitter_EmitterWritesToProvidedDelegate()

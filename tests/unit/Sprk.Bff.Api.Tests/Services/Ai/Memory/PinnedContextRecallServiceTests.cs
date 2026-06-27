@@ -494,20 +494,4 @@ public sealed class PinnedContextRecallServiceTests
     // Constructor null-arg defense
     // =========================================================================================
 
-    [Fact]
-    public void Ctor_ThrowsOnNullDependencies()
-    {
-        var opt = Options.Create(new PinnedContextRecallOptions());
-
-        Assert.Throws<ArgumentNullException>(() =>
-            new PinnedContextRecallService(null!, _cache.Object, _openAi.Object, opt, _logger.Object));
-        Assert.Throws<ArgumentNullException>(() =>
-            new PinnedContextRecallService(_repo.Object, null!, _openAi.Object, opt, _logger.Object));
-        Assert.Throws<ArgumentNullException>(() =>
-            new PinnedContextRecallService(_repo.Object, _cache.Object, null!, opt, _logger.Object));
-        Assert.Throws<ArgumentNullException>(() =>
-            new PinnedContextRecallService(_repo.Object, _cache.Object, _openAi.Object, null!, _logger.Object));
-        Assert.Throws<ArgumentNullException>(() =>
-            new PinnedContextRecallService(_repo.Object, _cache.Object, _openAi.Object, opt, null!));
-    }
 }

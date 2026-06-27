@@ -1,0 +1,56 @@
+<task id="DEVOPS-041" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Audit per-project README pointer blocks across active projects</title>
+    <status>not-started</status>
+    <phase>5</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>portfolio-views, audit, readme-pointer</tags>
+    <dependencies>022, 040</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Verify FR-26 + Success Criterion 10: every active project's local `README.md` has the `> **Portfolio**:` pointer block at the top. The block is auto-written by `/devops-project-start` (task 014) and `/devops-project-register` (task 015) — this task verifies the audit and remediates any missing blocks.
+  </prompt>
+
+  <role>Auditor. You run the spec's grep + reconcile any failures.</role>
+
+  <goal>
+`grep -L "> \*\*Portfolio\*\*" projects/*/README.md` returns no ACTIVE projects.
+  </goal>
+
+  <constraints>
+    <constraint source="spec FR-26">Block format: `> **Portfolio**: GitHub Issue #N · Epic: #E · Project Status: {status} · [Portfolio board view](url)`</constraint>
+    <constraint source="spec SC#10">grep MUST return no active projects missing the block</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm task 022 ✅ (backfill complete; pointer blocks should be present per `/devops-project-register` behavior).</step>
+    <step order="1" name="Audit">Run `grep -L "> \*\*Portfolio\*\*" projects/*/README.md` and capture list.</step>
+    <step order="2" name="Filter active-only">Cross-reference output with `notes/backfill-enumeration-{date}.md`. Any ACTIVE project in the grep result is a remediation candidate.</step>
+    <step order="3" name="Remediate">For each ACTIVE project missing the block: invoke `/devops-project-register --from-folder projects/{name}` (idempotent — re-running on registered project should reinforce/repair the block).</step>
+    <step order="4" name="Re-audit">Re-run grep. Confirm zero ACTIVE projects in result.</step>
+    <step order="5" name="Report">Save audit + remediation log to `notes/phase5-pointer-block-audit.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Audit</tool>
+    <tool name="Skill">/devops-project-register for remediation</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-devops-project-tracking-r1/notes/phase5-pointer-block-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep returns zero ACTIVE projects missing pointer block</criterion>
+    <criterion testable="true">Any remediations logged with project name + invocation result</criterion>
+  </acceptance-criteria>
+</task>

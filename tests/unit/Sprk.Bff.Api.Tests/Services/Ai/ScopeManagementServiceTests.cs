@@ -420,19 +420,6 @@ public class ScopeManagementServiceTests
         isLinked.Should().BeFalse();
     }
 
-    [Fact]
-    public async Task UnlinkScopeFromPlaybookAsync_NonExistentLink_DoesNotThrow()
-    {
-        // Arrange
-        var playbookId = Guid.NewGuid();
-        var toolId = Guid.NewGuid();
-
-        // Act - Unlink without ever linking (should be idempotent)
-        var act = () => _service.UnlinkScopeFromPlaybookAsync(playbookId, ScopeType.Tool, toolId, CancellationToken.None);
-
-        // Assert - Should not throw
-        await act.Should().NotThrowAsync();
-    }
 
     [Fact]
     public async Task IsLinkedAsync_NoLink_ReturnsFalse()

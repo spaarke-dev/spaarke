@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Create ai-search-azure-setup.md (operational guide)</title>
+    <phase>1: Documentation Foundation + Pre-Flight Verification</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001, 002</dependencies>
+    <blocks>020</blocks>
+    <tags>docs, guides, operations, azure-search, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New operational guide with explicit acceptance criteria (FR-02)</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create `docs/guides/ai-search-azure-setup.md` as the operational runbook for setting up AI Search resources in ANY environment.
+  </prompt>
+
+  <role>
+    Spaarke platform DevOps engineer. Familiar with Azure resource provisioning, Key Vault secrets, App Service config, PowerShell deploy scripts.
+  </role>
+
+  <goal>
+    `docs/guides/ai-search-azure-setup.md` exists as operator-ready guide covering all FR-02 sections.
+  </goal>
+
+  <context>
+    <background>
+      Currently no single doc owns AI Search provisioning. This guide is what an operator reads to set up AI Search in dev/staging/prod/demo.
+      Phase 3 Deploy-AllIndexes.ps1 will reference this guide; Phase 1 establishes the doc skeleton.
+    </background>
+    <relevant-files>
+      <file>docs/guides/ai-search-azure-setup.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-02">MUST contain: prerequisites, step-by-step procedure (provision → KV secret → Deploy-AllIndexes → verify), per-index schema deploy + ingestion procedure, troubleshooting, post-deploy verification commands, environment-specific variables</constraint>
+    <constraint source="project">Lowercase filename per user preference: `ai-search-azure-setup.md`</constraint>
+    <constraint source="project">Reference Deploy-AllIndexes.ps1 (Phase 3 deliverable) — placeholder OK with TODO until Phase 3 lands</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/design.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/handoff-to-ai-search-project.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Draft Section 1: Prerequisites (Azure CLI, search service, KV access, BFF MI roles)</step>
+    <step order="2">Draft Section 2: Step-by-step procedure (provision search service → set KV secret → run Deploy-AllIndexes.ps1 → verify)</step>
+    <step order="3">Draft Section 3: Per-index schema deploy + ingestion procedure (table format, references catalog)</step>
+    <step order="4">Draft Section 4: Troubleshooting (common errors: 401 unauthorized → key rotation, vector dim mismatch → embedding model alignment, etc.)</step>
+    <step order="5">Draft Section 5: Post-deploy verification commands</step>
+    <step order="6">Draft Section 6: Environment-specific variables (table: env → search service, KV name, RG, region)</step>
+    <step order="7">Write to `docs/guides/ai-search-azure-setup.md`</step>
+    <step order="8">Update TASK-INDEX.md: task 003 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create the guide file</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/ai-search-azure-setup.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File exists at `docs/guides/ai-search-azure-setup.md` (lowercase per user)</criterion>
+    <criterion testable="true">Contains all 6 required sections per FR-02</criterion>
+    <criterion testable="true">Reads as complete operator-ready guide for setting up AI Search in ANY environment</criterion>
+    <criterion testable="true">Cross-links to AI-SEARCH-INDEX-CATALOG.md and SPAARKE-DEPLOYMENT-GUIDE.md</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files before drafting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+
+  <notes-results>
+    <completed-on>2026-06-26</completed-on>
+    <deliverable>docs/guides/ai-search-azure-setup.md (created — 358 lines, 7-section TOC)</deliverable>
+    <sections-present>
+      <section>1. Prerequisites (tooling, Azure resources, RBAC table for operator + BFF MI, pre-flight verification link)</section>
+      <section>2. Step-by-Step Setup Procedure (2.1 provision service + Bicep alt; 2.2 KV secret with canonical AiSearch--AdminKey + VaultName=...;SecretName=... syntax; 2.3 grant BFF MI Search Index Data Contributor; 2.4 Deploy-AllIndexes.ps1 invocation + Phase 1 note; 2.5 -VerifyOnly invariant check)</section>
+      <section>3. Per-Index Deploy + Ingestion Reference (7-index table with deploy command + ingestion script + notes; cross-link to catalog §4)</section>
+      <section>4. Troubleshooting (4.1 401 KV admin-key drift; 4.2 missing MI role assignment; 4.3 vector dim mismatch; 4.4 Service Bus queue missing; 4.5 empty index post-deploy)</section>
+      <section>5. Post-Deploy Verification Commands (5.1 list indexes REST; 5.2 per-index field-flag verification; 5.3 vector profile + dim verification; 5.4 semantic config; 5.5 doc count; 5.6 BFF functional verification)</section>
+      <section>6. Environment-Specific Variables (dev/staging/prod/demo table with 2-tier naming policy callout + per-customer link)</section>
+    </sections-present>
+    <key-decisions>
+      <decision>Canonical KV secret name AiSearch--AdminKey used throughout (per 2026-06-26 Option C); legacy aliases noted but discouraged</decision>
+      <decision>Canonical KV-ref syntax @Microsoft.KeyVault(VaultName=...;SecretName=...) per Redis project handoff §4 — NOT SecretUri= form</decision>
+      <decision>2-tier naming policy (top-level env-suffixed; sub-resources env-agnostic) documented in §6 with link to catalog §1</decision>
+      <decision>Phase 1 note on Deploy-AllIndexes.ps1 being a Phase 3 deliverable (task 020) — guide is forward-compatible with the Phase 3 script</decision>
+      <decision>Cross-links to AI-SEARCH-INDEX-CATALOG.md + SPAARKE-DEPLOYMENT-GUIDE.md §4.6 in TOC opener and §7</decision>
+    </key-decisions>
+    <acceptance-gate-result>All FR-02 acceptance criteria met: file exists at lowercase path; all 6 sections present; reads as operator-ready end-to-end runbook; cross-links to catalog + deployment guide; canonical KV-ref syntax + secret name; 2-tier naming policy documented</acceptance-gate-result>
+  </notes-results>
+</task>

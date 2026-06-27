@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.dev/schemas/playbookconsumer-matchconditions/v1",
+  "title": "sprk_playbookconsumer.sprk_matchconditions",
+  "description": "Predicate JSON for compositional consumer→playbook routing. Stored in the sprk_matchconditions column of sprk_playbookconsumer. Match semantics: ALL keys must match. Value match: string => equality; array of strings => 'in list' (OR). Empty object {} or null/absent => always match (consumer-type + consumer-code + environment filters alone govern). Authoritative spec: chat-routing-redesign-r1 spec.md FR-1R-04.",
+  "type": "object",
+  "additionalProperties": {
+    "oneOf": [
+      {
+        "type": "string",
+        "description": "Equality match against the corresponding IRoutingContext field."
+      },
+      {
+        "type": "array",
+        "description": "In-list match (OR) against the corresponding IRoutingContext field.",
+        "items": { "type": "string" },
+        "minItems": 1
+      }
+    ]
+  },
+  "examples": [
+    null,
+    {},
+    { "mimeType": "application/pdf" },
+    { "mimeType": ["application/pdf", "text/plain"] },
+    { "documentType": "nda" },
+    { "documentType": "nda", "mimeType": "application/pdf" }
+  ],
+  "$comment": "Match keys initially supported by ConsumerRoutingService (chat-routing-redesign-r1 task 028a / FR-1R-02): 'mimeType' (matches IRoutingContext.MimeType) and 'documentType' (matches IRoutingContext.DocumentType when classification is available — Phase 4). Unknown keys are IGNORED at match time (defensive: future-compatible). New match keys MUST be added to IRoutingContext + ConsumerRoutingService.TryMatchConditions in lockstep, then documented here."
+}

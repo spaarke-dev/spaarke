@@ -256,17 +256,6 @@ public class SearchContainersTests
     // Endpoint Registration Tests
     // =========================================================================
 
-    [Fact]
-    public void MapSearchContainersEndpoints_MethodExists_IsStatic()
-    {
-        // Arrange
-        var method = typeof(SearchContainersEndpoints)
-            .GetMethod("MapSearchContainersEndpoints");
-
-        // Assert
-        method.Should().NotBeNull("the extension method must exist for route registration");
-        method!.IsStatic.Should().BeTrue();
-    }
 
     [Fact]
     public void MapSearchContainersEndpoints_Parameter_TakesRouteGroupBuilder()

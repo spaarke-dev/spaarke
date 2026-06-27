@@ -1,0 +1,90 @@
+name: Project
+description: Create a new Spaarke project (worktree-backed initiative). Use /devops-project-start once submitted to scaffold the local worktree.
+title: "[Project]: "
+labels: [project]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to register a new Spaarke project on the portfolio. After submission:
+        1. Set `Parent issue` to the corresponding Epic (required per D-12).
+        2. Run `/devops-project-start --from-issue #N` locally to scaffold the worktree + folder + design.md skeleton.
+
+  - type: input
+    id: project-folder
+    attributes:
+      label: Project Folder Slug
+      description: kebab-case; will become `projects/{slug}-r1/`. If folder exists, slug auto-bumps to `-r2+` at start-time.
+      placeholder: e.g. "spaarke-devops-project-tracking"
+    validations:
+      required: true
+
+  - type: input
+    id: worktree-slug
+    attributes:
+      label: Worktree Slug
+      description: Usually identical to Project Folder Slug. Will become `c:/code_files/spaarke-wt-{slug}-r1`.
+      placeholder: e.g. "spaarke-devops-project-tracking"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: project-type
+    attributes:
+      label: Proposed Project Type
+      description: Which dimension this project primarily falls under (per D-15).
+      options:
+        - Module
+        - UI
+        - Infrastructure
+        - Cleanup
+        - Data
+        - Process
+        - AI
+        - Mixed
+      default: 7
+    validations:
+      required: true
+
+  - type: input
+    id: parent-epic
+    attributes:
+      label: Parent Epic Reference
+      description: Issue # of the Epic this project rolls up to. Required per D-12 (every Project has an Epic parent).
+      placeholder: e.g. "#42"
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Project Summary
+      description: 2-4 sentences — what the project delivers and why it matters now.
+    validations:
+      required: true
+
+  - type: input
+    id: start-date
+    attributes:
+      label: Projected Start Date
+      description: When implementation will begin. YYYY-MM-DD. (Roadmap view uses this.)
+      placeholder: e.g. "2026-07-01"
+    validations:
+      required: false
+
+  - type: input
+    id: target-date
+    attributes:
+      label: Projected Target Date
+      description: When implementation will complete. YYYY-MM-DD. (Roadmap view uses this.)
+      placeholder: e.g. "2026-08-15"
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / Context
+      description: Anything useful for stakeholders — related projects, technical risks, scope flags.
+    validations:
+      required: false

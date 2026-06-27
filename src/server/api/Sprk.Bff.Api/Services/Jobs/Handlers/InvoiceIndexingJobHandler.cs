@@ -34,10 +34,10 @@ public sealed class InvoiceIndexingJobHandler : IJobHandler
     public const string JobTypeName = "InvoiceIndexing";
 
     /// <summary>
-    /// Index name pattern: spaarke-invoices-{tenantId}
-    /// For MVP, using a single index: spaarke-invoices-dev
+    /// Canonical index name: spaarke-invoices-index (per AI-SEARCH-INDEX-CATALOG.md; FR-10 + NFR-03).
+    /// MVP uses a single index; per-tenant fan-out is a future extension.
     /// </summary>
-    private const string IndexNamePattern = "spaarke-invoices-dev";
+    private const string IndexNamePattern = "spaarke-invoices-index";
 
     public InvoiceIndexingJobHandler(
         SearchIndexClient searchIndexClient,
@@ -329,7 +329,7 @@ public sealed class InvoiceIndexingJobHandler : IJobHandler
 
     /// <summary>
     /// Create search document matching the invoice index schema.
-    /// Schema from infrastructure/ai-search/invoice-index-schema.json
+    /// Schema from infrastructure/ai-search/spaarke-invoices-index.json
     /// </summary>
     private SearchDocument CreateSearchDocument(
         Guid invoiceId,

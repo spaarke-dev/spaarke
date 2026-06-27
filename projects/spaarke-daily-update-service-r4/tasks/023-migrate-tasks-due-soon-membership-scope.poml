@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Migrate notification-tasks-due-soon.json to membership-scope</title>
+    <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Deployed corrected `notification-tasks-due-soon.json` (5,615-char serialized payload) to PB-020 `sprk_configjson` via MCP `update_record`. Verified: LookupUserMembership ActionType 52 present (Lookup My Matters node), entityLogicalName=`sprk_event` (NOT OOB `task`), Task eventtype GUID `124f5fc9-98ff-f011-8406-7c1e525abd8b` in filter, membership-scope union OR-branch `(sprk_regardingmatter IN myMatters.ids)` ∪ `(matter ownerid eq-userid)` ∪ `(record ownerid eq-userid)`, due-date filter on `sprk_duedate`/`sprk_finalduedate` within `{{todayUtc}}..{{dueSoonWindowUtc}}`, dedupe by `sprk_eventid` (spec FR-7 said "activityid" — corrected to `sprk_eventid` per CLAUDE.md § 2026-06-25 entity-architecture rule; reaffirmed here). 5 nodes total (Start → Lookup My Matters → Query → Check → Create). Schedule frequency aligned to repo `daily 06:00` (deployed was `hourly`). Smoke notes: `notes/smoke/023-tasks-due-soon-deploy.md`. Parallel-safe with tasks 022/024/025 — independent playbook row.</completion-notes>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020, 021</dependencies>
+    <blocks>026</blocks>
+    <tags>jps, dataverse, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Mirror of task 022 for the due-soon playbook (PB-020). Same membership-union pattern, independent JSON file — parallel-safe with 022/024/025.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Mirror task 022 for `projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-due-soon.json` (PB-020). Same membership-union pattern: add `LookupUserMembership` parallel branch + FetchXml union `(ownerid eq-userid)` OR `(regardingobjectid IN membership-matterIds)` with dedupe by `activityid`. Redeploy via MCP `update_record` on PB-020.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS playbook designer applying canonical membership-union pattern.</role>
+
+  <goal>`notification-tasks-due-soon.json` reflects membership-scope union query (PB-020). Deployed `sprk_analysisplaybook` row for PB-020 has updated `sprk_configjson`. `jps-validate` passes. AC-7 manual UAT scenario satisfied for due-soon (mirroring the overdue case).</goal>
+
+  <context>
+    <background>R4 spec FR-7 (line 142) requires BOTH `notification-tasks-overdue` (PB-021) AND `notification-tasks-due-soon` (PB-020) to expand to membership scope. This task handles PB-020; task 022 handles PB-021. Same canonical pattern from PB-016 (`notification-new-documents.json`).</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-due-soon.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-overdue.json</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-034">Membership resolution via ActionType 52 LookupUserMembership.</constraint>
+    <constraint source="ADR-013">Playbook composes JPS primitives only.</constraint>
+    <constraint source="ADR-037">Multinode output composition — fan-out membership → query → notification.</constraint>
+    <constraint source="project">Dedupe by activityid. Repo JSON = source-of-truth.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership-resolution.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/skills/jps-playbook-design/SKILL.md</file>
+      <file>.claude/skills/jps-playbook-audit/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load knowledge files. Read spec FR-7 + AC-7.</step>
+    <step order="2">Read PB-016 reference (`notification-new-documents.json`) and task 022's modified PB-021 (if already done) to confirm canonical pattern.</step>
+    <step order="3">Read current `notification-tasks-due-soon.json`. Document existing node graph + FetchXml in `notes/`.</step>
+    <step order="4">Apply the same membership-union edit pattern as task 022 — substituting the due-soon date filter (e.g., `scheduledend &gt;= now AND scheduledend &lt; now + 7d` or whatever the existing filter is) for the overdue filter.</step>
+    <step order="5">Validate via `jps-validate` skill.</step>
+    <step order="6">Audit via `jps-playbook-audit` skill.</step>
+    <step order="7">Redeploy via `mcp__dataverse__update_record` on PB-020 — set `sprk_configjson`.</step>
+    <step order="8">Verify deployment via `mcp__dataverse__read_query`.</step>
+    <step order="9">Run `dotnet build src/server/api/Sprk.Bff.Api/` to confirm no upstream regression.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: change task 023 status to ✅.</step>
+    <step order="11">Document UAT script in `projects/spaarke-daily-update-service-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">update_record — redeploy PB-020 sprk_configjson; read_query — verify.</tool>
+    <tool name="jps-validate">Schema validation</tool>
+    <tool name="jps-playbook-audit">Audit against Action catalog</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-due-soon.json</output>
+    <output type="data">sprk_analysisplaybook PB-020 row sprk_configjson updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notification-tasks-due-soon.json node graph includes LookupUserMembership(sprk_matter).</criterion>
+    <criterion testable="true">FetchXml unions (ownerid eq-userid) OR (regardingobjectid IN membership-matterIds) with dedupe.</criterion>
+    <criterion testable="true">jps-validate passes.</criterion>
+    <criterion testable="true">Deployed PB-020 sprk_configjson matches repo file.</criterion>
+    <criterion testable="true">UAT scenario documented for due-soon variant of AC-7.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-7 line 142; AC-7 line 143. Hint: keep the date filter logic intact — only add the membership-union expansion. Hint: parallel-safe with tasks 022/024/025 — different JSON file.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

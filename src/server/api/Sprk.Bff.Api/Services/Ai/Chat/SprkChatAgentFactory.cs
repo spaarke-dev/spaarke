@@ -10,7 +10,6 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Sprk.Bff.Api.Services.Ai.Export;
@@ -57,25 +56,16 @@ public class SprkChatAgentFactory
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<SprkChatAgentFactory> _logger;
 
-    // ── AIPU2-061: Per-turn capability routing ────────────────────────────────
-    // ICapabilityRouter is a singleton (in-memory keyword + LLM classifier).
-    // Injected here so CreateAgentAsync can call RouteAsync before tool resolution.
-    // When null (pre-AIPU2-010 environments), the factory falls back to the existing
-    // static tool resolution path (backward-compatible).
-    private readonly ICapabilityRouter? _capabilityRouter;
-
     public SprkChatAgentFactory(
         IChatClient chatClient,
         [FromKeyedServices("raw")] IChatClient rawChatClient,
         IServiceProvider serviceProvider,
-        ILogger<SprkChatAgentFactory> logger,
-        ICapabilityRouter? capabilityRouter = null)
+        ILogger<SprkChatAgentFactory> logger)
     {
         _chatClient = chatClient;
         _rawChatClient = rawChatClient;
         _serviceProvider = serviceProvider;
         _logger = logger;
-        _capabilityRouter = capabilityRouter;
     }
 
     /// <summary>
@@ -95,7 +85,6 @@ public class SprkChatAgentFactory
         _rawChatClient = null!;
         _serviceProvider = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _capabilityRouter = null;
     }
 
     /// <summary>
@@ -105,13 +94,11 @@ public class SprkChatAgentFactory
     /// are responsible for caching the agent for the duration of a session and replacing it
     /// when a context switch occurs (different document or playbook).
     ///
-    /// AIPU2-061: Per-turn tool injection via CapabilityRouter.
-    /// When <paramref name="latestUserMessage"/> is provided and <see cref="ICapabilityRouter"/> is
-    /// registered, the factory calls <c>RouteAsync</c> to select the minimal tool set for the turn,
-    /// then validates those capabilities via <see cref="ICapabilityValidator"/>.  Only tools whose
-    /// capability appears in the validated set are injected into the agent.  If routing produces no
-    /// confident result (Layer 3 fallback), the full backward-compatible tool set is used.
-    /// A <c>capability_change</c> SSE event is emitted when the routed tool set differs from the
+    /// Per-playbook tool filtering (FR-23): when <paramref name="playbookId"/> is non-null, the
+    /// tool set exposed to the LLM is gated by the playbook's declared capabilities (Action +
+    /// Tool scopes). When <paramref name="playbookId"/> is null (standalone conversational chat),
+    /// only the always-on core capabilities are exposed.
+    /// A <c>capability_change</c> SSE event is emitted when the per-turn tool set differs from the
     /// <paramref name="previousTurnToolNames"/> set passed by the caller.
     /// </summary>
     /// <param name="sessionId">Opaque session identifier (used for logging/tracing).</param>
@@ -130,21 +117,18 @@ public class SprkChatAgentFactory
     /// </param>
     /// <param name="sseWriter">
     /// Optional SSE writer delegate for out-of-band events (progress, document_replace,
-    /// capability_change). Used by tools and by AIPU2-061 to emit <c>capability_change</c>
-    /// events when the per-turn tool set differs from the previous turn.
+    /// capability_change). Used by tools and to emit <c>capability_change</c> events when
+    /// the per-turn tool set differs from the previous turn.
     /// Null when SSE is not available.
     /// </param>
     /// <param name="latestUserMessage">
-    /// The most recent user message text. Used for:
-    ///   1. Conversation-aware document chunk re-selection (FR-03).
-    ///   2. AIPU2-061: Per-turn capability routing — passed to CapabilityRouter.RouteAsync
-    ///      to classify intent and select the minimal tool set for this turn.
-    /// Null on initial session creation or when not applicable (falls back to full tool set).
+    /// The most recent user message text. Used for conversation-aware document chunk
+    /// re-selection (FR-03). Null on initial session creation or when not applicable.
     /// </param>
     /// <param name="previousTurnToolNames">
-    /// AIPU2-061: Names of tools that were active in the previous turn (from the caller's
-    /// session state). When provided, a <c>capability_change</c> SSE event is emitted if
-    /// the current turn's routed tool set differs. Null on the first turn (no comparison).
+    /// Names of tools that were active in the previous turn (from the caller's session state).
+    /// When provided, a <c>capability_change</c> SSE event is emitted if the current turn's
+    /// tool set differs. Null on the first turn (no comparison).
     /// </param>
     /// <param name="uploadedFiles">
     /// R5 task 033: Optional manifest of files the end user uploaded into the current chat
@@ -163,14 +147,10 @@ public class SprkChatAgentFactory
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="intentHint">
     /// Optional closed-vocabulary soft-slash hint emitted by the frontend
-    /// `SoftSlashRouter.decorateBody()`. When non-null AND recognised (one of:
-    /// "summarize", "draft", "extract-entities", "analyze"),
-    /// CapabilityRouter Layer 0.5 short-circuits to a Confident result selecting
-    /// the synthetic capability for that intent — biasing the LLM toward the
-    /// matching playbook / handler on FIRST try. Default null preserves backward
-    /// compatibility — pre-R6 callers (tests + legacy paths) skip the pre-pass.
-    /// Wire-format field renamed `commandIntent` → `intentHint` per
-    /// chat-routing-redesign-r1 FR-07 / task 022 (2026-06-22).
+    /// `SoftSlashRouter.decorateBody()` (`summarize` / `draft` /
+    /// `extract-entities` / `analyze`). Biases the PlaybookDispatcher Phase B
+    /// vector query downstream (task 115), where the slash + natural-language
+    /// flows converge. Default null preserves backward compatibility.
     /// </param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -424,140 +404,25 @@ public class SprkChatAgentFactory
             ? await GetPlaybookCapabilitiesAsync(scope.ServiceProvider, playbookId.Value, cancellationToken)
             : (IReadOnlySet<string>)new HashSet<string>(PlaybookCapabilities.CoreCapabilities);
 
-        // === AIPU2-061: Per-turn capability routing via CapabilityRouter ===
-        // When a user message and the capability router are available, run the three-tier router
-        // to select the minimal tool set for this specific turn rather than injecting the full
-        // capability-gated set every time.  The routing result drives tool resolution below.
+        // === FR-24 (chat-routing-redesign-r1 task 141) — Render-routing dedup directive =========
+        // When the dispatcher-resolved playbook (passed via the `playbookId` parameter) targets
+        // a NON-chat terminal destination, append a dedup directive to the system prompt so the
+        // LLM emits ONLY a single-sentence acknowledgment for the `invoke_playbook` tool call —
+        // the playbook output renders at the destination (workspace tab / form-prefill /
+        // side-effect) and the chat-agent's parallel inline text would be a redundant render
+        // (R5 Gap A — path A vs path B parallelism is a smell; structurally eliminated here).
         //
-        // Routing pipeline:
-        //   1. RouteAsync(userMessage, playbookName, ct)   → CapabilityRoutingResult
-        //   2. ICapabilityValidator.FilterAsync(candidates) → removes kill-switch / tenant / role
-        //   3. ResolveTools with routing result            → only tools for this turn's capabilities
-        //   4. Emit capability_change SSE if tool set differs from previous turn (FR-801)
-        //
-        // Fallback: when the router is unavailable or routing produces no tools (Layer 3 with
-        // empty superset), fall back to the full playbook-capabilities-gated tool set so no
-        // regression occurs on environments that have not yet deployed AiCapabilitiesModule.
-        CapabilityRoutingResult? routingResult = null;
-        IReadOnlySet<string>? routedCapabilities = null;
-
-        if (_capabilityRouter is not null && !string.IsNullOrWhiteSpace(latestUserMessage))
-        {
-            try
-            {
-                // Derive the active playbook name from the context if available.
-                // PlaybookChatContextProvider populates SystemPrompt with the playbook name
-                // but there's no dedicated field — pass null when not resolvable.
-                // Future: AIPU2-013/014 may add PlaybookName to ChatContext.
-                var activePlaybookName = context.PlaybookId.HasValue
-                    ? context.PlaybookId.Value.ToString("N")
-                    : null;
-
-                // R6 Pillar 8 / task 082 / FR-50: pass the soft-slash `intentHint`
-                // (when supplied by the frontend `SoftSlashRouter`) so Layer 0.5 can
-                // short-circuit to the deterministic capability for the four soft
-                // slashes. Null in the common path (natural language, hard slashes,
-                // unrecognised slashes) preserves NFR-11 backward compat — Layer 1
-                // keyword scoring runs unchanged. Wire-format field renamed from
-                // `commandIntent` per chat-routing-redesign-r1 FR-07 / task 022.
-                routingResult = await _capabilityRouter
-                    .RouteAsync(latestUserMessage, activePlaybookName, cancellationToken, intentHint)
-                    .ConfigureAwait(false);
-
-                _logger.LogInformation(
-                    "AIPU2-061: CapabilityRouter result — session={SessionId}, layer={Layer}, " +
-                    "confident={IsConfident}, capabilities=[{Capabilities}], toolNames=[{ToolNames}]",
-                    sessionId,
-                    routingResult.Layer,
-                    routingResult.IsConfident,
-                    string.Join(",", routingResult.SelectedCapabilities),
-                    string.Join(",", routingResult.SelectedToolNames));
-
-                // Validate the router-selected capabilities: apply kill-switch, tenant,
-                // permission, and context checks via ICapabilityValidator.
-                // ICapabilityValidator is scoped — resolve from the per-request scope.
-                if (routingResult.SelectedCapabilities.Length > 0)
-                {
-                    var validator = scope.ServiceProvider.GetService<ICapabilityValidator>();
-                    if (validator is not null)
-                    {
-                        var manifest = scope.ServiceProvider.GetService<ICapabilityManifest>();
-                        if (manifest is not null)
-                        {
-                            // Build candidate list from router-selected capability names.
-                            var candidates = routingResult.SelectedCapabilities
-                                .Select(name =>
-                                {
-                                    manifest.TryGet(name, out var entry);
-                                    return entry;
-                                })
-                                .OfType<CapabilityManifestEntry>()
-                                .ToList();
-
-                            if (candidates.Count > 0)
-                            {
-                                // Build validation context from available request data.
-                                // ClaimsPrincipal is not available in the factory (factory is
-                                // singleton; httpContext carries the principal per-request).
-                                var principal = httpContext?.User
-                                    ?? new System.Security.Claims.ClaimsPrincipal();
-                                var tenantEnvUrl = $"https://{tenantId}.crm.dynamics.com";
-                                var convContext = new Dictionary<string, string>(
-                                    StringComparer.OrdinalIgnoreCase);
-
-                                var validationCtx = new CapabilityValidationContext(
-                                    User: principal,
-                                    TenantEnvironmentUrl: tenantEnvUrl,
-                                    ConversationContext: convContext);
-
-                                var validated = await validator
-                                    .FilterAsync(candidates, validationCtx, cancellationToken)
-                                    .ConfigureAwait(false);
-
-                                // Build the routed capability set intersected with the
-                                // playbook capabilities (belt-and-suspenders security gate).
-                                routedCapabilities = new HashSet<string>(
-                                    validated.Select(e => e.CapabilityName)
-                                             .Where(c => capabilities.Contains(c)),
-                                    StringComparer.OrdinalIgnoreCase);
-
-                                _logger.LogDebug(
-                                    "AIPU2-061: validated routed capabilities=[{Capabilities}]",
-                                    string.Join(",", routedCapabilities));
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // Soft failure — routing is enhancing, not required.
-                // Fall through to the existing full-capability tool set.
-                _logger.LogWarning(ex,
-                    "AIPU2-061: CapabilityRouter failed for session={SessionId}; " +
-                    "falling back to full playbook capability set",
-                    sessionId);
-                routingResult = null;
-                routedCapabilities = null;
-            }
-        }
-        // === End AIPU2-061 routing ===
-
-        // === R6 task 042 (FR-30) — CapabilityRouter dedup: one intent → one render =========
-        // When the router resolved an UNAMBIGUOUS playbook (single confident capability with
-        // a non-null PlaybookId), look up the playbook's terminal node `destination` per
-        // NodeRoutingConfig (task 031 / FR-27). When the destination is NOT chat, append a
-        // dedup directive to the system prompt so the LLM emits ONLY a single-sentence
-        // acknowledgment for the `invoke_playbook` tool call — the playbook output renders
-        // at the destination (workspace tab / form-prefill / side-effect) and the chat-agent's
-        // parallel inline text would be a redundant render (R5 Gap A — path A vs path B
-        // parallelism is a smell; structurally eliminated here).
+        // The resolved playbook ID arrives via the explicit `playbookId` parameter (resolved
+        // upstream by PlaybookDispatcher in ChatEndpoints). Semantics: when there is a
+        // confident playbook resolution and its terminal destination is not chat, suppress
+        // LLM inline analysis (R5 Gap A — path A vs path B parallelism is a smell;
+        // structurally eliminated here).
         //
         // NFR-01 binding: conversational primacy preserved. The directive applies ONLY to the
-        // `invoke_playbook` tool call response in THIS turn. Refinement, follow-up,
-        // comparison, and context-injection turns are unaffected — the next turn's routing
-        // resolves separately and only adds the directive when it again resolves to a
-        // non-chat destination playbook.
+        // `invoke_playbook` tool call response in THIS turn. Refinement, follow-up, comparison,
+        // and context-injection turns are unaffected — the next turn's routing resolves
+        // separately and only adds the directive when it again resolves to a non-chat
+        // destination playbook.
         //
         // NFR-13 / NFR-07 / NFR-08 binding: safety pipeline, pre-fill flows, and node
         // executors are all UNCHANGED — the dedup is a system-prompt enrichment only.
@@ -567,19 +432,17 @@ public class SprkChatAgentFactory
         // Soft failure: if INodeService lookup fails (Dataverse outage, etc.), the directive
         // is NOT applied and the chat-agent emits inline text normally — degrades to current
         // (pre-task-042) behavior. NFR-01 conversational primacy is preserved unconditionally.
-        if (routingResult is not null
-            && routingResult.IsConfident
-            && routingResult.SelectedPlaybookId.HasValue)
+        if (playbookId.HasValue)
         {
             try
             {
-                var resolvedPlaybookId = routingResult.SelectedPlaybookId.Value;
+                var resolvedPlaybookId = playbookId.Value;
                 var destination = await ResolvePlaybookTerminalDestinationAsync(
                     scope.ServiceProvider, resolvedPlaybookId, cancellationToken)
                     .ConfigureAwait(false);
 
                 _logger.LogInformation(
-                    "R6 task 042: CapabilityRouter dedup — session={SessionId} " +
+                    "FR-24 render-routing dedup — session={SessionId} " +
                     "playbookId={PlaybookId} destination={Destination} " +
                     "directiveApplied={DirectiveApplied}",
                     sessionId,
@@ -598,7 +461,7 @@ public class SprkChatAgentFactory
                 else if (destination.HasValue && destination.Value == Models.Ai.NodeDestination.Chat)
                 {
                     // === Hotfix Wave B-G9b (R6, 2026-06-10) — PDF hallucination fix ====================
-                    // When the router resolves to a CHAT-destination playbook, the playbook itself
+                    // When the resolved playbook targets a CHAT destination, the playbook itself
                     // produces the primary structured result (rendered into chat). Without a directive,
                     // the LLM may ALSO generate inline content in parallel. For PDFs (and any async-
                     // text-extraction format), the LLM sees an empty document body at invocation time
@@ -631,13 +494,13 @@ public class SprkChatAgentFactory
             {
                 // ADR-015: log exception type + tenant only; never user content.
                 _logger.LogWarning(ex,
-                    "R6 task 042: CapabilityRouter dedup directive lookup failed " +
+                    "FR-24 render-routing dedup directive lookup failed " +
                     "(session={SessionId}, playbookId={PlaybookId}, exceptionType={ExceptionType}); " +
                     "continuing without dedup directive — NFR-01 conversational primacy preserved.",
-                    sessionId, routingResult.SelectedPlaybookId, ex.GetType().Name);
+                    sessionId, playbookId, ex.GetType().Name);
             }
         }
-        // === End R6 task 042 dedup ============================================================
+        // === End FR-24 dedup ============================================================
 
         // Create a shared CitationContext for search tools to populate with source metadata.
         // This context is passed to DocumentSearchTools and KnowledgeRetrievalTools so they
@@ -650,19 +513,16 @@ public class SprkChatAgentFactory
         // from the Analysis Workspace with full context (task 002, task 020).
         var analysisId = context.AnalysisMetadata?.GetValueOrDefault("analysisId");
 
-        // Resolve AIFunction tools.
-        // AIPU2-061: when a validated routed capability set is available, pass the routing
-        // result so ResolveTools restricts to only the capabilities selected for this turn.
-        // Otherwise fall back to the full playbook capability set (backward compatible).
-        var effectiveCapabilities = routedCapabilities ?? capabilities;
+        // Resolve AIFunction tools. FR-23 per-playbook tool filtering is enforced via the
+        // `capabilities` set above (matched-playbook capabilities OR always-on core capabilities).
         var tools = await ResolveTools(
-            scope.ServiceProvider, tenantId, sessionId, context.KnowledgeScope, effectiveCapabilities,
+            scope.ServiceProvider, tenantId, sessionId, context.KnowledgeScope, capabilities,
             playbookId ?? Guid.Empty, documentId, analysisId, httpContext, sseWriter, citationContext,
-            routingResult, cancellationToken).ConfigureAwait(false);
+            cancellationToken).ConfigureAwait(false);
 
-        // === AIPU2-061: capability_change SSE event ===
-        // Emit when the routed tool set for this turn differs from the previous turn's tool set.
-        // This notifies the client (FR-801) that the active capability profile has changed so
+        // === capability_change SSE event ===
+        // Emit when the per-turn tool set differs from the previous turn's tool set.
+        // This notifies the client (FR-801) that the active tool profile has changed so
         // the UI can update affordances (e.g., hide/show tool pills in the chat bar).
         if (sseWriter is not null && previousTurnToolNames is not null)
         {
@@ -784,7 +644,7 @@ public class SprkChatAgentFactory
 
         // Resolve remaining dependencies
         var nodeService = scope.ServiceProvider.GetRequiredService<INodeService>();
-        var cache = scope.ServiceProvider.GetRequiredService<IDistributedCache>();
+        var cache = scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
 
         return new PlaybookDispatcher(
             embeddingService,
@@ -809,7 +669,7 @@ public class SprkChatAgentFactory
     public virtual DynamicCommandResolver CreateCommandResolver()
     {
         var entityService = _serviceProvider.GetRequiredService<IGenericEntityService>();
-        var cache = _serviceProvider.GetRequiredService<IDistributedCache>();
+        var cache = _serviceProvider.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
         var loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
 
         return new DynamicCommandResolver(
@@ -928,12 +788,10 @@ public class SprkChatAgentFactory
     /// AnalysisQueryTools was migrated to typed handler AnalysisQueryHandler in R6 Wave 7
     /// (data-driven via the SYS-Analysis Query sprk_analysistool row + the FR-11 block below).
     ///
-    /// AIPU2-061: When <paramref name="routingResult"/> is provided and confident (Layer 1 or 2),
-    /// only tools whose names appear in the router-selected tool set are included. This implements
-    /// the per-turn tool injection contract: the LLM sees only the minimal tool set for the
-    /// classified intent, reducing token cost and hallucination risk.
-    /// When <paramref name="routingResult"/> is null, uncertain, or a Layer 3 fallback, all tools
-    /// enabled by <paramref name="capabilities"/> are included (backward-compatible behaviour).
+    /// FR-23 per-playbook tool filtering: the <paramref name="capabilities"/> set carries either
+    /// the matched playbook's declared capabilities (playbookId resolved) or the always-on core
+    /// capabilities (standalone conversational chat). Tools gated by capability are registered
+    /// only when the gating capability is in the set.
     /// </summary>
     /// <param name="scopedProvider">The scoped DI provider for this agent creation call.</param>
     /// <param name="tenantId">Tenant ID from the authenticated session — injected into tool constructors (ADR-014).</param>
@@ -959,12 +817,6 @@ public class SprkChatAgentFactory
     /// Shared citation context for search tools to populate with source metadata (chunk IDs, source names, excerpts).
     /// Passed to DocumentSearchTools and KnowledgeRetrievalTools so they register citations during execution.
     /// </param>
-    /// <param name="routingResult">
-    /// AIPU2-061: Optional routing result from <see cref="ICapabilityRouter.RouteAsync"/>.
-    /// When provided and confident (Layer 1 or 2), tools are post-filtered so that only those
-    /// whose AIFunction name appears in <see cref="CapabilityRoutingResult.SelectedToolNames"/>
-    /// or in the capabilities' tool name lists are included. Null = full set (backward compat).
-    /// </param>
     /// <returns>List of registered <see cref="AIFunction"/> instances, or empty list on failure.</returns>
     private async Task<IReadOnlyList<AIFunction>> ResolveTools(
         IServiceProvider scopedProvider,
@@ -978,7 +830,6 @@ public class SprkChatAgentFactory
         HttpContext? httpContext,
         Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter,
         CitationContext? citationContext,
-        CapabilityRoutingResult? routingResult = null,
         CancellationToken cancellationToken = default)
     {
         // Resolve services that tool classes depend on from DI.
@@ -1649,109 +1500,11 @@ public class SprkChatAgentFactory
                 resolved, attempted, tools.Count);
         }
 
-        // === AIPU2-061: Per-turn tool filtering by routing result ===
-        // When the capability router produced a confident result (Layer 1 or 2), apply a
-        // post-filter so the agent only receives the tools selected for this specific turn.
-        //
-        // Filtering uses the union of:
-        //   (a) CapabilityRoutingResult.SelectedToolNames — explicit tool names from Layer 3
-        //       superset (populated by Layer 3 only; Layers 1 and 2 leave this empty).
-        //   (b) The tool names listed in each selected capability's manifest entry
-        //       (populated by Layers 1 and 2 via SelectedCapabilities → ToolNames lookup).
-        //
-        // Layer 3 fallback (IsConfident = false, SelectedToolNames may be non-empty):
-        //   SelectedToolNames carries the broad superset; filter by that list when non-empty.
-        //   When SelectedToolNames is also empty (empty manifest), return full set unchanged.
-        //
-        // Backward compat: when routingResult is null, skip filtering entirely.
-        if (routingResult is not null)
-        {
-            var allowedToolNames = BuildAllowedToolNames(routingResult, scopedProvider);
-            if (allowedToolNames.Count > 0)
-            {
-                var filtered = tools
-                    .Where(t => allowedToolNames.Contains(t.Name ?? string.Empty))
-                    .ToList();
-
-                _logger.LogDebug(
-                    "AIPU2-061: per-turn tool filter applied — " +
-                    "before={Before}, after={After}, layer={Layer}, confident={Confident}",
-                    tools.Count, filtered.Count, routingResult.Layer, routingResult.IsConfident);
-
-                tools = filtered;
-            }
-            else
-            {
-                // Empty allowed set means routing was uncertain (Layer 3 with empty manifest).
-                // Return the full capability-gated set unchanged (backward compatible).
-                _logger.LogDebug(
-                    "AIPU2-061: routing produced empty tool filter — returning full capability set ({Count} tools)",
-                    tools.Count);
-            }
-        }
-        // === End AIPU2-061 ===
+        // FR-23 per-playbook tool filtering: capability gating in the blocks above already
+        // limits tools to the matched playbook's declared capabilities (or the always-on
+        // core capabilities when no playbook is matched). No per-turn re-filter needed.
 
         return tools;
-    }
-
-    /// <summary>
-    /// AIPU2-061: Builds the set of AIFunction tool names that are permitted for this turn
-    /// based on the capability routing result.
-    ///
-    /// Resolution order:
-    ///   1. If the routing result has <see cref="CapabilityRoutingResult.SelectedToolNames"/>
-    ///      (Layer 3 superset), use those directly.
-    ///   2. Otherwise expand <see cref="CapabilityRoutingResult.SelectedCapabilities"/> to tool
-    ///      names by looking up each capability in the <see cref="ICapabilityManifest"/>.
-    ///   3. If neither produces a non-empty set, return empty — caller uses full set.
-    ///
-    /// Returns an empty set when routing produced no confident tool selection (full-set fallback).
-    /// </summary>
-    private HashSet<string> BuildAllowedToolNames(
-        CapabilityRoutingResult routingResult,
-        IServiceProvider scopedProvider)
-    {
-        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // Layer 3 superset: SelectedToolNames is pre-computed by ComputeLayer3Superset.
-        if (routingResult.SelectedToolNames.Length > 0)
-        {
-            foreach (var toolName in routingResult.SelectedToolNames)
-            {
-                if (!string.IsNullOrWhiteSpace(toolName))
-                    allowed.Add(toolName);
-            }
-            return allowed;
-        }
-
-        // Layers 1 and 2: expand capability names to tool names via the manifest.
-        if (routingResult.SelectedCapabilities.Length > 0)
-        {
-            var manifest = scopedProvider.GetService<ICapabilityManifest>();
-            if (manifest is not null)
-            {
-                foreach (var capName in routingResult.SelectedCapabilities)
-                {
-                    if (manifest.TryGet(capName, out var entry) && entry is not null)
-                    {
-                        foreach (var toolName in entry.ToolNames)
-                        {
-                            if (!string.IsNullOrWhiteSpace(toolName))
-                                allowed.Add(toolName);
-                        }
-                    }
-                    else
-                    {
-                        _logger.LogDebug(
-                            "AIPU2-061: routing selected capability '{CapabilityName}' " +
-                            "not found in manifest — skipping tool name expansion.",
-                            capName);
-                    }
-                }
-            }
-        }
-
-        return allowed;
     }
 
     /// <summary>
@@ -2013,9 +1766,9 @@ public class SprkChatAgentFactory
     /// <para>
     /// <b>NFR-01 binding</b>: the directive instructs a SHORT acknowledgment — NOT silence.
     /// Conversational primacy is preserved (the LLM still emits one acknowledgment sentence).
-    /// This directive is ONLY applied when the router has resolved a confident playbook
-    /// binding (<c>SelectedPlaybookId</c> != null); free-form / refinement / ambiguous turns
-    /// see no directive and the LLM responds conversationally as normal.
+    /// This directive is ONLY applied when the dispatcher has resolved a confident playbook
+    /// binding (the <c>playbookId</c> parameter is non-null); free-form / refinement /
+    /// ambiguous turns see no directive and the LLM responds conversationally as normal.
     /// </para>
     /// <para>
     /// <b>R5 Gap A binding</b>: this is the chat-destination side of the same dedup pattern
@@ -2318,15 +2071,16 @@ public class SprkChatAgentFactory
     }
 
     /// <summary>
-    /// AIPU2-061: Emits <c>capability_change</c> SSE events when the current turn's tool set
-    /// differs from the previous turn's tool set.
+    /// Emits <c>capability_change</c> SSE events when the current turn's tool set differs
+    /// from the previous turn's tool set.
     ///
     /// Emits one event per tool that was added or removed:
     ///   - Added tool   → status "available"
     ///   - Removed tool → status "unavailable"
     ///
     /// This satisfies the FR-801 contract: clients can update affordances (tool pills, etc.)
-    /// in real time when the active capability profile changes between turns.
+    /// in real time when the active tool profile changes between turns (e.g., when the
+    /// dispatcher resolves a different playbook on a follow-up turn).
     ///
     /// ADR-015: only tool names are emitted — no user message content.
     /// </summary>
@@ -2350,7 +2104,7 @@ public class SprkChatAgentFactory
                 return; // No change — skip event emission.
 
             _logger.LogDebug(
-                "AIPU2-061: tool set changed between turns — emitting capability_change events. " +
+                "Tool set changed between turns — emitting capability_change events. " +
                 "Previous=[{Prev}], Current=[{Curr}]",
                 string.Join(",", previousNames),
                 string.Join(",", currentNames));
@@ -2384,7 +2138,7 @@ public class SprkChatAgentFactory
         {
             // Soft failure — SSE event emission must never break agent creation.
             _logger.LogWarning(ex,
-                "AIPU2-061: failed to emit capability_change SSE events; continuing without");
+                "Failed to emit capability_change SSE events; continuing without");
         }
     }
 

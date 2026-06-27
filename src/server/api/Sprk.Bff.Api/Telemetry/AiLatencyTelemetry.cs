@@ -83,7 +83,7 @@ public sealed class AiLatencyTelemetry : IDisposable
         _routingTotalLatencyMs = _meter.CreateHistogram<double>(
             name: "ai_routing_total_latency_ms",
             unit: "ms",
-            description: "End-to-end CapabilityRouter decision latency in milliseconds (Layers 1 + 2 + 3 combined).");
+            description: "End-to-end routing decision latency in milliseconds.");
     }
 
     // ── Recording helpers ─────────────────────────────────────────────────────
@@ -138,7 +138,7 @@ public sealed class AiLatencyTelemetry : IDisposable
     }
 
     /// <summary>
-    /// Records the CapabilityRouter end-to-end routing decision latency.
+    /// Records the end-to-end routing decision latency.
     /// </summary>
     /// <param name="latencyMs">Total routing wall-clock time in milliseconds.</param>
     /// <param name="model">Model deployment name selected by the router.</param>

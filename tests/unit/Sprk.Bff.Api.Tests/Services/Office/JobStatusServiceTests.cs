@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache.NullObjects;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Office;
 using StackExchange.Redis;
@@ -31,6 +33,11 @@ public class JobStatusServiceTests : IDisposable
             .Returns(_subscriberMock.Object);
         _redisMock.Setup(r => r.GetDatabase(It.IsAny<int>(), It.IsAny<object>()))
             .Returns(_databaseMock.Object);
+        // Post task 005, JobStatusService gates pub/sub and health on
+        // _redis.IsConnected (not on null-ness of _subscriber). The mock
+        // default for IsConnected is false; tests for the "connected" path
+        // require it to be true.
+        _redisMock.Setup(r => r.IsConnected).Returns(true);
 
         _sut = new JobStatusService(_redisMock.Object, _loggerMock.Object);
     }
@@ -38,6 +45,17 @@ public class JobStatusServiceTests : IDisposable
     public void Dispose()
     {
         _sut.Dispose();
+    }
+
+    /// <summary>
+    /// Builds a JobStatusService with a NullConnectionMultiplexer — the ADR-032
+    /// P2 no-op peer. IsConnected==false drives the "Redis unavailable" paths
+    /// without throwing ArgumentNullException (post task 005 nullable cleanup).
+    /// </summary>
+    private JobStatusService CreateServiceWithoutRedis()
+    {
+        var nullRedis = new NullConnectionMultiplexer(NullLogger<NullConnectionMultiplexer>.Instance);
+        return new JobStatusService(nullRedis, _loggerMock.Object);
     }
 
     #region PublishStatusUpdateAsync Tests
@@ -76,8 +94,10 @@ public class JobStatusServiceTests : IDisposable
     [Fact]
     public async Task PublishStatusUpdateAsync_ReturnsFalse_WhenRedisNotAvailable()
     {
-        // Arrange
-        var serviceWithoutRedis = new JobStatusService(null, _loggerMock.Object);
+        // Arrange — NullConnectionMultiplexer.IsConnected==false drives the same
+        // "Redis unavailable" short-circuit the legacy null-check did
+        // (spaarke-redis-cache-remediation-r1 task 005 + ADR-032 P2 peer).
+        var serviceWithoutRedis = CreateServiceWithoutRedis();
         var update = new JobStatusUpdate
         {
             JobId = Guid.NewGuid(),
@@ -355,8 +375,10 @@ public class JobStatusServiceTests : IDisposable
     [Fact]
     public async Task IsHealthyAsync_ReturnsFalse_WhenRedisNotAvailable()
     {
-        // Arrange
-        var serviceWithoutRedis = new JobStatusService(null, _loggerMock.Object);
+        // Arrange — NullConnectionMultiplexer.IsConnected==false drives the same
+        // "Redis unavailable" short-circuit the legacy null-check did
+        // (spaarke-redis-cache-remediation-r1 task 005 + ADR-032 P2 peer).
+        var serviceWithoutRedis = CreateServiceWithoutRedis();
 
         // Act
         var healthy = await serviceWithoutRedis.IsHealthyAsync();
@@ -388,8 +410,10 @@ public class JobStatusServiceTests : IDisposable
     [Fact]
     public async Task SubscribeToJobAsync_CompletesImmediately_WhenRedisNotAvailable()
     {
-        // Arrange
-        var serviceWithoutRedis = new JobStatusService(null, _loggerMock.Object);
+        // Arrange — NullConnectionMultiplexer.IsConnected==false drives the same
+        // "Redis unavailable" short-circuit the legacy null-check did
+        // (spaarke-redis-cache-remediation-r1 task 005 + ADR-032 P2 peer).
+        var serviceWithoutRedis = CreateServiceWithoutRedis();
         var jobId = Guid.NewGuid();
         var updates = new List<JobStatusUpdate>();
 

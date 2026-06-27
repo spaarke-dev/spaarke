@@ -1,8 +1,7 @@
 using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Services.Ai.Memory;
 
@@ -44,18 +43,24 @@ public sealed class RecentlyDiscussedTracker : IRecentlyDiscussedTracker
     /// <summary>Maximum number of entries persisted per session before oldest is dropped.</summary>
     internal const int MaxEntries = 20;
 
+    /// <summary>Tenant-cache resource name for recently-discussed cue payloads (FR-05).</summary>
+    internal const string CacheResource = "recently-discussed";
+
+    /// <summary>Tenant-cache schema version for recently-discussed cue payloads.</summary>
+    internal const int CacheVersion = 1;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<RecentlyDiscussedTracker> _logger;
 
     public RecentlyDiscussedTracker(
-        IDistributedCache cache,
+        ITenantCache cache,
         ILogger<RecentlyDiscussedTracker> logger,
         TimeProvider? timeProvider = null)
     {
@@ -65,18 +70,19 @@ public sealed class RecentlyDiscussedTracker : IRecentlyDiscussedTracker
     }
 
     /// <inheritdoc />
-    public async Task MarkAsync(string sessionId, string fileId, CancellationToken cancellationToken = default)
+    public async Task MarkAsync(string tenantId, string sessionId, string fileId, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(fileId);
 
         var stopwatch = Stopwatch.StartNew();
-        var key = BuildKey(sessionId);
+        var cacheId = BuildCacheId(sessionId);
         var nowUtc = _timeProvider.GetUtcNow();
 
         try
         {
-            var current = await LoadEntriesAsync(key, cancellationToken).ConfigureAwait(false);
+            var current = await LoadEntriesAsync(tenantId, cacheId, cancellationToken).ConfigureAwait(false);
 
             // Remove existing entry for this fileId so the new prepend is idempotent.
             var rebuilt = new List<RecentFileEntry>(current.Count + 1)
@@ -97,7 +103,7 @@ public sealed class RecentlyDiscussedTracker : IRecentlyDiscussedTracker
                 rebuilt.RemoveRange(MaxEntries, rebuilt.Count - MaxEntries);
             }
 
-            await SaveEntriesAsync(key, rebuilt, cancellationToken).ConfigureAwait(false);
+            await SaveEntriesAsync(tenantId, cacheId, rebuilt, cancellationToken).ConfigureAwait(false);
 
             stopwatch.Stop();
             // ADR-015: sessionId + fileId + operation + duration. No content.
@@ -122,10 +128,12 @@ public sealed class RecentlyDiscussedTracker : IRecentlyDiscussedTracker
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<string>> GetRecentAsync(
+        string tenantId,
         string sessionId,
         int maxCount = 5,
         CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         if (maxCount <= 0)
         {
@@ -133,11 +141,11 @@ public sealed class RecentlyDiscussedTracker : IRecentlyDiscussedTracker
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var key = BuildKey(sessionId);
+        var cacheId = BuildCacheId(sessionId);
 
         try
         {
-            var entries = await LoadEntriesAsync(key, cancellationToken).ConfigureAwait(false);
+            var entries = await LoadEntriesAsync(tenantId, cacheId, cancellationToken).ConfigureAwait(false);
             if (entries.Count == 0)
             {
                 stopwatch.Stop();
@@ -178,24 +186,20 @@ public sealed class RecentlyDiscussedTracker : IRecentlyDiscussedTracker
     // Storage helpers
     // ────────────────────────────────────────────────────────────────────────
 
-    private static string BuildKey(string sessionId) =>
-        // Deterministic per-session key. SessionId is presumed lowercase "N"-format GUID
-        // from the only caller (ChatSessionManager); we additionally lowercase to harden
-        // against future callers that supply mixed case. Architecture §11.1 storage key
-        // convention.
-        $"session:{sessionId.ToLowerInvariant()}:recent-files";
+    /// <summary>
+    /// Deterministic per-session tenant-cache id. SessionId is presumed lowercase "N"-format
+    /// GUID from the only caller (ChatSessionManager); we additionally lowercase to harden
+    /// against future callers that supply mixed case. Architecture §11.1 storage key
+    /// convention; tenant prefix added by the wrapper per FR-05.
+    /// </summary>
+    internal static string BuildCacheId(string sessionId) => sessionId.ToLowerInvariant();
 
-    private async Task<List<RecentFileEntry>> LoadEntriesAsync(string key, CancellationToken ct)
+    private async Task<List<RecentFileEntry>> LoadEntriesAsync(string tenantId, string cacheId, CancellationToken ct)
     {
-        var bytes = await _cache.GetAsync(key, ct).ConfigureAwait(false);
-        if (bytes is null || bytes.Length == 0)
-        {
-            return new List<RecentFileEntry>(MaxEntries);
-        }
-
         try
         {
-            var entries = JsonSerializer.Deserialize<List<RecentFileEntry>>(bytes, JsonOptions);
+            var entries = await _cache.GetAsync<List<RecentFileEntry>>(
+                tenantId, CacheResource, cacheId, CacheVersion, ct: ct).ConfigureAwait(false);
             return entries ?? new List<RecentFileEntry>(MaxEntries);
         }
         catch (JsonException)
@@ -206,14 +210,16 @@ public sealed class RecentlyDiscussedTracker : IRecentlyDiscussedTracker
         }
     }
 
-    private async Task SaveEntriesAsync(string key, List<RecentFileEntry> entries, CancellationToken ct)
+    private Task SaveEntriesAsync(string tenantId, string cacheId, List<RecentFileEntry> entries, CancellationToken ct)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(entries, JsonOptions);
-        var options = new DistributedCacheEntryOptions
-        {
-            SlidingExpiration = SlidingTtl
-        };
-        await _cache.SetAsync(key, bytes, options, ct).ConfigureAwait(false);
+        return _cache.SetSlidingAsync(
+            tenantId,
+            CacheResource,
+            cacheId,
+            CacheVersion,
+            entries,
+            SlidingTtl,
+            ct: ct);
     }
 
     /// <summary>Per-file entry persisted in the per-session recent-files list.</summary>

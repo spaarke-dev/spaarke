@@ -466,10 +466,16 @@ public sealed class ConditionNodeExecutor : INodeExecutor
 
         foreach (var (varName, output) in context.PreviousOutputs)
         {
+            // 2026-06-24 (bug #10 fix): use TemplateEngine.ConvertJsonElement to recursively
+            // convert JsonElement → Dictionary<string,object?> so Handlebars can navigate
+            // nested paths like {{varName.output.count}}. The prior JsonSerializer.Deserialize<object>
+            // returned a JsonElement whose properties were invisible to Handlebars reflection,
+            // causing all such template expressions to render as empty strings and downstream
+            // numeric comparisons to throw "Cannot compare non-numeric value:".
             templateContext[varName] = new
             {
                 output = output.StructuredData.HasValue
-                    ? JsonSerializer.Deserialize<object>(output.StructuredData.Value.GetRawText())
+                    ? TemplateEngine.ConvertJsonElement(output.StructuredData.Value)
                     : null,
                 text = output.TextContent,
                 success = output.Success,

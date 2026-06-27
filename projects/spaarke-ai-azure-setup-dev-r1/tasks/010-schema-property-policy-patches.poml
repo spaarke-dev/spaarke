@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Apply schema property policy to 7 schemas (FR-09)</title>
+    <phase>2: Schema Preparation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>020</blocks>
+    <tags>azure-search, schemas, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>JSON schema patches across 7 files; explicit per-field acceptance criteria (FR-09 + NFR-09)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential review needed to apply consistent property policy across all 7 schemas</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Apply schema property policy to all 7 active index schemas per FR-09 + NFR-09: every scalar field gets `filterable=true sortable=true facetable=true retrievable=true` unless Azure forbids OR documented JSON-comment override.
+    `searchable=true` ONLY on text-content fields. Key field follows Azure-required config. Vector fields use 3072 dim + HNSW cosine + retrievable=false stored=true.
+  </prompt>
+
+  <role>
+    Spaarke platform Azure AI Search schema engineer.
+  </role>
+
+  <goal>
+    All 7 schemas in `infrastructure/ai-search/` (or wherever they live pre-consolidation) compliant with schema property policy. Overrides documented with JSON-comment rationale.
+  </goal>
+
+  <context>
+    <background>
+      Past silent zero-result bug on knowledge index was caused by missing `filterable`. Azure flags cannot be changed post-creation; default-enable everything Azure allows.
+    </background>
+    <relevant-files>
+      <file>infrastructure/ai-search/spaarke-files-index.json</file>
+      <file>infrastructure/ai-search/spaarke-records-index.json</file>
+      <file>infrastructure/ai-search/spaarke-rag-references.json</file>
+      <file>infrastructure/ai-search/spaarke-insights-index.json</file>
+      <file>infrastructure/ai-search/spaarke-session-files.json</file>
+      <file>infrastructure/ai-search/spaarke-invoices-index.json</file>
+      <file>infrastructure/ai-search/spaarke-playbook-embeddings.json</file>
+      <file>infra/ai-search/spaarke-file-index.json</file>
+      <file>infra/insights/schemas/spaarke-insights-index.index.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-09">Every scalar field has filterable=true sortable=true facetable=true retrievable=true unless Azure-restricted or documented override</constraint>
+    <constraint source="NFR-09">Override comments use `// reason` JSON-comment style; specify reason (e.g., PII, performance, etc.)</constraint>
+    <constraint source="NFR-11">Vector fields use 3072 dim + HNSW cosine + retrievable=false stored=true</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/design.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>infrastructure/ai-search/spaarke-rag-references.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Enumerate all 7 schema files (note: consolidation per FR-11 happens in task 012)</step>
+    <step order="2">For each schema: review every scalar field; apply property policy; add override comments for any exceptions</step>
+    <step order="3">For vector fields: confirm 3072 dim + HNSW cosine + retrievable=false stored=true</step>
+    <step order="4">For key field: confirm Azure-required config (filterable=true, sortable=false, facetable=false)</step>
+    <step order="5">For each schema: list fields-changed in PR description for code review evidence</step>
+    <step order="6">Update TASK-INDEX.md: task 010 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read each schema file</tool>
+    <tool name="Edit">Apply property flags + override comments</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">7 patched schema JSON files</output>
+  </outputs>
+
+  <notes-results>
+    <completion-date>2026-06-26</completion-date>
+    <rigor-applied>STANDARD</rigor-applied>
+    <scope-discipline>Honored — no renames, no file moves, no JSON `name` field changes, no field additions/removals, no field renames (rag-references `domain` left untouched for task 016). Retired-index schemas (`spaarke-knowledge-index-v2.json`, `discovery-index.json`) NOT touched.</scope-discipline>
+    <per-schema-summary>
+      <schema name="spaarke-file-index" path="infra/ai-search/spaarke-file-index.json" total-fields="28" fields-changed="28" overrides-added="12">
+        Every scalar field promoted to filterable=sortable=facetable=retrievable=true (or override). Key field given filterable=true (was false) + sortable=false/facetable=false override. Vector fields (contentVector3072, documentVector3072) confirmed PASS: 3072 dim + HNSW cosine + retrievable=false + stored=true added (was retrievable=true). Override comments: key (1), text-content searchable (4), long-text (1 = content), vector (2), datetime facetable (3 = createdAt/updatedAt/lastModified), metadata opaque (1), collections sortable (2 = tags, privilege_group_ids).
+      </schema>
+      <schema name="spaarke-records-index" path="infrastructure/ai-search/spaarke-records-index.json" total-fields="13" fields-changed="13" overrides-added="11">
+        All scalars get policy defaults; collections (organizations, people, referenceNumbers, privilege_group_ids) given override comments for sortable=false. Vector field (contentVector) confirmed PASS: 3072 dim + HNSW cosine + retrievable=false + stored=true added. Note: referenceNumbers kept facetable=false (high-cardinality identifiers, override documented).
+      </schema>
+      <schema name="spaarke-rag-references" path="infrastructure/ai-search/spaarke-rag-references.json" total-fields="13" fields-changed="13" overrides-added="7">
+        `domain` field LEFT AS-IS per scope discipline (task 016 owns rename). All other scalars get policy defaults. Vector field (contentVector3072) confirmed PASS: 3072 dim + HNSW cosine + retrievable=false + stored=true added.
+      </schema>
+      <schema name="spaarke-insights-index" path="infra/insights/schemas/spaarke-insights-index.index.json" total-fields="14 top-level (incl. 2 ComplexType + 1 Collection(ComplexType)); 13 inner scalars" fields-changed="all scalars" overrides-added="12">
+        ComplexType parents (`value`, `value.raw`, `value.raw.scope`, `scope`) left at default; inner scalars patched per policy. Collection(Edm.ComplexType) `evidence` parent left at default; 3 inner scalars patched. `confidence` (Edm.Double, continuous numeric) given facetable=false override. `displayHint` + `valueJson` (opaque/presentation blobs) given filter/sort/facet=false overrides. Vector field (contentVector) was ALREADY compliant: 3072 dim + HNSW cosine + retrievable=false + stored=true. PASS.
+      </schema>
+      <schema name="spaarke-session-files" path="infrastructure/ai-search/spaarke-session-files.json" total-fields="18" fields-changed="18" overrides-added="8">
+        Key field + collections + vectors + datetimes given override comments. tenantId + sessionId BOTH filterable=true preserved (canonical invariant per deploy-session-files-index.ps1 lines 209-215). Both vectors (contentVector3072, documentVector3072) confirmed PASS: 3072 dim + HNSW cosine + retrievable=false + stored=true added (was retrievable defaulted true).
+      </schema>
+      <schema name="spaarke-invoices (invoice-index-schema.json)" path="infrastructure/ai-search/invoice-index-schema.json" total-fields="17" fields-changed="17" overrides-added="6">
+        Key field, vector, datetimes (invoiceDate, indexedAt), totalAmount (Edm.Double continuous) given override comments. All scope IDs (invoiceId, matterId, projectId, vendorOrgId, etc.) now filterable=sortable=facetable=true. Vector field (contentVector) confirmed PASS: 3072 dim + HNSW cosine + retrievable=false + stored=true added (was retrievable defaulted).
+      </schema>
+      <schema name="playbook-embeddings" path="infrastructure/ai-search/playbook-embeddings.json" total-fields="10" fields-changed="10" overrides-added="6">
+        Key field + 3 collections (triggerPhrases, tags, documentTypes) + vector given override comments. description (long-form) kept sortable/facetable=false. Vector field (contentVector3072) confirmed PASS: 3072 dim + HNSW cosine + retrievable=false + stored=true added.
+      </schema>
+    </per-schema-summary>
+    <vector-field-verification-summary>
+      All 9 vector fields across 7 schemas now compliant with NFR-11 + catalog §3: dimensions=3072, HNSW kind, hnswParameters.metric=cosine, m=4, efConstruction=400, efSearch=500, retrievable=false, stored=true, searchable=true. spaarke-insights was the only schema where stored=true + retrievable=false were already set; the other 6 schemas had retrievable defaulted to true (catalog §2 table specifies retrievable=false for vectors per NFR-11) and were corrected.
+    </vector-field-verification-summary>
+    <judgment-calls>
+      - **rag-references `domain`**: deliberately left at filterable=sortable=facetable=retrievable=true per policy but field NAME unchanged (task 016 owns rename to `documentType`). Semantic config still references `domain` (line 151).
+      - **`metadata` (file-index, session-files)**: opaque JSON blobs — kept filterable=sortable=facetable=false with override comment (not meaningful to filter/sort/facet, only retrieve for client parsing).
+      - **`displayHint` + `valueJson` (insights)**: presentation/opaque-blob semantics — same treatment as metadata.
+      - **`confidence` (insights, Edm.Double)** + **`totalAmount` (invoices, Edm.Double)**: continuous-numeric high-cardinality fields where faceting would produce one bucket per distinct value — facetable=false with override comment. filterable+sortable=true.
+      - **`referenceNumbers` (records-index, Collection(Edm.String))**: high-cardinality opaque identifiers (matter codes, file numbers) — kept facetable=false (was already so); override comment added.
+      - **`entityId` (insights, scope.entityId, Edm.String)**: high-cardinality opaque identifier — facetable=false override per same rationale.
+      - **`evidence.ref` (insights, inner Edm.String)**: per-evidence opaque ref — facetable=false override.
+      - **Insights ComplexType parents**: Azure forbids top-level filterable/sortable/facetable on Edm.ComplexType; left at default per task guidance.
+      - **Existing `_comment_` keys** in insights schema preserved (top-level and inside scope) — they coexist with the new `// override` comments per the JSON-with-comments policy.
+    </judgment-calls>
+    <retired-indexes-untouched>
+      Confirmed NOT modified: infrastructure/ai-search/spaarke-knowledge-index-v2.json, infrastructure/ai-search/discovery-index.json
+    </retired-indexes-untouched>
+  </notes-results>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every scalar field in 7 schemas has filterable=true sortable=true facetable=true retrievable=true (or documented override)</criterion>
+    <criterion testable="true">searchable=true only on text-content fields</criterion>
+    <criterion testable="true">All vector fields use 3072 dim + HNSW cosine + retrievable=false stored=true</criterion>
+    <criterion testable="true">Override comments specify reason</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

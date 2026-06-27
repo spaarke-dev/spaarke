@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Project Wrap-up: quality gates + repo cleanup + README update + lessons learned</title>
+    <phase>Wrap-up</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>054</dependencies>
+    <blocks>none</blocks>
+    <tags>quality, cleanup, docs, project-management</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final quality gates per task-create Step 3.7 mandate</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Project wrap-up per task-create Step 3.7 mandate:
+    1. Run /code-review on all project code (identify remaining issues)
+    2. Run /adr-check on all project code (validate ADR compliance)
+    3. Fix critical issues before proceeding
+    4. Run /repo-cleanup projects/spaarke-ai-azure-setup-dev-r1 (audit + clean ephemeral files)
+    5. Update README.md: Status=Complete, Progress=100%, all graduation criteria checked
+    6. Document lessons learned in notes/lessons-learned.md
+    7. Final verification: all task files marked completed; all docs current
+  </prompt>
+
+  <role>
+    Spaarke platform project lead / closer.
+  </role>
+
+  <goal>
+    Project formally closed: quality gates passed; README marked Complete; lessons captured.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/README.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/notes/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="task-create Step 3.7">MANDATORY final wrap-up task — quality gates + cleanup + docs + lessons</constraint>
+    <constraint source="project">All 13 graduation criteria (from spec Success Criteria) must check before declaring complete</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/README.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run /code-review on all project code (BFF refactor + script + schemas + docs)</step>
+    <step order="2">Run /adr-check on all project code</step>
+    <step order="3">Fix any critical issues; document non-critical in notes/lessons-learned.md</step>
+    <step order="4">Run /repo-cleanup projects/spaarke-ai-azure-setup-dev-r1; review report; approve removals</step>
+    <step order="5">Update README.md: Status=Complete, Phase=Complete, Progress=100%, Completed Date=today, check all graduation criteria</step>
+    <step order="6">Update plan.md: Status=Complete; mark all milestones ✅</step>
+    <step order="7">Create notes/lessons-learned.md with notable insights (Redis project parallels, FR-17 bug-fix process, FR-20 alignment, NFR-14 fixture sweep effectiveness, FR-13 audit-expansion pattern)</step>
+    <step order="8">Verify all task files marked completed in TASK-INDEX.md</step>
+    <step order="9">Update TASK-INDEX.md: task 090 ✅ completed — PROJECT COMPLETE</step>
+    <step order="10">Reset current-task.md to "none" with note "Project complete YYYY-MM-DD"</step>
+  </steps>
+
+  <tools>
+    <tool name="code-review">Skill invocation</tool>
+    <tool name="adr-check">Skill invocation</tool>
+    <tool name="repo-cleanup">Skill invocation</tool>
+    <tool name="Edit">README, plan, current-task</tool>
+    <tool name="Write">lessons-learned.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">Updated README.md (Complete)</output>
+    <output type="docs">Updated plan.md (Complete)</output>
+    <output type="docs">notes/lessons-learned.md</output>
+    <output type="docs">Reset current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">code-review run; critical issues addressed</criterion>
+    <criterion testable="true">adr-check run; ADR compliance validated</criterion>
+    <criterion testable="true">repo-cleanup complete; ephemeral files removed</criterion>
+    <criterion testable="true">README.md: Status=Complete, all 13 graduation criteria checked</criterion>
+    <criterion testable="true">notes/lessons-learned.md exists with notable insights</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md marked completed</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: this IS the final quality gate.</protocol>
+  </execution>
+</task>

@@ -487,6 +487,70 @@ interface FieldState {
 /** Phase machine for the streaming state. */
 type StreamPhase = 'idle' | 'streaming' | 'complete';
 
+/**
+ * Per-section render state — Phase 5R Wave 5-C (FR-54 / task 114b).
+ *
+ * Composite Output Node delivers N upstream Action outputs as named sections.
+ * Section streaming events (`section_started` / `section_data` /
+ * `section_completed`) are keyed by `sectionName` (declared by the playbook
+ * author on `sections[*].sectionName` config), NOT by schema field position.
+ *
+ * Coordination point count: 5 (schema-on-action + schema-aware widget) → 2
+ * (section name + section state).
+ *
+ * @see CompositeSectionResult in DeliverCompositeNodeExecutor.cs — BFF mirror
+ */
+export interface SectionState {
+  /** Stable section identifier from the playbook's composite Output config. */
+  sectionName: string;
+  /**
+   * Human-readable label for the section header. When undefined, the renderer
+   * humanizes `sectionName` via `prettyName()` (camelCase → "Camel Case").
+   */
+  displayLabel?: string;
+  /**
+   * Declaration-order index of this section within the composite playbook.
+   * Per FR-53 the SSE emit order is COMPLETION order, but the renderer uses
+   * `sectionIndex` as a stable sort hint when defined so the on-screen layout
+   * matches the playbook author's intent.
+   */
+  sectionIndex?: number;
+  /** Total declared sections — for "N of M complete" progress hints. */
+  totalSections?: number;
+  /**
+   * Lifecycle state of the section.
+   *   - `'idle'`        — defensive default for sections that received a stray
+   *                       `section_data` or `section_completed` before
+   *                       `section_started` (tolerated, no crash).
+   *   - `'streaming'`   — `section_started` received; awaiting more data or
+   *                       completion.
+   *   - `'completed'`   — `section_completed` received; final state recorded.
+   */
+  status: 'idle' | 'streaming' | 'completed';
+  /**
+   * Accumulated text from all `section_data.contentDelta` chunks plus any
+   * `section_completed.finalContent` replacement.
+   */
+  accumulatedText: string;
+  /**
+   * Last-known structured data payload from `section_data.structuredData`
+   * (shallow-merged) and/or `section_completed.finalStructuredData` (replaces).
+   * Typed `unknown` — render-time narrowing.
+   */
+  structuredData?: unknown;
+  /**
+   * Citation list from `section_completed.citations` (NFR-A3 trust model).
+   * Each citation is an opaque record — subscribers cross-reference IDs.
+   */
+  citations?: ReadonlyArray<Record<string, unknown>>;
+  /**
+   * Monotonic insertion timestamp. Used as a deterministic fallback for sort
+   * when `sectionIndex` is missing on multiple sections; ensures a stable
+   * (insertion-order) render order.
+   */
+  receivedAt: number;
+}
+
 interface StreamReducerState {
   phase: StreamPhase;
   /**
@@ -501,28 +565,109 @@ interface StreamReducerState {
    * Cleared on `streaming_complete`.
    */
   mostRecentPath: string | null;
+  /**
+   * Section-name → SectionState. Phase 5R Wave 5-C (FR-54).
+   *
+   * Populated by the composite-section events (`section_started` /
+   * `section_data` / `section_completed`). Map preserves insertion order
+   * (= first-event-seen order), used as a deterministic fallback when
+   * sectionIndex is missing.
+   *
+   * BACKWARD-COMPAT INVARIANT: this map is EMPTY for unmigrated playbooks
+   * (only `FieldDelta` events arrive). The renderer detects "section mode"
+   * via `sections.size > 0` and routes accordingly. Mixed mode (both field
+   * deltas AND section events on the same widget instance) is undefined
+   * behaviour by spec (114a's BFF guard ensures one OR the other per stream);
+   * the renderer is defensive but lets sections take precedence if observed.
+   */
+  sections: Map<string, SectionState>;
+  /**
+   * Section name that most recently received a section event. Used by the
+   * renderer to surface a streaming indicator at the active section. Cleared
+   * by `section_completed` for that section.
+   */
+  mostRecentSectionName: string | null;
+  /**
+   * Monotonic counter for `SectionState.receivedAt`. Incremented on every
+   * section event so insertion order is unambiguously preserved.
+   */
+  sectionTickCounter: number;
 }
 
 type StreamReducerAction =
   | { type: 'streaming_started' }
   | { type: 'field_delta'; path: string; content: string; sequence: number }
   | { type: 'streaming_complete' }
+  | {
+      type: 'section_started';
+      sectionName: string;
+      displayLabel?: string;
+      sectionIndex?: number;
+      totalSections?: number;
+    }
+  | {
+      type: 'section_data';
+      sectionName: string;
+      contentDelta?: string;
+      structuredData?: unknown;
+    }
+  | {
+      type: 'section_completed';
+      sectionName: string;
+      finalContent?: string;
+      finalStructuredData?: unknown;
+      citations?: ReadonlyArray<Record<string, unknown>>;
+    }
   | { type: 'reset' };
 
 const INITIAL_REDUCER_STATE: StreamReducerState = {
   phase: 'idle',
   fields: new Map(),
   mostRecentPath: null,
+  sections: new Map(),
+  mostRecentSectionName: null,
+  sectionTickCounter: 0,
 };
+
+/**
+ * Defensive shallow-merge for `structuredData` payloads.
+ *
+ * - If `next` is undefined → keep `prior` unchanged.
+ * - If `prior` is undefined → adopt `next` wholesale.
+ * - If BOTH are plain objects → shallow-merge (next wins on key collision).
+ * - Otherwise (one or both are arrays / primitives) → REPLACE with `next` —
+ *   safe default since merging an array into an object would be a type error
+ *   in the consumer's contract.
+ */
+function mergeStructuredData(prior: unknown, next: unknown): unknown {
+  if (next === undefined) return prior;
+  if (prior === undefined) return next;
+  if (
+    typeof prior === 'object' &&
+    prior !== null &&
+    !Array.isArray(prior) &&
+    typeof next === 'object' &&
+    next !== null &&
+    !Array.isArray(next)
+  ) {
+    return { ...(prior as Record<string, unknown>), ...(next as Record<string, unknown>) };
+  }
+  return next;
+}
 
 function streamReducer(state: StreamReducerState, action: StreamReducerAction): StreamReducerState {
   switch (action.type) {
     case 'streaming_started':
-      // Fresh start. Clear any prior content from a previous run.
+      // Fresh start. Clear any prior content from a previous run — applies to
+      // BOTH legacy field state AND section state, since a fresh stream may
+      // begin in either mode.
       return {
         phase: 'streaming',
         fields: new Map(),
         mostRecentPath: null,
+        sections: new Map(),
+        mostRecentSectionName: null,
+        sectionTickCounter: 0,
       };
 
     case 'field_delta': {
@@ -546,6 +691,7 @@ function streamReducer(state: StreamReducerState, action: StreamReducerAction): 
         lastSequence: sequence,
       });
       return {
+        ...state,
         // First delta also flips phase to streaming if a stream began without
         // an explicit `streaming_started` (defensive — should not happen, but
         // makes the widget robust to a missing prelude).
@@ -557,10 +703,105 @@ function streamReducer(state: StreamReducerState, action: StreamReducerAction): 
 
     case 'streaming_complete':
       return {
+        ...state,
         phase: 'complete',
-        fields: state.fields,
         mostRecentPath: null,
       };
+
+    case 'section_started': {
+      const { sectionName, displayLabel, sectionIndex, totalSections } = action;
+      const nextSections = new Map(state.sections);
+      const prior = nextSections.get(sectionName);
+      const nextTick = state.sectionTickCounter + 1;
+      // Out-of-order tolerance (per task 114b spec): if section_completed
+      // already fired (e.g., events arrived reordered), keep the completed
+      // status but refresh metadata. Otherwise mark as 'streaming'.
+      const status = prior?.status === 'completed' ? 'completed' : 'streaming';
+      nextSections.set(sectionName, {
+        sectionName,
+        displayLabel: displayLabel ?? prior?.displayLabel,
+        sectionIndex: sectionIndex ?? prior?.sectionIndex,
+        totalSections: totalSections ?? prior?.totalSections,
+        status,
+        accumulatedText: prior?.accumulatedText ?? '',
+        structuredData: prior?.structuredData,
+        citations: prior?.citations,
+        receivedAt: prior?.receivedAt ?? nextTick,
+      });
+      return {
+        ...state,
+        // Section streaming implies the overall phase is streaming (consistent
+        // with the legacy stream's `streaming_started` semantics).
+        phase: state.phase === 'idle' ? 'streaming' : state.phase,
+        sections: nextSections,
+        mostRecentSectionName: sectionName,
+        sectionTickCounter: nextTick,
+      };
+    }
+
+    case 'section_data': {
+      const { sectionName, contentDelta, structuredData } = action;
+      const nextSections = new Map(state.sections);
+      const prior = nextSections.get(sectionName);
+      const nextTick = state.sectionTickCounter + 1;
+      // Defensive: if section_data arrives before section_started, create a
+      // partial entry with status 'streaming' so subsequent events accumulate
+      // correctly (out-of-order tolerance per task 114b spec).
+      const base: SectionState = prior ?? {
+        sectionName,
+        status: 'streaming',
+        accumulatedText: '',
+        receivedAt: nextTick,
+      };
+      nextSections.set(sectionName, {
+        ...base,
+        // Keep prior status unless this is the first event — never downgrade
+        // 'completed' back to 'streaming' (defensive against reordered events).
+        status: base.status === 'completed' ? 'completed' : 'streaming',
+        accumulatedText: base.accumulatedText + (contentDelta ?? ''),
+        structuredData: mergeStructuredData(base.structuredData, structuredData),
+      });
+      return {
+        ...state,
+        phase: state.phase === 'idle' ? 'streaming' : state.phase,
+        sections: nextSections,
+        mostRecentSectionName: sectionName,
+        sectionTickCounter: nextTick,
+      };
+    }
+
+    case 'section_completed': {
+      const { sectionName, finalContent, finalStructuredData, citations } = action;
+      const nextSections = new Map(state.sections);
+      const prior = nextSections.get(sectionName);
+      const nextTick = state.sectionTickCounter + 1;
+      // Defensive: if section_completed arrives before section_started, create
+      // a fresh completed entry so the renderer surfaces SOMETHING.
+      const base: SectionState = prior ?? {
+        sectionName,
+        status: 'streaming',
+        accumulatedText: '',
+        receivedAt: nextTick,
+      };
+      nextSections.set(sectionName, {
+        ...base,
+        status: 'completed',
+        // finalContent REPLACES accumulatedText when present (per FR-54
+        // contract); otherwise retain accumulated.
+        accumulatedText: finalContent !== undefined ? finalContent : base.accumulatedText,
+        // finalStructuredData REPLACES structuredData when present.
+        structuredData: finalStructuredData !== undefined ? finalStructuredData : base.structuredData,
+        citations: citations ?? base.citations,
+      });
+      return {
+        ...state,
+        sections: nextSections,
+        // Clear "most recent" only if this was the active section; otherwise
+        // preserve so the cursor stays at whichever section is still streaming.
+        mostRecentSectionName: state.mostRecentSectionName === sectionName ? null : state.mostRecentSectionName,
+        sectionTickCounter: nextTick,
+      };
+    }
 
     case 'reset':
       return INITIAL_REDUCER_STATE;
@@ -777,6 +1018,72 @@ const useStyles = makeStyles({
     padding: tokens.spacingHorizontalS,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-all',
+  },
+  // Phase 5R Wave 5-C section-keyed renderer styles (FR-54 / task 114b).
+  // Section-keyed mode replaces the schema-position-keyed render pipeline when
+  // `section_*` SSE events arrive. Uses identical Fluent v9 semantic tokens
+  // (no hardcoded colors per ADR-021) so the section renderer feels native
+  // alongside the legacy field renderer.
+  sectionsContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+    padding: tokens.spacingHorizontalM,
+  },
+  sectionBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  sectionHeader: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  sectionHeaderTitle: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: tokens.lineHeightBase400,
+    margin: 0,
+  },
+  sectionText: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: tokens.lineHeightBase400,
+    margin: 0,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+  sectionStructuredFallback: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    fontFamily: tokens.fontFamilyMonospace,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusSmall,
+    padding: tokens.spacingHorizontalS,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-all',
+    margin: 0,
+  },
+  sectionEmptyHint: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    fontStyle: 'italic',
+  },
+  sectionCitationsList: {
+    margin: 0,
+    paddingLeft: tokens.spacingHorizontalXL,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+  },
+  sectionCitationItem: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    lineHeight: tokens.lineHeightBase200,
   },
 });
 
@@ -1444,6 +1751,153 @@ const SchemaAwareObjectRenderer: React.FC<SchemaAwareObjectRendererProps> = ({
   );
 };
 
+// ---------------------------------------------------------------------------
+// Section renderer — Phase 5R Wave 5-C (FR-54 / task 114b)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-section block renderer for the section-name-keyed composite Output Node
+ * pattern (FR-54). Replaces the schema-position-keyed render pipeline when
+ * `section_*` SSE events arrive.
+ *
+ * Layout (per section):
+ *   1. Header row: `displayLabel` (or `prettyName(sectionName)`) + status pill
+ *      ("Streaming…" while not yet completed; nothing when completed — the
+ *      surrounding container's "Complete" badge carries the terminal state).
+ *   2. Body: `accumulatedText` rendered as wrapping paragraph + (when
+ *      `structuredData` is present) compact JSON fallback below for renderer-
+ *      agnostic surfacing. Future tasks may add a per-widget-type registry for
+ *      richer structured rendering (out of 114b scope — keep MVP simple).
+ *   3. Citations: when `section_completed.citations` was carried, render a
+ *      sub-list of citation IDs / labels (NFR-A3 trust model). Each citation
+ *      record is opaque; we extract `id`/`label`/`title` defensively.
+ *
+ * Empty-section handling: when `accumulatedText` is empty and no
+ * `structuredData` was carried, render the header only with a muted hint
+ * "(no content)" so the user sees a stable structural placeholder.
+ *
+ * ADR-021: Fluent v9 semantic tokens via `useStyles` — no hardcoded colors.
+ */
+interface SectionRendererProps {
+  section: SectionState;
+  isMostRecent: boolean;
+  styles: ReturnType<typeof useStyles>;
+}
+
+const SectionRenderer: React.FC<SectionRendererProps> = ({ section, isMostRecent, styles }) => {
+  const label = section.displayLabel?.length ? section.displayLabel : prettyName(section.sectionName);
+  const isStreaming = section.status === 'streaming';
+  const showCursor = isStreaming && isMostRecent;
+  const hasText = section.accumulatedText.length > 0;
+  const hasStructured = section.structuredData !== undefined;
+  const citations = section.citations ?? [];
+
+  // Defensive: when structured data is a string already, render as text; when
+  // it's a non-trivial object/array, render as compact JSON below the text so
+  // the user sees SOMETHING without us coupling to widget-type-specific shapes.
+  let structuredJson: string | null = null;
+  if (hasStructured && typeof section.structuredData !== 'string') {
+    try {
+      structuredJson = JSON.stringify(section.structuredData, null, 2);
+    } catch {
+      structuredJson = null; // unserializable — drop silently
+    }
+  }
+
+  return (
+    <div
+      className={styles.sectionBlock}
+      data-section-name={section.sectionName}
+      data-section-status={section.status}
+      data-section-index={section.sectionIndex !== undefined ? String(section.sectionIndex) : undefined}
+    >
+      <div className={styles.sectionHeader}>
+        <h3 className={styles.sectionHeaderTitle} data-section-header={section.sectionName}>
+          {label}
+        </h3>
+        {isStreaming && (
+          <Badge appearance="tint" color="brand" size="small" data-section-status-badge="streaming">
+            Streaming…
+          </Badge>
+        )}
+      </div>
+
+      {/* Text body — accumulated delta or final content. */}
+      {hasText && (
+        <p
+          className={styles.sectionText}
+          data-section-body="text"
+          data-field-path={`section.${section.sectionName}.text`}
+        >
+          {typeof section.structuredData === 'string' && !section.accumulatedText.length
+            ? (section.structuredData as string)
+            : section.accumulatedText}
+          {showCursor && (
+            <span className={styles.cursor} aria-hidden="true">
+              ▋
+            </span>
+          )}
+        </p>
+      )}
+
+      {/* When structuredData is itself a plain string and accumulatedText is empty,
+          surface the string content (covers BFF emitters that put the entire
+          section payload under structuredData rather than contentDelta). */}
+      {!hasText && typeof section.structuredData === 'string' && (
+        <p
+          className={styles.sectionText}
+          data-section-body="text-from-structured"
+          data-field-path={`section.${section.sectionName}.text`}
+        >
+          {section.structuredData as string}
+        </p>
+      )}
+
+      {/* Compact JSON fallback for non-string structured data — keeps the
+          section MVP simple while still surfacing payload content. A future task
+          may register per-widget-type custom renderers; out of 114b scope. */}
+      {structuredJson !== null && (
+        <pre
+          className={styles.sectionStructuredFallback}
+          data-section-body="structured"
+          data-field-path={`section.${section.sectionName}.structured`}
+        >
+          {structuredJson}
+        </pre>
+      )}
+
+      {/* Empty-section placeholder. */}
+      {!hasText && !hasStructured && (
+        <span className={styles.sectionEmptyHint} data-section-body="empty">
+          {isStreaming ? '(waiting for content…)' : '(no content)'}
+        </span>
+      )}
+
+      {/* Citations (NFR-A3 trust model) — appear below content on completed sections. */}
+      {citations.length > 0 && (
+        <ul
+          className={styles.sectionCitationsList}
+          data-section-body="citations"
+          data-field-path={`section.${section.sectionName}.citations`}
+        >
+          {citations.map((c, i) => {
+            const rec = c as Record<string, unknown>;
+            const idValue = typeof rec.id === 'string' ? rec.id : undefined;
+            const labelValue = typeof rec.label === 'string' ? rec.label : undefined;
+            const titleValue = typeof rec.title === 'string' ? rec.title : undefined;
+            const display = labelValue ?? titleValue ?? idValue ?? `Citation ${i + 1}`;
+            return (
+              <li key={`${idValue ?? i}-${i}`} className={styles.sectionCitationItem}>
+                {display}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+};
+
 /** Dispatch to the right sub-renderer based on `displayHint`. */
 function renderFieldByHint(props: FieldRendererProps): React.ReactNode {
   switch (props.field.displayHint) {
@@ -1541,6 +1995,62 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
       case 'streaming_complete':
         dispatch({ type: 'streaming_complete' });
         return;
+      // ── Phase 5R Wave 5-C section events (FR-54 / task 114b) ─────────────
+      case 'section_started': {
+        if (typeof event.sectionName !== 'string' || event.sectionName.length === 0) {
+          // eslint-disable-next-line no-console
+          console.debug('[StructuredOutputStreamWidget] dropped section_started without sectionName');
+          return;
+        }
+        dispatch({
+          type: 'section_started',
+          sectionName: event.sectionName,
+          displayLabel: typeof event.displayLabel === 'string' ? event.displayLabel : undefined,
+          sectionIndex: typeof event.sectionIndex === 'number' ? event.sectionIndex : undefined,
+          totalSections: typeof event.totalSections === 'number' ? event.totalSections : undefined,
+        });
+        return;
+      }
+      case 'section_data': {
+        if (typeof event.sectionName !== 'string' || event.sectionName.length === 0) {
+          // eslint-disable-next-line no-console
+          console.debug('[StructuredOutputStreamWidget] dropped section_data without sectionName');
+          return;
+        }
+        // contentDelta + structuredData are both optional; the reducer tolerates
+        // either-or-both. Drop only if NEITHER is present (no signal).
+        if (event.contentDelta === undefined && event.structuredData === undefined) {
+          // eslint-disable-next-line no-console
+          console.debug(
+            `[StructuredOutputStreamWidget] dropped section_data sectionName="${event.sectionName}" (no contentDelta or structuredData)`
+          );
+          return;
+        }
+        dispatch({
+          type: 'section_data',
+          sectionName: event.sectionName,
+          contentDelta: typeof event.contentDelta === 'string' ? event.contentDelta : undefined,
+          structuredData: event.structuredData,
+        });
+        return;
+      }
+      case 'section_completed': {
+        if (typeof event.sectionName !== 'string' || event.sectionName.length === 0) {
+          // eslint-disable-next-line no-console
+          console.debug('[StructuredOutputStreamWidget] dropped section_completed without sectionName');
+          return;
+        }
+        dispatch({
+          type: 'section_completed',
+          sectionName: event.sectionName,
+          finalContent: typeof event.finalContent === 'string' ? event.finalContent : undefined,
+          finalStructuredData: event.finalStructuredData,
+          citations: Array.isArray(event.citations)
+            ? (event.citations as ReadonlyArray<Record<string, unknown>>)
+            : undefined,
+        });
+        return;
+      }
       default:
         // Unknown event types — IGNORE per ADR-030.
         return;
@@ -1558,6 +2068,35 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
   // ────────────────────────────────────────────────────────────────────────
 
   const sortedFields = React.useMemo(() => [...schema.fields].sort((a, b) => a.order - b.order), [schema.fields]);
+
+  // ── Section-mode detection (Phase 5R Wave 5-C / FR-54) ──────────────────
+  //
+  // BACKWARD-COMPAT INVARIANT: section-mode activates ONLY when at least one
+  // `section_*` event has populated the sections map. Unmigrated schema-position
+  // playbooks (which only emit `FieldDelta`) leave `sections.size === 0` →
+  // legacy renderer path runs unchanged.
+  //
+  // Mixed mode: if a widget instance receives BOTH event families (shouldn't
+  // happen per task 114a's BFF guard, but be defensive), section-mode takes
+  // precedence per the FR-54 architectural intent (coordination drops to 2).
+  // The legacy fields map remains in state but is not rendered.
+  const isSectionMode = streamState.sections.size > 0;
+  const sortedSections = React.useMemo(() => {
+    const arr = Array.from(streamState.sections.values());
+    // Sort by sectionIndex when defined; fall back to receivedAt (insertion
+    // order) for stable rendering when index is missing. The BFF emits in
+    // completion order per FR-53; sortedSections honours sectionIndex when
+    // present so the playbook author's declared order is the default UI order.
+    arr.sort((a, b) => {
+      const ai = a.sectionIndex;
+      const bi = b.sectionIndex;
+      if (ai !== undefined && bi !== undefined) return ai - bi;
+      if (ai !== undefined) return -1;
+      if (bi !== undefined) return 1;
+      return a.receivedAt - b.receivedAt;
+    });
+    return arr;
+  }, [streamState.sections]);
 
   // Header state badge — derived from current phase + override states.
   const headerBadge = (() => {
@@ -1583,6 +2122,33 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
       );
     }
     // streaming mode
+    // Section-mode terminal state: all sections completed AND phase is not
+    // explicitly streaming → render "Complete" badge. Mixed mode (sections
+    // present + phase === 'complete') also renders complete.
+    if (isSectionMode) {
+      const allComplete = sortedSections.every(s => s.status === 'completed');
+      if (allComplete && streamState.phase !== 'streaming') {
+        return (
+          <Badge appearance="filled" color="success" icon={<CheckmarkCircleRegular />} data-state="complete">
+            Complete
+          </Badge>
+        );
+      }
+      if (allComplete) {
+        // Phase still streaming but all known sections are complete — render
+        // streaming because more sections may yet arrive.
+        return (
+          <Badge appearance="tint" color="brand" data-state="streaming">
+            Streaming…
+          </Badge>
+        );
+      }
+      return (
+        <Badge appearance="tint" color="brand" data-state="streaming">
+          Streaming…
+        </Badge>
+      );
+    }
     if (streamState.phase === 'complete') {
       return (
         <Badge appearance="filled" color="success" icon={<CheckmarkCircleRegular />} data-state="complete">
@@ -1639,6 +2205,7 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
                   ? streamState.phase
                   : 'static'
       }
+      data-render-mode={isSectionMode ? 'sections' : 'fields'}
     >
       <Card className={styles.card}>
         <CardHeader
@@ -1697,8 +2264,32 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
           </div>
         )}
 
-        {/* (a) Streaming + (b) Streaming-complete + static rendering — schema fields. */}
-        {!error && !declineState && !emptyResultState && !isLoading && (
+        {/* ── Phase 5R Wave 5-C section-keyed rendering (FR-54 / task 114b) ──
+            Section mode takes precedence over legacy field rendering when the
+            sections map has at least one entry. This is the FR-54 architectural
+            outcome: schema-position coordination drops out, coordination point
+            count goes from 5 to 2 (section name + section state). */}
+        {!error && !declineState && !emptyResultState && !isLoading && isSectionMode && (
+          <div className={styles.sectionsContainer} data-testid="sections-container">
+            {sortedSections.map((section, idx) => (
+              <React.Fragment key={section.sectionName}>
+                {idx > 0 && <Divider />}
+                <SectionRenderer
+                  section={section}
+                  isMostRecent={streamState.mostRecentSectionName === section.sectionName}
+                  styles={styles}
+                />
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+
+        {/* (a) Streaming + (b) Streaming-complete + static rendering — schema fields.
+            BACKWARD-COMPAT path (FR-54): when no `section_*` events have arrived,
+            the legacy schema-position-keyed renderer runs UNCHANGED. Unmigrated
+            playbooks emitting only `FieldDelta` events render via this path
+            until migrated by 118R. */}
+        {!error && !declineState && !emptyResultState && !isLoading && !isSectionMode && (
           <div className={styles.fieldsContainer}>
             {sortedFields.length === 0 && <Text className={styles.emptyResultText}>(No schema fields declared.)</Text>}
             {sortedFields.map((field, idx) => {

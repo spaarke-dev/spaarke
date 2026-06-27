@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.Schemas;
@@ -859,6 +861,198 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
+    /// Detects whether a Control node is a deployed-Start node — the canvas
+    /// entry-point anchor that the dispatching wrapper binds the payload into.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// R4 (2026-06-25, daily-update-service-r4): Deploy-Playbook.ps1 writes the Start
+    /// row's <c>sprk_configjson</c> as the playbook JSON's <c>nodes[].configJson</c>
+    /// object verbatim — it does NOT inject <c>__actionType=33</c> the way the
+    /// canvas-sync path (<c>NodeService.BuildConfigJson</c>) does. Without an explicit
+    /// <c>__actionType</c>, the orchestrator's structural fallback used to default
+    /// <c>NodeType.Control</c> to <c>ActionType.Condition</c>, which then failed
+    /// <c>ConditionNodeExecutor</c> validation ("Condition expression is required").
+    /// </para>
+    /// <para>
+    /// Detection signals (any one is sufficient — kept lenient because the deploy
+    /// shape varies across the 5 R4 playbooks):
+    /// </para>
+    /// <list type="number">
+    /// <item><description>Empty / null ConfigJson — auto-placed anchor.</description></item>
+    /// <item><description>Node name equals "Start" (case-insensitive).</description></item>
+    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
+    ///   property with value "start".</description></item>
+    /// <item><description>ConfigJson contains an <c>inputContract</c> object (entry-point
+    ///   marker per the R4 playbook authoring convention).</description></item>
+    /// </list>
+    /// </remarks>
+    private static bool IsDeployedStartNode(PlaybookNodeDto node)
+    {
+        if (node.NodeType != NodeType.Control)
+            return false;
+
+        if (string.IsNullOrWhiteSpace(node.ConfigJson))
+            return true;
+
+        if (string.Equals(node.Name, "Start", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
+                return false;
+
+            if (root.TryGetProperty("canvasType", out var canvas)
+                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(canvas.GetString(), "start", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("__canvasType", out var underscored)
+                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(underscored.GetString(), "start", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("inputContract", out _))
+                return true;
+        }
+        catch
+        {
+            // Malformed JSON — not Start; the executor lookup will surface the error.
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Detects whether a Control node is a deployed-LoadKnowledge node — the canvas-only
+    /// pass-through placeholder for the R5 AI Search knowledge-source binding.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// R4 (2026-06-26, daily-update-service-r4 follow-on after StartNodeExecutor):
+    /// same failure class as Start — Deploy-Playbook.ps1 does NOT inject
+    /// <c>__actionType=142</c> for the LoadKnowledge row, so without this detection
+    /// the structural fallback would route Control → ActionType.Condition →
+    /// ConditionNodeExecutor → "Condition expression is required" validation failure.
+    /// </para>
+    /// <para>
+    /// Detection signals (any one is sufficient):
+    /// </para>
+    /// <list type="number">
+    /// <item><description>Node name equals "LoadKnowledge" (case-insensitive).</description></item>
+    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
+    ///   property with value "loadKnowledge".</description></item>
+    /// <item><description>ConfigJson contains a <c>passthroughBinding</c> object
+    ///   (R4 placeholder marker) OR an <c>r5BindingPlan</c> object (forward-compat
+    ///   marker).</description></item>
+    /// </list>
+    /// </remarks>
+    private static bool IsDeployedLoadKnowledgeNode(PlaybookNodeDto node)
+    {
+        if (node.NodeType != NodeType.Control)
+            return false;
+
+        if (string.Equals(node.Name, "LoadKnowledge", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (string.IsNullOrWhiteSpace(node.ConfigJson))
+            return false;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
+                return false;
+
+            if (root.TryGetProperty("canvasType", out var canvas)
+                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(canvas.GetString(), "loadKnowledge", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("__canvasType", out var underscored)
+                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(underscored.GetString(), "loadKnowledge", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("passthroughBinding", out _))
+                return true;
+
+            if (root.TryGetProperty("r5BindingPlan", out _))
+                return true;
+        }
+        catch
+        {
+            // Malformed JSON — not LoadKnowledge; executor lookup will surface the error.
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Detects whether a Control node is a deployed-ReturnResponse node — the canvas-only
+    /// terminal node that binds upstream node outputs into the playbook run's return value.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// R4 (2026-06-26, daily-update-service-r4 follow-on after StartNodeExecutor):
+    /// same failure class as Start + LoadKnowledge — Deploy-Playbook.ps1 does NOT inject
+    /// <c>__actionType=143</c> for the ReturnResponse row.
+    /// </para>
+    /// <para>
+    /// Detection signals (any one is sufficient):
+    /// </para>
+    /// <list type="number">
+    /// <item><description>Node name equals "ReturnResponse" (case-insensitive).</description></item>
+    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
+    ///   property with value "returnResponse".</description></item>
+    /// <item><description>ConfigJson contains a <c>responseBinding</c> object
+    ///   (terminal-node marker per the R4 playbook authoring convention).</description></item>
+    /// </list>
+    /// </remarks>
+    private static bool IsDeployedReturnResponseNode(PlaybookNodeDto node)
+    {
+        if (node.NodeType != NodeType.Control)
+            return false;
+
+        if (string.Equals(node.Name, "ReturnResponse", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (string.IsNullOrWhiteSpace(node.ConfigJson))
+            return false;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
+                return false;
+
+            if (root.TryGetProperty("canvasType", out var canvas)
+                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(canvas.GetString(), "returnResponse", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("__canvasType", out var underscored)
+                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(underscored.GetString(), "returnResponse", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("responseBinding", out _))
+                return true;
+        }
+        catch
+        {
+            // Malformed JSON — not ReturnResponse; executor lookup will surface the error.
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Extracts the __actionType value from a node's ConfigJson.
     /// Returns null if ConfigJson is missing or doesn't contain the field.
     /// </summary>
@@ -1019,29 +1213,19 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 }
             }
 
-            // Skip Start nodes — they are canvas anchors with no execution logic.
-            // Detect via:
-            //   1. Explicit __actionType == Start (33) in ConfigJson
-            //   2. Control node with null/empty ConfigJson (auto-placed, no properties)
-            //   3. Control node named "Start" with __actionType == Condition (30) — legacy
-            //      canvas sync writes Condition instead of Start for the auto-placed node
+            // R4 spaarke-daily-update-service-r4 (2026-06-25): Start nodes are now
+            // first-class executable nodes routed to StartNodeExecutor (ActionType.Start
+            // = 33). The previous inline "passthrough" handler did not bind the dispatch
+            // payload into the scope variable, which made {{start.channels}} references
+            // in downstream nodes resolve to null. The executor reads the wrapper's
+            // payload from runContext.Parameters and binds it as a JsonElement into
+            // node.OutputVariable.
+            //
+            // Detection is centralised in IsDeployedStartNode (below) and applied by
+            // the structural fallback at the NodeType→ActionType switch — Control nodes
+            // matching the Start shape get ActionType.Start regardless of whether
+            // ConfigJson carries __actionType.
             var configActionType = ExtractActionTypeFromConfig(node.ConfigJson);
-            var isStartNode = configActionType == ActionType.Start
-                || (node.NodeType == NodeType.Control && string.IsNullOrWhiteSpace(node.ConfigJson))
-                || (node.NodeType == NodeType.Control && configActionType == ActionType.Condition
-                    && string.Equals(node.Name, "Start", StringComparison.OrdinalIgnoreCase));
-            if (isStartNode)
-            {
-                var skipOutput = NodeOutput.Ok(node.Id, node.OutputVariable, null, "Start node (passthrough)");
-                runContext.StoreNodeOutput(skipOutput);
-
-                await writer.WriteAsync(PlaybookStreamEvent.NodeCompleted(
-                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipOutput), cancellationToken);
-
-                EmitNodeCompleted("skipped"); // R6 Pillar 6c (FR-37 / task 063) — Start anchor
-
-                return skipOutput;
-            }
 
             // Note: ConditionJson on nodes is for conditional execution guards (Phase 5).
             // The Condition ActionType is handled by ConditionNodeExecutor (Phase 4) which
@@ -1108,16 +1292,43 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             else
             {
                 // Structural nodes (Output, Control, Workflow) WITHOUT an action FK:
-                // legacy path — uses ConfigJson __actionType or nodeType-based default.
+                // legacy path — uses ConfigJson __actionType, the deployed-Start
+                // detection helper, or nodeType-based default (in that order).
                 scopes = new ResolvedScopes([], [], []);
 
-                actionType = ExtractActionTypeFromConfig(node.ConfigJson) ?? node.NodeType switch
-                {
-                    NodeType.Output => ActionType.DeliverOutput,
-                    NodeType.Control => ActionType.Condition,
-                    NodeType.Workflow => ActionType.CreateTask,
-                    _ => ActionType.DeliverOutput
-                };
+                // R4 (2026-06-25, daily-update-service-r4): when the structural fallback
+                // resolves a Control node that matches the deployed-Start shape AND
+                // ConfigJson did not carry an explicit __actionType, route to
+                // ActionType.Start so StartNodeExecutor handles it instead of the
+                // legacy Condition default. Deploy-Playbook.ps1 does not inject
+                // __actionType=33 (only the canvas-sync path does that), so without
+                // this branch the deployed Start row falls into ConditionNodeExecutor
+                // and fails validation. Detection logic is centralised in
+                // IsDeployedStartNode for reuse + clarity.
+                // R4 (2026-06-26, daily-update-service-r4 follow-on): extended deployed-Start
+                // detection to cover all three canvas-only Control nodes that the R4
+                // DAILY-BRIEFING-NARRATE playbook deploys without __actionType injection.
+                // Each helper centralises the per-shape detection (see IsDeployedStartNode /
+                // IsDeployedLoadKnowledgeNode / IsDeployedReturnResponseNode). Without these
+                // branches the Condition default fires and rejects the node with "Condition
+                // expression is required" — the same UAT class that StartNodeExecutor closed
+                // on 2026-06-25.
+                actionType = configActionType
+                    ?? (IsDeployedStartNode(node) ? ActionType.Start : (ActionType?)null)
+                    ?? (IsDeployedLoadKnowledgeNode(node) ? ActionType.LoadKnowledge : (ActionType?)null)
+                    ?? (IsDeployedReturnResponseNode(node) ? ActionType.ReturnResponse : (ActionType?)null)
+                    ?? node.NodeType switch
+                    {
+                        NodeType.Output => ActionType.DeliverOutput,
+                        NodeType.Control => ActionType.Condition,
+                        NodeType.Workflow => ActionType.CreateTask,
+                        // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery node maps to a
+                        // SEPARATE ActionType so the legacy Output → DeliverOutput dispatch is
+                        // UNCHANGED (backward-compat invariant). The DeliverCompositeNodeExecutor
+                        // is the only executor for DeliverComposite.
+                        NodeType.DeliverComposite => ActionType.DeliverComposite,
+                        _ => ActionType.DeliverOutput
+                    };
                 action = new AnalysisAction
                 {
                     Id = Guid.Empty,
@@ -1250,6 +1461,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
                 await writer.WriteAsync(PlaybookStreamEvent.NodeCompleted(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, output), cancellationToken);
+
+                // FR-53 / chat-routing-redesign-r1 task 114a — per-section SSE streaming.
+                // When the completed node is a DeliverComposite node, re-iterate the composed
+                // section list and emit `section_started` → `section_data` → `section_completed`
+                // for each section, keyed by section name (NOT schema position). The emission
+                // is APPENDED to (not REPLACING) the standard `NodeCompleted` event — so all
+                // existing consumers see unchanged behavior.
+                //
+                // Backward-compat invariant: emits ONLY for actionType == DeliverComposite.
+                // Existing NodeType.Output → DeliverOutput path emits ZERO section events; its
+                // `FieldDelta` stream (via PlaybookExecutionEngine.ExecuteChatSummarizeAsync)
+                // continues UNCHANGED until migrated by FR-58 (task 118R).
+                if (actionType == ActionType.DeliverComposite)
+                {
+                    await EmitDeliverCompositeSectionEventsAsync(
+                        runContext, node, output, writer, cancellationToken).ConfigureAwait(false);
+                }
             }
             else
             {
@@ -1376,6 +1604,144 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// HttpContext.TraceIdentifier is also logged when present.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Emits per-section SSE stream events for a completed
+    /// <see cref="NodeType.DeliverComposite"/> node (FR-53 /
+    /// chat-routing-redesign-r1 task 114a). For each
+    /// <see cref="CompositeSectionResult"/> in the composite payload (in completion
+    /// order), emits three events: <c>section_started</c> → <c>section_data</c> →
+    /// <c>section_completed</c>, all keyed by the section's name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Approach A (orchestrator-emits)</b>: keeps the executor
+    /// (<see cref="DeliverCompositeNodeExecutor"/>) pure (returns structured data) and
+    /// localizes streaming concern to the orchestrator (ADR-013 separation of concerns).
+    /// </para>
+    /// <para>
+    /// <b>Phase A emission</b>: composite sections today are non-streaming (the upstream
+    /// executor produces consolidated content). One emission per section per lifecycle
+    /// stage — total of 3*N events for an N-section composite payload. A future
+    /// incremental-streaming phase (when individual composite-feeding nodes start
+    /// emitting partial outputs) emits multiple <c>section_data</c> events per section,
+    /// all sharing the same <c>SectionName</c>.
+    /// </para>
+    /// <para>
+    /// <b>Empty-sections safety</b>: when the composite produces zero sections (per
+    /// FR-52 "a partial composite is still a valid composite"), no <c>section_*</c>
+    /// events are emitted — the <c>NodeCompleted</c> event already in the stream is
+    /// sufficient. The frontend handles a composite payload with zero sections.
+    /// </para>
+    /// <para>
+    /// <b>ADR-015 tier-1 telemetry</b>: logs <c>(sectionCount, sectionNames=[...],
+    /// totalLatencyMs)</c> — section names are deterministic configuration identifiers
+    /// (safe). Section <i>content</i> is NEVER logged — it flows on the SSE wire which
+    /// is the canonical record.
+    /// </para>
+    /// <para>
+    /// <b>Malformed-payload safety</b>: if <see cref="NodeOutput.StructuredData"/>
+    /// cannot be deserialized to a <see cref="CompositeOutputPayload"/>, logs a warning
+    /// and returns (no events emitted). Emission is best-effort; downstream consumers
+    /// rely on the <c>NodeCompleted</c> event for canonical success signaling.
+    /// </para>
+    /// </remarks>
+    private async Task EmitDeliverCompositeSectionEventsAsync(
+        PlaybookRunContext runContext,
+        PlaybookNodeDto node,
+        NodeOutput output,
+        ChannelWriter<PlaybookStreamEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        // Deserialize the composite payload from NodeOutput.StructuredData.
+        // The executor (DeliverCompositeNodeExecutor) places a CompositeOutputPayload here.
+        CompositeOutputPayload? payload;
+        try
+        {
+            payload = output.GetData<CompositeOutputPayload>();
+        }
+        catch (JsonException ex)
+        {
+            // Defensive: if a future change produces malformed StructuredData, surface a
+            // warning + skip emission rather than aborting the run. The NodeCompleted
+            // event is already on the stream — consumers can still proceed.
+            _logger.LogWarning(ex,
+                "DeliverComposite node {NodeId} ({NodeName}): failed to deserialize CompositeOutputPayload " +
+                "from NodeOutput.StructuredData — skipping per-section SSE emission. RunId={RunId}",
+                node.Id, node.Name, runContext.RunId);
+            return;
+        }
+
+        if (payload is null || payload.Sections is null || payload.Sections.Count == 0)
+        {
+            // Empty composite per FR-52 is valid — no section events to emit. NodeCompleted
+            // already signals overall success.
+            _logger.LogDebug(
+                "DeliverComposite node {NodeId} ({NodeName}): composite payload has zero sections — " +
+                "no per-section SSE events to emit. RunId={RunId}",
+                node.Id, node.Name, runContext.RunId);
+            return;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var totalSections = payload.Sections.Count;
+        var sectionNames = new List<string>(totalSections);
+
+        for (var i = 0; i < totalSections; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var section = payload.Sections[i];
+            sectionNames.Add(section.SectionName);
+
+            // section_started — announce the section's start with position metadata.
+            var startedData = new SectionStartedSseEventData(
+                SectionName: section.SectionName,
+                DisplayLabel: section.DisplayLabel,
+                SectionIndex: i,
+                TotalSections: totalSections);
+
+            await writer.WriteAsync(PlaybookStreamEvent.SectionStarted(
+                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, startedData),
+                cancellationToken).ConfigureAwait(false);
+
+            // section_data — emit one consolidated content event for Phase A. Future
+            // incremental phases emit multiple deltas per section, all sharing the same
+            // SectionName.
+            var dataData = new SectionDataSseEventData(
+                SectionName: section.SectionName,
+                TextDelta: section.TextContent,
+                StructuredData: section.StructuredData);
+
+            await writer.WriteAsync(PlaybookStreamEvent.SectionData(
+                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, dataData),
+                cancellationToken).ConfigureAwait(false);
+
+            // section_completed — finalize with idempotent re-emission of the section's
+            // final state so frontends that drop the intermediate section_data event still
+            // render correctly.
+            var completedData = new SectionCompletedSseEventData(
+                SectionName: section.SectionName,
+                FinalText: section.TextContent,
+                FinalStructuredData: section.StructuredData,
+                SourceNodeId: section.SourceNodeId == Guid.Empty ? null : section.SourceNodeId);
+
+            await writer.WriteAsync(PlaybookStreamEvent.SectionCompleted(
+                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, completedData),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        stopwatch.Stop();
+
+        // ADR-015 tier-1 telemetry: section names are deterministic configuration identifiers
+        // (safe to log); section content is NOT duplicated into logs (SSE wire is canonical).
+        _logger.LogInformation(
+            "DeliverComposite node {NodeId} ({NodeName}) per-section SSE emission completed: " +
+            "sectionCount={SectionCount}, sectionNames=[{SectionNames}], totalLatencyMs={LatencyMs}, " +
+            "RunId={RunId}",
+            node.Id, node.Name, totalSections, string.Join(",", sectionNames),
+            stopwatch.ElapsedMilliseconds, runContext.RunId);
+    }
+
     private async Task ScanForUnrenderedTemplatesAsync(
         PlaybookRunContext runContext,
         PlaybookNodeDto node,

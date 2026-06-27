@@ -1,0 +1,47 @@
+<task id="CICD-002" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Phase 1 kickoff coordination: verify INDEX.md target list and PG-1 dispatch plan</title>
+    <status>complete</status>
+    <estimated-effort>0.25 hours</estimated-effort>
+    <phase>1 - Cross-cutting</phase>
+    <stream>cross-cutting</stream>
+    <rigor-level>MINIMAL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>coordination, planning, parallel-execution</tags>
+  </metadata>
+
+  <prompt>
+    Verify the parallel-execution plan for Phase 1 before dispatching PG-1. Identify which tasks have `.claude/` write conflicts (must be sequential in main session) and which are truly parallel-safe. Output a dispatch plan.
+  </prompt>
+
+  <role>Coordination/orchestration engineer.</role>
+
+  <goal>A short note in `notes/phase1-dispatch-plan.md` listing the PG-1 wave structure and any constraints.</goal>
+
+  <inputs>
+    <file purpose="task-index">projects/ci-cd-unit-test-remediation-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="project-CLAUDE">projects/ci-cd-unit-test-remediation-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="root-CLAUDE-3">Sub-agents cannot write to `.claude/` paths. Task 031 (modifies `.claude/skills/conflict-check/SKILL.md`) MUST run in main session.</constraint>
+    <constraint source="task-execute">Max concurrency 6 agents per wave (hard limit).</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">List all Phase 1 tasks marked `parallel-safe: true` from TASK-INDEX</step>
+    <step order="2">Identify any tasks that modify `.claude/` (per metadata `parallel-safe: false`)</step>
+    <step order="3">Group remaining into waves of ≤6</step>
+    <step order="4">Write `notes/phase1-dispatch-plan.md` with: Wave 1 list, Wave 2 list, sequential tasks list, reasoning</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/phase1-dispatch-plan.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dispatch plan note exists with concrete wave assignments</criterion>
+  </acceptance-criteria>
+</task>

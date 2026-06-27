@@ -111,15 +111,17 @@ export interface DecoratedChatBody {
   attachments?: unknown;
 
   /**
-   * R6 Pillar 8 / FR-50: closed-vocabulary intent field set by this router
-   * when the parsed `Intent.isSoftSlash === true`. Absent when the intent is
-   * NOT a soft slash (NFR-11 backward compat — the BFF defaults to its
-   * existing Layer 1 keyword path when this field is missing).
+   * Closed-vocabulary intent field set by this router when the parsed
+   * `Intent.isSoftSlash === true`. Absent when the intent is NOT a soft slash
+   * (NFR-11 backward compat — when the field is missing, the BFF treats the
+   * turn as natural language).
    *
-   * The BFF `CapabilityRouter` Layer 1 pre-pass maps this to a synthetic
-   * capability name (see `CapabilityRouter.cs`
-   * `SoftSlashIntentToCapabilityName`) and short-circuits to a Confident
-   * result selecting that capability.
+   * As of Phase 5R task 116 / FR-20, the BFF consumes this hint as a
+   * vector-query BIAS on the PlaybookDispatcher Phase B per-file embedding
+   * query (the dict-based `CapabilityRouter` Layer 0.5 short-circuit is
+   * removed). Slash and natural-language flows now converge on the same
+   * dispatcher path; the slash UX is preserved purely via the embedding-side
+   * bias.
    */
   intentHint?: CommandIntent;
 
@@ -132,23 +134,16 @@ export interface DecoratedChatBody {
 }
 
 // ---------------------------------------------------------------------------
-// Vocabulary mapping (closed)
+// Vocabulary (closed)
 // ---------------------------------------------------------------------------
-
-/**
- * Deterministic mapping from `SoftSlashCommand` → `CommandIntent` value.
- *
- * The mapping is the soft-slash literal stripped of its leading slash. The
- * table is exhaustive over `SoftSlashCommand` — TypeScript verifies this at
- * compile time via the `Record<SoftSlashCommand, CommandIntent>` type. Adding
- * a new entry without spec-FR sign-off WILL fail the build.
- */
-const SOFT_SLASH_TO_INTENT: Record<SoftSlashCommand, CommandIntent> = {
-  '/summarize': 'summarize',
-  '/draft': 'draft',
-  '/extract-entities': 'extract-entities',
-  '/analyze': 'analyze',
-} as const;
+//
+// Phase 5R task 116 / FR-20 — the explicit `SOFT_SLASH_TO_INTENT` mapping
+// dict (Record<SoftSlashCommand, CommandIntent>) is REMOVED. The relationship
+// between `SoftSlashCommand` and `CommandIntent` is structural: each soft-slash
+// command is the `/` sigil followed by its `CommandIntent` value, so the
+// mapping is a single `command.slice(1)` derivation (see `toCommandIntent`
+// below). The `SoftSlashIntents` export below remains as the canonical
+// runtime-enumerable list for telemetry audits + `/help` UI.
 
 /**
  * Read-only export for downstream consumers (telemetry audits, `/help` UI,
@@ -181,13 +176,17 @@ export function toCommandIntent(intent: Intent): CommandIntent | null {
   if (!intent.isSoftSlash || intent.command === null) {
     return null;
   }
-  // intent.command is a SlashCommand union — narrow to SoftSlashCommand via
-  // the deterministic lookup table. If the command is a hard slash, the lookup
-  // returns undefined and we fall back to null (defensive: invariant says
-  // isSoftSlash === true ⇒ command is in SOFT_SLASH_TO_INTENT, but null
-  // here keeps the function safe under future vocabulary changes).
-  const intentValue = SOFT_SLASH_TO_INTENT[intent.command as SoftSlashCommand];
-  return intentValue ?? null;
+  // Phase 5R task 116 / FR-20 — the `SOFT_SLASH_TO_INTENT` dict was removed.
+  // The mapping is purely structural: every `SoftSlashCommand` is the `/`
+  // sigil followed by its corresponding `CommandIntent` value. Strip the
+  // leading slash and narrow via the closed-vocabulary type.
+  //
+  // `isSoftSlash === true` is the parser's contract that `command` is in the
+  // `SoftSlashCommand` union (one of `/summarize`, `/draft`, `/extract-entities`,
+  // `/analyze`), so the derived value is guaranteed to be a valid
+  // `CommandIntent`. The defensive guard above (command === null) covers the
+  // malformed-intent case.
+  return (intent.command as SoftSlashCommand).slice(1) as CommandIntent;
 }
 
 /**

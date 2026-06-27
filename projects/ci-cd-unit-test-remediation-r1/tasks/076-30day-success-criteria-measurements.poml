@@ -1,0 +1,58 @@
+<task id="CICD-076" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>30-day success criteria measurements (SC-01..SC-10 via gh API analytics)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours (passive collection + 1 active measurement task at cutover+30d)</estimated-effort>
+    <phase>3 - Monitoring</phase>
+    <stream>A+B+C - Monitoring</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>071</dependencies>
+    <tags>monitoring, success-criteria, SC-measurements, 30d</tags>
+    <gate-condition>cutover+30d</gate-condition>
+  </metadata>
+
+  <prompt>
+    Per spec SC-01..SC-10: at cutover+30d, measure all 10 success criteria using gh API analytics + git log analysis. Document threshold met/not-met for each. If thresholds not met, escalate to user with recommendation (continue, adjust, rollback).
+  </prompt>
+
+  <role>Analytics engineer doing the post-cutover measurement.</role>
+
+  <goal>`notes/sc-measurements-30day.md` with measured values for SC-01..SC-10, threshold check, and recommendation.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md (§138-149 success criteria)</file>
+    <file purpose="baseline">projects/ci-cd-unit-test-remediation-r1/notes/baseline-metrics.md (from task 011)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec SC-04">PR-to-merge time decreases ≥ 30% vs baseline.</constraint>
+    <constraint source="spec SC-05">Master green rate ≥ 95% over 30 days post-cutover.</constraint>
+    <constraint source="spec SC-10">Hot-path collision incidents drop ≥ 50% over 30d vs prior 30d.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">SC-01 + SC-02: `gh run list` for ci-router.yml + ci-tier1-blocking.yml + ci-tier2-advisory.yml over last 30 days; compute p95</step>
+    <step order="2">SC-03: retry-pass ratio for Tier 1 over 30d</step>
+    <step order="3">SC-04: PR-to-merge time current 30d vs baseline 30d (from task 011)</step>
+    <step order="4">SC-05: master green rate over 30d via `gh api`</step>
+    <step order="5">SC-06: verify Release+Debug matrix restored and stable</step>
+    <step order="6">SC-07: verify tests/CLAUDE.md + constraints/testing.md no longer mandate coverage % (file check)</step>
+    <step order="7">SC-08: verify merge queue enabled + INDEX.md populated + conflict-check auto-invoke (via task-execute log review)</step>
+    <step order="8">SC-09: verify deploy-spaarke-ai.yml has ≥1 successful CD-from-master deploy</step>
+    <step order="9">SC-10: hot-path collision rate via git log analysis (rebase conflicts on Program.cs / SpaarkeAi registries over 30d vs prior 30d)</step>
+    <step order="10">Write `notes/sc-measurements-30day.md` with measured values + threshold check + recommendation</step>
+    <step order="11">If any SC fails: escalate to user with rollback/adjust recommendation</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/sc-measurements-30day.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 10 SCs measured with concrete values</criterion>
+    <criterion testable="true">Each SC checked against threshold (pass/fail)</criterion>
+    <criterion testable="true">Recommendation included if any fail</criterion>
+  </acceptance-criteria>
+</task>

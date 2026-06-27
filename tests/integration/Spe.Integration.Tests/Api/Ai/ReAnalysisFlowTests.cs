@@ -497,7 +497,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             // ChatSessionManager -- real instance with mocked Dataverse repo
             services.AddScoped(sp =>
             {
-                var cache = sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>();
+                var cache = sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
                 var logger = NullLogger<ChatSessionManager>.Instance;
                 return new ChatSessionManager(cache, MockDataverseRepository.Object, logger);
             });

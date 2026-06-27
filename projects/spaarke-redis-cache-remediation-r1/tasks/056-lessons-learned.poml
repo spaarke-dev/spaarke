@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Lessons-learned section (drift origin + guardrails)</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>039,051</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, retro</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Reflection/doc</rigor-reason>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Add Lessons-Learned section to `redis-cache-azure-setup.md` (or `projects/spaarke-redis-cache-remediation-r1/notes/lessons-learned.md`): how the drift originated (Redis deleted; App Setting left at false; in-memory warning ignored for unknown duration); what guardrails would have prevented it (fail-fast in deployed envs, alert on in-memory warning, deployment checklist explicitly verifies Redis state).</prompt>
+  <role>Spaarke architect; retro writer.</role>
+  <goal>Lessons-learned content present in the operational guide; also captured in `notes/lessons-learned.md` for project-level retro.</goal>
+  <context><background>FR-22 fourth bullet.</background><relevant-files><file>docs/guides/redis-cache-azure-setup.md</file><file>projects/spaarke-redis-cache-remediation-r1/notes/lessons-learned.md (NEW)</file></relevant-files></context>
+  <constraints><constraint source="spec">FR-22.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/phase-3-retro.md</file>
+      <file>docs/guides/redis-cache-azure-setup.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Write `notes/lessons-learned.md` (project-level).</step>
+    <step order="2">Mirror key points into Lessons-Learned section of `redis-cache-azure-setup.md`.</step>
+    <step order="3">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">retro</tool><tool name="Write">lessons</tool><tool name="Edit">guide section</tool></tools>
+  <outputs>
+    <output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/lessons-learned.md (NEW)</output>
+    <output type="docs">docs/guides/redis-cache-azure-setup.md (modified — Lessons section)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Both files contain drift-origin + guardrail content.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>MINIMAL rigor.</protocol></execution>
+</task>

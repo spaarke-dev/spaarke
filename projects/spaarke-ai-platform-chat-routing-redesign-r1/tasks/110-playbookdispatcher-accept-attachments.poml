@@ -3,7 +3,7 @@
   <metadata>
     <title>PlaybookDispatcher.DispatchAsync accepts IReadOnlyList&lt;ChatMessageAttachment&gt;</title>
     <phase>5: WP2 File-Aware Classification</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>105</dependencies>
     <blocks>111</blocks>

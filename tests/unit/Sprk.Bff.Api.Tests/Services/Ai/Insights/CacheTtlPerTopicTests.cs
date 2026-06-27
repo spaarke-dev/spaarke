@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
@@ -9,6 +8,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Insights;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Insights;
@@ -40,7 +40,8 @@ public class CacheTtlPerTopicTests
     private const string Subject = "matter:M-1234";
     private const string ScopeHash = "alice-scope-v1";
 
-    private readonly Mock<IDistributedCache> _cacheMock = new();
+    // FR-05 redis remediation r1: InsightsPlaybookExecutionCache now depends on ITenantCache.
+    private readonly Mock<ITenantCache> _cacheMock = new();
     private readonly Mock<IDataverseService> _dataverseMock = new();
 
     // ─── Helpers ─────────────────────────────────────────────────────────────
@@ -148,8 +149,10 @@ public class CacheTtlPerTopicTests
         // 5-minute DefaultTtl when request.Ttl is null.
 
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var lookup = CreateLookup(
             registryRows: (MatterHealthCanonicalName, 60));
@@ -163,12 +166,11 @@ public class CacheTtlPerTopicTests
         await sut.GetOrExecuteAsync(request, ct => EngineStreamWith(artifact, ct));
 
         _cacheMock.Verify(
-            c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.Is<DistributedCacheEntryOptions>(o =>
-                    o.AbsoluteExpirationRelativeToNow == TimeSpan.FromMinutes(60)),
-                It.IsAny<CancellationToken>()),
+            c => c.SetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<InsightArtifact>(),
+                It.Is<TimeSpan?>(t => t == TimeSpan.FromMinutes(60)),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "registry TTL (60 min) must be applied when request.Ttl is null");
     }
@@ -181,8 +183,10 @@ public class CacheTtlPerTopicTests
         // contract on InsightsPlaybookExecutionRequest.Ttl.
 
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var lookup = CreateLookup(
             registryRows: (MatterHealthCanonicalName, 60));
@@ -195,11 +199,11 @@ public class CacheTtlPerTopicTests
         await sut.GetOrExecuteAsync(request, ct => EngineStreamWith(MakeArtifact(), ct));
 
         _cacheMock.Verify(
-            c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.Is<DistributedCacheEntryOptions>(o => o.AbsoluteExpirationRelativeToNow == explicitTtl),
-                It.IsAny<CancellationToken>()),
+            c => c.SetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<InsightArtifact>(),
+                It.Is<TimeSpan?>(t => t == explicitTtl),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "per-call Ttl override must beat the registry value");
     }
@@ -212,8 +216,10 @@ public class CacheTtlPerTopicTests
         // mapped to a registry row → falls back to DefaultTtl.
 
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var lookup = CreateLookup(
             registryRows: (MatterHealthCanonicalName, 60));
@@ -225,12 +231,11 @@ public class CacheTtlPerTopicTests
         await sut.GetOrExecuteAsync(request, ct => EngineStreamWith(MakeArtifact(), ct));
 
         _cacheMock.Verify(
-            c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.Is<DistributedCacheEntryOptions>(o =>
-                    o.AbsoluteExpirationRelativeToNow == InsightsPlaybookExecutionCache.DefaultTtl),
-                It.IsAny<CancellationToken>()),
+            c => c.SetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<InsightArtifact>(),
+                It.Is<TimeSpan?>(t => t == InsightsPlaybookExecutionCache.DefaultTtl),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "unregistered playbook id must fall back to DefaultTtl");
     }
@@ -243,8 +248,10 @@ public class CacheTtlPerTopicTests
         // DefaultTtl is used when request.Ttl is null.
 
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         // No lookup — exercises the (_registryTtl == null) branch
         var sut = CreateSut(lookup: null);
@@ -255,12 +262,11 @@ public class CacheTtlPerTopicTests
         await sut.GetOrExecuteAsync(request, ct => EngineStreamWith(MakeArtifact(), ct));
 
         _cacheMock.Verify(
-            c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.Is<DistributedCacheEntryOptions>(o =>
-                    o.AbsoluteExpirationRelativeToNow == InsightsPlaybookExecutionCache.DefaultTtl),
-                It.IsAny<CancellationToken>()),
+            c => c.SetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<InsightArtifact>(),
+                It.Is<TimeSpan?>(t => t == InsightsPlaybookExecutionCache.DefaultTtl),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "when no TopicRegistryTtlLookup is injected, behavior must be unchanged from pre-052");
     }
@@ -273,8 +279,10 @@ public class CacheTtlPerTopicTests
         // rather than passing an invalid TimeSpan to the cache.
 
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var lookup = CreateLookup(
             registryRows: (MatterHealthCanonicalName, 5000));
@@ -286,12 +294,11 @@ public class CacheTtlPerTopicTests
         await sut.GetOrExecuteAsync(request, ct => EngineStreamWith(MakeArtifact(), ct));
 
         _cacheMock.Verify(
-            c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.Is<DistributedCacheEntryOptions>(o =>
-                    o.AbsoluteExpirationRelativeToNow == TimeSpan.FromMinutes(1440)),
-                It.IsAny<CancellationToken>()),
+            c => c.SetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<InsightArtifact>(),
+                It.Is<TimeSpan?>(t => t == TimeSpan.FromMinutes(1440)),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "out-of-bounds TTL (5000 min) must be clamped to schema max (1440 min)");
     }
@@ -304,8 +311,10 @@ public class CacheTtlPerTopicTests
         // hit AT MOST ONCE for N calls in the window.
 
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         var lookup = CreateLookup(
             registryRows: (MatterHealthCanonicalName, 60));
@@ -334,8 +343,10 @@ public class CacheTtlPerTopicTests
         // DefaultTtl.
 
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InsightArtifact?)null);
 
         _dataverseMock
             .Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
@@ -361,12 +372,11 @@ public class CacheTtlPerTopicTests
         await act.Should().NotThrowAsync("Dataverse failure must not propagate to the cache caller");
 
         _cacheMock.Verify(
-            c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.Is<DistributedCacheEntryOptions>(o =>
-                    o.AbsoluteExpirationRelativeToNow == InsightsPlaybookExecutionCache.DefaultTtl),
-                It.IsAny<CancellationToken>()),
+            c => c.SetAsync<InsightArtifact>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<InsightArtifact>(),
+                It.Is<TimeSpan?>(t => t == InsightsPlaybookExecutionCache.DefaultTtl),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "Dataverse failure → fallback to DefaultTtl per ADR-009 graceful degradation");
     }

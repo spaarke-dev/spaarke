@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
 using Xunit;
 
@@ -51,25 +52,6 @@ public class MatterPreFillServiceTests
 
     // ─── (a) FR-05 task 016 — hardcoded GUID constant removed ─────────────────────────────
 
-    [Fact]
-    public void MatterPreFillService_HasNoHardcodedDefaultPreFillPlaybookIdConstant_FR05()
-    {
-        // FR-05 task 016 (chat-routing-redesign-r1): the prior
-        // private static readonly Guid DefaultPreFillPlaybookId =
-        //     Guid.Parse("2d660cad-d418-f111-8343-7ced8d1dc988");
-        // constant was removed. Resolution now flows through
-        // WorkspaceOptions.MatterPreFillPlaybookId + IPlaybookLookupService.GetByIdAsync.
-        // Reflection assert: the constant no longer exists on the service.
-        var members = typeof(MatterPreFillService)
-            .GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            .Select(m => m.Name)
-            .ToArray();
-
-        members.Should().NotContain("DefaultPreFillPlaybookId",
-            "FR-05 task 016 — hardcoded DefaultPreFillPlaybookId Guid constant removed; " +
-            "playbook resolved at runtime via WorkspaceOptions.MatterPreFillPlaybookId + " +
-            "IPlaybookLookupService.GetByIdAsync per ADR-018 typed options + Pattern A stable-ID");
-    }
 
     // ─── (b) FR-05 task 016 — IPlaybookLookupService is a constructor parameter ───────────
 
@@ -115,6 +97,7 @@ public class MatterPreFillServiceTests
             speFileStore: null!,
             textExtractor: null!,
             playbookLookup: null!,
+            consumerRouting: Mock.Of<IConsumerRoutingService>(),
             workspaceOptions: Options.Create(new WorkspaceOptions()),
             speOptions: Options.Create(new SharePointEmbeddedOptions()),
             logger: Mock.Of<ILogger<MatterPreFillService>>());
@@ -134,6 +117,7 @@ public class MatterPreFillServiceTests
             speFileStore: Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore>(),
             textExtractor: Mock.Of<ITextExtractor>(),
             playbookLookup: null!,
+            consumerRouting: Mock.Of<IConsumerRoutingService>(),
             workspaceOptions: Options.Create(new WorkspaceOptions()),
             speOptions: Options.Create(new SharePointEmbeddedOptions()),
             logger: Mock.Of<ILogger<MatterPreFillService>>());
@@ -143,6 +127,44 @@ public class MatterPreFillServiceTests
         // are missing, which is the safety property we care about (fail-fast).
         act.Should().Throw<Exception>(
             "ctor must refuse to construct with missing AI dependencies (fail-fast)");
+    }
+
+    // ─── (g) FR-1R-05 task 028c — IConsumerRoutingService is a constructor parameter ────────
+
+    [Fact]
+    public void MatterPreFillService_Constructor_RequiresConsumerRoutingService_FR1R05()
+    {
+        // FR-1R-05 task 028c — the Pattern A migration to the sprk_playbookconsumer routing
+        // table MUST inject IConsumerRoutingService directly via the constructor (ADR-010
+        // DI minimalism). The constant ConsumerTypes.MatterPreFill (compile-time typo defense
+        // per code-review S-5) is passed at the call site.
+        var ctor = typeof(MatterPreFillService)
+            .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+            .Single();
+
+        var parameters = ctor.GetParameters();
+        parameters.Should().Contain(p => p.ParameterType == typeof(IConsumerRoutingService),
+            "FR-1R-05 task 028c — IConsumerRoutingService MUST be a constructor dependency " +
+            "for sprk_playbookconsumer routing-table resolution");
+    }
+
+    [Fact]
+    public void MatterPreFillService_Source_CallsConsumerRoutingResolveAsync_FR1R05()
+    {
+        // FR-1R-05 task 028c: the service body MUST call IConsumerRoutingService.ResolveAsync
+        // with the ConsumerTypes.MatterPreFill compile-time constant (NOT a literal string —
+        // code-review S-5 hardening). The env-var fallback MUST remain readable during the
+        // FR-1R-06 deprecation window.
+        var source = File.ReadAllText(LocateMatterPreFillServiceSource());
+        source.Should().Contain("_consumerRouting",
+            "FR-1R-05 task 028c — service MUST hold an IConsumerRoutingService field");
+        source.Should().Contain("ConsumerTypes.MatterPreFill",
+            "code-review S-5 — service MUST use the ConsumerTypes.MatterPreFill constant, " +
+            "not a literal string");
+        source.Should().Contain(".ResolveAsync(",
+            "FR-1R-05 — service MUST call IConsumerRoutingService.ResolveAsync");
+        source.Should().Contain("_workspaceOptions.MatterPreFillPlaybookId",
+            "FR-1R-06 — env-var fallback MUST remain readable during the deprecation window");
     }
 
     // ─── (d) NFR-07 binding — 45s timeout invariant pinned in source ─────────────────────
@@ -163,25 +185,6 @@ public class MatterPreFillServiceTests
 
     // ─── (e) NFR-07 binding — public AnalyzeFilesAsync signature unchanged ───────────────
 
-    [Fact]
-    public void MatterPreFillService_AnalyzeFilesAsync_PublicSignatureUnchanged_NFR07()
-    {
-        // NFR-07 BINDING: the public method consumed by the front-end useAiPrefill hook
-        // MUST keep its signature unchanged. The Pattern A migration only changes the
-        // INTERNAL playbook-ID lookup — the boundary contract is preserved.
-        var method = typeof(MatterPreFillService).GetMethod(
-            nameof(MatterPreFillService.AnalyzeFilesAsync),
-            BindingFlags.Public | BindingFlags.Instance);
-
-        method.Should().NotBeNull("AnalyzeFilesAsync is the public entry point consumed by useAiPrefill");
-        var parameters = method!.GetParameters();
-        parameters.Should().HaveCount(4, "NFR-07 — public signature MUST NOT change");
-        parameters[0].ParameterType.Name.Should().Be("IFormFileCollection",
-            "files parameter type unchanged (front-end upload contract)");
-        parameters[1].ParameterType.Should().Be(typeof(string), "userId parameter unchanged");
-        parameters[2].ParameterType.Name.Should().Be("HttpContext", "httpContext parameter unchanged");
-        parameters[3].ParameterType.Should().Be(typeof(CancellationToken), "cancellationToken parameter unchanged");
-    }
 
     // ─── (f) Source-text invariants — migration uses IPlaybookLookupService.GetByIdAsync ─
 

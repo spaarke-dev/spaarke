@@ -875,7 +875,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Queries the customer document index (spaarke-knowledge-index-v2) via <see cref="IRagService"/>
+    /// Queries the customer document index (spaarke-files-index) via <see cref="IRagService"/>
     /// for documents semantically similar to the current document being analyzed.
     /// Results from the current document are excluded to avoid self-referencing.
     /// </para>

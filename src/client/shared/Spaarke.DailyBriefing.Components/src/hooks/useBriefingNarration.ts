@@ -4,8 +4,9 @@
  * notification channel data is available.
  *
  * Replaces useAiBriefing with richer per-channel narrative output.
- * Fetches once when channels are loaded, caches the result for the session.
- * Falls back to template-based bullets when AI is unavailable.
+ * Refetches whenever the `channels` reference changes (consumer-driven
+ * cache invalidation). Falls back to template-based bullets when AI is
+ * unavailable.
  *
  * Usage:
  *   const { tldr, channelNarratives, isLoading, error } = useBriefingNarration(channels, loadingState);
@@ -21,9 +22,23 @@
  *   decomposition (mirrors task 012's `briefingService` → `notifications.ts`
  *   back-pointer pattern). Original location becomes a re-export shim
  *   (cleaned up in task 017/018).
+ *
+ * R4 task 033 / FR-15 (2026-06-26):
+ *   Removed the `hasFetchedRef` session cache. The original implementation
+ *   gated the fetch with a persistent `useRef(false)` so the hook fetched
+ *   exactly once per mount. That broke `AC-15`: after the user clicked
+ *   Check / Remove / Keep, `actionsRefresh` bumped → `useBriefingNotifications`
+ *   refetched → `channels` changed → narration was supposed to refetch, but
+ *   `hasFetchedRef.current === true` short-circuited the effect, so the TL;DR
+ *   + bullets stayed stale. Now the effect refetches whenever `channels`
+ *   (the dependency) changes. In-flight duplicate calls under rapid churn
+ *   are guarded by the existing `cancelled` closure flag in the cleanup
+ *   function (no AbortController needed because `fetchBriefingNarration`
+ *   already swallows AbortError → 'error', and the `cancelled` flag prevents
+ *   stale-result state writes).
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import type { ChannelFetchResult, LoadingState } from '../types/notifications';
 import type { TldrResult, ChannelNarrationResult, NarrativeBulletResult } from '../services/briefingService';
 import { fetchBriefingNarration } from '../services/briefingService';
@@ -107,27 +122,25 @@ export function useBriefingNarration(
   const [error, setError] = useState<string | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
 
-  // Track whether we already fetched for this set of channels
-  const hasFetchedRef = useRef(false);
-
   useEffect(() => {
     // Only fetch once notification data is fully loaded
     if (dataLoadingState !== 'loaded') return;
 
-    // Don't re-fetch if we already have a result
-    if (hasFetchedRef.current) return;
+    // R4 task 033 / FR-15: refetch whenever `channels` changes (the consumer
+    // bumps `channels` via `useBriefingNotifications`'s refetch in response to
+    // `actionsRefresh` — see DailyBriefingApp.tsx Effect 2). No persistent
+    // has-fetched flag; the `cancelled` closure prevents stale writes if a
+    // newer fetch supersedes this one.
 
     // Check if there are any successful channels to narrate
     const hasData = channels.some(ch => ch.status === 'success');
     if (!hasData) {
       setIsUnavailable(true);
       setUnavailableReason('No notification data to narrate.');
-      hasFetchedRef.current = true;
       return;
     }
 
     let cancelled = false;
-    hasFetchedRef.current = true;
     setIsLoading(true);
     setError(null);
     setIsUnavailable(false);

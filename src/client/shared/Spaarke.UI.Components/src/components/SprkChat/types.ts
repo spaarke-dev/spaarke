@@ -72,6 +72,10 @@ export interface IChatMessageMetadata {
     | 'action_confirmation'
     | 'plan_preview'
     | 'document_status'
+    // chat-routing-redesign-r1 task 117b — file-aware playbook options card.
+    // Rendered by SprkChatMessageRenderer with click handlers passed from
+    // SprkChat (onSelectPlaybook, onOpenLibraryModal) — FR-50 + FR-51.
+    | 'playbook_options'
     | string;
 
   /**
@@ -200,7 +204,10 @@ export type ChatSseEventType =
   | 'navigate'
   | 'document_stream_start'
   | 'document_stream_token'
-  | 'document_stream_end';
+  | 'document_stream_end'
+  // chat-routing-redesign-r1 task 117a/117b — file-aware playbook routing
+  // surfaces top-N candidates + an Open Library CTA inline in the chat.
+  | 'playbook_options';
 
 /** A parsed SSE event from the stream, matching ChatSseEvent from the server. */
 export interface IChatSseEvent {
@@ -287,6 +294,81 @@ export interface IChatSseEventData {
   playbookId?: string;
   /** Playbook display name. In 'dialog_open' and 'navigate' events. */
   playbookName?: string;
+
+  // ── playbook_options fields (chat-routing-redesign-r1 task 117a/117b) ───────
+  // Carried verbatim in the SSE `data` envelope. Locked by spec FR-49.
+  /** Top-N candidate playbooks. Present only in `playbook_options` events. */
+  candidates?: IPlaybookOptionCandidate[];
+  /** Whether the chat should also render the Open Library CTA. Always `true` per FR-51. */
+  libraryModalCta?: boolean;
+  /** Session attachment identifiers correlating the candidates to uploaded files. */
+  sessionAttachmentIds?: string[];
+  /** Whether the upstream reranker ran for this event. Telemetry signal. */
+  rerankInvoked?: boolean;
+  /** Controlled-vocabulary tag describing the rerank outcome (when invoked). */
+  rerankReason?: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Playbook Options Types (chat-routing-redesign-r1 task 117a/117b — FR-49 / 50 / 51)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A single playbook candidate surfaced in a `playbook_options` SSE event.
+ * Mirrors the BFF `PlaybookOptionCandidate` record in
+ * `Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes.PlaybookOptionsSseEvent`.
+ *
+ * ADR-015: All fields are tier-1 safe — admin-facing display name + opaque IDs +
+ * controlled-vocabulary reason. No user message content, no file content.
+ */
+export interface IPlaybookOptionCandidate {
+  /** Opaque immutable Dataverse PK (`sprk_aiplaybook` GUID, string form). */
+  playbookId: string;
+  /**
+   * Portable cross-environment short code. May be empty string when the upstream
+   * selector did not supply a code (the orchestrator may enrich before emit).
+   */
+  playbookCode: string;
+  /** Admin-facing playbook name (`sprk_name`). Tier-1 safe — configuration content. */
+  displayName: string;
+  /** Aggregated similarity score in the unit interval [0, 1]. */
+  confidence: number;
+  /**
+   * Controlled-vocabulary reason tag (e.g. `top-confidence`, `llm-rerank-from-5`,
+   * `timeout-graceful-degrade`). NEVER free-form NL.
+   */
+  reason: string;
+}
+
+/**
+ * Payload for the `playbook_options` SSE event emitted by the BFF after
+ * file-aware classification. Locked by spec FR-49.
+ *
+ * @see `Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes.PlaybookOptionsSseEventData`
+ */
+export interface IPlaybookOptionsPayload {
+  /**
+   * Ordered top-N candidates (highest confidence first). May be empty when no
+   * playbook crossed the secondary confidence threshold (graceful no-match path).
+   */
+  candidates: IPlaybookOptionCandidate[];
+  /**
+   * Always `true` per FR-51 — the chat ALWAYS renders an Open Library CTA
+   * alongside the candidates (or alone in the no-match case).
+   */
+  libraryModalCta: boolean;
+  /**
+   * Deterministic session attachment identifiers. Opaque IDs only — NO filenames,
+   * MIME types, sizes, or content (ADR-015 tier-1).
+   */
+  sessionAttachmentIds: string[];
+  /** Whether the upstream `IIntentRerankerService` was invoked to refine the list. */
+  rerankInvoked: boolean;
+  /**
+   * Controlled-vocabulary tag explaining the rerank outcome. `null`/absent when
+   * `rerankInvoked` is `false`.
+   */
+  rerankReason?: string | null;
 }
 
 /**
@@ -521,6 +603,49 @@ export interface ISprkChatProps {
    * delivered synchronously from the fetch loop without React state batching.
    */
   onPaneEvent?: ((event: IAiPaneEvent) => void) | null;
+
+  /**
+   * Callback fired for `playbook_options` SSE events
+   * (chat-routing-redesign-r1 task 117a/117b — FR-49 / 50 / 51).
+   *
+   * When provided, SprkChat forwards the BFF-emitted top-N candidate playbook list
+   * + Open Library CTA flag verbatim. The host (typically ConversationPane) renders
+   * the candidates as inline link buttons within the chat thread and wires click
+   * handlers to dispatch playbook execution.
+   *
+   * Uses the synchronous callback-ref pattern (same as onPaneEvent) — delivered
+   * from the fetch loop without React state batching.
+   *
+   * ADR-015 (binding): the callback MUST NOT be logged verbatim by the host. The
+   * payload is tier-1 safe by construction but accumulating it in telemetry
+   * defeats the point.
+   */
+  onPlaybookOptions?: ((payload: IPlaybookOptionsPayload) => void) | null;
+
+  /**
+   * Callback fired when the user clicks a candidate playbook link button rendered
+   * by `SprkChatMessageRenderer` for `responseType === 'playbook_options'`
+   * (chat-routing-redesign-r1 task 117b — FR-50).
+   *
+   * SprkChat threads this through to `SprkChatMessage` when rendering a structured
+   * playbook_options message. Implementations typically POST to
+   * `/api/ai/playbook-dispatch/execute` with `{ playbookId, sessionAttachmentIds,
+   * originalMessage, sessionId }` so the dispatcher executes the chosen playbook
+   * against the same session context.
+   *
+   * When the prop is omitted the candidate buttons render disabled.
+   */
+  onSelectPlaybook?: (playbookId: string, sessionAttachmentIds: string[]) => void;
+
+  /**
+   * Callback fired when the user clicks the "Open Library" link rendered alongside
+   * a `playbook_options` message (chat-routing-redesign-r1 task 117b — FR-51).
+   *
+   * Receives the session attachment IDs so the host can pre-filter the Library
+   * modal by attachment classification when available. When the prop is omitted
+   * the link renders disabled.
+   */
+  onOpenLibraryModal?: (sessionAttachmentIds: string[]) => void;
 
   /**
    * Callback fired when a chat attachment finishes client-side extraction and
@@ -1300,6 +1425,20 @@ export interface IUseSseStreamResult {
    * Pass null to unregister.
    */
   setOnPaneEvent: (handler: ((event: IAiPaneEvent) => void) | null) => void;
+
+  /**
+   * Register a callback for `playbook_options` SSE events
+   * (chat-routing-redesign-r1 task 117a/117b — FR-49 / 50 / 51).
+   *
+   * Uses the same synchronous callback-ref pattern as `setOnPaneEvent` so the
+   * payload is delivered from the fetch loop without React state batching.
+   * Pass `null` to unregister.
+   *
+   * ADR-015: the callback receives ONLY tier-1 safe data — opaque IDs, admin
+   * display names, controlled-vocabulary reason tags. The host MUST NOT log the
+   * payload verbatim into Application Insights / browser telemetry.
+   */
+  setOnPlaybookOptions: (handler: ((payload: IPlaybookOptionsPayload) => void) | null) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

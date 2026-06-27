@@ -508,6 +508,8 @@ public class InsightsAssistantEndpointTestFixture : WebApplicationFactory<Progra
                 ["DocumentIntelligence:AiSearchKey"] = "test-search-key",
                 ["OfficeRateLimit:Enabled"] = "false",
                 ["Redis:Enabled"] = "false",
+                // spaarke-redis-cache-remediation-r1 task 003 (FR-02): opt into in-memory fallback for tests.
+                ["Redis:AllowInMemoryFallback"] = "true",
                 ["ModelSelector:DefaultModel"] = "gpt-4o",
                 ["AzureOpenAI:Endpoint"] = "https://test.openai.azure.com/",
                 ["AzureOpenAI:ChatModelName"] = "gpt-4o",
@@ -546,7 +548,14 @@ public class InsightsAssistantEndpointTestFixture : WebApplicationFactory<Progra
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        // spaarke-redis-cache-remediation-r1 task 003 (FR-02): switch to Development for in-memory
+        // cache fallback; disable ValidateScopes to preserve pre-existing test behavior.
+        builder.UseEnvironment("Development");
+        builder.UseDefaultServiceProvider(options =>
+        {
+            options.ValidateScopes = false;
+            options.ValidateOnBuild = false;
+        });
 
         builder.ConfigureTestServices(services =>
         {

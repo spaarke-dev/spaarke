@@ -1,24 +1,25 @@
 # R4 Task Index
 
 > **Project**: smart-todo-r4
-> **Last Updated**: 2026-06-23 (PR #406 merged at squash commit `80f70a1d4`; closeout wave (110-117) added)
-> **Branch**: `work/smart-todo-r4-uat4-fixes` → MERGED to master
-> **Total Tasks**: 46 (was 38; +110-117 closeout wave from UAT rounds 4-13 retrospective)
-> **Status**: 🔲 8 not-started (closeout 110-117) · 🔄 0 in-progress · ✅ 35 complete (legacy) + 092→pending closeout-flip · ❌ 0 blocked
-> **Active wave**: **Closeout Wave 14** — 8 tasks (110-117) to close R4 properly: structural layout fix (110), widget Code Page modal removal (111), PCF CREATE-mode bridge (112), form-script audit (113), vitest wiring (114), SpeDocumentViewer cleanup (115), R4-092 flip (116), R4-098 wrap-up (117). R5 design backlog already captured in `projects/smart-todo-r5/design.md`.
+> **Last Updated**: 2026-06-24 (R4-110 ✅ merged via PR #419; closeout wave re-scoped per user decisions 2026-06-24)
+> **Branch**: `work/smart-todo-r4-closeout` → master @ `cc1391c9a`
+> **Total Tasks**: 47 (was 46; +118 ribbon-deploy; R4-111 closed-no-action)
+> **Status**: 🔲 6 not-started (112, 113, 114, 115, 118 + 116/117 wrap-up) · ✅ R4-110 complete · 🚫 R4-111 closed-no-action · ❌ 0 blocked
+> **Active wave**: **Closeout Wave 14** (re-scoped 2026-06-24)
 
-## Closeout Wave (110-117) — Execution Order
+## Closeout Wave (110-118) — Execution Order
 
-Sequential where dependencies dictate; otherwise parallel-safe:
-
-1. **R4-110** — Structural Workspace height-chain audit + fix (FOUNDATION — informs others)
-2. **R4-111** — Remove widget "Expand to Code Page modal" path (parallel with 110)
-3. **R4-112** — PCF CREATE-mode bridge (FU-1) (parallel)
-4. **R4-113** — Form-script audit: register or delete (NEW-1) (parallel)
-5. **R4-114** — Wire vitest for SmartTodo (FU-4) (parallel)
-6. **R4-115** — SpeDocumentViewer stale bundle cleanup (FU-6) (parallel)
-7. **R4-116** — R4-092 final deploy notes + flip to ✅ (serial after 110-115)
-8. **R4-117** — R4-098 wrap-up + lessons-learned (serial after 116)
+| Task | Status | Title | Notes |
+|---|---|---|---|
+| R4-110 | ✅ | Structural height-chain audit + fix | PR #419 merged at `b26ac56b7` |
+| R4-111 | 🚫 closed | Remove widget "Expand to Code Page modal" path | User decision 2026-06-24: leave widget Expand path; F-7/F-8 deferred to R5 |
+| R4-112 | 🔲 | PCF RegardingResolver — CREATE-mode bridge + bug fixes (EXPANDED) | (a) Bug 1: catalog nav-prop vs m:1 rel-name error on lookup; (b) CREATE-mode `window.__sprk_regarding_pending__` bridge; (c) form-binding cleanup note (Event NOT a host entity) |
+| R4-113 | 🔲 | Form-script audit — **DELETE** `sprk_todo_dirty_check.js` per user decision 2026-06-24 | "no shims" rule; parent-side `Xrm.Page.ui.close` patch keeps save/close working |
+| R4-114 | 🔲 | Wire vitest for SmartTodo Code Page | 22 spec files exist with no runner |
+| R4-115 | 🔲 | SpeDocumentViewer stale bundle cleanup | — |
+| **R4-118** (NEW) | 🔲 | Deploy `sprk_wizard_commands.js` + audit other parent form ribbons | spaarkedev1 returns 404 on `/webresources/sprk_wizard_commands.js` — Matter "Create To Do" button defined but JS not deployed. Deploy script at `scripts/Deploy-WizardCommandsJs.ps1`. Audit which other parent entities (Project, Event, Invoice, WorkAssignment, Communication) need similar ribbon buttons added. |
+| R4-116 | 🔲 | R4-092 final deploy notes + flip to ✅ | Serial after 112-115, 118 |
+| R4-117 | 🔲 | R4-098 wrap-up + lessons-learned | Serial after 116 |
 
 ---
 

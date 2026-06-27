@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Stale doc cleanup (FR-04): AI-EMBEDDING-STRATEGY, rag-architecture, MULTI-CONTAINER-RUNBOOK, retire rag-indexing-configuration</title>
+    <phase>1: Documentation Foundation + Pre-Flight Verification</phase>
+    <status>completed</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>001, 002</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, cleanup</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Doc updates only — 3 doc patches + 1 retirement (FR-04)</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Apply 4 stale-doc cleanups per FR-04:
+    1. AI-EMBEDDING-STRATEGY.md lines 63–69 — replace stale index inventory with one-line reference to catalog
+    2. rag-architecture.md lines 13–15 — replace dual-index narrative with 7-index landscape + catalog cross-link
+    3. MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md lines 67–68 — apply canonical names to BU value table
+    4. Retire docs/notes/rag-indexing-configuration.md (move to _archive/ or delete)
+  </prompt>
+
+  <role>
+    Spaarke platform technical writer.
+  </role>
+
+  <goal>
+    No surviving doc references retired indexes as active. Canonical names appear consistently.
+  </goal>
+
+  <context>
+    <background>
+      Three docs contain stale index inventories that pre-date the 7-index canonical landscape. rag-indexing-configuration.md is a Jan 2026 snapshot superseded by the new catalog.
+    </background>
+    <relevant-files>
+      <file>docs/guides/AI-EMBEDDING-STRATEGY.md</file>
+      <file>docs/architecture/rag-architecture.md</file>
+      <file>docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md</file>
+      <file>docs/notes/rag-indexing-configuration.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-04">No doc references retired indexes as active; canonical names in all surviving docs</constraint>
+    <constraint source="project">Retire = move to `_archive/` (preferred) OR delete; document decision</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>docs/guides/AI-EMBEDDING-STRATEGY.md</file>
+      <file>docs/architecture/rag-architecture.md</file>
+      <file>docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md</file>
+      <file>docs/notes/rag-indexing-configuration.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Edit AI-EMBEDDING-STRATEGY.md lines 63–69: replace stale table with `See [AI-SEARCH-INDEX-CATALOG.md](../architecture/AI-SEARCH-INDEX-CATALOG.md) for canonical index inventory.`</step>
+    <step order="2">Edit rag-architecture.md lines 13–15: replace dual-index narrative with current 7-index summary; cross-link to catalog</step>
+    <step order="3">Edit MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md lines 67–68 BU value table: apply canonical names</step>
+    <step order="4">Retire rag-indexing-configuration.md: move to `docs/notes/_archive/rag-indexing-configuration.md` with timestamped retirement note</step>
+    <step order="5">Grep across `docs/` for retired index names (`spaarke-knowledge-index-v2`, `discovery-index`, `spaarke-knowledge-shared`) — confirm zero hits as active references</step>
+    <step order="6">Update TASK-INDEX.md: task 005 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Patch 3 docs</tool>
+    <tool name="Bash">mv rag-indexing-configuration.md to _archive/</tool>
+    <tool name="Grep">Verify no retired index references survive</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/AI-EMBEDDING-STRATEGY.md</output>
+    <output type="docs">docs/architecture/rag-architecture.md</output>
+    <output type="docs">docs/guides/MULTI-CONTAINER-MULTI-INDEX-OPERATOR-RUNBOOK.md</output>
+    <output type="docs">docs/notes/_archive/rag-indexing-configuration.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AI-EMBEDDING-STRATEGY.md lines 63–69 reference catalog (no stale table)</criterion>
+    <criterion testable="true">rag-architecture.md lines 13–15 describe 7-index landscape + catalog cross-link</criterion>
+    <criterion testable="true">MULTI-CONTAINER-RUNBOOK.md BU table uses canonical names</criterion>
+    <criterion testable="true">rag-indexing-configuration.md moved to `_archive/`</criterion>
+    <criterion testable="true">Grep across `docs/` for retired index names returns zero active references</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -6,8 +6,10 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Xunit;
@@ -526,9 +528,10 @@ public sealed class InvoiceExtractionToolHandlerTests : TypedToolHandlerTestFixt
 
     private InvoiceExtractionToolHandler BuildHandlerWithMock(IOpenAiClient client, IDistributedCache cache)
     {
+        var tenantCache = new TenantCache(cache, NullLogger<TenantCache>.Instance);
         return new InvoiceExtractionToolHandler(
             client,
-            cache,
+            tenantCache,
             Options.Create(DefaultModelOptions),
             CreateLogger<InvoiceExtractionToolHandler>());
     }

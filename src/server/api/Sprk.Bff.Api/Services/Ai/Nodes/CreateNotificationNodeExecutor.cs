@@ -169,6 +169,38 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 ? _templateEngine.Render(config.DueDate, templateContext)
                 : null;
 
+            // FR-6 (R4 task 020): render enrichment template strings before passing to entity builder.
+            // Each is null-safe — playbooks that don't supply the field skip the entire rendering pass.
+            var regardingName = config.RegardingName is not null
+                ? _templateEngine.Render(config.RegardingName, templateContext)
+                : null;
+            var sourceEntityType = config.SourceEntityType is not null
+                ? _templateEngine.Render(config.SourceEntityType, templateContext)
+                : null;
+            var sourceId = config.SourceId is not null
+                ? _templateEngine.Render(config.SourceId, templateContext)
+                : null;
+            var sourceModifiedOn = config.SourceModifiedOn is not null
+                ? _templateEngine.Render(config.SourceModifiedOn, templateContext)
+                : null;
+            var sourceOwningUser = config.SourceOwningUser is not null
+                ? _templateEngine.Render(config.SourceOwningUser, templateContext)
+                : null;
+            var viaMatterId = config.ViaMatterId is not null
+                ? _templateEngine.Render(config.ViaMatterId, templateContext)
+                : null;
+            var viaMatterName = config.ViaMatterName is not null
+                ? _templateEngine.Render(config.ViaMatterName, templateContext)
+                : null;
+            // viaMatter.memberships[] is sourced from an upstream LookupUserMembership node
+            // output via `viaMatterMembershipsVariable` (the OutputVariable name; default
+            // "myMatters" matches the canonical playbook pattern in PB-016). Memberships
+            // are projected from `byRole` for the resolved matter ID per FR-6.
+            var viaMatterMemberships = ResolveViaMatterMemberships(
+                context,
+                config.ViaMatterMembershipsVariable,
+                viaMatterId);
+
             // Resolve recipient
             var recipientId = ResolveRecipientId(config, templateContext);
             if (recipientId is null)
@@ -241,6 +273,8 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 config.ToastType ?? DefaultToastType,
                 actionUrl, recipientId.Value, regardingId, regardingType,
                 dueDate,
+                regardingName, sourceEntityType, sourceId, sourceModifiedOn, sourceOwningUser,
+                viaMatterId, viaMatterName, viaMatterMemberships,
                 context);
 
             // Create the notification via shared Dataverse client
@@ -345,6 +379,19 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             var actionUrl = itemConfig.ActionUrl is not null ? _templateEngine.Render(itemConfig.ActionUrl, itemContext) : null;
             var dueDate = itemConfig.DueDate is not null ? _templateEngine.Render(itemConfig.DueDate, itemContext) : null;
 
+            // FR-6 enrichment (R4 task 020) — iterate-items path mirrors standard path.
+            var regardingName = itemConfig.RegardingName is not null ? _templateEngine.Render(itemConfig.RegardingName, itemContext) : null;
+            var sourceEntityType = itemConfig.SourceEntityType is not null ? _templateEngine.Render(itemConfig.SourceEntityType, itemContext) : null;
+            var sourceId = itemConfig.SourceId is not null ? _templateEngine.Render(itemConfig.SourceId, itemContext) : null;
+            var sourceModifiedOn = itemConfig.SourceModifiedOn is not null ? _templateEngine.Render(itemConfig.SourceModifiedOn, itemContext) : null;
+            var sourceOwningUser = itemConfig.SourceOwningUser is not null ? _templateEngine.Render(itemConfig.SourceOwningUser, itemContext) : null;
+            var viaMatterId = itemConfig.ViaMatterId is not null ? _templateEngine.Render(itemConfig.ViaMatterId, itemContext) : null;
+            var viaMatterName = itemConfig.ViaMatterName is not null ? _templateEngine.Render(itemConfig.ViaMatterName, itemContext) : null;
+            var viaMatterMemberships = ResolveViaMatterMemberships(
+                context,
+                itemConfig.ViaMatterMembershipsVariable,
+                viaMatterId);
+
             var recipientId = ResolveRecipientId(itemConfig, itemContext);
             if (recipientId is null)
             {
@@ -375,7 +422,10 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 title, body, category, itemConfig.Priority ?? DefaultPriority,
                 itemConfig.ToastType ?? DefaultToastType,
                 actionUrl, recipientId.Value, regardingId, regardingType,
-                dueDate, context);
+                dueDate,
+                regardingName, sourceEntityType, sourceId, sourceModifiedOn, sourceOwningUser,
+                viaMatterId, viaMatterName, viaMatterMemberships,
+                context);
             await _entityService.CreateAsync(entity, cancellationToken);
             created++;
         }
@@ -479,6 +529,17 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
         Guid? regardingId,
         string? regardingType,
         string? dueDate,
+        // FR-6 (R4 task 020): enrichment scalars + viaMatter projection.
+        // All inputs are optional — playbooks not yet migrated to enriched shape produce the
+        // legacy customData payload unchanged (AC-6b backward compat).
+        string? regardingName,
+        string? sourceEntityType,
+        string? sourceId,
+        string? sourceModifiedOn,
+        string? sourceOwningUser,
+        string? viaMatterId,
+        string? viaMatterName,
+        IReadOnlyList<object>? viaMatterMemberships,
         NodeExecutionContext context)
     {
         var entity = new Entity("appnotification");
@@ -495,19 +556,70 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             entity["sprk_category"] = category;
         }
 
-        // FR-18 (P3): build appnotification.data payload.
+        // FR-18 (P3) + FR-6 (R4 task 020): build appnotification.data payload.
         // - customData.actionUrl is populated regardless of toasttype (Daily Briefing UI consumer).
         // - customData.dueDate is populated when provided (R2.2 — Daily Briefing per-item due-date UX).
         // - data.actions[] is populated ONLY when actionUrl is present AND toasttype != Hidden
         //   (so MDA native bell icon shows a clickable "Open" button).
+        // - FR-6 enriched fields (regardingName, regardingEntityType, regardingId, viaMatter, source)
+        //   are added conditionally so old-shape playbooks remain backward compatible (AC-6b).
+        // - viaMatter is OMITTED entirely when no matter linkage (AC-6 / FR-6 requirement: omit, not null).
+        // - Payload typical <2KB, hard ceiling <10KB (AC-6c). Memberships array is the only field
+        //   that can grow; we don't truncate here — upstream LookupUserMembership already caps via
+        //   MembershipResolveOptions.DefaultLimit.
         // R2.2: data is built whenever actionUrl OR dueDate is present (was: only actionUrl).
+        // R4 task 020: also build data when ANY FR-6 enrichment scalar is present (e.g., notifications
+        // with regarding info but no URL).
         var hasActionUrl = !string.IsNullOrWhiteSpace(actionUrl);
         var hasDueDate = !string.IsNullOrWhiteSpace(dueDate);
-        if (hasActionUrl || hasDueDate)
+        var hasRegardingName = !string.IsNullOrWhiteSpace(regardingName);
+        var hasRegardingId = regardingId.HasValue && regardingId.Value != Guid.Empty;
+        var hasRegardingType = !string.IsNullOrWhiteSpace(regardingType);
+        var hasSourceEntity = !string.IsNullOrWhiteSpace(sourceEntityType) || !string.IsNullOrWhiteSpace(sourceId)
+                             || !string.IsNullOrWhiteSpace(sourceModifiedOn) || !string.IsNullOrWhiteSpace(sourceOwningUser);
+        var hasViaMatter = !string.IsNullOrWhiteSpace(viaMatterId)
+                           && (!string.IsNullOrWhiteSpace(viaMatterName) || viaMatterMemberships is { Count: > 0 });
+
+        if (hasActionUrl || hasDueDate || hasRegardingName || hasRegardingId || hasSourceEntity || hasViaMatter)
         {
             var customData = new Dictionary<string, object?>();
             if (hasActionUrl) customData["actionUrl"] = actionUrl;
             if (hasDueDate) customData["dueDate"] = dueDate;
+
+            // FR-6: regardingName + regardingEntityType + regardingId — flat fields used by widget
+            // grounding + EntityNameValidator allow-list (FR-14).
+            if (hasRegardingName) customData["regardingName"] = regardingName;
+            if (hasRegardingType) customData["regardingEntityType"] = regardingType;
+            if (hasRegardingId) customData["regardingId"] = regardingId!.Value.ToString();
+
+            // FR-6: viaMatter object — present ONLY when matter linkage exists. Per FR-6 + AC-6b,
+            // omit field entirely (not null) when source-record has no matter linkage.
+            if (hasViaMatter)
+            {
+                var viaMatter = new Dictionary<string, object?>
+                {
+                    ["id"] = viaMatterId
+                };
+                if (!string.IsNullOrWhiteSpace(viaMatterName))
+                {
+                    viaMatter["name"] = viaMatterName;
+                }
+                // memberships[] — one entry per role per FR-6 + AC-6 spec.
+                viaMatter["memberships"] = viaMatterMemberships ?? (IReadOnlyList<object>)Array.Empty<object>();
+                customData["viaMatter"] = viaMatter;
+            }
+
+            // FR-6: source object — captures originating record identity for widget grounding +
+            // narration. Built when ANY source-* scalar is present (AC-6a).
+            if (hasSourceEntity)
+            {
+                var source = new Dictionary<string, object?>();
+                if (!string.IsNullOrWhiteSpace(sourceEntityType)) source["entityType"] = sourceEntityType;
+                if (!string.IsNullOrWhiteSpace(sourceId)) source["id"] = sourceId;
+                if (!string.IsNullOrWhiteSpace(sourceModifiedOn)) source["modifiedOn"] = sourceModifiedOn;
+                if (!string.IsNullOrWhiteSpace(sourceOwningUser)) source["owningUser"] = sourceOwningUser;
+                customData["source"] = source;
+            }
 
             var isVisibleToast = hasActionUrl && toastType != ToastTypeHidden;
             object dataObject = isVisibleToast
@@ -546,6 +658,88 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     }
 
     /// <summary>
+    /// FR-6 (R4 task 020): Projects the viaMatter.memberships[] array for the resolved
+    /// matter ID by reading the upstream LookupUserMembership node's StructuredData output
+    /// (bound to <paramref name="membershipVariable"/>, default "myMatters").
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The LookupUserMembership executor produces:
+    /// <code>
+    /// {
+    ///   "byRole": { "owner": ["matterId1", ...], "assignedAttorney": ["matterId1", ...] }
+    /// }
+    /// </code>
+    /// We project by iterating <c>byRole</c> keys and emitting a one-entry-per-role list
+    /// for the matter IDs that match the resolved <paramref name="viaMatterId"/>. When the
+    /// upstream node is absent, the matter is not in the bucket, or the membership variable
+    /// is not configured, returns null — the caller then omits <c>viaMatter</c> entirely
+    /// (per FR-6 omission rule).
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<object>? ResolveViaMatterMemberships(
+        NodeExecutionContext context,
+        string? membershipVariable,
+        string? viaMatterId)
+    {
+        if (string.IsNullOrWhiteSpace(viaMatterId))
+        {
+            return null;
+        }
+
+        // Default variable name matches canonical PB-016 playbook pattern.
+        var variableName = string.IsNullOrWhiteSpace(membershipVariable)
+            ? "myMatters"
+            : membershipVariable.Trim();
+
+        if (!context.PreviousOutputs.TryGetValue(variableName, out var output)
+            || !output.StructuredData.HasValue)
+        {
+            return null;
+        }
+
+        try
+        {
+            var data = output.StructuredData.Value;
+            if (!data.TryGetProperty("byRole", out var byRoleProp)
+                || byRoleProp.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var memberships = new List<object>();
+            foreach (var roleEntry in byRoleProp.EnumerateObject())
+            {
+                if (roleEntry.Value.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+                // Match the matter ID inside this role's array (case-insensitive Guid string compare).
+                foreach (var idElement in roleEntry.Value.EnumerateArray())
+                {
+                    if (idElement.ValueKind != JsonValueKind.String) continue;
+                    var idStr = idElement.GetString();
+                    if (string.Equals(idStr, viaMatterId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        memberships.Add(new Dictionary<string, object?>
+                        {
+                            ["role"] = roleEntry.Name
+                        });
+                        break; // one entry per role; don't duplicate if list contains duplicates
+                    }
+                }
+            }
+
+            return memberships.Count > 0 ? memberships : null;
+        }
+        catch
+        {
+            // Defensive — malformed upstream output is not fatal; viaMatter is omitted gracefully.
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Builds template context dictionary from previous node outputs and execution metadata.
     /// </summary>
     private static Dictionary<string, object?> BuildTemplateContext(NodeExecutionContext context)
@@ -554,10 +748,13 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
 
         foreach (var (varName, output) in context.PreviousOutputs)
         {
+            // 2026-06-24 (bug #10 fix): use TemplateEngine.ConvertJsonElement so Handlebars
+            // can navigate nested paths like {{varName.output.count}}. See full rationale on
+            // the matching change in ConditionNodeExecutor.BuildTemplateContext.
             templateContext[varName] = new
             {
                 output = output.StructuredData.HasValue
-                    ? JsonSerializer.Deserialize<object>(output.StructuredData.Value.GetRawText())
+                    ? TemplateEngine.ConvertJsonElement(output.StructuredData.Value)
                     : null,
                 text = output.TextContent,
                 success = output.Success
@@ -638,4 +835,63 @@ internal sealed record NotificationNodeConfig
     /// emit a due date can omit this field — consumers render no due-date row when missing.
     /// </summary>
     public string? DueDate { get; init; }
+
+    // -- FR-6 enrichment (R4 task 020) -----------------------------------------------------
+    // All fields below are OPTIONAL — playbooks not yet migrated to enriched shape skip them
+    // entirely. Backward-compatible per AC-6b. Each supports template variables.
+
+    /// <summary>
+    /// Display name of the regarding entity (e.g., matter name). Written to
+    /// <c>customData.regardingName</c>. Used by widget grounding + FR-14 EntityNameValidator
+    /// allow-list. Supports template variables (e.g. <c>"{{item.matterName}}"</c>).
+    /// </summary>
+    public string? RegardingName { get; init; }
+
+    /// <summary>
+    /// Source record entity logical name (e.g., <c>sprk_document</c>, <c>sprk_event</c>).
+    /// Written to <c>customData.source.entityType</c>. Captures originating record identity
+    /// for FR-6 widget grounding. Supports template variables.
+    /// </summary>
+    public string? SourceEntityType { get; init; }
+
+    /// <summary>
+    /// Source record ID (Guid string). Written to <c>customData.source.id</c>. Supports
+    /// template variables (e.g. <c>"{{item.id}}"</c>).
+    /// </summary>
+    public string? SourceId { get; init; }
+
+    /// <summary>
+    /// Source record <c>modifiedon</c> timestamp (ISO-8601). Written to
+    /// <c>customData.source.modifiedOn</c>. Supports template variables.
+    /// </summary>
+    public string? SourceModifiedOn { get; init; }
+
+    /// <summary>
+    /// Source record owning user GUID. Written to <c>customData.source.owningUser</c>.
+    /// Supports template variables.
+    /// </summary>
+    public string? SourceOwningUser { get; init; }
+
+    /// <summary>
+    /// Matter ID the source record is regarding. When present + matter linkage exists,
+    /// written to <c>customData.viaMatter.id</c>. When absent, the entire <c>viaMatter</c>
+    /// field is OMITTED from customData (per FR-6 / AC-6 omission rule — not null).
+    /// Supports template variables (e.g. <c>"{{item.regardingMatterId}}"</c>).
+    /// </summary>
+    public string? ViaMatterId { get; init; }
+
+    /// <summary>
+    /// Display name of the matter. Written to <c>customData.viaMatter.name</c> when
+    /// <see cref="ViaMatterId"/> is present. Supports template variables.
+    /// </summary>
+    public string? ViaMatterName { get; init; }
+
+    /// <summary>
+    /// Name of the upstream <c>LookupUserMembership</c> node's OutputVariable
+    /// (default "myMatters" matches canonical PB-016 pattern). The executor reads this
+    /// variable's StructuredData.byRole bucket, finds entries matching <see cref="ViaMatterId"/>,
+    /// and emits one membership-array entry per role to <c>customData.viaMatter.memberships[]</c>.
+    /// Per FR-6: multi-role case (owner + assignedAttorney) produces multiple array entries.
+    /// </summary>
+    public string? ViaMatterMembershipsVariable { get; init; }
 }

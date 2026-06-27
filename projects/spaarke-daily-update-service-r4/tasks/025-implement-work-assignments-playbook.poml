@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Implement notification-work-assignments playbook (stub → full)</title>
+    <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Deployed full implementation to PB-022 (sprk_analysisplaybookid=be7874be-5f2d-f111-88b5-7ced8d1dc988) via mcp__dataverse__update_record. Stub (header-only, no nodes) → full 5-node graph (Start → Lookup My Matters [ActionType 52, sprk_matter] → Query New Work Assignments [ActionType 51, sprk_workassignment] → Has Assignments? [ActionType 30] → Create Notification [ActionType 50, iterateItems, dedup]). Filter: statecode=0 AND (createdon OR modifiedon last-x-hours {{timeWindowHours}} default 24h) AND (sprk_regardingmatter IN myMatters.ids OR matter-owner=eq-userid OR record-owner=eq-userid). Entity sprk_workassignment (custom Spaarke, NOT OOB task) used in 3 places: entityLogicalName, FetchXml entity name, CreateNotification regardingType. statecode=Active preserved. Smoke notes: notes/smoke/025-work-assignments-deploy.md. AC-9 UAT scripted. Parallel-safe (Group D, PB-022 only).</completion-notes>
+    <estimated-hours>2.5</estimated-hours>
+    <dependencies>020, 021</dependencies>
+    <blocks>026</blocks>
+    <tags>jps, dataverse, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Promotes stub playbook (PB-022) to full implementation. Independent JSON file — parallel-safe with 022/023/024. Component Justification required (stub → functional promotion).</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Edit `projects/spaarke-daily-update-service/notes/playbooks/notification-work-assignments.json` (PB-022). Node graph: Start → `LookupUserMembership(sprk_matter)` → `QueryDataverse` (`sprk_workassignment` records linked to membership matters, created or updated within last 24h) → `CreateNotification`. Redeploy via MCP `update_record` on PB-022. Include Component Justification block.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS playbook designer.</role>
+
+  <goal>`notification-work-assignments.json` is a fully functional playbook (no longer a stub). Deployed PB-022 row reflects the full graph. `jps-validate` passes. AC-9 satisfied (when a sprk_workassignment linked to user's memberships is created or updated, an appnotification row appears).</goal>
+
+  <context>
+    <background>R4 spec FR-9 (line 148) replaces the PB-022 stub with a working implementation. Single-entity query (sprk_workassignment) filtered to membership-scope matters and 24h time window. Simpler than PB-017's 3-entity union but same canonical pattern. Component Justification: existing=stub PB-022, extension=Yes (functional promotion), cost-of-doing-nothing=users get zero work-assignment notifications.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-work-assignments.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-034">Membership resolution via ActionType 52 LookupUserMembership.</constraint>
+    <constraint source="ADR-013">Playbook composes JPS primitives only.</constraint>
+    <constraint source="ADR-037">Multinode output composition.</constraint>
+    <constraint source="CLAUDE.md §11">Component Justification block REQUIRED: existing=stub PB-022, extension=Yes (functional promotion), cost-of-doing-nothing=users get zero work-assignment notifications.</constraint>
+    <constraint source="project">24h time window relative to playbook execution time (UTC). Repo JSON = source-of-truth.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership-resolution.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/skills/jps-playbook-design/SKILL.md</file>
+      <file>.claude/skills/jps-playbook-audit/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load knowledge files. Read spec FR-9 + AC-9.</step>
+    <step order="2">Read PB-016 reference + current PB-022 stub.</step>
+    <step order="3">Author Component Justification block (3-question template).</step>
+    <step order="4">Design node graph: Start → LookupUserMembership(sprk_matter) → QueryDataverse (sprk_workassignment WHERE regarding-matter IN membership AND (createdon&gt;=now-24h OR modifiedon&gt;=now-24h)) → CreateNotification.</step>
+    <step order="5">Replace stub JSON with full graph. Include Component Justification block.</step>
+    <step order="6">Validate via `jps-validate` skill.</step>
+    <step order="7">Audit via `jps-playbook-audit` skill.</step>
+    <step order="8">Redeploy via `mcp__dataverse__update_record` on PB-022 — set `sprk_configjson`.</step>
+    <step order="9">Verify deployment via `mcp__dataverse__read_query`.</step>
+    <step order="10">Run `dotnet build src/server/api/Sprk.Bff.Api/`.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md`: change task 025 status to ✅.</step>
+    <step order="12">Document UAT script + justification in `projects/spaarke-daily-update-service-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">update_record — redeploy PB-022; read_query — verify; describe — confirm sprk_workassignment metadata.</tool>
+    <tool name="jps-validate">Schema validation</tool>
+    <tool name="jps-playbook-audit">Audit against Action catalog</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">projects/spaarke-daily-update-service/notes/playbooks/notification-work-assignments.json</output>
+    <output type="data">sprk_analysisplaybook PB-022 row sprk_configjson updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notification-work-assignments.json contains functional node graph (no longer stub).</criterion>
+    <criterion testable="true">Graph includes LookupUserMembership(sprk_matter) + QueryDataverse (sprk_workassignment) + CreateNotification.</criterion>
+    <criterion testable="true">Component Justification block present.</criterion>
+    <criterion testable="true">jps-validate passes.</criterion>
+    <criterion testable="true">Deployed PB-022 sprk_configjson matches repo file.</criterion>
+    <criterion testable="true">UAT scenario documented for AC-9.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-9 line 148; AC-9 line 149. Hint: created-or-updated condition (OR createdon, OR modifiedon) covers both new assignments and edits — verify FetchXml supports the OR semantics; if not, document the choice (createdon vs modifiedon) and rationale. Hint: parallel-safe with 022/023/024.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

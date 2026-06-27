@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>UPDATE docs/architecture/caching-architecture.md</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>052,053,058</blocks>
+    <tags>docs, architecture</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Major doc update; binds FR-18</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>UPDATE existing `docs/architecture/caching-architecture.md`: add Tenant Isolation, Multi-instance Behavior, Cache Instance Registry, Failure Mode Catalog sections; update Key Conventions (`sdap:` → `spaarke:` examples + tenant prefix); update Component table for Phase 1 CacheModule changes; cross-link to new `redis-cache-azure-setup.md`; refresh Last Updated date.</prompt>
+  <role>Spaarke architect/doc writer.</role>
+  <goal>The existing doc retains its structure (Overview, Component Structure, Cache Types, TTL Tiers, Key Conventions, Invalidation Patterns, Data Flow) AND has the new sections per FR-18.</goal>
+  <context><background>This doc is the architectural source of truth; ADR-009 (amended in tasks 052+053) cites it for "how".</background><relevant-files><file>docs/architecture/caching-architecture.md</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">FR-18 — additions per list.</constraint>
+    <constraint source="spec">Q-F — kebab-case for NEW files; existing file stays as-is.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>docs/architecture/caching-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read existing doc.</step>
+    <step order="2">Add Tenant Isolation section (mandatory prefix; system-level exception allow-list; rationale).</step>
+    <step order="3">Add Multi-instance Behavior section (Pub/Sub fan-out; in-memory single-instance limitation).</step>
+    <step order="4">Add Cache Instance Registry section (Architecture 1 + future multi-Redis extensibility).</step>
+    <step order="5">Update Key Conventions section — `sdap:` examples → `spaarke:`; add `tenant:` prefix to examples.</step>
+    <step order="6">Update Component table — CacheModule fail-fast, AbortOnConnectFail, env-guarded AllowFallback, Null-Object.</step>
+    <step order="7">Add Failure Mode Catalog (unreachable in deployed = startup fail; degraded Pub/Sub = stale-cache risk; SKU undersize = P95 degradation with alert thresholds).</step>
+    <step order="8">Cross-link to `redis-cache-azure-setup.md`.</step>
+    <step order="9">Refresh Last Updated date.</step>
+    <step order="10">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">existing doc</tool><tool name="Edit">add sections</tool></tools>
+  <outputs><output type="docs">docs/architecture/caching-architecture.md (modified)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">All FR-18 new sections present.</criterion>
+    <criterion testable="true">Examples use `spaarke:` not `sdap:`.</criterion>
+    <criterion testable="true">Last Updated refreshed.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

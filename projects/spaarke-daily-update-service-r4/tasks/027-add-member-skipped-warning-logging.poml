@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Add structured member_skipped warning logging for Contact-only members</title>
+    <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>
+      Added structured `member_skipped` warning emission in `MembershipResolverService.BuildFetchXml`
+      (src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs) — the `case "Contact":` branch
+      now emits `_logger.LogWarning("member_skipped: matter={MatterId} contact={ContactId} role={Role} reason={Reason} field={Field}", entityType, systemUserId, d.Role, "no_systemuser_mapping", d.Field)` whenever the
+      resolved identity has NO ContactId (the Contact ↔ SystemUser cross-ref gap per ADR-028). Behavior unchanged — descriptor still skipped — only observability added.
+      Refactored BuildFetchXml from static to instance method (so it can access the existing `_logger` — no new DI dependencies; no new types).
+      Field bindings per FR-11: `MatterId={entityType}` (sprk_matter in canonical case), `ContactId={systemUserId}` (literal NULL is the trigger, SystemUserId provides traceability), `Role={descriptor.Role}`, `Reason="no_systemuser_mapping"`, `Field={descriptor.Field}` (extra diagnostic).
+      The literal token `member_skipped` lives in the message template so `traces | where message contains "member_skipped"` queries match (App Insights pattern matches task 003's `hallucination_detected`).
+      Tests: 3 new methods added to tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs — `ResolveAsync_ContactDescriptorWithNullContactId_EmitsMemberSkippedWarning` (positive case, FR-11 fields bound), `ResolveAsync_ContactDescriptorWithContactId_DoesNotEmitMemberSkipped` (false-positive guard), `ResolveAsync_MultipleContactDescriptorsAllNull_EmitsOneWarningPerDescriptor` (multiplicity invariant). Mock-`ILogger` pattern mirrors EntityNameValidatorNodeExecutorTests.cs.
+      Build: dotnet build src/server/api/Sprk.Bff.Api/ -c Release → succeeded (0 errors, 17 pre-existing warnings).
+      Tests: dotnet test --filter "FullyQualifiedName~Membership" → 201/201 passed (was 198 — added 3).
+      Publish-size: 46.31 MB compressed (no delta vs task 020 baseline; -0.83 MB vs task 021 baseline due to tooling artifact — task 027 production code is ~12 LoC). Headroom: 13.69 MB below §10 ceiling.
+      CVE: Microsoft.Kiota.Abstractions 1.21.2 (High) is pre-existing — NOT introduced by task 027. Zero new packages.
+      Logging-site decision + size measurement documented in projects/spaarke-daily-update-service-r4/notes/debug/027-publish-size.md.
+    </completion-notes>
+    <estimated-hours>1.5</estimated-hours>
+    <actual-hours>1.0</actual-hours>
+    <dependencies>020</dependencies>
+    <blocks>028</blocks>
+    <tags>bff-api, observability, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies BFF observability surface in `LookupUserMembershipNodeExecutor.cs` (or underlying `MembershipResolverService`). Load-bearing for AC-11 (Application Insights integration test). Touches BFF — CLAUDE.md §10 publish-size + CVE applies. ADR-028 + ADR-034 are binding (the Contact↔SystemUser mapping rationale lives in those).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>In `LookupUserMembershipNodeExecutor.cs` (or the underlying `MembershipResolverService`), when a Contact-typed member is detected with `azureactivedirectoryobjectid` NULL (no SystemUser cross-ref), emit a structured `ILogger.LogWarning` with event name `member_skipped` and fields: `matterid`, `contactid`, `role`, `reason: "no_systemuser_mapping"`. Use ILogger structured-logging template syntax so Application Insights captures the fields as columns, not just the message string.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF observability specialist with knowledge of ILogger structured-logging templates + Application Insights field extraction.</role>
+
+  <goal>The membership resolution code path emits a structured `member_skipped` warning event with the 4 required fields whenever an unmappable Contact member is encountered. The event is captured by Application Insights as searchable columns (not just a plain message). Build + tests pass. Publish-size delta documented.</goal>
+
+  <context>
+    <background>R4 spec FR-11 (line 154) requires structured logging when the membership service detects a Contact member with NULL azureactivedirectoryobjectid. Such members cannot be resolved to a SystemUser (per ADR-028 canonical mapping), so they are silently skipped today — which is acceptable behavior but lacks visibility. The structured warning provides ops visibility + lets task 028 assert AC-11 via Application Insights integration test (or a mock-ILogger unit test). MUST use template syntax `LogWarning("member_skipped matter {MatterId} contact {ContactId} role {Role} reason {Reason}", matterId, contactId, role, reason)` so field-extraction works.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs</file>
+      <file>src/server/shared/Spaarke.Core/Services/MembershipResolverService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/LookupUserMembershipNodeExecutorTests.cs</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Contact ↔ SystemUser cross-ref via azureactivedirectoryobjectid is the canonical mapping. Logging this gap MUST NOT change the mapping policy — just adds visibility.</constraint>
+    <constraint source="ADR-034">Membership resolution stays inside LookupUserMembershipNodeExecutor / MembershipResolverService. Do NOT add a new logger service.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — publish-size + CVE per task.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — publish-size + CVE per task. Placement decision: logging lives at the resolution site (membership executor or resolver service); use existing ILogger injection — no new types.</constraint>
+    <constraint source="project">MUST use ILogger structured-logging template syntax (not string interpolation). Event name MUST be `member_skipped` (snake_case). Field names: `matterid`, `contactid`, `role`, `reason: "no_systemuser_mapping"`. MUST NOT silently drop the member without logging.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership-resolution.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load knowledge files. Read FR-11 + AC-11.</step>
+    <step order="2">Locate the Contact-resolution code path: read `LookupUserMembershipNodeExecutor.cs` + `MembershipResolverService.cs` to find where Contact members are filtered to SystemUsers via azureactivedirectoryobjectid.</step>
+    <step order="3">Identify the precise point where a Contact-with-NULL-azureactivedirectoryobjectid is currently dropped (filter/where/skip path). This is the logging site.</step>
+    <step order="4">Confirm ILogger is already injected at that site. If not, add it via constructor injection (existing DI pattern in the file).</step>
+    <step order="5">Add `_logger.LogWarning("member_skipped matter {MatterId} contact {ContactId} role {Role} reason {Reason}", matterId, contactId, role, "no_systemuser_mapping")` at the drop site. Use template syntax — NOT string interpolation.</step>
+    <step order="6">Run `dotnet build src/server/api/Sprk.Bff.Api/` — fix compile errors.</step>
+    <step order="7">Run existing tests `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter FullyQualifiedName~LookupUserMembership` to confirm no regression.</step>
+    <step order="8">Run publish-size check + CVE check per CLAUDE.md §10.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: change task 027 status to ✅.</step>
+    <step order="10">Document the logging-site decision (executor vs resolver) + publish-size delta in `projects/spaarke-daily-update-service-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs (or src/server/shared/Spaarke.Core/Services/MembershipResolverService.cs)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Code path that drops Contact-with-NULL-azureactivedirectoryobjectid emits ILogger.LogWarning with event name member_skipped.</criterion>
+    <criterion testable="true">Warning uses structured template syntax (not string interpolation) — {MatterId}, {ContactId}, {Role}, {Reason} placeholders.</criterion>
+    <criterion testable="true">Reason field value is literal string "no_systemuser_mapping".</criterion>
+    <criterion testable="true">Member is still skipped (behavior unchanged) — logging adds visibility only.</criterion>
+    <criterion testable="true">dotnet build + existing tests pass.</criterion>
+    <criterion testable="true">Publish-size delta + CVE check recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-11 line 154; AC-11 line 155. Hint: the logging site may live in `MembershipResolverService` (shared Spaarke.Core) rather than the executor — read both files first. If in Spaarke.Core, the publish-size impact on BFF should be near-zero (just an extra log statement). Hint: task 028 will add the xUnit fixture mocking ILogger to assert this event fires — that's where AC-11 gets test coverage; this task just lands the log call.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>
