@@ -1,7 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Graph;
-using Microsoft.Graph.Models;
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -35,16 +32,18 @@ public static class OBOEndpoints
                     OrderDir: orderDir ?? "asc"
                 );
 
-                var result = await speFileStore.ListChildrenAsUserAsync(ctx, id, parameters, ct);
+                var result = await GraphCallScope.Run(
+                    () => speFileStore.ListChildrenAsUserAsync(ctx, id, parameters, ct),
+                    "obo.children.list");
                 return TypedResults.Ok(result);
             }
             catch (UnauthorizedAccessException)
             {
                 return TypedResults.Unauthorized();
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
         }).RequireRateLimiting("graph-read");
 
@@ -67,11 +66,15 @@ public static class OBOEndpoints
                 logger.LogInformation("OBO upload starting - Container: {ContainerId}, Path: {Path}", id, path);
 
                 // Resolve container ID to drive ID (SPE container IDs != drive IDs)
-                var driveId = await speFileStore.ResolveDriveIdAsync(id, ct);
+                var driveId = await GraphCallScope.Run(
+                    () => speFileStore.ResolveDriveIdAsync(id, ct),
+                    "obo.driveid.resolve");
                 logger.LogDebug("Resolved container {ContainerId} to drive {DriveId}", id, driveId);
 
                 // Stream directly to Graph SDK (no memory buffering)
-                var item = await speFileStore.UploadSmallAsUserAsync(ctx, driveId, path, req.Body, ct);
+                var item = await GraphCallScope.Run(
+                    () => speFileStore.UploadSmallAsUserAsync(ctx, driveId, path, req.Body, ct),
+                    "obo.upload.small");
 
                 logger.LogInformation("OBO upload successful - DriveItemId: {ItemId}", item?.Id);
 
@@ -82,10 +85,10 @@ public static class OBOEndpoints
                 logger.LogError(ex, "OBO upload unauthorized");
                 return TypedResults.Unauthorized();
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "OBO upload failed - Graph API error: {Message}", ex.Message);
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception ex)
             {
@@ -116,7 +119,9 @@ public static class OBOEndpoints
             try
             {
                 var behavior = Sprk.Bff.Api.Models.ConflictBehaviorExtensions.ParseConflictBehavior(conflictBehavior);
-                var session = await speFileStore.CreateUploadSessionAsUserAsync(ctx, driveId, path, behavior, ct);
+                var session = await GraphCallScope.Run(
+                    () => speFileStore.CreateUploadSessionAsUserAsync(ctx, driveId, path, behavior, ct),
+                    "obo.upload.session.create");
 
                 return session == null
                     ? TypedResults.Problem(statusCode: 500, title: "Failed to create upload session")
@@ -126,9 +131,9 @@ public static class OBOEndpoints
             {
                 return TypedResults.Unauthorized();
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
         }).RequireRateLimiting("graph-write");
 
@@ -167,7 +172,9 @@ public static class OBOEndpoints
                     return ProblemDetailsHelper.ValidationError("Request body cannot be empty");
                 }
 
-                var result = await speFileStore.UploadChunkAsUserAsync(userToken, uploadSessionUrl, contentRange, chunkData, ct);
+                var result = await GraphCallScope.Run(
+                    () => speFileStore.UploadChunkAsUserAsync(userToken, uploadSessionUrl, contentRange, chunkData, ct),
+                    "obo.upload.chunk");
 
                 return result.StatusCode switch
                 {
@@ -184,9 +191,9 @@ public static class OBOEndpoints
             {
                 return TypedResults.Unauthorized();
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception)
             {
@@ -215,7 +222,9 @@ public static class OBOEndpoints
 
             try
             {
-                var updatedItem = await speFileStore.UpdateItemAsUserAsync(ctx, driveId, itemId, request, ct);
+                var updatedItem = await GraphCallScope.Run(
+                    () => speFileStore.UpdateItemAsUserAsync(ctx, driveId, itemId, request, ct),
+                    "obo.item.update");
 
                 return updatedItem == null
                     ? TypedResults.NotFound()
@@ -225,9 +234,9 @@ public static class OBOEndpoints
             {
                 return TypedResults.Unauthorized();
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
         }).RequireRateLimiting("graph-write");
 
@@ -255,7 +264,9 @@ public static class OBOEndpoints
                 // Parse If-None-Match header (for ETag-based caching)
                 var ifNoneMatch = request.Headers["If-None-Match"].FirstOrDefault();
 
-                var fileContent = await speFileStore.DownloadFileWithRangeAsUserAsync(ctx, driveId, itemId, range, ifNoneMatch, ct);
+                var fileContent = await GraphCallScope.Run(
+                    () => speFileStore.DownloadFileWithRangeAsUserAsync(ctx, driveId, itemId, range, ifNoneMatch, ct),
+                    "obo.file.download.range");
 
                 if (fileContent == null)
                 {
@@ -290,9 +301,9 @@ public static class OBOEndpoints
             {
                 return TypedResults.Unauthorized();
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception)
             {
@@ -310,16 +321,18 @@ public static class OBOEndpoints
         {
             try
             {
-                await speFileStore.DeleteItemAsUserAsync(ctx, driveId, itemId, ct);
+                await GraphCallScope.Run(
+                    () => speFileStore.DeleteItemAsUserAsync(ctx, driveId, itemId, ct),
+                    "obo.item.delete");
                 return TypedResults.NoContent();
             }
             catch (UnauthorizedAccessException)
             {
                 return TypedResults.Unauthorized();
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception)
             {

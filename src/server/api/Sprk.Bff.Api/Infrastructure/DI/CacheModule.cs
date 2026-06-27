@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Cache.NullObjects;
+using Sprk.Bff.Api.Infrastructure.Caching;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -159,6 +160,12 @@ public static class CacheModule
         }
 
         services.AddMemoryCache();
+
+        // ADR-009 enforcement (CICD-087, 2026-06-26): wrap IMemoryCache behind
+        // IEndpointResponseCache so *Endpoints classes don't import
+        // Microsoft.Extensions.Caching.Memory directly. NetArchTest
+        // ADR009_CachingTests.MemoryCacheShouldNotBeSingleton enforces.
+        services.AddSingleton<IEndpointResponseCache, EndpointResponseCache>();
 
         // R7-S7 sub-gap #2 closure (2026-06-26): decorate IDistributedCache with
         // MetricsDistributedCache so cache.* Meter instruments fire on EVERY call —

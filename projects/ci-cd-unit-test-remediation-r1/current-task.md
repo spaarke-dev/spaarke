@@ -9,11 +9,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 082 (in background sub-agent: test-inventory-broader CSV) + 086 (newly added — CI Router fix, awaiting user-supplied browser error OR explicit "bisect now") |
-| **Step** | 082 sub-agent running; 086 integrated into project artifacts |
-| **Status** | mid-Phase-2.5 (080+081 ✅; 082 dispatched; 086 added but not started) |
-| **Mode** | 🤖 **AUTONOMOUS** — no approval gates between tasks/steps per project CLAUDE.md (EXCEPT 086 which awaits user direction — browser error message OR bisect approval) |
-| **Next Action** | Wait for 082 background notification, then execute 083 (deep-cleanup PR 1) in main session. **For 086**: user can either (a) paste the browser error message from https://github.com/spaarke-dev/spaarke/actions/runs/28244069552 (cheap win), or (b) say "proceed with bisect" to start the systematic bisect on `debug/ci-router-bisect`. 086 can run in parallel with 083-085 since it touches different files (workflow YAML vs test .cs). |
+| **Task** | 087 (ADR-009 fix; 2-3h) IN PROGRESS |
+| **Step** | Step 2: Create IEndpointResponseCache + impl, refactor 3 endpoints, build/test |
+| **Status** | FULL rigor; main session; hot-path BFF production code |
+| **Mode** | 🤖 **AUTONOMOUS** — no approval gates between tasks/steps per project CLAUDE.md |
+| **Next Action** | Execute task 087 (smaller, faster confidence-builder) FIRST in main session. Then 088 (larger, mechanical). Land both as a focused PR `fix/adr-007-009-bff-remediation` off master. After merge: push 2 confirmation commits to master; verify SC-12 (2 consecutive successful master CI Router pushes); then proceed to 071 cutover. |
 
 ### Uncommitted Changes in Working Tree (commit BEFORE compact OR after — user choice; not committed yet per user direction)
 
