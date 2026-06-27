@@ -747,3 +747,16 @@ Use `/conflict-check` skill to detect file overlap with active PRs before starti
 ---
 
 *Last updated 2026-05-16 by ai-procedure-quality-r1 Phase 2b Wave 2b-A.*
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 035 · FR-21)
+
+**At end of skill** (after worktree scaffolded): check if a matching Project Issue exists on Project #2 (search by branch name or folder slug).
+
+- **If matching Issue found**: invoke `/devops-project-register` to link this worktree → populate `Worktree Path` field on the Issue.
+- **If no matching Issue**: prompt "Register this project on the portfolio? [Y/n]".
+
+Silent on success. Failure degrades to ⚠️ warn.
+
+See: [`.claude/skills/devops-project-register/SKILL.md`](../devops-project-register/SKILL.md).

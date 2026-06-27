@@ -729,3 +729,18 @@ Skill successful when:
 ---
 
 *For Claude Code: This skill transforms human design documents into structured specs optimized for AI-driven implementation. Always preserve the original design document as a project artifact.*
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 030 · FR-16)
+
+**At end of skill** (after `spec.md` is written): if `projects/{name}/README.md` contains the `> **Portfolio**:` pointer block:
+
+1. Invoke `/devops-project-sync` (silent on success)
+2. If the Project Issue's `Project Status` field is not `In Progress`, set it to `In Progress` (a spec exists → project is moving)
+
+Silent on success (single `✅ Portfolio synced: #N — Status=In Progress` line). Degrades to ⚠️ warn on failure; does NOT block design-to-spec completion (per NFR-03).
+
+If `README.md` lacks the portfolio pointer block, hook is a no-op (skip silently — project not registered).
+
+See: [`.claude/skills/devops-project-sync/SKILL.md`](../devops-project-sync/SKILL.md).

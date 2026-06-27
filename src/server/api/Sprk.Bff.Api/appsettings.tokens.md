@@ -15,11 +15,11 @@ Tokens use the format `#{TOKEN_NAME}#` which is compatible with Azure DevOps and
 | `#{DEFAULT_CT_ID}#` | Default container type ID for SPE | `8a6ce34c-6055-4681-8f87-2f4f9f921c06` |
 | `#{KEY_VAULT_URL}#` | Key Vault URL (with trailing slash) | `https://spaarke-kv-dev.vault.azure.net/` |
 | `#{DATAVERSE_ORG_NAME}#` | Dataverse organization name | `spaarkedev1` |
-| `#{REDIS_INSTANCE_NAME}#` | Redis cache instance prefix | `sdap-dev:` |
+| `#{REDIS_INSTANCE_NAME}#` | Redis cache instance prefix | `spaarke:` |
 | `#{SERVICE_BUS_QUEUE_NAME}#` | Service Bus queue name | `sdap-jobs` |
 | `#{AI_SUMMARIZE_MODEL}#` | OpenAI model for summarization | `gpt-4o-mini` |
 | `#{AI_SEARCH_INDEX_NAME}#` | AI Search index for records | `spaarke-records-index` |
-| `#{SHARED_KNOWLEDGE_INDEX_NAME}#` | AI Search index for RAG knowledge | `spaarke-knowledge-index-v2` |
+| `#{SHARED_KNOWLEDGE_INDEX_NAME}#` | AI Search index for RAG knowledge | `spaarke-files-index` |
 | `#{DEPLOYMENT_ENVIRONMENT}#` | Environment name | `Development`, `Test`, `Production` |
 | `#{CUSTOMER_TENANT_ID}#` | Customer tenant for cross-tenant (or null) | `null` or GUID |
 | `#{RECORD_MATCHING_ENABLED}#` | Enable record matching (boolean) | `true` or `false` |
@@ -43,7 +43,9 @@ The template references these Key Vault secrets:
 | `ai-docintel-endpoint` | Document Intelligence endpoint |
 | `ai-docintel-key` | Document Intelligence API key |
 | `ai-search-endpoint` | AI Search endpoint URL |
-| `ai-search-key` | AI Search admin key |
+| `ai-search-key` | AI Search admin key (legacy operational alias — mirrors AiSearch--AdminKey value) |
+| `AiSearch--AdminKey` | AI Search admin key (canonical per spec FR-21; added 2026-06-26 task 001 Option C remediation) |
+| `AzureAISearchApiKey` | AI Search admin key (legacy app-settings alias — mirrors AiSearch--AdminKey value; referenced by `AiSearch__ApiKeySecretName` + `AiSearch__ReferencesApiKey`) |
 | `PromptFlow-Endpoint` | AI Foundry Prompt Flow endpoint |
 | `PromptFlow-Key` | AI Foundry Prompt Flow API key |
 | `AppInsights-ConnectionString` | Application Insights connection string |
@@ -91,11 +93,11 @@ API_APP_ID=1e40baad-e065-4aea-a8d4-4b7ab273458c
 DEFAULT_CT_ID=8a6ce34c-6055-4681-8f87-2f4f9f921c06
 KEY_VAULT_URL=https://spaarke-spekvcert.vault.azure.net/
 DATAVERSE_ORG_NAME=spaarkedev1
-REDIS_INSTANCE_NAME=sdap-dev:
+REDIS_INSTANCE_NAME=spaarke:
 SERVICE_BUS_QUEUE_NAME=sdap-jobs
 AI_SUMMARIZE_MODEL=gpt-4o-mini
 AI_SEARCH_INDEX_NAME=spaarke-records-index
-SHARED_KNOWLEDGE_INDEX_NAME=spaarke-knowledge-index-v2
+SHARED_KNOWLEDGE_INDEX_NAME=spaarke-files-index
 DEPLOYMENT_ENVIRONMENT=Development
 CUSTOMER_TENANT_ID=null
 RECORD_MATCHING_ENABLED=false

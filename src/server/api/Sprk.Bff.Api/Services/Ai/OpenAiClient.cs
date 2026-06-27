@@ -708,10 +708,18 @@ public class OpenAiClient : IOpenAiClient
         string schemaName,
         string? model = null,
         int? maxOutputTokens = null,
+        float? temperature = null,
         CancellationToken cancellationToken = default)
     {
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
+        // Wave B-G9c1 (B6) fix: default to 0.0f for deterministic structured output,
+        // matching sibling structured methods (GetStructuredCompletionAsync<T>,
+        // StreamStructuredCompletionAsync) which both hardcode Temperature=0.
+        // Callers (typically the 8 tool handlers that resolve a per-action override
+        // from sprk_analysisaction.sprk_temperature) pass an explicit value when
+        // non-deterministic output is desired.
+        var effectiveTemperature = temperature ?? 0.0f;
         var chatClient = _client.GetChatClient(deploymentName);
 
         var chatOptions = new ChatCompletionOptions
@@ -721,7 +729,7 @@ public class OpenAiClient : IOpenAiClient
                 jsonSchema,
                 jsonSchemaIsStrict: true),
             MaxOutputTokenCount = effectiveMaxTokens,
-            Temperature = _options.Temperature
+            Temperature = effectiveTemperature
         };
 
         var messages = new List<ChatMessage>

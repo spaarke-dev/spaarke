@@ -31,6 +31,8 @@ export {
 } from './BffDataverseClient';
 
 export { AppInsightsService } from './AppInsightsService';
+export { reportClientError, setClientErrorTelemetryHook } from './reportClientError';
+export type { ClientErrorContext } from './reportClientError';
 export { EntityCreationService } from './EntityCreationService';
 export type {
   IFileUploadResult,
@@ -39,6 +41,7 @@ export type {
   ISendEmailInput,
   ISendEmailResult,
   IUploadProgress,
+  IUserBuCascadeDefaults,
   AuthenticatedFetchFn,
 } from './EntityCreationService';
 export * from './CommandRegistry';

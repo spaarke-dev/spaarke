@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="101" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>ChatDataverseRepository → IChatAuditRepository rename + retire placeholder methods (FR-25)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4f)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>100</dependencies>
+    <blocks>102</blocks>
+    <tags>bff-api, services, refactoring, architecture-binding</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; refactors interface + retires placeholder methods on a production surface; FR-25 binding; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>4-P</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Rename `IChatDataverseRepository` → `IChatAuditRepository`; retire the 5 placeholder `Task.CompletedTask` no-op methods (per spec FR-25 + architecture §7.2 + §11.4). The Cosmos `audit` container is the sole compliance reader going forward — `sprk_aichatmessage` becomes a pure write-target (audit trail). Per architecture §11.2 strategy, retired read methods become extension methods that throw `NotSupportedException` to preserve binary compat through a stabilization window.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer with refactoring expertise. Familiar with R6 chat persistence + ADR-013 facade boundary.</role>
+
+  <goal>
+    Interface renamed; old reader methods either deleted OR throw `NotSupportedException`; `ChatDataverseRepository.cs` write methods preserved for compliance audit trail; integration test confirms audit writes still succeed; grep confirms zero remaining read consumers of the retired methods.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-25 + architecture §7.2 + §11.4. `ChatDataverseRepository` shipped with 5 `Task.CompletedTask` no-op methods + a 10K-character cap on message reads — broken placeholder code that was never wired to real consumers. Per Owner decision (CLAUDE.md Decisions table, 2026-06-21), retire the read surface entirely; Cosmos `audit` (`AuditLogService`) is the canonical reader for compliance. The repository's WRITE methods remain (audit trail). Per architecture §11.2, throwing `NotSupportedException` from the retired read methods preserves binary compat through the stabilization window.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IChatDataverseRepository.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Audit/AuditLogService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-25">5 `Task.CompletedTask` no-ops removed; `GetMessagesAsync` deleted OR throws `NotSupportedException` for stabilization window; integration test confirms audit writes succeed; grep confirms zero read consumers remain.</constraint>
+    <constraint source="architecture §7.2">`sprk_aichatmessage` becomes write-only audit role; Cosmos `audit` is sole reader.</constraint>
+    <constraint source="architecture §11.2">Old read methods become extension methods that throw `NotSupportedException` — preserves binary compat through stabilization window.</constraint>
+    <constraint source="architecture §11.4">Document `sprk_aichatmessage` as pure write-target; remove all reader code paths in chat; preserve writes for compliance audit trail.</constraint>
+    <constraint source="ADR-013">Stays inside `Services/Ai/` boundary; no CRUD-code direct-injection regressions.</constraint>
+    <constraint source="ADR-015">Tier-2 audit content allowed per ADR-015 amendment (hash, IDs, tool names); preserve existing tier compliance.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect minor delta only.</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — modify tests covering this repo + DI registration.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `IChatDataverseRepository.cs` + `ChatDataverseRepository.cs` to inventory: (a) the 5 `Task.CompletedTask` no-op methods; (b) any remaining write methods (preserve); (c) all callers via grep.</step>
+    <step order="2">Grep `IChatDataverseRepository` across `src/server/api/Sprk.Bff.Api/` — identify all references including DI module registrations and constructor injections.</step>
+    <step order="3">Rename interface file → `IChatAuditRepository.cs` (audit-only contract). Update class name to match. Keep write methods (audit trail).</step>
+    <step order="4">Decide per-method: delete OR retain-as-throwing-NotSupportedException. Per architecture §11.2 strategy, prefer extension methods that throw — preserves binary compat. Apply consistently.</step>
+    <step order="5">Update all DI registrations: `AnalysisServicesModule.cs`, `AiModule.cs` — register `IChatAuditRepository` → `ChatAuditRepository` mapping.</step>
+    <step order="6">Update all consumers (`ChatSessionManager.cs`, `ChatHistoryManager.cs`) — verify they only call WRITE methods or are themselves refactored to call `AuditLogService` for reads.</step>
+    <step order="7">Update unit + integration tests under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` — rename test classes; assert NotSupportedException on retired methods; assert writes still succeed.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + tests — must pass.</step>
+    <step order="9">Grep prove: `grep -rn "IChatDataverseRepository" src/` returns zero hits (or only legacy comments).</step>
+    <step order="10">Measure BFF publish size; report delta.</step>
+    <step order="11">code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="12">Update TASK-INDEX.md: task 101 → ✅; update current-task.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Repository + interface + DI + consumer files</tool>
+    <tool name="Grep">Enumerate references to old interface name; verify zero remain after rename</tool>
+    <tool name="Edit">Rename + retire methods + update DI + update consumers + update tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IChatAuditRepository.cs (renamed)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatAuditRepository.cs (renamed; placeholder reads retired)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (updated registration)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs (updated registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatAuditRepositoryTests.cs (renamed + extended)</output>
+    <output type="docs">notes/handoffs/101-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rn "IChatDataverseRepository" src/server/api/Sprk.Bff.Api/` returns ZERO production-code hits.</criterion>
+    <criterion testable="true">`IChatAuditRepository` interface exists; write methods preserved.</criterion>
+    <criterion testable="true">Retired read methods: deleted OR throw `NotSupportedException` consistently.</criterion>
+    <criterion testable="true">DI modules register `IChatAuditRepository` → `ChatAuditRepository`.</criterion>
+    <criterion testable="true">Integration test confirms `sprk_aichatmessage` writes still succeed.</criterion>
+    <criterion testable="true">Unit test asserts `NotSupportedException` on retired read calls (if kept-as-throwing).</criterion>
+    <criterion testable="true">BFF build passes; publish-size delta reported.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The 5 `Task.CompletedTask` no-op methods are technical debt from R-pre-1; per architecture §4.5 "Components NOT to build" — DO NOT fix as real-impl repository; retire instead. Cosmos `audit` (`AuditLogService`) is the canonical reader. State the placement decision + retire rationale in PR description per bff-extensions.md.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

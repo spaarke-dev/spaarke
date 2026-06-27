@@ -1,0 +1,120 @@
+<task id="R4-070" project="smart-todo-r4">
+  <metadata>
+    <title>F — Vertical Kanban orientation toggle (horizontal columns ↔ vertical sections)</title>
+    <phase>Phase 2: Wave 2b</phase>
+    <workstream>F</workstream>
+    <status>complete</status>
+    <estimated-effort>1-1.5 days</estimated-effort>
+    <tags>smart-todo, ui, fluent-v9, kanban, orientation, layout</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-012, R4-030</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/components/KanbanBoard.tsx (modified)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Add vertical orientation toggle to the SmartTodo toolbar (consumes task 012's `<OrientationToggle>`). Vertical = each column ("Today / Tomorrow / Future") becomes a collapsible section stacked top-to-bottom; cards stack within each section. CSS transform-only re-layout — no React tree re-creation (NFR-08 &lt;300ms target).
+  </prompt>
+
+  <role>React + Fluent v9 + CSS Grid engineer for SmartTodo Kanban layout.</role>
+
+  <goal>Toggle re-orients Kanban from horizontal columns to vertical sections (and back). Works in standalone Code Page + workspace widget narrow container. Switch &lt;300ms with no layout jank (NFR-08).</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="shared-toggle">src/client/shared/Spaarke.UI.Components/src/components/OrientationToggle/</file>
+    <file purpose="target">src/solutions/SmartTodo/src/components/KanbanBoard.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + Griffel; semantic tokens</constraint>
+    <constraint source="ADR-012">Consume `<OrientationToggle>` from `@spaarke/ui-components`</constraint>
+    <constraint source="spec FR-28">Toolbar exposes orientation toggle</constraint>
+    <constraint source="spec FR-29">Vertical orientation = collapsible sections stacked top-to-bottom; works on standalone Code Page + workspace widget narrow container</constraint>
+    <constraint source="spec NFR-08">Switch &lt;300ms; no layout jank</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/orientation-css</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="CSS Grid flow-direction toggle" location="Modern CSS layout">
+        Use `grid-auto-flow` or `flex-direction` via class swap; avoid re-mounting the React tree. Animate transitions with CSS transform + transition.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Standard horizontal Kanban (3 columns side-by-side) is fine on wide screens but breaks in narrow workspace-widget container. Vertical orientation makes the Kanban usable in narrow contexts.</background>
+    <dependencies>
+      <dependency task="R4-012" status="must-complete">OrientationToggle primitive hoisted</dependency>
+      <dependency task="R4-030" status="must-complete">4-row layout in place (toolbar slot ready)</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 071: Persist orientation via sprk_userpreference</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Wire OrientationToggle into toolbar">Pass `orientation` state + `onChange`.</step>
+    <step order="2" name="Implement KanbanBoard CSS toggle">Two CSS rule sets (horizontal + vertical) keyed off a className. CSS Grid for horizontal; flex-column for vertical.</step>
+    <step order="3" name="Add collapsible sections for vertical mode">Each column becomes a Fluent v9 `<Accordion>` panel (or equivalent collapsible) when in vertical mode.</step>
+    <step order="4" name="Ensure no React re-mount">Same component tree; only CSS classes swap. Cards keep state across orientation change.</step>
+    <step order="5" name="CSS transform animation">Add CSS transition for the layout swap; keep under 300ms.</step>
+    <step order="6" name="Build + test">`npm run build:prod`; tests for orientation state + render branches.</step>
+    <step order="7" name="Smoke test in standalone Code Page">Toggle; verify columns become sections; cards preserved.</step>
+    <step order="8" name="Smoke test in narrow widget container">Mount widget in narrow pane; toggle vertical; verify usability.</step>
+    <step order="9" name="Performance verify">NFR-08: switch &lt;300ms; no jank.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="ui-test">Performance + narrow-container verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/components/KanbanBoard.tsx (modified)</output>
+    <output type="code">src/solutions/SmartTodo/src/components/KanbanBoard.styles.ts (modified)</output>
+    <output type="test">Tests for orientation render branches</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Orientation toggle re-flows layout">
+      <steps>
+        <step>Open SmartTodo Code Page; default = horizontal</step>
+        <step>Click orientation toggle → vertical</step>
+        <step>Verify columns become stacked sections</step>
+        <step>Toggle back → horizontal restored</step>
+      </steps>
+      <expected>Layout swap is instant; cards preserved; collapsible sections functional in vertical mode</expected>
+    </test>
+    <test name="Performance under 300ms">
+      <steps>
+        <step>Open dev tools Performance</step>
+        <step>Click toggle; measure layout swap time</step>
+      </steps>
+      <expected>Swap &lt;300ms; no layout-thrashing jank</expected>
+    </test>
+    <test name="Narrow widget container usability">
+      <steps>
+        <step>Mount widget in narrow pane (workspace)</step>
+        <step>Toggle to vertical</step>
+        <step>Verify scrolling + collapsing work</step>
+      </steps>
+      <expected>Vertical orientation usable in narrow container</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Orientation toggle visible in toolbar</criterion>
+    <criterion testable="true">Vertical mode renders 3 stacked collapsible sections</criterion>
+    <criterion testable="true">No React re-mount; cards preserved across toggle</criterion>
+    <criterion testable="true">Switch &lt;300ms; no layout jank (NFR-08)</criterion>
+    <criterion testable="true">Works in standalone Code Page AND narrow workspace-widget container</criterion>
+  </acceptance-criteria>
+</task>

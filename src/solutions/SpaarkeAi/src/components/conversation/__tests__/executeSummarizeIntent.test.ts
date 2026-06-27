@@ -168,11 +168,43 @@ describe('executeSummarizeIntent — happy paths', () => {
       'doc-1',
     ]);
 
-    // workspace.streaming_started precedes field_delta precedes streaming_complete
+    // R6 Hotfix Wave B-G9c2 (B7+B8): a workspace.widget_load MUST be emitted
+    // BEFORE the SSE stream to install the per-run Summary tab (deferred
+    // install pattern). Order: widget_load → streaming_started → field_delta
+    // → streaming_complete.
     const workspaceEvents = events
       .filter((e) => e.channel === 'workspace')
       .map((e) => (e.event as { type: string }).type);
-    expect(workspaceEvents).toEqual(['streaming_started', 'field_delta', 'streaming_complete']);
+    expect(workspaceEvents).toEqual([
+      'widget_load',
+      'streaming_started',
+      'field_delta',
+      'streaming_complete',
+    ]);
+
+    // The widget_load event MUST carry the structured-output-stream widget
+    // type + a tab title that includes the source filename.
+    const widgetLoad = events.find(
+      (e) => e.channel === 'workspace' && (e.event as { type: string }).type === 'widget_load'
+    );
+    expect(widgetLoad).toBeDefined();
+    const wl = widgetLoad!.event as {
+      widgetType?: string;
+      displayName?: string;
+      widgetData?: { correlationId?: string; title?: string };
+    };
+    expect(wl.widgetType).toBe('structured-output-stream');
+    expect(wl.displayName).toBe('Summary: a.pdf');
+    expect(wl.widgetData?.title).toBe('Summary: a.pdf');
+    // correlationId MUST match the streamId on the streaming_started event
+    // so the widget filters its events correctly.
+    const started = events.find(
+      (e) =>
+        e.channel === 'workspace' && (e.event as { type: string }).type === 'streaming_started'
+    );
+    const startedStreamId = (started!.event as { streamId?: string }).streamId;
+    expect(wl.widgetData?.correlationId).toBeDefined();
+    expect(wl.widgetData?.correlationId).toBe(startedStreamId);
 
     // getAccessToken invoked exactly once for the stream open
     expect(getToken).toHaveBeenCalledTimes(1);
@@ -378,8 +410,14 @@ describe('executeSummarizeIntent — error paths', () => {
     const workspaceTypes = events
       .filter((e) => e.channel === 'workspace')
       .map((e) => (e.event as { type: string }).type);
-    // streaming_started + field_delta + streaming_complete (3 events)
-    expect(workspaceTypes).toEqual(['streaming_started', 'field_delta', 'streaming_complete']);
+    // R6 Hotfix Wave B-G9c2: widget_load (per-run Summary tab install) +
+    // streaming_started + field_delta + streaming_complete (4 events).
+    expect(workspaceTypes).toEqual([
+      'widget_load',
+      'streaming_started',
+      'field_delta',
+      'streaming_complete',
+    ]);
   });
 
   test('AbortSignal propagates to fetch calls', async () => {
@@ -445,5 +483,139 @@ describe('executeSummarizeIntent — error paths', () => {
         publishPaneEvent: publish,
       })
     ).rejects.toThrow(/sessionId is required/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R6 Hotfix Wave B-G9c2 (B7 + B8) — per-run tab + unique streamId
+// ---------------------------------------------------------------------------
+
+describe('executeSummarizeIntent — B-G9c2 per-run tab + unique streamId', () => {
+  beforeEach(() => {
+    (globalThis.fetch as unknown) = undefined;
+  });
+
+  test('two consecutive runs generate UNIQUE streamIds and emit TWO widget_load events', async () => {
+    let docCallCount = 0;
+    const auth = jest.fn(async () => {
+      docCallCount += 1;
+      return jsonResponse(
+        { documentId: `doc-${docCallCount}`, filename: `f${docCallCount}.pdf`, status: 'ready' },
+        202
+      );
+    });
+    const getToken = jest.fn(async () => 'tok');
+    global.fetch = jest.fn(async () =>
+      sseResponse([JSON.stringify({ type: 'complete', done: true })])
+    ) as unknown as typeof fetch;
+
+    // Run A
+    const eventsA = makePublishSpy();
+    const resultA = await executeSummarizeIntent({
+      bffBaseUrl: BFF_BASE,
+      sessionId: SESSION_ID,
+      heldFiles: [makeHeldFile('chip-1', 'contract.pdf')],
+      authenticatedFetch: auth,
+      getAccessToken: getToken,
+      publishPaneEvent: eventsA.publish,
+    });
+
+    // Run B
+    const eventsB = makePublishSpy();
+    const resultB = await executeSummarizeIntent({
+      bffBaseUrl: BFF_BASE,
+      sessionId: SESSION_ID,
+      heldFiles: [makeHeldFile('chip-2', 'brief.docx')],
+      authenticatedFetch: auth,
+      getAccessToken: getToken,
+      publishPaneEvent: eventsB.publish,
+    });
+
+    // Unique streamIds — never collide.
+    expect(resultA.streamId).not.toBe(resultB.streamId);
+
+    // Each run emits ONE widget_load (not zero, not two).
+    const widgetLoadA = eventsA.events.filter(
+      (e) => e.channel === 'workspace' && (e.event as { type: string }).type === 'widget_load'
+    );
+    const widgetLoadB = eventsB.events.filter(
+      (e) => e.channel === 'workspace' && (e.event as { type: string }).type === 'widget_load'
+    );
+    expect(widgetLoadA).toHaveLength(1);
+    expect(widgetLoadB).toHaveLength(1);
+
+    // Each widget_load carries its own correlationId — matches the streamId
+    // of the run that emitted it. The two correlationIds are DIFFERENT so
+    // events from concurrent runs cannot cross-contaminate.
+    const corrA = (widgetLoadA[0].event as { widgetData?: { correlationId?: string } }).widgetData
+      ?.correlationId;
+    const corrB = (widgetLoadB[0].event as { widgetData?: { correlationId?: string } }).widgetData
+      ?.correlationId;
+    expect(corrA).toBe(resultA.streamId);
+    expect(corrB).toBe(resultB.streamId);
+    expect(corrA).not.toBe(corrB);
+  });
+
+  test('tab title includes the source filename (single-file run)', async () => {
+    const auth = jest.fn(async () =>
+      jsonResponse({ documentId: 'doc-1', filename: 'deposition.pdf', status: 'ready' }, 202)
+    );
+    const getToken = jest.fn(async () => 'tok');
+    global.fetch = jest.fn(async () =>
+      sseResponse([JSON.stringify({ type: 'complete', done: true })])
+    ) as unknown as typeof fetch;
+    const { publish, events } = makePublishSpy();
+
+    await executeSummarizeIntent({
+      bffBaseUrl: BFF_BASE,
+      sessionId: SESSION_ID,
+      heldFiles: [makeHeldFile('chip-1', 'deposition.pdf')],
+      authenticatedFetch: auth,
+      getAccessToken: getToken,
+      publishPaneEvent: publish,
+    });
+
+    const widgetLoad = events.find(
+      (e) => e.channel === 'workspace' && (e.event as { type: string }).type === 'widget_load'
+    );
+    expect(widgetLoad).toBeDefined();
+    const wl = widgetLoad!.event as {
+      displayName?: string;
+      widgetData?: { title?: string };
+    };
+    expect(wl.displayName).toBe('Summary: deposition.pdf');
+    expect(wl.widgetData?.title).toBe('Summary: deposition.pdf');
+  });
+
+  test('tab title collapses to "N files" for 3+ files', async () => {
+    let n = 0;
+    const auth = jest.fn(async () => {
+      n += 1;
+      return jsonResponse({ documentId: `doc-${n}`, filename: `f${n}.pdf`, status: 'ready' }, 202);
+    });
+    const getToken = jest.fn(async () => 'tok');
+    global.fetch = jest.fn(async () =>
+      sseResponse([JSON.stringify({ type: 'complete', done: true })])
+    ) as unknown as typeof fetch;
+    const { publish, events } = makePublishSpy();
+
+    await executeSummarizeIntent({
+      bffBaseUrl: BFF_BASE,
+      sessionId: SESSION_ID,
+      heldFiles: [
+        makeHeldFile('chip-1', 'a.pdf'),
+        makeHeldFile('chip-2', 'b.pdf'),
+        makeHeldFile('chip-3', 'c.pdf'),
+      ],
+      authenticatedFetch: auth,
+      getAccessToken: getToken,
+      publishPaneEvent: publish,
+    });
+
+    const widgetLoad = events.find(
+      (e) => e.channel === 'workspace' && (e.event as { type: string }).type === 'widget_load'
+    );
+    const wl = widgetLoad!.event as { displayName?: string };
+    expect(wl.displayName).toBe('Summary: 3 files');
   });
 });

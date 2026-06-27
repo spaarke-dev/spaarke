@@ -1,0 +1,57 @@
+<task id="013" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Seed matter-health / single registry row</title>
+    <status>completed</status>
+    <estimated-effort>0.5h</estimated-effort>
+    <phase>1</phase>
+    <tags>dataverse, seed-data</tags>
+    <dependencies>011, 012</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>MINIMAL</rigor>
+  </metadata>
+
+  <prompt>
+    Insert one row into `sprk_aitopicregistry` representing the matter-health single-mode topic. This row will be queried by `InsightSummaryCard` mount logic (FR-05 conditional sparkle).
+  </prompt>
+
+  <role>Dataverse data seeder.</role>
+
+  <goal>
+    One row exists in `sprk_aitopicregistry` with: topicname=`matter-health`, mode=`single`, playbookname=`matter-health-single`, displayname=`Matter Health Insight`, icon=`Sparkle24Filled`, hostentity=`sprk_matter`, targetfield=`sprk_performancesummary`, cachettlminutes=60, enabled=true.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-04 acceptance)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="Q-U1">NO `@v1` suffix in playbookname — use bare `matter-health-single`</constraint>
+    <constraint source="Q-U2">Icon = Fluent component name string `Sparkle24Filled`</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse seed, sprk_aitopicregistry</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Insert row via Web API or Power Apps form">POST /api/data/v9.2/sprk_aitopicregistries</step>
+    <step order="2" name="Verify row queryable">GET filtered by topicname + mode</step>
+  </steps>
+
+  <outputs>
+    <output type="data">One sprk_aitopicregistry row for matter-health/single</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Web API query for topicname='matter-health' AND mode='single' returns exactly 1 row</criterion>
+    <criterion testable="true">All 9 fields populated as specified</criterion>
+    <criterion testable="true">No `@v1` substring in `playbookname`</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-11. Row Guid: c46b940e-4b65-f111-ab0c-70a8a590c51c. All 10 fields verified via Web API GET (sprk_name="matter-health/single", sprk_topicname="matter-health", sprk_mode="single", sprk_playbookname="matter-health-single", sprk_displayname="Matter Health Insight", sprk_icon="Sparkle24Filled", sprk_hostentity="sprk_matter", sprk_targetfield="sprk_performancesummary", sprk_cachettlminutes=60, sprk_enabled=true). Q-U1 compliance: 0 occurrences of "@v" in values. Q-U2 compliance: icon is bare Fluent component name "Sparkle24Filled".
+  </notes>
+</task>

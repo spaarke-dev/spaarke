@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>`BuildChannelNarrationPrompt` emits `regardingId` per item + updated rule list (FR-15, FR-16)</title>
+    <phase>P2b: BFF /narrate Fix</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>031</blocks>
+    <tags>bff-api, api, ai, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api triggers FULL; modifies .cs prompt builder</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Modify `BuildChannelNarrationPrompt` in `Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs` to emit `regardingId=` for each item line per FR-15. Format: `- [id={item.Id} regardingId={item.RegardingId}] Title | ... | regarding: Name (Type) | ...`. Update the prompt rule list per FR-16: "Set `primaryEntityType` to the regarding entity type of the most relevant supplied item. Set `primaryEntityId` to the matching `regardingId` of the most relevant supplied item. Do NOT use the `[id=...]` notification ID. Do NOT invent IDs."
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF Minimal API + LLM prompt engineering + Azure OpenAI integration.</role>
+
+  <goal>Prompt builder output (logged or unit-tested) contains `regardingId=` for every item that has one; rule list contains the FR-16 instructions verbatim.</goal>
+
+  <context>
+    <background>
+      Per design.md §D3: LLM hallucinates `primaryEntityId` because the prompt never gives it the real IDs. This task gives the LLM the IDs and tells it which to use.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">BFF Minimal API; no Azure Functions; change stays in `Sprk.Bff.Api`.</constraint>
+    <constraint source="ADR-013">AI feature in BFF (no separate AI service).</constraint>
+    <constraint source="project">FR-15: prompt emits `regardingId=` per item line.</constraint>
+    <constraint source="project">FR-16: prompt rule list explicitly instructs LLM on `primaryEntityId` source.</constraint>
+    <constraint source="project">CLAUDE.md §10: bff-extensions.md MUST checklist applies; verify publish-size delta ≤ +1 MB; no new HIGH-severity CVE; add tests in 031/032.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `DailyBriefingEndpoints.cs` and locate `BuildChannelNarrationPrompt`.</step>
+    <step order="2">Update item-line format to include `regardingId={item.RegardingId}` (omit when null/empty).</step>
+    <step order="3">Update prompt rule list with FR-16 instructions verbatim.</step>
+    <step order="4">Run `dotnet build src/server/api/Sprk.Bff.Api/`; ensure green.</step>
+    <step order="5">Update TASK-INDEX.md: change task 030 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Prompt format string includes `regardingId={item.RegardingId}` per item line (when present).</criterion>
+    <criterion testable="true">Prompt rule list contains FR-16 instructions ("Set `primaryEntityType` to ... Do NOT use the `[id=...]` notification ID. Do NOT invent IDs.").</criterion>
+    <criterion testable="true">`dotnet build` green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task 031 adds the server-side validation. Don't add validation here. Don't deploy yet — that's task 060.
+
+    Completed 2026-06-18 (Wave 1 parallel batch via project-pipeline). FR-15 + FR-16 applied to BuildChannelNarrationPrompt:
+    - Item line emits `[id=... regardingId=...]` when RegardingId present; bare `[id=...]` when empty (graceful degradation)
+    - Rule list includes FR-16 instructions verbatim, placed before the JSON-shape rule
+    - `dotnet build src/server/api/Sprk.Bff.Api/` green (0 errors, 16 pre-existing warnings — none in DailyBriefingEndpoints.cs)
+    Per orchestrator constraint: no git commit, no TASK-INDEX.md update, no publish-size verify (deferred to task 033), no tests (deferred to task 032). Task 031 next: server-side `primaryEntityId` validation in ParseChannelBullets.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

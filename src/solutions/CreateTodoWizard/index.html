@@ -6,6 +6,15 @@
     <title>Create New To Do</title>
     <style>
       /* Reset styles for Dataverse modal dialog context */
+
+      /* Box-sizing reset — REQUIRED per docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md §2.
+       * Wizard pilot (2026-06-09) for the box-sizing audit cleanup — if this
+       * wizard renders correctly after the fix, the same edit is safe to
+       * batch-apply to the other 6 wizards. */
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
+
       html, body, #root {
         margin: 0;
         padding: 0;

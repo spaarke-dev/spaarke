@@ -24,7 +24,6 @@ import { ITodo } from '../types/entities';
 import { useFeedTodoSync } from './useFeedTodoSync';
 import { computeTodoScore } from '../utils/todoScoreUtils';
 import type { IWebApi } from '../types/xrm';
-import type { TodoFilterMode } from '../services/queryHelpers';
 
 // ---------------------------------------------------------------------------
 // Sort helper
@@ -61,13 +60,13 @@ function sortTodoItems(items: ITodo[]): ITodo[] {
 export interface IUseTodoItemsOptions {
   /** Xrm.WebApi reference from the PCF framework context */
   webApi: IWebApi;
-  /** GUID of the current user (context.userSettings.userId) */
-  userId: string;
   /**
-   * My Tasks filter mode (R3 FR-12). Changing this value triggers a re-fetch
-   * with a new OData predicate. Defaults to 'MyTasks' (owner OR assignee).
+   * UAT 2026-06-19: param semantic changed from systemuser GUID to
+   * sprk_contact GUID. Caller must resolve via useCurrentContactId.
+   * The field name stays `userId` for back-compat with legacy callers
+   * (they pass whatever value they have; field renaming is deferred).
    */
-  filterMode?: TodoFilterMode;
+  userId: string;
   /**
    * Optional mock items for local development / testing.
    * When provided, bypasses Xrm.WebApi.
@@ -91,7 +90,7 @@ export interface IUseTodoItemsResult {
 // ---------------------------------------------------------------------------
 
 export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult {
-  const { webApi, userId, mockItems, filterMode = 'MyTasks' } = options;
+  const { webApi, userId, mockItems } = options;
 
   const [items, setItems] = useState<ITodo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -142,7 +141,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
     setError(null);
 
     serviceRef.current
-      .getActiveTodos(userId, filterMode)
+      .getActiveTodos(userId)
       .then((result) => {
         if (cancelled) return;
 
@@ -169,7 +168,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
     return () => {
       cancelled = true;
     };
-  }, [userId, mockItems, fetchKey, filterMode]);
+  }, [userId, mockItems, fetchKey]);
 
   // -------------------------------------------------------------------------
   // FeedTodoSyncContext subscription — react to cross-block todo lifecycle
@@ -197,7 +196,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
         if (!userId) return;
 
         try {
-          const result = await serviceRef.current.getActiveTodos(userId, filterMode);
+          const result = await serviceRef.current.getActiveTodos(userId);
           if (!result.success) return;
 
           // Find the newly active todo in the refreshed list
@@ -224,7 +223,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
     });
 
     return unsubscribe;
-  }, [subscribe, userId, filterMode]);
+  }, [subscribe, userId]);
 
   // Memoize the returned items so that consumers receive a stable reference
   // when neither the list contents nor the loading/error state has changed.

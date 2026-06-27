@@ -381,6 +381,18 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
         // Extract template parameters from ConfigJson (if present)
         var templateParameters = ExtractTemplateParameters(context.Node.ConfigJson);
 
+        // Wave B-G9c1 (B6): per-action temperature override. If the AnalysisAction row
+        // has a non-null sprk_temperature value, that takes precedence over the node-level
+        // default (0.3). When the action's value is null (column missing or unset), we
+        // default to 0.0 for deterministic structured output — matching sibling structured
+        // methods (GetStructuredCompletionAsync<T>, StreamStructuredCompletionAsync).
+        // The previous behavior (using NodeExecutionContext.Temperature default 0.3) was the
+        // root cause of the same-file → different-summary symptom investigated in
+        // wave-b-g9c-medium-bugs.md section B6.
+        var effectiveTemperature = context.Action.Temperature.HasValue
+            ? (double)context.Action.Temperature.Value
+            : 0.0;
+
         return new ToolExecutionContext
         {
             AnalysisId = context.RunId,
@@ -394,7 +406,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             DownstreamNodes = context.DownstreamNodes,
             PreResolvedLookupChoices = preResolvedLookupChoices,
             MaxTokens = context.MaxTokens,
-            Temperature = context.Temperature,
+            Temperature = effectiveTemperature,
             ModelDeploymentId = context.ModelDeploymentId ?? context.Node.ModelDeploymentId,
             CorrelationId = context.CorrelationId,
             CreatedAt = context.CreatedAt,
@@ -863,7 +875,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Queries the customer document index (spaarke-knowledge-index-v2) via <see cref="IRagService"/>
+    /// Queries the customer document index (spaarke-files-index) via <see cref="IRagService"/>
     /// for documents semantically similar to the current document being analyzed.
     /// Results from the current document are excluded to avoid self-referencing.
     /// </para>

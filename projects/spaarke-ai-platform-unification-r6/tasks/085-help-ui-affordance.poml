@@ -1,0 +1,165 @@
+<task id="085" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-D-06 `/help` UI Affordance Discoverable from Chat Input Bar</title>
+    <phase>Phase D — Command Router + Integration + Closeout</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>081</dependencies>
+    <blocks>087</blocks>
+    <tags>frontend, react, fluent-ui, ai-widgets, command-router</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New UI affordance built on the `/help` drawer from task 081; no architectural risk; STANDARD per task-create Step 0 rigor tree (UI polish + discoverability).</rigor-reason>
+    <parallel-group>D-G2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Single UI component (HelpAffordance.tsx) lives in its own file; runs alongside 084 + 086.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the `/help` UI affordance per spec FR-53 — a chat-input-bar control (icon button or
+    pill) that triggers the same `CommandHelpPanel` drawer task 081 built. Goal: make Pillar 8
+    commands discoverable for users who don't know slash syntax exists.
+
+    Fluent v9 `Button` with help icon, positioned in the chat input bar (likely beside the send
+    button). Clicking dispatches to `HardSlashExecutor.executeHardSlash({command: 'help', ...})`
+    so the same drawer surface task 081 wired is reused. Tooltip: "Show available commands (/help)".
+
+    ADR-021 binding: dark-mode safe; Fluent v9 semantic tokens only.
+
+    NFR-11 binding: this is purely additive UX; chat input bar still works normally for natural
+    language and explicit slashes.
+
+    Frontend-only task; BFF publish-size delta = 0 MB.
+  </prompt>
+
+  <role>
+    Frontend engineer with Fluent v9 + accessibility experience. Comfortable with chat-input-bar
+    composition and tooltip surfaces.
+  </role>
+
+  <goal>
+    `HelpAffordance.tsx` exists; rendered in `ConversationPane.tsx` chat input bar; clicking opens
+    the `CommandHelpPanel` drawer (reused from task 081). Dark-mode safe. Accessible
+    (`aria-label`, keyboard focus, screen-reader text).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="hard-slash-executor">src/solutions/SpaarkeAi/src/components/conversation/HardSlashExecutor.ts</file>
+    <file purpose="help-panel">src/solutions/SpaarkeAi/src/components/conversation/CommandHelpPanel.tsx</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-53">`/help` UI affordance discoverable from chat input bar.</constraint>
+    <constraint source="spec Phase D exit criterion 1">`/help` works and is discoverable — verifiable by clicking the affordance.</constraint>
+    <constraint source="ADR-021">Dark-mode safe; Fluent v9 semantic tokens only.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB.</constraint>
+    <constraint source="spec NFR-11">Additive UX; existing chat input bar behavior unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/help-affordance</topic>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 icon button in input bar" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        Use `&lt;Button appearance="subtle" icon={&lt;Help24Regular /&gt;} aria-label="Show available commands (/help)" /&gt;`. Tooltip via Fluent v9 `Tooltip`. Semantic tokens for colors.
+      </pattern>
+      <pattern name="Reuse CommandHelpPanel drawer" location="src/solutions/SpaarkeAi/src/components/conversation/CommandHelpPanel.tsx (from task 081)">
+        Trigger same drawer via shared `useCommandHelpPanel()` hook or via HardSlashExecutor.executeHardSlash({command: 'help'}).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context. Output: "🔒 RIGOR LEVEL: STANDARD — UI affordance built on existing drawer from task 081; ADR-021 dark-mode check required".
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 085 status is 🔲, dep 081 is ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read CommandHelpPanel.tsx (task 081 output). Read Fluent v9 patterns. Identify the chat input bar location in ConversationPane.tsx.
+    </step>
+    <step order="3" name="Author HelpAffordance">
+      Create `src/solutions/SpaarkeAi/src/components/conversation/HelpAffordance.tsx`. Fluent v9 Button + Tooltip. Click handler opens the same drawer as `/help`. Accessibility: `aria-label`, keyboard focus, screen-reader text.
+    </step>
+    <step order="4" name="Wire into ConversationPane">
+      Add `&lt;HelpAffordance /&gt;` to the chat input bar in `ConversationPane.tsx`. Positioned beside the send button.
+    </step>
+    <step order="5" name="Build + Visual Verification">
+      Run build. Visually verify the affordance is discoverable (icon visible, tooltip clear). Verify clicking opens the drawer with command list.
+    </step>
+    <step order="6" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below.
+    </step>
+    <step order="7" name="Document + Complete">
+      Update task POML status. Update TASK-INDEX.md: 085 🔲 → ✅. Reset `current-task.md`. Report completion + downstream unblock (087).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Frontend build runner</tool>
+    <tool name="git">Stage + commit HelpAffordance.tsx + ConversationPane changes</tool>
+    <tool name="fluent-v9-component">Skill for Fluent v9 patterns + ADR-021 dark-mode compliance</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/HelpAffordance.tsx (NEW)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (MODIFIED — render HelpAffordance in input bar)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 085 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`HelpAffordance.tsx` exists and renders a Fluent v9 button with help icon + tooltip.</criterion>
+    <criterion testable="true">Clicking opens the same `CommandHelpPanel` drawer as `/help` (task 081 reuse confirmed).</criterion>
+    <criterion testable="true">Accessibility: `aria-label`, keyboard focus, screen-reader text present.</criterion>
+    <criterion testable="true">Dark mode safe per ADR-021 — Fluent v9 semantic tokens only; no hardcoded colors.</criterion>
+    <criterion testable="true">Affordance is positioned discoverably in chat input bar.</criterion>
+    <criterion testable="true">Existing chat input bar behavior unchanged (NFR-11).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB.</criterion>
+    <criterion testable="true">Phase D exit criterion 1 met: `/help` works and is discoverable.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Help Affordance Visible + Functional">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=control&amp;controlName=spaarke_SpaarkeAi</url>
+      <steps>
+        <step>Open conversation pane</step>
+        <step>Verify help icon button visible in chat input bar</step>
+        <step>Hover; verify tooltip shows "Show available commands (/help)"</step>
+        <step>Click; verify CommandHelpPanel drawer opens with command list</step>
+        <step>Verify drawer shows all 6 hard slashes + 4 soft slashes</step>
+      </steps>
+      <expected>Affordance discoverable; drawer opens; commands listed</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Verify help affordance icon adapts (no white background in dark mode)</step>
+        <step>Verify tooltip text + drawer background use semantic tokens</step>
+        <step>Verify icons use currentColor</step>
+      </steps>
+      <expected>All colors use Fluent v9 semantic tokens per ADR-021</expected>
+    </test>
+    <test name="Accessibility">
+      <steps>
+        <step>Tab-navigate to the help affordance</step>
+        <step>Verify focus ring visible</step>
+        <step>Press Enter; verify drawer opens</step>
+        <step>Verify screen-reader announces aria-label</step>
+      </steps>
+      <expected>Keyboard + screen-reader accessible</expected>
+    </test>
+  </ui-tests>
+</task>

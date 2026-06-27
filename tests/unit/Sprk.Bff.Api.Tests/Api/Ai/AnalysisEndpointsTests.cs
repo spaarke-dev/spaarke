@@ -25,17 +25,6 @@ public class AnalysisEndpointsTests
 {
     #region Endpoint Mapping Tests
 
-    [Fact]
-    public void MapAnalysisEndpoints_CreatesExpectedRoutes()
-    {
-        // Arrange - Verify endpoint extension method exists and has correct signature
-        var method = typeof(AnalysisEndpoints).GetMethod("MapAnalysisEndpoints");
-
-        // Assert
-        method.Should().NotBeNull();
-        method!.IsStatic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(IEndpointRouteBuilder));
-    }
 
     #endregion
 

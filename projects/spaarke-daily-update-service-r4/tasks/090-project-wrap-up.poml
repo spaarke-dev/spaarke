@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Project wrap-up — final quality gates, merge-to-master, lessons-learned, portfolio archive</title>
+    <phase>6: Wrap-up</phase>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>R4 graduates. Final mental code-review + adr-check sweeps across full R4 surface (BFF, PCF/PlaybookBuilder, widget, workspace shell, JPS data layer) confirm ADR-001/010/013/021/024/027/028/029/034/037 compliance. All 15 spec.md §Success Criteria boxes ticked with evidence (see PR #456 body "All FRs Satisfied" section + README Graduation Criteria). README + plan.md status → Complete. TASK-INDEX.md verified: 46/46 tasks ✅. lessons-learned.md authored (10 sections covering JPS deployment thesis, entity architecture correction, NVARCHAR(10) constraint, Path A.5 pattern, sub-agent timeouts, parallel waves, long-lived PR pattern, prod deployment pointer, project-CLAUDE.md memory, deferred items). repo-cleanup-audit-090.md authored — 6 files recommended for cleanup, 2 retained, owner decides. Note: NOT merging PR #456 (owner's explicit call); NOT running /devops-project-archive (handled by owner via portfolio board). Tag `daily-briefing-r4-complete` created on the final commit and pushed.</completion-notes>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>049</dependencies>
+    <blocks>none</blocks>
+    <tags>devops, wrap-up</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Wrap-up sequence runs quality gates + repo-cleanup + portfolio archive (regression sweeps; not new code)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Close out spaarke-daily-update-service-r4 after all 5 PRs are merged: run final code-review + adr-check sweeps, run repo-cleanup, update README to Complete, document lessons learned, archive project artifacts, sync portfolio status. This is the mandatory final task per CLAUDE.md §7 and task-create skill Step 3.7.
+  </prompt>
+
+  <role>SPAARKE platform developer. Project closeout discipline; familiarity with code-review + adr-check + repo-cleanup + merge-to-master + devops-project-* skills.</role>
+
+  <goal>
+    R4 project is graduated per spec.md §Success Criteria (all 15 boxes ticked): JPS deployment complete, all 20 FRs delivered, all 6 NFRs passed, hallucination eliminated under UAT, all R3 deliverables preserved, all 5 PRs merged in correct order (PR 1 → 2 → 3 → 4 → 5), publish-size delta ≤+1 MB, no new HIGH CVE. README + plan + portfolio status all updated to Complete. notes/lessons-learned.md authored. Ephemeral files cleaned (notes/debug/, spikes/, drafts/).
+  </goal>
+
+  <context>
+    <background>
+      Mandatory wrap-up task per task-create skill Step 3.7 and CLAUDE.md §7. Verifies that the R4 project meets graduation criteria, captures lessons learned for future R5+ projects (especially around JPS deployment gap that R4 specifically addressed), and prepares the project folder for archival via repo-cleanup.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/README.md</file>
+      <file>projects/spaarke-daily-update-service-r4/plan.md</file>
+      <file>projects/spaarke-daily-update-service-r4/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/lessons-learned.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §7">Task completion + transition protocol — README updated, TASK-INDEX 🔲 → ✅, lessons-learned captured</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — final publish-size verification before merge-to-master; cumulative ceiling 60 MB</constraint>
+    <constraint source="CLAUDE.md §11">Component Justification — final code-review verifies each new component (003 EntityNameValidator, 010 DAILY-BRIEFING-NARRATE playbook, 031 dispatch wrapper) has concrete justification</constraint>
+    <constraint source="project">All 5 PRs must be merged before this task runs; verify via gh pr list and git log on master</constraint>
+    <constraint source="project">R3 PR #451 coordination — if R3 has merged, no rebase work for R4; if R3 is still open, document handoff for whoever merges later</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/merge-to-master/SKILL.md</file>
+      <file>.claude/skills/devops-project-sync/SKILL.md</file>
+      <file>.claude/skills/devops-project-archive/SKILL.md</file>
+      <file>docs/procedures/AI-CODING-PROCEDURES-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all 5 PRs (PR 1–5) merged to master. Run `gh pr list --state merged --base master --head 'work/spaarke-daily-update-service-r4*'`. If any PR is unmerged, STOP and block until merged.</step>
+    <step order="2">Run final `/code-review` across all R4-touched files (PR 1–5 surface). Address any critical issues with hotfix commits.</step>
+    <step order="3">Run final `/adr-check` to verify compliance with ADRs 001, 010, 013, 021, 024, 027, 028, 029, 034, 037.</step>
+    <step order="4">Verify spec.md §Success Criteria checklist — all 15 boxes can be ticked. Run a final UAT sweep in spaarkedev1: hallucination test (ACME-only data → TL;DR mentions only ACME), 4 preferences visibly affect rendering, three-dot menu shows 6 actions, link click → modal opens, 403 → toast.</step>
+    <step order="5">Final BFF publish-size measurement: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` — record final compressed size + cumulative delta vs R3 baseline. Confirm ≤+1 MB per NFR-02 and within 60 MB ceiling per CLAUDE.md §10.</step>
+    <step order="6">Final CVE scan: `dotnet list package --vulnerable --include-transitive` + `npm audit --production --workspace=@spaarke/daily-briefing-components`. Confirm no new HIGH per NFR-01.</step>
+    <step order="7">Author `projects/spaarke-daily-update-service-r4/notes/lessons-learned.md`. Capture: JPS deployment-as-first-class-concern lesson (R4's core thesis); spec path discovery friction (NotificationService.cs path mismatch); `sprk_playbookconsumer` extension feasibility (whatever task 030 decided); R3 PR #451 parallel-development coordination experience; any other gotchas encountered during execution.</step>
+    <step order="8">Update README.md: Status = Complete, Phase = Complete, Progress = 100%, Completed Date set, all Graduation Criteria checkboxes ticked, Changelog entry appended.</step>
+    <step order="9">Update plan.md: Status = Complete; all milestones ✅.</step>
+    <step order="10">Verify TASK-INDEX.md has all 46 tasks marked ✅. Update if any are still 🔲 or 🔄.</step>
+    <step order="11">Run `/repo-cleanup projects/spaarke-daily-update-service-r4` — review cleanup report, approve removal of notes/debug/, notes/spikes/, notes/drafts/. Archive notes/handoffs/ if any.</step>
+    <step order="12">Run `/devops-project-sync` to refresh portfolio Issue with final state (Task Count, Status=Complete).</step>
+    <step order="13">Optionally run `/devops-project-archive` to formally close the portfolio Issue with completion summary.</step>
+    <step order="14">Final commit + push of wrap-up artifacts (lessons-learned, updated README/plan/TASK-INDEX). Tag the commit `daily-briefing-r4-complete`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET projects</tool>
+    <tool name="npm">Build/test TypeScript widgets + audit</tool>
+    <tool name="gh">GitHub PR/Issue ops</tool>
+    <tool name="git">Tag + final commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r4/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r4/README.md (Status=Complete)</output>
+    <output type="docs">projects/spaarke-daily-update-service-r4/plan.md (Status=Complete)</output>
+    <output type="docs">projects/spaarke-daily-update-service-r4/tasks/TASK-INDEX.md (all ✅)</output>
+    <output type="config">Git tag `daily-briefing-r4-complete`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 15 spec.md §Success Criteria boxes ticked with evidence in commit/PR notes.</criterion>
+    <criterion testable="true">Final BFF publish-size delta ≤ +1 MB vs R3 baseline; final size within 60 MB ceiling.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE introduced by R4 changes.</criterion>
+    <criterion testable="true">README.md, plan.md, TASK-INDEX.md all show Status = Complete; all task IDs 001–049 + 090 marked ✅.</criterion>
+    <criterion testable="true">notes/lessons-learned.md exists and captures the JPS-deployment-as-first-class-concern principle.</criterion>
+    <criterion testable="true">Portfolio Issue (if registered) shows final Task Count + Status=Complete.</criterion>
+    <criterion testable="true">No critical issues from final code-review or adr-check sweeps.</criterion>
+    <criterion testable="true">Repository cleanup completed; ephemeral files removed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is mandatory per CLAUDE.md §7 and task-create Step 3.7 — do not skip even if "the work feels done."
+
+    Key R4 lesson to capture in lessons-learned.md: the project's core thesis was "JPS is data, not code. Source-code changes are necessary but not sufficient — corresponding sprk_analysisaction + sprk_analysisplaybook rows must be deployed to each environment." If a future project ships a new NodeExecutor, ActionType enum value, or playbook, the developer MUST deploy the corresponding Dataverse rows or the feature is silently inert. R4 added §10-style hygiene awareness for this concern; consider promoting it into a §10 sub-bullet for future projects.
+
+    If R3 PR #451 is still open at wrap-up time, document the coordination handoff (which PR merged first, which conflicts surfaced, how they were resolved) so the team has a precedent.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4). Wrap-up tasks have inherent rigor — run all quality gates explicitly, do not skip even if context-pressured.</protocol>
+  </execution>
+</task>

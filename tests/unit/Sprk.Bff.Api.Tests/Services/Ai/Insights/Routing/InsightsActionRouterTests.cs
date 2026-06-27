@@ -37,6 +37,12 @@ public class InsightsActionRouterTests
     private const string PerAreaLayer1ActionCode = "INS-L1C-CTRNS@v1";
     private const string PerPairLayer2ActionCode = "INS-L2X-CTRNS-CLOSING@v1";
 
+    // Post-FR-06 (task 023): the resolver normalizes "@v1"-suffixed inputs to the
+    // clean form before the alternate-key lookup. Tests that exercise the lookup
+    // path must mock against the normalized (clean) code.
+    private const string PerAreaLayer1ActionCodeNormalized = "INS-L1C-CTRNS";
+    private const string PerPairLayer2ActionCodeNormalized = "INS-L2X-CTRNS-CLOSING";
+
     private static readonly Guid GenericLayer1ActionId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid PerAreaLayer1ActionId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid PerPairLayer2ActionId = Guid.Parse("33333333-3333-3333-3333-333333333333");
@@ -120,12 +126,14 @@ public class InsightsActionRouterTests
         var defaultAction = DefaultLayer1Action();
 
         // Per-area row exists: alternate-key lookup returns an entity, scope resolver returns AnalysisAction.
+        // Per FR-06 task 023: the resolver normalizes "@v1" suffix off the code at the lookup
+        // boundary, so the alternate-key call uses the normalized (clean) form.
         entity.Setup(e => e.RetrieveByAlternateKeyAsync(
                 "sprk_analysisaction",
-                It.Is<KeyAttributeCollection>(k => k.Contains("sprk_actioncode") && (string)k["sprk_actioncode"] == PerAreaLayer1ActionCode),
+                It.Is<KeyAttributeCollection>(k => k.Contains("sprk_actioncode") && (string)k["sprk_actioncode"] == PerAreaLayer1ActionCodeNormalized),
                 It.IsAny<string[]>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(MakeActionEntity(PerAreaLayer1ActionId, PerAreaLayer1ActionCode));
+            .ReturnsAsync(MakeActionEntity(PerAreaLayer1ActionId, PerAreaLayer1ActionCodeNormalized));
 
         scope.Setup(s => s.GetActionAsync(PerAreaLayer1ActionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(PerAreaLayer1Action());
@@ -219,7 +227,10 @@ public class InsightsActionRouterTests
         SetupRefRow(entity, "sprk_practicearea_ref", "sprk_practiceareacode", "sprk_practicearea_refid", "CTRNS", PracticeAreaRefId);
         SetupRefRow(entity, "sprk_documenttype_ref", "sprk_documenttypecode", "sprk_documenttype_refid", "CTRNS_CLOSING_STATEMENT", DocumentTypeRefId);
         SetupMatrixRow(entity, PracticeAreaRefId, DocumentTypeRefId, MatrixRowId, layer2ActionCode: PerPairLayer2ActionCode);
-        SetupAlternateKeyAction(entity, PerPairLayer2ActionCode, PerPairLayer2ActionId);
+        // Per FR-06 task 023: the resolver normalizes "@v1" suffix off the code at the lookup
+        // boundary, so the alternate-key call uses the normalized (clean) form even when the
+        // matrix carries the legacy "@v1"-suffixed code.
+        SetupAlternateKeyAction(entity, PerPairLayer2ActionCodeNormalized, PerPairLayer2ActionId);
 
         scope.Setup(s => s.GetActionAsync(PerPairLayer2ActionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(PerPairLayer2Action());
@@ -229,6 +240,8 @@ public class InsightsActionRouterTests
         result.Decision.Should().Be(InsightsLayer2RoutingDecision.UsePerPairAction);
         result.Action.Id.Should().Be(PerPairLayer2ActionId);
         result.MatrixRowId.Should().Be(MatrixRowId);
+        // ResolvedActionCode reflects the matrix-carried code (pre-normalization);
+        // normalization happens only at the lookup boundary, not in the result payload.
         result.ResolvedActionCode.Should().Be(PerPairLayer2ActionCode);
     }
 
@@ -321,7 +334,8 @@ public class InsightsActionRouterTests
         SetupRefRow(entity, "sprk_practicearea_ref", "sprk_practiceareacode", "sprk_practicearea_refid", "CTRNS", PracticeAreaRefId);
         SetupRefRow(entity, "sprk_documenttype_ref", "sprk_documenttypecode", "sprk_documenttype_refid", "CTRNS_CLOSING_STATEMENT", DocumentTypeRefId);
         SetupMatrixRow(entity, PracticeAreaRefId, DocumentTypeRefId, MatrixRowId, layer2ActionCode: PerPairLayer2ActionCode);
-        SetupAlternateKeyAction(entity, PerPairLayer2ActionCode, PerPairLayer2ActionId);
+        // Per FR-06 task 023: alternate-key lookup uses the normalized (clean) form.
+        SetupAlternateKeyAction(entity, PerPairLayer2ActionCodeNormalized, PerPairLayer2ActionId);
 
         scope.Setup(s => s.GetActionAsync(PerPairLayer2ActionId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(PerPairLayer2Action());
@@ -337,10 +351,11 @@ public class InsightsActionRouterTests
             It.Is<QueryExpression>(q => q.EntityName == "sprk_practicearea_documenttype"),
             It.IsAny<CancellationToken>()),
             Times.Once);
-        // Per-pair action lookup runs only ONCE (cached on its own key).
+        // Per-pair action lookup runs only ONCE (cached on its own key, on the matrix-carried
+        // code form — normalization is applied inside LoadActionByCodeAsync after the cache).
         entity.Verify(e => e.RetrieveByAlternateKeyAsync(
             "sprk_analysisaction",
-            It.Is<KeyAttributeCollection>(k => k.Contains("sprk_actioncode") && (string)k["sprk_actioncode"] == PerPairLayer2ActionCode),
+            It.Is<KeyAttributeCollection>(k => k.Contains("sprk_actioncode") && (string)k["sprk_actioncode"] == PerPairLayer2ActionCodeNormalized),
             It.IsAny<string[]>(),
             It.IsAny<CancellationToken>()),
             Times.Once);

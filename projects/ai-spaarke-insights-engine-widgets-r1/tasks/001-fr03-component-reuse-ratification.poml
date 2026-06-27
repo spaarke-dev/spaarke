@@ -1,0 +1,72 @@
+<task id="001" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>FR-03 pre-flight ratification — DR-001 component reuse</title>
+    <status>completed</status>
+    <completed>2026-06-10</completed>
+    <completion-note>Empirical investigation RATIFIES plan-time FR-03 finding. No divergence — no owner escalation required. Deliverables: notes/insight-component-reuse-investigation.md + decisions/DR-001-component-reuse.md.</completion-note>
+    <estimated-effort>3h</estimated-effort>
+    <phase>0</phase>
+    <tags>foundation, investigation, ui, decision-record</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    The `/project-pipeline` constrained run (2026-06-10) performed a plan-time pre-flight investigation per FR-03 and applied the finding to spec.md. This task ratifies the finding with implementation-level confirmation: read every claim in spec.md FR-03 + Resolution Decisions row "FR-03", verify against the named files, and produce `notes/insight-component-reuse-investigation.md` + `decisions/DR-001-component-reuse.md`. If the plan-time finding is wrong on any point, file the divergence in DR-001 with empirical evidence and surface to owner before Task 010.
+  </prompt>
+
+  <role>UI architect with Spaarke Fluent v9 + AI-widget package experience.</role>
+
+  <goal>
+    Two deliverables: `notes/insight-component-reuse-investigation.md` (raw findings + file paths) + `decisions/DR-001-component-reuse.md` (ratified decision). Confirm: `InsightSummaryCard` ships in `@spaarke/ai-widgets`; uses Fluent v9 Popover + Dialog composition (no extant inline-expand-to-modal pattern); reuses `AiSummaryPopover` lazy-load + state-machine shape; does NOT use `FeedbackButtons` (Q-U3 deferred).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-03 + Resolution Decisions)</file>
+    <file purpose="plan">projects/ai-spaarke-insights-engine-widgets-r1/plan.md (Phase 0 Task 001)</file>
+    <file purpose="existing-pattern">src/client/shared/Spaarke.UI.Components/src/components/AiSummaryPopover/AiSummaryPopover.tsx</file>
+    <file purpose="destination-package">src/client/shared/Spaarke.AI.Widgets/package.json (v0.1.0 verification)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-03">Must produce notes file + DR-001 decision record at named paths</constraint>
+    <constraint source="root-CLAUDE.md §3">Cannot modify `.claude/` paths from a sub-agent context</constraint>
+    <constraint source="Q-U3">Feedback affordance deferred to r2+; do NOT reference `FeedbackButtons` as a reuse candidate</constraint>
+    <constraint source="Q-U1">Ban `@v1`/`@vN` identifier-suffix vernacular anywhere</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent-v9-widget-composition, popover+dialog pattern, spaarke-ai-widgets package</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/CLAUDE.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read AiSummaryPopover.tsx">Document the state machine, props, lazy-load callback, Sparkle icon import</step>
+    <step order="2" name="Inventory @spaarke/ai-widgets package">List exports, verify v0.1.0, identify build/lint/Storybook readiness</step>
+    <step order="3" name="Search for any other inline-expand-to-modal pattern">grep `Dialog.*Popover`, `expand-to-modal`, `Modal.*inline` across `src/client/shared/`</step>
+    <step order="4" name="Author notes/insight-component-reuse-investigation.md">Record: package home decision, AiSummaryPopover reuse points, gaps (no full modal expand), proposed composition approach</step>
+    <step order="5" name="Author decisions/DR-001-component-reuse.md">Ratify (or contradict) the plan-time finding; cite evidence; one decision; one rationale</step>
+    <step order="6" name="If divergent, escalate to owner">If empirical investigation contradicts plan-time finding, STOP and surface to owner before Task 010</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/insight-component-reuse-investigation.md</output>
+    <output type="decision-record">projects/ai-spaarke-insights-engine-widgets-r1/decisions/DR-001-component-reuse.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DR-001 explicitly cites at least one file path from `src/client/shared/Spaarke.AI.Widgets/`</criterion>
+    <criterion testable="true">DR-001 records whether `AiSummaryPopover` lazy-load pattern is reused or net-new</criterion>
+    <criterion testable="true">Investigation notes name at least one Storybook-readiness gap (if any) so Phase 3 task 030 knows what to fix</criterion>
+    <criterion testable="true">No `@v1` syntax appears in either deliverable</criterion>
+    <criterion testable="true">No `FeedbackButtons` reference appears in either deliverable (Q-U3 deferred)</criterion>
+  </acceptance-criteria>
+</task>

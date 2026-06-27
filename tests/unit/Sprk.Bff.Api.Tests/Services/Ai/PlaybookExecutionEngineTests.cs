@@ -1,21 +1,34 @@
+using System.Runtime.CompilerServices;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
 using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Telemetry;
 using Xunit;
+using ConversationMessage = Sprk.Bff.Api.Services.Ai.ConversationMessage;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai;
 
 /// <summary>
 /// Unit tests for PlaybookExecutionEngine.
-/// Tests both conversational and batch execution modes.
+/// Tests conversational, batch, and (post-R6 task 025 / D-A-17) chat-Summarize execution modes.
 /// </summary>
 public class PlaybookExecutionEngineTests
 {
     private readonly Mock<IAiPlaybookBuilderService> _builderServiceMock;
     private readonly Mock<IPlaybookOrchestrationService> _orchestrationServiceMock;
     private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock;
+    private readonly Mock<INodeService> _nodeServiceMock;
+    private readonly Mock<IGenericEntityService> _entityServiceMock;
+    private readonly Mock<IRagService> _ragServiceMock;
+    private readonly StubChatSummarizeOpenAiClient _openAiClient;
+    private readonly R5SummarizeTelemetry _summarizeTelemetry;
     private readonly Mock<ILogger<PlaybookExecutionEngine>> _loggerMock;
     private readonly PlaybookExecutionEngine _engine;
 
@@ -24,12 +37,22 @@ public class PlaybookExecutionEngineTests
         _builderServiceMock = new Mock<IAiPlaybookBuilderService>();
         _orchestrationServiceMock = new Mock<IPlaybookOrchestrationService>();
         _httpContextAccessorMock = new Mock<IHttpContextAccessor>();
+        _nodeServiceMock = new Mock<INodeService>();
+        _entityServiceMock = new Mock<IGenericEntityService>();
+        _ragServiceMock = new Mock<IRagService>();
+        _openAiClient = new StubChatSummarizeOpenAiClient();
+        _summarizeTelemetry = new R5SummarizeTelemetry();
         _loggerMock = new Mock<ILogger<PlaybookExecutionEngine>>();
 
         _engine = new PlaybookExecutionEngine(
             _builderServiceMock.Object,
             _orchestrationServiceMock.Object,
             _httpContextAccessorMock.Object,
+            _nodeServiceMock.Object,
+            _entityServiceMock.Object,
+            _ragServiceMock.Object,
+            _openAiClient,
+            _summarizeTelemetry,
             _loggerMock.Object);
     }
 
@@ -557,6 +580,351 @@ public class PlaybookExecutionEngineTests
             CompletedNodes = 1
         });
         await Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region ExecuteChatSummarizeAsync Tests (R6 Pillar 4 / D-A-17)
+
+    // Tests below cover the chat-Summarize streaming pipeline that R6 task 025 moved into
+    // PlaybookExecutionEngine. Coverage migrated from the pre-R6 SessionSummarizeOrchestratorTests
+    // (the orchestrator is now a thin pass-through; this is where the moved logic lives).
+
+    private const string ChatTenantId = "tenant-abc";
+    private const string ChatSessionId = "session-xyz";
+    private const string ChatFileId1 = "file-001";
+    private const string ChatFileId2 = "file-002";
+    private static readonly Guid ChatPlaybookId = Guid.Parse("44285d15-1360-f111-ab0b-70a8a59455f4");
+    private static readonly Guid ChatActionId = Guid.Parse("eeb05bfd-1260-f111-ab0b-70a8a59455f4");
+
+    /// <summary>
+    /// Configure the engine's FK-chain stubs so ExecuteChatSummarizeAsync resolves
+    /// playbook → node → action through the post-R6 FK chain (no alternate-key).
+    /// </summary>
+    private void StubFkChain(string systemPrompt = "You are the R6 chat-Summarize assistant.",
+        string outputSchemaJson = """{"type":"object","additionalProperties":false,"required":["tldr"],"properties":{"tldr":{"type":"array","items":{"type":"string"}}}}""")
+    {
+        _nodeServiceMock
+            .Setup(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new PlaybookNodeDto { Id = Guid.NewGuid(), PlaybookId = ChatPlaybookId, ActionId = ChatActionId } });
+
+        var actionEntity = new Entity("sprk_analysisaction", ChatActionId)
+        {
+            ["sprk_analysisactionid"] = ChatActionId,
+            ["sprk_name"] = "Summarize Document for Chat",
+            ["sprk_actioncode"] = "SUM-CHAT@v1",
+            ["sprk_systemprompt"] = systemPrompt,
+            ["sprk_outputschemajson"] = outputSchemaJson
+        };
+        _entityServiceMock
+            .Setup(e => e.RetrieveAsync(
+                "sprk_analysisaction",
+                It.IsAny<Guid>(),
+                It.IsAny<string[]>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(actionEntity);
+
+        _ragServiceMock
+            .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RagSearchResponse
+            {
+                Query = "default",
+                Results = new[]
+                {
+                    new RagSearchResult { Id = "chunk-1", DocumentName = "f1.pdf", Content = "Lorem ipsum.", Score = 0.9 }
+                }
+            });
+    }
+
+    private static ChatSummarizeRequest BuildEngineRequest(
+        IReadOnlyList<string>? fileIds,
+        SummarizeInvocationPath path = SummarizeInvocationPath.DirectEndpoint,
+        params string[] sessionFileIds)
+    {
+        var manifest = sessionFileIds
+            .Select(id => new ChatSessionFile(
+                FileId: id, FileName: $"{id}.pdf", ContentType: "application/pdf",
+                SizeBytes: 1024, SearchDocumentIdsCsv: $"doc-{id}-1",
+                UploadedAt: DateTimeOffset.UtcNow))
+            .ToList();
+        return new ChatSummarizeRequest(
+            TenantId: ChatTenantId,
+            SessionId: ChatSessionId,
+            FileIds: fileIds,
+            StyleHint: null,
+            UploadedFiles: manifest,
+            Path: path);
+    }
+
+    private static async Task<List<AnalysisChunk>> CollectChunks(IAsyncEnumerable<AnalysisChunk> source)
+    {
+        var list = new List<AnalysisChunk>();
+        await foreach (var chunk in source)
+        {
+            list.Add(chunk);
+        }
+        return list;
+    }
+
+    // ─── (a) FK-chain resolution — no alternate-key lookup (FR-26) ────────────────────────────
+
+    [Fact]
+    public async Task ExecuteChatSummarizeAsync_ResolvesActionViaFkChain_NoAlternateKey()
+    {
+        StubFkChain();
+        _openAiClient.TokensToYield = new[] { "{\"tldr\":[\"x\"]}" };
+
+        var request = BuildEngineRequest(new[] { ChatFileId1 }, sessionFileIds: ChatFileId1);
+        _ = await CollectChunks(_engine.ExecuteChatSummarizeAsync(ChatPlaybookId, request, CancellationToken.None));
+
+        _nodeServiceMock.Verify(n => n.GetNodesAsync(ChatPlaybookId, It.IsAny<CancellationToken>()), Times.Once,
+            "engine resolves playbook → node via INodeService.GetNodesAsync (FK chain — post-R6 task 024)");
+        _entityServiceMock.Verify(
+            e => e.RetrieveAsync("sprk_analysisaction", ChatActionId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "engine loads action by FK-resolved ID, NOT by alternate key");
+        _entityServiceMock.Verify(
+            e => e.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]?>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "FR-26 invariant: NO alternate-key lookup remains in the chat-summarize path");
+    }
+
+    // ─── (b) Single-file does NOT emit combined-summary interjection — FR-04 negative ─────────
+
+    [Fact]
+    public async Task ExecuteChatSummarizeAsync_SingleFile_DoesNotEmitCombinedSummaryInterjection()
+    {
+        StubFkChain();
+        _openAiClient.TokensToYield = new[] { "{\"tldr\":[\"point\"]}" };
+
+        var request = BuildEngineRequest(new[] { ChatFileId1 }, sessionFileIds: ChatFileId1);
+        var chunks = await CollectChunks(_engine.ExecuteChatSummarizeAsync(ChatPlaybookId, request, CancellationToken.None));
+
+        chunks.Should().NotContain(c => c.Type == "text" && c.Content == PlaybookExecutionEngine.CombinedSummaryInterjection);
+    }
+
+    // ─── (c) Multi-file emits combined-summary interjection BEFORE stream — FR-04 positive ────
+
+    [Fact]
+    public async Task ExecuteChatSummarizeAsync_MultiFile_EmitsCombinedSummaryInterjectionBeforePlaybookStream()
+    {
+        StubFkChain();
+        _openAiClient.TokensToYield = new[] { "{\"tldr\":[\"a\",\"b\"]}" };
+
+        var request = BuildEngineRequest(new[] { ChatFileId1, ChatFileId2 }, sessionFileIds: new[] { ChatFileId1, ChatFileId2 });
+        var chunks = await CollectChunks(_engine.ExecuteChatSummarizeAsync(ChatPlaybookId, request, CancellationToken.None));
+
+        chunks.Should().NotBeEmpty();
+        chunks[0].Type.Should().Be("text");
+        chunks[0].Content.Should().Be(PlaybookExecutionEngine.CombinedSummaryInterjection);
+
+        // And the interjection precedes any delta or completion chunk.
+        var firstStructured = chunks.FirstOrDefault(c => c.Type is "delta" or "complete");
+        firstStructured.Should().NotBeNull();
+        chunks.IndexOf(chunks[0]).Should().BeLessThan(chunks.IndexOf(firstStructured!));
+    }
+
+    // ─── (d) ADR-014 — RagService gets BOTH tenantId AND sessionId filters ───────────────────
+
+    [Fact]
+    public async Task ExecuteChatSummarizeAsync_PropagatesTenantAndSessionIdToRagSearchOptions()
+    {
+        StubFkChain();
+        _openAiClient.TokensToYield = new[] { "{\"tldr\":[\"x\"]}" };
+
+        RagSearchOptions? observedOptions = null;
+        _ragServiceMock
+            .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<string, RagSearchOptions, CancellationToken>((_, opts, _) => observedOptions = opts)
+            .ReturnsAsync(new RagSearchResponse { Query = "q", Results = Array.Empty<RagSearchResult>() });
+
+        var request = BuildEngineRequest(new[] { ChatFileId1 }, sessionFileIds: ChatFileId1);
+        _ = await CollectChunks(_engine.ExecuteChatSummarizeAsync(ChatPlaybookId, request, CancellationToken.None));
+
+        observedOptions.Should().NotBeNull();
+        observedOptions!.TenantId.Should().Be(ChatTenantId);
+        observedOptions.SessionId.Should().Be(ChatSessionId);
+    }
+
+    // ─── (e) NFR-02 — hard cap 20 files (engine-side defense-in-depth) ────────────────────────
+
+    [Fact]
+    public async Task ExecuteChatSummarizeAsync_RejectsMoreThanTwentyFileIds()
+    {
+        StubFkChain();
+        var tooMany = Enumerable.Range(1, ChatSession.MaxUploadedFiles + 1).Select(i => $"f-{i}").ToList();
+        var request = BuildEngineRequest(tooMany, sessionFileIds: ChatFileId1);
+
+        var act = async () => { await foreach (var _ in _engine.ExecuteChatSummarizeAsync(ChatPlaybookId, request, CancellationToken.None)) { } };
+        await act.Should().ThrowAsync<ArgumentException>().WithMessage("*NFR-02*");
+    }
+
+    // ─── (f) Mid-stream exception yields FromError + terminates gracefully ───────────────────
+
+    [Fact]
+    public async Task ExecuteChatSummarizeAsync_MidStreamException_YieldsFromErrorAndTerminates()
+    {
+        StubFkChain();
+        _openAiClient.ThrowMidStream = true;
+        _openAiClient.TokensToYield = new[] { "{\"tld" }; // emits one token, then the next MoveNext throws
+
+        var request = BuildEngineRequest(new[] { ChatFileId1 }, sessionFileIds: ChatFileId1);
+        var chunks = await CollectChunks(_engine.ExecuteChatSummarizeAsync(ChatPlaybookId, request, CancellationToken.None));
+
+        chunks.Should().Contain(c => c.Type == "error");
+        chunks.Last().Type.Should().Be("error");
+        chunks.Last().Error.Should().NotBeNullOrEmpty();
+    }
+
+    // ─── (g) Decline path — empty file selection emits a decline-style error chunk ───────────
+
+    [Fact]
+    public async Task ExecuteChatSummarizeAsync_NoFilesInSession_EmitsDecline()
+    {
+        StubFkChain();
+        var request = BuildEngineRequest(fileIds: null /* default to session */, sessionFileIds: Array.Empty<string>());
+
+        var chunks = await CollectChunks(_engine.ExecuteChatSummarizeAsync(ChatPlaybookId, request, CancellationToken.None));
+
+        chunks.Should().ContainSingle();
+        chunks[0].Type.Should().Be("error");
+        chunks[0].Error.Should().Contain("No files are available");
+
+        // Should short-circuit before any FK resolution or RAG call.
+        _nodeServiceMock.Verify(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _ragServiceMock.Verify(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ─── (h) FK-chain broken — node has empty ActionId → engine surfaces clear error ─────────
+
+    [Fact]
+    public async Task ExecuteChatSummarizeAsync_NodeWithEmptyActionId_EmitsFromError()
+    {
+        // Simulate a broken FK chain — node exists but ActionId is Guid.Empty (the pre-task-024 state).
+        _nodeServiceMock
+            .Setup(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { new PlaybookNodeDto { Id = Guid.NewGuid(), PlaybookId = ChatPlaybookId, ActionId = Guid.Empty } });
+
+        var request = BuildEngineRequest(new[] { ChatFileId1 }, sessionFileIds: ChatFileId1);
+        var chunks = await CollectChunks(_engine.ExecuteChatSummarizeAsync(ChatPlaybookId, request, CancellationToken.None));
+
+        chunks.Should().Contain(c => c.Type == "error");
+        chunks.Last().Error.Should().Contain("FK chain", "engine surfaces broken FK chain cleanly");
+    }
+
+    // ─── (i) Argument validation — empty tenant + empty session + Guid.Empty playbookId ─────
+
+    [Fact]
+    public async Task ExecuteChatSummarizeAsync_EmptyTenantId_Throws()
+    {
+        StubFkChain();
+        var request = new ChatSummarizeRequest(
+            TenantId: "", SessionId: ChatSessionId, FileIds: null, StyleHint: null,
+            UploadedFiles: Array.Empty<ChatSessionFile>(),
+            Path: SummarizeInvocationPath.DirectEndpoint);
+
+        var act = async () => { await foreach (var _ in _engine.ExecuteChatSummarizeAsync(ChatPlaybookId, request, CancellationToken.None)) { } };
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task ExecuteChatSummarizeAsync_EmptySessionId_Throws()
+    {
+        StubFkChain();
+        var request = new ChatSummarizeRequest(
+            TenantId: ChatTenantId, SessionId: "", FileIds: null, StyleHint: null,
+            UploadedFiles: Array.Empty<ChatSessionFile>(),
+            Path: SummarizeInvocationPath.DirectEndpoint);
+
+        var act = async () => { await foreach (var _ in _engine.ExecuteChatSummarizeAsync(ChatPlaybookId, request, CancellationToken.None)) { } };
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task ExecuteChatSummarizeAsync_EmptyPlaybookId_Throws()
+    {
+        StubFkChain();
+        var request = BuildEngineRequest(new[] { ChatFileId1 }, sessionFileIds: ChatFileId1);
+
+        var act = async () => { await foreach (var _ in _engine.ExecuteChatSummarizeAsync(Guid.Empty, request, CancellationToken.None)) { } };
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    // ─── (j) Stream shape — happy path ends with Type="complete" ─────────────────────────────
+
+    [Fact]
+    public async Task ExecuteChatSummarizeAsync_HappyPath_EndsWithCompleteChunk()
+    {
+        StubFkChain();
+        _openAiClient.TokensToYield = new[] { "{\"tldr\":[\"a\"]}" };
+
+        var request = BuildEngineRequest(new[] { ChatFileId1 }, sessionFileIds: ChatFileId1);
+        var chunks = await CollectChunks(_engine.ExecuteChatSummarizeAsync(ChatPlaybookId, request, CancellationToken.None));
+
+        chunks.Should().Contain(c => c.Type == "complete");
+        chunks.Last().Type.Should().Be("complete");
+    }
+
+    #endregion
+
+    #region Chat-Summarize test doubles
+
+    /// <summary>
+    /// Stub <see cref="IOpenAiClient"/> for streaming chat-Summarize tests. Only the streaming
+    /// method is needed; all other interface members throw to make accidental use visible.
+    /// </summary>
+    private sealed class StubChatSummarizeOpenAiClient : IOpenAiClient
+    {
+        public IReadOnlyList<string> TokensToYield { get; set; } = Array.Empty<string>();
+        public bool ThrowMidStream { get; set; }
+
+        public async IAsyncEnumerable<string> StreamStructuredCompletionAsync(
+            IEnumerable<global::OpenAI.Chat.ChatMessage> messages,
+            BinaryData jsonSchema,
+            string schemaName,
+            string? model = null,
+            int? maxOutputTokens = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var i = 0;
+            foreach (var token in TokensToYield)
+            {
+                if (ThrowMidStream && i > 0)
+                {
+                    throw new InvalidOperationException("simulated mid-stream failure");
+                }
+                yield return token;
+                i++;
+                await Task.Yield();
+            }
+
+            if (ThrowMidStream && TokensToYield.Count > 0)
+            {
+                // If only one token was queued and we still want to fail, simulate the failure
+                // on the MoveNext following the last yield.
+                throw new InvalidOperationException("simulated mid-stream failure");
+            }
+        }
+
+        public IAsyncEnumerable<string> StreamCompletionAsync(string prompt, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by chat-summarize engine tests.");
+        public Task<string> GetCompletionAsync(string prompt, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by chat-summarize engine tests.");
+        public IAsyncEnumerable<string> StreamVisionCompletionAsync(string prompt, byte[] imageBytes, string mediaType, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by chat-summarize engine tests.");
+        public Task<string> GetVisionCompletionAsync(string prompt, byte[] imageBytes, string mediaType, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by chat-summarize engine tests.");
+        public Task<ReadOnlyMemory<float>> GenerateEmbeddingAsync(string text, string? model = null, int? dimensions = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by chat-summarize engine tests.");
+        public Task<IReadOnlyList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(IEnumerable<string> texts, string? model = null, int? dimensions = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by chat-summarize engine tests.");
+        public Task<ChatCompletionResult> GetChatCompletionWithToolsAsync(IEnumerable<global::OpenAI.Chat.ChatMessage> messages, IEnumerable<global::OpenAI.Chat.ChatTool> tools, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by chat-summarize engine tests.");
+        public Task<T> GetStructuredCompletionAsync<T>(IEnumerable<global::OpenAI.Chat.ChatMessage> messages, BinaryData jsonSchema, string schemaName, string deploymentName, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by chat-summarize engine tests.");
+        public Task<string> GetStructuredCompletionRawAsync(string prompt, BinaryData jsonSchema, string schemaName, string? model = null, int? maxOutputTokens = null, float? temperature = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by chat-summarize engine tests.");
     }
 
     #endregion

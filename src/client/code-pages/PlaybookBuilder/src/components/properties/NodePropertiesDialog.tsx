@@ -15,7 +15,7 @@
  * @see ADR-021 - Fluent UI v9 design system (dark mode required)
  */
 
-import { memo, useCallback, useState, useMemo } from 'react';
+import { memo, useCallback, useEffect, useState, useMemo } from 'react';
 import {
   makeStyles,
   tokens,
@@ -50,8 +50,12 @@ import { CreateTaskForm } from './CreateTaskForm';
 import { AiCompletionForm } from './AiCompletionForm';
 import { WaitForm } from './WaitForm';
 import { UpdateRecordForm } from './UpdateRecordForm';
+import { LookupUserMembershipForm } from './LookupUserMembershipForm';
+import { EntityNameValidatorForm } from './EntityNameValidatorForm';
 import { PromptSchemaForm } from './PromptSchemaForm';
 import { PromptSchemaEditor } from './PromptSchemaEditor';
+import { RenameGuardDialog, type RenameGuardAction } from './RenameGuardDialog';
+import { findOutputVariableReferences, type OutputVariableReference } from '../../services/canvasValidation';
 import type { PromptSchema } from '../../types/promptSchema';
 
 // ---------------------------------------------------------------------------
@@ -142,6 +146,8 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
   const selectNode = useCanvasStore(s => s.selectNode);
   const updateNodeData = useCanvasStore(s => s.updateNodeData);
   const removeNode = useCanvasStore(s => s.removeNode);
+  // R3 P9 H2 (task 091): rename-guard store action (auto-rename action).
+  const renameOutputVariableReferences = useCanvasStore(s => s.renameOutputVariableReferences);
 
   const selectedNode = selectedNodeId ? (nodes.find(n => n.id === selectedNodeId) ?? null) : null;
 
@@ -168,6 +174,8 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
     'createTask',
     'aiCompletion',
     'wait',
+    'lookupUserMembership',
+    'entityNameValidator',
   ].includes(nodeType);
   const hasConfigTab = hasTypeForm || isConditionNode || !isStartNode;
 
@@ -199,6 +207,67 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
       selectNode(null);
     }
   }, [selectedNode, removeNode, selectNode]);
+
+  // -----------------------------------------------------------------------
+  // R3 P9 H2 (task 091) — OutputVariable rename guard (FR-3H2.1 / AC-H2.1).
+  // Same intercept as NodePropertiesForm: controlled local draft, commit on
+  // blur, dialog when other nodes reference the old name. See NodePropertiesForm
+  // for the rationale on using onBlur instead of onChange.
+  // -----------------------------------------------------------------------
+  const committedOutputVar = selectedNode?.data.outputVariable ?? '';
+  const [outputVarDraft, setOutputVarDraft] = useState<string>(committedOutputVar);
+  const [renameGuard, setRenameGuard] = useState<{
+    open: boolean;
+    oldName: string;
+    newName: string;
+    references: OutputVariableReference[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (renameGuard === null) {
+      setOutputVarDraft(committedOutputVar);
+    }
+  }, [committedOutputVar, renameGuard]);
+
+  const handleOutputVariableCommit = useCallback(() => {
+    if (!selectedNode) return;
+    const oldName = committedOutputVar.trim();
+    const newName = outputVarDraft.trim();
+
+    if (newName === committedOutputVar) return;
+    if (oldName === '') {
+      updateNodeData(selectedNode.id, { outputVariable: outputVarDraft });
+      return;
+    }
+    if (oldName === newName) {
+      updateNodeData(selectedNode.id, { outputVariable: outputVarDraft });
+      return;
+    }
+
+    const references = findOutputVariableReferences(oldName, nodes, selectedNode.id);
+    if (references.length === 0) {
+      updateNodeData(selectedNode.id, { outputVariable: outputVarDraft });
+      return;
+    }
+
+    setRenameGuard({ open: true, oldName, newName, references });
+  }, [selectedNode, committedOutputVar, outputVarDraft, nodes, updateNodeData]);
+
+  const handleRenameGuardResolve = useCallback(
+    (action: RenameGuardAction) => {
+      if (!renameGuard || !selectedNode) return;
+      const { oldName, newName } = renameGuard;
+
+      if (action === 'autoRename') {
+        renameOutputVariableReferences(oldName, newName);
+        updateNodeData(selectedNode.id, { outputVariable: outputVarDraft });
+      } else {
+        setOutputVarDraft(committedOutputVar);
+      }
+      setRenameGuard(null);
+    },
+    [renameGuard, selectedNode, committedOutputVar, outputVarDraft, updateNodeData, renameOutputVariableReferences]
+  );
 
   // Which tabs to show — dynamic based on node type
   const visibleTabs = useMemo(() => {
@@ -280,8 +349,9 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
                           <Input
                             id={`${selectedNode.id}-outputVar`}
                             size="medium"
-                            value={selectedNode.data.outputVariable ?? ''}
-                            onChange={(_, data) => handleUpdate('outputVariable', data.value)}
+                            value={outputVarDraft}
+                            onChange={(_, data) => setOutputVarDraft(data.value)}
+                            onBlur={handleOutputVariableCommit}
                             placeholder={`output_${nodeType}`}
                           />
                         </div>
@@ -429,6 +499,20 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
                         )}
                         {nodeType === 'wait' && (
                           <WaitForm
+                            nodeId={selectedNode.id}
+                            configJson={selectedNode.data.configJson ?? '{}'}
+                            onConfigChange={handleConfigChange}
+                          />
+                        )}
+                        {nodeType === 'lookupUserMembership' && (
+                          <LookupUserMembershipForm
+                            nodeId={selectedNode.id}
+                            configJson={selectedNode.data.configJson ?? '{}'}
+                            onConfigChange={handleConfigChange}
+                          />
+                        )}
+                        {nodeType === 'entityNameValidator' && (
+                          <EntityNameValidatorForm
                             nodeId={selectedNode.id}
                             configJson={selectedNode.data.configJson ?? '{}'}
                             onConfigChange={handleConfigChange}

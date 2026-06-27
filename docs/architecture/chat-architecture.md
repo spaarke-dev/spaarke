@@ -54,7 +54,7 @@ The key architectural decision is the **Agent Framework pattern** — each chat 
 ### Playbook Dispatch Flow
 
 1. **PlaybookDispatcher.DispatchAsync** receives user message and host context
-2. **Stage 1** (1.5s budget): Vector similarity search via PlaybookEmbeddingService against `playbook-embeddings` AI Search index, pre-filtered by entityType
+2. **Stage 1** (1.5s budget): Vector similarity search via PlaybookEmbeddingService against `spaarke-playbook-embeddings` AI Search index, pre-filtered by entityType
 3. **Decision**: If single candidate with score >= 0.85 -> skip Stage 2, build result directly
 4. **Stage 2** (0.5s budget): LLM refinement selects best match from candidates and extracts parameters
 5. **PlaybookOutputHandler.HandleOutputAsync** routes to the appropriate output type based on JPS DeliverOutput node

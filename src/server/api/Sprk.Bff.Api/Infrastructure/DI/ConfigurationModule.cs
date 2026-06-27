@@ -91,9 +91,12 @@ public static class ConfigurationModule
             .ValidateDataAnnotations();
 
         // Bing Grounding options (AIPU-071) — gated on BingGrounding:Enabled kill switch (ADR-018).
-        // Validation deferred (no ValidateOnStart): BingConnectionName is [Required] but only
-        // needed when Enabled=true. App starts cleanly with Enabled=false and no Bing config.
-        // LegalResearchTools.ResearchLegalAsync/LookupCaseAsync check Enabled at call time.
+        // BingConnectionName is NOT [Required] at the option-class level (removed Wave B-G8
+        // 2026-06-09 after a startup crash on Spaarke Dev: LegalResearchHandler ctor calls
+        // .Value which triggered DataAnnotation eagerly even though comment said "validation
+        // deferred"). Required-when-Enabled semantics enforced at use-site in
+        // LegalResearchHandler.RunBingGroundingAsync; kill switch at the call sites already
+        // prevents the use-site code from running when Enabled=false.
         services
             .AddOptions<Sprk.Bff.Api.Services.Ai.Foundry.BingGroundingOptions>()
             .Bind(configuration.GetSection(Sprk.Bff.Api.Services.Ai.Foundry.BingGroundingOptions.SectionName))
@@ -118,9 +121,37 @@ public static class ConfigurationModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // PlaybookSelector options (chat-routing-redesign-r1 task 113R / FR-47) —
+        // confidence thresholds + delta margin + max-N for the file-aware top-N
+        // candidate selector. All properties have spec-defined defaults so binding
+        // succeeds when the "PlaybookSelector" section is absent. ValidateOnStart
+        // is wired so misconfigured ranges (e.g., ConfidenceThreshold > 1.0 from
+        // env-var typo) fail fast at app start rather than at first selection call.
+        services
+            .AddOptions<PlaybookSelectorOptions>()
+            .Bind(configuration.GetSection(PlaybookSelectorOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // IntentReranker options (chat-routing-redesign-r1 task 111R / FR-46) —
+        // hybrid LLM intent reranker tuning knobs (model deployment, FR-46 timeout
+        // budget, sampling temperature). All properties have spec-defined defaults
+        // so binding succeeds when the "IntentReranker" section is absent.
+        // ValidateOnStart fails fast on misconfigured ranges (e.g., negative timeout
+        // or out-of-range temperature) at app start rather than at first rerank call.
+        services
+            .AddOptions<IntentRerankerOptions>()
+            .Bind(configuration.GetSection(IntentRerankerOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
         services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
+        // Phase 1R FR-1R-06: deprecation warning when any Workspace__*PlaybookId env var
+        // is set (routing now lives in sprk_playbookconsumer Dataverse table; env vars
+        // are graceful-degrade fallback only during the deprecation window).
+        services.AddSingleton<IValidateOptions<WorkspaceOptions>, WorkspaceOptionsValidator>();
 
         // Startup health check to validate configuration
         services.AddHostedService<StartupValidationService>();

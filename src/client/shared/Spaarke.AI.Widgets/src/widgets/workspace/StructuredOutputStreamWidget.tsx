@@ -110,6 +110,69 @@ import type { WorkspacePaneEvent } from '../../events/PaneEventTypes';
  */
 export type StructuredOutputDisplayHint = 'heading' | 'paragraph' | 'list' | 'badge' | 'callout';
 
+// ---------------------------------------------------------------------------
+// JSON Schema (action `outputSchema`) — R6 Pillar 5 (tasks 040 + 041)
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal subset of JSON Schema draft-07 the widget understands for schema-
+ * aware dispatch. Mirrors the shape that R6 Phase B Wave B-G2 (tasks 032 + 033)
+ * populated on `sprk_analysisaction.sprk_outputschemajson` for:
+ *
+ *   - `SUM-CHAT@v1`: `{ tldr: string[], summary: string, keywords: string,
+ *     entities: { organizations: string[], persons: string[] } }`
+ *
+ * The widget reads this schema to dispatch on top-level field type:
+ *
+ *   - Task 040: `{ type: 'array', items: { type: 'string' } }` →
+ *     accumulated content JSON.parse'd → Fluent v9 `<ul><li>...</li></ul>`.
+ *     Fixes R5 SC-18 TL;DR bug (Gap C, lessons-learned).
+ *   - Task 041: `{ type: 'object', properties: {...} }` → labeled key-value
+ *     blocks via `<SchemaAwareObjectRenderer />`; nested arrays REUSE task
+ *     040's `<SchemaAwareArrayRenderer />` (no duplicate implementation per
+ *     Q5 architectural decision). Fixes R5 SC-18 entities bug (Gap C).
+ *     Depth limit: nested object-of-object (depth ≥ 2) is out of Phase B
+ *     scope and falls back to compact JSON.stringify with a TODO marker.
+ *   - All other types: fall through to the legacy displayHint-based renderer
+ *     (backward compatibility for actions without `outputSchema` per NFR-11).
+ *
+ * The `outputSchema` is OPTIONAL on `widgetData`. When absent the widget
+ * behaves as it did pre-R6 (string-only renderer with `displayHint` dispatch).
+ *
+ * Reuse: this is a generic JSON Schema subset; nothing here is widget-specific.
+ * If another consumer needs richer JSON Schema (`oneOf`, `allOf`, `$ref`),
+ * extend ADDITIVELY; do not break this contract.
+ */
+export interface JsonSchemaField {
+  /**
+   * JSON Schema field type. We narrow to the four shapes the widget renders:
+   *   - `'string'`  — fall through to legacy renderer (current behaviour)
+   *   - `'array'`   — paired with `items` to dispatch array-of-string (task 040)
+   *   - `'object'`  — paired with `properties` to dispatch labeled blocks (task 041)
+   *   - `'number'`/`'boolean'` — fall through to legacy renderer
+   *
+   * Typed loose so unknown variants degrade to the fallback path without
+   * crashing the widget (defensive narrowing in the dispatch site).
+   */
+  type?: 'string' | 'number' | 'boolean' | 'array' | 'object' | string;
+  /** Item schema for `type: 'array'`. Task 040 supports `items: { type: 'string' }`. */
+  items?: JsonSchemaField;
+  /** Nested properties for `type: 'object'`. Task 041 will dispatch on these. */
+  properties?: Record<string, JsonSchemaField>;
+  /** Human-readable description (carried through for future UI hints). */
+  description?: string;
+}
+
+/**
+ * The action's output-schema declaration, mirrored from
+ * `sprk_analysisaction.sprk_outputschemajson`. Top-level is always
+ * `{ type: 'object', properties: { ... } }` per R6 Phase B Wave B-G2 contracts.
+ */
+export interface JsonSchema extends JsonSchemaField {
+  type?: 'object';
+  properties?: Record<string, JsonSchemaField>;
+}
+
 /**
  * Schema-driven field descriptor — the contract this widget renders against.
  *
@@ -241,6 +304,28 @@ export interface StructuredOutputStreamWidgetData {
    * "AI Output" + the active state badge.
    */
   title?: string;
+  /**
+   * Action `outputSchema` (R6 Pillar 5; populated by Phase B Wave B-G2 tasks
+   * 032 + 033 on `sprk_analysisaction.sprk_outputschemajson`). When present,
+   * the widget reads each top-level field's declared JSON Schema type and
+   * dispatches:
+   *
+   *   - `array` of `string` → Fluent v9 `<ul><li>...</li></ul>` (task 040 — THIS)
+   *   - `object` → labeled key-value blocks (task 041 — NEXT; same file)
+   *   - everything else → legacy `displayHint`-based renderer (back-compat)
+   *
+   * When ABSENT (legacy actions not yet migrated), the widget falls back to
+   * today's `displayHint` rendering with zero regression — this is the binding
+   * NFR-11 backward-compatibility contract.
+   *
+   * Schema-aware parsing happens on `streaming_complete` for the streaming
+   * path (mid-stream tokens cannot parse). For `mode: 'static'` the parse
+   * happens immediately at render time.
+   *
+   * Malformed JSON in the accumulated content surfaces an inline error state
+   * on the field; the widget does NOT crash and other fields render normally.
+   */
+  outputSchema?: JsonSchema;
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +424,52 @@ export const INSIGHTS_PLAYBOOK_SCHEMA: StructuredOutputSchema = {
   ],
 };
 
+/**
+ * SUM-CHAT@v1 action `outputSchema` mirror — exported so dispatchers (e.g.
+ * `dispatchSummarizeOnly` in `FilePreviewContextWidget.tsx`) can attach the
+ * schema-aware classifier contract to the widget payload WITHOUT redeclaring
+ * the shape at the call site.
+ *
+ * R6 Hotfix Wave B-G9a (2026-06-10): production walkthrough showed `tldr`
+ * (declared `array of string`) rendering as a bold paragraph and `entities`
+ * (declared `object`) rendering as comma-split bullets — i.e. the legacy
+ * `displayHint` path was running because `outputSchema` was ABSENT on
+ * `widgetData`. Tasks 040 + 041 added the schema-aware dispatch but
+ * `dispatchSummarizeOnly` did not pass `outputSchema`, so `classifySchemaField()`
+ * returned `'legacy'` for every field. The unit tests passed because they
+ * always set `outputSchema`. This constant + the dispatcher update closes the
+ * data-flow gap.
+ *
+ * SHAPE: mirrors `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Playbooks/
+ * summarize-document-for-chat.playbook.json` `actions[0].outputSchema`
+ * (Phase B Wave B-G2 task 032). The widget reads each top-level field's
+ * declared JSON Schema type and dispatches:
+ *
+ *   - `tldr`     → `array` of `string` → `<SchemaAwareArrayRenderer />` (bulleted list)
+ *   - `summary`  → `string`            → legacy `displayHint: 'paragraph'` path
+ *   - `keywords` → `string`            → legacy `displayHint: 'badge'` path
+ *   - `entities` → `object` w/ props   → `<SchemaAwareObjectRenderer />` (labeled blocks)
+ *
+ * Reuse: if a sibling action declares the SAME output envelope shape, it MAY
+ * reuse this constant verbatim. If it declares a divergent shape, mirror the
+ * new shape in a sibling constant — do NOT mutate this constant.
+ */
+export const SUM_CHAT_OUTPUT_SCHEMA: JsonSchema = {
+  type: 'object',
+  properties: {
+    tldr: { type: 'array', items: { type: 'string' } },
+    summary: { type: 'string' },
+    keywords: { type: 'string' },
+    entities: {
+      type: 'object',
+      properties: {
+        organizations: { type: 'array', items: { type: 'string' } },
+        persons: { type: 'array', items: { type: 'string' } },
+      },
+    },
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Internal reducer — append-only progressive rendering by JSON path
 // ---------------------------------------------------------------------------
@@ -356,6 +487,70 @@ interface FieldState {
 /** Phase machine for the streaming state. */
 type StreamPhase = 'idle' | 'streaming' | 'complete';
 
+/**
+ * Per-section render state — Phase 5R Wave 5-C (FR-54 / task 114b).
+ *
+ * Composite Output Node delivers N upstream Action outputs as named sections.
+ * Section streaming events (`section_started` / `section_data` /
+ * `section_completed`) are keyed by `sectionName` (declared by the playbook
+ * author on `sections[*].sectionName` config), NOT by schema field position.
+ *
+ * Coordination point count: 5 (schema-on-action + schema-aware widget) → 2
+ * (section name + section state).
+ *
+ * @see CompositeSectionResult in DeliverCompositeNodeExecutor.cs — BFF mirror
+ */
+export interface SectionState {
+  /** Stable section identifier from the playbook's composite Output config. */
+  sectionName: string;
+  /**
+   * Human-readable label for the section header. When undefined, the renderer
+   * humanizes `sectionName` via `prettyName()` (camelCase → "Camel Case").
+   */
+  displayLabel?: string;
+  /**
+   * Declaration-order index of this section within the composite playbook.
+   * Per FR-53 the SSE emit order is COMPLETION order, but the renderer uses
+   * `sectionIndex` as a stable sort hint when defined so the on-screen layout
+   * matches the playbook author's intent.
+   */
+  sectionIndex?: number;
+  /** Total declared sections — for "N of M complete" progress hints. */
+  totalSections?: number;
+  /**
+   * Lifecycle state of the section.
+   *   - `'idle'`        — defensive default for sections that received a stray
+   *                       `section_data` or `section_completed` before
+   *                       `section_started` (tolerated, no crash).
+   *   - `'streaming'`   — `section_started` received; awaiting more data or
+   *                       completion.
+   *   - `'completed'`   — `section_completed` received; final state recorded.
+   */
+  status: 'idle' | 'streaming' | 'completed';
+  /**
+   * Accumulated text from all `section_data.contentDelta` chunks plus any
+   * `section_completed.finalContent` replacement.
+   */
+  accumulatedText: string;
+  /**
+   * Last-known structured data payload from `section_data.structuredData`
+   * (shallow-merged) and/or `section_completed.finalStructuredData` (replaces).
+   * Typed `unknown` — render-time narrowing.
+   */
+  structuredData?: unknown;
+  /**
+   * Citation list from `section_completed.citations` (NFR-A3 trust model).
+   * Each citation is an opaque record — subscribers cross-reference IDs.
+   */
+  citations?: ReadonlyArray<Record<string, unknown>>;
+  /**
+   * Monotonic insertion timestamp. Used as a deterministic fallback for sort
+   * when `sectionIndex` is missing on multiple sections; ensures a stable
+   * (insertion-order) render order.
+   */
+  receivedAt: number;
+}
+
 interface StreamReducerState {
   phase: StreamPhase;
   /**
@@ -370,28 +565,109 @@ interface StreamReducerState {
    * Cleared on `streaming_complete`.
    */
   mostRecentPath: string | null;
+  /**
+   * Section-name → SectionState. Phase 5R Wave 5-C (FR-54).
+   *
+   * Populated by the composite-section events (`section_started` /
+   * `section_data` / `section_completed`). Map preserves insertion order
+   * (= first-event-seen order), used as a deterministic fallback when
+   * sectionIndex is missing.
+   *
+   * BACKWARD-COMPAT INVARIANT: this map is EMPTY for unmigrated playbooks
+   * (only `FieldDelta` events arrive). The renderer detects "section mode"
+   * via `sections.size > 0` and routes accordingly. Mixed mode (both field
+   * deltas AND section events on the same widget instance) is undefined
+   * behaviour by spec (114a's BFF guard ensures one OR the other per stream);
+   * the renderer is defensive but lets sections take precedence if observed.
+   */
+  sections: Map<string, SectionState>;
+  /**
+   * Section name that most recently received a section event. Used by the
+   * renderer to surface a streaming indicator at the active section. Cleared
+   * by `section_completed` for that section.
+   */
+  mostRecentSectionName: string | null;
+  /**
+   * Monotonic counter for `SectionState.receivedAt`. Incremented on every
+   * section event so insertion order is unambiguously preserved.
+   */
+  sectionTickCounter: number;
 }
 
 type StreamReducerAction =
   | { type: 'streaming_started' }
   | { type: 'field_delta'; path: string; content: string; sequence: number }
   | { type: 'streaming_complete' }
+  | {
+      type: 'section_started';
+      sectionName: string;
+      displayLabel?: string;
+      sectionIndex?: number;
+      totalSections?: number;
+    }
+  | {
+      type: 'section_data';
+      sectionName: string;
+      contentDelta?: string;
+      structuredData?: unknown;
+    }
+  | {
+      type: 'section_completed';
+      sectionName: string;
+      finalContent?: string;
+      finalStructuredData?: unknown;
+      citations?: ReadonlyArray<Record<string, unknown>>;
+    }
   | { type: 'reset' };
 
 const INITIAL_REDUCER_STATE: StreamReducerState = {
   phase: 'idle',
   fields: new Map(),
   mostRecentPath: null,
+  sections: new Map(),
+  mostRecentSectionName: null,
+  sectionTickCounter: 0,
 };
+
+/**
+ * Defensive shallow-merge for `structuredData` payloads.
+ *
+ * - If `next` is undefined → keep `prior` unchanged.
+ * - If `prior` is undefined → adopt `next` wholesale.
+ * - If BOTH are plain objects → shallow-merge (next wins on key collision).
+ * - Otherwise (one or both are arrays / primitives) → REPLACE with `next` —
+ *   safe default since merging an array into an object would be a type error
+ *   in the consumer's contract.
+ */
+function mergeStructuredData(prior: unknown, next: unknown): unknown {
+  if (next === undefined) return prior;
+  if (prior === undefined) return next;
+  if (
+    typeof prior === 'object' &&
+    prior !== null &&
+    !Array.isArray(prior) &&
+    typeof next === 'object' &&
+    next !== null &&
+    !Array.isArray(next)
+  ) {
+    return { ...(prior as Record<string, unknown>), ...(next as Record<string, unknown>) };
+  }
+  return next;
+}
 
 function streamReducer(state: StreamReducerState, action: StreamReducerAction): StreamReducerState {
   switch (action.type) {
     case 'streaming_started':
-      // Fresh start. Clear any prior content from a previous run.
+      // Fresh start. Clear any prior content from a previous run — applies to
+      // BOTH legacy field state AND section state, since a fresh stream may
+      // begin in either mode.
       return {
         phase: 'streaming',
         fields: new Map(),
         mostRecentPath: null,
+        sections: new Map(),
+        mostRecentSectionName: null,
+        sectionTickCounter: 0,
       };
 
     case 'field_delta': {
@@ -415,6 +691,7 @@ function streamReducer(state: StreamReducerState, action: StreamReducerAction): 
         lastSequence: sequence,
       });
       return {
+        ...state,
         // First delta also flips phase to streaming if a stream began without
         // an explicit `streaming_started` (defensive — should not happen, but
         // makes the widget robust to a missing prelude).
@@ -426,10 +703,105 @@ function streamReducer(state: StreamReducerState, action: StreamReducerAction): 
 
     case 'streaming_complete':
       return {
+        ...state,
         phase: 'complete',
-        fields: state.fields,
         mostRecentPath: null,
       };
+
+    case 'section_started': {
+      const { sectionName, displayLabel, sectionIndex, totalSections } = action;
+      const nextSections = new Map(state.sections);
+      const prior = nextSections.get(sectionName);
+      const nextTick = state.sectionTickCounter + 1;
+      // Out-of-order tolerance (per task 114b spec): if section_completed
+      // already fired (e.g., events arrived reordered), keep the completed
+      // status but refresh metadata. Otherwise mark as 'streaming'.
+      const status = prior?.status === 'completed' ? 'completed' : 'streaming';
+      nextSections.set(sectionName, {
+        sectionName,
+        displayLabel: displayLabel ?? prior?.displayLabel,
+        sectionIndex: sectionIndex ?? prior?.sectionIndex,
+        totalSections: totalSections ?? prior?.totalSections,
+        status,
+        accumulatedText: prior?.accumulatedText ?? '',
+        structuredData: prior?.structuredData,
+        citations: prior?.citations,
+        receivedAt: prior?.receivedAt ?? nextTick,
+      });
+      return {
+        ...state,
+        // Section streaming implies the overall phase is streaming (consistent
+        // with the legacy stream's `streaming_started` semantics).
+        phase: state.phase === 'idle' ? 'streaming' : state.phase,
+        sections: nextSections,
+        mostRecentSectionName: sectionName,
+        sectionTickCounter: nextTick,
+      };
+    }
+
+    case 'section_data': {
+      const { sectionName, contentDelta, structuredData } = action;
+      const nextSections = new Map(state.sections);
+      const prior = nextSections.get(sectionName);
+      const nextTick = state.sectionTickCounter + 1;
+      // Defensive: if section_data arrives before section_started, create a
+      // partial entry with status 'streaming' so subsequent events accumulate
+      // correctly (out-of-order tolerance per task 114b spec).
+      const base: SectionState = prior ?? {
+        sectionName,
+        status: 'streaming',
+        accumulatedText: '',
+        receivedAt: nextTick,
+      };
+      nextSections.set(sectionName, {
+        ...base,
+        // Keep prior status unless this is the first event — never downgrade
+        // 'completed' back to 'streaming' (defensive against reordered events).
+        status: base.status === 'completed' ? 'completed' : 'streaming',
+        accumulatedText: base.accumulatedText + (contentDelta ?? ''),
+        structuredData: mergeStructuredData(base.structuredData, structuredData),
+      });
+      return {
+        ...state,
+        phase: state.phase === 'idle' ? 'streaming' : state.phase,
+        sections: nextSections,
+        mostRecentSectionName: sectionName,
+        sectionTickCounter: nextTick,
+      };
+    }
+
+    case 'section_completed': {
+      const { sectionName, finalContent, finalStructuredData, citations } = action;
+      const nextSections = new Map(state.sections);
+      const prior = nextSections.get(sectionName);
+      const nextTick = state.sectionTickCounter + 1;
+      // Defensive: if section_completed arrives before section_started, create
+      // a fresh completed entry so the renderer surfaces SOMETHING.
+      const base: SectionState = prior ?? {
+        sectionName,
+        status: 'streaming',
+        accumulatedText: '',
+        receivedAt: nextTick,
+      };
+      nextSections.set(sectionName, {
+        ...base,
+        status: 'completed',
+        // finalContent REPLACES accumulatedText when present (per FR-54
+        // contract); otherwise retain accumulated.
+        accumulatedText: finalContent !== undefined ? finalContent : base.accumulatedText,
+        // finalStructuredData REPLACES structuredData when present.
+        structuredData: finalStructuredData !== undefined ? finalStructuredData : base.structuredData,
+        citations: citations ?? base.citations,
+      });
+      return {
+        ...state,
+        sections: nextSections,
+        // Clear "most recent" only if this was the active section; otherwise
+        // preserve so the cursor stays at whichever section is still streaming.
+        mostRecentSectionName: state.mostRecentSectionName === sectionName ? null : state.mostRecentSectionName,
+        sectionTickCounter: nextTick,
+      };
+    }
 
     case 'reset':
       return INITIAL_REDUCER_STATE;
@@ -597,6 +969,122 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
     fontSize: tokens.fontSizeBase300,
   },
+  // R6 task 041 — schema-aware object renderer (labeled key-value blocks).
+  // Top-level container: vertical stack of nested labeled rows, each row
+  // containing a small uppercase label and the rendered value below.
+  schemaObjectContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+  },
+  schemaObjectRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+  },
+  schemaObjectKey: {
+    // Reuses the same look as `fieldLabel` (small, uppercase, neutral 3) so the
+    // nested block visually nests under the top-level field label without
+    // competing for visual weight.
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightSemibold,
+    textTransform: 'capitalize',
+  },
+  schemaObjectValueText: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: tokens.lineHeightBase400,
+    margin: 0,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+  // Empty-state hint shown when a nested array property parses to `[]`.
+  schemaObjectEmptyHint: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    fontStyle: 'italic',
+  },
+  // Compact-JSON fallback for depth-≥-2 nested objects (Phase B constraint).
+  // Renders as a monospaced single-line block with a discreet TODO marker so
+  // future phases can locate the deferred case.
+  schemaObjectDeepFallback: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    fontFamily: tokens.fontFamilyMonospace,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusSmall,
+    padding: tokens.spacingHorizontalS,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-all',
+  },
+  // Phase 5R Wave 5-C section-keyed renderer styles (FR-54 / task 114b).
+  // Section-keyed mode replaces the schema-position-keyed render pipeline when
+  // `section_*` SSE events arrive. Uses identical Fluent v9 semantic tokens
+  // (no hardcoded colors per ADR-021) so the section renderer feels native
+  // alongside the legacy field renderer.
+  sectionsContainer: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalL,
+    padding: tokens.spacingHorizontalM,
+  },
+  sectionBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  sectionHeader: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  sectionHeaderTitle: {
+    fontSize: tokens.fontSizeBase400,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: tokens.lineHeightBase400,
+    margin: 0,
+  },
+  sectionText: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: tokens.lineHeightBase400,
+    margin: 0,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
+  sectionStructuredFallback: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    fontFamily: tokens.fontFamilyMonospace,
+    backgroundColor: tokens.colorNeutralBackground2,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusSmall,
+    padding: tokens.spacingHorizontalS,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-all',
+    margin: 0,
+  },
+  sectionEmptyHint: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    fontStyle: 'italic',
+  },
+  sectionCitationsList: {
+    margin: 0,
+    paddingLeft: tokens.spacingHorizontalXL,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+  },
+  sectionCitationItem: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    lineHeight: tokens.lineHeightBase200,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -614,7 +1102,94 @@ function isStreamWidgetData(value: unknown): value is StructuredOutputStreamWidg
   if (typeof obj.schema !== 'object' || obj.schema === null) return false;
   const schema = obj.schema as Record<string, unknown>;
   if (!Array.isArray(schema.fields)) return false;
+  // outputSchema is OPTIONAL (back-compat per NFR-11). When present it must be
+  // an object; further shape validation happens lazily at dispatch time so a
+  // partially-malformed schema degrades to legacy rendering, not a crash.
+  if (obj.outputSchema !== undefined && (typeof obj.outputSchema !== 'object' || obj.outputSchema === null)) {
+    return false;
+  }
   return true;
+}
+
+/**
+ * Schema-aware dispatch result for a single top-level field.
+ *
+ * - `'array-of-string'` — outputSchema declares `{ type: 'array', items: { type: 'string' } }`;
+ *   widget renders as bulleted `<ul>` (task 040). Final-state only — mid-stream
+ *   tokens are not parseable JSON so they continue to render via the legacy
+ *   skeleton/cursor path until `streaming_complete`.
+ * - `'object'` — outputSchema declares `{ type: 'object', properties: { ... } }`;
+ *   widget renders as labeled key-value blocks via `<SchemaAwareObjectRenderer />`
+ *   (task 041, fixes R5 SC-18 entities bug). Nested arrays REUSE task 040's path.
+ * - `'legacy'` — no outputSchema, or field type doesn't match a schema-aware
+ *   case; widget renders via the existing `displayHint` path.
+ *
+ * Pure function — no side effects, safe to call per-render.
+ */
+function classifySchemaField(
+  outputSchema: JsonSchema | undefined,
+  fieldPath: string
+): 'array-of-string' | 'object' | 'legacy' {
+  if (outputSchema === undefined) return 'legacy';
+  const properties = outputSchema.properties;
+  if (properties === undefined || typeof properties !== 'object') return 'legacy';
+  const fieldSchema = properties[fieldPath];
+  if (fieldSchema === undefined || fieldSchema === null) return 'legacy';
+
+  // Array-of-string dispatch (task 040 — THIS task).
+  if (fieldSchema.type === 'array' && fieldSchema.items?.type === 'string') {
+    return 'array-of-string';
+  }
+
+  // Object dispatch (R6 task 041 — fixes R5 SC-18 entities bug, Gap C).
+  // When the outputSchema declares a field as `{ type: 'object', properties: {...} }`,
+  // we parse the accumulated content as JSON and render it as labeled
+  // key-value blocks (one per nested property), recursing into `renderValue`
+  // for each nested value (strings → text; arrays-of-strings → bulleted list
+  // REUSING the task 040 SchemaAwareArrayRenderer code path; deeper nested
+  // objects → compact JSON fallback per the Phase B depth-≥-2 constraint).
+  if (fieldSchema.type === 'object' && fieldSchema.properties) {
+    return 'object';
+  }
+
+  return 'legacy';
+}
+
+/**
+ * Attempt to JSON-parse accumulated streaming content as a string[] for a
+ * field whose outputSchema declares `{ type: 'array', items: { type: 'string' } }`.
+ *
+ * Returns the parsed array on success. Returns `{ error: string }` on:
+ *   - JSON.parse throwing (malformed JSON — common mid-stream, EXPECTED until
+ *     `streaming_complete` fires)
+ *   - parse result NOT being an array
+ *   - parse result array containing non-string items
+ *
+ * Callers MUST treat parse errors during `phase: 'streaming'` as expected
+ * (the content is incomplete) and DEFER schema-aware rendering until
+ * `phase: 'complete'`. Only post-complete parse failures surface as user-
+ * visible errors.
+ */
+function parseArrayOfString(content: string): { items: string[] } | { error: string } {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) return { items: [] };
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (!Array.isArray(parsed)) {
+      return { error: 'Expected JSON array; received non-array value' };
+    }
+    const items: string[] = [];
+    for (const v of parsed) {
+      if (typeof v !== 'string') {
+        return { error: 'Array contains non-string item' };
+      }
+      items.push(v);
+    }
+    return { items };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return { error: `Malformed JSON: ${message}` };
+  }
 }
 
 /**
@@ -828,6 +1403,501 @@ const FieldSkeleton: React.FC<{ styles: ReturnType<typeof useStyles>; displayHin
   );
 };
 
+/**
+ * Schema-aware bulleted-list renderer for `array: string` fields (R6 task 040).
+ *
+ * Renders the parsed `items` array as a Fluent v9 `<ul><li>...</li></ul>` styled
+ * via `tokens.colorNeutralForeground1` + `tokens.spacingHorizontalXL` (consistent
+ * with the legacy `ListRenderer`). On parse failure, renders an inline error
+ * surface that does NOT crash the widget or leak across other fields.
+ *
+ * Per ADR-021: zero hard-coded colors; all styling via Fluent v9 semantic
+ * tokens (reuses `styles.list`, `styles.listItem`, `styles.errorText`).
+ */
+interface SchemaAwareArrayRendererProps {
+  styles: ReturnType<typeof useStyles>;
+  items: string[] | null;
+  errorMessage: string | null;
+  fieldPath: string;
+}
+
+const SchemaAwareArrayRenderer: React.FC<SchemaAwareArrayRendererProps> = ({
+  styles,
+  items,
+  errorMessage,
+  fieldPath,
+}) => {
+  if (errorMessage !== null) {
+    return (
+      <div data-display-hint="schema-array-error" data-field-path={fieldPath}>
+        <Text className={styles.errorText}>{errorMessage}</Text>
+      </div>
+    );
+  }
+  if (items === null || items.length === 0) {
+    // Empty array — render an empty <ul> so structure is consistent (assertive
+    // for tests / accessibility tools) but no <li> children appear.
+    return (
+      <ul className={styles.list} data-display-hint="schema-array" data-field-path={fieldPath} data-empty="true" />
+    );
+  }
+  return (
+    <ul className={styles.list} data-display-hint="schema-array" data-field-path={fieldPath}>
+      {items.map((item, i) => (
+        <li key={`${item}-${i}`} className={styles.listItem}>
+          {item}
+        </li>
+      ))}
+    </ul>
+  );
+};
+
+/**
+ * Attempt to JSON-parse accumulated streaming content as an object for a field
+ * whose outputSchema declares `{ type: 'object', properties: {...} }` (R6 task 041).
+ *
+ * Returns the parsed object on success. Returns `{ error: string }` on:
+ *   - JSON.parse throwing (malformed JSON — common mid-stream, EXPECTED until
+ *     `streaming_complete` fires; callers gate on phase per the same contract
+ *     as `parseArrayOfString`)
+ *   - parse result NOT being a plain object (e.g., null, array, primitive)
+ *
+ * Symmetry with `parseArrayOfString` is deliberate: same discriminated-union
+ * shape, same defensive try/catch, same caller responsibilities. Treat parse
+ * errors during `phase: 'streaming'` as expected (content incomplete) and
+ * DEFER schema-aware rendering until `phase: 'complete'`.
+ */
+function parseObject(content: string): { value: Record<string, unknown> } | { error: string } {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) {
+    // Empty input is treated as an empty object (renderer shows empty labeled
+    // blocks per schema declaration) — consistent with parseArrayOfString
+    // returning `{ items: [] }` for empty input.
+    return { value: {} };
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { error: 'Expected JSON object; received non-object value' };
+    }
+    return { value: parsed as Record<string, unknown> };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return { error: `Malformed JSON: ${message}` };
+  }
+}
+
+/**
+ * Humanize a camelCase / snake_case JSON property key for display as a label.
+ *
+ *   - `organizations` → `Organizations`
+ *   - `firstName`     → `First Name`
+ *   - `case_id`       → `Case Id`
+ *
+ * v1 deliberately simple — locale-aware tokenization deferred to future phases
+ * if international schemas land. Keeps the renderer's UX consistent without
+ * introducing an i18n dependency.
+ */
+function prettyName(key: string): string {
+  if (key.length === 0) return key;
+  // Split on camelCase boundaries first, then on underscores / hyphens.
+  const spaced = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+  // Capitalize the first letter of each word.
+  return spaced
+    .split(/\s+/)
+    .filter(w => w.length > 0)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/**
+ * Schema-aware object renderer for `{ type: 'object', properties: {...} }`
+ * fields (R6 task 041 — fixes R5 SC-18 entities bug, Gap C in lessons-learned).
+ *
+ * Renders the parsed object as a vertical stack of LABELED key-value blocks:
+ * one row per nested property declared on the schema, with the property name
+ * humanized via `prettyName()` and the value rendered recursively via
+ * `renderObjectValue()` — which dispatches to:
+ *
+ *   - `array` of `string` → REUSES `<SchemaAwareArrayRenderer />` (task 040 path,
+ *     no duplicate implementation per Q5 architectural decision)
+ *   - `string` → plain text via `tokens.colorNeutralForeground1`
+ *   - `object` (depth ≥ 2) → compact JSON.stringify fallback per the Phase B
+ *     depth-limit constraint (out of scope for Phase B; documented inline for
+ *     future-phase pickup)
+ *   - any other shape → compact JSON fallback (defensive)
+ *
+ * Iteration order matches the schema's `properties` declaration order — JSON
+ * Schema does not formally order keys, but the action contracts (`SUM-CHAT@v1`,
+ * etc.) declare properties in a deliberate UI-presentation order and we honor
+ * it. Properties present in the parsed value but absent from the schema are
+ * IGNORED (out-of-band data does not appear in the labeled blocks); properties
+ * present in the schema but absent from the parsed value render as an empty
+ * em-dash placeholder so the layout remains stable.
+ *
+ * Errors: a single inline error surface on parse failure (mirrors
+ * `<SchemaAwareArrayRenderer />`); the widget does NOT crash and sibling fields
+ * continue to render normally.
+ *
+ * Per ADR-021: zero hard-coded colors; all styling via Fluent v9 semantic
+ * tokens (`schemaObjectKey`, `schemaObjectValueText`, `schemaObjectDeepFallback`,
+ * etc.).
+ */
+interface SchemaAwareObjectRendererProps {
+  styles: ReturnType<typeof useStyles>;
+  value: Record<string, unknown> | null;
+  errorMessage: string | null;
+  fieldPath: string;
+  fieldSchema: JsonSchemaField;
+}
+
+/**
+ * Render a single nested value within a `SchemaAwareObjectRenderer` row.
+ *
+ * Depth is tracked by the caller — task 041 / Phase B supports exactly ONE
+ * level of object nesting (top-level field is object; its properties may be
+ * strings or arrays-of-strings). Any deeper nested object (depth ≥ 2 from
+ * the top-level object field) falls back to compact JSON with a documented
+ * TODO marker. This bound matches the R6 spec FR-29 + Phase B constraint
+ * carried in the POML (see <constraints> "Nested object-of-object (depth ≥ 2)
+ * is OUT of scope for Phase B").
+ *
+ * Pure function — no side effects.
+ */
+function renderObjectValue(
+  styles: ReturnType<typeof useStyles>,
+  value: unknown,
+  schema: JsonSchemaField | undefined,
+  fieldPath: string,
+  propKey: string,
+  depth: number
+): React.ReactNode {
+  // Defensive: missing value (schema declares key but parsed object lacks it).
+  if (value === undefined) {
+    return (
+      <span className={styles.schemaObjectEmptyHint} data-empty="true">
+        —
+      </span>
+    );
+  }
+
+  const propType = schema?.type;
+
+  // Array property — REUSE task 040's `<SchemaAwareArrayRenderer />` so the
+  // bulleted-list rendering is identical to top-level array fields. This is the
+  // Q5 architectural decision: do NOT duplicate task 040's path.
+  if (propType === 'array' && schema?.items?.type === 'string') {
+    if (!Array.isArray(value)) {
+      // Schema says array but parsed value isn't — defensive fallback.
+      return (
+        <Text className={styles.errorText} data-display-hint="schema-object-prop-error">
+          Expected array; got {typeof value}
+        </Text>
+      );
+    }
+    // Coerce items to string defensively.
+    const items: string[] = [];
+    for (const v of value) {
+      if (typeof v !== 'string') {
+        return (
+          <Text className={styles.errorText} data-display-hint="schema-object-prop-error">
+            Array contains non-string item
+          </Text>
+        );
+      }
+      items.push(v);
+    }
+    return (
+      <SchemaAwareArrayRenderer
+        styles={styles}
+        items={items}
+        errorMessage={null}
+        fieldPath={`${fieldPath}.${propKey}`}
+      />
+    );
+  }
+
+  // Plain-string property.
+  if (propType === 'string') {
+    if (typeof value !== 'string') {
+      return (
+        <Text className={styles.errorText} data-display-hint="schema-object-prop-error">
+          Expected string; got {typeof value}
+        </Text>
+      );
+    }
+    return (
+      <Text
+        className={styles.schemaObjectValueText}
+        data-display-hint="schema-object-string"
+        data-field-path={`${fieldPath}.${propKey}`}
+      >
+        {value}
+      </Text>
+    );
+  }
+
+  // Nested object property — Phase B depth limit.
+  //
+  // Depth semantics: `depth` = how many object levels we've descended through
+  // BEFORE reaching this property. `SchemaAwareObjectRenderer` itself
+  // (rendering the top-level object field) sits at "depth 1"; it invokes
+  // `renderObjectValue` with `depth = 1`. If the property's value is ALSO an
+  // object, rendering it as labeled blocks would mean depth 2 — out of scope
+  // for Phase B (POML constraint: "Nested object-of-object (depth ≥ 2) is
+  // OUT of scope for Phase B").
+  //
+  // Therefore: if `propType === 'object'` we ALWAYS bail to compact JSON
+  // fallback at this point — Phase B does not render nested object levels
+  // as labeled blocks. The `data-depth` attribute reports `depth + 1` so the
+  // value reflects the level at which the deep value WOULD have been rendered
+  // (the more-intuitive UI-facing depth). Future phases lift this restriction
+  // by recursing into a nested `<SchemaAwareObjectRenderer />` here when
+  // `depth + 1 <= MAX_OBJECT_DEPTH`.
+  if (propType === 'object' && schema?.properties) {
+    const renderedDepth = depth + 1;
+    // eslint-disable-next-line no-console
+    console.debug(
+      `[StructuredOutputStreamWidget] depth-≥-2 nested object fallback path="${fieldPath}.${propKey}" depth=${renderedDepth}`
+    );
+    let compact: string;
+    try {
+      compact = JSON.stringify(value);
+    } catch {
+      compact = '[unserializable]';
+    }
+    return (
+      <pre
+        className={styles.schemaObjectDeepFallback}
+        data-display-hint="schema-object-deep-fallback"
+        data-field-path={`${fieldPath}.${propKey}`}
+        data-depth={String(renderedDepth)}
+      >
+        {/* TODO(phase-c): Lift depth-≥-2 limit when richer schemas land. */}
+        {compact}
+      </pre>
+    );
+  }
+
+  // Schema declares an unrecognised type (number, boolean, or omitted) — render
+  // a stringified value to surface SOMETHING without crashing. Future phases
+  // may add explicit dispatch for number/boolean if the contracts require it.
+  let display: string;
+  if (typeof value === 'string') {
+    display = value;
+  } else {
+    try {
+      display = JSON.stringify(value);
+    } catch {
+      display = String(value);
+    }
+  }
+  return (
+    <Text
+      className={styles.schemaObjectValueText}
+      data-display-hint="schema-object-fallback"
+      data-field-path={`${fieldPath}.${propKey}`}
+    >
+      {display}
+    </Text>
+  );
+}
+
+const SchemaAwareObjectRenderer: React.FC<SchemaAwareObjectRendererProps> = ({
+  styles,
+  value,
+  errorMessage,
+  fieldPath,
+  fieldSchema,
+}) => {
+  if (errorMessage !== null) {
+    return (
+      <div data-display-hint="schema-object-error" data-field-path={fieldPath}>
+        <Text className={styles.errorText}>{errorMessage}</Text>
+      </div>
+    );
+  }
+  const properties = fieldSchema.properties;
+  // Properties absent from schema — render empty labeled-block container so
+  // the layout is consistent with the array empty-state convention.
+  if (!properties || Object.keys(properties).length === 0) {
+    return (
+      <div
+        className={styles.schemaObjectContainer}
+        data-display-hint="schema-object"
+        data-field-path={fieldPath}
+        data-empty="true"
+      />
+    );
+  }
+  const parsed: Record<string, unknown> = value ?? {};
+  return (
+    <div className={styles.schemaObjectContainer} data-display-hint="schema-object" data-field-path={fieldPath}>
+      {Object.entries(properties).map(([propKey, propSchema]) => (
+        <div
+          key={propKey}
+          className={styles.schemaObjectRow}
+          data-prop-key={propKey}
+          data-field-path={`${fieldPath}.${propKey}`}
+        >
+          <Text className={styles.schemaObjectKey}>{prettyName(propKey)}</Text>
+          {renderObjectValue(styles, parsed[propKey], propSchema, fieldPath, propKey, 1)}
+        </div>
+      ))}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Section renderer — Phase 5R Wave 5-C (FR-54 / task 114b)
+// ---------------------------------------------------------------------------
+
+/**
+ * Per-section block renderer for the section-name-keyed composite Output Node
+ * pattern (FR-54). Replaces the schema-position-keyed render pipeline when
+ * `section_*` SSE events arrive.
+ *
+ * Layout (per section):
+ *   1. Header row: `displayLabel` (or `prettyName(sectionName)`) + status pill
+ *      ("Streaming…" while not yet completed; nothing when completed — the
+ *      surrounding container's "Complete" badge carries the terminal state).
+ *   2. Body: `accumulatedText` rendered as wrapping paragraph + (when
+ *      `structuredData` is present) compact JSON fallback below for renderer-
+ *      agnostic surfacing. Future tasks may add a per-widget-type registry for
+ *      richer structured rendering (out of 114b scope — keep MVP simple).
+ *   3. Citations: when `section_completed.citations` was carried, render a
+ *      sub-list of citation IDs / labels (NFR-A3 trust model). Each citation
+ *      record is opaque; we extract `id`/`label`/`title` defensively.
+ *
+ * Empty-section handling: when `accumulatedText` is empty and no
+ * `structuredData` was carried, render the header only with a muted hint
+ * "(no content)" so the user sees a stable structural placeholder.
+ *
+ * ADR-021: Fluent v9 semantic tokens via `useStyles` — no hardcoded colors.
+ */
+interface SectionRendererProps {
+  section: SectionState;
+  isMostRecent: boolean;
+  styles: ReturnType<typeof useStyles>;
+}
+
+const SectionRenderer: React.FC<SectionRendererProps> = ({ section, isMostRecent, styles }) => {
+  const label = section.displayLabel?.length ? section.displayLabel : prettyName(section.sectionName);
+  const isStreaming = section.status === 'streaming';
+  const showCursor = isStreaming && isMostRecent;
+  const hasText = section.accumulatedText.length > 0;
+  const hasStructured = section.structuredData !== undefined;
+  const citations = section.citations ?? [];
+
+  // Defensive: when structured data is a string already, render as text; when
+  // it's a non-trivial object/array, render as compact JSON below the text so
+  // the user sees SOMETHING without us coupling to widget-type-specific shapes.
+  let structuredJson: string | null = null;
+  if (hasStructured && typeof section.structuredData !== 'string') {
+    try {
+      structuredJson = JSON.stringify(section.structuredData, null, 2);
+    } catch {
+      structuredJson = null; // unserializable — drop silently
+    }
+  }
+
+  return (
+    <div
+      className={styles.sectionBlock}
+      data-section-name={section.sectionName}
+      data-section-status={section.status}
+      data-section-index={section.sectionIndex !== undefined ? String(section.sectionIndex) : undefined}
+    >
+      <div className={styles.sectionHeader}>
+        <h3 className={styles.sectionHeaderTitle} data-section-header={section.sectionName}>
+          {label}
+        </h3>
+        {isStreaming && (
+          <Badge appearance="tint" color="brand" size="small" data-section-status-badge="streaming">
+            Streaming…
+          </Badge>
+        )}
+      </div>
+
+      {/* Text body — accumulated delta or final content. */}
+      {hasText && (
+        <p
+          className={styles.sectionText}
+          data-section-body="text"
+          data-field-path={`section.${section.sectionName}.text`}
+        >
+          {typeof section.structuredData === 'string' && !section.accumulatedText.length
+            ? (section.structuredData as string)
+            : section.accumulatedText}
+          {showCursor && (
+            <span className={styles.cursor} aria-hidden="true">
+              ▋
+            </span>
+          )}
+        </p>
+      )}
+
+      {/* When structuredData is itself a plain string and accumulatedText is empty,
+          surface the string content (covers BFF emitters that put the entire
+          section payload under structuredData rather than contentDelta). */}
+      {!hasText && typeof section.structuredData === 'string' && (
+        <p
+          className={styles.sectionText}
+          data-section-body="text-from-structured"
+          data-field-path={`section.${section.sectionName}.text`}
+        >
+          {section.structuredData as string}
+        </p>
+      )}
+
+      {/* Compact JSON fallback for non-string structured data — keeps the
+          section MVP simple while still surfacing payload content. A future task
+          may register per-widget-type custom renderers; out of 114b scope. */}
+      {structuredJson !== null && (
+        <pre
+          className={styles.sectionStructuredFallback}
+          data-section-body="structured"
+          data-field-path={`section.${section.sectionName}.structured`}
+        >
+          {structuredJson}
+        </pre>
+      )}
+
+      {/* Empty-section placeholder. */}
+      {!hasText && !hasStructured && (
+        <span className={styles.sectionEmptyHint} data-section-body="empty">
+          {isStreaming ? '(waiting for content…)' : '(no content)'}
+        </span>
+      )}
+
+      {/* Citations (NFR-A3 trust model) — appear below content on completed sections. */}
+      {citations.length > 0 && (
+        <ul
+          className={styles.sectionCitationsList}
+          data-section-body="citations"
+          data-field-path={`section.${section.sectionName}.citations`}
+        >
+          {citations.map((c, i) => {
+            const rec = c as Record<string, unknown>;
+            const idValue = typeof rec.id === 'string' ? rec.id : undefined;
+            const labelValue = typeof rec.label === 'string' ? rec.label : undefined;
+            const titleValue = typeof rec.title === 'string' ? rec.title : undefined;
+            const display = labelValue ?? titleValue ?? idValue ?? `Citation ${i + 1}`;
+            return (
+              <li key={`${idValue ?? i}-${i}`} className={styles.sectionCitationItem}>
+                {display}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+};
+
 /** Dispatch to the right sub-renderer based on `displayHint`. */
 function renderFieldByHint(props: FieldRendererProps): React.ReactNode {
   switch (props.field.displayHint) {
@@ -873,6 +1943,7 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
   const declineState = isValid ? data.declineState : undefined;
   const emptyResultState = isValid ? data.emptyResultState === true : false;
   const title = isValid ? data.title : undefined;
+  const outputSchema = isValid ? data.outputSchema : undefined;
 
   const [streamState, dispatch] = React.useReducer(streamReducer, INITIAL_REDUCER_STATE);
 
@@ -924,6 +1995,62 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
       case 'streaming_complete':
         dispatch({ type: 'streaming_complete' });
         return;
+      // ── Phase 5R Wave 5-C section events (FR-54 / task 114b) ─────────────
+      case 'section_started': {
+        if (typeof event.sectionName !== 'string' || event.sectionName.length === 0) {
+          // eslint-disable-next-line no-console
+          console.debug('[StructuredOutputStreamWidget] dropped section_started without sectionName');
+          return;
+        }
+        dispatch({
+          type: 'section_started',
+          sectionName: event.sectionName,
+          displayLabel: typeof event.displayLabel === 'string' ? event.displayLabel : undefined,
+          sectionIndex: typeof event.sectionIndex === 'number' ? event.sectionIndex : undefined,
+          totalSections: typeof event.totalSections === 'number' ? event.totalSections : undefined,
+        });
+        return;
+      }
+      case 'section_data': {
+        if (typeof event.sectionName !== 'string' || event.sectionName.length === 0) {
+          // eslint-disable-next-line no-console
+          console.debug('[StructuredOutputStreamWidget] dropped section_data without sectionName');
+          return;
+        }
+        // contentDelta + structuredData are both optional; the reducer tolerates
+        // either-or-both. Drop only if NEITHER is present (no signal).
+        if (event.contentDelta === undefined && event.structuredData === undefined) {
+          // eslint-disable-next-line no-console
+          console.debug(
+            `[StructuredOutputStreamWidget] dropped section_data sectionName="${event.sectionName}" (no contentDelta or structuredData)`
+          );
+          return;
+        }
+        dispatch({
+          type: 'section_data',
+          sectionName: event.sectionName,
+          contentDelta: typeof event.contentDelta === 'string' ? event.contentDelta : undefined,
+          structuredData: event.structuredData,
+        });
+        return;
+      }
+      case 'section_completed': {
+        if (typeof event.sectionName !== 'string' || event.sectionName.length === 0) {
+          // eslint-disable-next-line no-console
+          console.debug('[StructuredOutputStreamWidget] dropped section_completed without sectionName');
+          return;
+        }
+        dispatch({
+          type: 'section_completed',
+          sectionName: event.sectionName,
+          finalContent: typeof event.finalContent === 'string' ? event.finalContent : undefined,
+          finalStructuredData: event.finalStructuredData,
+          citations: Array.isArray(event.citations)
+            ? (event.citations as ReadonlyArray<Record<string, unknown>>)
+            : undefined,
+        });
+        return;
+      }
       default:
         // Unknown event types — IGNORE per ADR-030.
         return;
@@ -941,6 +2068,35 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
   // ────────────────────────────────────────────────────────────────────────
 
   const sortedFields = React.useMemo(() => [...schema.fields].sort((a, b) => a.order - b.order), [schema.fields]);
+
+  // ── Section-mode detection (Phase 5R Wave 5-C / FR-54) ──────────────────
+  //
+  // BACKWARD-COMPAT INVARIANT: section-mode activates ONLY when at least one
+  // `section_*` event has populated the sections map. Unmigrated schema-position
+  // playbooks (which only emit `FieldDelta`) leave `sections.size === 0` →
+  // legacy renderer path runs unchanged.
+  //
+  // Mixed mode: if a widget instance receives BOTH event families (shouldn't
+  // happen per task 114a's BFF guard, but be defensive), section-mode takes
+  // precedence per the FR-54 architectural intent (coordination drops to 2).
+  // The legacy fields map remains in state but is not rendered.
+  const isSectionMode = streamState.sections.size > 0;
+  const sortedSections = React.useMemo(() => {
+    const arr = Array.from(streamState.sections.values());
+    // Sort by sectionIndex when defined; fall back to receivedAt (insertion
+    // order) for stable rendering when index is missing. The BFF emits in
+    // completion order per FR-53; sortedSections honours sectionIndex when
+    // present so the playbook author's declared order is the default UI order.
+    arr.sort((a, b) => {
+      const ai = a.sectionIndex;
+      const bi = b.sectionIndex;
+      if (ai !== undefined && bi !== undefined) return ai - bi;
+      if (ai !== undefined) return -1;
+      if (bi !== undefined) return 1;
+      return a.receivedAt - b.receivedAt;
+    });
+    return arr;
+  }, [streamState.sections]);
 
   // Header state badge — derived from current phase + override states.
   const headerBadge = (() => {
@@ -966,6 +2122,33 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
       );
     }
     // streaming mode
+    // Section-mode terminal state: all sections completed AND phase is not
+    // explicitly streaming → render "Complete" badge. Mixed mode (sections
+    // present + phase === 'complete') also renders complete.
+    if (isSectionMode) {
+      const allComplete = sortedSections.every(s => s.status === 'completed');
+      if (allComplete && streamState.phase !== 'streaming') {
+        return (
+          <Badge appearance="filled" color="success" icon={<CheckmarkCircleRegular />} data-state="complete">
+            Complete
+          </Badge>
+        );
+      }
+      if (allComplete) {
+        // Phase still streaming but all known sections are complete — render
+        // streaming because more sections may yet arrive.
+        return (
+          <Badge appearance="tint" color="brand" data-state="streaming">
+            Streaming…
+          </Badge>
+        );
+      }
+      return (
+        <Badge appearance="tint" color="brand" data-state="streaming">
+          Streaming…
+        </Badge>
+      );
+    }
     if (streamState.phase === 'complete') {
       return (
         <Badge appearance="filled" color="success" icon={<CheckmarkCircleRegular />} data-state="complete">
@@ -1022,6 +2205,7 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
                   ? streamState.phase
                   : 'static'
       }
+      data-render-mode={isSectionMode ? 'sections' : 'fields'}
     >
       <Card className={styles.card}>
         <CardHeader
@@ -1080,8 +2264,32 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
           </div>
         )}
 
-        {/* (a) Streaming + (b) Streaming-complete + static rendering — schema fields. */}
-        {!error && !declineState && !emptyResultState && !isLoading && (
+        {/* ── Phase 5R Wave 5-C section-keyed rendering (FR-54 / task 114b) ──
+            Section mode takes precedence over legacy field rendering when the
+            sections map has at least one entry. This is the FR-54 architectural
+            outcome: schema-position coordination drops out, coordination point
+            count goes from 5 to 2 (section name + section state). */}
+        {!error && !declineState && !emptyResultState && !isLoading && isSectionMode && (
+          <div className={styles.sectionsContainer} data-testid="sections-container">
+            {sortedSections.map((section, idx) => (
+              <React.Fragment key={section.sectionName}>
+                {idx > 0 && <Divider />}
+                <SectionRenderer
+                  section={section}
+                  isMostRecent={streamState.mostRecentSectionName === section.sectionName}
+                  styles={styles}
+                />
+              </React.Fragment>
+            ))}
+          </div>
+        )}
+
+        {/* (a) Streaming + (b) Streaming-complete + static rendering — schema fields.
+            BACKWARD-COMPAT path (FR-54): when no `section_*` events have arrived,
+            the legacy schema-position-keyed renderer runs UNCHANGED. Unmigrated
+            playbooks emitting only `FieldDelta` events render via this path
+            until migrated by 118R. */}
+        {!error && !declineState && !emptyResultState && !isLoading && !isSectionMode && (
           <div className={styles.fieldsContainer}>
             {sortedFields.length === 0 && <Text className={styles.emptyResultText}>(No schema fields declared.)</Text>}
             {sortedFields.map((field, idx) => {
@@ -1089,12 +2297,125 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
               const hasContent = typeof content === 'string' && content.length > 0;
               const showCursor = hasContent && showCursorForPath(field.path);
 
+              // ── Schema-aware dispatch (R6 task 040 array; task 041 object) ────
+              //
+              // When the action's `outputSchema` declares this field as an
+              // `array` of `string` (e.g., `tldr: string[]` on SUM-CHAT@v1),
+              // attempt to JSON.parse the accumulated content and render as
+              // a Fluent v9 bulleted list. The dispatch is GATED on the
+              // streaming phase: mid-stream tokens are not parseable JSON, so
+              // the legacy skeleton/cursor path continues to render until
+              // `streaming_complete` fires (or `mode === 'static'`).
+              //
+              // Per NFR-11 backward compatibility: when `outputSchema` is
+              // absent or the field's schema is not recognised, `classification`
+              // is `'legacy'` and the existing `renderFieldByHint` path runs
+              // unchanged.
+              const classification = classifySchemaField(outputSchema, field.path);
+              const schemaAwareReady = hasContent && (mode === 'static' || streamState.phase === 'complete');
+
+              let schemaAwareNode: React.ReactNode | null = null;
+              if (schemaAwareReady && classification === 'array-of-string') {
+                const parseResult = parseArrayOfString(content ?? '');
+                if ('error' in parseResult) {
+                  // R6 Hotfix Wave B-G10c (2026-06-10): The server streams VALUE
+                  // content per field (per R5 task 006 spike — Azure OpenAI emits
+                  // properties in declaration order), NOT full JSON syntax with
+                  // brackets. So at streaming_complete the `tldr` content is the
+                  // raw bullet text (e.g., "The international..."), not the JSON
+                  // literal `["The...", "..."]`. Strict JSON.parse fails. Fall
+                  // back to the LEGACY `splitListContent` which handles newline-
+                  // separated, comma-separated, and single-string shapes — same
+                  // forgiving behavior R5 had before 040/041's strict path.
+                  // eslint-disable-next-line no-console
+                  console.warn(
+                    `[StructuredOutputStreamWidget] schema-aware parse failure path="${field.path}" — falling back to splitListContent`
+                  );
+                  const fallbackItems = splitListContent(content ?? '');
+                  schemaAwareNode = (
+                    <SchemaAwareArrayRenderer
+                      styles={styles}
+                      items={fallbackItems}
+                      errorMessage={null}
+                      fieldPath={field.path}
+                    />
+                  );
+                } else {
+                  schemaAwareNode = (
+                    <SchemaAwareArrayRenderer
+                      styles={styles}
+                      items={parseResult.items}
+                      errorMessage={null}
+                      fieldPath={field.path}
+                    />
+                  );
+                }
+              } else if (schemaAwareReady && classification === 'object') {
+                // R6 task 041 — object dispatch (fixes R5 SC-18 entities bug).
+                // We parse the accumulated content as JSON and hand it +
+                // the schema's properties subtree to `SchemaAwareObjectRenderer`,
+                // which renders labeled key-value blocks (one per nested
+                // property) and recursively reuses task 040's bulleted-list
+                // path for nested array-of-string properties (e.g.,
+                // `entities.organizations`).
+                const fieldSchema = outputSchema?.properties?.[field.path];
+                if (fieldSchema === undefined) {
+                  // Should not happen: classification === 'object' implies the
+                  // field's schema exists with type 'object'. Defensive fallback.
+                  schemaAwareNode = null;
+                } else {
+                  // R6 Hotfix Wave B-G10c (2026-06-10): same streaming-value
+                  // problem as array-of-string above — server emits value text
+                  // per field, not JSON syntax. Try strict parse first; on
+                  // failure, try wrapping content in `{}` (common case where
+                  // the leading/trailing brace was stripped), and finally fall
+                  // back to a synthetic object with raw content under the first
+                  // declared property so user-visible content is preserved.
+                  let parseResult = parseObject(content ?? '');
+                  if ('error' in parseResult) {
+                    const wrapped = parseObject(`{${content ?? ''}}`);
+                    if (!('error' in wrapped)) {
+                      parseResult = wrapped;
+                    }
+                  }
+                  if ('error' in parseResult) {
+                    // Final fallback: render raw content as a paragraph so the
+                    // user sees SOMETHING rather than an error. Going through
+                    // SchemaAwareObjectRenderer would iterate the SCHEMA's
+                    // properties (organizations / persons) and show em-dashes
+                    // for each — worse UX than just showing the raw text.
+                    // eslint-disable-next-line no-console
+                    console.warn(
+                      `[StructuredOutputStreamWidget] schema-aware object parse failure path="${field.path}" — using raw-text fallback`
+                    );
+                    schemaAwareNode = (
+                      <div data-display-hint="schema-object-raw-fallback" data-field-path={field.path}>
+                        <Text className={styles.schemaObjectValueText}>{(content ?? '').trim()}</Text>
+                      </div>
+                    );
+                  } else {
+                    schemaAwareNode = (
+                      <SchemaAwareObjectRenderer
+                        styles={styles}
+                        value={parseResult.value}
+                        errorMessage={null}
+                        fieldPath={field.path}
+                        fieldSchema={fieldSchema}
+                      />
+                    );
+                  }
+                }
+              }
+
               return (
                 <React.Fragment key={field.path}>
                   {idx > 0 && <Divider />}
                   <div className={styles.fieldBlock} data-field-path={field.path}>
                     {field.label && <Text className={styles.fieldLabel}>{field.label}</Text>}
-                    {hasContent ? (
+                    {schemaAwareNode !== null ? (
+                      // Schema-aware path took over (task 040 array; task 041 object).
+                      schemaAwareNode
+                    ) : hasContent ? (
                       renderFieldByHint({ field, content: content ?? '', showCursor, styles })
                     ) : mode === 'streaming' && streamState.phase !== 'complete' ? (
                       // Skeleton while streaming and this field has not started yet

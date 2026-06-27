@@ -182,11 +182,16 @@ export interface IOrganization {
   sprk_name: string;
 }
 
-/** Dataverse sprk_contact entity */
+/**
+ * Dataverse `contact` (OOB Person) entity — the entity backing
+ * `sprk_todo.sprk_assignedto` post UAT 2026-06-21 migration. There is no
+ * custom `sprk_contact` table; this interface uses the OOB field names
+ * (`contactid`, `fullname`) so callers serialize/deserialize correctly.
+ */
 export interface IContact {
-  sprk_contactid: string;
-  sprk_name: string;
-  sprk_email?: string;
+  contactid: string;
+  fullname: string;
+  emailaddress1?: string;
 }
 
 /** Dataverse sprk_userpreference entity for storing user-specific settings. */

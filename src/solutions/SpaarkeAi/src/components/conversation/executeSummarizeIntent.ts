@@ -61,6 +61,12 @@ import type {
   ContextPaneEvent,
   PaneChannel,
   PaneChannelEventMap,
+  StructuredOutputStreamWidgetData,
+} from '@spaarke/ai-widgets';
+import {
+  STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE,
+  SUMMARIZE_SCHEMA,
+  SUM_CHAT_OUTPUT_SCHEMA,
 } from '@spaarke/ai-widgets';
 
 // ---------------------------------------------------------------------------
@@ -174,6 +180,23 @@ function generateStreamId(): string {
 }
 
 /**
+ * Build the Summary-tab title suffix from the list of source filenames.
+ *
+ * - 0 names → '' (caller emits plain `Summary`).
+ * - 1 name  → the filename verbatim.
+ * - 2 names → `<a>, <b>` (joined by comma + space).
+ * - 3+ names → `N files` (avoid unbounded title growth).
+ *
+ * @see Wave B-G9c2 — B8 per-run tab titles include the source filename.
+ */
+function formatTitleSuffix(names: ReadonlyArray<string>): string {
+  if (!names || names.length === 0) return '';
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]}, ${names[1]}`;
+  return `${names.length} files`;
+}
+
+/**
  * Promote held files + run the deterministic Summarize action.
  *
  * Throws on any /documents error, any /summarize 4xx/5xx, SSE network error,
@@ -257,7 +280,52 @@ export async function executeSummarizeIntent(
   publishPaneEvent('context', stagedEvent);
 
   // ───────────────────────────────────────────────────────────────────────
-  // Step 3: POST /summarize and consume the SSE stream
+  // Step 3a: Hotfix Wave B-G9c2 (B7 + B8) — emit `workspace.widget_load` to
+  // install a NEW Summary tab for THIS run (deferred install + per-run tab).
+  //
+  // B7 (defer install): WorkspacePane no longer auto-installs a Summary tab
+  // on mount. The tab is created on demand by the existing `widget_load`
+  // handler in WorkspacePane when this event fires.
+  //
+  // B8 (new tab per run): The streamId for THIS invocation is unique (the
+  // caller defaults to `generateStreamId()` when no `streamId` is passed in
+  // `ExecuteSummarizeIntentInputs`). The widget binds its correlationId to
+  // the streamId so events from concurrent / subsequent runs land in their
+  // own tabs (FR-06 restoration; the widget config in
+  // `register-structured-output-stream-widget.ts` already has
+  // `allowMultiple: true`).
+  //
+  // Tab title includes the source filename(s) when known. Up to 2 filenames
+  // verbatim; 3+ collapse to "N files" to avoid runaway tab titles.
+  // ───────────────────────────────────────────────────────────────────────
+  const titleSuffix = formatTitleSuffix(promotedFilenames);
+  const tabDisplayName = `Summary${titleSuffix ? `: ${titleSuffix}` : ''}`;
+
+  const widgetData: StructuredOutputStreamWidgetData & {
+    sessionId?: string;
+    fileIds?: string[];
+  } = {
+    mode: 'streaming',
+    schema: SUMMARIZE_SCHEMA,
+    // R6 Hotfix Wave B-G9a parity (mirrors `dispatchSummarizeOnly` in
+    // FilePreviewContextWidget): without `outputSchema`, `tldr` / `entities`
+    // fall back to legacy display hints.
+    outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
+    correlationId: streamId,
+    title: tabDisplayName,
+    sessionId,
+    fileIds: promotedIds.slice(),
+  };
+
+  publishPaneEvent('workspace', {
+    type: 'widget_load',
+    widgetType: STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE,
+    widgetData,
+    displayName: tabDisplayName,
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Step 3b: POST /summarize and consume the SSE stream
   // ───────────────────────────────────────────────────────────────────────
   const summarizeUrl = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/summarize`;
   const bridge = createSseToPaneEventBridge(streamId);

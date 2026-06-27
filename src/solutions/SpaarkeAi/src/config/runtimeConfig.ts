@@ -1,87 +1,39 @@
 /**
- * runtimeConfig.ts
- * Runtime configuration singleton for the SpaarkeAi Code Page.
+ * SpaarkeAi runtime-config singleton.
  *
- * Config is resolved at bootstrap from Dataverse Environment Variables
- * via resolveRuntimeConfig() from @spaarke/auth. Never use module-level
- * constants that call these getters — they will throw before bootstrap.
+ * Post-consolidation (R2 task 055 / FR-21): this file is a thin consumer of the
+ * canonical `createRuntimeConfigStore` factory from `@spaarke/auth`. The
+ * previous local implementation (singleton state, getters, error labeling,
+ * simple `getTenantId()` reader) has been eliminated; the factory preserves
+ * the exact pre-consolidation behavior via the `errorLabel: "SpaarkeAi"`
+ * config (defaults handle the simple tenant-id read case). See
+ * `projects/spaarke-daily-update-service-r2/notes/runtime-config-divergence.md`
+ * for the divergence analysis informing the consolidation.
  *
- * Usage:
- *   1. Call setRuntimeConfig() once at bootstrap (main.tsx) after resolveRuntimeConfig()
- *   2. Import getBffBaseUrl / getBffOAuthScope / getMsalClientId anywhere via lazy functions
+ * Why this file still exists (FR-21 acceptance relaxation, owner decision):
+ * Multiple consumer modules import `setRuntimeConfig` / `getBffBaseUrl` /
+ * `getTenantId` from this path. Replacing every import with a direct
+ * `@spaarke/auth` factory call would create N stores per solution (each
+ * factory call produces a fresh store — wrong singleton semantics). Keeping
+ * this file as a single factory-call + re-export preserves singleton-per-
+ * solution semantics AND avoids touching consumer imports.
  *
- * @see ADR-006 - Code Pages for standalone dialogs (not PCF)
- * @see resolveRuntimeConfig in @spaarke/auth
+ * @see @spaarke/auth#createRuntimeConfigStore — the canonical factory.
+ * @see ADR-028 — Spaarke Auth Architecture.
+ * @see ADR-006 — Code Pages for standalone dialogs.
  */
 
-import type { IRuntimeConfig } from "@spaarke/auth";
+import { createRuntimeConfigStore } from "@spaarke/auth";
 
-// ---------------------------------------------------------------------------
-// Singleton
-// ---------------------------------------------------------------------------
+const store = createRuntimeConfigStore({
+  errorLabel: "SpaarkeAi",
+  // SpaarkeAi's getTenantId() is a simple stored-value read with no fallback —
+  // factory defaults (lazyTenantResolveWithTelemetry: false) handle this
+  // exactly the same way the pre-consolidation local impl did.
+});
 
-let _config: IRuntimeConfig | null = null;
-
-/**
- * Store the resolved runtime config. Called once from main.tsx bootstrap.
- * Also sets window globals so that @spaarke/auth resolveConfig() can find them.
- */
-export function setRuntimeConfig(config: IRuntimeConfig): void {
-  _config = config;
-
-  // Set window globals for @spaarke/auth resolveConfig() and MSAL
-  if (typeof window !== "undefined") {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).__SPAARKE_BFF_BASE_URL__ = config.bffBaseUrl;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).__SPAARKE_MSAL_CLIENT_ID__ = config.msalClientId;
-  }
-}
-
-/**
- * Get the resolved runtime config. Throws if not initialized.
- */
-function getConfig(): IRuntimeConfig {
-  if (!_config) {
-    throw new Error(
-      "[SpaarkeAi] Runtime config not initialized. " +
-        "Call setRuntimeConfig() in main.tsx before using config getters."
-    );
-  }
-  return _config;
-}
-
-// ---------------------------------------------------------------------------
-// Public accessors — always lazy functions (never module-level constants)
-// ---------------------------------------------------------------------------
-
-/**
- * BFF API base URL resolved from Dataverse Environment Variables at runtime.
- * Returns HOST ONLY — the /api suffix is stripped by normalizeUrl() in @spaarke/auth.
- * Example: "https://spe-api-dev-67e2xz.azurewebsites.net"
- */
-export function getBffBaseUrl(): string {
-  return getConfig().bffBaseUrl;
-}
-
-/**
- * BFF API OAuth scope resolved from Dataverse Environment Variables at runtime.
- * Example: "api://1e40baad-.../user_impersonation"
- */
-export function getBffOAuthScope(): string {
-  return getConfig().bffOAuthScope;
-}
-
-/**
- * MSAL client ID resolved from Dataverse Environment Variables at runtime.
- */
-export function getMsalClientId(): string {
-  return getConfig().msalClientId;
-}
-
-/**
- * Azure AD tenant ID captured at bootstrap from Xrm.organizationSettings.
- */
-export function getTenantId(): string {
-  return getConfig().tenantId ?? "";
-}
+export const setRuntimeConfig = store.setRuntimeConfig;
+export const getBffBaseUrl = store.getBffBaseUrl;
+export const getBffOAuthScope = store.getBffOAuthScope;
+export const getMsalClientId = store.getMsalClientId;
+export const getTenantId = store.getTenantId;

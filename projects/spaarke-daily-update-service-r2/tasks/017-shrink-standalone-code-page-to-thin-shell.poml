@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Shrink standalone code page to thin host shell (FR-08)</title>
+    <phase>P2: Pattern D Hoist</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>061</blocks>
+    <tags>frontend, react, fluent-ui, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Deletes solution-local business logic; visual regression risk; mandatory thin-shell contract</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Reduce `src/solutions/DailyBriefing/src/` to a thin host shell per FR-08. The shell contains ONLY host-binding plumbing: runtime config resolution, auth initialization, theme bootstrap, Xrm resolution, FluentProvider setup. It mounts `&lt;DailyBriefingApp {...hostBindings} /&gt;` from `@spaarke/daily-briefing-components/components`. Delete every component, hook, service, and types file that has been hoisted. Verify grep shows no business logic remains.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in thin host shell pattern (EventsPage precedent), Vite + React 19 code page bootstrap, and the Pattern D consumer shape.</role>
+
+  <goal>Standalone Daily Briefing code page (`src/solutions/DailyBriefing/src/`) contains only host-binding code; all business logic comes from the new shared package; build + runtime green.</goal>
+
+  <context>
+    <background>
+      Per FR-08: "thin host shell" is defined by content, not LOC. No business logic, no component definitions, no hook definitions, no service implementations. Visual rendering of the standalone code page should remain equivalent (NFR-02 relaxed).
+    </background>
+    <relevant-files>
+      <file>src/solutions/DailyBriefing/src/main.tsx</file>
+      <file>src/solutions/DailyBriefing/src/App.tsx</file>
+      <file>src/solutions/EventsPage/src/main.tsx</file>
+      <file>src/solutions/EventsPage/src/App.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Code Page pattern — standalone surface preserved as Vite + React 19 + Fluent v9.</constraint>
+    <constraint source="ADR-012">Thin shell consumes shared package; no business logic in solution.</constraint>
+    <constraint source="ADR-026">Vite + `vite-plugin-singlefile` + React 19 build standard.</constraint>
+    <constraint source="project">Spec FR-08: grep verifies no business logic, no component definitions, no hook definitions in `src/solutions/DailyBriefing/src/*.tsx`.</constraint>
+    <constraint source="project">Standalone code page MUST be preserved as a working surface (owner decision).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-006-ui-surface-architecture.md</file>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>docs/adr/ADR-026-code-page-build-standard.md</file>
+      <file>.claude/patterns/ui/fluent-v9-host-visual-fit.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+      <file>src/solutions/EventsPage/src/main.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="Thin host shell" location="src/solutions/EventsPage/src/">
+        Mirror EventsPage's main.tsx + App.tsx structure: auth init → theme → Xrm → FluentProvider → mount shared component.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `EventsPage/src/main.tsx` + `App.tsx` as the canonical thin-shell reference.</step>
+    <step order="2">Inventory `src/solutions/DailyBriefing/src/` — list every file. Identify which are host-binding (keep) vs business logic (delete).</step>
+    <step order="3">Delete all hoisted component/hook/service/types files from the solution.</step>
+    <step order="4">Update `App.tsx` (or equivalent) to import `DailyBriefingApp` from `@spaarke/daily-briefing-components/components` and mount it with host bindings.</step>
+    <step order="5">Verify `main.tsx` performs only: runtime config resolution, auth init, theme bootstrap, Xrm resolution, FluentProvider setup, mount.</step>
+    <step order="6">Run grep: `grep -r "function\|const.*=.*=&gt;" src/solutions/DailyBriefing/src/*.tsx` — verify only host-binding code remains; no component definitions, no hook definitions, no service implementations.</step>
+    <step order="7">Run `npm run build` in `src/solutions/DailyBriefing/`; build green.</step>
+    <step order="8">Locally serve the build; smoke test: TL;DR + bullets render; preferences work; To-Do creation works.</step>
+    <step order="9">Visual diff vs. pre-shrink baseline; document any non-trivial deviation in PR/`notes/`.</step>
+    <step order="10">Update TASK-INDEX.md: change task 017 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + dev server.</tool>
+    <tool name="terminal">Grep + file ops.</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="Standalone code page functional parity post-shrink">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_dailyupdate</url>
+      <steps>
+        <step>Open standalone Daily Briefing</step>
+        <step>Verify TL;DR + bullets render</step>
+        <step>Open preferences; disable a channel; verify refetch</step>
+        <step>Click an entity link; verify modal opens</step>
+        <step>Click Add-to-To-Do; verify `sprk_todo` created</step>
+      </steps>
+      <expected>All functions work identically to pre-shrink baseline</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Re-open standalone code page</step>
+      </steps>
+      <expected>All colors adapt; semantic tokens preserved</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/solutions/DailyBriefing/src/main.tsx</output>
+    <output type="code">src/solutions/DailyBriefing/src/App.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -r "function\|const.*=.*=&gt;" src/solutions/DailyBriefing/src/*.tsx` shows only host-binding code; no business logic.</criterion>
+    <criterion testable="true">All hoisted files deleted from `src/solutions/DailyBriefing/src/`.</criterion>
+    <criterion testable="true">Build + dev serve green; functional smoke equivalent to baseline.</criterion>
+    <criterion testable="true">Visual rendering equivalent to baseline (minor shifts acceptable per NFR-02).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Don't delete `MicrosoftToDoIcon.tsx`, `authInit.ts`, `runtimeConfig.ts` here — those go in DD tasks 050, 053, 055. This task is hoist-cleanup only.
+
+    **Completion (2026-06-18 — Wave 7 parallel batch)**:
+    - Deleted 18 shim files (9 components + channelIcons + components/index.ts + 2 hooks + 3 services + types/notifications.ts + utils/toastUtils.ts + App.tsx) and 4 now-empty directories (components/, hooks/, types/, utils/).
+    - Preserved 4 host-shell files: main.tsx (modified), vite-env.d.ts, config/runtimeConfig.ts (task 055 factory consumer), services/authInit.ts (task 053 factory consumer).
+    - main.tsx: imports `DailyBriefingApp` from `@spaarke/daily-briefing-components/components` directly; removed `import { App } from "./App"`; mounts `&lt;DailyBriefingApp params={params} /&gt;`.
+    - package.json: added `@spaarke/auth`, `@spaarke/daily-briefing-components`, `@spaarke/ui-components` as `file:` deps (EventsPage precedent).
+    - tsconfig.json: added `@spaarke/daily-briefing-components` + `/*` paths.
+    - vite.config.ts: added `@spaarke/daily-briefing-components` to sharedLibPaths (resolveSharedLibDeps), React plugin include globs, and resolve.alias.
+    - Grep verification: `grep -rE "function|const.*=.*=>" src/solutions/DailyBriefing/src/*.tsx` returns only 3 matches in main.tsx (`bootstrapAuth`, `Root`, `parseDataParams()` in `useMemo`). All host-binding; no component/hook/service definitions.
+    - Build verification: `tsc-surface-gate` reports "Surface-owned: 0" errors. Pre-existing `@spaarke/sdap-client` Vite resolution error in cross-package `EntityCreationService.ts` persists (out-of-scope per task brief). `tsc --noEmit` on solution-local files: zero errors.
+    - NO commit, NO push, NO TASK-INDEX update per orchestrator directive.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

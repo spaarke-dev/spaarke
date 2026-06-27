@@ -457,6 +457,7 @@ public sealed class SpeDashboardSyncService : BackgroundService
     {
         try
         {
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): SPE-dashboard metrics aggregate across all tenants/containers in the BFF org; cross-tenant aggregation is the intentional shape of the metric.
             var json = await _cache.GetStringAsync(CacheKey, ct);
             if (json == null) return null;
 
@@ -480,6 +481,7 @@ public sealed class SpeDashboardSyncService : BackgroundService
 
         var json = JsonSerializer.Serialize(metrics, CacheJsonOptions);
 
+        // SYSTEM-LEVEL EXCEPTION (NFR-08): SPE-dashboard metrics aggregate across all tenants/containers in the BFF org; cross-tenant aggregation is the intentional shape of the metric.
         await _cache.SetStringAsync(CacheKey, json,
             new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = ttl },
             ct);

@@ -33,10 +33,8 @@ import {
   ArrowClockwiseRegular,
   SettingsRegular,
 } from "@fluentui/react-icons";
-import { MicrosoftToDoIcon } from "../icons/MicrosoftToDoIcon";
+import { MicrosoftToDoIcon } from "@spaarke/ui-components";
 import { AddTodoBar } from "./AddTodoBar";
-import { MyTasksFilter } from "./MyTasksFilter";
-import type { MyTasksFilterMode } from "../hooks/useUserPreferences";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -102,15 +100,15 @@ export interface IKanbanHeaderProps {
   onSettingsOpen: () => void;
   /** When true, hides the header (matching existing SmartToDo embedded pattern). */
   embedded?: boolean;
-  /** Currently-selected My Tasks filter mode (R3 FR-12). */
-  myTasksFilterMode: MyTasksFilterMode;
-  /** Called when the user selects a different My Tasks filter mode. */
-  onMyTasksFilterModeChange: (mode: MyTasksFilterMode) => void;
   /**
-   * Disable the My Tasks filter (e.g. while user preferences are still
-   * loading on first render).
+   * Optional slot rendered in the right-action group, just BEFORE the
+   * Recalculate + Settings buttons. R4 task 070 mounts the shared
+   * `<OrientationToggle>` here so the user can flip the Kanban board
+   * between horizontal columns and vertical stacked sections (FR-28 /
+   * FR-29). Passing `undefined` leaves the right group unchanged
+   * (regression-safe for any consumer that hasn't adopted the slot yet).
    */
-  myTasksFilterDisabled?: boolean;
+  orientationSlot?: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,9 +124,7 @@ export const KanbanHeader: React.FC<IKanbanHeaderProps> = React.memo(
     isAdding,
     onSettingsOpen,
     embedded = false,
-    myTasksFilterMode,
-    onMyTasksFilterModeChange,
-    myTasksFilterDisabled = false,
+    orientationSlot,
   }) => {
     const styles = useStyles();
 
@@ -137,6 +133,7 @@ export const KanbanHeader: React.FC<IKanbanHeaderProps> = React.memo(
       return (
         <div className={styles.header} role="banner" style={{ justifyContent: "flex-end" }}>
           <div className={styles.rightGroup}>
+            {orientationSlot}
             <Button
               appearance="subtle"
               size="small"
@@ -178,21 +175,20 @@ export const KanbanHeader: React.FC<IKanbanHeaderProps> = React.memo(
           </Badge>
         </div>
 
-        {/* My Tasks filter — sits between title and add bar so the scope of
-            items being shown is visible adjacent to the count badge (FR-12). */}
-        <MyTasksFilter
-          value={myTasksFilterMode}
-          onChange={onMyTasksFilterModeChange}
-          disabled={myTasksFilterDisabled}
-        />
+        {/* R4 task 031 / FR-07 / OD-2 — the R3 inline `<MyTasksFilter>`
+            three-mode radio group is removed; the SmartTodo Code Page Header
+            (Row 3) now renders a single non-dismissible "Assigned to Me"
+            scope Tag instead. The kanban-only KanbanHeader carries no
+            filter-mode UI of its own. */}
 
         {/* Center group: add bar (flex-grow) */}
         <div className={styles.centerGroup}>
           <AddTodoBar onAdd={onAdd} isAdding={isAdding} />
         </div>
 
-        {/* Right group: recalculate + settings */}
+        {/* Right group: orientation toggle (R4 task 070) + recalculate + settings */}
         <div className={styles.rightGroup}>
+          {orientationSlot}
           <Button
             appearance="subtle"
             size="small"

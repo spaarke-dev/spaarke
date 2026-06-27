@@ -7,7 +7,8 @@
  *   - Due Date      (optional, sprk_duedate)
  *   - Priority Score (0-100 slider, sprk_priorityscore)
  *   - Effort Score   (0-100 slider, sprk_effortscore)
- *   - Assignee      (optional, systemuser lookup → sprk_assignedto)
+ *   - Assignee      (optional, OOB contact lookup → sprk_assignedto)
+ *                   UAT 2026-06-21: migrated from systemuser to contact
  *   - Notes         (optional, multi-line, sprk_notes)
  *
  * Per smart-todo-decoupling-r3 spec FR-15: This form writes to `sprk_todo`,
@@ -30,7 +31,12 @@ import type { ILookupItem } from '../../types/LookupTypes';
 
 export interface ICreateTodoStepProps {
   dataService: IDataService;
-  /** Search callback for systemuser assignee lookup. */
+  /**
+   * Search callback for the Assignee LookupField. Should return matching
+   * OOB `contact` records (UAT 2026-06-21 — `sprk_assignedto` migrated from
+   * systemuser to contact). Prop name retained for back-compat with the
+   * generic CreateRecordWizard pattern.
+   */
   onSearchUsers: (query: string) => Promise<ILookupItem[]>;
   onValidChange: (isValid: boolean) => void;
   onFormValues: (values: ICreateTodoFormState) => void;
@@ -154,7 +160,7 @@ export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
           value={assigneeValue}
           onChange={handleAssigneeChange}
           onSearch={onSearchUsers}
-          placeholder="Search users..."
+          placeholder="Search contacts..."
         />
       </div>
 

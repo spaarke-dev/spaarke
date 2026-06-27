@@ -35,7 +35,16 @@ if ($WhatIf) {
 Write-Host '[1/6] Installing npm dependencies...' -ForegroundColor Yellow
 Push-Location $reportingDir
 try {
-    npm install --prefer-offline 2>&1 | Write-Host
+    # Localize $ErrorActionPreference for the npm call so benign stderr
+    # output (e.g. Rollup's "/* #__PURE__ */" warnings on the build step)
+    # doesn't trip the script's outer 'Stop' preference. See 2026-06-11
+    # incident: master-deploy run blocked on a Rollup annotation warning
+    # even though $LASTEXITCODE was 0. The fix relies on $LASTEXITCODE
+    # for actual failure detection; the rest of the script keeps Stop.
+    & {
+        $ErrorActionPreference = 'Continue'
+        npm install --prefer-offline 2>&1 | Write-Host
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'Error: npm install failed.' -ForegroundColor Red
         exit 1
@@ -45,11 +54,14 @@ try {
     Pop-Location
 }
 
-# Step 2: npm run build
+# Step 2: npm run build (same localized $ErrorActionPreference rationale)
 Write-Host '[2/6] Building Reporting Code Page (vite build)...' -ForegroundColor Yellow
 Push-Location $reportingDir
 try {
-    npm run build 2>&1 | Write-Host
+    & {
+        $ErrorActionPreference = 'Continue'
+        npm run build 2>&1 | Write-Host
+    }
     if ($LASTEXITCODE -ne 0) {
         Write-Host 'Error: npm run build failed.' -ForegroundColor Red
         exit 1

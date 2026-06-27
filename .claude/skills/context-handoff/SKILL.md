@@ -367,3 +367,15 @@ This can be automatic if the user's first message is work-related, or explicit v
 ---
 
 *This skill ensures no work is lost across context boundaries.*
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 034 · FR-20) — **HIGHEST VALUE**
+
+**At end of skill** (after handoff document written): invoke `/devops-project-sync`.
+
+Per spec §6.2: this is the **highest-value hook** — compaction checkpoints (every 3 steps, >60% context, 5+ files modified) coincide with portfolio checkpoints so the GitHub board is never more than 3 task steps stale.
+
+Silent on success. Failure degrades to ⚠️ warn; does NOT block handoff write.
+
+See: [`.claude/skills/devops-project-sync/SKILL.md`](../devops-project-sync/SKILL.md).

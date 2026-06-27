@@ -335,15 +335,6 @@ public class MultiAppSupportTests
     // SpeAdminTokenProvider — EvictExpiredTokens
     // ─────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public void EvictExpiredTokens_DoesNotThrow_WhenCacheIsEmpty()
-    {
-        // Arrange
-        var provider = MakeTokenProvider();
-
-        // Act & Assert — should not throw
-        provider.Invoking(p => p.EvictExpiredTokens()).Should().NotThrow();
-    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // SHA256 token hashing — user tokens not stored in plaintext

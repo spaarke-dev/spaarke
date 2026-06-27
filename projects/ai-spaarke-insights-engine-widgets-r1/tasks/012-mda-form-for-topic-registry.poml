@@ -1,0 +1,62 @@
+<task id="012" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Generate model-driven app form for sprk_aitopicregistry (SME-editable)</title>
+    <status>completed</status>
+    <estimated-effort>1.5h</estimated-effort>
+    <phase>1</phase>
+    <tags>dataverse, form, mda</tags>
+    <dependencies>011</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Per FR-09: SMEs must be able to add a topic registry row via Power Apps without code deploy. Generate model-driven app form (Main + Quick Create) for `sprk_aitopicregistry`; verify SME UX.
+  </prompt>
+
+  <role>Power Apps form designer.</role>
+
+  <goal>
+    Two forms generated + saved: Main form (full editing) + Quick Create (add new topic). Verified SME can author a row via Power Apps UI.
+  </goal>
+
+  <inputs>
+    <file purpose="design">projects/ai-spaarke-insights-engine-widgets-r1/notes/topic-registry-schema-design.md (form layout sketch)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-09">SME-editable in Power Apps; no code deploy required</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>model-driven app, forms, savedquery, formxml</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/notes/topic-registry-schema-design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Author Main form FormXml">Sections + fields per design sketch</step>
+    <step order="2" name="Author Quick Create FormXml">Minimal subset (topicname, mode, playbookname, hostentity, targetfield)</step>
+    <step order="3" name="Deploy via solution patch">scripts/Deploy-AllWebResources.ps1 or equivalent</step>
+    <step order="4" name="SME smoke test">Add a test row via Power Apps; delete after verification</step>
+  </steps>
+
+  <outputs>
+    <output type="deployment">Main + Quick Create forms for sprk_aitopicregistry</output>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/topic-registry-form-deploy.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Main form opens via Power Apps and renders all 9 fields</criterion>
+    <criterion testable="true">Quick Create form successfully adds a row</criterion>
+    <criterion testable="true">No JavaScript required to add a row</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-10. Both forms deployed to spaarkedev1 in solution spaarke_insights:
+    - Main "AI Topic Registration" (formid 1823746f-4665-f111-ab0c-7ced8ddc4cc6) — 3 sections (Identity / Routing / Runtime), all 9 FR-04 fields + sprk_name + header sprk_enabled.
+    - Quick Create "Add Topic" (formid 5523746f-4665-f111-ab0c-7ced8ddc4cc6) — minimal subset per step 2 (7 fields).
+    Smoke test (Smoke-AiTopicRegistryQuickCreate.ps1) inserted + verified + deleted a test row using pure OData (no JS). Q-U1 guard in deploy script passed (zero @vN in FormXml). See notes/handoffs/topic-registry-form-deploy.md for full handoff.
+  </notes>
+</task>

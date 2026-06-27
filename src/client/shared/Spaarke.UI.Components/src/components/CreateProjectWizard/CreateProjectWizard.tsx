@@ -37,6 +37,7 @@ import { EMPTY_PROJECT_FORM } from './projectFormTypes';
 import type { ICreateProjectFormState } from './projectFormTypes';
 
 import { EntityCreationService } from '../../services/EntityCreationService';
+import type { IUserBuCascadeDefaults } from '../../services/EntityCreationService';
 import type { IDataService, INavigationService, IUploadService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { provisionSecureProject } from './provisioningService';
@@ -216,6 +217,27 @@ export interface ICreateProjectWizardProps {
    * Called when the wizard opens. If not provided, file uploads will be skipped.
    */
   resolveSpeContainerId?: () => Promise<string>;
+  /**
+   * Optional callback to resolve BU-derived cascade defaults
+   * (`sprk_containerid`, `sprk_searchindexname`) at finish time.
+   * Called once just before the Project record is created so the wizard can
+   * stamp both fields from the current user's owning Business Unit
+   * (FR-WIZ-02 / G2 latent-gap fix). When omitted, the cascade step is skipped
+   * and the BFF backfill chain handles the fields server-side.
+   *
+   * Implementations typically resolve `userId` from
+   * `Xrm.Utility.getGlobalContext().userSettings.userId` and call
+   * {@link EntityCreationService.resolveUserBuDefaults}.
+   */
+  resolveUserBuDefaults?: () => Promise<IUserBuCascadeDefaults>;
+  /**
+   * AAD tenant ID. Forwarded to `EntityCreationService.indexUploadedFiles()` so
+   * post-upload RAG indexing via `@spaarke/sdap-client` can route to the
+   * correct multi-tenant index. When omitted, indexing is skipped (files still
+   * upload to SPE successfully). Typically sourced from solution
+   * `config.tenantId` in `main.tsx`.
+   */
+  tenantId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +273,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
   authenticatedFetch: authFetch,
   bffBaseUrl,
   resolveSpeContainerId,
+  resolveUserBuDefaults,
+  tenantId,
 }) => {
   // ── Entity-specific form state ──────────────────────────────────────────
   const [formValid, setFormValid] = React.useState(false);
@@ -379,9 +403,26 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         const currentFormValues = formValuesRef.current;
         const mergedFormValues: ICreateProjectFormState = { ...currentFormValues };
 
-        // 1. Create sprk_project record
+        // 1. Resolve BU-derived cascade defaults (FR-WIZ-02 / G2 fix).
+        // Non-fatal: if resolution fails, we still create the project — the BFF
+        // backfill chain handles `sprk_containerid` / `sprk_searchindexname` server-side.
+        let cascadeDefaults: IUserBuCascadeDefaults | undefined;
+        if (resolveUserBuDefaults) {
+          try {
+            cascadeDefaults = await resolveUserBuDefaults();
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Unknown error';
+            console.warn('[CreateProjectWizard] BU cascade resolution failed (non-fatal):', message);
+            warnings.push(
+              `Could not resolve Business Unit defaults for container/index (${message}). ` +
+                'The project was still created — fields will be populated by server-side backfill.'
+            );
+          }
+        }
+
+        // 2. Create sprk_project record (with INV-5-safe BU cascade applied inside the service)
         const projectService = new ProjectService(dataService);
-        const result = await projectService.createProject(mergedFormValues);
+        const result = await projectService.createProject(mergedFormValues, cascadeDefaults);
         if (!result.success) {
           throw new Error(result.errorMessage ?? 'Failed to create project');
         }
@@ -545,6 +586,24 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               if (docResult.warnings.length > 0) {
                 warnings.push(...docResult.warnings);
               }
+
+              // Trigger RAG indexing per file (canonical sync OBO path via
+              // @spaarke/sdap-client.SdapApiClient.indexFile). Non-fatal —
+              // file uploads already succeeded; indexing is best-effort.
+              const indexingWarnings = await entityService.indexUploadedFiles(
+                uploadResult.uploadedFiles,
+                tenantId ?? '',
+                {
+                  entityType: 'sprk_project',
+                  entityId: projectId,
+                  entityName: projectName,
+                },
+                docResult.createdDocumentIds,
+                cascadeDefaults?.searchIndexName
+              );
+              if (indexingWarnings.length > 0) {
+                warnings.push(...indexingWarnings);
+              }
             }
           } catch (err) {
             const message = err instanceof Error ? err.message : 'File processing failed';
@@ -635,6 +694,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
       bffBaseUrl,
       navigationService,
       resolveSpeContainerId,
+      resolveUserBuDefaults,
       webApiAdapter,
     ]
   );

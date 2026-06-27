@@ -242,9 +242,25 @@ public sealed class InsightsActionRouter : IInsightsActionRouter
     /// surface as a logged Warning + null return to preserve the "every matter
     /// classifies" invariant.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Action-code reform (FR-06, task 023)</b>: applies
+    /// <see cref="ActionCodeNormalizer.Normalize"/> to the input so callers passing
+    /// either <c>"foo-bar"</c> or <c>"foo-bar@v1"</c> resolve to the same row. A
+    /// tier-1-safe telemetry tag <c>actionCodeFormat</c> (<c>"clean"</c> or
+    /// <c>"v1Suffix"</c>) reflects the INPUT form before normalization, so the
+    /// stabilization-window decay rate is measurable from logs.
+    /// </para>
+    /// </remarks>
     private async Task<AnalysisAction?> LoadActionByCodeAsync(string actionCode, CancellationToken cancellationToken)
     {
-        var keys = new KeyAttributeCollection { { "sprk_actioncode", actionCode } };
+        // FR-06 (task 023): normalize at the lookup boundary so callers passing the
+        // legacy "@v1" suffix and callers passing the new clean form resolve identically.
+        // The tag value reflects the INPUT form so the deprecation window can be measured.
+        var actionCodeFormat = ActionCodeNormalizer.Format(actionCode);
+        var normalizedCode = ActionCodeNormalizer.Normalize(actionCode) ?? actionCode;
+
+        var keys = new KeyAttributeCollection { { "sprk_actioncode", normalizedCode } };
         var columns = new[]
         {
             "sprk_analysisactionid",
@@ -264,6 +280,9 @@ public sealed class InsightsActionRouter : IInsightsActionRouter
 
             if (entity is null)
             {
+                _logger.LogInformation(
+                    "InsightsActionRouter: action {ActionCode} not found (format: {ActionCodeFormat})",
+                    normalizedCode, actionCodeFormat);
                 return null;
             }
 
@@ -273,6 +292,11 @@ public sealed class InsightsActionRouter : IInsightsActionRouter
             // ensuring routed actions and default actions look identical to downstream code.
             var actionId = entity.GetAttributeValue<Guid>("sprk_analysisactionid");
             var resolved = await _scopeResolver.GetActionAsync(actionId, cancellationToken).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "InsightsActionRouter: resolved action {ActionCode} (format: {ActionCodeFormat}, actionId: {ActionId})",
+                normalizedCode, actionCodeFormat, actionId);
+
             return resolved;
         }
         catch (InvalidOperationException ex) when (
@@ -280,6 +304,9 @@ public sealed class InsightsActionRouter : IInsightsActionRouter
             || ex.Message.Contains("does not exist", StringComparison.OrdinalIgnoreCase))
         {
             // Expected on the "no per-area row authored yet" path.
+            _logger.LogInformation(
+                "InsightsActionRouter: action {ActionCode} not found (format: {ActionCodeFormat})",
+                normalizedCode, actionCodeFormat);
             return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -287,8 +314,8 @@ public sealed class InsightsActionRouter : IInsightsActionRouter
             // Defense-in-depth: never let a Dataverse hiccup break universal-ingest's
             // "every matter classifies" invariant. Caller falls back to the default.
             _logger.LogWarning(ex,
-                "InsightsActionRouter: error loading action {ActionCode} from Dataverse — caller will fall back to default action",
-                actionCode);
+                "InsightsActionRouter: error loading action {ActionCode} (format: {ActionCodeFormat}) from Dataverse — caller will fall back to default action",
+                normalizedCode, actionCodeFormat);
             return null;
         }
     }

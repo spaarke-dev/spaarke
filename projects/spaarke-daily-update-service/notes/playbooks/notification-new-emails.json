@@ -1,9 +1,17 @@
 {
   "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "_correction": {
+    "date": "2026-06-25",
+    "by": "Claude Code task-015 entity-architecture correction",
+    "reason": "Owner clarified Spaarke uses sprk_communication (with sprk_communicationtype discriminator) for emails. Original repo file used OOB email activity entity incorrectly. Corrected per CLAUDE.md § '2026-06-25 — Spaarke entity architecture'.",
+    "previousEntities": ["email"],
+    "correctedEntities": ["sprk_communication"],
+    "alsoAdded": "Membership-scope branch via LookupUserMembership (ActionType 52) preserved — deployed PB-016 currently LACKS this, R4 PR 3 W1 + AC-5b deploys the corrected union."
+  },
   "playbook": {
     "id": "NP-004",
     "name": "New Emails on Matters",
-    "description": "Notifies users when new emails have been received on their assigned matters since the last check. Queries email activity records linked to matters where the user is a team member, filtered by the configurable timeWindow parameter.",
+    "description": "Notifies users when new emails (sprk_communication records with sprk_communicationtype = Email/100000000) have been received on their assigned matters since the last check. Resolves matter memberships via the LookupUserMembership node (ADR-034 / R3 FR-1C.2 / A1 defect remediation) and filters inbound communications by those matter IDs within the configurable timeWindow parameter. Uses Spaarke custom sprk_communication entity (NOT OOB email activity).",
     "sprk_playbooktype": 2,
     "isPublic": true,
     "isSystemPlaybook": true,
@@ -43,29 +51,47 @@
       "positionY": 200,
       "dependsOn": [],
       "configJson": {
+        "__actionType": 33,
         "scope": "user-matters",
         "resolveUserId": true,
-        "description": "Scoped to the current user's assigned matters"
+        "description": "Scoped to the current user's assigned matters (resolved via LookupUserMembership node)"
+      }
+    },
+    {
+      "name": "Lookup My Matters",
+      "nodeType": "Workflow",
+      "actionType": 52,
+      "canvasType": "lookupUserMembership",
+      "outputVariable": "myMatters",
+      "positionX": 250,
+      "positionY": 200,
+      "dependsOn": ["Start"],
+      "configJson": {
+        "__actionType": 52,
+        "entityType": "sprk_matter",
+        "roles": ["owner", "assignedAttorney", "assignedParalegal"],
+        "includeRelated": false,
+        "description": "Resolve the executing user's matter memberships (owner + assigned attorney + assigned paralegal) per ADR-034. Resolved IDs are bound to `myMatters.ids` for downstream filtering via {{joinIds myMatters.ids}}."
       }
     },
     {
       "name": "Query New Emails",
       "nodeType": "Workflow",
-      "actionType": 22,
-      "canvasType": "updateRecord",
+      "actionType": 51,
+      "canvasType": "queryDataverse",
       "outputVariable": "newEmails",
-      "positionX": 350,
+      "positionX": 450,
       "positionY": 200,
-      "dependsOn": ["Start"],
+      "dependsOn": ["Lookup My Matters"],
       "configJson": {
-        "__actionType": 22,
+        "__actionType": 51,
         "queryMode": true,
-        "entityLogicalName": "email",
-        "fetchXml": "<fetch top='50'><entity name='email'><attribute name='subject'/><attribute name='sender'/><attribute name='createdon'/><attribute name='regardingobjectid'/><attribute name='activityid'/><filter type='and'><condition attribute='directioncode' operator='eq' value='0'/><condition attribute='createdon' operator='ge' value='{{sinceTimestamp}}'/></filter><link-entity name='sprk_matter' from='sprk_matterid' to='regardingobjectid' link-type='inner'><attribute name='sprk_name'/></link-entity><order attribute='createdon' descending='true'/></entity></fetch>",
-        "parameters": {
-          "sinceTimestamp": "{{timeWindow}}"
+        "entityLogicalName": "sprk_communication",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_communication\"><attribute name=\"sprk_subject\"/><attribute name=\"sprk_from\"/><attribute name=\"sprk_to\"/><attribute name=\"sprk_receiveddate\"/><attribute name=\"createdon\"/><attribute name=\"sprk_communicationid\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"sprk_communicationtype\" operator=\"eq\" value=\"100000000\"/><condition attribute=\"createdon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><condition attribute=\"createdby\" operator=\"ne-userid\"/><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"sprk_receiveddate\" descending=\"true\"/><order attribute=\"createdon\" descending=\"true\"/></entity></fetch>",
+        "templateParameters": {
+          "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
         },
-        "description": "Retrieve inbound emails linked to user's matters received within the configured time window"
+        "description": "New sprk_communication records (type=Email 100000000, createdby != current user, createdon in last {{timeWindowHours}}, default 24h) where EITHER (a) sprk_regardingmatter is in the user's myMatters.ids membership set [LookupUserMembership branch], OR (b) the email owner is the current user, OR (c) the sprk_regardingmatter owner is the current user. Sort: sprk_receiveddate desc, createdon desc tiebreaker."
       }
     },
     {
@@ -74,12 +100,17 @@
       "actionType": 30,
       "canvasType": "condition",
       "outputVariable": "hasNewEmails",
-      "positionX": 600,
+      "positionX": 700,
       "positionY": 200,
       "dependsOn": ["Query New Emails"],
       "configJson": {
         "__actionType": 30,
-        "conditionJson": "{{newEmails.output.count}} > 0",
+        "condition": {
+          "operator": "gt",
+          "left": "{{newEmails.output.count}}",
+          "right": 0
+        },
+        "trueBranch": "Create Notification",
         "description": "Check if any new emails were found"
       }
     },
@@ -89,38 +120,47 @@
       "actionType": 50,
       "canvasType": "createNotification",
       "outputVariable": "notification",
-      "positionX": 900,
+      "positionX": 1000,
       "positionY": 150,
       "dependsOn": ["Has New Emails?"],
       "configJson": {
         "__actionType": 50,
         "title": "You have {{newEmails.output.count}} new email(s) on your matters",
-        "body": "{{#each newEmails.output.items}}From {{sender}}: {{subject}} ({{regardingMatterName}})\n{{/each}}",
+        "body": "{{#each newEmails.output.items}}From {{sprk_from}}: {{sprk_subject}} ({{sprk_regardingrecordname}})\n{{/each}}",
         "category": "new-emails",
         "priority": 100000000,
-        "actionUrl": "/main.aspx?pagetype=entitylist&etn=email&viewtype=1039",
+        "actionUrl": "/main.aspx?pagetype=entitylist&etn=sprk_communication&viewtype=1039",
         "recipientId": "{{run.userId}}",
-        "regardingType": "email",
+        "regardingType": "sprk_communication",
         "iterateItems": true,
         "itemNotification": {
-          "title": "New email on {{item.regardingMatterName}}",
-          "body": "From {{item.sender}}: {{item.subject}}",
+          "title": "New email on {{item.sprk_regardingrecordname}}",
+          "body": "From {{item.sprk_from}}: {{item.sprk_subject}}",
           "category": "new-emails",
           "priority": 100000000,
-          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=email&id={{item.activityid}}",
+          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_communication&id={{item.sprk_communicationid}}",
           "recipientId": "{{run.userId}}",
-          "regardingId": "{{item.activityid}}",
-          "regardingType": "email"
+          "regardingId": "{{item.sprk_communicationid}}",
+          "regardingType": "sprk_communication",
+          "regardingName": "{{item.sprk_subject}}",
+          "sourceEntityType": "sprk_communication",
+          "sourceId": "{{item.sprk_communicationid}}",
+          "sourceModifiedOn": "{{item.createdon}}",
+          "sourceOwningUser": "{{item.ownerid}}",
+          "viaMatterId": "{{item.sprk_regardingmatter}}",
+          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterMembershipsVariable": "myMatters"
         },
         "deduplication": {
           "enabled": true,
-          "key": "new-emails:{{run.userId}}:{{item.activityid}}"
+          "key": "new-emails:{{run.userId}}:{{item.sprk_communicationid}}"
         }
       }
     }
   ],
   "edges": [
-    { "source": "Start", "target": "Query New Emails" },
+    { "source": "Start", "target": "Lookup My Matters" },
+    { "source": "Lookup My Matters", "target": "Query New Emails" },
     { "source": "Query New Emails", "target": "Has New Emails?" },
     { "source": "Has New Emails?", "target": "Create Notification", "condition": "true" }
   ]

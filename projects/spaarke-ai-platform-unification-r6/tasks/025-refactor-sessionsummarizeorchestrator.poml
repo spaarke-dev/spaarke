@@ -1,0 +1,165 @@
+<task id="025" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-17 Refactor `SessionSummarizeOrchestrator` to Invoke `PlaybookExecutionEngine.ExecuteAsync` (Pillar 4)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <dependencies>024</dependencies>
+    <blocks>028</blocks>
+    <tags>bff-api, ai, refactoring, chat</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Refactors chat /summarize core orchestrator; removes alternate-key bypass; preserves NFR-13 safety pipeline + streaming JSON delta + session-files filter; tag `bff-api`+`ai`+`refactoring`+`chat`.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent orchestrator file; gates 028 integration test.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Refactor `SessionSummarizeOrchestrator` to invoke
+    `PlaybookExecutionEngine.ExecuteAsync(playbookId: "summarize-document-for-chat@v1", ...)`
+    instead of loading the action by alternate key. With the FK chain fixed (task 024),
+    the engine traverses playbook → node → action cleanly without the
+    `sprk_actioncode` alternate-key lookup.
+
+    Critical-path context: this task closes Pillar 4 — chat `/summarize` finally routes
+    through the same `PlaybookExecutionEngine` as the rest of the platform. Project CLAUDE.md
+    binding: "MUST route chat `/summarize` through `PlaybookExecutionEngine` (no
+    alternate-key bypass after Pillar 4 lands)" + "MUST NOT load action by alternate key in
+    chat `/summarize` path after Pillar 4 lands."
+
+    PRESERVATION MANDATORY:
+    1. Existing session-files Azure Search filter — UNCHANGED (the orchestrator's chat path
+       filters retrieval by sessionId before passing to the engine).
+    2. Structured Outputs mode — UNCHANGED (engine respects action's output schema).
+    3. Streaming JSON delta — UNCHANGED (engine's existing streaming path is what
+       `SummaryHandler` already uses).
+    4. NFR-13 safety pipeline middleware chain — UNCHANGED (PromptShield + Groundedness +
+       Citations + Privilege + Cross-matter still wraps the call).
+    5. NFR-08 11 production node executors — UNCHANGED.
+
+    Regression test required: existing chat /summarize end-to-end test MUST pass with
+    byte-equivalent output. Any change to summary text or streaming-delta shape = FAIL.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with deep `SessionSummarizeOrchestrator` + `PlaybookExecutionEngine`
+    + chat-streaming experience. Comfortable with NFR-13 safety pipeline preservation +
+    streaming JSON delta contracts.
+  </role>
+
+  <goal>
+    `SessionSummarizeOrchestrator` invokes `PlaybookExecutionEngine.ExecuteAsync` via
+    playbookId; alternate-key lookup removed. Existing session-files filter + Structured
+    Outputs mode + streaming JSON delta preserved. Safety pipeline + node executors
+    unchanged. Regression test passes with byte-equivalent output. Build green;
+    publish-size delta reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+    <file purpose="execution-engine">src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/PlaybookExecutionEngine.cs</file>
+    <file purpose="playbook-architecture">docs/architecture/playbook-architecture.md</file>
+    <file purpose="chat-architecture">docs/architecture/chat-architecture.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">No new top-level Program.cs lines; orchestrator already registered inside existing module.</constraint>
+    <constraint source="ADR-013">Orchestrator is AI-internal; no facade-boundary change.</constraint>
+    <constraint source="ADR-015">No user message content in telemetry; engine emits playbook + node + action IDs + decisions + timestamps only.</constraint>
+    <constraint source="ADR-018">No new feature flags.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; ≤+5 MB R6 budget per NFR-02.</constraint>
+    <constraint source="spec NFR-08">11 production node executors UNMODIFIED — engine path uses existing executors.</constraint>
+    <constraint source="spec NFR-13">Safety pipeline middleware chain (PromptShield + Groundedness + Citations + Privilege + Cross-matter) MUST continue to wrap the chat /summarize call.</constraint>
+    <constraint source="spec FR-26">Existing functionality preserved: session-files filter + Structured Outputs mode + streaming JSON delta. FK chain traversed; NO `sprk_actioncode` alternate-key lookup remains in chat path.</constraint>
+    <constraint source="project CLAUDE.md MUST NOT">MUST NOT load action by alternate key in chat /summarize path after this task lands.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/orchestrator-refactor</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — chat /summarize orchestrator refactor + NFR-13/-08 preservation binding".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 024 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Capture baseline publish size. Capture current /summarize output for regression baseline (byte-equivalent target).
+    </step>
+    <step order="3" name="Inspect Current Orchestrator">
+      Identify the alternate-key lookup site + the path before/after it. Map the call flow: orchestrator → alternate-key load → action → execution. Plan replacement: orchestrator → engine.ExecuteAsync(playbookId) → playbook → node → action (via FK now valid).
+    </step>
+    <step order="4" name="Refactor Orchestrator">
+      Replace alternate-key lookup with `PlaybookExecutionEngine.ExecuteAsync("summarize-document-for-chat@v1", parameters)`. Preserve: session-files Azure Search filter (passed via parameters); Structured Outputs mode (engine respects action's output schema); streaming JSON delta (engine's existing streaming path).
+    </step>
+    <step order="5" name="Add Regression Test">
+      Add unit/integration test asserting: chat /summarize end-to-end with a mock session returns byte-equivalent (or semantically-equivalent) output to pre-refactor baseline. Any change in summary text or streaming-delta shape = test fails.
+    </step>
+    <step order="6" name="Verify Safety Pipeline Preservation">
+      Add test asserting: NFR-13 middleware chain (PromptShield + Groundedness + Citations + Privilege + Cross-matter) still wraps the call. Test passes when middleware order + invocation preserved.
+    </step>
+    <step order="7" name="Verify No Alternate-Key Lookups Remain">
+      Grep the chat /summarize code path for any remaining `sprk_actioncode` alternate-key usage. MUST return 0 results. Record evidence.
+    </step>
+    <step order="8" name="Build + Verify Publish Size + Acceptance Criteria">
+      `dotnet build` → 0 errors. `dotnet publish -c Release` → delta vs baseline. Walk each criterion.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Verify ADR-010 / ADR-013 / ADR-015 / ADR-018 / ADR-029 + NFR-08 / NFR-13 + FR-26 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 025 ✅. Reset `current-task.md`. Report. Pillar 4 closeout summary.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="git">stage + commit changes</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs (modified — engine.ExecuteAsync path)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestratorTests.cs (modified — regression test)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (025 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-025-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SessionSummarizeOrchestrator` invokes `PlaybookExecutionEngine.ExecuteAsync(playbookId, parameters)`.</criterion>
+    <criterion testable="true">NO `sprk_actioncode` alternate-key lookup remains in chat /summarize code path (grep evidence = 0).</criterion>
+    <criterion testable="true">Session-files Azure Search filter preserved (passed via parameters).</criterion>
+    <criterion testable="true">Structured Outputs mode preserved.</criterion>
+    <criterion testable="true">Streaming JSON delta preserved.</criterion>
+    <criterion testable="true">Safety pipeline middleware chain unchanged (NFR-13).</criterion>
+    <criterion testable="true">11 production node executors unchanged (NFR-08).</criterion>
+    <criterion testable="true">Regression test passes with byte-equivalent (or semantically-equivalent) output to pre-refactor baseline.</criterion>
+    <criterion testable="true">Telemetry payload ADR-015-compliant.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; ≤+5 MB R6 budget.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+    <criterion testable="true">Pillar 4 complete: chat /summarize routes through `PlaybookExecutionEngine` (no alternate-key bypass).</criterion>
+  </acceptance-criteria>
+</task>

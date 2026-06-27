@@ -1,8 +1,16 @@
-import { SdapClientConfig, DriveItem, FileMetadata } from './types';
+import {
+  SdapClientConfig,
+  DriveItem,
+  FileMetadata,
+  AuthenticatedFetchFn,
+  IndexFileRequest,
+  IndexFileResult,
+} from './types';
 import { TokenProvider } from './auth/TokenProvider';
 import { UploadOperation } from './operations/UploadOperation';
 import { DownloadOperation } from './operations/DownloadOperation';
 import { DeleteOperation } from './operations/DeleteOperation';
+import { IndexFileOperation } from './operations/IndexFileOperation';
 
 /**
  * SDAP API Client for file operations with SharePoint Embedded.
@@ -34,25 +42,58 @@ export class SdapApiClient {
   private readonly baseUrl: string;
   private readonly timeout: number;
   private readonly tokenProvider: TokenProvider;
+  private readonly authenticatedFetch?: AuthenticatedFetchFn;
   private readonly uploadOp: UploadOperation;
   private readonly downloadOp: DownloadOperation;
   private readonly deleteOp: DeleteOperation;
+  private readonly indexFileOp?: IndexFileOperation;
 
   /**
    * Creates a new SDAP API client instance.
    *
-   * @param config - Client configuration
+   * @param config - Client configuration. Pass `authenticatedFetch` to enable
+   *   operations that require Spaarke Auth v2 (ADR-028) — currently
+   *   {@link indexFile}. Without it, those operations throw on call.
+   *   Legacy operations (upload/download/delete) still use the internal
+   *   `TokenProvider` shim until the full migration in
+   *   `sdap-client-shared-library-fix-r1`.
    */
-  constructor(config: SdapClientConfig) {
+  constructor(config: SdapClientConfig & { authenticatedFetch?: AuthenticatedFetchFn }) {
     this.validateConfig(config);
 
     this.baseUrl = config.baseUrl.replace(/\/$/, ''); // Remove trailing slash
     this.timeout = config.timeout ?? 300000; // 5 minutes default
+    this.authenticatedFetch = config.authenticatedFetch;
 
     this.tokenProvider = new TokenProvider();
     this.uploadOp = new UploadOperation(this.baseUrl, this.timeout, this.tokenProvider);
     this.downloadOp = new DownloadOperation(this.baseUrl, this.timeout, this.tokenProvider);
     this.deleteOp = new DeleteOperation(this.baseUrl, this.timeout, this.tokenProvider);
+
+    if (this.authenticatedFetch) {
+      this.indexFileOp = new IndexFileOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
+    }
+  }
+
+  /**
+   * Triggers sync OBO indexing of a SPE-resident file into Azure AI Search.
+   * Call after a successful upload to make the file searchable in
+   * `spaarke-files-index`.
+   *
+   * Requires `authenticatedFetch` in the constructor config (Spaarke Auth v2).
+   *
+   * @param request - File identifiers, tenant, optional parent + index targeting
+   * @returns Indexing outcome (non-throwing for HTTP failures — inspect `success`)
+   * @throws Error if `authenticatedFetch` was not provided at construction
+   */
+  public async indexFile(request: IndexFileRequest): Promise<IndexFileResult> {
+    if (!this.indexFileOp) {
+      throw new Error(
+        'SdapApiClient.indexFile requires `authenticatedFetch` in the client config. ' +
+          'Pass `authenticatedFetch` from `@spaarke/auth` when constructing the client.'
+      );
+    }
+    return this.indexFileOp.indexFile(request);
   }
 
   /**

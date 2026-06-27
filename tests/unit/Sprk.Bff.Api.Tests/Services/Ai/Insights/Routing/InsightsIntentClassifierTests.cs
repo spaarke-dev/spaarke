@@ -65,7 +65,7 @@ public class InsightsIntentClassifierTests
         openAiMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(PredictMatterCostJson);
 
         // Act
@@ -91,7 +91,7 @@ public class InsightsIntentClassifierTests
         openAiMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(OpenEndedRagJson);
 
         // Act
@@ -119,7 +119,7 @@ public class InsightsIntentClassifierTests
         openAiMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(LowConfidenceRagJson);
 
         // Act
@@ -146,7 +146,7 @@ public class InsightsIntentClassifierTests
         openAiMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(lowConfPlaybookJson);
 
         // Act
@@ -175,7 +175,7 @@ public class InsightsIntentClassifierTests
         openAiMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(PredictMatterCostJson);
 
         var query = "What will this matter cost?";
@@ -194,7 +194,7 @@ public class InsightsIntentClassifierTests
 
         openAiMock.Verify(c => c.GetStructuredCompletionRawAsync(
             It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-            It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
+            It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "second call MUST be served from cache without a second LLM call");
     }
@@ -207,7 +207,7 @@ public class InsightsIntentClassifierTests
         openAiMock
             .SetupSequence(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(PredictMatterCostJson)
             .ReturnsAsync(OpenEndedRagJson);
 
@@ -229,7 +229,7 @@ public class InsightsIntentClassifierTests
 
         openAiMock.Verify(c => c.GetStructuredCompletionRawAsync(
             It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-            It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
+            It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()),
             Times.Exactly(2),
             "different subject schemes must trigger two LLM calls");
     }
@@ -242,7 +242,7 @@ public class InsightsIntentClassifierTests
         openAiMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(OpenEndedRagJson);
 
         // Act
@@ -254,7 +254,7 @@ public class InsightsIntentClassifierTests
 
         openAiMock.Verify(c => c.GetStructuredCompletionRawAsync(
             It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-            It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
+            It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -270,7 +270,7 @@ public class InsightsIntentClassifierTests
         openAiMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("LLM unavailable"));
 
         // Act
@@ -296,7 +296,7 @@ public class InsightsIntentClassifierTests
         openAiMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(MalformedJson);
 
         // Act
@@ -316,7 +316,7 @@ public class InsightsIntentClassifierTests
         openAiMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
         // Act + Assert — cancellation MUST propagate, not become a fallback
@@ -332,7 +332,7 @@ public class InsightsIntentClassifierTests
         openAiMock
             .SetupSequence(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("transient failure"))
             .ReturnsAsync(PredictMatterCostJson);
 
@@ -416,7 +416,7 @@ public class InsightsIntentClassifierTests
         openAiMock
             .Setup(c => c.GetStructuredCompletionRawAsync(
                 It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
-                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(PredictMatterCostJson);
 
         const int sampleCount = 100;

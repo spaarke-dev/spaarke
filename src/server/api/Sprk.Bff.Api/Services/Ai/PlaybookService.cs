@@ -3,7 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
@@ -19,7 +19,16 @@ public class PlaybookService : IPlaybookService
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<PlaybookService> _logger;
-    private readonly IDistributedCache? _cache;
+    private readonly ITenantCache _cache;
+
+    // NFR-08 system-level cache allow-listed (FR-05 redis remediation r1):
+    // IPlaybookService.GetByNameAsync(name) has no tenantId in scope — playbook-by-name lookup
+    // is org-wide per ADR-029 (single Redis instance per BFF org). Using the "system" sentinel
+    // as the ITenantCache tenant scope preserves the wrapper invariant while documenting the
+    // system-level cache exception. On-wire key: spaarke:tenant:system:playbook-by-name:{name}:v1
+    private const string SystemTenantSentinel = "system";
+    private const string CacheResource = "playbook-by-name";
+    private const int CacheVersion = 1;
     private AccessToken? _currentToken;
 
     private const string EntitySetName = "sprk_analysisplaybooks";
@@ -30,6 +39,22 @@ public class PlaybookService : IPlaybookService
     private const string SkillRelationship = "sprk_playbook_skill";
     private const string KnowledgeRelationship = "sprk_playbook_knowledge";
     private const string ToolRelationship = "sprk_playbook_tool";
+
+    // sprk_indexstatus option codes (chat-routing-redesign-r1 FR-13, task 030 schema
+    // verification). These are the single source of truth for the numeric option-set
+    // codes across PlaybookService, PlaybookEmbeddingService, PlaybookIndexingService,
+    // and PlaybookIndexDriftDetectionJob.
+    private const int IndexStatusNotIndexed = 100_000_000;
+    private const int IndexStatusPending = 100_000_001;
+    private const int IndexStatusIndexed = 100_000_002;
+    private const int IndexStatusStale = 100_000_003;
+    private const int IndexStatusFailed = 100_000_004;
+
+    /// <summary>
+    /// Default <c>sprk_indexstatus</c> value for newly-created or never-indexed playbooks.
+    /// Public so that <see cref="PlaybookIndexDriftDetectionJob"/> can use the same default.
+    /// </summary>
+    public const int NotIndexedCode = IndexStatusNotIndexed;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -42,11 +67,11 @@ public class PlaybookService : IPlaybookService
         IConfiguration configuration,
         TokenCredential credential,
         ILogger<PlaybookService> logger,
-        IDistributedCache? cache = null)
+        ITenantCache cache)
     {
         _httpClient = httpClient;
         _logger = logger;
-        _cache = cache;
+        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _credential = credential;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
@@ -173,7 +198,10 @@ public class PlaybookService : IPlaybookService
 
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
         // NOTE: sprk_istemplate removed until Dataverse schema is updated
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
+        // NOTE: sprk_jps_matching_metadata added by chat-routing-redesign-r1 task 031/036 — required by FR-10/FR-12
+        // NOTE: sprk_indexstatus / sprk_indexhash / sprk_lastindexedat added by chat-routing-redesign-r1
+        //       task 034 follow-up (Gap 2) — required by FR-13 drift detection and Gap 5 hash-on-index
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_jps_matching_metadata,sprk_indexstatus,sprk_indexhash,sprk_lastindexedat,sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
         var url = $"{EntitySetName}({playbookId})?$select={select}";
 
         var response = await _httpClient.GetAsync(url, cancellationToken);
@@ -197,6 +225,10 @@ public class PlaybookService : IPlaybookService
             Id = entity.Id,
             Name = entity.Name ?? string.Empty,
             Description = entity.Description,
+            JpsMatchingMetadata = entity.JpsMatchingMetadata,
+            IndexStatusCode = entity.IndexStatusCode ?? NotIndexedCode,
+            IndexHash = entity.IndexHash,
+            LastIndexedAt = entity.LastIndexedAt,
             OutputTypeId = entity.OutputTypeId,
             IsPublic = entity.IsPublic ?? false,
             IsTemplate = entity.IsTemplate ?? false,
@@ -331,29 +363,21 @@ public class PlaybookService : IPlaybookService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        // Cache key following SDAP naming convention
-        var cacheKey = $"sdap:playbook:name:{name}";
-
-        // Try cache first (if available)
-        if (_cache != null)
+        // NFR-08 system-level allow-listed: tenant scope = "system" (see class header).
+        // The cache id is the playbook name itself.
+        try
         {
-            var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
-            if (cached != null)
+            var cachedPlaybook = await _cache.GetAsync<PlaybookResponse>(
+                SystemTenantSentinel, CacheResource, name, CacheVersion, ct: cancellationToken);
+            if (cachedPlaybook != null)
             {
-                try
-                {
-                    var cachedPlaybook = JsonSerializer.Deserialize<PlaybookResponse>(cached, JsonOptions);
-                    if (cachedPlaybook != null)
-                    {
-                        _logger.LogDebug("[PLAYBOOK] Cache HIT for playbook name '{Name}'", name);
-                        return cachedPlaybook;
-                    }
-                }
-                catch (JsonException ex)
-                {
-                    _logger.LogWarning(ex, "[PLAYBOOK] Cache deserialization failed for '{Name}'", name);
-                }
+                _logger.LogDebug("[PLAYBOOK] Cache HIT for playbook name '{Name}'", name);
+                return cachedPlaybook;
             }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PLAYBOOK] Cache read failed for '{Name}'", name);
         }
 
         _logger.LogDebug("[PLAYBOOK] Cache MISS for playbook name '{Name}', querying Dataverse", name);
@@ -363,7 +387,10 @@ public class PlaybookService : IPlaybookService
         // Query by name - exact match, case-insensitive per Dataverse default
         // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
         // NOTE: sprk_istemplate removed until Dataverse schema is updated (causes 400 if column doesn't exist)
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
+        // NOTE: sprk_jps_matching_metadata added by chat-routing-redesign-r1 task 031/036 — required by FR-10/FR-12
+        // NOTE: sprk_indexstatus / sprk_indexhash / sprk_lastindexedat added by chat-routing-redesign-r1
+        //       task 034 follow-up (Gap 2) — required by FR-13 drift detection and Gap 5 hash-on-index
+        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_jps_matching_metadata,sprk_indexstatus,sprk_indexhash,sprk_lastindexedat,sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
         var filter = $"sprk_name eq '{EscapeODataString(name)}'";
         var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$top=1";
 
@@ -420,6 +447,10 @@ public class PlaybookService : IPlaybookService
             Id = entity.Id,
             Name = entity.Name ?? string.Empty,
             Description = entity.Description,
+            JpsMatchingMetadata = entity.JpsMatchingMetadata,
+            IndexStatusCode = entity.IndexStatusCode ?? NotIndexedCode,
+            IndexHash = entity.IndexHash,
+            LastIndexedAt = entity.LastIndexedAt,
             OutputTypeId = entity.OutputTypeId,
             IsPublic = entity.IsPublic ?? false,
             IsTemplate = entity.IsTemplate ?? false,
@@ -433,27 +464,162 @@ public class PlaybookService : IPlaybookService
             ModifiedOn = entity.ModifiedOn ?? DateTime.UtcNow
         };
 
-        // Cache result for 24 hours (playbooks are relatively stable)
-        if (_cache != null)
+        // Cache result for 24 hours (playbooks are relatively stable).
+        // NFR-08 system-level allow-listed: tenant scope = "system" (see class header).
+        try
         {
-            try
-            {
-                var serialized = JsonSerializer.Serialize(playbook, JsonOptions);
-                var cacheOptions = new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24)
-                };
-                await _cache.SetStringAsync(cacheKey, serialized, cacheOptions, cancellationToken);
-                _logger.LogDebug("[PLAYBOOK] Cached playbook '{Name}' for 24 hours", name);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[PLAYBOOK] Failed to cache playbook '{Name}'", name);
-            }
+            await _cache.SetAsync(
+                SystemTenantSentinel, CacheResource, name, CacheVersion,
+                playbook, TimeSpan.FromHours(24), ct: cancellationToken);
+            _logger.LogDebug("[PLAYBOOK] Cached playbook '{Name}' for 24 hours", name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PLAYBOOK] Failed to cache playbook '{Name}'", name);
         }
 
         _logger.LogInformation("[PLAYBOOK] Retrieved playbook '{Name}' (ID: {Id})", name, playbook.Id);
         return playbook;
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<PlaybookResponse> ListAllActivePlaybooksAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // Tenant-wide enumeration of all Active (statecode == 0) playbooks for the
+        // chat-routing-redesign-r1 FR-13 drift-detection job. Per-tenant scoping is
+        // upstream via JobContract.SubjectId — this method intentionally returns all
+        // statecode=0 rows visible to the BFF's Dataverse application user.
+        //
+        // The projection mirrors GetPlaybookAsync (FR-13 Gap 2) so drift comparison can
+        // run from this single read — no per-row GetPlaybookAsync round-trip needed for
+        // the hash comparison itself (N:N relationships are not required for drift
+        // detection — those are loaded only when the drift job needs to MarkStale).
+        const string select =
+            "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_jps_matching_metadata," +
+            "sprk_indexstatus,sprk_indexhash,sprk_lastindexedat," +
+            "sprk_ispublic,_ownerid_value,createdon,modifiedon,sprk_playbookcapabilities";
+        const string filter = "statecode eq 0";
+        const int pageSize = 100;
+
+        // Initial page URL.
+        var pageUrl = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$top={pageSize}";
+
+        while (!string.IsNullOrEmpty(pageUrl))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var response = await _httpClient.GetAsync(pageUrl, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (IsMissingEntityResponse(response.StatusCode, body))
+                {
+                    _logger.LogWarning(
+                        "[PLAYBOOK] Dataverse table '{EntitySet}' missing-entity during ListAllActivePlaybooksAsync " +
+                        "({StatusCode}). Yielding zero rows.",
+                        EntitySetName, response.StatusCode);
+                    yield break;
+                }
+                response.EnsureSuccessStatusCode();
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(JsonOptions, cancellationToken);
+            if (result?.Value is null)
+            {
+                yield break;
+            }
+
+            foreach (var element in result.Value)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var entity = JsonSerializer.Deserialize<PlaybookEntity>(element.GetRawText(), JsonOptions);
+                if (entity is null) continue;
+
+                // N:N relationships are NOT loaded here — drift detection only needs the
+                // fields driving the embed-input hash composition (PlaybookName, Description,
+                // TriggerPhrases, RecordType, EntityType, Capabilities, JpsMatchingMetadata)
+                // plus the tracking fields. Empty arrays are returned for relationship
+                // collections; callers needing relationships should call GetPlaybookAsync.
+                yield return new PlaybookResponse
+                {
+                    Id = entity.Id,
+                    Name = entity.Name ?? string.Empty,
+                    Description = entity.Description,
+                    JpsMatchingMetadata = entity.JpsMatchingMetadata,
+                    IndexStatusCode = entity.IndexStatusCode ?? NotIndexedCode,
+                    IndexHash = entity.IndexHash,
+                    LastIndexedAt = entity.LastIndexedAt,
+                    OutputTypeId = entity.OutputTypeId,
+                    IsPublic = entity.IsPublic ?? false,
+                    IsTemplate = entity.IsTemplate ?? false,
+                    OwnerId = entity.OwnerId ?? Guid.Empty,
+                    Capabilities = ParseCapabilities(entity.Capabilities),
+                    CreatedOn = entity.CreatedOn ?? DateTime.UtcNow,
+                    ModifiedOn = entity.ModifiedOn ?? DateTime.UtcNow
+                };
+            }
+
+            // Follow @odata.nextLink for subsequent pages. Dataverse returns absolute URLs
+            // here; HttpClient.GetAsync handles either absolute or BaseAddress-relative.
+            pageUrl = result.NextLink ?? string.Empty;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task UpdateIndexStatusAsync(
+        Guid playbookId,
+        int statusCode,
+        string? indexHash,
+        string? lastError,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // ADR-015: Log only playbook ID + status code. Never log indexHash content or
+        // lastError content (lastError flows to Dataverse for admin visibility but
+        // MUST NOT enter BFF logs).
+        _logger.LogInformation(
+            "Updating playbook index status: PlaybookId={PlaybookId}, StatusCode={StatusCode}",
+            playbookId, statusCode);
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_indexstatus"] = statusCode
+        };
+
+        // sprk_indexhash: only emit the field when the caller provided a non-null value.
+        // JsonOptions has DefaultIgnoreCondition = WhenWritingNull (PlaybookService static
+        // member), so a null value here is omitted from the PATCH body and the existing
+        // Dataverse value is preserved unchanged (correct for Stale/Failed — admins want
+        // to see what the hash WAS, not lose it).
+        if (indexHash is not null)
+        {
+            payload["sprk_indexhash"] = indexHash;
+        }
+
+        // Stamp sprk_lastindexedat only on successful index completion. Stale / Failed
+        // transitions leave the previous timestamp intact so admins can see when the
+        // playbook was last successfully indexed.
+        if (statusCode == IndexStatusIndexed)
+        {
+            payload["sprk_lastindexedat"] = DateTime.UtcNow;
+        }
+
+        // sprk_lastindexerror: write the truncated error message when provided (admin-visible
+        // diagnostic), or clear to empty string when null (caller explicitly cleared the field
+        // — e.g., successful index after a previous failure). Empty string IS serialized
+        // (WhenWritingNull only suppresses literal nulls), so it does reach Dataverse and
+        // clears the cell.
+        payload["sprk_lastindexerror"] = lastError ?? string.Empty;
+
+        var url = $"{EntitySetName}({playbookId})";
+        var response = await _httpClient.PatchAsJsonAsync(url, payload, JsonOptions, cancellationToken);
+        response.EnsureSuccessStatusCode();
     }
 
     private async Task<PlaybookListResponse> ExecuteListQueryAsync(
@@ -538,11 +704,9 @@ public class PlaybookService : IPlaybookService
 
     /// <summary>
     /// Detects whether a non-success Dataverse response indicates the queried entity
-    /// (table) does not exist in this environment. Mirrors the helper in
-    /// <see cref="Sprk.Bff.Api.Services.Ai.Capabilities.DataverseCapabilityManifestLoader"/>.
-    /// Treated as a graceful "no results" condition rather than an error so the chat
-    /// pipeline and Daily Briefing can degrade gracefully when fresh environments lack
-    /// schema.
+    /// (table) does not exist in this environment. Treated as a graceful "no results"
+    /// condition rather than an error so the chat pipeline and Daily Briefing can
+    /// degrade gracefully when fresh environments lack schema.
     /// </summary>
     internal static bool IsMissingEntityResponse(System.Net.HttpStatusCode statusCode, string body)
     {
@@ -989,6 +1153,35 @@ public class PlaybookService : IPlaybookService
 
         [JsonPropertyName("sprk_description")]
         public string? Description { get; set; }
+
+        /// <summary>
+        /// Raw JSON content from the Dataverse <c>sprk_jps_matching_metadata</c> Memo column
+        /// (chat-routing-redesign-r1 task 031). Consumed by the embedding composer (FR-10) and
+        /// the indexing validation gate (FR-12).
+        /// </summary>
+        [JsonPropertyName("sprk_jps_matching_metadata")]
+        public string? JpsMatchingMetadata { get; set; }
+
+        /// <summary>
+        /// Numeric option-set value for <c>sprk_indexstatus</c> (chat-routing-redesign-r1
+        /// FR-13). Null when the playbook has never been indexed (mapped to NotIndexedCode).
+        /// </summary>
+        [JsonPropertyName("sprk_indexstatus")]
+        public int? IndexStatusCode { get; set; }
+
+        /// <summary>
+        /// SHA-256 hex digest of the canonical embed-input string at last successful index
+        /// time (chat-routing-redesign-r1 FR-13). Null until the playbook has been indexed.
+        /// </summary>
+        [JsonPropertyName("sprk_indexhash")]
+        public string? IndexHash { get; set; }
+
+        /// <summary>
+        /// UTC timestamp of the most recent successful index operation (chat-routing-redesign-r1
+        /// FR-13). Null until the playbook has been indexed.
+        /// </summary>
+        [JsonPropertyName("sprk_lastindexedat")]
+        public DateTime? LastIndexedAt { get; set; }
 
         [JsonPropertyName("sprk_ispublic")]
         public bool? IsPublic { get; set; }

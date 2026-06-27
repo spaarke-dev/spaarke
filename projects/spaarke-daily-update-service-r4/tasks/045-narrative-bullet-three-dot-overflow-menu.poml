@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Implement NarrativeBullet three-dot overflow menu (FR-18)</title>
+    <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>Replaced inline 5-icon row in NarrativeBullet.tsx with Fluent v9 three-dot overflow menu (MoreHorizontalRegular trigger + MenuList + 6 MenuItems): Mark as read, Remove from briefing, Keep on briefing for 7 more days, Add to To Do, Dismiss, Open record. Semantic-token compliant per ADR-021 (0 hex matches). 41 Jest tests pass across the joined 040+041+045 suites; agent execution timed out mid-stream but work recovered from git stash and verified. Component Justification: existing closest = inline 5-icon row; extension = Yes (UX redesign); cost-of-doing-nothing = inline collision + R3 UAT defect persists.</completion-notes>
+    <estimated-hours>3.5</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>046, 049</blocks>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Major UX redesign on a hot-path file; Fluent v9 Menu primitives; R3 PR #451 overlap; blocks 046</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Edit `NarrativeBullet.tsx`. Replace inline 5-icon row with Fluent v9 `Menu` / `MenuTrigger` (`MoreHorizontalRegular` icon) / `MenuList` / `MenuItem`. Inline: regarding-name link + optionally 1 quick action (default: none). Overflow menu items in order: Mark as read, Remove from briefing, Keep on briefing for 7 more days, Add to To Do, Dismiss, Open record. Match semantic-search PCF list visual pattern. Touch targets meet WCAG.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 + React hooks + Xrm.WebApi.</role>
+  <goal>NarrativeBullet shows: (inline) regarding-name link; (overflow `⋯` button) Fluent v9 Menu with 6 actions in defined order. No inline 5-icon row. Keyboard navigation works; screen reader announces menu role; touch targets ≥44×44px per WCAG.</goal>
+  <context>
+    <background>FR-18: R3 UAT defect — inline 5-icon row collides visually and confuses users. Three-dot overflow menu (semantic-search PCF list pattern) is the redesign. R3's 3 actions (Check/Remove/Keep) move into the menu unchanged; add To Do (R2 ADR-024) preserved; Dismiss + Open record are new.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/ (reference visual pattern)</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; dark mode required</constraint>
+    <constraint source="ADR-024">Preserve useInlineTodoCreate + TODO_REGARDING_CATALOG in Add to To Do</constraint>
+    <constraint source="project">R3 PR #451 file overlap — see notes/risks.md R1; run conflict-check before merge</constraint>
+    <constraint source="project">Preserve R3 deliverables: schema, TTL=604800, read-state, 3 actions (now via overflow menu)</constraint>
+    <constraint source="project">Justification: existing = inline 5-icon row; extension = Yes (UX redesign required by UAT); cost-of-doing-nothing = inline collision + R3 UAT defect persists</constraint>
+    <constraint source="project">WCAG: touch targets ≥44×44px; keyboard nav (Tab, Enter, Esc); ARIA menu role</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-024-sprk-todo-polymorphic-resolver.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Inspect existing NarrativeBullet.tsx; document current inline 5-icon row structure + callback prop names</step>
+    <step order="2">Inspect semantic-search PCF list visual pattern for reference styling</step>
+    <step order="3">Add Fluent v9 imports: `Menu`, `MenuTrigger`, `MenuButton` (or icon-only Button), `MenuList`, `MenuItem`, `MenuPopover`, `MoreHorizontalRegular`</step>
+    <step order="4">Define `NarrativeBulletAction` type with action ids: 'markAsRead', 'remove', 'keep', 'addToDo', 'dismiss', 'openRecord'</step>
+    <step order="5">Replace inline 5-icon row with: regarding-name link (left) + overflow Menu (right)</step>
+    <step order="6">Build MenuList with 6 MenuItems in defined order; each MenuItem has icon + label + onClick handler that calls a single `onAction(actionId)` prop</step>
+    <step order="7">Ensure touch targets ≥44×44px (Fluent v9 default sizes; verify with size='medium' on MenuButton)</step>
+    <step order="8">Apply semantic tokens only (no raw hex) for any custom styling; verify dark mode renders correctly</step>
+    <step order="9">Update component prop types: replace per-action callbacks with single `onAction(actionId: NarrativeBulletAction)` to keep wire-up clean</step>
+    <step order="10">Add `aria-label` to overflow button ("More actions"); ensure MenuList items are keyboard-navigable</step>
+    <step order="11">Add Jest tests: menu opens on click; menu opens via keyboard (Tab + Enter); each of 6 items present in order; Esc closes; clicking item fires onAction with correct id</step>
+    <step order="12">Run `npm test`; verify all pass</step>
+    <step order="13">Run `npm run build` to verify TypeScript compiles</step>
+    <step order="14">Run `/conflict-check` against R3 PR #451 (NarrativeBullet.tsx is high-risk overlap)</step>
+    <step order="15">Update TASK-INDEX.md ✅</step>
+    <step order="16">Document deviations in notes/</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/src/components/__tests__/NarrativeBullet.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Visual audit: no inline action collision; overflow menu shows all 6 actions in defined order (FR-18 / AC-18a)</criterion>
+    <criterion testable="true">Accessibility: keyboard nav works; screen reader announces menu items; dark mode renders correctly per ADR-021 (AC-18b)</criterion>
+    <criterion testable="true">Add to To Do still works via overflow menu — ADR-024 useInlineTodoCreate + TODO_REGARDING_CATALOG (AC-18c, verified in task 046)</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test>Click `⋯` button → menu opens, 6 items shown in order: Mark as read, Remove from briefing, Keep on briefing for 7 more days, Add to To Do, Dismiss, Open record</test>
+    <test>Tab navigates to overflow button; Enter opens menu; arrow keys navigate items; Enter selects; Esc closes</test>
+    <test>Screen reader: button announces "More actions"; menu announces role=menu; items announced by label</test>
+    <test>Touch target measured ≥44×44px on overflow button</test>
+    <test>Dark Mode Compliance: NarrativeBullet renders in dark theme with semantic tokens per ADR-021 — no raw hex; menu surface contrast meets WCAG AA</test>
+    <test>Console Errors: no errors or warnings during menu open/close/select cycle</test>
+  </ui-tests>
+  <notes>HIGH OVERLAP RISK: R3 PR #451 modifies NarrativeBullet.tsx for read-state and 3-action wiring. Run conflict-check before merge. Component prop refactor (single `onAction` instead of per-action callbacks) makes task 046 wiring cleaner. Blocks task 046 (callback wiring) and task 047 (link-click handler).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

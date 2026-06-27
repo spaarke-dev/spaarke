@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Author DAILY-BRIEFING-NARRATE playbook sprk_configjson node graph</title>
+    <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Authored canonical playbook JSON at projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json (6 nodes / 6 edges: Start → LoadKnowledge → [GenerateTldr ‖ GenerateChannelNarratives] → ValidateEntityNames → ReturnResponse). Header fields verified: sprk_playbookcode=BRIEF-NARRATE, sprk_playbooktype=0 (AiAnalysis), sprk_playbookmode=1 (NodeBased), sprk_triggertype=0 (Manual), sprk_capabilities=100000006 (Summarize). All 3 Action GUIDs cross-referenced against PR 1 deployment catalog (BRIEF-NARRATE-TLDR, BRIEF-NARRATE-CHANNEL, BRIEF-VALIDATE-ENTITY-NAMES; SYS-LOOKUP-MEMBERSHIP recorded for catalog but NOT used by this playbook — daily-briefing payload is structured, not Dataverse-queried). Companion design notes at projects/spaarke-daily-update-service-r4/notes/design/010-daily-briefing-narrate-node-graph.md document parallel-branch rationale, allow-list construction logic, LoadKnowledge R5 deferral, anti-hallucination posture (FR-13+FR-14 defense-in-depth), and Component Justification (CLAUDE.md §11). JSON parses; no baked legal-genre example names (grep clean for Acme/Johnson/Lee/Davis/LLP/etc.). Deployment deferred to task 011.</completion-notes>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>009</dependencies>
+    <blocks>011</blocks>
+    <tags>jps, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New playbook JSON authoring — load-bearing data artifact for FR-12 /narrate dispatch. Defines the node graph that orchestrates LoadKnowledge + parallel narrative generation + entity-name validation. Requires Component Justification (CLAUDE.md §11) for new playbook.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Follow `jps-playbook-design` skill. Author repo JSON source-of-truth file at `projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json` defining the `DAILY-BRIEFING-NARRATE` playbook: header fields (`sprk_playbookcode = "BRIEF-NARRATE"`, `sprk_playbooktype = 0` AiAnalysis NOT 2 Notification, `sprk_playbookmode = 1` NodeBased, `sprk_triggertype = 0` Manual, `sprk_capabilities = 100000006` Summarize) plus `sprk_configjson` node graph: Start &#x2192; LoadKnowledge (channel registry) &#x2192; [GenerateTldr &#x2016; GenerateChannelNarratives (parallel per channel — ADR-037)] &#x2192; ValidateEntityNames (Tool ActionType 141) &#x2192; ReturnResponse. Validate via `jps-validate` skill before completion. Include Component Justification block (CLAUDE.md §11): existing=none for narrate-grounded use case, extension=No, cost-of-doing-nothing=`/narrate` cannot dispatch to JPS without this playbook (FR-12 binding).</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS playbook designer with expertise in node-based graph composition (ADR-037 multinode output composition), Skill nodes (AI), Tool nodes (post-LLM validation), and parallel-branch fan-out semantics.</role>
+
+  <goal>A valid, jps-validate-passing JSON file at `projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json` defining the BRIEF-NARRATE playbook header + node graph. The graph references the 3 Action codes deployed in PR 1 (BRIEF-NARRATE-TLDR, BRIEF-NARRATE-CHANNEL, BRIEF-VALIDATE-ENTITY-NAMES). Parallel fan-out for channel narratives modeled per ADR-037. Component justification block present.</goal>
+
+  <context>
+    <background>R4 spec FR-4 (line 123) deploys the `DAILY-BRIEFING-NARRATE` playbook row to spaarkedev1; this task authors the canonical repo JSON source-of-truth from which task 011 deploys. The node graph orchestrates the post-PR-1 Action primitives into the end-to-end /narrate pipeline. ADR-037 governs how parallel channel-narrative branches compose their outputs into a single ReturnResponse payload. AC-4a requires the row to be Active + jps-playbook-audit passing.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">All AI work stays in BFF. Playbook composes JPS primitives only — no new endpoints or services beyond what PR 1 ships.</constraint>
+    <constraint source="ADR-037">Multinode output composition — parallel GenerateChannelNarratives branches compose deterministically into ReturnResponse via JPS node-graph composition rules. Document compose strategy in JSON metadata.</constraint>
+    <constraint source="CLAUDE.md §11">Component Justification block required for new playbook: cite that no existing playbook handles narrate-grounded summarization; cost-of-doing-nothing = FR-12 cannot proceed.</constraint>
+    <constraint source="project">Header fields exactly: `sprk_playbookcode = "BRIEF-NARRATE"`, `sprk_playbooktype = 0`, `sprk_playbookmode = 1`, `sprk_triggertype = 0`, `sprk_capabilities = 100000006`. Deviations require owner sign-off.</constraint>
+    <constraint source="spec FR-13">Prompt content lives in the Action rows (PR 1), NOT in this playbook's JSON. The playbook references action codes only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>.claude/skills/jps-playbook-design/SKILL.md</file>
+      <file>.claude/skills/jps-playbook-audit/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="jps-playbook-design" location=".claude/skills/jps-playbook-design/SKILL.md">JPS playbook authoring — header schema + sprk_configjson node graph composition rules.</pattern>
+      <pattern name="multinode-output-composition" location=".claude/adr/ADR-037-multinode-output-composition.md">Parallel-branch compose semantics for fan-out → fan-in patterns like GenerateChannelNarratives.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read spec.md FR-4 (line 123) + FR-13/FR-14 (lines 166-172) for context on what the playbook orchestrates.</step>
+    <step order="2">Read a reference repo JSON (`projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json`) to confirm canonical file shape — header + sprk_configjson + metadata.</step>
+    <step order="3">Confirm Action codes deployed in PR 1 (BRIEF-NARRATE-TLDR, BRIEF-NARRATE-CHANNEL, BRIEF-VALIDATE-ENTITY-NAMES, SYS-LOOKUP-MEMBERSHIP) by reading `mcp__dataverse__read_query` for `sprk_analysisaction WHERE sprk_actioncode IN (…)` against spaarkedev1.</step>
+    <step order="4">Author `projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json` with: header fields (`sprk_playbookcode = "BRIEF-NARRATE"`, type 0, mode 1, trigger 0, capabilities 100000006), description, Component Justification block (CLAUDE.md §11 format), `sprk_configjson` node graph.</step>
+    <step order="5">Author the node graph: Start node &#x2192; LoadKnowledge node (channel registry input) &#x2192; parallel split: [GenerateTldr (Skill, references BRIEF-NARRATE-TLDR) &#x2016; GenerateChannelNarratives (Skill, references BRIEF-NARRATE-CHANNEL, fan-out per channel from LoadKnowledge output)] &#x2192; compose node &#x2192; ValidateEntityNames (Tool ActionType 141, references BRIEF-VALIDATE-ENTITY-NAMES) &#x2192; ReturnResponse.</step>
+    <step order="6">Document parallel-branch compose strategy in the JSON metadata per ADR-037: how GenerateChannelNarratives outputs aggregate into the channelNarratives array.</step>
+    <step order="7">Run `jps-validate` skill against the file. Fix any schema violations.</step>
+    <step order="8">Verify NO baked example names anywhere in the JSON (per FR-13 AC-13a — Acme Corp, Johnson &amp; Lee, etc.). This file shouldn't contain prompt text at all — that lives in Action rows — but still grep.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to &#x2705;.</step>
+    <step order="10">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">read_query — verify Action codes from PR 1 deployment exist in spaarkedev1 before referencing them</tool>
+    <tool name="jps-validate">Schema validation of authored JSON</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File `projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json` exists.</criterion>
+    <criterion testable="true">Header fields exactly: sprk_playbookcode = "BRIEF-NARRATE", sprk_playbooktype = 0, sprk_playbookmode = 1, sprk_triggertype = 0, sprk_capabilities = 100000006.</criterion>
+    <criterion testable="true">sprk_configjson contains Start, LoadKnowledge, GenerateTldr, GenerateChannelNarratives (parallel), ValidateEntityNames (ActionType 141), ReturnResponse nodes.</criterion>
+    <criterion testable="true">`jps-validate` skill passes on the file with zero schema errors.</criterion>
+    <criterion testable="true">Component Justification block (CLAUDE.md §11 three-question format) present in JSON top-level metadata or sibling notes file.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-4 (line 123), AC-4a (line 124-125), FR-13/FR-14 for downstream consumption. Hint: the JSON only references Action codes — actual prompts live in `sprk_systemprompt` of the deployed Action rows (PR 1). Hint: model the parallel fan-out after any existing playbook that does parallel branches if one exists; otherwise document the compose semantics explicitly per ADR-037. Verify Action codes exist BEFORE referencing them (deploy state in spaarkedev1 must reflect PR 1 propagation).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

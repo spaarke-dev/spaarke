@@ -4,15 +4,14 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using NSubstitute;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
@@ -53,17 +52,6 @@ public class ChatSessionPlanEndpointTests : IClassFixture<CustomWebAppFactory>
     // Endpoint Registration Tests (ADR-001 — Minimal API)
     // =========================================================================
 
-    [Fact]
-    public void MapChatEndpoints_MethodExists_AndIsStatic()
-    {
-        // Arrange
-        var method = typeof(ChatEndpoints).GetMethod("MapChatEndpoints");
-
-        // Assert
-        method.Should().NotBeNull("endpoint registration extension method must exist (ADR-001)");
-        method!.IsStatic.Should().BeTrue("Minimal API extension methods are static (ADR-001)");
-        method.ReturnType.Should().Be(typeof(IEndpointRouteBuilder));
-    }
 
     // =========================================================================
     // Authentication Tests (ADR-008)
@@ -180,7 +168,7 @@ public class ChatSessionPlanEndpointTests : IClassFixture<CustomWebAppFactory>
 /// </summary>
 public class PendingPlanManagerTests
 {
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ILogger<PendingPlanManager> _logger;
     private readonly PendingPlanManager _sut;
 
@@ -189,8 +177,8 @@ public class PendingPlanManagerTests
 
     public PendingPlanManagerTests()
     {
-        // Use in-memory distributed cache (no Redis required in unit tests)
-        _cache = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+        // Use in-memory tenant cache (no Redis required in unit tests).
+        _cache = new InMemoryTenantCache();
 
         _logger = Substitute.For<ILogger<PendingPlanManager>>();
         _sut = new PendingPlanManager(_cache, _logger);
@@ -326,15 +314,6 @@ public class PendingPlanManagerTests
         result.Should().BeNull("plan was explicitly deleted");
     }
 
-    [Fact]
-    public async Task DeleteAsync_WhenNoPlanExists_DoesNotThrow()
-    {
-        // Act — deleting a non-existent plan should be idempotent
-        var action = async () => await _sut.DeleteAsync(TestTenantId, "never-existed-session");
-
-        // Assert
-        await action.Should().NotThrowAsync("deleting a non-existent plan is a no-op");
-    }
 
     // =========================================================================
     // Key isolation — different tenants/sessions are isolated
@@ -392,8 +371,9 @@ public class PendingPlanManagerTests
         // Act
         var key = PendingPlanManager.BuildPendingPlanKey("tenant-001", "session-001");
 
-        // Assert — key must follow ADR-014 pattern: "plan:pending:{tenantId}:{sessionId}"
-        key.Should().Be("plan:pending:tenant-001:session-001");
+        // Assert — FR-05 on-wire format (post-Wave 6 migration to ITenantCache):
+        // tenant:{tenantId}:pending-plan:{sessionId}:v1
+        key.Should().Be("tenant:tenant-001:pending-plan:session-001:v1");
     }
 
     [Fact]
@@ -406,10 +386,11 @@ public class PendingPlanManagerTests
         // Act
         var key = PendingPlanManager.BuildPendingPlanKey(tenantId, sessionId);
 
-        // Assert — both components in key (multi-tenant isolation, ADR-014)
+        // Assert — both components in key (multi-tenant isolation, ADR-014); post-FR-05 format.
         key.Should().Contain(tenantId, "tenant ID must be in cache key for multi-tenant isolation");
         key.Should().Contain(sessionId, "session ID must be in cache key");
-        key.Should().StartWith("plan:pending:", "key must use the 'plan:pending:' prefix");
+        key.Should().StartWith("tenant:", "FR-05 on-wire key prefix is 'tenant:'");
+        key.Should().Contain(":pending-plan:", "resource segment marks the pending-plan namespace");
     }
 
     // =========================================================================

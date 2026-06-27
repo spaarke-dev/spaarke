@@ -1,0 +1,91 @@
+<task id="DEVOPS-014" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Create /devops-project-start skill (THE BLESSED HANDOFF)</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <estimated-effort>5 hours</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>skill-creation, devops, project-start, blessed-handoff, worktree</tags>
+    <dependencies>010, 013</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Author `/devops-project-start --from-issue #N` skill per FR-10. **THE BLESSED HANDOFF (D-13)** — the one canonical bridge from a GitHub Project Issue to a local worktree + folder + design.md skeleton.
+
+Reads Project Issue #N body + fields. Scaffolds `projects/{slug}-r1/` folder (slug derived from Issue title per F9, suffixed `-r1`, bumped `-r2`+ if folder exists). Creates git worktree at `c:/code_files/spaarke-wt-{slug}-r1` from master with feature branch. Drafts `design.md` skeleton populated from Issue body. Writes back `Worktree Path` + `Project Folder` field values to Issue. Writes `> **Portfolio**: GitHub Issue #N · Epic: #E · Project Status: Planned · [board view]` header block to the new local `README.md`.
+
+Supports `--open-editor` flag (default OFF per D-21). Supports `--slug` override. For Path B promotions (Idea sub-issues attached), `--absorbs #X #Y #Z` includes a "Source Ideas" section in drafted `design.md` preserving original framings.
+
+NOTE: This task modifies `.claude/skills/` — main session only. This is the LOAD-BEARING skill of Phase 2 — invest time getting the contract right.
+  </prompt>
+
+  <role>
+Senior skill author. You understand the spec-driven Spaarke workflow end-to-end. You ship a skill that round-trips cleanly: Issue → worktree → folder → README → back-to-Issue with populated fields, all in one invocation.
+  </role>
+
+  <goal>
+After invocation: both the local worktree and the Issue's portfolio fields are populated. Local README contains the portfolio pointer block. `design.md` skeleton is ready for `/design-to-spec`. End-to-end Issue → ready-for-`/design-to-spec` round-trip works.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-07">Spaarke skill convention</constraint>
+    <constraint source="spec D-13">This is the ONE blessed handoff; no parallel paths</constraint>
+    <constraint source="spec F9">Slug derived from Issue title (kebab-cased + `-r1` suffix); `-r2`+ if folder exists; `--slug` overrides</constraint>
+    <constraint source="spec D-21">`--open-editor` is opt-in OFF by default</constraint>
+    <constraint source="NFR-04">Idempotent — re-running on a started project is a no-op + reports current state</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/design.md</file>
+      <file>.claude/skills/worktree-setup/SKILL.md</file>
+      <file>.claude/skills/design-to-spec/SKILL.md</file>
+      <file>.claude/skills/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="git worktree create + feature branch" location=".claude/skills/worktree-setup/SKILL.md">
+        `git worktree add c:/code_files/spaarke-wt-{slug} -b work/{slug}` creates the worktree + branch in one shot. Verify with `git worktree list`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 010, 011, 012, 013 ✅. Load `worktree-setup` skill as exemplar for git operations.</step>
+    <step order="1" name="Author SKILL.md frontmatter + Prerequisites">Token scopes, `gh` CLI, git installed, current dir in main repo.</step>
+    <step order="2" name="Author Purpose">"THE BLESSED HANDOFF" framing per D-13.</step>
+    <step order="3" name="Author Steps">(a) Read Issue #N via `gh issue view --json` + project field values via `gh project item-list 2 --owner spaarke-dev --format json | jq`. (b) Derive slug per F9. (c) Check `projects/{slug}-r1/` existence; bump suffix if needed. (d) Create folder + worktree + feature branch. (e) Generate `design.md` skeleton from Issue body fields. (f) Write `README.md` with portfolio pointer block + standard project README template (note: pipeline scaffold will overwrite this README later if /project-pipeline runs, but pointer block must be preserved). (g) Write back `Worktree Path` + `Project Folder` field values via GraphQL mutation. (h) Optionally `--absorbs #X #Y #Z`: read sub-issue bodies, include "Source Ideas" section in design.md. (i) Optional `--open-editor`: launch VS Code.</step>
+    <step order="4" name="Author Failure Modes">Issue not Type=Project (suggest /devops-idea-promote first), slug collision (auto-suffix), worktree already exists (skip + report), token scope insufficient.</step>
+    <step order="5" name="Update INDEX.md">Add row marking this as **THE BLESSED HANDOFF**.</step>
+    <step order="6" name="End-to-end smoke test">Create throwaway Idea → promote → run `/devops-project-start --from-issue #N`. Verify: folder created, worktree created, design.md drafted, Issue fields back-populated, README has pointer block.</step>
+    <step order="7" name="Path B smoke test">Promote 3 Ideas via Path B → run with `--absorbs`. Verify design.md has "Source Ideas" section preserving all 3 framings.</step>
+    <step order="8" name="Idempotency test">Re-run on the smoke-test project; confirm no-op + status report (no folder recreation, no Issue field churn).</step>
+    <step order="9" name="Cleanup">Remove smoke-test artifacts: archive throwaway Issues, remove throwaway worktrees, delete throwaway folders.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/* files</tool>
+    <tool name="Write">New SKILL.md</tool>
+    <tool name="gh">Smoke tests</tool>
+    <tool name="git">Worktree creation</tool>
+  </tools>
+
+  <outputs>
+    <output type="skill">.claude/skills/devops-project-start/SKILL.md</output>
+    <output type="config">.claude/skills/INDEX.md (one new row marked BLESSED HANDOFF)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase2-project-start-smoke-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SKILL.md exists with all NFR-07 sections</criterion>
+    <criterion testable="true">End-to-end smoke test: Issue → folder + worktree + design.md + back-populated fields + README pointer block</criterion>
+    <criterion testable="true">Path B `--absorbs` smoke test: design.md has "Source Ideas" section with all 3 source Ideas</criterion>
+    <criterion testable="true">Idempotency: re-run is a no-op</criterion>
+    <criterion testable="true">`--open-editor` defaults OFF (per D-21)</criterion>
+    <criterion testable="true">INDEX.md updated</criterion>
+  </acceptance-criteria>
+</task>

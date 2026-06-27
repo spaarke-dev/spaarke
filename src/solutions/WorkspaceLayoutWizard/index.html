@@ -6,6 +6,14 @@
     <title>Workspace Layout Wizard</title>
     <style>
       /* Reset styles for Dataverse Custom Page context */
+
+      /* Box-sizing reset — REQUIRED per docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md §2.
+       * Without it, embedded DataGrid cells render +24px wider than declared
+       * (content-box adds 12+12 padding). Backfilled 2026-06-09. */
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
+
       html, body, #root {
         margin: 0;
         padding: 0;

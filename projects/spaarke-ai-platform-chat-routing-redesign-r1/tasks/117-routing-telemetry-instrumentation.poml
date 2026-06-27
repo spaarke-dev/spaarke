@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="117" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Routing telemetry instrumentation (ADR-015 tier-1 safe)</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>116</dependencies>
+    <blocks>119</blocks>
+    <tags>bff-api, telemetry, ADR-015</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'telemetry'; adds App Insights metrics; binding ADR-015 tier-1 hygiene; STANDARD per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Instrument routing telemetry for the Phase 5 file-aware dispatcher per ADR-015 tier-1 safe rules. Emit App Insights events / metrics for: `(filesCount, filesAllAgree, decidersInvoked, selectedPlaybookId, selectionConfidence, manifestPresent, perFileLatencyMs[], totalLatencyMs)`. Payloads carry tier-1 fields only — deterministic IDs, counts, durations, controlled enums. NEVER user message text, file content, query text, reason text.
+  </prompt>
+
+  <role>SPAARKE platform observability engineer. Familiar with App Insights custom events + ADR-015 tier-1 hygiene rules.</role>
+
+  <goal>
+    Routing telemetry events flow to App Insights from `PlaybookDispatcher`. Each dispatch emits at least one custom event (e.g., `RoutingDispatchCompleted`) with the listed tier-1 dimensions. Verification via App Insights query confirms no content leakage; unit tests assert the event-emission code does not include user message or file content fields.
+  </goal>
+
+  <context>
+    <background>
+      Per spec NFR-A7 + ADR-015 + design §1.2 telemetry plan. The telemetry surface enables (a) routing accuracy monitoring, (b) `selectionConfidence` threshold calibration, (c) detection of regressions. Per ADR-015 tier-1: only deterministic identifiers, counts, durations, enums, hashes are allowed in logs. The dispatcher already emits some telemetry (R5SummarizeTelemetry etc.); this task consolidates routing-specific telemetry into a coherent surface.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Telemetry/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-015">Tier-1 logging — log only IDs, counts, sizes, timings, outcome codes; never content.</constraint>
+    <constraint source="NFR-A7">Telemetry/`context.*` events carry tier-1 fields only.</constraint>
+    <constraint source="spec FR-18">`decidersInvoked` count must be recorded for case-distribution monitoring.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect minor delta.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify existing telemetry pattern in `Sprk.Bff.Api` (likely `ILogger` + `TelemetryClient` or `ActivitySource`). Reuse the pattern for consistency.</step>
+    <step order="2">Author a `RoutingDispatchTelemetry` helper that accepts a struct of tier-1 fields and emits a single App Insights custom event. Fields: `{ tenantId, sessionId, filesCount, manifestPresent, filesAllAgree, decidersInvoked, selectedPlaybookId, selectionConfidence, perFileLatencyMs[], totalLatencyMs, outcome }`.</step>
+    <step order="3">Wire emission at the END of `PlaybookDispatcher.DispatchAsync` — always emits one event per dispatch (success + failure paths).</step>
+    <step order="4">Author negative-assert unit test: build a `RoutingDispatchTelemetry` event with sentinel user message ("SECRET_USER_TEXT_DO_NOT_LOG") and file content ("SECRET_FILE_CONTENT_DO_NOT_LOG"). Run; serialize emitted event; grep result for those sentinels — must NOT appear.</step>
+    <step order="5">Author positive unit test: assert standard tier-1 fields ARE emitted with correct values.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`. All pass.</step>
+    <step order="7">Spot-check App Insights query (post-deploy) — verify event surfaces with expected fields; verify no leakage.</step>
+    <step order="8">Measure BFF publish size; report delta.</step>
+    <step order="9">Update TASK-INDEX.md: task 117 → ✅; current-task.md → ready for 118.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Existing telemetry patterns + dispatcher; ADR-015 tier-1 fields</tool>
+    <tool name="Edit">Author telemetry helper + emission point + tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Telemetry/RoutingDispatchTelemetry.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs (telemetry emission)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Telemetry/RoutingDispatchTelemetryTests.cs (negative + positive assertions)</output>
+    <output type="docs">notes/handoffs/117-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Routing telemetry event emitted per dispatch (success + failure).</criterion>
+    <criterion testable="true">Negative-sentinel test confirms NO user message text in serialized event.</criterion>
+    <criterion testable="true">Negative-sentinel test confirms NO file content in serialized event.</criterion>
+    <criterion testable="true">Positive test asserts tier-1 fields emitted correctly.</criterion>
+    <criterion testable="true">App Insights spot-check (post-deploy) confirms event format.</criterion>
+    <criterion testable="true">BFF publish-size delta reported.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The negative-sentinel test (step 4) is the strongest ADR-015 hygiene guarantee — if any future contributor inadvertently adds user content to the telemetry payload, the test fails. Use cryptographically distinctive sentinels.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — Step 9.5 quality gates skipped (telemetry-only).</protocol>
+  </execution>
+</task>

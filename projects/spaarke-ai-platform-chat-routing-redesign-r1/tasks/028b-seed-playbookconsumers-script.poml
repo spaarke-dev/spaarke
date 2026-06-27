@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028b" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Seed-PlaybookConsumers.ps1 + seed 6 initial routing records</title>
+    <phase>1R: sprk_playbookconsumer Routing Table</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>028a</dependencies>
+    <blocks>028c,028d</blocks>
+    <tags>dataverse, scripts, data, seed</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Script + data only; not core code. STANDARD rigor per task-execute Step 0.5 (script tag, no `.cs` changes).</rigor-reason>
+    <parallel-group>1-L</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `scripts/dataverse/Seed-PlaybookConsumers.ps1` modeled after existing `scripts/dataverse/Deploy-Playbook.ps1`. Seed 6 initial `sprk_playbookconsumer` records using the current production playbook GUIDs from existing env vars (`Workspace__*PlaybookId`). Idempotent UPSERT by alternate key `(consumertype + consumercode + environment)` — rerun is a no-op. Print env-var values BEFORE write for manual review. Document the script in `scripts/README.md`. After this task lands, downstream tasks 028c (Pattern A — 4 consumers) and 028d (Pattern B — 2 consumers) inject the routing service against a seeded table.
+  </prompt>
+
+  <role>SPAARKE platform Dataverse script author. Expert in PowerShell + PAC CLI + Dataverse Web API + idempotent UPSERT patterns by alternate key.</role>
+
+  <goal>
+    Running `Seed-PlaybookConsumers.ps1` against an empty Dev `sprk_playbookconsumer` table creates 6 records (matter-pre-fill, project-pre-fill, ai-summary, summarize-file, chat-summarize, email-analysis) using current env-var GUIDs. Rerun is a no-op — all 6 records detected by alternate key + skipped or update-no-change. Manual Dataverse view confirms 6 rows visible to admin. Script documented in `scripts/README.md`.
+  </goal>
+
+  <context>
+    <background>
+      Per spec §"Phase 1R" FR-1R-07. The 6 production-bound consumers today read playbook GUIDs from env vars (`Workspace__MatterPreFillPlaybookId`, etc.) — Phase 1R replaces this with Dataverse-backed routing. This seed script captures the current env-var values as the initial table contents so downstream consumer migrations (028c/028d) can swap reads from env-var to `IConsumerRoutingService.ResolveAsync` without behavior change. Documented full GUIDs in spec.md FR-1R-05 include `2d660cad-d418-f111-8343-7ced8d1dc988` (matter-pre-fill), `18cf3cc8-…` (ai-summary), `bc71facf-…` (email-analysis); the script reads `appsettings.json` + `appsettings.Development.json` as the AUTHORITATIVE source and prints values BEFORE write for manual review (defense against the 2026-06-24 UAT-2 failure mode).
+    </background>
+    <relevant-files>
+      <file>scripts/dataverse/Deploy-Playbook.ps1</file>
+      <file>scripts/README.md</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.Development.json</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-1R-07">Idempotent UPSERT by alternate key `(consumertype + consumercode + environment)`. Rerun = no-op.</constraint>
+    <constraint source="project">Reads env-var GUIDs from `appsettings.json` / `appsettings.Development.json` as authoritative source (NOT hardcoded in script).</constraint>
+    <constraint source="project">Prints all 6 env-var GUIDs BEFORE write for manual review — defends against the 2026-06-24 UAT-2 env-var-misconfigured failure mode.</constraint>
+    <constraint source="ADR-015">No user message content / file content in script logs; print only consumer codes + GUIDs + environment.</constraint>
+    <constraint source="ADR-029">N/A — no BFF code change; publish-size unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/TASK-INDEX.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `scripts/dataverse/Deploy-Playbook.ps1` end-to-end to match the existing pattern (auth, PAC CLI invocation, error handling, output formatting). Adopt the same shape for `Seed-PlaybookConsumers.ps1`.</step>
+    <step order="2">Read `appsettings.json` + `appsettings.Development.json` to identify the 4 `Workspace__*PlaybookId` env-var keys (MatterPreFill, ProjectPreFill, AiSummary, Summarize) and their current values. For `chat-summarize`, resolve `summarize-document-for-chat@v1` by `sprk_playbookcode` at script execution time (PAC CLI query). For `email-analysis`, use the playbook GUID discovered in task 020.</step>
+    <step order="3">Design the UPSERT-by-alternate-key flow — query `sprk_playbookconsumer` by `ak_consumertype_code_env`; if exists → update with same fields (no-op if values unchanged); if not → create. Use Dataverse Web API `Upsert` semantics (PATCH with alternate key URL) for atomicity.</step>
+    <step order="4">Author `scripts/dataverse/Seed-PlaybookConsumers.ps1`. Parameters: `-EnvironmentUrl` (Dataverse env), `-AppSettingsPath` (default to `src/server/api/Sprk.Bff.Api/appsettings.json`), `-DryRun` (print only, no write). Read 6 GUIDs from appsettings + chat-summarize playbookcode resolution + email-analysis GUID. PRINT all 6 (consumerType, consumerCode='default', playbookId, priority=500, environment='*') in a formatted table to stdout BEFORE write; require explicit confirmation OR `-Confirm:$false` flag to proceed.</step>
+    <step order="5">Implement the UPSERT loop — for each of 6 records, query by alternate key; create or update with consumerType/consumerCode='default'/playbookId/priority=500/environment='*'/enabled=true/matchconditions=null. Log per-record outcome (created/updated-changed/updated-unchanged).</step>
+    <step order="6">Test idempotency — run against empty Dev table → 6 records created; rerun immediately → 6 records detected, all updates skipped (no-op confirmed by log).</step>
+    <step order="7">Update `scripts/README.md` with `Seed-PlaybookConsumers.ps1` section: purpose (FR-1R-07), prerequisites (Dataverse env auth, appsettings.json access), invocation example, expected output, idempotency guarantee.</step>
+    <step order="8">Manual smoke — view 6 records in Power Apps maker portal as admin; confirm priority=500, environment='*', enabled=true, matchconditions=null, playbookId lookup populated.</step>
+    <step order="9">Update TASK-INDEX.md: task 028b → ✅; current-task.md → ready for 028c + 028d (parallel-safe wave 1-M).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Deploy-Playbook.ps1, appsettings.json/Development.json, scripts/README.md</tool>
+    <tool name="Write">scripts/dataverse/Seed-PlaybookConsumers.ps1</tool>
+    <tool name="Edit">scripts/README.md (add Seed-PlaybookConsumers section)</tool>
+    <tool name="Bash">pwsh / pac CLI / Dataverse Web API invocation; script idempotency test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/dataverse/Seed-PlaybookConsumers.ps1</output>
+    <output type="docs">scripts/README.md (Seed-PlaybookConsumers section added)</output>
+    <output type="docs">notes/handoffs/028b-seed-verification-evidence.md (6-row snapshot + idempotency log)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`Seed-PlaybookConsumers.ps1` exists at `scripts/dataverse/Seed-PlaybookConsumers.ps1`.</criterion>
+    <criterion testable="true">Script reads 6 GUIDs from `appsettings.json` / `appsettings.Development.json` (not hardcoded) plus chat-summarize playbookcode lookup + email-analysis GUID from task 020.</criterion>
+    <criterion testable="true">Script PRINTS all 6 consumer rows BEFORE write; supports `-DryRun` flag for print-only.</criterion>
+    <criterion testable="true">Running against empty table creates 6 records (matter-pre-fill, project-pre-fill, ai-summary, summarize-file, chat-summarize, email-analysis) — all with consumerCode='default', priority=500, environment='*', enabled=true, matchconditions=null.</criterion>
+    <criterion testable="true">Rerunning is idempotent — log confirms 6 records detected via alternate key + zero changes.</criterion>
+    <criterion testable="true">Manual Dataverse view confirms 6 rows visible to admin with correct playbookId lookups.</criterion>
+    <criterion testable="true">`scripts/README.md` documents the script (purpose, prerequisites, invocation, output, idempotency).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The print-before-write step is the binding defense against the 2026-06-24 UAT-2 failure mode (env var set under legacy key). If any env-var value looks wrong (e.g., null, malformed GUID, mismatched with known production), STOP and escalate to owner before writing. Email-analysis GUID is the one discovered during task 020 — re-confirm the value against `notes/handoffs/020-*` evidence before script execution. Chat-summarize must resolve via playbookcode lookup at script execution time (NOT hardcoded), because the playbook GUID is environment-specific.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — script + data; no code-review / adr-check gate.</protocol>
+  </execution>
+</task>

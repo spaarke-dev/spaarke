@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Orchestrates the build of all Spaarke client components in the required order:
-    1. Shared libraries (Spaarke.Auth, Spaarke.SdapClient, Spaarke.UI.Components)
+    1. Shared libraries (8 packages in src/client/shared/ — Auth, SdapClient, AI.Context, AI.Outputs, Events.Components, SmartTodo.Components, UI.Components, AI.Widgets)
     2. Vite solutions (20 projects in src/solutions/)
     3. Webpack code pages (4 projects in src/client/code-pages/)
     4. PCF controls (src/client/pcf/)
@@ -56,11 +56,16 @@ if ($Component) {
 # --- Configuration ---
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 
-# Shared libraries (build order matters)
+# Shared libraries (build order matters — downstream deps must come after their dependencies)
 $SharedLibs = @(
-    @{ Name = "Spaarke.Auth";          Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
-    @{ Name = "Spaarke.SdapClient";    Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }
-    @{ Name = "Spaarke.UI.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }
+    @{ Name = "Spaarke.Auth";                 Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
+    @{ Name = "Spaarke.SdapClient";           Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }
+    @{ Name = "Spaarke.AI.Context";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Context" }           # depends on Auth
+    @{ Name = "Spaarke.AI.Outputs";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Outputs" }
+    @{ Name = "Spaarke.Events.Components";    Path = "$RepoRoot\src\client\shared\Spaarke.Events.Components" }
+    @{ Name = "Spaarke.SmartTodo.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.SmartTodo.Components" }
+    @{ Name = "Spaarke.UI.Components";        Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }        # depends on Auth, SdapClient
+    @{ Name = "Spaarke.AI.Widgets";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Widgets" }           # depends on UI.Components, AI.Outputs
 )
 
 # Vite solutions (src/solutions/ - each has vite.config.ts)
@@ -148,14 +153,27 @@ function Invoke-ComponentBuild {
             $nodeModulesPath = Join-Path $BuildPath "node_modules"
             if (-not (Test-Path $nodeModulesPath)) {
                 Write-Host "        installing (no node_modules)..." -ForegroundColor DarkGray
-                $installOutput = & npm install --legacy-peer-deps --no-audit --no-fund 2>&1
+                # Localize $ErrorActionPreference inside the script block so
+                # benign stderr emissions from npm don't become terminating
+                # exceptions under the script's outer 'Stop' preference. See
+                # 2026-06-11 incident: every Vite solution was marked FAILED in
+                # batch because rollup's "/* #__PURE__ */" warnings were
+                # captured via 2>&1 and promoted to terminating errors, even
+                # though $LASTEXITCODE was 0 and the build succeeded.
+                $installOutput = & {
+                    $ErrorActionPreference = 'Continue'
+                    npm install --legacy-peer-deps --no-audit --no-fund 2>&1
+                }
                 if ($LASTEXITCODE -ne 0) {
                     throw "npm install failed (exit code $LASTEXITCODE)`n$($installOutput | Out-String)"
                 }
             }
 
-            # npm run build
-            $buildOutput = & npm run build 2>&1
+            # npm run build (same localized $ErrorActionPreference rationale)
+            $buildOutput = & {
+                $ErrorActionPreference = 'Continue'
+                npm run build 2>&1
+            }
             if ($LASTEXITCODE -ne 0) {
                 throw "npm run build failed (exit code $LASTEXITCODE)`n$($buildOutput | Out-String)"
             }

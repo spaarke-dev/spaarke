@@ -38,6 +38,13 @@
     <!-- OpenAI pinned to 2.8.0: required by Microsoft.Extensions.AI.OpenAI 10.3.0 IChatClient bridge -->
     <PackageReference Include="OpenAI" Version="2.8.0" />
 
+    <!-- JsonSchema.Net 7.3.4: Draft 2020-12 meta-schema validation for sprk_analysistool
+         JSON Schemas (R6 audit item 1, 2026-06-07). Used by ToolHandlerToAIFunctionAdapter
+         constructor + AnalysisToolService.MapJsonSchema to refuse malformed schemas before
+         the LLM sees them. Sole transitive dep: Json.More.Net. +300 KB compressed delta
+         (well within R6 NFR-02 budget of +5 MB). -->
+    <PackageReference Include="JsonSchema.Net" Version="7.3.4" />
+
     <!-- Azure packages -->
     <!-- Cosmos DB SDK v3 — AI persistence (AIPU2-030: SessionPersistenceService, AIPU2-033: AuditLogService) -->
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.47.0" />
@@ -83,6 +90,14 @@
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.14.0" />
+    <!-- Redis tracing instrumentation (spaarke-redis-cache-remediation-r1 task 040 closure).
+         Without this, App Insights' standard SDK does NOT capture StackExchange.Redis
+         dependency calls. Pinned to 1.12.0-beta.1 (current stable-ish for OTel 1.15.x). -->
+    <PackageReference Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="1.12.0-beta.1" />
+    <!-- spaarke-redis-cache-remediation-r1 R7-S7 closure (2026-06-26): wire the OTel pipeline
+         to Azure Monitor so the 12 registered Meters + AddRedisInstrumentation() actually
+         flow to App Insights. Replaces classic AddApplicationInsightsTelemetry() in Program.cs. -->
+    <PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.4.0" />
 
     <!-- Polly (CRITICAL - must be 8.x) -->
     <PackageReference Include="Polly" Version="8.6.5" />
@@ -119,6 +134,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\shared\Spaarke.Core\Spaarke.Core.csproj" />
     <ProjectReference Include="..\..\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
+    <!-- R3 task 010 (FR-2.1): Spaarke.Scheduling in-process job host (~50KB Cronos). -->
+    <ProjectReference Include="..\..\shared\Spaarke.Scheduling\Spaarke.Scheduling.csproj" />
   </ItemGroup>
 
   <!-- Builder scope JSON files for AI Playbook Builder (Phase 4 Dataverse import) -->

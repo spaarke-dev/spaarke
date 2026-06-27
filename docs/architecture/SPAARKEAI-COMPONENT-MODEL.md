@@ -1,8 +1,8 @@
 # SpaarkeAi Component Model
 
-> **Purpose**: Inventory of the shared libraries (`@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/auth`, `@spaarke/legal-workspace`, `@spaarke/events-components`) and solution-local components that compose the SpaarkeAi three-pane shell. Includes the PaneEventBus contract.
+> **Purpose**: Inventory of the shared libraries (`@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/auth`, `@spaarke/legal-workspace`, `@spaarke/events-components`, `@spaarke/daily-briefing-components`) and solution-local components that compose the SpaarkeAi three-pane shell. Includes the PaneEventBus contract.
 >
-> **Last reviewed**: 2026-05-22 (Task 123, Round 13). Refreshed from task 113 (Round 9) to cover R10–R13 deltas. Periodic review required.
+> **Last reviewed**: 2026-06-18 (project `spaarke-daily-update-service-r2` task 063 / SC14). Added `@spaarke/daily-briefing-components` (§7) as the third Pattern D dual-use shared lib alongside `@spaarke/events-components` and `@spaarke/smart-todo-components`. Previous review: 2026-05-22 (Task 123, Round 13).
 
 ---
 
@@ -237,7 +237,44 @@ This is the model for future "controlled component" patterns in the shared lib.
 
 ---
 
-## 7. Solution-local components — SpaarkeAi
+## 7. `@spaarke/daily-briefing-components` (Daily Briefing surface — R2 task 010)
+
+Path: `src/client/shared/Spaarke.DailyBriefing.Components/src/`. Hoisted from the standalone DailyBriefing solution in **project `spaarke-daily-update-service-r2` (R2 task 010, 2026-06-18)** so the same Daily Briefing UI can be reused inside the SpaarkeAi Daily Briefing workspace widget (R2 task 018). Pure data + UI; no LegalWorkspace coupling; auth via `Xrm.WebApi` + `@spaarke/auth` `authenticatedFetch`; Fluent v9 only (ADR-021); React 19 (ADR-022). Third instance of the Pattern D "one components inventory, two consumers" model — follows the precedent set by `@spaarke/events-components` (Calendar) and `@spaarke/smart-todo-components` (Smart Todo).
+
+### 7.1 Public exports
+
+Barrel: `src/index.ts` re-exports the same six subpaths declared in `package.json` `exports`:
+
+| Subpath | Contents |
+|---|---|
+| `./components` | `DailyBriefingApp` (top-level composer), `TldrSection`, `ActivityNotesSection`, `ChannelHeading` + `channelIcons`, `NarrativeBullet`, `PreferencesDropdown`, `CaughtUpFooter`, `DigestHeader`, `EmptyState` (per FR-04). |
+| `./widgets` | Reserved for a future `DailyBriefingWorkspaceWidget` matching the Calendar widget shape; currently empty. The LegalWorkspace section shim mounts `DailyBriefingApp` directly. |
+| `./hooks` | `useBriefingNotifications`, `useBriefingPreferences`, `useBriefingActions` (per FR-06 — the three split hooks that replaced the monolithic `useNotificationData` in R2), plus `useBriefingNarration` and `useInlineTodoCreate` (per FR-05). |
+| `./services` | Notification + narration + preferences service modules (Xrm.WebApi + `authenticatedFetch`). |
+| `./types` | `NotificationContext`, `NarrateRequest`, briefing payload types, preference types. |
+| `./utils` | Pure helpers (date, channel-icon resolution). |
+
+### 7.2 The `loadNotificationContext` factory option seam (FR-01)
+
+`DailyBriefingApp` accepts an optional `loadNotificationContext?: () => Promise<NarrateRequest | null>` prop that allows the host to inject its own notification-context resolver. The seam decouples the shared component from any specific Xrm context source:
+
+- **Standalone code page** (`src/solutions/DailyBriefing/`) omits the prop. Behavior matches the empty-payload contract — BFF `/narrate` returns empty bullets; UI renders the empty state.
+- **SpaarkeAi workspace widget** (LegalWorkspace `daily-briefing.registration.ts` shim, R2 task 002 wires in after task 018) injects a resolver that pulls the active notification context from the SpaarkeAi shell; bullets populate accordingly.
+
+This is the equivalent of the controlled-mode pattern in Calendar (§6.5): same shared component, host owns the data-source binding.
+
+### 7.3 Consumers (architectural unity goal)
+
+| Consumer | Purpose |
+|---|---|
+| `src/solutions/DailyBriefing/` | Standalone Code Page `sprk_dailyupdate` — thin host shell (R2 task 017 shrink). Mounts `<DailyBriefingApp />` with no `loadNotificationContext`. |
+| `src/solutions/LegalWorkspace/src/sections/daily-briefing.registration.ts` | LegalWorkspace section shim consumed by SpaarkeAi via the embedded `LegalWorkspaceApp` pipeline. R2 task 018 rewires it to mount `<DailyBriefingApp loadNotificationContext={...} />` from the new package. Replaces the prior `@spaarke/ui-components/components/WorkspaceShell/sections/dailyBriefing/` shim (Task 069 / 086) which is retired in R2. |
+
+The presence of `@spaarke/daily-briefing-components` makes Pattern D the codified default for new dual-use widgets — see [`../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`](../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md) §1.1 and §4.
+
+---
+
+## 8. Solution-local components — SpaarkeAi
 
 Path: `src/solutions/SpaarkeAi/src/`. These are NOT shared. Reusable from other Code Pages only via copy-paste or future hoisting.
 
@@ -263,7 +300,7 @@ Path: `src/solutions/SpaarkeAi/src/`. These are NOT shared. Reusable from other 
 
 ---
 
-## 8. Solution-local components — LegalWorkspace
+## 9. Solution-local components — LegalWorkspace
 
 Path: `src/solutions/LegalWorkspace/src/`. The "monolithic" workspace surface that SpaarkeAi embeds.
 
@@ -290,13 +327,13 @@ Path: `src/solutions/LegalWorkspace/src/`. The "monolithic" workspace surface th
 
 ---
 
-## 9. PaneEventBus contract
+## 10. PaneEventBus contract
 
-### 9.1 Bus instance lifetime
+### 10.1 Bus instance lifetime
 
 A SINGLE `PaneEventBus` instance per shell mount, provided via `PaneEventBusProvider` (lives at the top of `ThreePaneShell`). Every component below it that calls `usePaneEvent` or `useDispatchPaneEvent` shares the same bus.
 
-### 9.2 Channel summary
+### 10.2 Channel summary
 
 | Channel | Type union | Notes |
 |---|---|---|
@@ -305,7 +342,7 @@ A SINGLE `PaneEventBus` instance per shell mount, provided via `PaneEventBusProv
 | `conversation` | `ConversationPaneEvent` (5 event types) | Chat / playbook events |
 | `safety` | `SafetyPaneEvent` (2 event types) | Groundedness annotations |
 
-### 9.3 Subscribe / dispatch hooks
+### 10.3 Subscribe / dispatch hooks
 
 ```ts
 // Subscribe (registered as a useEffect internally)
@@ -318,7 +355,7 @@ const dispatch = useDispatchPaneEvent();
 dispatch('workspace', { type: 'widget_load', widgetType: 'workspace', widgetData: {...} });
 ```
 
-### 9.4 Important dispatch patterns
+### 10.4 Important dispatch patterns
 
 1. **Subscription-race** — dispatching from a `useEffect` declared BEFORE the subscriber's `useEffect` lands on a zero-subscriber channel. Fix: defer to a macrotask via `setTimeout(..., 0)`. See `WorkspacePane.tsx:340-540` block comments.
 2. **`widget_load` dispatch contract**:
@@ -329,7 +366,7 @@ dispatch('workspace', { type: 'widget_load', widgetType: 'workspace', widgetData
 
 ---
 
-## 10. Cross-references
+## 11. Cross-references
 
 - [`SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](./SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — end-to-end pipeline diagram + storage contract
 - [`SPAARKEAI-COMPONENTIZATION-AUDIT.md`](./SPAARKEAI-COMPONENTIZATION-AUDIT.md) — honest reuse audit; calls out the dual `useWorkspaceLayouts` and section-factory coupling

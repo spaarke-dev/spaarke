@@ -19,10 +19,17 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 /// </summary>
 public class EmailAnalysisIntegrationTests
 {
+    // chat-routing-redesign-r1 task 020 (FR-03 Pattern B): well-known playbooks resolve
+    // via IPlaybookLookupService.GetByIdAsync(stableId) — these mirror the consts inside
+    // AppOnlyAnalysisService so the fixture can stub the lookup deterministically.
+    private const string EmailAnalysisPlaybookId = "bc71facf-6af1-f011-8406-7ced8d1dc988";
+
     private readonly Mock<IDataverseService> _dataverseServiceMock;
     private readonly Mock<ISpeFileOperations> _speFileOperationsMock;
     private readonly Mock<ITextExtractor> _textExtractorMock;
     private readonly Mock<IPlaybookService> _playbookServiceMock;
+    private readonly Mock<IPlaybookLookupService> _playbookLookupMock;
+    private readonly Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IConsumerRoutingService> _consumerRoutingMock;
     private readonly Mock<IScopeResolverService> _scopeResolverMock;
     private readonly Mock<IToolHandlerRegistry> _toolHandlerRegistryMock;
     private readonly Mock<INodeService> _nodeServiceMock;
@@ -36,6 +43,8 @@ public class EmailAnalysisIntegrationTests
         _speFileOperationsMock = new Mock<ISpeFileOperations>();
         _textExtractorMock = new Mock<ITextExtractor>();
         _playbookServiceMock = new Mock<IPlaybookService>();
+        _playbookLookupMock = new Mock<IPlaybookLookupService>();
+        _consumerRoutingMock = new Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IConsumerRoutingService>();
         _scopeResolverMock = new Mock<IScopeResolverService>();
         _toolHandlerRegistryMock = new Mock<IToolHandlerRegistry>();
         _nodeServiceMock = new Mock<INodeService>();
@@ -48,6 +57,8 @@ public class EmailAnalysisIntegrationTests
             _speFileOperationsMock.Object,
             _textExtractorMock.Object,
             _playbookServiceMock.Object,
+            _playbookLookupMock.Object,
+            _consumerRoutingMock.Object,
             _scopeResolverMock.Object,
             _toolHandlerRegistryMock.Object,
             _nodeServiceMock.Object,
@@ -193,10 +204,11 @@ public class EmailAnalysisIntegrationTests
                 };
             });
 
-        // Setup playbook service
+        // Setup playbook lookup — FR-03 Pattern B (task 020): "Email Analysis" resolves via
+        // IPlaybookLookupService.GetByIdAsync(stableId) instead of IPlaybookService.GetByNameAsync.
         var playbook = CreateEmailAnalysisPlaybook();
-        _playbookServiceMock
-            .Setup(x => x.GetByNameAsync("Email Analysis", It.IsAny<CancellationToken>()))
+        _playbookLookupMock
+            .Setup(x => x.GetByIdAsync(EmailAnalysisPlaybookId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(playbook);
 
         // Setup scope resolver
@@ -308,10 +320,11 @@ public class EmailAnalysisIntegrationTests
         // Act
         var result = await _service.AnalyzeEmailAsync(emailId);
 
-        // Assert - Verify playbook was loaded for combined analysis
-        _playbookServiceMock.Verify(
-            x => x.GetByNameAsync("Email Analysis", It.IsAny<CancellationToken>()),
-            Times.Once);
+        // Assert - Verify playbook was loaded for combined analysis via stable-ID lookup
+        // (FR-03 Pattern B, task 020).
+        _playbookLookupMock.Verify(
+            x => x.GetByIdAsync(EmailAnalysisPlaybookId, It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
     }
 
     [Fact]
@@ -515,8 +528,10 @@ public class EmailAnalysisIntegrationTests
             .Setup(x => x.ExtractAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new TextExtractionResult { Success = true, Text = "text" });
 
-        _playbookServiceMock
-            .Setup(x => x.GetByNameAsync("Email Analysis", It.IsAny<CancellationToken>()))
+        // FR-03 Pattern B (task 020): "Email Analysis" resolves via stable-ID lookup —
+        // simulate playbook-not-found at the new resolution path.
+        _playbookLookupMock
+            .Setup(x => x.GetByIdAsync(EmailAnalysisPlaybookId, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new KeyNotFoundException("Playbook not found"));
 
         _dataverseServiceMock

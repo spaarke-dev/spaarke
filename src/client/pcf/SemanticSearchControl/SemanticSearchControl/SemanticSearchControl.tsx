@@ -55,6 +55,7 @@ import {
 } from './components';
 import { useSemanticSearch, useFilters, useFilterOptions, useDocumentListPrefs } from './hooks';
 import { SemanticSearchApiService, NavigationService, DataverseMetadataService } from './services';
+import { resolveSearchIndexNameAsync } from './services/SearchIndexResolver';
 import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilter';
 import { authenticatedFetch } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
@@ -506,9 +507,51 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Filter state management — declared BEFORE auth effects so useEffect can reference filters
   const { filters, setFilters, clearFilters, hasActiveFilters } = useFilters();
 
+  // FR-PCF-02 / FR-PCF-03 — resolve the Azure AI Search index name via the
+  // host record's `sprk_ai_search_index` lookup column (Phase G, v1.1.75).
+  //
+  // v1.1.74 read this from the manifest bound property `searchIndexName`
+  // (SingleLine.Text) which was fed from `sprk_searchindexname` on the host
+  // record. Phase G replaces that text column with a lookup to the new
+  // master-data table `sprk_aisearchindex`; the bound property is dropped
+  // from the manifest and the PCF resolves the name itself on mount via
+  // `context.webAPI.retrieveRecord(...)$expand=sprk_ai_search_index(...)`.
+  //
+  // State semantics (React 16 — no React 18 transitions/suspense):
+  //   - `null` (initial)            → "not yet resolved" — downstream treats
+  //                                    same as "use BFF tenant default" per
+  //                                    the omit-on-empty contract (tasks
+  //                                    031/032). The initial load fires before
+  //                                    resolution completes; that's acceptable
+  //                                    behaviour (BFF default is the same
+  //                                    fallback the resolver would produce on
+  //                                    failure).
+  //   - non-empty string            → host record has a lookup pointing at a
+  //                                    valid `sprk_aisearchindex` row.
+  //   - `null` (after resolve fail) → BFF tenant default applies.
+  //
+  // Resolution runs once on mount; entityType + entityId are stable for the
+  // control's lifetime (page navigation re-mounts the PCF).
+  const [resolvedSearchIndexName, setResolvedSearchIndexName] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void resolveSearchIndexNameAsync(context).then(name => {
+      if (!cancelled) {
+        setResolvedSearchIndexName(name);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally empty deps — context.webAPI + context.mode are stable for
+    // the control's lifetime per PCF contract. Re-resolving on every render
+    // would spam Dataverse. (Same pattern as the auth-init useEffect below.)
+  }, []);
+  const boundSearchIndexName = resolvedSearchIndexName;
+
   // Search state management — declared BEFORE auth effects so useEffect can reference search
   const { results, totalCount, isLoading, isLoadingMore, error, hasMore, query, search, loadMore, reset } =
-    useSemanticSearch(apiService, searchScope, scopeId);
+    useSemanticSearch(apiService, searchScope, scopeId, boundSearchIndexName);
 
   // Auto-load all documents once auth is ready (shows documents without requiring a search query).
   // search and filters intentionally omitted from deps — we only want to fire once on auth ready.
@@ -747,8 +790,41 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // first result's documentId. The per-row "Find Similar" action retains
   // that behavior; only the toolbar Open icon was redirected.
   const handleOpenViewer = useCallback(() => {
-    void navigationService.openSemanticSearchPage(query ?? queryInput ?? '', searchScope, scopeId, isDarkMode);
-  }, [navigationService, query, queryInput, searchScope, scopeId, isDarkMode]);
+    // FR-PCF-03 + FR-PARITY-01 (Wave 9 wiring) — surface the PCF's current
+    // filter state + the manifest-bound search-index binding into the code
+    // page envelope so the dialog opens showing the SAME result set the PCF
+    // is currently showing. `buildSemanticSearchEnvelope` handles default /
+    // empty omission per-key, so passing all keys here is safe.
+    void navigationService.openSemanticSearchPage(
+      query ?? queryInput ?? '',
+      searchScope,
+      scopeId,
+      isDarkMode,
+      undefined, // use default modal options (80% x 80%)
+      {
+        threshold: filters.threshold,
+        searchMode: filters.searchMode,
+        fileTypes: filters.fileTypes,
+        dateFrom: filters.dateRange?.from ?? null,
+        dateTo: filters.dateRange?.to ?? null,
+        // PCF surfaces tag filtering via `selectedTags` (FR-DOC-05/07); the
+        // code-page parser supports `tags` so we forward it for parity.
+        tags: selectedTags,
+        associatedOnly: filters.associatedOnly,
+      },
+      boundSearchIndexName ?? undefined
+    );
+  }, [
+    navigationService,
+    query,
+    queryInput,
+    searchScope,
+    scopeId,
+    isDarkMode,
+    filters,
+    selectedTags,
+    boundSearchIndexName,
+  ]);
 
   // Handle Add Document — opens DocumentUploadWizard Code Page dialog.
   // After upload completes, always re-run the search (empty query returns all
@@ -1761,7 +1837,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.73 • Built 2026-06-05</Text>
+        <Text size={100}>v1.1.76 • Built 2026-06-10</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so

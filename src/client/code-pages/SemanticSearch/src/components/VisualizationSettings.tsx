@@ -54,11 +54,9 @@ const CLUSTER_BY_OPTIONS: { value: VisualizationColorBy; label: string }[] = [
   { value: 'PersonContact', label: 'Created By' },
 ];
 
-const SEARCH_MODE_OPTIONS: { value: HybridMode; label: string }[] = [
-  { value: 'rrf', label: 'Hybrid (RRF)' },
-  { value: 'vectorOnly', label: 'Vector Only' },
-  { value: 'keywordOnly', label: 'Keyword Only' },
-];
+// Phase G (2026-06-10): SEARCH_MODE_OPTIONS moved to SearchFilterPane along
+// with the Search Mode dropdown itself. Kept here as a reference comment so
+// future readers know where the literal list lives now.
 
 const DATE_FIELD_OPTIONS: { value: TimelineDateField; label: string }[] = [
   { value: 'createdAt', label: 'Created Date' },
@@ -301,6 +299,14 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
   const styles = useStyles();
   const [isOpen, setIsOpen] = useState(true);
 
+  // Phase G (2026-06-10) — threshold/searchMode props are still accepted for
+  // backwards-compat but are no longer rendered (relocated to SearchFilterPane).
+  // Void unused destructured values to keep TS strict-mode happy.
+  void threshold;
+  void onThresholdChange;
+  void searchMode;
+  void onSearchModeChange;
+
   // Re-open settings panel whenever the view tab changes
   const prevViewMode = useRef(viewMode);
   useEffect(() => {
@@ -309,23 +315,6 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
       setIsOpen(true);
     }
   }, [viewMode]);
-
-  // --- Shared handlers ---
-  const handleThresholdChange = useCallback(
-    (_ev: unknown, data: { value: number }) => {
-      onThresholdChange(data.value);
-    },
-    [onThresholdChange]
-  );
-
-  const handleSearchModeChange = useCallback(
-    (_ev: unknown, data: { optionValue?: string }) => {
-      if (data.optionValue) {
-        onSearchModeChange(data.optionValue as HybridMode);
-      }
-    },
-    [onSearchModeChange]
-  );
 
   // --- Map handlers ---
   const handleMapColorByChange = useCallback(
@@ -393,40 +382,11 @@ export const VisualizationSettings: React.FC<VisualizationSettingsProps> = ({
       </PopoverTrigger>
 
       <PopoverSurface className={styles.surface}>
-        {/* === Shared: Relevance Threshold === */}
-        <div className={styles.section}>
-          <div className={styles.sliderRow}>
-            <Label className={styles.sectionTitle}>Relevance Threshold</Label>
-            <Text className={styles.sliderValue}>{threshold}%</Text>
-          </div>
-          <Slider
-            min={0}
-            max={100}
-            value={threshold}
-            onChange={handleThresholdChange}
-            aria-label="Relevance threshold"
-          />
-          <Text className={styles.hint}>Hide results below this score</Text>
-        </div>
-
-        {/* === Shared: Search Mode === */}
-        <div className={styles.section}>
-          <Label className={styles.sectionTitle}>Search Mode</Label>
-          <Dropdown
-            className={styles.dropdown}
-            size="small"
-            value={SEARCH_MODE_OPTIONS.find(o => o.value === searchMode)?.label ?? 'Hybrid (RRF)'}
-            selectedOptions={[searchMode]}
-            onOptionSelect={handleSearchModeChange}
-            aria-label="Search mode"
-          >
-            {SEARCH_MODE_OPTIONS.map(opt => (
-              <Option key={opt.value} value={opt.value}>
-                {opt.label}
-              </Option>
-            ))}
-          </Dropdown>
-        </div>
+        {/* Phase G (2026-06-10) — Relevance Threshold + Search Mode were
+            relocated INTO the SearchFilterPane (left side) per spec §6 to
+            make them more discoverable. They are no longer rendered here.
+            Props remain for backwards-compat with `App.tsx`'s state model;
+            the threshold/searchMode are controlled from the pane now. */}
 
         {/* === Network-only settings === */}
         {viewMode === 'map' && (

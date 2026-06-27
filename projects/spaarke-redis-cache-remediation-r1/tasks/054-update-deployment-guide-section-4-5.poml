@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>UPDATE SPAARKE-DEPLOYMENT-GUIDE.md §4.5 + Appendix D</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>051</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Doc update; binds FR-21</rigor-reason>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Insert new §4.5 "Phase 1.5: Redis Cache" between existing §4 (Phase 1 Azure Infrastructure) and §4.6 (AI Search) — contains: brief context paragraph, `Deploy-RedisCache.ps1 -EnvironmentName <env>` code block, cross-links. Add `Deploy-RedisCache.ps1` entry to Appendix D Script Reference. Existing file keeps UPPERCASE name (Q-F).</prompt>
+  <role>Spaarke doc maintainer.</role>
+  <goal>§4.5 present; Appendix D updated.</goal>
+  <context><background>Per FR-21, deployment guide gets §4.5 between the existing §4 and §4.6.</background><relevant-files><file>docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md</file></relevant-files></context>
+  <constraints><constraint source="spec">FR-21.</constraint><constraint source="spec">Q-F existing UPPERCASE name preserved.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/redis-cache-azure-setup.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read existing guide. Confirm §4 + §4.6 location.</step>
+    <step order="2">Insert §4.5 with: 1-2 sentence context, code block (`pwsh ./scripts/Deploy-RedisCache.ps1 -EnvironmentName <env>`), cross-links to `caching-architecture.md` + `redis-cache-azure-setup.md`.</step>
+    <step order="3">Add `Deploy-RedisCache.ps1` entry to Appendix D Script Reference.</step>
+    <step order="4">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">existing guide</tool><tool name="Edit">insert section + appendix entry</tool></tools>
+  <outputs><output type="docs">docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md (modified)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">§4.5 present with deploy script invocation.</criterion>
+    <criterion testable="true">Appendix D references `Deploy-RedisCache.ps1`.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

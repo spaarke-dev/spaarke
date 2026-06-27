@@ -1,0 +1,75 @@
+<task id="DEVOPS-001" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Extend GitHub Project #2 Type field with Project option</title>
+    <status>completed</status>
+    <phase>1</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~15 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>github-project, schema, foundation, gh-cli</tags>
+    <dependencies>none</dependencies>
+    <parallel-group>P1-schema</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Add a new `Project` option to the `Type` single-select field on GitHub Project #2 ("Spaarke Core") at https://github.com/users/spaarke-dev/projects/2. The existing options (`Idea`, `Epic`, `Story`, `Task`, `Bug`, `Spike`) MUST be preserved. After this lands, the field offers 7 options total. This is a hand-driven Phase 1 task; the `/devops-portfolio-setup` skill (task 010) will codify this for idempotent re-run.
+  </prompt>
+
+  <role>
+DevOps engineer fluent with GitHub Projects v2 GraphQL API + `gh` CLI v2.40+. You operate within an authenticated `gh auth status` session as `spaarke-dev`.
+  </role>
+
+  <goal>
+`gh project field-list 2 --owner spaarke-dev --format json` shows the `Type` field options list now including `"name":"Project"` alongside the 6 existing options. No existing item's `Type` value has been altered.
+  </goal>
+
+  <constraints>
+    <constraint source="spec">MUST use `gh` CLI (or `gh api graphql`) — no Octokit/REST wrapper</constraint>
+    <constraint source="spec">MUST preserve all existing Type options; this is additive only</constraint>
+    <constraint source="NFR-01">Project #2 is the only portfolio surface — no new board</constraint>
+    <constraint source="NFR-04">Idempotency target — re-running this task on an already-extended schema MUST be a no-op</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/CLAUDE.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="gh GraphQL update single-select field" location="https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/using-the-api-to-manage-projects">
+        Use `updateProjectV2Field` mutation with `singleSelectOptions` to add an option. Get the field ID via `gh project field-list 2 --owner spaarke-dev --format json | jq` first.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Read project CLAUDE.md + spec.md FR-01 section. Verify `gh auth status` is active as `spaarke-dev`.</step>
+    <step order="1" name="Capture baseline">Run `gh project field-list 2 --owner spaarke-dev --format json` and save output to `notes/spikes/phase1-baseline-fields-{date}.json`. Confirm Type field ID + existing options. Note item count.</step>
+    <step order="2" name="Idempotency pre-check">Inspect baseline JSON. If `"name":"Project"` already exists in Type options, REPORT no-op and exit early (this is the idempotency contract).</step>
+    <step order="3" name="Compose mutation">Build the `updateProjectV2Field` GraphQL mutation that ADDS `Project` to existing `singleSelectOptions` (must include ALL existing options to avoid wiping them; the mutation replaces the full list).</step>
+    <step order="4" name="Execute mutation">Run via `gh api graphql -f query='...' -f projectId=... -f fieldId=... -f options=...`. Capture response.</step>
+    <step order="5" name="Verify">Re-run `gh project field-list 2 --owner spaarke-dev --format json`. Confirm `Type` now has 7 options including `Project`; confirm no existing option lost.</step>
+    <step order="6" name="Verify items untouched">Spot-check 3 existing items: their `Type` value should be unchanged.</step>
+    <step order="7" name="Document">Save final field JSON to `notes/spikes/phase1-after-fr01-{date}.json`. Update task status in TASK-INDEX.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">GitHub CLI for Project mutations</tool>
+    <tool name="jq">JSON parsing (Windows: `winget install jq` or use PowerShell `ConvertFrom-Json`)</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">GitHub Project #2 Type field — 7 options total</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase1-baseline-fields-{date}.json</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase1-after-fr01-{date}.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`gh project field-list 2 --owner spaarke-dev --format json | jq '.fields[] | select(.name=="Type") | .options[].name'` includes `Project`</criterion>
+    <criterion testable="true">Existing 6 Type options (`Idea`, `Epic`, `Story`, `Task`, `Bug`, `Spike`) still present</criterion>
+    <criterion testable="true">No existing item's Type value changed (random spot-check of 3 items)</criterion>
+    <criterion testable="true">Re-running the task is a no-op (idempotency dry-run reports zero proposed mutations)</criterion>
+  </acceptance-criteria>
+</task>

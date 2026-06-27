@@ -94,9 +94,19 @@ public class VisualizationService : IVisualizationService
             _logger.LogDebug("[VIZ-DEBUG] Source document {DocumentId} FOUND: Name={Name}, FileName={FileName}",
                 documentId, sourceDataverseDoc.Name, sourceDataverseDoc.FileName ?? "(null)");
 
-            // Step 2: Get SearchClient and try to get source document from AI Search (optional for semantic search)
-            _logger.LogDebug("[VIZ-DEBUG] Step 2: Getting SearchClient for tenant {TenantId}", options.TenantId);
-            var searchClient = await _deploymentService.GetSearchClientAsync(options.TenantId, cancellationToken);
+            // Step 2: Get SearchClient and try to get source document from AI Search (optional for semantic search).
+            //
+            // multi-container-multi-index-r1: route by the source document's `sprk_searchindexname`
+            // so Find Similar binds to the SAME index the document was indexed into. Without this,
+            // multi-index tenants get the default-tenant index — which may not contain the source
+            // doc — and the entire semantic-relationships pass is silently skipped (line ~150).
+            // When `SearchIndexName` is null/empty (legacy documents), the 3-arg overload falls
+            // through to the same 2-tier chain as the 2-arg overload (NFR-02 backward compat).
+            _logger.LogDebug(
+                "[VIZ-DEBUG] Step 2: Getting SearchClient for tenant {TenantId}, sourceSearchIndexName={SourceIndex}",
+                options.TenantId, sourceDataverseDoc.SearchIndexName ?? "(null — using default)");
+            var searchClient = await _deploymentService.GetSearchClientAsync(
+                options.TenantId, sourceDataverseDoc.SearchIndexName, cancellationToken);
             _logger.LogDebug("[VIZ-DEBUG] Step 2: SearchClient obtained, index={IndexName}", searchClient.IndexName);
 
             var sourceDocument = await GetSourceDocumentAsync(

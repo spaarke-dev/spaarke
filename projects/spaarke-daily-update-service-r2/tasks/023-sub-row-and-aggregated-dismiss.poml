@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Sub-row Dismiss + aggregated cascade Dismiss (FR-14, FR-14a)</title>
+    <phase>P2a: Hybrid Aggregation UX</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>024</blocks>
+    <tags>frontend, react, fluent-ui, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code change in NarrativeBullet; two distinct dismiss behaviors (single + cascade)</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Default serial within Group C (file-overlap with 021/022 on NarrativeBullet.tsx)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per FR-14 + FR-14a: each sub-row's Dismiss button marks ONLY that specific underlying `appnotification` row as read (sub-row fades). The aggregated-bullet Dismiss button (the existing one on the narrative line) marks ALL underlying `appnotification` rows in `itemIds[]` as read (cascade); the entire bullet hides on success.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in `useBriefingActions.markAsRead`, optimistic UI patterns, and conditional component rendering.</role>
+
+  <goal>Sub-row Dismiss marks one row; aggregated Dismiss cascades to all `itemIds[]`. Optimistic UI hides the dismissed item(s); on failure, restore + show error.</goal>
+
+  <context>
+    <background>
+      Per FR-14 and FR-14a: distinguish between per-item dismiss (sub-row) and bulk dismiss (aggregated). Both invariants — leaving other sub-rows alone (per-item) AND removing all on aggregated — must hold.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingActions.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-14: sub-row Dismiss marks only the specific underlying row; sub-row fades; others remain visible.</constraint>
+    <constraint source="project">FR-14a: aggregated Dismiss cascades — marks ALL rows in `itemIds[]` as read; entire bullet (narrative + sub-list) hides.</constraint>
+    <constraint source="ADR-021">Fluent v9 Button + animation/transition tokens.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-021-fluent-ui-v9-design-system.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">In `NarrativeBullet.tsx`, populate the sub-row Dismiss slot with a Fluent v9 `Button` (compact, icon).</step>
+    <step order="2">Sub-row Dismiss `onClick`: call `useBriefingActions.markAsRead(item.id)`; on success, fade the specific sub-row (optimistic).</step>
+    <step order="3">Update the existing aggregated-bullet Dismiss behavior: invoke `markAsRead` for EACH id in `itemIds[]` (cascade); on success, hide the entire bullet.</step>
+    <step order="4">Error handling: if any markAsRead fails, restore the dismissed UI and surface a toast.</step>
+    <step order="5">Verify single-item bullets (N=1) keep their original Dismiss behavior (no cascade needed; only one id).</step>
+    <step order="6">Run dev server; smoke test: dismiss one sub-row → others remain; dismiss aggregated → entire bullet gone.</step>
+    <step order="7">Update TASK-INDEX.md: change task 023 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + dev server.</tool>
+  </tools>
+
+  <ui-tests>
+    <test name="Sub-row Dismiss marks only specific row (FR-14)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_dailyupdate</url>
+      <steps>
+        <step>Find an aggregated bullet with N&gt;1 underlying items</step>
+        <step>Click Dismiss on the first sub-row</step>
+        <step>Verify only that sub-row fades</step>
+        <step>Verify other sub-rows remain visible</step>
+        <step>Query Dataverse `appnotification` — verify only the targeted notification's `isread` flipped to true</step>
+      </steps>
+      <expected>Sub-row Dismiss is targeted; only one notification marked read</expected>
+    </test>
+    <test name="Aggregated Dismiss cascades (FR-14a)">
+      <steps>
+        <step>Find another aggregated bullet with N&gt;1 items</step>
+        <step>Click the aggregated-level Dismiss button (on the narrative line)</step>
+        <step>Verify entire bullet (narrative + sub-list) hides</step>
+        <step>Query Dataverse — verify all rows in `itemIds[]` have `isread = true`</step>
+      </steps>
+      <expected>Aggregated Dismiss cascades to all underlying rows</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Sub-row Dismiss marks only the specific underlying row; others remain.</criterion>
+    <criterion testable="true">Aggregated Dismiss cascades to all rows in `itemIds[]`; bullet fully hides.</criterion>
+    <criterion testable="true">Single-item bullets retain original (non-cascading, single-id) Dismiss behavior.</criterion>
+    <criterion testable="true">Error handling restores UI on backend failure.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    P2a final task — closes the hybrid aggregation UX. Tests in task 024.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

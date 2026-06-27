@@ -1,0 +1,90 @@
+<task id="R3-084" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`MembershipJunctionUpdater` handler (subscription consumer, idempotent)</title>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+      Wave 21 Group S. Created IMembershipJunctionUpdater (Scoped handler contract — also reused
+      directly by task 085's MembershipReconciliationJob) + MembershipJunctionUpdater (real impl,
+      composite-alternate-key idempotency on the 5-tuple {personId, personIdType, entityLogicalName,
+      entityRecordId, sourceField} — retrieve-then-create/update/delete branching, Added/Updated
+      both upsert role+lastSyncedOn, Removed deletes-if-present and no-ops-if-absent) +
+      MembershipJunctionUpdaterHost (Service Bus subscription consumer BackgroundService —
+      DefaultAzureCredential per ADR-028, ServiceBusProcessor pump, AbandonMessageAsync on
+      transient error, DeadLetterMessageAsync on JSON deserialization failure, 30s drain on
+      StopAsync per NFR-07 with `DrainTimeout` constant locked at the type-system level) +
+      NullMembershipJunctionUpdaterHost (ADR-032 hosted-service-peer pattern — logs once on
+      start, performs no Service Bus work) + MembershipJunctionUpdaterOptions (bound from
+      "Membership:JunctionUpdater" section, distinct from task 081's "Membership:EventPublisher"
+      sub-key so the publisher + consumer kill-switches flip independently). Extended
+      MembershipModule.AddMembership() with symmetric registration per bff-extensions.md §F.1:
+      both Enabled=true and Enabled=false branches register an IHostedService (real or Null) —
+      symmetric registration eliminates operator-flag-flip-time DI surprises. Updated
+      appsettings.Development.json.template with "Membership:JunctionUpdater" subsection
+      (Enabled=false by default; operator populates ServiceBusNamespace + flips Enabled to true
+      after task 071 topic deploy completes). Tests: 14 new unit tests across
+      MembershipJunctionUpdaterTests (12) + MembershipJunctionUpdaterHostTests (2) — all pass.
+      Test coverage: Added_CreatesRowWhenMissing, Added_UpdatesWhenRowExists (idempotency on
+      duplicate Added), Updated_OverwritesRoleAndLastSyncedOn, Updated_CreatesRowWhenMissing
+      (recon self-heal), Removed_DeletesExistingRow, Removed_IsNoOpWhenRowAbsent (idempotency on
+      duplicate Removed), DuplicateDelivery_IsIdempotent (canonical at-least-once duplicate-delivery
+      test — stateful mock toggles row existence; verifies Create once + Update once on the second
+      delivery), CancellationRequested_Propagates, NullEvent_Throws, NullHost_LogsAndReturnsImmediately,
+      RealHost_StopAsync_DoesNotDeadlock_WhenNeverStarted, DrainTimeout_Is30Seconds (locks
+      NFR-07 at the type level). Full BFF unit-test run: 7524 pass / 110 skip (pre-existing) /
+      0 fail (1m30s). Build: 0 errors, no new warnings. Publish: 46.22 MB (+0.01 MB vs task 081
+      baseline 46.21 MB — within +1 MB per-task ceiling; cumulative still well under 60 MB
+      hard ceiling). CVE: pre-existing Microsoft.Kiota.Abstractions 1.21.2 HIGH only; no new HIGH
+      CVEs introduced. Sub-agent boundary respected — no .claude/ writes. Coordinated with parallel
+      sibling 081: no file overlap (081 owns Events/MembershipEventPublisher*, 084 owns the rest);
+      both extend MembershipModule with distinct config sub-keys so the publisher (publish-side) +
+      consumer (subscription-side) kill-switches are flipped independently. Topic + subscription
+      names match task 071 Bicep: "sprk-membership-changes" + "recon-junction-updater".
+      Cross-cutting: IMembershipJunctionUpdater is now available for task 085's
+      MembershipReconciliationJob to reuse directly — recon synthesizes MembershipChangedEvent
+      payloads from source-of-truth scans and invokes HandleAsync through the same idempotency
+      contract, so a single write path (junction-row upsert/delete) services both event-driven +
+      nightly-recon paths.
+    </completion-notes>
+    <phase>P8</phase>
+    <parallel-group>S (with 085)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>4-6h</estimated-effort>
+    <tags>bff-api,membership,service-bus-consumer,phase2</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipJunctionUpdater.cs (new)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipJunctionUpdaterHost.cs (new BackgroundService)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipJunctionUpdaterTests.cs</file>
+    </relevant-files>
+    <dependencies>070, 071, 072</dependencies>
+  </metadata>
+  <prompt>Implement Service Bus subscription consumer that processes MembershipChangedEvent and upserts/deletes `sprk_userentityassociation` rows. Idempotent: keyed on {personId, entityRecordId, sourceField} — duplicate delivery safe.</prompt>
+  <goal>Handler consumes from `recon-junction-updater` subscription. Add → upsert. Remove → delete. Update → upsert (overwrite role/timestamp). Idempotent on duplicate delivery.</goal>
+  <constraints>
+    <constraint source="ADR-001">In-process BackgroundService</constraint>
+    <constraint source="spec FR-2P2.4">Idempotency keyed on {personId, entityRecordId, sourceField}</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>service-bus-consumer-handler</topic>
+    <files>
+      <file>.claude/patterns/api/background-workers.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-2P2.4</step>
+    <step order="1">Implement MembershipJunctionUpdater (event-handler logic)</step>
+    <step order="2">Implement MembershipJunctionUpdaterHost : BackgroundService (subscription consumer loop)</step>
+    <step order="3">Upsert by composite key (idempotency)</step>
+    <step order="4">Unit tests: add/remove/update; duplicate delivery; cancellation</step>
+    <step order="5">Integration test: event published → row appears in junction table</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">AC-1P2.5 — handler upserts/deletes correctly + idempotent</criterion>
+    <criterion testable="true">Cancellation propagates within 30s (NFR-07)</criterion>
+  </acceptance-criteria>
+</task>

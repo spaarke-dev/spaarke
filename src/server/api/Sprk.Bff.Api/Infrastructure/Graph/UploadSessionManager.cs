@@ -64,7 +64,8 @@ public class UploadSessionManager
                 item.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
                 item.ETag,
                 item.Folder != null,
-                item.WebUrl);
+                item.WebUrl,
+                item.ParentReference?.DriveId ?? driveId);
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
@@ -274,7 +275,8 @@ public class UploadSessionManager
                 uploadedItem.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
                 uploadedItem.ETag,
                 uploadedItem.Folder != null,
-                uploadedItem.WebUrl);
+                uploadedItem.WebUrl,
+                uploadedItem.ParentReference?.DriveId ?? containerId);
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
         {

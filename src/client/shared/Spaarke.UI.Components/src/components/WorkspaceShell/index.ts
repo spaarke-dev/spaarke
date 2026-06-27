@@ -83,34 +83,16 @@ export {
   useToolbarDividerStyles,
 } from './WorkspaceShell.styles';
 
-// Daily Briefing section (hoisted in task 069 from LegalWorkspace).
-// The hook + section component are context-agnostic — consumers supply
-// `authenticatedFetch` and optionally `tenantId` / `onRateLimitError`.
-// The registration is a FACTORY (not a static const) because consumer-supplied
-// auth deps must close over the factory call; see comments in
-// `dailyBriefing.registration.ts` for rationale.
-export { useDailyBriefing } from './sections/dailyBriefing/useDailyBriefing';
-export type {
-  DailyBriefingState,
-  DailyBriefingError,
-  UseDailyBriefingOptions,
-  // task 086 / Round 4 Fix 3 — exposed so consumers wiring
-  // `loadNotificationContext` can type their payload builders.
-  NarrateRequest,
-  NotificationCategoryDto,
-  PriorityItemDto,
-  ChannelNarrationInput,
-  ChannelItemDto,
-} from './sections/dailyBriefing/useDailyBriefing';
-
-export {
-  DailyBriefingSection,
-  TELEMETRY_EVENT_DAILY_BRIEFING_429,
-} from './sections/dailyBriefing/DailyBriefingSection';
-export type { DailyBriefingSectionProps } from './sections/dailyBriefing/DailyBriefingSection';
-
-export { createDailyBriefingRegistration } from './sections/dailyBriefing/dailyBriefing.registration';
-export type { CreateDailyBriefingRegistrationOptions } from './sections/dailyBriefing/dailyBriefing.registration';
+// Daily Briefing section — REMOVED from @spaarke/ui-components in R2.1 hotfix
+// (2026-06-19). The old narrative-only DailyBriefingSection + useDailyBriefing
+// hook + createDailyBriefingRegistration factory have been deleted; the full
+// DailyBriefingApp (TL;DR + Activity Notes + per-item actions) is now mounted
+// by the new factory at @spaarke/daily-briefing-components/widgets,
+// closing the Pattern D dual-use gap left by R2 task 018. Consumers (the
+// LegalWorkspace shim) now import the factory + TELEMETRY_EVENT_DAILY_BRIEFING_429
+// + NarrateRequest from @spaarke/daily-briefing-components/widgets.
+// See projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md
+// and the R2.1 hotfix commit for full context.
 
 // Wizard launchers (hoisted in Round 4 Fix 2 / task 085 — see file header).
 // Shared Xrm.Navigation.navigateTo wrappers for the seven Get Started wizards.

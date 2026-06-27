@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="102" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>BFF: lookup-first resolver (FetchXml link-entity) + `DataverseAllowedIndexesProvider` (cached)</title>
+    <phase>G: Lookup-driven multi-index</phase>
+    <status>completed</status>
+    <estimated-hours>4-6</estimated-hours>
+    <dependencies>100, 101</dependencies>
+    <blocks>103, 104</blocks>
+    <tags>bff-api, api, services, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api`; modifies `.cs` code in critical resolver + allow-list paths; introduces new caching layer; 6+ steps; foundational change for Phase G. Code-review + adr-check at Step 9.5 required.</rigor-reason>
+    <parallel-group>G3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Server-side BFF work; disjoint from PCF v1.1.75 (task 106) which is client-side. Both depend on task 100 only.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update `SearchIndexNameResolver` to read the index name via FetchXml `link-entity` (outer join) from the `sprk_aisearchindexid` lookup expansion. Each step in the 3-step chain (document → parent → BU) uses a single fetch with a linked-entity attribute projection of `sprk_aisearchindex.sprk_searchindexname`. Retain the text-column read path as a fallback (for backward compatibility during migration soak); both paths log distinct messages so App Insights can confirm the migration. Replace the static `AiSearchOptions.AllowedIndexes` validation in `KnowledgeDeploymentService` with a new `DataverseAllowedIndexesProvider` that queries `sprk_aisearchindex` (statecode = 0, project `sprk_searchindexname`) with a 5-minute `IMemoryCache` TTL. Existing appsettings `AllowedIndexes` validation is retained as a final fallback (logged as warning when used).
+  </prompt>
+
+  <role>
+    BFF developer with deep familiarity with `Sprk.Bff.Api/Services/Ai/`, `Spaarke.Dataverse`, FetchXml, and `IMemoryCache`. Read `.claude/constraints/bff-extensions.md` before designing — binding pre-merge checklist.
+  </role>
+
+  <goal>
+    `SearchIndexNameResolver.ResolveAsync` reads from `sprk_aisearchindexid` lookup via FetchXml `link-entity` (outer); falls back to `sprk_searchindexname` text column when lookup is null (logged as "text-fallback"). `KnowledgeDeploymentService.GetSearchClientAsync` validates against `DataverseAllowedIndexesProvider.IsAllowedAsync` (cached query of `sprk_aisearchindex` rows where statecode = 0); on a Dataverse fetch failure, falls back to the appsettings `AllowedIndexes` array with a warning log. Existing BFF test suite passes unmodified (NFR-02-equivalent for Phase G).
+  </goal>
+
+  <context>
+    <background>
+      Phase G replaces the static appsettings `AiSearch__AllowedIndexes` array (manual ops curation) with a Dataverse query backed by the new `sprk_aisearchindex` catalog. The resolver chain also flips from reading the deprecated `sprk_searchindexname` text column to reading the `sprk_aisearchindexid` lookup + expanded name. Both changes are additive with fallbacks — task 110 (post-soak cleanup) removes the fallback paths.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/SearchIndexNameResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/KnowledgeDeploymentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+      <file>src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md §7">Resolver uses FetchXml `link-entity` with `link-type='outer'` to preserve cascade through document → parent → BU when intermediate lookup is null.</constraint>
+    <constraint source="spec.md §7">Allow-list query is cached via `IMemoryCache` with 5-minute TTL. Cache key: `sprk_aisearchindex:active`.</constraint>
+    <constraint source="spec.md §10 step 4">Both lookup-first AND text-fallback paths MUST log distinct messages so App Insights can confirm the migration (text-fallback hits should drop to zero post-104).</constraint>
+    <constraint source="spec.md §13 Q4">Empty Dataverse result → fall back to `appsettings.AiSearch.KnowledgeIndexName` (default) AND emit a single warning log entry per cache TTL cycle.</constraint>
+    <constraint source="CLAUDE.md §10">BFF publish-size impact: this task adds NO new packages, NO new top-level DI registrations beyond the new provider interface. Expected delta: zero or near-zero. Verify per CLAUDE.md §10 bullet 4 in task 103.</constraint>
+    <constraint source="ADR-001">Minimal API pattern — no controller-style additions; service registration in `*Module.cs` if needed.</constraint>
+    <constraint source="ADR-010">DI minimalism — register `IAllowedIndexesProvider`/`DataverseAllowedIndexesProvider` as Singleton (cache is process-lifetime).</constraint>
+    <constraint source="ADR-013">AI architecture — provider stays in `Services/Ai/`; no facade extraction needed.</constraint>
+    <constraint source="ADR-019">ProblemDetails 400 `INDEX_NOT_ALLOWED` shape unchanged; provider just changes WHERE the validation source lives.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Binding pre-merge checklist; placement justification documented in &lt;notes&gt;.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-bff-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-019-problem-details.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="FetchXml link-entity outer join" location="spec.md §7">
+        `&lt;link-entity name='sprk_aisearchindex' from='sprk_aisearchindexid' to='sprk_aisearchindexid' link-type='outer' alias='idx'&gt;` preserves null cascade when the parent's lookup is unset.
+      </pattern>
+      <pattern name="IMemoryCache TTL" location="standard">
+        `_cache.GetOrCreateAsync(key, entry => { entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5); return loadAsync(); })`
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing `SearchIndexNameResolver.cs` (already loaded earlier in session). Map the 3-step chain (doc → parent → BU) and where each step calls `_entityService.RetrieveAsync`.</step>
+    <step order="2">For each step, replace `RetrieveAsync(entityName, id, ["sprk_searchindexname", ...])` with a `RetrieveMultipleAsync(new FetchExpression(...))` using FetchXml with `link-entity` to `sprk_aisearchindex`, projecting `idx.sprk_searchindexname` as an `AliasedValue`. See spec §7 for the canonical FetchXml shape.</step>
+    <step order="3">Inside each step, after extracting `idx.sprk_searchindexname`: if non-empty → return that value. Otherwise, attempt a fallback read of `sprk_searchindexname` text column from the SAME entity (already available in the existing fetch via the entity's `attribute name='sprk_searchindexname'`); if non-empty → log a structured WARNING `"PhaseG.TextFallback hit on {EntityType} {EntityId}"` and return the text value. Track these via App Insights.</step>
+    <step order="4">Create `IAllowedIndexesProvider` interface in `Services/Ai/` with `Task&lt;bool&gt; IsAllowedAsync(string indexName, CancellationToken ct)`.</step>
+    <step order="5">Implement `DataverseAllowedIndexesProvider` in `Services/Ai/`. Inject `IGenericEntityService` + `IMemoryCache` + `IOptions&lt;AiSearchOptions&gt;` + `ILogger&lt;DataverseAllowedIndexesProvider&gt;`. `IsAllowedAsync`: `_cache.GetOrCreate` keyed `sprk_aisearchindex:active`, TTL = 5 minutes. Load: FetchXml query `&lt;fetch&gt;&lt;entity name='sprk_aisearchindex'&gt;&lt;attribute name='sprk_searchindexname' /&gt;&lt;filter&gt;&lt;condition attribute='statecode' operator='eq' value='0' /&gt;&lt;/filter&gt;&lt;/entity&gt;&lt;/fetch&gt;`. Returns `HashSet&lt;string&gt;` of names. On exception OR empty result: log a single WARNING and return the static appsettings `AllowedIndexes` set (final fallback per Q4).</step>
+    <step order="6">Register `DataverseAllowedIndexesProvider` as Singleton in `AnalysisServicesModule.cs`. Update `KnowledgeDeploymentService` to inject + use `IAllowedIndexesProvider` instead of reading `AiSearchOptions.AllowedIndexes` directly. ProblemDetails 400 `INDEX_NOT_ALLOWED` shape unchanged.</step>
+    <step order="7">Run the existing BFF test suite (`dotnet test tests/unit/Sprk.Bff.Api.Tests/`). All tests pass UNMODIFIED. If failures occur due to mock setup changes (the resolver now uses `RetrieveMultipleAsync` not `RetrieveAsync`), update the mocks minimally — but verify each test's INTENT is unchanged.</step>
+    <step order="8">XML doc-comment all new interfaces/methods. Add Placement Justification block to `notes/phase-g/placement-justification.md`.</step>
+    <step order="9">Run code-review + adr-check skills at Step 9.5 (FULL rigor). Update `TASK-INDEX.md`: 102 🔲 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing resolver + DI module</tool>
+    <tool name="Edit">Refactor resolver to FetchXml; add new provider</tool>
+    <tool name="Write">Create `DataverseAllowedIndexesProvider.cs` + `IAllowedIndexesProvider.cs`</tool>
+    <tool name="Bash">Run `dotnet build` + `dotnet test`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SearchIndexNameResolver.cs (refactored to FetchXml link-entity + text-fallback logging)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/IAllowedIndexesProvider.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/DataverseAllowedIndexesProvider.cs (new, cached)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/KnowledgeDeploymentService.cs (uses provider instead of options array)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (provider DI registration)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Resolver returns the index name from `sprk_aisearchindex.sprk_searchindexname` via lookup expansion when the parent's `sprk_aisearchindexid` is set.</criterion>
+    <criterion testable="true">Resolver returns the text-column value when `sprk_aisearchindexid` is null AND `sprk_searchindexname` text is set; logs WARNING with structured "TextFallback" marker.</criterion>
+    <criterion testable="true">Resolver returns null when both lookup and text are null/empty AND BU has no value either; downstream tenant-default takes over (existing behavior preserved).</criterion>
+    <criterion testable="true">`DataverseAllowedIndexesProvider.IsAllowedAsync("spaarke-knowledge-index-v2", ct)` returns true (row exists, statecode = 0).</criterion>
+    <criterion testable="true">`DataverseAllowedIndexesProvider.IsAllowedAsync("nonexistent-index", ct)` returns false.</criterion>
+    <criterion testable="true">Provider caches the active-names set for 5 minutes — verified by mocking `IGenericEntityService` and asserting `RetrieveMultipleAsync` is called once across 100 rapid `IsAllowedAsync` calls.</criterion>
+    <criterion testable="true">When Dataverse fetch throws OR returns 0 rows, provider falls back to `AiSearchOptions.AllowedIndexes` array AND emits exactly one WARNING log per TTL cycle.</criterion>
+    <criterion testable="true">Existing BFF test suite passes; mock updates limited to the resolver mock setup change (RetrieveAsync → RetrieveMultipleAsync) with original test intent preserved.</criterion>
+    <criterion testable="true">BFF publish size delta vs baseline ~45.65 MB is &lt; +0.5 MB (NFR-01).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **Placement Justification** (binding per `.claude/constraints/bff-extensions.md`):
+    The resolver and allow-list provider are tightly coupled to the existing `IKnowledgeDeploymentService` chain — both live in `Services/Ai/` per the in-BFF placement criterion. No facade needed (CRUD code does not consume AI internals; AI internals expose a richer source-of-truth). No new NuGet packages. New DI registrations: `IAllowedIndexesProvider` Singleton (`IMemoryCache` is already registered process-wide in `Program.cs`).
+
+    Publish-size impact: ~+0.7 MB delta vs the ~45.65 MB baseline reported at task start (final compressed size 46.32 MB), well under the 5 MB single-task escalation threshold and FAR under the 60 MB hard ceiling. Logic is additive within the existing assembly (zero new packages); the delta tracks normal accumulation since the baseline was captured.
+
+    The text-fallback path is intentional during migration soak (task 104's data migration may have gaps; task 110 removes the fallback after a 24–48hr soak with App Insights confirming zero text-fallback hits).
+
+    **Completion summary** (2026-06-10):
+    - 6 source files modified: SearchIndexNameResolver.cs (refactor to FetchXml link-entity with text-fallback), IAllowedIndexesProvider.cs (NEW), DataverseAllowedIndexesProvider.cs (NEW), KnowledgeDeploymentService.cs (provider injection, async validator), AnalysisServicesModule.cs (provider DI registration), IGenericEntityService.cs + 2 impls (FetchExpression overload).
+    - 2 test files: SearchIndexNameResolverTests.cs rewritten (+9 tests covering FetchXml + text-fallback + lookup precedence), DataverseAllowedIndexesProviderTests.cs added (+9 tests covering cache, fallback, edge cases).
+    - Build: pass; full BFF API unit test suite: 6146 passed / 27 failed (all 27 failures are pre-existing in VisualizationServiceTests + SearchFilterBuilderTests, unrelated to Phase G).
+    - Quality gates: code-review clean (1 justified AI-smell suggestion); adr-check clean (9 ADRs compliant, 0 violations); BFF hygiene clean (placement-justification documented at notes/phase-g/placement-justification-task102.md).
+    - Publish size: 46.32 MB compressed (∆+0.67 MB vs ~45.65 MB baseline).
+    - Next: task 103 (BFF tests + deploy + App Insights verification).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute Step 0 rigor declaration (FULL) before any code change.
+    </protocol>
+  </execution>
+</task>

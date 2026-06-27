@@ -1,0 +1,131 @@
+<task id="R4-010" project="smart-todo-r4">
+  <metadata>
+    <title>Extract &lt;RecordNavigationModalShell&gt; from RichFilePreview.tsx into @spaarke/ui-components</title>
+    <phase>Phase 1: Shared-lib hoist</phase>
+    <workstream>C (foundation)</workstream>
+    <status>complete</status>
+    <estimated-effort>1-2 days</estimated-effort>
+    <tags>shared-lib, ui-components, fluent-v9, hoist, modal, file-preview, smart-todo</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <blocks>R4-011, R4-040, R4-041</blocks>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/ (new)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx (reference, not modified)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (export)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Extract the navigation logic from `RichFilePreview.tsx` (`currentIndex`, `navigationTotal`, `onNavigate`, `ChevronLeft20Regular` / `ChevronRight20Regular`, `prevDisabled` / `nextDisabled`) into a new shared `<RecordNavigationModalShell>` component in `@spaarke/ui-components`. The shell renders chrome (`<` `>` nav, "N of M" counter, title, action bar slot, children slot) and exposes the cross-frame messaging dirty-check protocol (`request-dirty-check` / `dirty-check-result`). Do NOT modify `RichFilePreview.tsx` itself — task 011 handles the refactor.
+  </prompt>
+
+  <role>
+Senior React + Fluent v9 developer working on `@spaarke/ui-components`. You know Griffel, semantic tokens, and the existing FilePreview component structure.
+  </role>
+
+  <goal>
+A new shared component at `src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/`:
+- `RecordNavigationModalShell.tsx` with props: `currentIndex`, `navigationTotal`, `onNavigate(direction: "prev" | "next"): void`, `title`, `actionBar` (ReactNode slot), `children` (ReactNode slot).
+- Dirty-check protocol: shell posts `request-dirty-check` to a target iframe; awaits `dirty-check-result`; on dirty, prompts user before invoking `onNavigate`.
+- Styling: Fluent v9 + Griffel `makeStyles` + semantic tokens. No v8. No inline styles.
+- Exported from `src/client/shared/Spaarke.UI.Components/src/index.ts`.
+- Unit tests covering: nav state transitions, "N of M" rendering, dirty-check protocol roundtrip, prev/next disabled boundaries.
+- API docs covering the dirty-check protocol.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="project-plan">projects/smart-todo-r4/plan.md</file>
+    <file purpose="extraction-source">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx</file>
+    <file purpose="extraction-source">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+    <file purpose="library-index">src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    <file purpose="package-claude">src/client/shared/CLAUDE.md</file>
+    <file purpose="pattern">.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    <file purpose="pattern">.claude/patterns/webresource/code-page-wizard-wrapper.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">MUST use Fluent UI v9 + Griffel `makeStyles` + semantic tokens. NO v8 components. NO inline styles. NO CSS modules.</constraint>
+    <constraint source="ADR-012">MUST live in `@spaarke/ui-components` (not solution-specific). MUST export from library index.</constraint>
+    <constraint source="spec FR-12">Props MUST be: `currentIndex`, `navigationTotal`, `onNavigate`, `title`, `actionBar`, `children`. Renders chrome.</constraint>
+    <constraint source="spec FR-14">Cross-frame messaging protocol: shell posts `request-dirty-check`, iframe responds `dirty-check-result` ({dirty: bool}); if dirty, prompt user before navigating.</constraint>
+    <constraint source="spec NFR-05">Modal nav feels instant: &lt;500ms perceived latency for content swap (this task: chrome must not introduce overhead).</constraint>
+    <constraint source="spec NFR-06">Unit tests for dirty-check protocol + nav state transitions.</constraint>
+    <constraint source="spec NFR-07">Keyboard nav across `<` `>` controls; dirty-check prompt accessible (WCAG 2.1 AA).</constraint>
+    <constraint source="project">MUST NOT modify `RichFilePreview.tsx` itself — task 011 handles the refactor.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>shared-lib/fluent-v9</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>.claude/patterns/webresource/code-page-wizard-wrapper.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+    </files>
+    <patterns>
+      <pattern name="Griffel makeStyles + semantic tokens" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        All styling via `makeStyles(() => ({ root: { backgroundColor: tokens.colorNeutralBackground1, ... } }))` — no `style={}` props, no CSS classes.
+      </pattern>
+      <pattern name="Navigation chrome from RichFilePreview" location="src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx">
+        ChevronLeft20Regular / ChevronRight20Regular + Button + Text counter + disabled boundaries. Extract verbatim, generalize props.
+      </pattern>
+      <pattern name="postMessage protocol with origin checks" location="MDN postMessage docs">
+        Use `window.postMessage` to iframe with target origin restriction (Spaarke domain only). Listener registers via `useEffect` cleanup.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>The hybrid modal pattern is R4's architectural keystone. This shell hosts iframe-embedded OOB MDA forms (for SmartTodo, Document preview, future entities) and standardizes record navigation. Extracting the existing RichFilePreview nav logic verbatim ensures we can refactor RichFilePreviewDialog (task 011) without regression — if the file preview still works after refactor, the shell abstraction is sound.</background>
+    <related-work>
+      <item>R3 introduced RichFilePreview navigation pattern.</item>
+      <item>Task 011 refactors RichFilePreviewDialog to consume this shell (regression check).</item>
+      <item>Task 040 wires SmartTodo card-open path to this shell with To Do main form iframe target.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 70%. Load task + spec + plan + RichFilePreview.tsx.</step>
+    <step order="1" name="Read extraction source">Read RichFilePreview.tsx + RichFilePreviewDialog.tsx; identify all nav-related state, props, callbacks, and styling.</step>
+    <step order="2" name="Read patterns">Load fluent-v9-component-authoring.md, fluent-v9-theming.md, code-page-wizard-wrapper.md.</step>
+    <step order="3" name="Design component API">Define `RecordNavigationModalShellProps` interface with all required props + dirty-check callbacks. Document in JSDoc + API docs.</step>
+    <step order="4" name="Implement component">Create `RecordNavigationModalShell.tsx` + `RecordNavigationModalShell.styles.ts` + `types.ts`. Implement chrome + nav state + dirty-check `postMessage` flow.</step>
+    <step order="5" name="Write dirty-check protocol docs">Document `request-dirty-check` / `dirty-check-result` message shape + origin restrictions + timing. Include in component JSDoc + a `README.md` in the component directory.</step>
+    <step order="6" name="Write unit tests">Cover: prev disabled at index 0; next disabled at index = total-1; "N of M" string format; postMessage round-trip mock; dirty-check prompt invocation.</step>
+    <step order="7" name="Export from library index">Add `export { RecordNavigationModalShell } from './components/RecordNavigationModalShell';` to `src/index.ts`.</step>
+    <step order="8" name="Build verification">`npm run build` in `Spaarke.UI.Components/` — verify no TS errors, no v8 imports.</step>
+    <step order="9" name="Run tests">`npm test` — all new + existing tests green.</step>
+    <step order="10" name="Update task status">Mark complete in TASK-INDEX.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test in `Spaarke.UI.Components/`</tool>
+    <tool name="git">Stage + commit shared-lib changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/RecordNavigationModalShell.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/RecordNavigationModalShell.styles.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/types.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/index.ts</output>
+    <output type="docs">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/__tests__/RecordNavigationModalShell.test.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (added export)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`<RecordNavigationModalShell>` renders chrome with `<` `>` nav, "N of M" counter, title, action bar slot, children slot</criterion>
+    <criterion testable="true">Props match spec FR-12: currentIndex, navigationTotal, onNavigate, title, actionBar, children</criterion>
+    <criterion testable="true">Dirty-check protocol: `postMessage`-based round-trip; prompts user only when dirty=true</criterion>
+    <criterion testable="true">No v8 Fluent imports; no inline styles; all styling via Griffel makeStyles + semantic tokens (eslint clean)</criterion>
+    <criterion testable="true">Unit tests pass: prev/next disabled boundaries, "N of M" string, postMessage mock, dirty-check prompt</criterion>
+    <criterion testable="true">Exported from `@spaarke/ui-components` index; `npm run build` clean</criterion>
+    <criterion testable="true">Cross-frame messaging protocol documented in component README</criterion>
+    <criterion testable="true">Keyboard nav across `<` `>` works; dirty-check prompt is keyboard + screen-reader accessible</criterion>
+  </acceptance-criteria>
+</task>

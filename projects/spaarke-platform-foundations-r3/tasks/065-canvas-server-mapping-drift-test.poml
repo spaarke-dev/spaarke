@@ -1,0 +1,126 @@
+<task id="R3-065" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Canvas-server mapping drift integration test (CI)</title>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+2 new integration tests added at tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/
+CanvasServerMappingDriftTests.cs (Traits: Category=Integration, Phase=P7.1,
+Coverage=FR-3H3.1,AC-H3.1). Both pass cleanly (2/2, ~20 ms).
+
+(1) CanvasNodeTypes_ExistInServerMapping_NoDrift — parses canvas case arms from
+    playbookNodeSync.ts buildConfigJson() switch + server case arms from NodeService.cs
+    MapCanvasTypeToActionType() switch via pure C# regex (Approach A — no Roslyn, no
+    Node subprocess). Asserts client-canvas-types ⊆ server-canvas-arms with explicit
+    failure message naming the unmapped types.
+
+(2) ClientActionTypeMembers_ExistInServerActionTypeEnum_NoDrift — parses both
+    ActionType enum bodies (client typescript + server C#) and asserts every client
+    member exists server-side with the SAME integer value (the value is the wire
+    format stored in sprk_configjson.__actionType — a renumbered slot is just as
+    broken as a missing name).
+
+CURRENT TYPE-SET PARITY (post-fix):
+  - Canvas types (client buildConfigJson): aiAnalysis, aiCompletion, condition,
+    deliverOutput, deliverToIndex, sendEmail, updateRecord, createTask,
+    createNotification, wait, lookupUserMembership (11 arms — all paired).
+  - Server canvas arms (NodeService.MapCanvasTypeToActionType): start, aiAnalysis,
+    aiCompletion, aiEmbedding, deliverOutput, deliverToIndex, condition, parallel,
+    wait, createTask, sendEmail, updateRecord, callWebhook, sendTeamsMessage,
+    lookupUserMembership, createNotification (16 arms — server carries 5 client-
+    not-exposed arms: aiEmbedding, parallel, callWebhook, sendTeamsMessage, start;
+    this is the intended direction — server may have extras).
+  - Client ActionType members: 12; server ActionType members: 22. Each client
+    member exists server-side with matching integer value.
+
+PRE-EXISTING DRIFT DISCOVERED + FIXED IN-SCOPE:
+  The first test run surfaced a real G6 drift bug: the canvas has emitted
+  `createNotification` (with __actionType=50 baked into configJson client-side
+  via NodeTypeToActionType[CreateNotification]) since R2, but the server's
+  MapCanvasTypeToActionType + MapCanvasTypeToNodeType switches in NodeService.cs
+  were missing the arm — so a server-initiated SyncCanvasToNodesAsync() persisted
+  __actionType=0 (AiAnalysis fallback) for CreateNotification nodes. The client-
+  driven sync path (playbookNodeSync.ts) was unaffected because that path bakes
+  __actionType from NodeTypeToActionType directly. Fix: added "createNotification"
+  arm to both switches (NodeService.cs lines ~985 + ~1013) with detailed XML doc
+  rationale citing FR-3H3.1 / AC-H3.1. This is precisely the kind of latent G6
+  defect the drift test was designed to catch — caught it on first run.
+
+DRIFT-SIMULATION VERIFICATION (AC-H3.1 "Test FAILS on intentional drift"):
+  Scratch-edited playbookNodeSync.ts buildConfigJson() to inject
+  `case 'driftSimulationTask065':` (no matching server arm) → re-ran the test →
+  observed expected failure with the exact message naming `driftSimulationTask065`
+  as the unmapped canvas arm → reverted the scratch edit → test back to green.
+  Procedure is documented in the test file's HOW TO RE-VERIFY DRIFT DETECTION
+  comment block for future operator re-verification.
+
+PROJECT-LOCATION DECISION: used existing Sprk.Bff.Api.IntegrationTests project
+(under new Playbooks/ subdirectory) rather than creating new
+tests/integration/PlaybookBuilder.Tests/ as the POML named. Justification:
+the existing project is the canonical drift-test home in this branch (per task
+053 MigratedPlaybookTests + task 025 JobsEndpointsTests precedent); a new
+project for one test file would add CSproj overhead + a CI build target with
+zero offsetting benefit. Spec FR-3H3.1 names the path as illustrative
+("`tests/integration/PlaybookBuilder.Tests/`") not binding.
+
+APPROACH DECISION: Approach A (pure C# + regex parsing of both .ts and .cs
+sources). Avoided Approach B (Node subprocess) — no CI Node guarantee; avoided
+Roslyn — not in test dependencies and would require a new NuGet add for marginal
+benefit on a stable parse target. Regex parsers narrow the source slice via
+stable anchors (function signatures + section dividers) before extracting case
+arms, so the brittleness exposure is bounded: a refactor of either source file's
+function name OR section structure would surface a clear failure message
+pointing to the parser regex that needs updating, not a silent false-negative.
+Both parsers include sanity assertions (extracted sets must be non-empty) to
+guarantee parser breakage is loud, not silent.
+
+CI INTEGRATION: existing .github/workflows/sdap-ci.yml `dotnet test` step (line
+119) runs solution-wide with no project filter — the new test file is picked up
+automatically. No YAML edits required.
+
+Hard constraints honored: build clean (0 warnings, 0 errors after fix), no
+.claude/ paths touched, no new NuGet packages added (no CVE delta), no
+production CRUD code modified outside the surgical 2-line NodeService.cs
+drift fix (which is itself a discovered-defect repair, in-scope per AC-H3.1).
+Test-only addition + tiny surgical server fix. Publish-size impact: N/A
+(test code does not ship; NodeService.cs delta is +2 lines, well under +1 MB
+NFR-01 threshold).
+    </completion-notes>
+    <phase>P7.1</phase>
+    <parallel-group>O (with 063, 064)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>integration-test,ci,playbook-builder,h3</tags>
+    <relevant-files>
+      <file>tests/integration/PlaybookBuilder.Tests/CanvasServerMappingDriftTests.cs (new)</file>
+    </relevant-files>
+    <dependencies>042</dependencies>
+  </metadata>
+  <prompt>Integration test in `tests/integration/PlaybookBuilder.Tests/` asserts every canvas type in `playbookNodeSync.ts` has a corresponding entry in `NodeService.cs`. Fails CI build on intentional drift (G6 prevention).</prompt>
+  <goal>CI fails when canvas/server mappings drift. Test catches missing ActionType pairs.</goal>
+  <constraints>
+    <constraint source="spec FR-3H3.1">Drift test required + must fail CI on drift</constraint>
+  </constraints>
+  <knowledge>
+    <topic>integration-test-drift-detection</topic>
+    <files>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/NodeService.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-3H3.1</step>
+    <step order="1">Implement test: parse playbookNodeSync.ts (Node.js subprocess) + parse NodeService.cs (Roslyn) + compare</step>
+    <step order="2">Verify test passes for current state</step>
+    <step order="3">Insert temporary drift → assert CI fails → revert</step>
+    <step order="4">Document in test README</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Test passes for current canvas/server alignment</criterion>
+    <criterion testable="true">Test FAILS on intentional drift (AC-H3.1)</criterion>
+    <criterion testable="true">CI integration verified</criterion>
+  </acceptance-criteria>
+</task>

@@ -31,7 +31,6 @@ import {
   buildDocumentsTabQuery,
   buildTodoItemsQuery,
   buildDismissedTodoQuery,
-  type TodoFilterMode,
 } from './queryHelpers';
 
 // ---------------------------------------------------------------------------
@@ -417,24 +416,19 @@ export class DataverseService {
    * Retrieve active (non-completed, non-dismissed) to-do items for the Smart
    * To Do list.
    *
-   * Returns `sprk_todo` records where statecode = 0 (Active) and statuscode in
-   * (Open, In Progress). Ownership predicate is determined by `mode`:
-   *   - 'MyTasks' (default): owner OR assignee = userId
-   *   - 'AssignedToMe':      assignee = userId
-   *   - 'All':               no ownership predicate
-   * (R3 FR-12 / A-6 — see queryHelpers.buildTodoItemsQuery for the team-clause
-   * deferral TODO.)
+   * Returns `sprk_todo` records where statecode = 0 (Active), statuscode in
+   * (Open, In Progress), AND assignee = userId.
+   *
+   * R4 task 031 / FR-07 / OD-2 — "Assigned to Me" is the SOLE filter mode.
+   * The legacy R3 `mode` parameter (My Tasks / AssignedToMe / All) is removed.
    *
    * Sort: priorityscore desc, duedate asc.
    *
    * @param userId - The GUID of the current user
-   * @param mode   - My Tasks filter mode (default 'MyTasks')
    */
-  async getActiveTodos(
-    userId: string,
-    mode: TodoFilterMode = 'MyTasks'
-  ): Promise<IResult<ITodo[]>> {
-    const query = buildTodoItemsQuery(userId, mode);
+  /** UAT 2026-06-19: param renamed userId → contactId (assigned-to migrated to Contact lookup). */
+  async getActiveTodos(contactId: string): Promise<IResult<ITodo[]>> {
+    const query = buildTodoItemsQuery(contactId);
     return tryCatch(async () => {
       const result = await this._webApi.retrieveMultipleRecords('sprk_todo', query);
       return toTypedArray<ITodo>(mapTodoFormattedValues(result.entities));

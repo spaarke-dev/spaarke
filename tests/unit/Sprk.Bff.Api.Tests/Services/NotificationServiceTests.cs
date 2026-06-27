@@ -88,7 +88,33 @@ public class NotificationServiceTests
         ((OptionSetValue)capturedEntity["priority"]).Value.Should().Be(priority);
         capturedEntity["icontype"].Should().NotBeNull(); // Category maps to icon type
         capturedEntity["data"].Should().NotBeNull(); // Action data JSON
-        capturedEntity["ttlindays"].Should().Be(7);
+        capturedEntity["ttlinseconds"].Should().Be(604800); // 7 days * 86400 seconds (R3 task 010 — FR-2)
+        capturedEntity.Contains("ttlindays").Should().BeFalse(); // Non-existent column; must not be written
+    }
+
+    [Fact]
+    public async Task CreateNotificationAsync_AlwaysWritesTtlInSeconds_With604800()
+    {
+        // Arrange — R3 task 010 (FR-2 AC-2): producer MUST write canonical `ttlinseconds = 604800`
+        // (7 calendar days in seconds). `ttlindays` is a non-existent column on `appnotification`;
+        // writes to it are silently dropped and notifications fall back to the tenant-default 14d TTL.
+        var userId = Guid.NewGuid();
+        var title = "Daily briefing ready";
+
+        Entity? capturedEntity = null;
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => capturedEntity = e)
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        await _sut.CreateNotificationAsync(userId, title);
+
+        // Assert
+        capturedEntity.Should().NotBeNull();
+        capturedEntity!.Contains("ttlinseconds").Should().BeTrue("ttlinseconds is the canonical writable field per Microsoft Learn");
+        capturedEntity["ttlinseconds"].Should().Be(604800);
+        capturedEntity.Contains("ttlindays").Should().BeFalse("ttlindays is not a real appnotification column");
     }
 
     [Fact]

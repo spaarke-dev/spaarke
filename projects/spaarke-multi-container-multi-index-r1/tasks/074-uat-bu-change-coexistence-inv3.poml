@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>UAT — BU-change coexistence proof (INV-3)</title>
+    <phase>H: Deploy + UAT</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>071</dependencies>
+    <blocks>090</blocks>
+    <tags>testing, e2e-test, dataverse, mcp</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>End-to-end test that proves INV-3 (BU change does NOT propagate) — a load-bearing invariant. Testing-only; reversible.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential UAT step; depends on task 071's records being in place. Mutates a BU value temporarily — must complete (including revert) before other UAT runs.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Prove README graduation criterion #3 (and design.md INV-3 coexistence model) per spec.md acceptance for BU-change behavior. MCP-query existing Matter records under Spaarke Demo BU to record their current `sprk_searchindexname` values. Change Spaarke Demo BU's `sprk_searchindexname` to a different valid value (e.g., `discovery-index`). MCP-query the existing Matters — values must remain UNCHANGED (INV-3 coexistence). Create a NEW Matter via the wizard — verify new value is used. Revert the BU value. Final MCP-verify state.
+  </prompt>
+
+  <role>
+    Spaarke QA / operator running an invariant-proof UAT. Mutates a BU value, observes the effect (or absence of effect), reverts. Reversibility is non-negotiable.
+  </role>
+
+  <goal>
+    INV-3 coexistence empirically proven: changing a BU's `sprk_searchindexname` leaves existing records unchanged; new wizard-created records pick up the new value. BU value reverted to its original at task end. State documented in verification notes.
+  </goal>
+
+  <context>
+    <background>
+      INV-3 ("BU change does NOT propagate") is the binding invariant that enables the migration scenario without a sync engine. README graduation criterion #3 makes this an explicit project acceptance gate.
+
+      Test mutates a production-class BU value temporarily — handle with care. Always revert before task close.
+    </background>
+    <relevant-files>
+      <file>(testing only)</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="design.md INV-3">Updating a BU's container/index does NOT cascade to existing records. No auto-sync.</constraint>
+    <constraint source="README graduation criterion #3">An operator changes a BU's `sprk_searchindexname`; existing records keep their original values; new records get the new value. Verify by before/after MCP query.</constraint>
+    <constraint source="project">Reversibility — BU value MUST be reverted to its original at task end. Final MCP query confirms revert.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">MCP-query Spaarke Demo BU to capture current state: `SELECT businessunitid, name, sprk_searchindexname, sprk_containerid FROM businessunit WHERE name = 'Spaarke Demo'`. Record the original `sprk_searchindexname` value (should be `spaarke-knowledge-index-v2` per Phase A.5 / task 001).</step>
+    <step order="2">MCP-query existing Matter records under Spaarke Demo BU (limit ~10): `SELECT sprk_matterid, sprk_searchindexname FROM sprk_matter WHERE _owningbusinessunit_value = '&lt;spaarke-demo-buid&gt;'`. Record the matters' current `sprk_searchindexname` values.</step>
+    <step order="3">MCP-update Spaarke Demo BU's `sprk_searchindexname` to `discovery-index` (a different valid value from the allow-list). Confirm via re-query.</step>
+    <step order="4">Re-query the same existing Matters from Step 2. Their `sprk_searchindexname` values must be UNCHANGED (INV-3 coexistence). Document the before/after side-by-side.</step>
+    <step order="5">Create a NEW Matter via CreateMatterWizard while the BU is set to `discovery-index`. MCP-query the new Matter; verify `sprk_searchindexname = "discovery-index"` (NOT the old value).</step>
+    <step order="6">REVERT: MCP-update Spaarke Demo BU's `sprk_searchindexname` back to the original value from Step 1 (`spaarke-knowledge-index-v2`). Re-query the BU to confirm revert.</step>
+    <step order="7">Optional cleanup: delete the test Matter created in Step 5 (if it was synthetic and not needed). Verify final state: BU value reverted; existing records still hold their original values; (test Matter cleaned up if synthetic).</step>
+    <step order="8">Capture before/after MCP query outputs to `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/074-bu-change-coexistence.md`. Update TASK-INDEX + current-task.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp__dataverse__read_query">Pre/post state captures of BU + Matter records</tool>
+    <tool name="mcp__dataverse__update_record">Change BU value + revert</tool>
+    <tool name="mcp__dataverse__delete_record">Optional cleanup of test Matter</tool>
+    <tool name="Write">Capture verification notes</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/074-bu-change-coexistence.md (before/after MCP outputs proving INV-3)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">INV-3: existing Matter records keep their original `sprk_searchindexname` after BU value change.</criterion>
+    <criterion testable="true">New Matter created via wizard while BU = `discovery-index` has `sprk_searchindexname = "discovery-index"`.</criterion>
+    <criterion testable="true">Revert successful — Spaarke Demo BU `sprk_searchindexname` returned to its original value at task end.</criterion>
+    <criterion testable="true">README graduation criterion #3 satisfied (before/after MCP query proof captured).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Sequential — depends on 071 (wizards smoke). Blocks 090 (wrap-up).
+
+    Reversibility is non-negotiable. If the revert (Step 6) fails for any reason, escalate immediately — leaving the BU on a test value would mis-route future records. Use the original value captured in Step 1 verbatim.
+
+    The test Matter from Step 5 can stay if not synthetic (e.g., if you used a real planned-Matter creation); just document it. If purely synthetic, delete via MCP after Step 5.
+
+    `discovery-index` is chosen because it's in the appsettings allow-list per FR-BFF-06. If discovery-index isn't available in the test env, substitute any other allow-listed value.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load design.md INV-3 + README graduation criterion #3 before starting. Follow task-execute Step 0 (STANDARD rigor). Always document the revert step explicitly in the verification notes.
+    </protocol>
+  </execution>
+</task>

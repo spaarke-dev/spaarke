@@ -8,7 +8,6 @@ using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Xunit;
@@ -50,9 +49,11 @@ public class SprkChatAgentFactoryTests
         var agent = await factory.CreateAgentAsync(
             TestSessionId, TestDocumentId, TestPlaybookId, TestTenantId);
 
-        // Assert
+        // Assert — base prompt preserved at the start; SprkChatAgentFactory may
+        // append additive directives (e.g. R6 Wave B-G10b compact-formatting
+        // directive) so we assert StartWith rather than exact equality.
         agent.Should().NotBeNull();
-        agent.Context.SystemPrompt.Should().Be(expectedSystemPrompt);
+        agent.Context.SystemPrompt.Should().StartWith(expectedSystemPrompt);
         agent.Context.DocumentSummary.Should().Be("This is an NDA.");
         agent.Context.PlaybookId.Should().Be(TestPlaybookId);
     }
@@ -129,144 +130,25 @@ public class SprkChatAgentFactoryTests
         var agentDoc1 = await factory.CreateAgentAsync(TestSessionId, doc1, TestPlaybookId, TestTenantId);
         var agentDoc2 = await factory.CreateAgentAsync(TestSessionId, doc2, TestPlaybookId, TestTenantId);
 
-        // Assert
-        agentDoc1.Context.SystemPrompt.Should().Be(prompt1);
-        agentDoc2.Context.SystemPrompt.Should().Be(prompt2);
+        // Assert — base prompt preserved at the start; additive directives
+        // (e.g. R6 Wave B-G10b compact-formatting) may follow.
+        agentDoc1.Context.SystemPrompt.Should().StartWith(prompt1);
+        agentDoc2.Context.SystemPrompt.Should().StartWith(prompt2);
     }
 
-    // ── AIPU2-061: Per-turn tool injection tests ──────────────────────────────
+    // ── FR-23 per-playbook tool filtering tests ──────────────────────────────
+
 
     /// <summary>
-    /// When the CapabilityRouter returns a confident result for a simple greeting-like
-    /// message that matches no capability hints, the factory falls back to the full
-    /// playbook capability set (backward compatible).
-    ///
-    /// Verifies: factory returns an agent and does not throw when the router is
-    /// configured but routing produces an uncertain result for low-complexity intent.
-    /// </summary>
-    [Fact]
-    public async Task CreateAgentAsync_WithRouter_LowComplexityIntent_UsesFullCapabilitySet()
-    {
-        // Arrange
-        // Router returns "uncertain" for a simple hello message — no capability matched.
-        var routerMock = new Mock<ICapabilityRouter>();
-        routerMock
-            .Setup(r => r.RouteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CapabilityRoutingResult.Uncertain(0.0, layer: 1, latencyMs: 0));
-
-        var contextProviderMock = new Mock<IChatContextProvider>();
-        contextProviderMock
-            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateDefaultContext());
-
-        var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
-        var factory = services.GetRequiredService<SprkChatAgentFactory>();
-
-        // Act — low-complexity greeting-style message
-        var agent = await factory.CreateAgentAsync(
-            TestSessionId, TestDocumentId, TestPlaybookId, TestTenantId,
-            latestUserMessage: "Hello");
-
-        // Assert — agent created successfully, router was called
-        agent.Should().NotBeNull();
-        routerMock.Verify(
-            r => r.RouteAsync("Hello", It.IsAny<string?>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
-
-    /// <summary>
-    /// When the CapabilityRouter returns a confident result with a specific capability
-    /// selected for a document-analysis-style message, the factory passes the routing
-    /// result to ResolveTools. Verifies the agent is returned and the router was called
-    /// with the user message text.
-    /// </summary>
-    [Fact]
-    public async Task CreateAgentAsync_WithRouter_DocumentAnalysisIntent_CallsRouterWithUserMessage()
-    {
-        // Arrange
-        const string documentAnalysisMessage = "analyze this contract for risk clauses";
-
-        var routerMock = new Mock<ICapabilityRouter>();
-        routerMock
-            .Setup(r => r.RouteAsync(documentAnalysisMessage, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CapabilityRoutingResult.Confident(
-                selectedCapabilities: ["analyze"],
-                confidence: 0.92,
-                layer: 1,
-                latencyMs: 3));
-
-        var contextProviderMock = new Mock<IChatContextProvider>();
-        contextProviderMock
-            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateDefaultContext());
-
-        var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
-        var factory = services.GetRequiredService<SprkChatAgentFactory>();
-
-        // Act
-        var agent = await factory.CreateAgentAsync(
-            TestSessionId, TestDocumentId, TestPlaybookId, TestTenantId,
-            latestUserMessage: documentAnalysisMessage);
-
-        // Assert — agent created successfully, router was called with the exact user message
-        agent.Should().NotBeNull();
-        routerMock.Verify(
-            r => r.RouteAsync(documentAnalysisMessage, It.IsAny<string?>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
-
-    /// <summary>
-    /// When no user message is provided (latestUserMessage is null), the CapabilityRouter
-    /// is NOT called — the factory falls through to the existing full-capability-set path.
-    /// </summary>
-    [Fact]
-    public async Task CreateAgentAsync_WithRouter_NullUserMessage_RouterNotCalled()
-    {
-        // Arrange
-        var routerMock = new Mock<ICapabilityRouter>();
-
-        var contextProviderMock = new Mock<IChatContextProvider>();
-        contextProviderMock
-            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateDefaultContext());
-
-        var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
-        var factory = services.GetRequiredService<SprkChatAgentFactory>();
-
-        // Act — no user message = initial session creation
-        var agent = await factory.CreateAgentAsync(
-            TestSessionId, TestDocumentId, TestPlaybookId, TestTenantId,
-            latestUserMessage: null);
-
-        // Assert — router never called for null message
-        agent.Should().NotBeNull();
-        routerMock.Verify(
-            r => r.RouteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
-            Times.Never);
-    }
-
-    /// <summary>
-    /// When the tool set changes between turns (previous turn had different tools than current),
-    /// capability_change SSE events are emitted for added and removed tools.
-    ///
-    /// Verifies the FR-801 capability_change contract: the factory emits events so the
-    /// client can update UI affordances when the active capability profile changes.
+    /// When the tool set changes between turns (previous turn had a tool that no longer
+    /// appears in the current set), capability_change SSE events are emitted for the
+    /// added / removed tools. Verifies the FR-801 capability_change contract still
+    /// works in the post-CapabilityRouter world.
     /// </summary>
     [Fact]
     public async Task CreateAgentAsync_EmitsCapabilityChange_WhenToolSetDiffers()
     {
         // Arrange
-        var routerMock = new Mock<ICapabilityRouter>();
-        // Router returns a confident result — routing WILL happen but manifest is empty,
-        // so tool filtering leaves full set in place. The capability_change event is
-        // triggered by comparing current tools against previousTurnToolNames.
-        routerMock
-            .Setup(r => r.RouteAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CapabilityRoutingResult.Uncertain(0.0, layer: 1, latencyMs: 0));
-
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
@@ -274,8 +156,6 @@ public class SprkChatAgentFactoryTests
             .ReturnsAsync(CreateDefaultContext());
 
         // Previous turn had a tool called "OldTool" that no longer appears in the current set.
-        // The current agent will have no tools (no DI services = no tools resolved).
-        // So the factory should emit "unavailable" for "OldTool".
         var capturedEvents = new List<ChatSseEvent>();
         Func<ChatSseEvent, CancellationToken, Task> sseWriter = (evt, _) =>
         {
@@ -283,7 +163,7 @@ public class SprkChatAgentFactoryTests
             return Task.CompletedTask;
         };
 
-        var services = BuildServiceProvider(contextProviderMock.Object, routerMock.Object);
+        var services = BuildServiceProvider(contextProviderMock.Object);
         var factory = services.GetRequiredService<SprkChatAgentFactory>();
 
         // Act — previous turn had "OldTool", current turn will have no tools
@@ -302,229 +182,23 @@ public class SprkChatAgentFactoryTests
         changeEvent.Data.Should().NotBeNull();
     }
 
-    /// <summary>
-    /// When the router is not registered in DI (null ICapabilityRouter), the factory
-    /// behaves exactly as before AIPU2-061 — no routing call, full tool set resolved.
-    /// </summary>
-    [Fact]
-    public async Task CreateAgentAsync_WithoutRouter_FallsBackToFullCapabilitySet()
-    {
-        // Arrange — no router registered (null capabilityRouter)
-        var contextProviderMock = new Mock<IChatContextProvider>();
-        contextProviderMock
-            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateDefaultContext());
-
-        // Use the original service provider (no router registration)
-        var services = BuildServiceProvider(contextProviderMock.Object, capabilityRouter: null);
-        var factory = services.GetRequiredService<SprkChatAgentFactory>();
-
-        // Act — any user message; router is absent so no routing occurs
-        var agent = await factory.CreateAgentAsync(
-            TestSessionId, TestDocumentId, TestPlaybookId, TestTenantId,
-            latestUserMessage: "summarize this document");
-
-        // Assert — agent created normally; no exception thrown
-        agent.Should().NotBeNull();
-    }
-
-    // ── R5 task 015 — InvokeSummarizePlaybookTool routing-selection coverage ──
-
-    /// <summary>
-    /// When the playbook capability set contains <see cref="PlaybookCapabilities.Summarize"/>
-    /// AND <see cref="Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator"/> is registered
-    /// in DI, the factory MUST register <c>invoke_summarize_playbook</c> as an AIFunction on
-    /// the resolved agent's tool list. Verified via the <c>capability_change</c> SSE event:
-    /// when the previous turn did NOT have this tool, the factory emits a "capability_change"
-    /// event listing it as a newly-available tool.
-    ///
-    /// This satisfies R5 task 015 acceptance criterion: "tool is visible in the agent's tool
-    /// catalog when the gating capability is present".
-    /// </summary>
-    [Fact]
-    public async Task CreateAgentAsync_WithSummarizeCapability_RegistersInvokeSummarizePlaybookTool()
-    {
-        // Arrange — null playbookId means "use CoreCapabilities" which includes Summarize.
-        // SessionSummarizeOrchestrator is registered in DI alongside its real (mocked) deps.
-        var contextProviderMock = new Mock<IChatContextProvider>();
-        contextProviderMock
-            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateDefaultContext());
-
-        var services = BuildServiceProviderWithSummarizeOrchestrator(contextProviderMock.Object);
-        var factory = services.GetRequiredService<SprkChatAgentFactory>();
-
-        // Capture capability_change events so we can inspect the tool catalog.
-        var capturedEvents = new List<ChatSseEvent>();
-        Func<ChatSseEvent, CancellationToken, Task> sseWriter = (evt, _) =>
-        {
-            capturedEvents.Add(evt);
-            return Task.CompletedTask;
-        };
-
-        // Act — playbookId = null → CoreCapabilities (Search/Analyze/SelectionRevise/Summarize).
-        // previousTurnToolNames empty → every current tool is reported as "available".
-        await factory.CreateAgentAsync(
-            TestSessionId, TestDocumentId,
-            playbookId: null,
-            tenantId: TestTenantId,
-            sseWriter: sseWriter,
-            latestUserMessage: "summarize the attached files",
-            previousTurnToolNames: Array.Empty<string>());
-
-        // Assert — exactly one capability_change event lists `invoke_summarize_playbook`
-        // as a newly-available tool. We assert on the event payload to confirm the LLM
-        // tool name from R5 task 015 appears in the resolved tool catalog.
-        capturedEvents.Should()
-            .Contain(e => e.Type == "capability_change",
-                because: "factory must emit capability_change when the tool set differs from the previous turn");
-
-        // Convert each capability_change event's serialized payload to a string and
-        // search for the tool name. The payload shape is implementation-defined but the
-        // tool name appears verbatim in either the JSON or via the Data property fields.
-        var changeEvents = capturedEvents.Where(e => e.Type == "capability_change").ToList();
-        var allPayloads = string.Join("\n", changeEvents.Select(e =>
-            System.Text.Json.JsonSerializer.Serialize(e.Data)));
-        allPayloads.Should().Contain(InvokeSummarizePlaybookTool.ToolName,
-            because: "the factory MUST emit a capability_change event listing invoke_summarize_playbook as available when Summarize capability is set");
-    }
-
-    // ── R5 task 024 — InvokeInsightsQueryTool routing-selection coverage ──────
-
-    /// <summary>
-    /// When the playbook capability set contains <see cref="PlaybookCapabilities.InsightsQuery"/>
-    /// AND <see cref="Sprk.Bff.Api.Services.Ai.Chat.Tools.InvokeInsightsQueryTool"/> is registered
-    /// in DI, the factory MUST register <c>insights.query</c> as an AIFunction on the
-    /// resolved agent's tool list. Verified via the <c>capability_change</c> SSE event:
-    /// when the previous turn did NOT have this tool, the factory emits a "capability_change"
-    /// event listing it as a newly-available tool.
-    ///
-    /// This satisfies R5 task 024 acceptance criterion: "tool is visible in the agent's tool
-    /// catalog when the gating capability is present".
-    /// </summary>
-    [Fact]
-    public async Task CreateAgentAsync_WithInsightsQueryCapability_RegistersInsightsQueryTool()
-    {
-        // Arrange — null playbookId means "use CoreCapabilities" which now includes InsightsQuery
-        // (per R5 task 024 PlaybookCapabilities update).
-        var contextProviderMock = new Mock<IChatContextProvider>();
-        contextProviderMock
-            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateDefaultContext());
-
-        var services = BuildServiceProviderWithInsightsQueryTool(contextProviderMock.Object);
-        var factory = services.GetRequiredService<SprkChatAgentFactory>();
-
-        var capturedEvents = new List<ChatSseEvent>();
-        Func<ChatSseEvent, CancellationToken, Task> sseWriter = (evt, _) =>
-        {
-            capturedEvents.Add(evt);
-            return Task.CompletedTask;
-        };
-
-        // Act — playbookId = null → CoreCapabilities (includes InsightsQuery per task 024).
-        // previousTurnToolNames empty → every current tool is reported as "available".
-        await factory.CreateAgentAsync(
-            TestSessionId, TestDocumentId,
-            playbookId: null,
-            tenantId: TestTenantId,
-            sseWriter: sseWriter,
-            latestUserMessage: "what will this matter cost?",
-            previousTurnToolNames: Array.Empty<string>());
-
-        // Assert — a capability_change event lists `insights.query` as a newly-available tool.
-        capturedEvents.Should()
-            .Contain(e => e.Type == "capability_change",
-                because: "factory must emit capability_change when the tool set differs from the previous turn");
-
-        var changeEvents = capturedEvents.Where(e => e.Type == "capability_change").ToList();
-        var allPayloads = string.Join("\n", changeEvents.Select(e =>
-            System.Text.Json.JsonSerializer.Serialize(e.Data)));
-        allPayloads.Should().Contain(InvokeInsightsQueryTool.ToolName,
-            because: "the factory MUST emit a capability_change event listing insights.query as available when InsightsQuery capability is set");
-    }
-
-    /// <summary>
-    /// Build a service provider that includes the dependencies needed to register
-    /// <see cref="Sprk.Bff.Api.Services.Ai.Chat.Tools.InvokeInsightsQueryTool"/> in DI so the
-    /// tool's gating block in <c>SprkChatAgentFactory.ResolveTools</c> can wire successfully.
-    /// </summary>
-    private static ServiceProvider BuildServiceProviderWithInsightsQueryTool(
-        IChatContextProvider contextProvider)
-    {
-        var services = new ServiceCollection();
-
-        var chatClientMock = new Mock<IChatClient>();
-        services.AddSingleton(chatClientMock.Object);
-
-        var rawChatClientMock = new Mock<IChatClient>();
-        services.AddKeyedSingleton<IChatClient>("raw", rawChatClientMock.Object);
-
-        services.AddScoped(_ => contextProvider);
-        services.AddLogging();
-
-        // Register the typed HttpClient for InvokeInsightsQueryTool — mirrors the
-        // AnalysisServicesModule.AddAnalysisOrchestrationServices registration but with a
-        // test-only BaseAddress. The tool's gating block in ResolveTools only checks "is
-        // the tool resolvable?", it does NOT invoke the HTTP call.
-        services.AddHttpContextAccessor();
-        services.AddHttpClient<Sprk.Bff.Api.Services.Ai.Chat.Tools.InvokeInsightsQueryTool>(client =>
-        {
-            client.BaseAddress = new Uri("https://test.local");
-            client.Timeout = TimeSpan.FromSeconds(60);
-        });
-
-        services.AddSingleton<SprkChatAgentFactory>();
-
-        return services.BuildServiceProvider();
-    }
-
-    /// <summary>
-    /// Build a service provider that includes the dependencies needed to register
-    /// <see cref="Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator"/> in DI so the
-    /// tool's gating block in <c>SprkChatAgentFactory.ResolveTools</c> can wire successfully.
-    /// </summary>
-    private static ServiceProvider BuildServiceProviderWithSummarizeOrchestrator(
-        IChatContextProvider contextProvider)
-    {
-        var services = new ServiceCollection();
-
-        var chatClientMock = new Mock<IChatClient>();
-        services.AddSingleton(chatClientMock.Object);
-
-        var rawChatClientMock = new Mock<IChatClient>();
-        services.AddKeyedSingleton<IChatClient>("raw", rawChatClientMock.Object);
-
-        services.AddScoped(_ => contextProvider);
-        services.AddLogging();
-
-        // Register dependencies of SessionSummarizeOrchestrator. ChatSessionManager is a
-        // concrete class (not an interface) so we cannot Moq.Of() it — construct with
-        // mocked I/O deps directly. The tool's registration block ONLY checks "is the
-        // orchestrator resolvable?", it does NOT invoke the orchestrator's methods.
-        var chatSessionManager = new ChatSessionManager(
-            cache: Mock.Of<IDistributedCache>(),
-            dataverseRepository: Mock.Of<IChatDataverseRepository>(),
-            logger: Mock.Of<ILogger<ChatSessionManager>>(),
-            persistence: null,
-            cleanupSignal: null);
-
-        services.AddSingleton(chatSessionManager);
-        services.AddSingleton(Mock.Of<IRagService>());
-        services.AddSingleton(Mock.Of<IOpenAiClient>());
-        services.AddSingleton(Mock.Of<Spaarke.Dataverse.IGenericEntityService>());
-        services.AddSingleton<Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry>();
-
-        // The actual orchestrator class — concrete, scoped, per task 012 + AnalysisServicesModule.
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();
-
-        services.AddSingleton<SprkChatAgentFactory>();
-
-        return services.BuildServiceProvider();
-    }
+    // ── R5 task 015 / R5 task 024 — REMOVED in R6 Wave 10 / task 023 (Pillar 3 cleanup) ──
+    // The InvokeSummarizePlaybookTool + InvokeInsightsQueryTool bridges were deleted in
+    // favor of the generic InvokePlaybookHandler (R6 Pillar 3 / task 021). The factory no
+    // longer registers `invoke_summarize_playbook` or `insights.query` AIFunctions; the
+    // generic `invoke_playbook` tool is surfaced via the data-driven block (FR-11) from the
+    // SYS-Invoke Playbook Dataverse seed row. Capability gating moves from C# constants
+    // (PlaybookCapabilities.Summarize / .InsightsQuery) to the playbook-visibility lookup
+    // inside InvokePlaybookHandler.IsTenantVisibleAsync (per task 021). Test coverage for
+    // the generic dispatcher lives in InvokePlaybookHandlerTests; integration coverage for
+    // the data-driven block lives in SprkChatAgentFactoryDataDrivenToolsTests.
+    //
+    // Removed tests:
+    //   - CreateAgentAsync_WithSummarizeCapability_RegistersInvokeSummarizePlaybookTool
+    //   - CreateAgentAsync_WithInsightsQueryCapability_RegistersInsightsQueryTool
+    //   - BuildServiceProviderWithInsightsQueryTool (helper)
+    //   - BuildServiceProviderWithSummarizeOrchestrator (helper)
+    // Recoverable via `git show HEAD~1:tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryTests.cs`.
 
     // ── R5 task 033 — Session Files manifest suffix on system prompt ──────────
 
@@ -581,8 +255,8 @@ public class SprkChatAgentFactoryTests
         agent.Context.SystemPrompt.Should().Contain("schedule.docx");
         agent.Context.SystemPrompt.Should().Contain("file-001");
         agent.Context.SystemPrompt.Should().Contain("file-002");
-        agent.Context.SystemPrompt.Should().Contain("invoke_summarize_playbook",
-            because: "the suffix MUST name the exact tool the LLM should invoke to summarize");
+        agent.Context.SystemPrompt.Should().Contain("invoke_playbook",
+            because: "post-task-023 the suffix MUST name the generic invoke_playbook tool (the chat-summarize playbook ID is resolved at LLM call time)");
         agent.Context.SystemPrompt.Should().Contain("2 uploaded file",
             because: "the suffix announces the file count so the LLM can reason about cardinality");
     }
@@ -623,12 +297,19 @@ public class SprkChatAgentFactoryTests
             TestPlaybookId,
             TestTenantId);
 
-        // Assert — base prompt preserved; no suffix injected.
-        agent.Context.SystemPrompt.Should().Be(basePrompt,
-            because: "no manifest = no suffix appended (backward-compatible behavior)");
+        // Assert — base prompt preserved at the start; no Session Files suffix.
+        // (R6 Wave B-G10b appends a compact-formatting directive regardless of
+        // file presence — the backward-compat contract this test owns is
+        // specifically about the Session Files manifest, asserted via the
+        // NotContain checks below.)
+        agent.Context.SystemPrompt.Should().StartWith(basePrompt,
+            because: "the original base prompt must be preserved at the start (any additive directives follow it)");
         agent.Context.SystemPrompt.Should().NotContain("Session Files:");
-        agent.Context.SystemPrompt.Should().NotContain("invoke_summarize_playbook",
-            because: "the tool-name binding only appears via the manifest suffix");
+        // Post-task-023: the legacy `invoke_summarize_playbook` tool name was deleted; the
+        // generic `invoke_playbook` is now the canonical name. With no uploaded files, the
+        // manifest suffix is absent — so neither name should appear.
+        agent.Context.SystemPrompt.Should().NotContain("invoke_playbook",
+            because: "the tool-name binding only appears via the manifest suffix; with no uploaded files there is no suffix");
     }
 
     /// <summary>
@@ -698,24 +379,9 @@ public class SprkChatAgentFactoryTests
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private static CapabilityManifestEntry MakeManifestEntry(
-        string name,
-        string[] toolNames,
-        string[] keywordHints) =>
-        new CapabilityManifestEntry(
-            CapabilityName: name,
-            Description: $"Description for {name}",
-            KeywordHints: keywordHints,
-            PlaybookId: null,
-            ToolNames: toolNames,
-            IsEnabled: true,
-            TenantRestrictions: Array.Empty<string>());
-
     #region Private helpers
 
-    private static ServiceProvider BuildServiceProvider(
-        IChatContextProvider contextProvider,
-        ICapabilityRouter? capabilityRouter = null)
+    private static ServiceProvider BuildServiceProvider(IChatContextProvider contextProvider)
     {
         var services = new ServiceCollection();
 
@@ -734,21 +400,7 @@ public class SprkChatAgentFactoryTests
         services.AddLogging();
 
         // Register factory (singleton — matches ADR-010 constraint)
-        // AIPU2-061: inject the router (may be null for backward-compat tests).
-        if (capabilityRouter is not null)
-        {
-            services.AddSingleton<SprkChatAgentFactory>(sp =>
-                new SprkChatAgentFactory(
-                    sp.GetRequiredService<IChatClient>(),
-                    sp.GetRequiredKeyedService<IChatClient>("raw"),
-                    sp,
-                    sp.GetRequiredService<ILogger<SprkChatAgentFactory>>(),
-                    capabilityRouter));
-        }
-        else
-        {
-            services.AddSingleton<SprkChatAgentFactory>();
-        }
+        services.AddSingleton<SprkChatAgentFactory>();
 
         return services.BuildServiceProvider();
     }

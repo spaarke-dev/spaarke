@@ -1,0 +1,246 @@
+<task id="012" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-11 BIG-BANG MIGRATION (Q9) — Migrate All 10 Pre-R5 Chat Tools to `IToolHandler` + `sprk_analysistool` Rows</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>8-12 hours (multi-day — high-risk gate task)</estimated-effort>
+    <dependencies>011</dependencies>
+    <blocks>013</blocks>
+    <tags>bff-api, refactoring, ai, chat, migration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Highest-risk task in Phase A. Modifies/migrates 10 production chat-tool classes; risk to ALL chat-side functionality if rollback path is incomplete. Per project plan risk register R1: "All 10 chat tools migrate in single task → high blast radius." Mandatory comprehensive regression test + documented rollback plan.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single-task atomic migration per Q9 binding decision. Cannot be split — entire batch lands together with regression gate, or rolls back atomically.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    🚨 HIGH-RISK GATE TASK — Q9 BATCH MIGRATION.
+
+    Migrate all 10 pre-R5 chat tool C# classes to data-driven `IToolHandler` implementations
+    + corresponding `sprk_analysistool` Dataverse rows in a SINGLE batch per Q9 binding
+    decision. Tools to migrate:
+
+    1. DocumentSearch
+    2. AnalysisQuery
+    3. KnowledgeRetrieval
+    4. TextRefinement
+    5. WorkingDocument
+    6. AnalysisExecution
+    7. WebSearch
+    8. CodeInterpreter
+    9. LegalResearch
+    10. VerifyCitations
+
+    For each tool: (a) extract its logic into an `IToolHandler` implementation
+    (`{ToolName}Handler.cs`); (b) seed a `sprk_analysistool` Dataverse row with
+    `AvailableInContexts = Chat`, valid `JsonSchema` (task 008) for parameter declaration,
+    handler-class binding, description preserved verbatim; (c) verify the existing hardcoded
+    class can be deleted (or feature-gated for rollback per ADR-018 / existing flag).
+
+    🔴 CRITICAL ROLLBACK PLAN (mandatory; document in task notes):
+    1. Rollback path 1: `git revert` of this PR returns to hardcoded list (task 011's
+       fallback path activates with ZERO data-driven rows, restoring hardcoded behavior).
+    2. Rollback path 2: Delete all 10 seeded `sprk_analysistool` rows → task 011's
+       fallback activates → hardcoded list returns.
+    3. Rollback path 3: If both above fail, manually re-enable hardcoded classes via the
+       feature flag/gate established in task 011. NO NEW feature flags introduced per
+       ADR-018; reuse the existing one.
+
+    🔴 COMPREHENSIVE REGRESSION TEST SUITE (mandatory; gates merge):
+    For each of the 10 tools, the regression test MUST exercise every code path:
+    - LLM-invoked function call → handler dispatches → result returns correctly
+    - Parameter validation (valid JSON, invalid JSON rejected, missing required fields)
+    - Error path (handler throws → graceful error response)
+    - Authorization path (tenant isolation; cross-tenant invocation blocked)
+    - Streaming response (if tool returns streamed content)
+    - Telemetry path (ADR-015: tool name + decision + timestamp only; no user message
+      content)
+
+    Total minimum test count: 10 tools × 6 paths = 60 regression tests. Migration is NOT
+    complete until all 60 pass in staging.
+
+    Critical-path context: this task is the single highest-risk item in Phase A. Task 013
+    (regression gate) validates the migration in staging before Phase B can begin. Pillar 3
+    (tasks 020-023) cannot start until 013 confirms the batch is functional.
+  </prompt>
+
+  <role>
+    Senior BFF engineer + AI-platform owner. MUST have prior experience with the 10
+    existing chat-tool classes' invocation paths and the chat-agent middleware chain.
+    Deep familiarity with NFR-13 safety pipeline + NFR-01 conversational primacy.
+  </role>
+
+  <goal>
+    All 10 pre-R5 chat tool classes migrated to `IToolHandler` implementations.
+    10 `sprk_analysistool` Dataverse rows seeded with `AvailableInContexts = Chat` and
+    valid `JsonSchema`. 60+ regression tests pass. Rollback plan documented and tested.
+    Build green; publish-size delta reported (net negative expected due to deleted
+    hardcoded classes). ADR-015 trace hygiene verified for every migrated tool.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="factory">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/IToolHandler.cs</file>
+    <file purpose="adapter">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlerToAIFunctionAdapter.cs</file>
+    <file purpose="dto">src/server/api/Sprk.Bff.Api/Services/Ai/Models/AnalysisTool.cs</file>
+    <file purpose="chat-architecture">docs/architecture/chat-architecture.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">No new top-level Program.cs lines; handler registrations inside existing module.</constraint>
+    <constraint source="ADR-013">Handlers are AI-internal; no CRUD-side facade exposure.</constraint>
+    <constraint source="ADR-014">Tenant-isolation on tool execution; cache keys include `tenantId`.</constraint>
+    <constraint source="ADR-015">Every migrated handler MUST emit only tool name + decision + timestamp telemetry; NEVER user message content.</constraint>
+    <constraint source="ADR-018">No new feature flags. Rollback gate uses existing flag established in task 011 if any.</constraint>
+    <constraint source="ADR-027">Dataverse seed rows use unmanaged solution conventions.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; net negative expected (deleted hardcoded classes). ≤+5 MB R6 total budget per NFR-02.</constraint>
+    <constraint source="spec NFR-01">Conversational primacy preserved — chat agent responds conversationally after migration.</constraint>
+    <constraint source="spec NFR-04">ZERO Microsoft Agent Framework references introduced.</constraint>
+    <constraint source="spec NFR-11">Backward compatibility — existing tools' user-visible behavior unchanged post-migration.</constraint>
+    <constraint source="spec NFR-13">Safety pipeline middleware chain (PromptShield + Groundedness + Citations + Privilege + Cross-matter) MUST continue to wrap every tool invocation.</constraint>
+    <constraint source="spec FR-12">All 10 named tools migrated; existing classes deleted OR feature-gated for rollback.</constraint>
+    <constraint source="bff-extensions.md F (test obligation)">Every modified service MUST have updated unit tests. 60+ regression tests required (10 tools × 6 paths).</constraint>
+    <constraint source="project plan R1">Comprehensive regression test + rollback plan + staging validation gate REQUIRED before merge.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/tool-migration</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <notes>
+    <note title="Rollback Plan (binding; MUST be documented in PR + task notes before merge)">
+      Three rollback paths in priority order:
+      1. `git revert` of this PR. Task 011's fallback path returns hardcoded tool list when ZERO data-driven rows exist.
+      2. Delete all 10 seeded `sprk_analysistool` rows via Web API or `pac` script. Task 011 fallback re-activates.
+      3. If both above fail in production: re-enable hardcoded classes via existing capability flag established in task 011. NO new feature flags created.
+
+      Rollback drill: BEFORE merging this PR, execute rollback path 2 in staging to confirm the hardcoded fallback re-activates correctly. Record evidence.
+    </note>
+    <note title="Migration estimate">
+      8-12 hours = ~1.5-2 engineer-days. Allocate 1 day to handlers + DI; 0.5-1 day to Dataverse rows + seed script; 0.5 day to regression test authoring; 0.5 day to staging validation + rollback drill.
+    </note>
+  </notes>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — Q9 BIG-BANG migration; highest-risk task in Phase A; mandatory regression suite + rollback plan + staging gate". Read R1 risk in plan.md + R5 lessons-learned (`projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md`).
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 011 ✅. Update `current-task.md` to task 012; flag as multi-day high-risk task.
+    </step>
+    <step order="2" name="Gather Resources + Inventory Existing Tools">
+      Read inputs + knowledge. Capture baseline publish size. Locate all 10 hardcoded tool classes; for each: capture name, description, parameter contract, current invocation path, telemetry pattern.
+    </step>
+    <step order="3" name="Author Rollback Plan Document">
+      Create `notes/task-012-rollback-plan.md` with the 3 rollback paths spelled out + staging-validation procedure. Confirm NO new feature flag introduced.
+    </step>
+    <step order="4" name="Migrate Tool 1: DocumentSearch">
+      Extract logic to `DocumentSearchHandler : IToolHandler`. Author `sprk_analysistool` row JSON (Chat context, JsonSchema, description verbatim). Author regression test covering all 6 paths.
+    </step>
+    <step order="5" name="Migrate Tools 2-10 in Sequence">
+      Repeat Step 4 for: AnalysisQuery, KnowledgeRetrieval, TextRefinement, WorkingDocument, AnalysisExecution, WebSearch, CodeInterpreter, LegalResearch, VerifyCitations. CHECKPOINT after every 3 tools per CLAUDE.md §5 (Proactive Checkpointing). Build green after each.
+    </step>
+    <step order="6" name="Register Handlers in DI">
+      Register all 10 new handlers in `AnalysisServicesModule`. Verify no new Program.cs lines.
+    </step>
+    <step order="7" name="🛑 Confirmation Gate — Data Seed Deployment">
+      PAUSE per project CLAUDE.md §Confirmation Triggers (10 data-row inserts to production Dataverse entity). Present all 10 row definitions + handler bindings; request approval.
+    </step>
+    <step order="8" name="Deploy 10 sprk_analysistool Rows to Dataverse">
+      After confirmation: deploy via idempotent seed script using `dataverse-deploy`. Verify all 10 rows; verify `AvailableInContexts = Chat`; verify each row's `JsonSchema` parses cleanly.
+    </step>
+    <step order="9" name="Run Regression Suite (60+ tests)">
+      Run all regression tests locally. Suite MUST be 100% green. Each tool × 6 paths. Record evidence per tool.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check` against all 10 new handler `.cs` files + DI module + tests. Verify ADR-010/013/014/015/018/027/029 + NFR-01/04/11/13 + FR-12 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="🛑 Staging Validation Gate (Q9 mandatory)">
+      Deploy to staging. Run regression suite against staging. Execute rollback drill (delete one tool row → confirm fallback to hardcoded → restore). Record evidence. STOP and request human sign-off before merging to master.
+    </step>
+    <step order="11" name="Delete Hardcoded Tool Classes (after staging validation)">
+      Delete the 10 hardcoded tool class files. Run build + regression suite one more time. Confirm green. (If retaining as feature-gated rollback: SKIP this step and document in task notes; per ADR-018 must use existing flag only.)
+    </step>
+    <step order="12" name="Verify Publish Size">
+      `dotnet publish -c Release` → measure delta vs baseline. Net negative size expected (deleted classes). Report absolute + delta in task notes; confirm ≤+5 MB R6 total budget.
+    </step>
+    <step order="13" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 012 ✅. Reset `current-task.md` to task 013. Report migration summary + rollback plan link + staging-validation evidence + publish-size delta. Notify human reviewer that Q9 batch landed.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="pac">Dataverse seed deployment + verification</tool>
+    <tool name="dataverse-deploy">Skill for solution / data deployment</tool>
+    <tool name="mcp__dataverse__create_record">MCP — seed `sprk_analysistool` rows</tool>
+    <tool name="mcp__dataverse__read_query">MCP — verify rows after seed</tool>
+    <tool name="git">stage + commit + manage rollback via `git revert`</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DocumentSearchHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/AnalysisQueryHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/KnowledgeRetrievalHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/TextRefinementHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/WorkingDocumentHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/AnalysisExecutionHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/WebSearchHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/CodeInterpreterHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/LegalResearchHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/VerifyCitationsHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (modified — handler registrations)</output>
+    <output type="code">[DELETED] src/server/api/Sprk.Bff.Api/{paths}/DocumentSearch.cs + 9 others (after staging validation)</output>
+    <output type="schema">scripts/Seed-ChatToolRows.ps1 OR solution data rows (NEW, idempotent)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/*Tests.cs (10 NEW test classes, 60+ tests total)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (012 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset to 013)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-012-rollback-plan.md</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-012-migration-evidence.md (60+ test results + staging-validation evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">10 new `IToolHandler` implementations exist; one per migrated chat tool.</criterion>
+    <criterion testable="true">10 `sprk_analysistool` Dataverse rows seeded with `AvailableInContexts = Chat`, valid `JsonSchema`, description preserved verbatim.</criterion>
+    <criterion testable="true">60+ regression tests pass (10 tools × 6 paths minimum).</criterion>
+    <criterion testable="true">Rollback plan documented in `notes/task-012-rollback-plan.md`; rollback drill executed in staging with evidence.</criterion>
+    <criterion testable="true">Hardcoded tool class files deleted (or feature-gated via EXISTING flag per ADR-018 — no new flag).</criterion>
+    <criterion testable="true">Chat agent's tool list resolves data-driven via `sprk_analysistool` rows (FR-12 end-to-end).</criterion>
+    <criterion testable="true">Conversational primacy preserved (NFR-01 test passes after migration).</criterion>
+    <criterion testable="true">Safety pipeline middleware chain unchanged (NFR-13 verified via integration test).</criterion>
+    <criterion testable="true">ZERO Microsoft Agent Framework references introduced (NFR-04; grep evidence).</criterion>
+    <criterion testable="true">No user message content in any migrated handler's telemetry (ADR-015 verified per tool).</criterion>
+    <criterion testable="true">BFF publish-size delta net-negative or near-zero; ≤+5 MB R6 total budget.</criterion>
+    <criterion testable="true">Staging-validation gate passed; human sign-off recorded before master merge.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+  </acceptance-criteria>
+</task>

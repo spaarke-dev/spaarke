@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Deploy Phase 1 to bff-dev environment</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>023,024</dependencies>
+    <blocks>027</blocks>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deploy to DEV environment using deployment skill; tags include 'deploy' + 'bff-api'; STANDARD per Step 0.5</rigor-reason>
+    <parallel-group>1-I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy the Phase 1 BFF build (tasks 010–024 merged) to the `bff-dev` Azure App Service via the `bff-deploy` skill. Verify deployment success, run smoke tests against `/by-code/` + `/by-name/` (deprecation telemetry), record publish-size cumulative delta vs Phase 0 baseline in handoff note. DOES NOT trigger Dataverse data updates in DEV — task 014 already backfilled the codes.
+  </prompt>
+
+  <role>SPAARKE platform deployment engineer. Expert in `bff-deploy` skill + Azure App Service slot deployment + Application Insights smoke testing.</role>
+
+  <goal>
+    The `bff-dev` Azure App Service is running the Phase 1 build. Smoke tests confirm: `/api/ai/playbooks/by-code/summarize-document-chat` returns 200; `/api/ai/playbooks/by-code/nonexistent` returns 404 ProblemDetails; `/api/ai/playbooks/by-name/{name}` returns 200 but emits deprecation warning. BFF publish size measured + cumulative delta vs Phase 0 baseline recorded; within NFR-01 thresholds.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-02 acceptance + NFR-01 publish-size verification. Phase 1 ships the stable-code migration to DEV first; higher-environment promotion is a separate operator action. The `bff-deploy` skill packages, pushes to Azure App Service slot, runs health checks, and swaps. Cumulative publish-size delta vs Phase 0 baseline (~45.65 MB per CLAUDE.md) must stay within thresholds.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/ (build target)</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>deploy/api-publish/ (output directory)</file>
+      <file>config/appsettings.Development.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029">Publish-size measurement REQUIRED; cumulative delta vs Phase 0 baseline reported in handoff. ≤55 MB cumulative tolerated; ≥55 MB triggers architecture review; ≥60 MB HARD STOP.</constraint>
+    <constraint source="ADR-008">Deployed endpoint enforces tenant scoping; verify via smoke test (cross-tenant call returns 404).</constraint>
+    <constraint source="ADR-015">Smoke tests use synthetic tenant/session — no real user content in test payloads.</constraint>
+    <constraint source="spec">FR-02 acceptance verification gate — deploy fails IF any consumer returns wrong output shape post-deploy.</constraint>
+    <constraint source="project">DEV environment only. DO NOT deploy to staging/prod from this task — those are separate operator actions.</constraint>
+    <constraint source="project">DO NOT trigger Dataverse data updates from this task — task 014 already populated codes in DEV. Higher-environment data updates are deferred to separate operator runs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify branch state — all Phase 1 tasks 010–024 are merged or staged. Run `git status` + `git log --oneline -n 10`.</step>
+    <step order="2">Invoke `bff-deploy` skill (per `.claude/skills/bff-deploy/SKILL.md`) targeting `bff-dev` slot. Capture deployment evidence (deployment ID, slot, swap timestamp).</step>
+    <step order="3">Smoke test 1: `curl -H "Authorization: Bearer $DEV_TOKEN" "$BFF_DEV_URL/api/ai/playbooks/by-code/summarize-document-chat"` → expect 200.</step>
+    <step order="4">Smoke test 2: `curl -H "Authorization: Bearer $DEV_TOKEN" "$BFF_DEV_URL/api/ai/playbooks/by-code/nonexistent-xyz"` → expect 404 with `application/problem+json`.</step>
+    <step order="5">Smoke test 3: `curl -H "Authorization: Bearer $DEV_TOKEN" "$BFF_DEV_URL/api/ai/playbooks/by-name/summarize-document-for-chat@v1"` → expect 200 + deprecation warning in Application Insights logs.</step>
+    <step order="6">Verify cross-tenant isolation: call `/by-code/` with a tenant-A token requesting a tenant-B-only playbook → expect 404.</step>
+    <step order="7">Measure publish size: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; record compressed size; compute cumulative delta vs Phase 0 baseline.</step>
+    <step order="8">Write deployment evidence note `notes/handoffs/026-phase-1-dev-deploy-evidence.md`: deployment ID, smoke test pass/fail, publish-size cumulative delta, Application Insights query for deprecation telemetry.</step>
+    <step order="9">Update TASK-INDEX.md: task 026 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">git status / git log / dotnet publish / curl smoke tests</tool>
+    <tool name="Skill">bff-deploy (the deployment skill itself)</tool>
+    <tool name="Write">Deployment evidence handoff note</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">bff-dev Azure App Service slot running Phase 1 build</output>
+    <output type="docs">notes/handoffs/026-phase-1-dev-deploy-evidence.md — deployment ID + smoke test evidence + cumulative publish-size delta</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deployment evidence note exists with deployment ID + timestamp.</criterion>
+    <criterion testable="true">Smoke test 1 (`/by-code/summarize-document-chat`) returns 200.</criterion>
+    <criterion testable="true">Smoke test 2 (404 nonexistent) returns ProblemDetails shape.</criterion>
+    <criterion testable="true">Smoke test 3 (`/by-name/`) returns 200 + deprecation log fires in Application Insights.</criterion>
+    <criterion testable="true">Cross-tenant smoke test confirms tenant scoping.</criterion>
+    <criterion testable="true">Cumulative publish-size delta vs Phase 0 baseline reported; within ≤55 MB cumulative + ≤+5 MB per-task NFR-01 thresholds.</criterion>
+    <criterion testable="true">No HIGH-severity CVE introduced (verify per `dotnet list package --vulnerable --include-transitive`).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 025 (integration tests) — different concerns. Use existing bff-dev slot per docs/architecture/auth-azure-resources.md. If cumulative publish-size delta ≥+5 MB triggers escalation, document justification per CLAUDE.md §10 bullet 4 — but Phase 1 changes should be near-zero (additive helpers, no new packages).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — invokes bff-deploy skill; smoke tests + publish-size verification at Step 9.</protocol>
+  </execution>
+</task>

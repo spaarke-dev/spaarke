@@ -30,7 +30,11 @@ public class AnalysisActionService : DataverseHttpServiceBase
 
         await EnsureAuthenticatedAsync(cancellationToken);
 
-        var url = $"sprk_analysisactions({actionId})?$expand=sprk_ActionTypeId($select=sprk_name,sprk_executoractiontype)";
+        // Bug fix 2026-06-23: removed sprk_actiontype from $select — that field does not exist on
+        // sprk_analysisaction (the comment below documents the Q1 2026-06-02 empirical confirmation
+        // but the SELECT clause was never updated). Including it causes ALL GetActionAsync calls to
+        // return 400 Bad Request, silently breaking every node that depends on Action lookup.
+        var url = $"sprk_analysisactions({actionId})?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature&$expand=sprk_ActionTypeId($select=sprk_name,sprk_executoractiontype)";
         var response = await Http.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -71,7 +75,10 @@ public class AnalysisActionService : DataverseHttpServiceBase
             SortOrder = sortOrder,
             ActionType = actionType,
             OwnerType = ScopeOwnerType.System,
-            IsImmutable = false
+            IsImmutable = false,
+            // Wave B-G9c1 (B6): per-action temperature override. Null = deterministic 0.0
+            // (matches sibling structured methods' hardcoded Temperature=0 behavior).
+            Temperature = entity.Temperature
         };
 
         Logger.LogInformation("Loaded action from Dataverse: {ActionName}", action.Name);
@@ -99,7 +106,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
 
         var query = BuildODataQuery(
             options,
-            selectFields: "sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt",
+            selectFields: "sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature",
             expandClause: "sprk_ActionTypeId($select=sprk_name,sprk_executoractiontype)",
             nameFieldPath: "sprk_name",
             categoryFieldPath: null,
@@ -135,7 +142,9 @@ public class AnalysisActionService : DataverseHttpServiceBase
                 SystemPrompt = entity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
                 SortOrder = sortOrder,
                 OwnerType = ScopeOwnerType.System,
-                IsImmutable = false
+                IsImmutable = false,
+                // Wave B-G9c1 (B6): per-action temperature override.
+                Temperature = entity.Temperature
             };
         }).ToArray();
 
@@ -204,7 +213,10 @@ public class AnalysisActionService : DataverseHttpServiceBase
             SortOrder = sortOrder,
             ActionType = request.ActionType,
             OwnerType = ScopeOwnerType.Customer,
-            IsImmutable = false
+            IsImmutable = false,
+            // Wave B-G9c1 (B6): per-action temperature override. Reflects server-side value
+            // (null when CREATE didn't set it; downstream defaults to 0.0).
+            Temperature = entity.Temperature
         };
 
         Logger.LogInformation("[CREATE ACTION] Created action '{ActionName}' with ID {ActionId}", action.Name, action.Id);
@@ -402,6 +414,14 @@ public class AnalysisActionService : DataverseHttpServiceBase
 
         [JsonPropertyName("sprk_ActionTypeId")]
         public ActionTypeReference? ActionTypeId { get; set; }
+
+        /// <summary>
+        /// Per-action temperature override (sprk_temperature, Decimal 0.0–2.0).
+        /// Null = use deterministic default (0.0) downstream.
+        /// Added Wave B-G9c1 (B6) — see <c>projects/spaarke-ai-platform-unification-r6/notes/wave-b-g9c-medium-bugs.md</c>.
+        /// </summary>
+        [JsonPropertyName("sprk_temperature")]
+        public decimal? Temperature { get; set; }
     }
 
     internal class ActionTypeReference

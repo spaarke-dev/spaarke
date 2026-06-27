@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Smoke test — chat session key format</title>
+    <phase>3: Dev environment cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>034</dependencies>
+    <blocks>036</blocks>
+    <tags>azure, testing, e2e-test, verification</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Live invariant verification on production-like dev env</rigor-reason>
+    <parallel-group>Phase3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase 3 cutover sequence — strictly serial</parallel-reason>
+  </metadata>
+  <prompt>Exercise chat session creation flow against dev BFF; observe Redis keys. Verify a key matching `spaarke:tenant:{tenantId}:session:{id}:v1` appears — confirming tenant-prefix invariant in production-like state. Per FR-14 + Success Criterion #1.</prompt>
+  <role>Spaarke operator; smoke testing.</role>
+  <goal>Observed key matches the expected pattern; documented in `notes/cutover-deploy-log.md`.</goal>
+  <context><background>The tenant-prefix invariant is the multi-tenant safety guarantee. Smoke test confirms it holds end-to-end against real Redis.</background><relevant-files><file>spaarke-bff-redis-dev (Azure)</file><file>spaarke-bff-dev (Azure)</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">FR-14 — smoke-test verification.</constraint>
+    <constraint source="spec">FR-05 — tenant prefix mandatory.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cutover-deploy-log.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Hit chat session creation endpoint with a known tenant ID (test user).</step>
+    <step order="2">Connect to Redis: `az redis cli -g spe-infrastructure-westus2 -n spaarke-bff-redis-dev` (or via `redis-cli` with the connection string).</step>
+    <step order="3">`KEYS spaarke:tenant:*:session:*`. Confirm at least one key matches.</step>
+    <step order="4">Verify key shape: `spaarke:tenant:{guid}:session:{id}:v1`.</step>
+    <step order="5">Document in `notes/cutover-deploy-log.md`.</step>
+    <step order="6">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">curl, redis-cli</tool><tool name="Write">log</tool></tools>
+  <outputs><output type="notes">cutover-deploy-log.md (smoke record appended)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">At least one Redis key matches `spaarke:tenant:*:session:*:v1`.</criterion>
+    <criterion testable="true">No keys in non-tenant-prefix form observed in chat path.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>

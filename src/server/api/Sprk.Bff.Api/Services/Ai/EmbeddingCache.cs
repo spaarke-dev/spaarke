@@ -1,8 +1,7 @@
-using System.Buffers;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -26,7 +25,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </remarks>
 public class EmbeddingCache : IEmbeddingCache
 {
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ILogger<EmbeddingCache> _logger;
     private readonly CacheMetrics? _metrics;
 
@@ -34,14 +33,22 @@ public class EmbeddingCache : IEmbeddingCache
     // Balance between freshness (model updates) and cost savings
     private static readonly TimeSpan DefaultTtl = TimeSpan.FromDays(7);
 
-    // Cache key prefix following SDAP naming convention
-    private const string CacheKeyPrefix = "sdap:embedding:";
+    // NFR-08 system-level cache allow-listed (FR-05 redis remediation r1):
+    // IEmbeddingCache's public API takes only a `contentHash` — there is no tenantId in scope at
+    // the call site, and embeddings of identical content under the same model are deterministic
+    // (tenant-agnostic). We use the "system" sentinel as the ITenantCache tenant scope so the
+    // cache wrapper invariant (every call passes a tenantId) is preserved while the embedding
+    // cache remains effectively content-keyed. On-wire key:
+    // spaarke:tenant:system:embedding:{contentHash}:v1
+    private const string SystemTenantSentinel = "system";
+    private const string CacheResource = "embedding";
+    private const int CacheVersion = 1;
 
     // Cache type for metrics
     private const string CacheType = "embedding";
 
     public EmbeddingCache(
-        IDistributedCache cache,
+        ITenantCache cache,
         ILogger<EmbeddingCache> logger,
         CacheMetrics? metrics = null)
     {
@@ -69,15 +76,16 @@ public class EmbeddingCache : IEmbeddingCache
         if (string.IsNullOrEmpty(contentHash))
             throw new ArgumentException("Content hash cannot be null or empty", nameof(contentHash));
 
-        var cacheKey = $"{CacheKeyPrefix}{contentHash}";
         var sw = Stopwatch.StartNew();
 
         try
         {
-            var cachedData = await _cache.GetAsync(cacheKey, cancellationToken);
+            // NFR-08 system-level allow-listed: tenant scope = "system" (see class header).
+            var cachedData = await _cache.GetAsync<byte[]>(
+                SystemTenantSentinel, CacheResource, contentHash, CacheVersion, ct: cancellationToken);
             sw.Stop();
 
-            if (cachedData != null)
+            if (cachedData != null && cachedData.Length > 0)
             {
                 // Cache HIT - deserialize embedding
                 var embedding = DeserializeEmbedding(cachedData);
@@ -121,19 +129,13 @@ public class EmbeddingCache : IEmbeddingCache
         if (embedding.Length == 0)
             throw new ArgumentException("Embedding cannot be empty", nameof(embedding));
 
-        var cacheKey = $"{CacheKeyPrefix}{contentHash}";
-
         try
         {
             var serializedData = SerializeEmbedding(embedding);
+            // NFR-08 system-level allow-listed: tenant scope = "system" (see class header).
             await _cache.SetAsync(
-                cacheKey,
-                serializedData,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = DefaultTtl
-                },
-                cancellationToken);
+                SystemTenantSentinel, CacheResource, contentHash, CacheVersion,
+                serializedData, DefaultTtl, ct: cancellationToken);
 
             _logger.LogDebug(
                 "Cached embedding for hash {Hash}..., vector length={Length}, TTL={TTL} days",

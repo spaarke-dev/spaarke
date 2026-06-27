@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Sister project handoff signal</title>
+    <phase>3: Dev environment cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>034,037</dependencies>
+    <blocks>039</blocks>
+    <tags>docs, devops</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation + cross-project communication</rigor-reason>
+    <parallel-group>Phase3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase 3 cutover sequence</parallel-reason>
+  </metadata>
+  <prompt>Append a cutover-record entry to `projects/spaarke-ai-azure-setup-dev-r1/notes/handoffs/` (or create that dir if missing) signaling that this project's Phase 3 has cleared. Reference task 034's gate-signal record + cutover-deploy-log timestamps.</prompt>
+  <role>Spaarke operator; cross-project comms.</role>
+  <goal>Sister project has a discoverable handoff record indicating gate signal cleared.</goal>
+  <context><background>Per NFR-11, sister project's Phase 3 is gated on this. This task makes the gate-clear signal visible.</background><relevant-files><file>projects/spaarke-ai-azure-setup-dev-r1/</file></relevant-files></context>
+  <constraints><constraint source="spec">NFR-11 — sister project sequencing.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cutover-deploy-log.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Locate or create `projects/spaarke-ai-azure-setup-dev-r1/notes/handoffs/`.</step>
+    <step order="2">Write `redis-cache-remediation-r1-phase3-cleared.md` — gate-signal cleared, Success Criterion #1 verified, timestamps from cutover log.</step>
+    <step order="3">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">cutover log</tool><tool name="Write">handoff file in sister project</tool></tools>
+  <outputs><output type="docs">projects/spaarke-ai-azure-setup-dev-r1/notes/handoffs/redis-cache-remediation-r1-phase3-cleared.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Handoff file exists in sister project with gate-signal verification.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>MINIMAL rigor.</protocol></execution>
+</task>

@@ -1,7 +1,12 @@
 import * as React from "react";
 import { tokens, Spinner } from "@fluentui/react-components";
 import { WorkspaceShell } from "@spaarke/ui-components";
-import type { SectionFactoryContext, NavigateTarget, DialogOptions } from "@spaarke/ui-components";
+import type {
+  SectionFactoryContext,
+  NavigateTarget,
+  DialogOptions,
+  SectionRegistration,
+} from "@spaarke/ui-components";
 import { useDataverseService } from "../../hooks/useDataverseService";
 import { useWorkspaceLayouts } from "../../hooks/useWorkspaceLayouts";
 import { navigateToEntityList } from "../../utils/navigation";
@@ -119,6 +124,13 @@ export interface IWorkspaceGridProps {
    * byte-identical bundle behaviour.
    */
   embedded?: boolean;
+  /**
+   * Optional custom section registry (R2 Option D, 2026-06-18). When omitted,
+   * the default `SECTION_REGISTRY` is used (standalone LegalWorkspace behavior).
+   * Embedding consumers (SpaarkeAi) pass a registry built via
+   * `createLegalWorkspaceSectionRegistry({...})` via `<LegalWorkspaceApp sections={...} />`.
+   */
+  sections?: readonly SectionRegistration[];
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +145,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   onHeaderReady,
   initialWorkspaceId,
   embedded = false,
+  sections = SECTION_REGISTRY,
 }) => {
   // -------------------------------------------------------------------------
   // DataverseService for DocumentsTab
@@ -653,7 +666,13 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   }, [webApi, userId, service, businessUnitId, handleNavigate, handleOpenWizardGeneric, handleOpenDocumentsDialog]);
 
   // -------------------------------------------------------------------------
-  // Build dynamic WorkspaceConfig from active layout + SECTION_REGISTRY
+  // Build dynamic WorkspaceConfig from active layout + sections registry
+  //
+  // The `sections` prop defaults to the imported `SECTION_REGISTRY` so
+  // standalone LegalWorkspace behavior is byte-identical (FR-25 / NFR-10).
+  // Embedding consumers (SpaarkeAi) pass a CUSTOM registry built via
+  // `createLegalWorkspaceSectionRegistry({...})` — R2 Option D (2026-06-18).
+  //
   // Falls back to old buildWorkspaceConfig on error for graceful degradation
   // -------------------------------------------------------------------------
 
@@ -661,7 +680,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     try {
       return buildDynamicWorkspaceConfig(
         activeLayoutJson,
-        SECTION_REGISTRY,
+        sections,
         factoryContext,
       );
     } catch (err) {
@@ -699,6 +718,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeLayoutJson,
+    sections,
     factoryContext,
     webApi,
     userId,

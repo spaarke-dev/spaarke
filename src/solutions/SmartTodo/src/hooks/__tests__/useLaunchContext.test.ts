@@ -48,7 +48,10 @@
 
 import {
   LAUNCH_ACTION_CREATE_TODO,
+  LAUNCH_ACTION_OPEN_TODO,
+  LAUNCH_ACTION_OPEN_TODOS,
   LAUNCH_PARAM_KEYS,
+  VISUAL_HOST_PARAM_KEYS,
   parseLaunchContextFromSearch,
 } from '../useLaunchContext';
 
@@ -105,11 +108,13 @@ describe('parseLaunchContextFromSearch — pure URL parser', () => {
 
     expect(result).toBeDefined();
     expect(result?.action).toBe(LAUNCH_ACTION_CREATE_TODO);
-    expect(result?.initialRegarding).toEqual({
-      entityType: 'sprk_communication',
-      recordId: 'abc12345-6789-0123-4567-89abcdef0123',
-      recordName: 'Re: Demand letter', // URL-decoded
-    });
+    if (result?.action === LAUNCH_ACTION_CREATE_TODO) {
+      expect(result.initialRegarding).toEqual({
+        entityType: 'sprk_communication',
+        recordId: 'abc12345-6789-0123-4567-89abcdef0123',
+        recordName: 'Re: Demand letter', // URL-decoded
+      });
+    }
   });
 
   it('(c) returns context with initialRegarding=undefined when regardingId is missing (defensive)', () => {
@@ -123,7 +128,9 @@ describe('parseLaunchContextFromSearch — pure URL parser', () => {
 
     expect(result).toBeDefined();
     expect(result?.action).toBe(LAUNCH_ACTION_CREATE_TODO);
-    expect(result?.initialRegarding).toBeUndefined();
+    if (result?.action === LAUNCH_ACTION_CREATE_TODO) {
+      expect(result.initialRegarding).toBeUndefined();
+    }
     // Defensive console.warn for diagnostics
     if (warnSpy) {
       expect(warnSpy).toHaveBeenCalled();
@@ -140,7 +147,9 @@ describe('parseLaunchContextFromSearch — pure URL parser', () => {
     const result = parseLaunchContextFromSearch(search);
 
     expect(result?.action).toBe(LAUNCH_ACTION_CREATE_TODO);
-    expect(result?.initialRegarding).toBeUndefined();
+    if (result?.action === LAUNCH_ACTION_CREATE_TODO) {
+      expect(result.initialRegarding).toBeUndefined();
+    }
   });
 
   it('(c) returns context with initialRegarding=undefined when regardingName is missing', () => {
@@ -153,7 +162,9 @@ describe('parseLaunchContextFromSearch — pure URL parser', () => {
     const result = parseLaunchContextFromSearch(search);
 
     expect(result?.action).toBe(LAUNCH_ACTION_CREATE_TODO);
-    expect(result?.initialRegarding).toBeUndefined();
+    if (result?.action === LAUNCH_ACTION_CREATE_TODO) {
+      expect(result.initialRegarding).toBeUndefined();
+    }
   });
 
   it('(b) URL-decodes record name characters (ampersand, hash, colon)', () => {
@@ -164,7 +175,10 @@ describe('parseLaunchContextFromSearch — pure URL parser', () => {
 
     const result = parseLaunchContextFromSearch(search);
 
-    expect(result?.initialRegarding?.recordName).toBe(recordName);
+    expect(result?.action).toBe(LAUNCH_ACTION_CREATE_TODO);
+    if (result?.action === LAUNCH_ACTION_CREATE_TODO) {
+      expect(result.initialRegarding?.recordName).toBe(recordName);
+    }
   });
 
   it('matches the binding LAUNCH_PARAM_KEYS contract with the createTodoLauncher.ts side', () => {
@@ -175,6 +189,313 @@ describe('parseLaunchContextFromSearch — pure URL parser', () => {
     expect(LAUNCH_PARAM_KEYS.REGARDING_ID).toBe('regardingId');
     expect(LAUNCH_PARAM_KEYS.REGARDING_NAME).toBe('regardingName');
     expect(LAUNCH_ACTION_CREATE_TODO).toBe('createTodo');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// openTodos branch tests — R4 task 034 / FR-34 Visual Host drill-through
+//
+// Verifies the parser recognises:
+//   (f) Explicit raw `?action=openTodos&regardingType=...&regardingId=...`
+//   (g) VisualHost `?data=` envelope (entityName/filterField/filterValue/mode)
+//   (h) VisualHost raw auto-inject (same keys, no envelope, no explicit action)
+//   (i) `entityType` derivation from `filterField` (strip `sprk_regarding` prefix)
+//   (j) Incomplete openTodos info → undefined (no graceful degrade)
+//   (k) Action discriminator + VISUAL_HOST_PARAM_KEYS binding contract
+// ---------------------------------------------------------------------------
+
+describe('parseLaunchContextFromSearch — openTodos branch (R4 FR-34)', () => {
+  let warnSpy: any;
+
+  beforeEach(() => {
+    warnSpy = typeof jest !== 'undefined' ? jest.spyOn(console, 'warn').mockImplementation(() => {}) : null;
+  });
+
+  afterEach(() => {
+    warnSpy?.mockRestore?.();
+  });
+
+  it('(f) returns openTodos context via explicit raw keys', () => {
+    const guid = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+    const search = `?action=openTodos&regardingType=sprk_matter&regardingId=${guid}`;
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result).toBeDefined();
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODOS);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODOS) {
+      expect(result.regardingFilter.entityType).toBe('sprk_matter');
+      expect(result.regardingFilter.recordId).toBe(guid);
+      expect(result.regardingFilter.recordName).toBeUndefined();
+    }
+  });
+
+  it('(f) returns openTodos context via explicit raw keys with optional recordName', () => {
+    const guid = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+    const search =
+      `?action=openTodos&regardingType=sprk_project&regardingId=${guid}` +
+      '&regardingName=Project%20Alpha';
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODOS);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODOS) {
+      expect(result.regardingFilter.entityType).toBe('sprk_project');
+      expect(result.regardingFilter.recordId).toBe(guid);
+      expect(result.regardingFilter.recordName).toBe('Project Alpha');
+    }
+  });
+
+  it('(g) returns openTodos context via VisualHost `?data=` envelope', () => {
+    // VisualHost emits: data="entityName=sprk_todo&filterField=sprk_regardingmatter&filterValue=<guid>&mode=dialog"
+    // Dataverse URL-encodes that string and presents it as ?data=<urlencoded>
+    const guid = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+    const dataString = `entityName=sprk_todo&filterField=sprk_regardingmatter&filterValue=${guid}&mode=dialog`;
+    const search = `?data=${encodeURIComponent(dataString)}`;
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result).toBeDefined();
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODOS);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODOS) {
+      expect(result.regardingFilter.entityType).toBe('sprk_matter');
+      expect(result.regardingFilter.recordId).toBe(guid);
+      expect(result.regardingFilter.recordName).toBeUndefined();
+    }
+  });
+
+  it('(h) returns openTodos context via raw VisualHost auto-inject keys (no envelope, no explicit action)', () => {
+    const guid = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+    const search =
+      '?entityName=sprk_todo' +
+      '&filterField=sprk_regardingmatter' +
+      `&filterValue=${guid}` +
+      '&mode=dialog';
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result).toBeDefined();
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODOS);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODOS) {
+      expect(result.regardingFilter.entityType).toBe('sprk_matter');
+      expect(result.regardingFilter.recordId).toBe(guid);
+    }
+  });
+
+  it('(i) entityType derivation: filterField=sprk_regardingproject → sprk_project', () => {
+    const guid = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+    const search = `?entityName=sprk_todo&filterField=sprk_regardingproject&filterValue=${guid}`;
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODOS);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODOS) {
+      expect(result.regardingFilter.entityType).toBe('sprk_project');
+    }
+  });
+
+  it('(i) entityType derivation: filterField=sprk_regardingworkassignment → sprk_workassignment', () => {
+    const guid = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+    const search = `?entityName=sprk_todo&filterField=sprk_regardingworkassignment&filterValue=${guid}`;
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODOS);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODOS) {
+      expect(result.regardingFilter.entityType).toBe('sprk_workassignment');
+    }
+  });
+
+  it('(i) entityType derivation: filterField=sprk_regardinginvoice → sprk_invoice', () => {
+    const guid = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+    const search = `?filterField=sprk_regardinginvoice&filterValue=${guid}`;
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODOS);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODOS) {
+      expect(result.regardingFilter.entityType).toBe('sprk_invoice');
+    }
+  });
+
+  it('(j) returns undefined when openTodos action recognised but filterField has no sprk_regarding prefix', () => {
+    // The hook can't safely derive an entity type — fall back to undefined.
+    const guid = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+    const search = `?filterField=ownerid&filterValue=${guid}`;
+
+    const result = parseLaunchContextFromSearch(search);
+
+    // No `filterField=sprk_regarding...` AND no explicit `action` → not a launch context
+    expect(result).toBeUndefined();
+  });
+
+  it('(j) returns undefined when openTodos has filterField but missing filterValue', () => {
+    const search = '?filterField=sprk_regardingmatter';
+    // No filterValue → no inference
+    const result = parseLaunchContextFromSearch(search);
+    expect(result).toBeUndefined();
+  });
+
+  it('(j) returns undefined when explicit action=openTodos but regarding info absent', () => {
+    const result = parseLaunchContextFromSearch('?action=openTodos');
+    expect(result).toBeUndefined();
+  });
+
+  it('(g) envelope-wrapped explicit raw form also works (defensive)', () => {
+    // Less common but supported: someone wraps explicit raw keys in the envelope.
+    const guid = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+    const dataString = `action=openTodos&regardingType=sprk_matter&regardingId=${guid}`;
+    const search = `?data=${encodeURIComponent(dataString)}`;
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODOS);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODOS) {
+      expect(result.regardingFilter.entityType).toBe('sprk_matter');
+      expect(result.regardingFilter.recordId).toBe(guid);
+    }
+  });
+
+  it('(g) envelope-wrapped createTodo also works (defensive — back-compat with R3 callers using envelope form)', () => {
+    // R3's Outlook ribbon uses raw form, but if a future caller wraps it in
+    // the Dataverse envelope (e.g., for parity with VisualHost-style chrome),
+    // the parser must still recognise it. This is the back-compat guarantee
+    // R4 task 034 added via the parseDataParams refactor.
+    const guid = 'a1b2c3d4-e5f6-7890-1234-567890abcdef';
+    const dataString =
+      `action=createTodo&regardingType=sprk_communication&regardingId=${guid}` +
+      '&regardingName=Email%20subject';
+    const search = `?data=${encodeURIComponent(dataString)}`;
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result?.action).toBe(LAUNCH_ACTION_CREATE_TODO);
+    if (result?.action === LAUNCH_ACTION_CREATE_TODO) {
+      expect(result.initialRegarding?.entityType).toBe('sprk_communication');
+      expect(result.initialRegarding?.recordId).toBe(guid);
+      expect(result.initialRegarding?.recordName).toBe('Email subject');
+    }
+  });
+
+  it('(k) matches the binding VISUAL_HOST_PARAM_KEYS contract with VisualHostRoot.tsx', () => {
+    // Bind by literal value — if VisualHost changes its auto-inject param names,
+    // this test will fail loud (the parser must change too — they are a pair).
+    expect(VISUAL_HOST_PARAM_KEYS.ENTITY_NAME).toBe('entityName');
+    expect(VISUAL_HOST_PARAM_KEYS.FILTER_FIELD).toBe('filterField');
+    expect(VISUAL_HOST_PARAM_KEYS.FILTER_VALUE).toBe('filterValue');
+    expect(VISUAL_HOST_PARAM_KEYS.MODE).toBe('mode');
+    expect(LAUNCH_ACTION_OPEN_TODOS).toBe('openTodos');
+  });
+
+  it('(k) entityName + mode keys are ignored (verified by isolating to filterField/filterValue only)', () => {
+    // Without filterField/filterValue, just entityName + mode should NOT trigger openTodos.
+    const search = '?entityName=sprk_todo&mode=dialog';
+    const result = parseLaunchContextFromSearch(search);
+    expect(result).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// openTodo branch tests — R4 task 100 / W-2 LegalWorkspace widget "Open" button
+//
+// Verifies the parser recognises:
+//   (l) Explicit raw `?action=openTodo&todoId=<guid>`
+//   (m) Envelope-wrapped `?data=action%3DopenTodo%26todoId%3D<guid>`
+//   (n) Missing/blank todoId → undefined (defensive)
+//   (o) Action discriminator + LAUNCH_PARAM_KEYS.TODO_ID binding contract
+//   (p) openTodo coexists with createTodo / openTodos (no regression to other branches)
+// ---------------------------------------------------------------------------
+
+describe('parseLaunchContextFromSearch — openTodo branch (R4 task 100 / W-2)', () => {
+  let warnSpy: any;
+
+  beforeEach(() => {
+    warnSpy = typeof jest !== 'undefined' ? jest.spyOn(console, 'warn').mockImplementation(() => {}) : null;
+  });
+
+  afterEach(() => {
+    warnSpy?.mockRestore?.();
+  });
+
+  it('(l) returns openTodo context via explicit raw keys', () => {
+    const guid = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
+    const search = `?action=openTodo&todoId=${guid}`;
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result).toBeDefined();
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODO);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODO) {
+      expect(result.todoId).toBe(guid);
+    }
+  });
+
+  it('(m) returns openTodo context via envelope-wrapped `?data=` form', () => {
+    // The LegalWorkspace shim calls ctx.onOpenWizard(...) which routes through
+    // Xrm.Navigation.navigateTo({pageType:"webresource", data: "action=openTodo&todoId=<guid>"}).
+    // Dataverse URL-encodes the entire `data` string and presents it as ?data=<urlencoded>.
+    const guid = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
+    const dataString = `action=openTodo&todoId=${guid}`;
+    const search = `?data=${encodeURIComponent(dataString)}`;
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result).toBeDefined();
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODO);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODO) {
+      expect(result.todoId).toBe(guid);
+    }
+  });
+
+  it('(n) returns undefined when action=openTodo but todoId is missing', () => {
+    const result = parseLaunchContextFromSearch('?action=openTodo');
+    expect(result).toBeUndefined();
+    if (warnSpy) {
+      expect(warnSpy).toHaveBeenCalled();
+    }
+  });
+
+  it('(n) returns undefined when action=openTodo but todoId is whitespace-only', () => {
+    const result = parseLaunchContextFromSearch('?action=openTodo&todoId=%20%20');
+    expect(result).toBeUndefined();
+  });
+
+  it('(o) matches the binding LAUNCH_PARAM_KEYS.TODO_ID contract', () => {
+    // Bind by literal value — if the shim's URL builder changes the param name,
+    // this test will fail loud (the parser must change too — they are a pair).
+    expect(LAUNCH_PARAM_KEYS.TODO_ID).toBe('todoId');
+    expect(LAUNCH_ACTION_OPEN_TODO).toBe('openTodo');
+  });
+
+  it('(p) openTodo does NOT collide with openTodos (regression — different actions)', () => {
+    // openTodo (singular) — specific record open.
+    const guid = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
+    const openTodoResult = parseLaunchContextFromSearch(`?action=openTodo&todoId=${guid}`);
+    expect(openTodoResult?.action).toBe(LAUNCH_ACTION_OPEN_TODO);
+
+    // openTodos (plural) — kanban filter — regression check.
+    const openTodosResult = parseLaunchContextFromSearch(
+      `?action=openTodos&regardingType=sprk_matter&regardingId=${guid}`,
+    );
+    expect(openTodosResult?.action).toBe(LAUNCH_ACTION_OPEN_TODOS);
+
+    // createTodo — regression check.
+    const createTodoResult = parseLaunchContextFromSearch(
+      `?action=createTodo&regardingType=sprk_communication&regardingId=${guid}&regardingName=Subject`,
+    );
+    expect(createTodoResult?.action).toBe(LAUNCH_ACTION_CREATE_TODO);
+  });
+
+  it('(p) openTodo URL trimming — strips surrounding whitespace from todoId', () => {
+    const guid = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
+    // %20 = space; surround the guid with encoded spaces.
+    const search = `?action=openTodo&todoId=%20${guid}%20`;
+
+    const result = parseLaunchContextFromSearch(search);
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODO);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODO) {
+      expect(result.todoId).toBe(guid); // trimmed
+    }
   });
 });
 

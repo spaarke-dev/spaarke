@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Write scripts/ai-search/Deploy-AllIndexes.ps1 (unified deployer per FR-07)</title>
+    <phase>3: Deploy Infrastructure</phase>
+    <status>completed</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>001, 002, 003, 010, 011, 012, 013, 014, 015, 016</dependencies>
+    <blocks>021, 050</blocks>
+    <tags>azure, azure-search, deploy, infrastructure, bicep, powershell, scripts</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation: PowerShell script with explicit param contract, hybrid Bicep+PS pattern, post-deploy verifier; mirrors Deploy-RedisCache.ps1 canonical template</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Foundational script; blocks deploy + retires 5 pre-existing per-index scripts</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Write `scripts/ai-search/Deploy-AllIndexes.ps1` as the SINGLE canonical deployer for ALL Spaarke AI Search indexes. Mirror the validated structure of `scripts/Deploy-RedisCache.ps1` per Redis project handoff §6.
+    Catalog-driven (reads index list from manifest or catalog). Hybrid Bicep+PS pattern: PS calls Bicep for resource shape if updated; PS handles index PUT calls + KV secret upserts + cross-resource wiring.
+    Retire 5 pre-existing per-index PS scripts + 1 Bicep deployer in the SAME PR.
+  </prompt>
+
+  <role>
+    Spaarke platform infrastructure engineer. Expert in PowerShell SupportsShouldProcess pattern, Azure CLI scripting, Bicep parametrization, Azure AI Search REST API.
+  </role>
+
+  <goal>
+    `scripts/ai-search/Deploy-AllIndexes.ps1` operational with required params, idempotent, post-deploy invariant verifier. 5 per-index PS scripts + 1 Bicep deployer deleted in same PR.
+  </goal>
+
+  <context>
+    <background>
+      Current Deploy-IndexSchemas.ps1 is broken (wrong IndexMap; covers 3 of 7 indexes). FR-07 replaces it with single unified script.
+      Redis project's Deploy-RedisCache.ps1 is the validated template — mirror its structure.
+    </background>
+    <relevant-files>
+      <file>scripts/ai-search/Deploy-AllIndexes.ps1</file>
+      <file>scripts/Deploy-RedisCache.ps1</file>
+      <file>infrastructure/ai-search/deploy-session-files-index.ps1</file>
+      <file>scripts/ai-search/Deploy-IndexSchemas.ps1</file>
+      <file>infrastructure/ai-search/Deploy-InvoiceSearchIndex.ps1</file>
+      <file>infrastructure/ai-search/deploy-invoice-index.ps1</file>
+      <file>infrastructure/ai-search/deploy-invoice-index.bicep</file>
+      <file>scripts/Create-PlaybookEmbeddingsIndex.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-07">Required params: -Environment (ValidateSet dev/staging/prod/demo), -Indexes subset, -DryRun, -VerifyOnly, -Force (NFR-05 prod/demo gate), -CutoverBffSettings</constraint>
+    <constraint source="FR-07">SupportsShouldProcess; wrap every destructive call in if ($PSCmdlet.ShouldProcess(...))</constraint>
+    <constraint source="FR-07">Catalog-driven; idempotent; post-deploy invariant verifier per index (vector dim, key field, required-filterable fields, schema policy compliance)</constraint>
+    <constraint source="FR-07">Retire in same PR: Deploy-IndexSchemas.ps1, Deploy-InvoiceSearchIndex.ps1, deploy-invoice-index.ps1, deploy-invoice-index.bicep, deploy-session-files-index.ps1, Create-PlaybookEmbeddingsIndex.ps1</constraint>
+    <constraint source="NFR-01">Idempotent — safe to re-run; no destructive side effects without explicit -Force</constraint>
+    <constraint source="NFR-02">Post-deploy verifier fail-fast on policy violations (non-zero exit, log index + field + violation)</constraint>
+    <constraint source="NFR-05">Force gate for prod/demo</constraint>
+    <constraint source="NFR-06">-DryRun + -VerifyOnly supported</constraint>
+    <constraint source="NFR-12">Total runtime for full 7-index deploy &lt; 30 min target</constraint>
+    <constraint source="ADR-013">Honor SemaphoreSlim patterns if applicable (n/a for schema deploy; relevant for ingestion phase 5)</constraint>
+    <constraint source="ADR-028">KV references use @Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=...) form (CutoverBffSettings)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/Deploy-RedisCache.ps1</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/handoff-to-ai-search-project.md</file>
+      <file>infrastructure/ai-search/deploy-session-files-index.ps1</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>docs/guides/ai-search-azure-setup.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>.claude/skills/script-aware/SKILL.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-bounded-concurrency.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read Deploy-RedisCache.ps1 (canonical template) to extract structure patterns</step>
+    <step order="2">Read deploy-session-files-index.ps1 to extract post-deploy invariant verifier pattern</step>
+    <step order="3">Draft param block with SupportsShouldProcess + all 6 required params</step>
+    <step order="4">Draft Force gate logic for prod/demo (NFR-05)</step>
+    <step order="5">Draft env→RG mapping + catalog/manifest loader</step>
+    <step order="6">Draft index PUT logic with idempotency probe (GET index, compare definition, PUT if drift or new)</step>
+    <step order="7">Draft per-index post-deploy invariant verifier: vector dim, key field, filterable fields, schema policy compliance</step>
+    <step order="8">Draft optional -CutoverBffSettings: az webapp config appsettings set with @Microsoft.KeyVault refs</step>
+    <step order="9">Draft -DryRun + -VerifyOnly branches (skip destructive ops, only run probe/verifier)</step>
+    <step order="10">Test against deployed dev: -DryRun shows all 7 would deploy; -VerifyOnly returns non-zero if any policy violation</step>
+    <step order="11">Delete 5 per-index PS scripts + deploy-invoice-index.bicep (same PR per FR-07)</step>
+    <step order="12">Update ai-search-azure-setup.md to reference Deploy-AllIndexes.ps1 (replace placeholder/TODO from task 003)</step>
+    <step order="13">Update TASK-INDEX.md: task 020 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Template scripts</tool>
+    <tool name="Write">New Deploy-AllIndexes.ps1</tool>
+    <tool name="Bash">git rm for retired scripts</tool>
+    <tool name="az">CLI for testing -DryRun + -VerifyOnly</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/ai-search/Deploy-AllIndexes.ps1</output>
+    <output type="deletion">scripts/ai-search/Deploy-IndexSchemas.ps1 (retired)</output>
+    <output type="deletion">infrastructure/ai-search/Deploy-InvoiceSearchIndex.ps1 (retired)</output>
+    <output type="deletion">infrastructure/ai-search/deploy-invoice-index.ps1 (retired)</output>
+    <output type="deletion">infrastructure/ai-search/deploy-invoice-index.bicep (retired)</output>
+    <output type="deletion">infrastructure/ai-search/deploy-session-files-index.ps1 (retired)</output>
+    <output type="deletion">scripts/Create-PlaybookEmbeddingsIndex.ps1 (retired)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Script exists with required param signature (Environment, Indexes, DryRun, VerifyOnly, Force, CutoverBffSettings)</criterion>
+    <criterion testable="true">SupportsShouldProcess wraps destructive calls</criterion>
+    <criterion testable="true">-DryRun shows all 7 indexes would deploy without changes</criterion>
+    <criterion testable="true">-VerifyOnly returns non-zero on policy violation</criterion>
+    <criterion testable="true">-Force required for prod/demo (NFR-05)</criterion>
+    <criterion testable="true">5 per-index PS scripts + 1 Bicep deployer deleted in same PR</criterion>
+    <criterion testable="true">Idempotent: re-running against same env produces no side effects</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: load all knowledge files; declare RIGOR LEVEL at start; run code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+
+  <notes-results>
+    <completed-on>2026-06-26</completed-on>
+    <summary>
+      Wrote `scripts/ai-search/Deploy-AllIndexes.ps1` (~430 lines) as single canonical deployer for all 7 catalog indexes per FR-07.
+      Catalog-driven design: `$Catalog` hashtable declares Name+SchemaFile+Invariants per index; -Indexes subset filter selects from catalog keys.
+      Mirrors `scripts/Deploy-RedisCache.ps1` structure: SupportsShouldProcess wraps every PUT/POST, NFR-05 Force gate for prod/demo (exit 2), idempotency via PUT verb (Azure AI Search PUT creates-or-updates), live admin key from `az search admin-key` with optional KV fallback, optional -CutoverBffSettings for App Service KV-ref migration.
+      Post-deploy invariant verifier (NFR-02): asserts per-index name match + key field present + required-filterable fields exist+filterable=true + vector fields are 3072-dim HNSW cosine + semantic config references canonical field (FR-17 documentType) + forbidden field names absent (FR-17 domain). Verifier runs after every successful deploy AND on -VerifyOnly runs; exits 6 on any violation.
+      Retired 6 legacy scripts in same PR per FR-07 atomic-PR rule: Deploy-IndexSchemas.ps1, Deploy-InvoiceSearchIndex.ps1, deploy-invoice-index.ps1, deploy-invoice-index.bicep, deploy-session-files-index.ps1, Create-PlaybookEmbeddingsIndex.ps1.
+      Updated `docs/guides/ai-search-azure-setup.md` §2.4 — removed the Phase 1 "deployer is deferred" NOTE since it now ships.
+      Validated against dev: -DryRun shows 7-index plan with all invariants (exit 0); -Indexes subset works (exit 0); -Environment prod without -Force exits 2 (NFR-05 gate); -VerifyOnly against empty dev returns 7×HTTP 404 FAIL with exit 6 (correct — verifier catches missing indexes).
+      No orphaned references to deleted scripts in `scripts/` or `.github/` workflows (verified by grep).
+    </summary>
+    <verification>
+      <evidence>scripts/ai-search/Deploy-AllIndexes.ps1 (430 LOC, SupportsShouldProcess + Force gate + verifier)</evidence>
+      <evidence>git rm of 6 retired scripts (atomic per FR-07)</evidence>
+      <evidence>docs/guides/ai-search-azure-setup.md §2.4 NOTE removed</evidence>
+      <evidence>-DryRun against dev: exit 0, lists all 7 indexes + invariants</evidence>
+      <evidence>-VerifyOnly against empty dev: exit 6, 7 FETCH-FAILED (HTTP 404) FAILs</evidence>
+      <evidence>-Environment prod -DryRun without -Force: exit 2, NFR-05 message</evidence>
+    </verification>
+  </notes-results>
+</task>

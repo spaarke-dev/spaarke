@@ -107,6 +107,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.KnowledgeSourceName,
                 request.Metadata,
                 request.ParentEntity,
+                request.SearchIndexName,
                 stopwatch,
                 cancellationToken);
         }
@@ -178,6 +179,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.KnowledgeSourceName,
                 request.Metadata,
                 request.ParentEntity,
+                request.SearchIndexName,
                 stopwatch,
                 cancellationToken);
         }
@@ -224,6 +226,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.KnowledgeSourceName,
                 request.Metadata,
                 request.ParentEntity,
+                request.SearchIndexName,
                 stopwatch,
                 cancellationToken);
         }
@@ -245,6 +248,14 @@ public sealed class FileIndexingService : IFileIndexingService
     /// Shared pipeline that all entry points converge to.
     /// Handles: chunk → build documents → index batch.
     /// </summary>
+    /// <remarks>
+    /// multi-container-multi-index-r1 indexer-routing-fix (Tier 3): <paramref name="searchIndexName"/>
+    /// threads the per-record <c>sprk_searchindexname</c> from each entry-point request DTO
+    /// (<see cref="FileIndexRequest"/> / <see cref="ContentIndexRequest"/>) into the
+    /// <see cref="IRagService.IndexDocumentsBatchAsync(IEnumerable{KnowledgeDocument}, string?, CancellationToken)"/>
+    /// new 3-argument overload. When null/whitespace, falls through to tenant-default
+    /// (existing behavior preserved per NFR-02).
+    /// </remarks>
     private async Task<FileIndexingResult> IndexTextInternalAsync(
         string text,
         string fileName,
@@ -255,6 +266,7 @@ public sealed class FileIndexingService : IFileIndexingService
         string? knowledgeSourceName,
         Dictionary<string, string>? metadata,
         ParentEntityContext? parentEntity,
+        string? searchIndexName,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
@@ -318,8 +330,13 @@ public sealed class FileIndexingService : IFileIndexingService
             ParentEntityName = parentEntity?.EntityName
         }).ToList();
 
-        // Step 3: Batch index (embeddings generated inside RagService)
-        var results = await _ragService.IndexDocumentsBatchAsync(documents, cancellationToken);
+        // Step 3: Batch index (embeddings generated inside RagService).
+        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3): pass `searchIndexName`
+        // to the new 3-arg overload so the per-record sprk_searchindexname routes the batch
+        // to the correct physical Azure AI Search index. The 2-arg overload is preserved for
+        // NFR-02 backward-compat — when searchIndexName is null/whitespace, the 3-arg overload
+        // delegates to the tenant-default chain (FR-BFF-04).
+        var results = await _ragService.IndexDocumentsBatchAsync(documents, searchIndexName, cancellationToken);
 
         var successCount = results.Count(r => r.Succeeded);
 

@@ -95,6 +95,7 @@ import {
   CheckmarkRegular,
   PinRegular,
   PinFilled,
+  PersonRegular,
 } from "@fluentui/react-icons";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
@@ -186,6 +187,11 @@ const useStyles = makeStyles({
   activeMarker: {
     color: tokens.colorBrandForeground1,
     flexShrink: 0,
+  },
+  personalMarker: {
+    color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
+    fontSize: tokens.fontSizeBase300,
   },
   emptyHint: {
     paddingTop: tokens.spacingVerticalXS,
@@ -400,9 +406,12 @@ function applyActiveLayout(layoutId: string): void {
  * of the WorkspacePane. See file header for full FR / NFR mapping.
  */
 export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
-  // tabs / activeTabId / onTabSelect / onTabClose retained for API back-compat
-  // (see WorkspacePaneMenuProps JSDoc). Task 089 removed the Open + Home menu
-  // sections that used these props.
+  // tabs is destructured for the iteration-2 pin → tab feature (the handler
+  // checks whether a layoutId is already open before dispatching widget_load).
+  // activeTabId / onTabSelect / onTabClose retained for API back-compat (see
+  // WorkspacePaneMenuProps JSDoc). Task 089 removed the Open + Home menu
+  // sections that used those latter props.
+  tabs,
 }) => {
   const styles = useStyles();
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -486,9 +495,25 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
           next.add(layoutId);
           return next;
         });
+        // ai-spaarke-ai-workspace-UI-r1 iteration 2 (2026-06-08): pin → tab.
+        // Skip the dispatch if the workspace is already open in a tab.
+        const alreadyOpen = tabs.some(
+          (t) =>
+            t.widgetType === "workspace" &&
+            (t.widgetData as { layoutId?: string } | null)?.layoutId ===
+              layoutId,
+        );
+        if (!alreadyOpen) {
+          dispatch("workspace", {
+            type: "widget_load",
+            widgetType: "workspace",
+            widgetData: { layoutId, layoutName },
+            displayName: layoutName,
+          });
+        }
       }
     },
-    [pinnedIds],
+    [pinnedIds, tabs, dispatch],
   );
 
   // -------------------------------------------------------------------------
@@ -735,6 +760,14 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
                   <div className={styles.layoutRow}>
                     {pinSlot}
                     <span className={styles.tabLabel}>{layout.name}</span>
+                    {!layout.isSystem && (
+                      <Tooltip content="Personal workspace" relationship="label">
+                        <PersonRegular
+                          className={styles.personalMarker}
+                          aria-label="Personal workspace"
+                        />
+                      </Tooltip>
+                    )}
                     {isActive && (
                       <CheckmarkRegular className={styles.activeMarker} />
                     )}

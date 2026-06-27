@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Add `SearchIndexName` to request DTOs (`SemanticSearchRequest`, `RagSearchRequest`, `RecordSearchRequest`)</title>
+    <phase>B: BFF resolver extension</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>013, 014, 015, 016</blocks>
+    <tags>bff-api, api, models</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .cs code in 3 model files that downstream services + endpoint depend on. Tags include `bff-api`. Forward-compat invariant must be preserved.</rigor-reason>
+    <parallel-group>B1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>File-disjoint with task 012 (appsettings) — different file paths, no shared edit risk.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add an optional `string? SearchIndexName { get; init; }` property to the three request DTOs: `SemanticSearchRequest`, `RagSearchRequest`, `RecordSearchRequest`. JSON deserialization MUST be forward-compatible — requests WITHOUT this field continue to parse and work as today (NFR-02).
+  </prompt>
+
+  <role>
+    BFF developer familiar with `Sprk.Bff.Api/Models/Ai/`. Read `.claude/constraints/bff-extensions.md` for the binding pre-merge checklist before editing.
+  </role>
+
+  <goal>
+    All three request DTOs expose `SearchIndexName` (nullable, init-only). Existing serialization tests pass unmodified. New requests with `searchIndexName` deserialize correctly; old requests without it deserialize with `SearchIndexName = null`.
+  </goal>
+
+  <context>
+    <background>
+      Phase B threads an explicit index identifier from client to resolver. Task 010 extended the resolver signature; this task adds the DTO surface so the endpoint layer can read `request.SearchIndexName` and pass it to the resolver. Forward-compat is mandatory — existing PCF + code-page callers must continue to work.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-BFF-05">`SemanticSearchRequest`, `RagSearchRequest`, `RecordSearchRequest` MUST add optional `string? SearchIndexName { get; init; }`. JSON deserialization MUST be forward-compatible.</constraint>
+    <constraint source="spec.md NFR-02">Existing serialization/endpoint tests pass UNMODIFIED.</constraint>
+    <constraint source="ADR-001">Minimal-API model conventions; DTOs are records or simple classes with `init`-only setters.</constraint>
+    <constraint source="ADR-013">AI architecture — DTOs live within `Models/Ai/`; no facade or contract extraction needed.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Binding pre-merge checklist for any BFF addition.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-bff-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Nullable init-only property" location="ADR-001">
+        `public string? SearchIndexName { get; init; }` — JSON.NET / System.Text.Json defaults serialize null as absent; deserialization is forward-compatible by construction.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate the three request DTO files. `SemanticSearchRequest.cs` is at `src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/`. Find `RagSearchRequest.cs` and `RecordSearchRequest.cs` under `Models/Ai/` (exact subfolder discovered during the task).</step>
+    <step order="2">Add `public string? SearchIndexName { get; init; }` to each DTO. Place it logically near other optional/scoping properties; preserve existing property order otherwise.</step>
+    <step order="3">Build BFF: `dotnet build src/server/api/Sprk.Bff.Api/`. Verify no compile errors.</step>
+    <step order="4">Run existing test suite: `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. All existing tests MUST pass UNMODIFIED (NFR-02).</step>
+    <step order="5">Update `TASK-INDEX.md` status: 🔲 → ✅. Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing DTO files</tool>
+    <tool name="Edit">Add the new property to each DTO</tool>
+    <tool name="Bash">Run `dotnet build` and `dotnet test`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/SemanticSearch/SemanticSearchRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/.../RagSearchRequest.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/.../RecordSearchRequest.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-BFF-05: All three DTOs expose `SearchIndexName` property; build succeeds.</criterion>
+    <criterion testable="true">NFR-02: Existing test suite passes UNMODIFIED — `dotnet test` shows same pass count.</criterion>
+    <criterion testable="true">Forward-compat: JSON without `searchIndexName` deserializes successfully with property = null. (Test coverage delivered in task 017.)</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is intentionally narrow — a single property addition to three DTOs. Forward-compat is a property of `string?` + System.Text.Json defaults, not a runtime check.
+
+    Parallel-safe with task 012 (appsettings change). Both can run concurrently; task 013/014/015 depend on both completing.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute Step 0 (rigor declaration: FULL) before any code change.
+    </protocol>
+  </execution>
+</task>

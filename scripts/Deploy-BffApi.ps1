@@ -210,6 +210,14 @@ if (-not $SkipBuild) {
 
     Push-Location $ApiProject
     try {
+        # Restore first — required by --no-restore on publish below. Without
+        # this, fresh checkouts or clean states fail with exit 1 (2026-06-11
+        # incident: master-deploy session hit "Build failed with exit code 1"
+        # because the publish skipped restore but nothing else restored).
+        dotnet restore --verbosity minimal 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Restore failed with exit code $LASTEXITCODE"
+        }
         dotnet publish -c Release -o $PublishPath --no-restore 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Build failed with exit code $LASTEXITCODE"

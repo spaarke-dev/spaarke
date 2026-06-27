@@ -1,0 +1,54 @@
+<task id="CICD-061" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Update .claude/skills/project-pipeline/SKILL.md: Step 2 INDEX.md overlap warnings + Step 3 require <hot-path-declaration></title>
+    <status>complete</status>
+    <estimated-effort>1.5 hours</estimated-effort>
+    <phase>2 - Stream C</phase>
+    <stream>C - Hot-path coordination</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>030</dependencies>
+    <tags>skill-directive, project-pipeline, INDEX, hot-path-declaration</tags>
+    <execution-note>Modifies .claude/ — MUST run in main session</execution-note>
+  </metadata>
+
+  <prompt>
+    Per spec FR-C04: Update `.claude/skills/project-pipeline/SKILL.md` in two places. (1) Step 2 (Comprehensive Resource Discovery): read `projects/INDEX.md` to surface overlap warnings when the new project touches hot paths already claimed by other active projects. (2) Step 3 (Generate Task Files): require `<hot-path-declaration>` element in `design.md` for any BFF or SpaarkeAi-touching project; reject (warn loudly) if missing.
+  </prompt>
+
+  <role>Skill author updating the project initialization orchestrator.</role>
+
+  <goal>project-pipeline Step 2 reads INDEX.md; Step 3 enforces hot-path declaration requirement in design.md.</goal>
+
+  <inputs>
+    <file purpose="pre-rewrite-source">.claude/skills/project-pipeline/SKILL.md (Step 2 ~lines 327-427; Step 3 ~lines 459-590)</file>
+    <file purpose="dependency">projects/INDEX.md (created in task 030)</file>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md (FR-C04)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="root-CLAUDE-3">Modifies .claude/ — MUST run in main session.</constraint>
+    <constraint source="spec FR-C04">Step 2 reads INDEX.md for overlap. Step 3 requires <hot-path-declaration> in design.md for BFF/SpaarkeAi-touching projects.</constraint>
+    <constraint source="project autonomous">FULL rigor — Step 9.5.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Read current project-pipeline SKILL.md. Locate Step 2 (Resource Discovery) and Step 3 (Generate Task Files).</step>
+    <step order="2">Edit Step 2: after the "DISCOVER RESOURCES" enumeration, add a new step "Read projects/INDEX.md → identify any active projects whose hot-path declarations overlap with this project's likely touch areas (parse spec.md/design.md for BFF or SpaarkeAi mentions)". Emit warning at Step 2 output if overlap detected.</step>
+    <step order="3">Edit Step 3 (Generate Task Files), in the REQUIREMENTS section: add a new bullet "If spec.md or design.md indicates BFF or SpaarkeAi touch, design.md MUST contain a <hot-path-declaration> XML block. If absent, the pipeline emits a HARD WARNING and the project is flagged for design-doc update before Phase 1 starts."</step>
+    <step order="4">Update the failure-modes section if present to document this new check</step>
+    <step order="5">Step 9.5: code-review + adr-check</step>
+  </steps>
+
+  <outputs>
+    <output type="skill">.claude/skills/project-pipeline/SKILL.md (extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Step 2 contains a INDEX.md-reading + overlap-warning sub-step</criterion>
+    <criterion testable="true">Step 3 REQUIREMENTS contains the <hot-path-declaration> requirement for BFF/SpaarkeAi-touching projects</criterion>
+    <criterion testable="true">Cross-reference to spec FR-C04 present</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,63 @@
+<task id="DEVOPS-038" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Inject PR-comment-and-conditional-archive hook into /merge-to-master</title>
+    <status>completed</status>
+    <phase>4</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>hook-injection, merge-to-master, additive-only</tags>
+    <dependencies>019, 016, 018</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Inject hook into `.claude/skills/merge-to-master/SKILL.md` per FR-24. After merge succeeds: (1) update Project Issue with merged PR # in body and add a comment; (2) if all POML tasks complete + PR merged, prompt for archive (per F3 default: explicit gate, NOT auto-archive). Additive only.
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill modifier. Two distinct hook actions sequenced after successful merge.</role>
+
+  <goal>
+Post-merge: Issue has comment "Merged via PR #M" or equivalent; archive prompt fires only when both conditions met (tasks complete + PR merged).
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-03">Additive only; silent on success</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+    <constraint source="spec F3">Archive is EXPLICIT GATE (not auto-archive on merge)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/merge-to-master/SKILL.md</file>
+      <file>.claude/skills/devops-project-sync/SKILL.md</file>
+      <file>.claude/skills/devops-project-archive/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm tasks 016, 018, 019 ✅.</step>
+    <step order="1" name="Add hook Step — PR comment">After successful merge: capture PR #M; invoke `gh issue comment` on the Project Issue with "Merged via PR #M (commit {hash})". Invoke `/devops-project-sync` to refresh fields.</step>
+    <step order="2" name="Add hook Step — conditional archive prompt">If `Tasks Completed == Task Count` AND PR merged: prompt "All tasks complete + PR merged. Archive project? [y/N]" → on Y, invoke `/devops-project-archive`. Per F3 default: prompt is mandatory; never auto-archive.</step>
+    <step order="3" name="Smoke test">Merge a branch with all tasks complete; verify PR comment + archive prompt fires. Decline archive; verify branch state preserved.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/merge-to-master/SKILL.md</tool>
+    <tool name="Skill">Smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">.claude/skills/merge-to-master/SKILL.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">merge-to-master SKILL.md references `/devops-project-sync` AND `/devops-project-archive`</criterion>
+    <criterion testable="true">Post-merge: PR # comment lands on Issue</criterion>
+    <criterion testable="true">Archive prompt fires only when both conditions met</criterion>
+    <criterion testable="true">Never auto-archives (F3 explicit gate)</criterion>
+  </acceptance-criteria>
+</task>

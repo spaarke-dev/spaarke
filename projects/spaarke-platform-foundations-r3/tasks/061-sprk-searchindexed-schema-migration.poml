@@ -1,0 +1,79 @@
+<task id="R3-061" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Schema migration — `sprk_searchindexed` → `sprk_searchindexqueuedon` + `sprk_searchindexcompletedon`</title>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+Host entity CONFIRMED as `sprk_document` via inventory (task 060 notes §2A) and cross-checked against
+`Spaarke.Dataverse.DataverseWebApiService._entitySetName = "sprk_documents"` (line 27) and
+`Models.cs DocumentEntity` (line 193) which holds the `SearchIndexed` property mapping to
+`sprk_searchindexed` (lines 177, 286).
+
+Deployed `scripts/Migrate-SprkSearchIndexedSchema.ps1` (NEW — idempotent, mirrors the
+R3-015 `Create-BackgroundJobEntity.ps1` pattern) to spaarkedev1. First run:
+  - sprk_searchindexqueuedon    : CREATED (DateTime, DateAndTime, UserLocal)
+  - sprk_searchindexcompletedon : CREATED (DateTime, DateAndTime, UserLocal)
+  - sprk_searchindexed          : PRESERVED (legacy bool — dual-write transition per spec line 366)
+  - sprk_searchindexedon        : PRESERVED (sibling legacy datetime; informational)
+  - PublishXml: OK
+  - Final verification: all 4 attributes present.
+
+Idempotency PROVEN — second run produced `Skipped: sprk_searchindexqueuedon, sprk_searchindexcompletedon`
+with `Created: (none)` and legacy field still PRESENT.
+
+Authored new data-model doc `docs/data-model/sprk_document-search-index-lifecycle.md` covering
+the migration rationale, the dual-write contract, the lifecycle semantics (enqueued vs completed),
+and the post-R3 drop path. Updated `docs/data-model/sprk_financial-related-entities.md` catalog:
+added 2 new rows for the new datetime fields (alphabetical insert between sprk_searchindexedon
+and sprk_searchindexname), and annotated both legacy fields (sprk_searchindexed,
+sprk_searchindexedon) as "Legacy — preserved for dual-write transition".
+
+DEVIATION from spec/POML reference: the POML originally cited `DeliverToIndexNodeExecutor.cs` as
+the dual-write site. Per inventory finding §6.3, that file does NOT currently contain
+`sprk_searchindexed` references. Task 062 will instead apply dual-write at the
+**Spaarke.Dataverse mapping layer** (`DataverseWebApiService` + `DataverseServiceClientImpl`)
+per inventory recommendation §6.2 — single choke-point covers all 3 upstream writers
+(RagIndexingJobHandler, RagEndpoints.IndexFile, RagEndpoints.SendToIndex) with zero call-site churn.
+
+This task is schema-only — no BFF code change, no NFR-01 size delta, no CVE surface change.
+Removal of the legacy `sprk_searchindexed` is explicitly DEFERRED to a future R4 task per spec
+assumption (line 366) and is NOT part of R3 scope.
+    </completion-notes>
+    <phase>P7.1</phase>
+    <parallel-group>N (with 062)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>dataverse,schema-migration,h3</tags>
+    <relevant-files>
+      <file>scripts/Migrate-SprkSearchIndexedSchema.ps1 (new)</file>
+    </relevant-files>
+    <dependencies>060</dependencies>
+  </metadata>
+  <prompt>Add new fields `sprk_searchindexqueuedon` (datetime) + `sprk_searchindexcompletedon` (datetime) to the relevant entity (sprk_document or similar — verify from inventory). Keep `sprk_searchindexed` for dual-write during transition.</prompt>
+  <goal>New fields exist + writable. Old field still readable. Dual-write enabled in DeliverToIndexNodeExecutor (task 062).</goal>
+  <constraints>
+    <constraint source="spec FR-3H3.2">Dual-field migration (queuedon + completedon)</constraint>
+    <constraint source="spec assumption">Dual-write for R3 + one sprint after; remove old field post-migration</constraint>
+  </constraints>
+  <knowledge>
+    <topic>dataverse-schema-migration</topic>
+    <files>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+      <file>projects/spaarke-platform-foundations-r3/notes/sprk-searchindexed-consumer-inventory.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + inventory results</step>
+    <step order="1">Identify host entity from inventory</step>
+    <step order="2">Add `sprk_searchindexqueuedon` + `sprk_searchindexcompletedon` columns</step>
+    <step order="3">Deploy to spaarkedev1; verify maker portal</step>
+    <step order="4">Keep `sprk_searchindexed` for dual-write transition</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">New fields exist + writable in spaarkedev1</criterion>
+    <criterion testable="true">Old field intact (dual-write transition)</criterion>
+  </acceptance-criteria>
+</task>

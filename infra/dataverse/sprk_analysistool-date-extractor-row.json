@@ -1,0 +1,33 @@
+{
+  "_comment_top": "R6 task 101 (D-H-01, FR-17) — seed row for the DateExtractorHandler typed handler.",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'DateExtractorHandler' (= nameof handler class).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_toolcode first; UPSERTs.",
+  "_comment_toolcode": "R6 audit item 4 (2026-06-07): sprk_toolcode column extended manually from 10 to 100 chars. Renamed from 'DATEXTR@v1' to descriptive 'DATE-EXTRACTOR'. NO @v1 suffix per cross-environment migration policy.",
+  "sprk_name": "SYS-Date Extractor",
+  "sprk_toolcode": "DATE-EXTRACTOR",
+  "sprk_description": "Pure deterministic date normalization + relative-date resolution. Parses ISO 8601, US/EU short formats, named months, quarter notation, and relative phrases ('next quarter', 'tomorrow', 'in 30 days') into canonical ISO 8601 dates. NO LLM call.",
+  "sprk_handlerclass": "DateExtractorHandler",
+  "sprk_availableincontexts": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat). FR-17 acceptance: invocable from both playbook orchestration and chat-driven function calling.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "DateExtractorHandler Request",
+    "description": "Argument shape for chat-driven invocation of DateExtractorHandler. The 'text' field carries the input to scan for date references.",
+    "type": "object",
+    "required": ["text"],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Free-text input to scan for date references. The handler extracts every recognizable date and returns normalized ISO 8601 output. NEVER pre-processed by the LLM — this is the literal text to scan."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "Default configuration. Per-invocation playbook config may override referenceDate / locale / confidenceThreshold per row.",
+    "locale": "US",
+    "confidenceThreshold": 0.0
+  },
+  "_comment_configuration": "referenceDate is intentionally OMITTED — defaults to DateTimeOffset.UtcNow at execution. locale = US (MM/DD/YYYY); set 'EU' for DD/MM/YYYY disambiguation. confidenceThreshold = 0.0 returns all matches; raise to 0.9+ to filter ambiguous/inferred-year cases."
+}

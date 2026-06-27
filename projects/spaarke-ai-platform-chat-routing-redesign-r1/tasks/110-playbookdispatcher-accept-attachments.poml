@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="110" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>PlaybookDispatcher.DispatchAsync accepts IReadOnlyList&lt;ChatMessageAttachment&gt;</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>105</dependencies>
+    <blocks>111</blocks>
+    <tags>bff-api, services, ai, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'ai'; modifies `PlaybookDispatcher.cs` signature; backward-compat invariant; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Extend `PlaybookDispatcher.DispatchAsync` to accept `IReadOnlyList&lt;ChatMessageAttachment&gt;? attachments = null` as an optional backward-compatible parameter. Per spec FR-15, callers passing `null` or empty list MUST observe identical behavior to today (no regression for the no-files path). This task adds only the signature change + null-safe handling; downstream tasks 111-114 add the Phase A/B/C fingerprint + classification logic.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat-routing layer + backward-compat API evolution.</role>
+
+  <goal>
+    `PlaybookDispatcher.DispatchAsync` signature accepts an optional `IReadOnlyList&lt;ChatMessageAttachment&gt;? attachments` parameter. Call-site grep shows new signature accepted; existing tests pass without modification (null/empty list = today's behavior); a new unit test confirms null + empty + 1-file all dispatch successfully via the message-only path.
+  </prompt>
+
+  <context>
+    <background>
+      Per spec FR-15 + design §1.2 WP2. `PlaybookDispatcher.cs:150` is the current single-message dispatch entry point. To enable Hybrid C file-aware classification (FR-17), the dispatcher must accept per-turn attachments. This is wave 5-A — the foundation for the Phase A fingerprint (task 111), Phase B vector match (task 112), Phase C reconciliation (task 113), and gpt-4o-mini decider (task 114). Backward-compat is binding: existing tests must pass unmodified.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatMessageAttachment.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookDispatcherTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-15">Backward-compat: existing tests pass without modification; null/empty = today's behavior.</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary; no CRUD-code violations.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect minor delta only.</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — add a new test class for the new signature path; existing tests remain unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookDispatcher.cs:150` current `DispatchAsync` signature; understand the existing message-only path.</step>
+    <step order="2">Read `ChatMessageAttachment.cs` to confirm the shape (filename, contentType, textContent, etc.).</step>
+    <step order="3">Add `IReadOnlyList&lt;ChatMessageAttachment&gt;? attachments = null` as a new parameter at the END of `DispatchAsync` (preserve binary compat for callers).</step>
+    <step order="4">In the dispatcher body, ADD a guard at the top: if `attachments == null || attachments.Count == 0`, fall through to the existing message-only logic. (Phase A/B/C logic lands in tasks 111-114.)</step>
+    <step order="5">Grep call sites of `DispatchAsync`. Confirm zero are broken by the new optional parameter; document call-site list.</step>
+    <step order="6">Update `SprkChatAgentFactory.cs` (or whoever resolves attachments per-turn) to pass attachments where available; preserve null when absent.</step>
+    <step order="7">Add a new unit test in `PlaybookDispatcherTests.cs` asserting: (a) null attachments dispatches identically to today; (b) empty list dispatches identically; (c) 1-attachment dispatches successfully (today via message-only path; tasks 111-114 will extend with file-aware logic).</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Existing tests must pass without modification; new test passes.</step>
+    <step order="9">Measure BFF publish size; report delta vs Phase 4 baseline.</step>
+    <step order="10">code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="11">Update TASK-INDEX.md: task 110 → ✅; current-task.md → ready for 111.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookDispatcher.cs + ChatMessageAttachment.cs + existing tests</tool>
+    <tool name="Grep">Enumerate DispatchAsync call sites</tool>
+    <tool name="Edit">Signature + null-safe guard; new unit test; consumer wiring</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs (signature extended)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (attachment plumbing)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookDispatcherTests.cs (new backward-compat test cases)</output>
+    <output type="docs">notes/handoffs/110-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`DispatchAsync` accepts new optional `IReadOnlyList&lt;ChatMessageAttachment&gt;?` parameter.</criterion>
+    <criterion testable="true">Existing tests pass without modification.</criterion>
+    <criterion testable="true">New unit test asserts null + empty + 1-file all dispatch successfully.</criterion>
+    <criterion testable="true">Call-site grep shows new signature accepted by all callers (no broken compilation).</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative within NFR-01.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 5-A entry point. Tasks 111-114 will extend the dispatcher with Phase A/B/C logic and gpt-4o-mini decider — those tasks share this file and must run sequentially. Use optional-parameter pattern (not overload) to keep the call-site grep clean.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,108 @@
+<task id="069" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-23 — Agent recognition of "remember X" / "forget X" / "always X" → pinned-context tool</title>
+    <status>pending</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <phase>Phase C — Cross-Conversation Memory (Pillar 7)</phase>
+    <wave>C-G2 (sequential after 065/068)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>065 (pinned-context entity), 068 (budget tracker)</dependencies>
+    <tags>bff-api, ai, chat, memory</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New chat tool dispatching from existing CapabilityRouter; consumed by user voice commands; data-write surface to pinned-context entity.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Build chat tool + CapabilityRouter recognition for user voice memory primitives per
+    spec FR-47:
+    - "remember X" → create pinned-context item (pinType: user-preference)
+    - "forget X" → delete matching pinned-context item
+    - "always X" → create pinned-context item (pinType: system-rule)
+
+    Tool name: `manage_pinned_context(action: "create"|"delete", pinType, title,
+    content?)`. Register as `sprk_analysistool` row with `AvailableInContexts = "Chat"`.
+    CapabilityRouter intent classifier recognizes the voice patterns + dispatches.
+    Consumes `IPinnedContextService` from task 065. Emit telemetry per ADR-015 (tool
+    name + decision + timestamp + pinType only — NEVER the `title` or `content` body
+    since those may contain user PII).
+  </prompt>
+
+  <role>
+    Senior AI platform engineer with familiarity with CapabilityRouter intent
+    classification + tool handler pattern.
+  </role>
+
+  <goal>
+    Tool installed + CapabilityRouter recognizes voice commands; user can pin / forget
+    facts conversationally; pinned items appear in subsequent sessions.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="chat-arch">docs/architecture/chat-architecture.md</file>
+    <file purpose="capability-router">src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+    <file purpose="pinned-context-svc">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IPinnedContextService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Auto-discovery in existing module.</constraint>
+    <constraint source="ADR-013">BFF-internal tool.</constraint>
+    <constraint source="ADR-015">Telemetry: tool name + decision + timestamp + pinType ONLY. NEVER `title` / `content` body (may contain PII).</constraint>
+    <constraint source="ADR-029">Publish-size delta verified.</constraint>
+    <constraint source="spec FR-47">Voice commands ("remember X" / "forget X" / "always X") via CapabilityRouter.</constraint>
+    <constraint source="project R6 Pillar 7">Tool uses `IPinnedContextService` from task 065; do NOT bypass the service contract.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/ai-chat-tools-memory</topic>
+    <files>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — User memory write surface; PII protection critical."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 065 + 068 complete.</step>
+    <step order="2" name="Gather Resources">Read CapabilityRouter intent classifier patterns + tool handler examples.</step>
+    <step order="3" name="Author Handler">`Services/Ai/Handlers/ManagePinnedContextHandler.cs` implementing `IToolHandler`.</step>
+    <step order="4" name="Extend CapabilityRouter">Add intent classification for the 3 voice patterns; dispatch to the tool.</step>
+    <step order="5" name="Seed Dataverse Row">`sprk_analysistool` row for manage_pinned_context.</step>
+    <step order="6" name="Tests">Unit tests: each voice command dispatches correctly; PII guard verified (no title/content in telemetry).</step>
+    <step order="7" name="Publish-Size + CVE">dotnet publish + vulnerable check.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 069 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish</tool>
+    <tool name="pac">Seed `sprk_analysistool` row</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ManagePinnedContextHandler.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs (modified — voice command recognition)</output>
+    <output type="data">Dataverse row: `sprk_analysistool` for manage_pinned_context</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/ManagePinnedContextHandlerTests.cs (NEW)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"remember X" → create pinned-context (pinType: user-preference).</criterion>
+    <criterion testable="true">"forget X" → delete matching pinned-context item.</criterion>
+    <criterion testable="true">"always X" → create pinned-context (pinType: system-rule).</criterion>
+    <criterion testable="true">CapabilityRouter recognizes all 3 patterns.</criterion>
+    <criterion testable="true">Pinned items visible in subsequent sessions via memory composition (task 067).</criterion>
+    <criterion testable="true">Telemetry contains tool name + decision + timestamp + pinType only; NEVER title/content body.</criterion>
+    <criterion testable="true">Publish-size delta within budget.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>BFF unit + integration tests for FR-BFF-01..07</title>
+    <phase>B: BFF resolver extension</phase>
+    <status>not-started</status>
+    <estimated-hours>3-5</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>018</blocks>
+    <tags>bff-api, testing, unit-test, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tags include `testing` and `integration-test`. Test-creation task per task-execute rigor decision tree.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Must serialize after all Phase B impl tasks (010–016) so tests can target the completed integration.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Write unit + integration tests covering FR-BFF-01 through FR-BFF-07 plus NFR-02/05/08. Coverage: allow-list validation (valid/invalid/null/empty), ProblemDetails 400 shape (`INDEX_NOT_ALLOWED` with extension members), resolver fall-through to the existing 2-tier chain, DTO forward-compat (3 DTOs deserialize with/without `SearchIndexName`), end-to-end thread-through. Verify the existing BFF test suite passes UNMODIFIED (NFR-02).
+  </prompt>
+
+  <role>
+    BFF test developer familiar with the existing `tests/unit/Sprk.Bff.Api.Tests/` structure, xUnit conventions, and Spaarke testing patterns (see `.claude/patterns/testing/`).
+  </role>
+
+  <goal>
+    All FR-BFF acceptance criteria are testable and tests pass. ProblemDetails schema validated. Forward-compat invariant proven by test (DTOs without `SearchIndexName` deserialize successfully). End-to-end integration test confirms the resolved index name surfaces in the issued Azure Search URL. Existing test suite passes UNMODIFIED.
+  </goal>
+
+  <context>
+    <background>
+      Phase B implementation (tasks 010–016) is complete. This task locks in the behavior with tests so future refactors don't regress. The existing BFF test suite passing unmodified is the strongest backward-compat signal we have.
+    </background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Models/Ai/</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/KnowledgeDeploymentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-BFF-01..07">Each FR has its own testable acceptance criterion; this task delivers the tests.</constraint>
+    <constraint source="spec.md NFR-02">Existing BFF test suite passes UNMODIFIED — pass count matches pre-change baseline.</constraint>
+    <constraint source="spec.md NFR-05">Performance — searches with explicit `searchIndexName` MUST be within 10% of today's baseline. Verified by perf test (10 runs each).</constraint>
+    <constraint source="spec.md NFR-08">ProblemDetails JSON schema validated for `400 INDEX_NOT_ALLOWED` (extension members present).</constraint>
+    <constraint source="ADR-022">Testing standards — xUnit + appropriate mocking (Moq or NSubstitute as already used in the project); Arrange/Act/Assert structure; descriptive test names.</constraint>
+    <constraint source=".claude/constraints/testing.md">Spaarke testing conventions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-testing-standards.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Unit test structure" location=".claude/patterns/testing/unit-test-structure.md">
+        Arrange/Act/Assert; one assertion per logical concept; descriptive `MethodName_Scenario_ExpectedOutcome` test names.
+      </pattern>
+      <pattern name="ProblemDetails schema test" location="ADR-019">
+        Assert response status = 400; deserialize body as `ProblemDetails`; assert `type` contains `INDEX_NOT_ALLOWED`, `status` = 400, extension member naming rejected index.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create or extend `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/KnowledgeDeploymentServiceTests.cs` with unit tests covering: (a) valid `indexName` returns bound `SearchClient`; (b) invalid `indexName` throws/returns `INDEX_NOT_ALLOWED`; (c) null `indexName` falls through to existing chain; (d) empty `indexName` falls through.</step>
+    <step order="2">Add DTO forward-compat tests in `tests/unit/Sprk.Bff.Api.Tests/Models/Ai/` for all 3 DTOs: deserialize JSON WITHOUT `searchIndexName` and verify property is null + parse succeeds; deserialize JSON WITH `searchIndexName` and verify property is set.</step>
+    <step order="3">Add ProblemDetails schema test for `400 INDEX_NOT_ALLOWED`: POST to endpoint with bad `searchIndexName`, assert status 400, deserialize body, assert `type`/`title`/`status`/`detail` + extension member naming the rejected index (NFR-08).</step>
+    <step order="4">Add integration test for end-to-end thread-through: POST with valid `searchIndexName`, capture BFF log output, assert log includes the resolved index name in the issued Azure Search query URL (FR-BFF-07).</step>
+    <step order="5">Add a performance smoke test (10 runs with explicit `searchIndexName`, 10 runs without) to verify NFR-05 (&lt; 10% delta). If a full perf harness doesn't exist, document the timing measurements in task notes rather than blocking on a new test framework.</step>
+    <step order="6">Run the FULL existing BFF test suite (`dotnet test`); assert pass count matches the pre-Phase-B baseline. This is the NFR-02 gate. Update `TASK-INDEX.md` status: 🔲 → ✅; update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing test patterns</tool>
+    <tool name="Write">Create new test files</tool>
+    <tool name="Edit">Extend existing test files</tool>
+    <tool name="Bash">Run `dotnet test`; capture pass counts</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/KnowledgeDeploymentServiceTests.cs (new or extended)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Models/Ai/*RequestTests.cs (3 DTOs)</output>
+    <output type="code">tests/integration/Sprk.Bff.Api.IntegrationTests/* (end-to-end + ProblemDetails schema)</output>
+    <output type="notes" ephemeral="true">Perf measurements (10×10 runs) captured to task notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-BFF-01..07: Each FR has at least one passing test covering its acceptance criterion.</criterion>
+    <criterion testable="true">NFR-02: Existing BFF test suite passes UNMODIFIED — `dotnet test` pass count matches pre-Phase-B baseline.</criterion>
+    <criterion testable="true">NFR-05: Searches with explicit `searchIndexName` within 10% of baseline (10×10 perf runs documented).</criterion>
+    <criterion testable="true">NFR-08: 400 INDEX_NOT_ALLOWED ProblemDetails schema validated by test.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The forward-compat DTO tests are the cheapest, highest-value tests in this task — they encode the backward-compat invariant directly. Prioritize them.
+
+    If the integration-test harness in `tests/integration/Sprk.Bff.Api.IntegrationTests/` doesn't exist yet for this kind of end-to-end test, extending the unit-test layer with a `WebApplicationFactory`-based test is an acceptable fallback (still hits the full pipeline + DI).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute Step 0 (rigor declaration: STANDARD) before any test code change.
+    </protocol>
+  </execution>
+</task>
