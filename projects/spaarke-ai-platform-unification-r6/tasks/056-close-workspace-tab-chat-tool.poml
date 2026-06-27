@@ -1,7 +1,7 @@
 <task id="056" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-07 — `close_workspace_tab` chat tool</title>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>Phase C — Tri-directional Workspace (Pillar 6b)</phase>
     <wave>C-G2 (parallel after 6a)</wave>

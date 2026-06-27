@@ -39,6 +39,7 @@ import {
 import { WidgetErrorBoundary } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import type { WorkspaceWidgetProps } from "@spaarke/ai-widgets";
+import { AddToAssistantToggle } from "./AddToAssistantToggle";
 
 // NOTE (task 098 — 2026-05-22): the per-tab pin button was removed from
 // every tab row. Pin state is still owned by `services/pinnedWorkspaces.ts`
@@ -202,6 +203,22 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
   },
 
+  // R6 Pillar 9 / task 098 — visibility-toggle strip above the active widget.
+  // Subtle thin bar, semantic tokens only (ADR-021 dark-mode parity).
+  visibilityBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderBottomStyle: "solid",
+    borderBottomColor: tokens.colorNeutralStroke2,
+  },
+
   // Loading state within the content area.
   loadingState: {
     display: "flex",
@@ -252,6 +269,30 @@ export interface WorkspaceTabManagerComponentProps {
   onTabChange: (tabId: string) => void;
   /** Called when the user clicks the close button on a tab. */
   onTabClose: (tabId: string) => void;
+
+  /**
+   * Current chat session identifier. Required for the per-tab
+   * AddToAssistantToggle (R6 Pillar 9 / task 098) so the dispatched
+   * `workspace.tab_edited` PaneEventBus event is scoped to the active
+   * session per ADR-015.
+   *
+   * When null, the toggle is not rendered (no session = no visibility
+   * contract to project).
+   */
+  chatSessionId?: string | null;
+
+  /**
+   * Called when the user toggles the per-tab "Visible to assistant"
+   * switch. Receives the tabId and the NEW visibility value. The host
+   * (WorkspacePane) persists the change via PATCH to
+   * `/api/ai/chat/sessions/{id}/tabs/{tabId}` AND updates the local
+   * WorkspaceTabManager so the next system-prompt snapshot reflects
+   * the new flag.
+   *
+   * R6 Pillar 9 / task 098 — server projection already wired; this
+   * callback is the missing UI mount point.
+   */
+  onToggleVisibility?: (tabId: string, visibleToAssistant: boolean) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +354,8 @@ export function WorkspaceTabManagerComponent({
   activeTabId,
   onTabChange,
   onTabClose,
+  chatSessionId,
+  onToggleVisibility,
 }: WorkspaceTabManagerComponentProps): React.JSX.Element {
   const styles = useStyles();
 
@@ -545,6 +588,23 @@ export function WorkspaceTabManagerComponent({
       {/* Active tab content                                                   */}
       {/* ------------------------------------------------------------------ */}
       <div className={styles.content}>
+        {/* R6 Pillar 9 / task 098 — per-tab "Visible to assistant" toggle.
+            Rendered above the widget content (not inline in the tab strip —
+            tab labels stay clean). Only shows when:
+              - we have an active tab AND
+              - we have a chat session (need for ADR-015-scoped event) AND
+              - the host wired onToggleVisibility (otherwise it's read-only). */}
+        {activeTab !== null && chatSessionId && onToggleVisibility ? (
+          <div className={styles.visibilityBar}>
+            <AddToAssistantToggle
+              tabId={activeTab.id}
+              sessionId={chatSessionId}
+              visibleToAssistant={activeTab.visibleToAssistant}
+              onChange={(next) => onToggleVisibility(activeTab.id, next)}
+            />
+          </div>
+        ) : null}
+
         {activeTab !== null ? (
           <ActiveWidgetContent tab={activeTab} styles={styles} />
         ) : (

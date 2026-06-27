@@ -1,8 +1,8 @@
 # Spaarke AI Platform Unification R6
 
-> **Last Updated**: 2026-06-07
+> **Last Updated**: 2026-06-25 (post-UAT, post-master-merge)
 >
-> **Status**: Ready for Implementation
+> **Status**: Backend shipped + deployed to master 2026-06-24 (PR #401 / merge `8579d6536`); UAT 2026-06-25 surfaced surface-wiring gaps; **NOT yet closed** — pending surface completion + closeout tasks 089/090
 >
 > **Type**: Architecture convergence phase (not feature project)
 
@@ -25,11 +25,30 @@ R6 is the convergence phase that aligns the conversational chat-agent with the p
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Implementation kickoff (Step 3 of project-pipeline) |
-| **Progress** | 0% (artifacts generated; tasks generated; implementation not yet started) |
-| **Target Completion** | ~6–7 weeks from Phase A start (Q7 scope-expansion adjusted) |
-| **Completed Date** | — |
+| **Phase** | Closeout — Surface Completion (post-UAT 2026-06-25) |
+| **Progress** | Backend 100% (Phases A/B/C/D + handler workstream complete); Surface ~70%; Closeout ~10% |
+| **Master merge** | PR #401 merged 2026-06-24 18:43 UTC (commit `8579d6536`); Environment Promotion 19:06 UTC ✅ |
+| **UAT result** | Tier G ✅, Tier F partial; Tiers A/B deferred to focused project; Tiers C/D/E blocked on surface wiring gaps |
+| **Blocking surface gaps** | TIER-C (LLM workspace visibility), task 095 (trace SSE bridge), 097b (`getConversationHistory`), 098 (`AddToAssistantToggle` mount) |
+| **Builder UI gaps** | Tasks 091 (persona dropdown), 093 (destination/widgetType fields) — may carry to R7 |
+| **Closeout** | Tasks 089 (Phase D exit-gate) + 090 (project wrap-up) — gated on UAT pass |
 | **Owner** | Spaarke dev team |
+
+### What's working today (deployed to spaarke-dev)
+- All 9 pillars' BACKEND services + Dataverse schemas + chat tools + endpoints
+- Hotfixes #1-5 (OpenAI tool name sanitization, allowedToolNames match, Layer 3 fallback rescue, Layer 0.5 empty-manifest guard, Pillar 8 callbacks 097a/097c)
+- Dark mode (ADR-021 conformance)
+- Natural language paths (NFR-11 backward compat preserved)
+- 8 typed tool handlers (DateExtractor, FinancialCalculator, ClauseComparison, FinancialCalculation, EntityExtractor, ClauseAnalyzer, RiskDetector, InvoiceExtraction)
+
+### What's NOT working (the surface gap)
+- LLM has no visibility into workspace tabs (Tier C UAT — primary blocker)
+- Execution trace widget not rendered (Tier D — task 095 pending)
+- Per-tab "Add to Assistant" toggle not rendered (Tier E — task 098 pending)
+- `/export` produces empty markdown (task 097b — `getConversationHistory` stub)
+- Persona CUST- / playbook-attached layers exist but unauthored (task 091 — no UI)
+- Q5 destination + widgetType node routing unauthored (task 093 — no UI)
+- Pinned memory exists in Cosmos but no inspection UI (task 096 — widget mount pending)
 
 ## Problem Statement
 

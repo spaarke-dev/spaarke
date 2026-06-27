@@ -2,7 +2,7 @@
   <metadata>
     <title>D-A-16 Playbook FK Fix — Wire `summarize-document-for-chat@v1` Node → `SUM-CHAT@v1` Action (Pillar 4)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <dependencies>011</dependencies>
     <blocks>025</blocks>

@@ -410,6 +410,13 @@ registerContextWidget('playbook-gallery', {
 export { GetStartedCardsWidget } from './widgets/context/GetStartedCardsWidget';
 export type { GetStartedCardId, GetStartedCardsWidgetProps } from './widgets/context/GetStartedCardsWidget';
 
+// R6 Pillar 7 / task 096 — export PinnedMemoryListWidget so the SpaarkeAi
+// shell can mount it inline in the Context pane (selectedTool ===
+// 'pinned-memory'). Owns its own BFF fetch (GET /api/memory/pins).
+export { default as PinnedMemoryListWidget } from './widgets/context/PinnedMemoryListWidget';
+export type { PinnedMemoryListData, PinnedMemoryListWidgetProps } from './widgets/context/PinnedMemoryListWidget';
+export { PINNED_MEMORY_LIST_WIDGET_TYPE } from './widgets/context/PinnedMemoryListWidget';
+
 registerContextWidget('get-started-cards', {
   factory: () =>
     import('./widgets/context/GetStartedCardsWidget').then(m => ({

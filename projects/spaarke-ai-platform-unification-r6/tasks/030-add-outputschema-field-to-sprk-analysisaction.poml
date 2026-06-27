@@ -3,7 +3,7 @@
   <metadata>
     <title>D-B-01 Add `outputSchema` JSON field to `sprk_analysisaction` Dataverse entity</title>
     <phase>Phase B — Schema-Aware Output</phase>
-    <status>complete</status>
+    <status>completed</status>
     <completed-on>2026-06-08</completed-on>
     <outcome-note>
       Option A reshape applied: the column already existed on `sprk_analysisaction` as

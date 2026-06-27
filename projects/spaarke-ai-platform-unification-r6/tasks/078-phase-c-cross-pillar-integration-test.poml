@@ -1,7 +1,7 @@
 <task id="078" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>Phase C cross-pillar integration test (workspace state in prompt + trace + memory + conflict + pinned + Q7 UI)</title>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>1 day</estimated-effort>
     <phase>Phase C — Integration</phase>
     <wave>C-G4 (sequential after all Phase C deliverable tasks)</wave>

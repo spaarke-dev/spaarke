@@ -205,6 +205,14 @@ export type ChatSseEventType =
   | 'document_stream_start'
   | 'document_stream_token'
   | 'document_stream_end'
+  // R6 Pillar 6c / task 095 — ContextEventEmitter trace bridge. Carries one
+  // of the 6 typed context.* events from the BFF to the frontend via the
+  // chat SSE stream. The frontend SprkChat host forwards verbatim to the
+  // `context` PaneEventBus channel where ExecutionTraceWidget renders it.
+  // ADR-015 binding: payload contains typed enumerated fields ONLY (no user
+  // content). ADR-030 compliant: existing `context` channel, additive event
+  // types (see ContextPaneEvent in @spaarke/ai-widgets).
+  | 'context_event'
   // chat-routing-redesign-r1 task 117a/117b — file-aware playbook routing
   // surfaces top-N candidates + an Open Library CTA inline in the chat.
   | 'playbook_options';
@@ -307,6 +315,70 @@ export interface IChatSseEventData {
   rerankInvoked?: boolean;
   /** Controlled-vocabulary tag describing the rerank outcome (when invoked). */
   rerankReason?: string | null;
+
+  // ── context_event fields (R6 task 095 — Pillar 6c trace bridge) ─────────────
+  //
+  // Discriminant + 6 typed sub-shapes, mirroring ContextPaneEvent in
+  // @spaarke/ai-widgets/events/PaneEventTypes. ADR-015 binding: ONLY the typed
+  // enumerated fields below are read — never arbitrary free-form attributes.
+  //
+  // The frontend SprkChat host receives `context_event` SSE events and forwards
+  // each payload verbatim to the `context` PaneEventBus channel so subscribers
+  // (ExecutionTraceWidget) can render in real time.
+
+  /**
+   * Trace event sub-type. Matches the six R6 task 059 / 063 discriminants.
+   * Present on 'context_event' SSE events ONLY.
+   */
+  contextEventType?:
+    | 'tool_call_started'
+    | 'tool_call_completed'
+    | 'knowledge_retrieved'
+    | 'playbook_node_executing'
+    | 'playbook_node_completed'
+    | 'decision_made';
+
+  /** ISO-8601 UTC timestamp of the trace event. Present on 'context_event'. */
+  contextTimestamp?: string;
+
+  /** Registered tool name (tool_call_* events). */
+  contextToolName?: string;
+
+  /** Tool / decision correlation GUID (tool_call_*, decision_made). */
+  contextDecisionId?: string;
+
+  /** Tool outcome enum (tool_call_completed). */
+  contextOutcome?: string;
+
+  /** Wall-clock duration ms (tool_call_completed, playbook_node_completed). */
+  contextDurationMs?: number;
+
+  /** Knowledge source identifier (knowledge_retrieved). */
+  contextKnowledgeSourceId?: string;
+
+  /** Numeric relevance score 0..1 (knowledge_retrieved). */
+  contextRelevanceScore?: number;
+
+  /** Result count (knowledge_retrieved). */
+  contextResultCount?: number;
+
+  /** Playbook GUID (playbook_node_*). */
+  contextPlaybookId?: string;
+
+  /** Node GUID (playbook_node_*). */
+  contextNodeId?: string;
+
+  /** Node type enum (playbook_node_executing). */
+  contextNodeType?: string;
+
+  /** Routing-layer identifier (decision_made). */
+  contextLayer?: string;
+
+  /** Decision enum-like string (decision_made). */
+  contextDecision?: string;
+
+  /** Capability name (decision_made). */
+  contextCapabilityName?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -795,6 +867,43 @@ export interface ISprkChatProps {
    * routing decisions) and consults its own helpers (`routeSummarizeIntent`).
    */
   onBeforeSendMessage?: (messageText: string) => void;
+
+  /**
+   * Fires for each `context_event` SSE event received from the BFF (R6
+   * Pillar 6c / task 095). The caller MUST forward `data` verbatim to the
+   * `context` PaneEventBus channel so subscribers (ExecutionTraceWidget)
+   * render in real time. Payload contains typed enumerated fields ONLY
+   * (ADR-015 tier-1 safe by BFF construction).
+   *
+   * Same synchronous callback-ref pattern as onPaneEvent / onPlaybookOptions
+   * — invoked from the fetch loop without React state batching.
+   *
+   * R6 task 095 — trace bridge (2026-06-26).
+   */
+  onContextEvent?: ((data: IChatSseEventData) => void) | null;
+
+  /**
+   * Fires whenever the internal `messages` array changes (new user message,
+   * new assistant response, streamed token update, refine/status message
+   * inserted, history loaded from BFF).
+   *
+   * The host receives a SNAPSHOT of the current message list — useful for
+   * features that need read-only access to conversation state without
+   * embedding SprkChat's internal hooks (e.g. R6 Pillar 8 task 097b
+   * `/export` markdown generation, or future "summarize this conversation"
+   * affordances).
+   *
+   * Use this callback to maintain a host-side ref/state of messages; do NOT
+   * use it to drive React state cascades — call sites are inside the chat
+   * render loop, and high-frequency setState here will re-render SprkChat.
+   *
+   * ADR-015: the callback delivers the same message content already rendered
+   * to the chat surface. Hosts must NOT log it verbatim into telemetry; the
+   * host's own ADR-015 boundary applies (deterministic IDs + counts only).
+   *
+   * R6 task 097b / TIER-C surface completion (2026-06-25).
+   */
+  onMessagesChange?: (messages: IChatMessage[]) => void;
 
   /**
    * Outbound-body decoration hook — R6 task 080+ Pillar 8 (Command Router)
@@ -1439,6 +1548,22 @@ export interface IUseSseStreamResult {
    * payload verbatim into Application Insights / browser telemetry.
    */
   setOnPlaybookOptions: (handler: ((payload: IPlaybookOptionsPayload) => void) | null) => void;
+
+  /**
+   * R6 Pillar 6c / task 095 — register/unregister a synchronous callback for
+   * `context_event` SSE forwarding (trace bridge from BFF ContextEventEmitter
+   * to PaneEventBus `context` channel).
+   *
+   * Same callback-ref pattern as setOnPlaybookOptions — payload delivered
+   * verbatim from the fetch loop without React state batching. Host (typically
+   * ConversationPane) dispatches each event to the `context` PaneEventBus
+   * channel so ExecutionTraceWidget renders in real time. Pass `null` to
+   * unregister.
+   *
+   * ADR-015: the callback receives ONLY typed enumerated fields (toolName,
+   * decisionId, outcome, durationMs, etc.) — no user content.
+   */
+  setOnContextEvent: (handler: ((data: IChatSseEventData) => void) | null) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

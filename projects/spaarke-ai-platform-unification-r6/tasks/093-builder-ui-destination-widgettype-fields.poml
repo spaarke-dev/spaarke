@@ -1,0 +1,42 @@
+<task id="093" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>Builder UI — `destination` + `widgetType` Fields on Node Properties Form (Pillar 5 closeout)</title>
+    <phase>Closeout — Surface Completion (post-audit)</phase>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <dependencies>030, 031 (Pillar 5 backend already shipped)</dependencies>
+    <blocks>none (R6 may close without this; deferrable to R7)</blocks>
+    <tags>builder-ui, pcf, pillar-5, routing, audit-gap</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>UI on PlaybookBuilder canvas node properties; modifies maker-facing form schema.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent UI work; parallel-safe with 091.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add `destination` (enum: chat / workspace / form-prefill / side-effect) + `widgetType`
+    (free-text for workspace destinations) fields to the node properties form in
+    PlaybookBuilder.
+
+    Without this UI, every playbook routes the default way; makers can't configure Q5
+    re-shape's per-node destination contract.
+
+    **Source of truth**: `r6-deliverables-audit.md` Pillar 5 — Phase 3b, ~1 day effort.
+
+    **Backend already shipped** (tasks 030, 031 ✅):
+    - `sprk_analysisaction.outputSchema` JSON field exists
+    - `NodeRoutingConfig` JSON schema on `sprk_analysisplaybooknode.sprk_routingconfigjson`
+    - `PlaybookOutputHandler` reads these at runtime
+    - `StructuredOutputStreamWidget` is schema-aware
+
+    **UI work scope**:
+    1. Add `destination` dropdown to NodePropertiesDialog/NodePropertiesForm in PlaybookBuilder
+    2. Conditionally show `widgetType` text input when destination = workspace
+    3. Persist as `NodeRoutingConfig` JSON to `sprk_routingconfigjson` field
+    4. Validation: warn if widgetType set but destination is not workspace
+    5. UAT: build a playbook with workspace destination, run via /summarize, verify Workspace tab renders the configured widget type
+
+    **Out of scope**: destination-aware preview in builder canvas (R7).
+  </prompt>
+</task>

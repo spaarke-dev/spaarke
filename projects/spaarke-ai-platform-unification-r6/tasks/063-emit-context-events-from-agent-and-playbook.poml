@@ -1,7 +1,7 @@
 <task id="063" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-16 — Telemetry: chat agent + playbook execution emit new `context.*` events (ADR-015 BINDING)</title>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>1 day</estimated-effort>
     <phase>Phase C — Tri-directional Workspace (Pillar 6c)</phase>
     <wave>C-G2 (sequential after 059)</wave>

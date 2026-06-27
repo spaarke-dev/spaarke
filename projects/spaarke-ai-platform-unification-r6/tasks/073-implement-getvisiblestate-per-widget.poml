@@ -1,7 +1,7 @@
 <task id="073" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-28 — Implement `getAgentVisibleState()` per widget type (Summary / DocumentViewer / Dashboard / Table)</title>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>1 day</estimated-effort>
     <phase>Phase C — Widget Visibility Contract (Pillar 9)</phase>
     <wave>C-G2 (sequential after 072)</wave>

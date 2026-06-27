@@ -2,7 +2,7 @@
   <metadata>
     <title>D-D-09 Lightweight Eval Baseline (Q10) — Markdown Conversation Transcripts per Persona + Playbook</title>
     <phase>Phase D — Command Router + Integration + Closeout</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>087</dependencies>
     <blocks>089</blocks>

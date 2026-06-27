@@ -2,7 +2,7 @@
   <metadata>
     <title>D-A-14 Dynamic Playbook List in `invoke_playbook` Tool Description at Chat-Agent Build Time (Pillar 3)</title>
     <phase>Phase A — Data-driven Foundation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>4 hours</estimated-effort>
     <dependencies>021</dependencies>
     <blocks>023</blocks>

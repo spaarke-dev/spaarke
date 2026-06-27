@@ -1,0 +1,33 @@
+<task id="092" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>Verify + Remove Vestigial `sprk_capabilities` Field on Playbook Entity</title>
+    <phase>Closeout — Surface Completion (post-audit)</phase>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>dataverse, cleanup, audit-gap, pillar-2</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Dataverse field audit + conditional removal; no code logic change.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent of other closeout tasks.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per `r6-deliverables-audit.md` Pillar 2 open question: verify whether
+    `sprk_capabilities` (single-select) exists on `sprk_analysisplaybook` separately from
+    `sprk_playbookcapabilities` (multi-select choice). If both appear on the playbook form
+    in make.powerapps.com, the single-select is likely vestigial R5 and should be removed.
+
+    **Steps**:
+    1. Open make.powerapps.com → `sprk_analysisplaybook` table → Columns
+    2. Verify presence of both `sprk_capabilities` and `sprk_playbookcapabilities`
+    3. If both exist: confirm `sprk_capabilities` has no production references in code (grep `Sprk.Bff.Api`)
+    4. If unreferenced: remove field from form + delete column via Dataverse maker portal
+    5. Document outcome in `notes/task-092-evidence.md`
+
+    **Out of scope**: changes to `sprk_capabilities` on `sprk_scope` entities (those are
+    production code paths).
+  </prompt>
+</task>

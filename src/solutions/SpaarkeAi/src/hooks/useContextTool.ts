@@ -66,7 +66,7 @@ import { getPinnedContextTool } from '../services/contextToolPin';
  * Identifier for the active Context-pane tool. Add new entries here +
  * VALID_CONTEXT_TOOL_IDS below when new tools land.
  */
-export type ContextToolId = 'quick-start' | 'semantic-search';
+export type ContextToolId = 'quick-start' | 'semantic-search' | 'pinned-memory' | 'execution-trace';
 
 /** Public contract returned by useContextTool. */
 export interface UseContextToolResult {
@@ -97,6 +97,8 @@ const DEFAULT_TOOL: ContextToolId = 'quick-start';
 const VALID_CONTEXT_TOOL_IDS: ReadonlySet<string> = new Set<ContextToolId>([
   'quick-start',
   'semantic-search',
+  'pinned-memory',
+  'execution-trace',
 ]);
 
 // ---------------------------------------------------------------------------

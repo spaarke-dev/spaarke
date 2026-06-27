@@ -202,6 +202,13 @@ interface SseEventHandlers {
    * verbatim — caller is responsible for ADR-015 logging discipline.
    */
   onPlaybookOptions: (payload: IPlaybookOptionsPayload) => void;
+  /**
+   * R6 Pillar 6c / task 095 — receives the raw `context_event` SSE payload
+   * (with `contextEventType` discriminant + typed fields). Caller forwards to
+   * the `context` PaneEventBus channel verbatim. ADR-015: payload contains
+   * typed enumerated fields ONLY.
+   */
+  onContextEvent: (data: IChatSseEventData) => void;
   onDone: () => void;
   onError: (message: string) => void;
 }
@@ -283,6 +290,13 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
       rerankInvoked: typeof data.rerankInvoked === 'boolean' ? data.rerankInvoked : false,
       rerankReason: data.rerankReason ?? null,
     });
+  } else if (event.type === 'context_event') {
+    // R6 task 095 — trace bridge. Forward the raw payload to the host so it
+    // can dispatch on the `context` PaneEventBus channel. Tier-1 safe by BFF
+    // construction (ContextEventEmitter writes typed fields only).
+    if (event.data) {
+      handlers.onContextEvent(event.data);
+    }
   } else if (event.type === 'done') {
     handlers.onDone();
   } else if (event.type === 'error') {
@@ -359,6 +373,12 @@ export function useSseStream(): IUseSseStreamResult {
   // append a structured playbook_options chat message to its in-memory thread.
   const onPlaybookOptionsRef = useRef<((payload: IPlaybookOptionsPayload) => void) | null>(null);
 
+  // R6 Pillar 6c / task 095 — callback ref for `context_event` SSE events
+  // (trace bridge from BFF ContextEventEmitter to PaneEventBus context channel).
+  // Same synchronous callback-ref pattern as setOnPlaybookOptions. SprkChat
+  // wires this so the host can forward to ExecutionTraceWidget via the bus.
+  const onContextEventRef = useRef<((data: IChatSseEventData) => void) | null>(null);
+
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const cancelStream = useCallback(() => {
@@ -398,6 +418,13 @@ export function useSseStream(): IUseSseStreamResult {
   // chat message + handle click → playbook execute.
   const setOnPlaybookOptions = useCallback((handler: ((payload: IPlaybookOptionsPayload) => void) | null) => {
     onPlaybookOptionsRef.current = handler;
+  }, []);
+
+  // R6 Pillar 6c / task 095 — register/unregister the context_event callback.
+  // SprkChat wires this so the host can forward each event to the PaneEventBus
+  // context channel where ExecutionTraceWidget renders it.
+  const setOnContextEvent = useCallback((handler: ((data: IChatSseEventData) => void) | null) => {
+    onContextEventRef.current = handler;
   }, []);
 
   const startStream = useCallback(
@@ -491,6 +518,14 @@ export function useSseStream(): IUseSseStreamResult {
               const handler = onPlaybookOptionsRef.current;
               if (handler) {
                 handler(payload);
+              }
+            },
+            onContextEvent: (data: IChatSseEventData) => {
+              // R6 task 095 — forward to host via the registered callback ref.
+              // Host dispatches to the `context` PaneEventBus channel.
+              const handler = onContextEventRef.current;
+              if (handler) {
+                handler(data);
               }
             },
             onDone: () => {
@@ -603,5 +638,6 @@ export function useSseStream(): IUseSseStreamResult {
     setOnDocumentStreamEvent,
     setOnPaneEvent,
     setOnPlaybookOptions,
+    setOnContextEvent,
   };
 }

@@ -1,7 +1,7 @@
 <task id="065" project="spaarke-ai-platform-unification-r6">
   <metadata>
     <title>D-C-18 — Pinned-context entity in Cosmos `memory` container (pinType: user-preference / system-rule / matter-fact)</title>
-    <status>pending</status>
+    <status>completed</status>
     <estimated-effort>6 hours</estimated-effort>
     <phase>Phase C — Cross-Conversation Memory (Pillar 7)</phase>
     <wave>C-G2 (parallel after 6a)</wave>

@@ -794,6 +794,44 @@ export function WorkspacePane(): React.JSX.Element {
   // Tab close handler — called by WorkspaceTabManagerComponent
   // ---------------------------------------------------------------------------
 
+  // R6 Pillar 9 / task 098 — per-tab visibility toggle handler.
+  // Updates the local tab record so the next system-prompt snapshot reflects
+  // the new flag, then PATCHes the BFF persistence layer. We don't roll back
+  // on PATCH failure (the local view stays in sync with the user's intent);
+  // background reconciliation on next workspace-state fetch corrects any
+  // drift if the server rejects.
+  const handleToggleVisibility = React.useCallback(
+    (tabId: string, visibleToAssistant: boolean): void => {
+      const manager = managerRef.current;
+      manager.setTabVisibility(tabId, visibleToAssistant);
+      syncState();
+
+      // Best-effort BFF persistence. Server projection already wired per R6
+      // Pillar 6a/9 — the endpoint accepts a partial PATCH on the tab record
+      // with the visibleToAssistant field.
+      if (chatSessionId && bffBaseUrl && isAuthenticated) {
+        void authenticatedFetch(
+          `${bffBaseUrl}/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs/${encodeURIComponent(tabId)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ visibleToAssistant }),
+          },
+        ).catch((err) => {
+          // Best-effort persistence — local view stays in sync with user
+          // intent. Background reconciliation on next workspace-state fetch
+          // corrects any drift if the server rejects.
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[task-098] workspace visibility PATCH failed (tabId=${tabId}, sessionId=${chatSessionId}):`,
+            err,
+          );
+        });
+      }
+    },
+    [chatSessionId, bffBaseUrl, isAuthenticated, authenticatedFetch, syncState],
+  );
+
   const handleTabClose = React.useCallback(
     (tabId: string): void => {
       const manager = managerRef.current;
@@ -902,6 +940,9 @@ export function WorkspacePane(): React.JSX.Element {
         activeTabId={activeTabId}
         onTabChange={handleTabChange}
         onTabClose={handleTabClose}
+        // R6 Pillar 9 / task 098 — per-tab "Visible to assistant" toggle.
+        chatSessionId={chatSessionId}
+        onToggleVisibility={handleToggleVisibility}
       />
     </div>
   );
