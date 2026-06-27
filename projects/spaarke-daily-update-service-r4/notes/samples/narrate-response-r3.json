@@ -1,11 +1,7 @@
 {
   "tldr": {
     "summary": "Three urgent matters need attention today.",
-    "keyTakeaways": [
-      "Acme contract overdue",
-      "Bravo brief due tomorrow",
-      "Foxtrot deposition scheduled"
-    ],
+    "keyTakeaways": ["Acme contract overdue", "Bravo brief due tomorrow", "Foxtrot deposition scheduled"],
     "topAction": "Review the Acme engagement letter (2 days overdue).",
     "categoryCount": 3,
     "priorityItemCount": 5

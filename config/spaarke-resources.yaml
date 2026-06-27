@@ -238,12 +238,12 @@ environments:
             purpose: SPE document chunks (512-token); knowledge tier for fine-grained RAG retrieval
             schema: infrastructure/ai-search/spaarke-files-index.json
             ingestion: runtime (RagIndexingPipeline + FilesIndexIngestDocumentSource)
-            doc_count_2026_06_26: 0  # schema-only for dev rebuild
+            doc_count_2026_06_26: 0 # schema-only for dev rebuild
           spaarke-discovery-index:
             purpose: SPE document chunks (1024-token); discovery tier for broader-context retrieval — reactivated per FR-14 reframe 2026-06-26
             schema: infrastructure/ai-search/spaarke-discovery-index.json
             ingestion: runtime (RagIndexingPipeline writes in parallel with files-index)
-            doc_count_2026_06_26: 0  # schema-only; runtime-populated when files-index ingest runs
+            doc_count_2026_06_26: 0 # schema-only; runtime-populated when files-index ingest runs
           spaarke-records-index:
             purpose: Dataverse record matching (matter/project/invoice/account); FR-12 tenantId field
             schema: infrastructure/ai-search/spaarke-records-index.json
@@ -258,17 +258,17 @@ environments:
             purpose: Derived intelligence (Observations + Precedents); single-index per D-53
             schema: infrastructure/ai-search/spaarke-insights-index.json
             ingestion: runtime (PrecedentProjectionSync + analysis pipeline emitting Observations)
-            doc_count_2026_06_26: 0  # runtime job pending first dispatch
+            doc_count_2026_06_26: 0 # runtime job pending first dispatch
           spaarke-session-files:
             purpose: Chat session uploads (transient); ADR-014 strict tenantId+sessionId pair-filter
             schema: infrastructure/ai-search/spaarke-session-files.json
             ingestion: runtime (FileIndexingService + PostUploadIndexingEnqueuer; cleanup SessionFilesCleanupJob)
-            doc_count_2026_06_26: 0  # transient by design
+            doc_count_2026_06_26: 0 # transient by design
           spaarke-invoices-index:
             purpose: Invoice semantic search (Financial Intelligence MVP); renamed from `spaarke-invoices-dev`
             schema: infrastructure/ai-search/spaarke-invoices-index.json
             ingestion: runtime (InvoiceIndexingJobHandler)
-            doc_count_2026_06_26: 0  # schema-only for dev rebuild
+            doc_count_2026_06_26: 0 # schema-only for dev rebuild
           spaarke-playbook-embeddings:
             purpose: Playbook dispatch vectors; global (no tenantId — shared catalog); renamed from `playbook-embeddings`
             schema: infrastructure/ai-search/spaarke-playbook-embeddings.json
@@ -289,7 +289,7 @@ environments:
           # `ai-search-key` is the older operational name; mirrored 2026-06-26
           admin_key_alias_legacy_app: kv:AzureAISearchApiKey
           admin_key_alias_legacy_ops: kv:ai-search-key
-        deployer: scripts/ai-search/Deploy-AllIndexes.ps1  # FR-07 unified deployer
+        deployer: scripts/ai-search/Deploy-AllIndexes.ps1 # FR-07 unified deployer
         operator_runbook: docs/guides/ai-search-azure-setup.md
         catalog_doc: docs/architecture/AI-SEARCH-INDEX-CATALOG.md
       document_intelligence:
@@ -308,7 +308,7 @@ environments:
           drive_id: b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50
           friendly_name: Spaarke Demo
           purpose: Knowledge / default for EmailProcessing DefaultContainerId
-          ai_search_index: spaarke-files-index  # canonical per spaarke-ai-azure-setup-dev-r1 FR-13 (was spaarke-knowledge-index-v2)
+          ai_search_index: spaarke-files-index # canonical per spaarke-ai-azure-setup-dev-r1 FR-13 (was spaarke-knowledge-index-v2)
           dataverse_env_var: sprk_SharePointEmbeddedContainerId # in SpaarkeCore solution; current dev value
           bff_setting: EmailProcessing__DefaultContainerId
         spaarke_files:
@@ -320,7 +320,7 @@ environments:
           drive_id: b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh
           friendly_name: Spaarke Dev Container 2
           purpose: File storage container; mapped to `spaarke-files-index` (canonical plural) search index for document RAG
-          ai_search_index: spaarke-files-index  # canonical per spaarke-ai-azure-setup-dev-r1 FR-11 (was spaarke-file-index singular)
+          ai_search_index: spaarke-files-index # canonical per spaarke-ai-azure-setup-dev-r1 FR-11 (was spaarke-file-index singular)
       cert_secrets:
         certificate: kv:spe-app-cert
         certificate_password: kv:spe-app-cert-pass
@@ -338,9 +338,9 @@ environments:
         - ai-openai-endpoint
         - ai-openai-key
         - ai-search-endpoint
-        - ai-search-key                # legacy operational alias (mirrors AiSearch--AdminKey)
-        - AiSearch--AdminKey           # canonical per spec FR-21; added 2026-06-26 task 001
-        - AzureAISearchApiKey          # legacy app-settings alias (mirrors AiSearch--AdminKey); added 2026-06-26 task 001
+        - ai-search-key # legacy operational alias (mirrors AiSearch--AdminKey)
+        - AiSearch--AdminKey # canonical per spec FR-21; added 2026-06-26 task 001
+        - AzureAISearchApiKey # legacy app-settings alias (mirrors AiSearch--AdminKey); added 2026-06-26 task 001
         - application-insights-key
         - bff-api-client-secret
         - Graph-API-ClientSecret
@@ -443,7 +443,7 @@ github_actions:
 _metadata:
   version: 2
   source_of_truth: Spaarke non-secret manifest
-  last_updated: 2026-06-26  # v2: spaarke-ai-azure-setup-dev-r1 alignment — 8-index catalog + 2 new KV secrets
+  last_updated: 2026-06-26 # v2: spaarke-ai-azure-setup-dev-r1 alignment — 8-index catalog + 2 new KV secrets
   replaces:
     - config/azure-config.local.json
     - config/app-registrations.local.json

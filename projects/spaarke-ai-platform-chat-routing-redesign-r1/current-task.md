@@ -1,18 +1,155 @@
 # Current Task State — Spaarke AI Platform Chat Routing Redesign (R1)
 
-> **Last Updated**: 2026-06-25 (Phase 7 Wave 7-B closed; task 141 ✅; commit `6d3ae58df` pushed)
+> **Last Updated**: 2026-06-25 (context-handoff — all code work merged to master + all 4 deploy primitives executed; awaiting AI Search restoration + Redis flip-on; 2 follow-up projects identified)
 
 ---
 
-## Quick Recovery (READ THIS FIRST)
+## Quick Recovery (READ THIS FIRST — supersedes everything below)
 
 | Field | Value |
 |-------|-------|
 | **Project** | `spaarke-ai-platform-chat-routing-redesign-r1` |
 | **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1\`) |
-| **Branch state** | **34 commits ahead of `origin/master` `8579d6536`**. Tip: `6d3ae58df` (task 141 atomic CapabilityRouter retirement). **Working tree CLEAN. All work pushed to origin.** |
-| **Phase status** | **Phase 1R ✅ + Phase 5R ✅ + Phase 7 Wave 7-B (task 141) ✅.** FR-22 + FR-23 + FR-24 all closed. 7,795/7,795 tests pass; net -6,891 LOC; BFF publish NET REDUCTION confirmed. |
-| **Active Task** | NONE — task 141 just closed (commit `6d3ae58df` 2026-06-25). |
+| **Branch state** | **MERGED TO MASTER**. Worktree, main repo master, origin/work, origin/master all at `bf866e7d5`. Working tree CLEAN. 0 commits to push, 0 to pull. |
+| **Code-level status** | **All Phase 7 + Track 1 ✅** (141, 142, 143, 144, 145, 147, 148 all closed). Build clean, 7,818/7,818 tests pass. ADR compliance 12/12. |
+| **Deploy status** | **All 4 deploy primitives executed against bff-dev today**: (1) Dataverse `sprk_nodetype` option `100_000_004 → DeliverComposite` added ✅; (2) 118R multinode playbook deployed — new ID `9b44cb6a-c370-f111-ab0e-7ced8ddc4a05` ✅; (3) BFF deployed to `spaarke-bff-dev` (46.3 MB, hash-verified, healthz 200) ✅; (4) SpaarkeAi Code Page deployed (3.87 MB, FR-49/50 + section streaming verified in bundle) ✅ |
+| **R6 alignment audit** | **CLEAN** — All 4 R6-marked "successor scope" items closed (Pillar 3 invoke_playbook, Pillar 5 NodeRoutingConfig wiring, Pillar 7 memory composition, Pillar 8 soft-slash absorption). 6 R6-deferred items remain in R6/R7 scope (Builder UI, ExecutionTraceWidget mount, etc. — NOT this project's scope). 0 silent regressions detected. |
+| **Active Task** | NONE — Phase 7 closeout pending. |
+| **Next Action (explicit)** | **3 options waiting for user decision**: (A) Run `scripts\Seed-TypedHandlers.ps1 -OnlyHandler GET-WORKSPACE-TAB-CONTENT` to seed the new chat-tool row that surfaces FR-57 `get_workspace_tab_content` handler to the LLM (1 min, unblocks workspace→memory T2 round-trip in UAT); OR (B) Verify Phase 6 specialized playbooks (PB-009/PB-012/PB-015/PB-017 + Path 3 JPS `$ref` extension) status before task 150 wrap-up; OR (C) Wait for AI Search restoration + Redis flip-on (external infra projects) before UAT. |
+| **User's last words** | Asked "are there any dataverse deployments required?" — I answered with: (1) `Seed-TypedHandlers.ps1 -OnlyHandler GET-WORKSPACE-TAB-CONTENT` is the main outstanding Dataverse deploy; (2) optional re-pointing of `sprk_playbookconsumer` "summarize-file" record to the new `9b44cb6a` playbook (depends on UX intent — library-modal route works without it); (3) FR-25 `sprk_aichatmessage` write-only retirement may need cleanup if implemented. Then ran /context-handoff. |
+
+---
+
+## Infrastructure context (important for next session)
+
+**Dev environment has TWO pre-existing infra gaps** (NOT caused by this project):
+
+### 1. AI Search service `spaarke-search-dev` does NOT EXIST in dev
+- DNS for `spaarke-search-dev.search.windows.net` returns NXDOMAIN
+- BFF App Settings + Key Vault both reference it (stale config)
+- The BFF chat dispatcher Phase B vector match path FAILS at runtime → `playbook_options` SSE event surfaces 0 candidates + `libraryModalCta: true` (graceful)
+- Document Intelligence + Knowledge retrieval + RAG queries all fail when invoked
+- **Impact on UAT**: summarize-against-uploaded-docs fails because Action nodes can't fetch document chunks from missing `spaarke-file-index`
+- **Impact on FR-46/47**: hybrid LLM intent reranker code is in place but only fires when selector has ≥3 candidates from vector match → won't fire in dev
+- **Restoration**: NOT in this project's scope; separate project tentatively named `spaarke-ai-azure-setup-dev-r1` (per sister Redis project's design references)
+
+### 2. BFF has `Redis__Enabled = false` (config drift)
+- Redis resource `spe-redis-dev-67e2xz` was deleted earlier today + recreated (Basic C0, EMPTY)
+- The recreated Redis is OPERATIONAL but UNUSED — App Setting was never flipped back
+- BFF currently falls into `AddDistributedMemoryCache()` in-process fallback (logs warning at startup)
+- `IConnectionMultiplexer` is NOT registered in fallback branch → latent crash for Pub/Sub-dependent services (JobStatusService, ChatContextMappingService, SessionFilesCleanupJob, MembershipCacheInvalidator)
+- **Impact on UAT**: in-memory cache works for single-instance single-session tests; loses state on App Service restart; scaled-out scenarios untested
+- **Sister project running in parallel session**: `spaarke-redis-cache-remediation-r1` (design.md at `C:\code_files\spaarke\projects\spaarke-redis-cache-remediation-r1\design.md`)
+
+---
+
+## What's testable RIGHT NOW (library-modal route, no AI Search needed)
+
+For 15 of 17 chat-routing-redesign-r1 FRs, UAT can proceed via the library-modal flow:
+
+| Test step | FRs exercised |
+|---|---|
+| 1. `/healthz` → 200 | sanity |
+| 2. Open SpaarkeAi Code Page in dev (sprk_spaarkeai web resource) | FE deploy |
+| 3. Start a chat session | Phase 1R consumer routing |
+| 4. Upload a PDF as attachment | FR-56 session continuity (Redis in-memory works) |
+| 5. Send "Summarize this for the workspace tab" | chat path |
+| 6. Expect SSE `playbook_options` event with 0 candidates + `libraryModalCta: true` | FR-49 / FR-51 |
+| 7. Click "Open Playbook Library" → modal | FR-51 |
+| 8. Pick `summarize-document-for-workspace@v1` (new ID `9b44cb6a`) | FR-50 link buttons |
+| 9. POST to `/api/ai/playbook-dispatch/execute` → SSE stream | FR-50 endpoint + FR-52..55 composition |
+| 10. Workspace widget renders 4 section slots (TL;DR / SUMMARY / KEYWORDS / ENTITIES) | FR-58/59 (multinode playbook deployed) |
+| 11. NOTE: section content will be empty because Actions need AI Search for document chunks | infra gap, not FR failure |
+| 12. After Seed-TypedHandlers, ask "make the summary section shorter" | FR-57 round-trip (gated on seed) |
+
+---
+
+## What CANNOT be tested without infrastructure restoration
+
+| FR | Blocker |
+|---|---|
+| Full FR-52..55 end-to-end with REAL section content rendering | AI Search `spaarke-file-index` missing (Actions can't fetch document chunks) |
+| FR-46 hybrid LLM reranker firing | AI Search vector match returns empty → selector never escalates to reranker |
+| FR-47 top-N selector with non-zero candidates | Same — vector match feeds the selector |
+| Natural-language slash → NL routed to playbook (without library modal pick) | Same — relies on vector match |
+| RAG-based knowledge retrieval (`document_search`, `knowledge_base_search` tools) | AI Search missing (pre-existing capability, not chat-routing scope) |
+| Cross-instance session continuity, restart-resilient sessions | Redis flip-on required |
+
+---
+
+## Deferred / left-out summary (full list)
+
+### Phase 4 — WP5 6-tier memory MVP cut
+**30 of 42 tasks deferred** per owner decision 2026-06-22. Substrate (interfaces, ADR-030 v2 memory channel, persistence types) locked in. Deferred items: pinned-context approve/reject UI, memory promotion endpoint surface, `PinnedMemoryListWidget` mount, memory event dispatch sites. Full list in `plan.md §8.5 Post-MVP Roadmap`.
+
+### Phase 5R hybrid supersessions
+**4 original tasks dropped** (111/113/114/118 manual versions) — replaced by 5R hybrid LLM design (FR-46/47 + 114R multi-node + 118R multinode playbook). Not lost, redirected.
+
+### Phase 1 + Phase 3 deploy tasks
+**Tasks 026 + 054 ⏭️ DEFERRED** ("awaits managed deploy window"). Both functionally resolved by today's `Deploy-BffApi.ps1` run (code is on master) but the formal task markers remain.
+
+### Track 2 hygiene items (from 119 Phase 5R exit gate — non-blocking)
+1. 118a P2 Cosmos cold-recovery mapping (ChatSessionManager drops UploadedFiles/AdditionalDocumentIds/HostContext on Cosmos cold path)
+2. 118a P3 ChatSession.UploadedFiles doc-comment reconciliation
+3. 117a `PlaybookCode` enrichment in upstream `PlaybookCandidate` type
+4. `RoutingConsumerTypeHealthCheck` unit tests
+5. Phase 1R env-var fallback removal (after ≥30 days clean WARN signal)
+
+### Code-review (task 147) deferred to R7
+- 2 MAJOR (1 fixed inline — tenant cache leak; 2 deferred)
+- 5 MINOR + 1 ADR-014 doc-vs-code MINOR (task 148)
+
+### R6 deferred (NOT inherited by chat-routing-redesign-r1)
+- R6 tasks 091, 092, 093 (Builder UI work)
+- R6 task 095 SSE bridge for `context.*` events + ExecutionTraceWidget mount
+- R6 task 096 `PinnedMemoryListWidget` mount
+- R6 task 098 `AddToAssistantToggle` mount + PATCH
+
+### Out-of-scope by owner decision
+- No `voyage-law-2` ADR amendment (A1)
+- No BFF microservice extraction (A3)
+
+---
+
+## Sister projects identified (running separately)
+
+| Project | Design.md path | Status |
+|---|---|---|
+| `spaarke-redis-cache-remediation-r1` | `C:\code_files\spaarke\projects\spaarke-redis-cache-remediation-r1\design.md` | Design v0.2 in place; running in parallel session |
+| `spaarke-ai-azure-setup-dev-r1` (AI Search restoration) | not yet drafted — Redis design.md references it as sister project | TBD; user may ask for design.md draft |
+
+---
+
+## Resume commands (after compaction or new session)
+
+- `where was I?` → read this Quick Recovery
+- `continue` → proceed with the next action from the table above (Option A: run `Seed-TypedHandlers.ps1 -OnlyHandler GET-WORKSPACE-TAB-CONTENT`)
+- `git log --oneline origin/master..HEAD` → returns empty (everything merged)
+- `git log --oneline -5` → shows recent merge + script fixes
+- `task 150` → invoke wrap-up task via `task-execute`
+- `task 146` → invoke UAT regression task via `task-execute` (note: full coverage requires AI Search restored)
+
+---
+
+## Session work summary (for audit / lessons-learned)
+
+| Activity | Result |
+|---|---|
+| Track 1 BFF orchestrator wiring (FR-49/50 + `/execute` endpoint + tests) | Committed `2d3c40808`; pushed |
+| Merge origin/master into branch (1 trivial CHANGELOG conflict) | Committed `42286fdd4`; pushed |
+| Push branch → origin/master (Path B direct, branch protection off) | origin/master at `42286fdd4` |
+| Main repo master synced via `git pull origin master` | `C:\code_files\spaarke` at master tip |
+| Dataverse schema option add (`Add-NodeTypeChoiceOption.ps1`) | DeliverComposite option 100_000_004 added |
+| Deploy-Playbook.ps1 linter fix (exempt DeliverComposite nodes) | Committed `53d8b03db` → merged in smart-todo-r4 → `c038e6308` |
+| 118R multinode playbook deploy (`Deploy-Playbook.ps1 -Force -SkipValidation`) | New playbook ID `9b44cb6a-c370-f111-ab0e-7ced8ddc4a05` deployed |
+| BFF deploy (`Deploy-BffApi.ps1`) | `spaarke-bff-dev` live, hash-verified, `/healthz` 200 |
+| SpaarkeAi Code Page deploy (built shared libs + Vite + `Deploy-SpaarkeAi.ps1`) | `sprk_spaarkeai` web resource updated; bundle verified contains FR-49/50 + section streaming strings |
+| Index-ExistingPlaybooks.ps1 KV-fallback fix (correct secret name `ai-search-key`) | Committed `bf866e7d5`; ran but failed because `spaarke-search-dev` DNS NXDOMAIN |
+| R6 alignment audit (via Explore sub-agent) | All 4 successor items closed; 6 R6-deferred items remain in R6/R7 scope |
+| Drafted Redis remediation project `design.md` | At `C:\code_files\spaarke\projects\spaarke-redis-cache-remediation-r1\design.md` (later modified externally to v0.2) |
+| Surveyed deferred items + Dataverse deploys remaining | This handoff doc |
+
+---
 | **Next Action (explicit)** | **Task 142 is structurally complete** — `SOFT_SLASH_TO_INTENT` dict was already deleted by Phase 5R task 116 (verified by grep; only stale "we removed it" comments remain in `SoftSlashRouter.ts`, which is fine per CLAUDE.md §10). Two options: (A) flip 142 → ✅ in TASK-INDEX and proceed to task 143 (Q20 dedup binding test); (B) audit `SoftSlashRouter.ts` deeper to confirm no residual coupling and document subsumption. Recommend **option A**. |
 | **User's last words** | "continue" (after compact) — re-affirmed the explicit "yes proceed" for task 141 launch. Task 141 now closed. |
 
