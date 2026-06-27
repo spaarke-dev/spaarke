@@ -35,13 +35,13 @@ import {
   Popover,
   PopoverTrigger,
   PopoverSurface,
-  Switch,
   TabList,
   Tab,
+  Tooltip,
   makeStyles,
+  mergeClasses,
   shorthands,
   tokens,
-  Text,
 } from '@fluentui/react-components';
 import { AppsList20Regular, Grid20Regular, ChevronDownRegular } from '@fluentui/react-icons';
 // Deep-path import (NOT the barrel) — same React-16-via-Lexical-via-barrel issue
@@ -82,7 +82,14 @@ const useStyles = makeStyles({
   root: {
     display: 'flex',
     alignItems: 'center',
-    flexWrap: 'wrap',
+    // v1.1.52 (Item 2) — Disable wrap so the trailing view toggle is
+    // always pinned to row 1, even when long filter labels (e.g.
+    // "File Type (3)", "Date Range (active)", multi-tag selection) make
+    // the natural width exceed the viewport. Horizontal-scroll fallback
+    // keeps the bar usable on sub-1920 widths without re-flowing the
+    // toolbar to a second line.
+    flexWrap: 'nowrap',
+    overflowX: 'auto',
     gap: tokens.spacingHorizontalS,
     rowGap: tokens.spacingVerticalXS,
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
@@ -95,11 +102,66 @@ const useStyles = makeStyles({
     flex: 1,
     minWidth: 0,
   },
-  associatedSwitch: {
-    // Keep label + switch inline; rely on Fluent default sizing.
+  // v1.1.49 — 2-state Associated/All toggle (Item 8 Part C).
+  // Replaces the Fluent v9 Switch with a token-driven 2-button group so the
+  // ACTIVE state can carry an unambiguous color cue: green for "All
+  // Documents", brand-blue for "Associated Only". Inactive state is neutral.
+  // All values flow through `tokens.*` per ADR-021 so dark mode + brand
+  // themes resolve correctly.
+  scopeToggleGroup: {
+    display: 'inline-flex',
+    alignItems: 'stretch',
+    // v1.1.52 (Item 2) — Don't allow the scope toggle to shrink. The
+    // labels ("All Documents" / "Associated Only") need full visibility;
+    // truncating them silently changes their meaning. Under overflow the
+    // toolbar scrolls horizontally instead.
+    flexShrink: 0,
+    ...shorthands.borderRadius(tokens.borderRadiusMedium),
+    ...shorthands.border(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
+    ...shorthands.overflow('hidden'),
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  scopeToggleButton: {
+    minWidth: 'auto',
+    ...shorthands.borderRadius('0px'),
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground2,
+    backgroundColor: 'transparent',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+    },
+  },
+  scopeToggleActiveAll: {
+    backgroundColor: tokens.colorPaletteGreenBackground2,
+    color: tokens.colorPaletteGreenForeground2,
+    fontWeight: tokens.fontWeightSemibold,
+    ':hover': {
+      backgroundColor: tokens.colorPaletteGreenBackground2,
+    },
+  },
+  scopeToggleActiveAssociated: {
+    backgroundColor: tokens.colorBrandBackground2,
+    color: tokens.colorBrandForeground2,
+    fontWeight: tokens.fontWeightSemibold,
+    ':hover': {
+      backgroundColor: tokens.colorBrandBackground2,
+    },
   },
   filterButton: {
-    // Subtle button with the filter label + selection summary.
+    // v1.1.52 (Item 2) — Cap filter-button width so a long selection
+    // summary (e.g. "File Type: Engagement Letter, Witness Statement"
+    // or a multi-tag pill) doesn't push the view toggle out of view on
+    // 1920×1080. Fluent v9 Button truncates its label child via the
+    // inner span's overflow rules; setting maxWidth on the button +
+    // letting it shrink (minWidth: 0) is the safe primitive.
+    maxWidth: '200px',
+    minWidth: 0,
+    flexShrink: 1,
   },
   menuList: {
     minWidth: '200px',
@@ -108,6 +170,10 @@ const useStyles = makeStyles({
   },
   viewToggle: {
     // TabList sized to fit two icon-only tabs.
+    // v1.1.52 (Item 2) — Pin to row 1 even under overflow; the spacer
+    // pushes it to the far right but flexShrink: 0 prevents the toggle
+    // itself from being squeezed.
+    flexShrink: 0,
   },
   // Popover surface for the Date Range picker — gives the inline-stacked
   // DateRangeFilter a roomy panel so the From/To inputs are usable.
@@ -138,9 +204,32 @@ export interface ICommandBarProps {
   selectedTags: string[];
   onSelectedTagsChange: (next: string[]) => void;
 
+  /**
+   * v1.1.51 (Item 1) — Clear all filters callback. When provided, a small
+   * subtle "Clear" button is rendered immediately to the right of the
+   * TagFilter, visible only when at least one of the resettable filters
+   * is non-default. Resets `fileTypes`, `dateRange`, `threshold`,
+   * `searchMode`, and `selectedTags`.
+   *
+   * IMPORTANT (FR-DOC-06 binding): this MUST NOT reset
+   * `filters.associatedOnly`. The associatedOnly toggle is the SCOPE
+   * control, not a filter — it triggers the auto-search ref/effect at
+   * the parent (SemanticSearchControl.tsx). The parent's onClearFilters
+   * implementation preserves the current associatedOnly value verbatim.
+   */
+  onClearFilters?: () => void;
+
   /** Active view (list | card) — owned by parent via useDocumentListPrefs. */
   view: DocumentListView;
   onViewChange: (next: DocumentListView) => void;
+
+  /**
+   * Whether to render the list/card view toggle group (v1.1.47).
+   * When `false`, the trailing tab group is hidden and the view is treated
+   * as locked at the parent level (the parent forces `view` to `defaultView`).
+   * Defaults to `true` at the parent (back-compat with v1.1.46 behavior).
+   */
+  showViewToggle?: boolean;
 
   /** Disable all interactive controls (during loading). */
   disabled?: boolean;
@@ -187,8 +276,10 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
   optionsLoading,
   selectedTags,
   onSelectedTagsChange,
+  onClearFilters,
   view,
   onViewChange,
+  showViewToggle = true,
   disabled,
 }) => {
   const styles = useStyles();
@@ -198,18 +289,22 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
   // observe `filters.associatedOnly` mutations. We MUST therefore route
   // through `onFiltersChange` — never via a separate handler — so the
   // parent's existing ref + effect logic fires unchanged.
-  const handleAssociatedOnlyChange = React.useCallback(
-    (ev: React.ChangeEvent<HTMLInputElement>) => {
-      onFiltersChange({ ...filters, associatedOnly: ev.currentTarget.checked });
+  //
+  // v1.1.49 — UI reskinned to a 2-state button group (Item 8 Part C). The
+  // boolean semantic is unchanged: true = Associated Only, false = All
+  // Documents. Each button writes the new value through `onFiltersChange`
+  // so the parent's auto-search ref + effect fire exactly as before.
+  const associatedOnlyChecked = filters.associatedOnly ?? false;
+  const setAssociatedOnly = React.useCallback(
+    (next: boolean) => {
+      if (next === associatedOnlyChecked) return;
+      onFiltersChange({ ...filters, associatedOnly: next });
     },
-    [filters, onFiltersChange]
+    [associatedOnlyChecked, filters, onFiltersChange]
   );
 
   // ── File Type (multi-select) ───────────────────────────────────────────
-  const fileTypeCheckedValues = React.useMemo(
-    () => ({ [FILE_TYPE_GROUP]: filters.fileTypes }),
-    [filters.fileTypes]
-  );
+  const fileTypeCheckedValues = React.useMemo(() => ({ [FILE_TYPE_GROUP]: filters.fileTypes }), [filters.fileTypes]);
 
   const handleFileTypeCheckedChange = React.useCallback(
     (_ev: unknown, data: { name: string; checkedItems: string[] }) => {
@@ -237,10 +332,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
   );
 
   // ── Mode (single-select) ───────────────────────────────────────────────
-  const modeCheckedValues = React.useMemo(
-    () => ({ [MODE_GROUP]: [filters.searchMode] }),
-    [filters.searchMode]
-  );
+  const modeCheckedValues = React.useMemo(() => ({ [MODE_GROUP]: [filters.searchMode] }), [filters.searchMode]);
 
   const handleModeChange = React.useCallback(
     (_ev: unknown, data: { name: string; checkedItems: string[] }) => {
@@ -273,22 +365,44 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
     <div className={styles.root} role="toolbar" aria-label="Document filters and view">
       {/* Associated Only — only shown for entity-scoped surfaces. The auto-search
           ref/effect in SemanticSearchControl.tsx observes mutations to filters.associatedOnly
-          and re-fires the search on its own. This component must not call search() directly. */}
+          and re-fires the search on its own. This component must not call search() directly.
+
+          v1.1.49 — UI is a 2-state button group instead of a Switch (Item 8 Part C).
+          The underlying contract is unchanged: `filters.associatedOnly` is the
+          boolean source of truth; both buttons just call onFiltersChange with the
+          appropriate value. Active button gets a token-driven color cue (green
+          for All Documents, brand-blue for Associated Only). */}
       {showAssociatedOnly && (
-        <Switch
-          className={styles.associatedSwitch}
-          label="Associated Only"
-          checked={filters.associatedOnly ?? false}
-          onChange={handleAssociatedOnlyChange}
-          disabled={disabled}
-        />
+        <div className={styles.scopeToggleGroup} role="group" aria-label="Document scope toggle">
+          <Button
+            className={mergeClasses(
+              styles.scopeToggleButton,
+              !associatedOnlyChecked ? styles.scopeToggleActiveAll : undefined
+            )}
+            appearance="subtle"
+            onClick={() => setAssociatedOnly(false)}
+            aria-pressed={!associatedOnlyChecked}
+            disabled={disabled}
+          >
+            All Documents
+          </Button>
+          <Button
+            className={mergeClasses(
+              styles.scopeToggleButton,
+              associatedOnlyChecked ? styles.scopeToggleActiveAssociated : undefined
+            )}
+            appearance="subtle"
+            onClick={() => setAssociatedOnly(true)}
+            aria-pressed={associatedOnlyChecked}
+            disabled={disabled}
+          >
+            Associated Only
+          </Button>
+        </div>
       )}
 
       {/* File Type — multi-select via MenuItemCheckbox */}
-      <Menu
-        checkedValues={fileTypeCheckedValues}
-        onCheckedValueChange={handleFileTypeCheckedChange}
-      >
+      <Menu checkedValues={fileTypeCheckedValues} onCheckedValueChange={handleFileTypeCheckedChange}>
         <MenuTrigger disableButtonEnhancement>
           <Button
             className={styles.filterButton}
@@ -339,10 +453,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
       </Popover>
 
       {/* Threshold — single-select via MenuItemRadio (5 preset values) */}
-      <Menu
-        checkedValues={thresholdCheckedValues}
-        onCheckedValueChange={handleThresholdChange}
-      >
+      <Menu checkedValues={thresholdCheckedValues} onCheckedValueChange={handleThresholdChange}>
         <MenuTrigger disableButtonEnhancement>
           <Button
             className={styles.filterButton}
@@ -367,10 +478,7 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
       </Menu>
 
       {/* Mode — single-select (hybrid | vectorOnly | keywordOnly) */}
-      <Menu
-        checkedValues={modeCheckedValues}
-        onCheckedValueChange={handleModeChange}
-      >
+      <Menu checkedValues={modeCheckedValues} onCheckedValueChange={handleModeChange}>
         <MenuTrigger disableButtonEnhancement>
           <Button
             className={styles.filterButton}
@@ -405,24 +513,62 @@ export const CommandBar: React.FC<ICommandBarProps> = ({
         sortAlphabetical
       />
 
+      {/* v1.1.51 (Item 1) — Subtle Clear button.
+          Visible only when at least one resettable filter is non-default
+          (compute inline so the affordance never sits there grey-clickable
+          on an unfiltered view). Active set: fileTypes / dateRange /
+          threshold / searchMode / selectedTags. NOT included:
+          `associatedOnly` (FR-DOC-06 binding — that's a scope, not a
+          filter, and resetting it would fire the auto-search effect). */}
+      {onClearFilters &&
+        (() => {
+          const hasActiveFilters =
+            (filters.fileTypes && filters.fileTypes.length > 0) ||
+            (filters.dateRange !== null && (!!filters.dateRange.from || !!filters.dateRange.to)) ||
+            (filters.threshold ?? 0) !== 0 ||
+            (filters.searchMode ?? 'hybrid') !== 'hybrid' ||
+            (selectedTags && selectedTags.length > 0);
+          if (!hasActiveFilters) return null;
+          return (
+            <Button
+              appearance="subtle"
+              size="small"
+              onClick={onClearFilters}
+              disabled={disabled}
+              aria-label="Clear filters"
+            >
+              Clear
+            </Button>
+          );
+        })()}
+
       <div className={styles.spacer} aria-hidden="true" />
 
-      {/* View toggle — list (AppsList20Regular) / card (Grid20Regular) */}
-      <TabList
-        className={styles.viewToggle}
-        selectedValue={view}
-        onTabSelect={handleViewTabSelect}
-        appearance="subtle"
-        size="small"
-        aria-label="View toggle"
-      >
-        <Tab value="list" icon={<AppsList20Regular />} aria-label="List view">
-          <Text size={100}>List</Text>
-        </Tab>
-        <Tab value="card" icon={<Grid20Regular />} aria-label="Card view">
-          <Text size={100}>Card</Text>
-        </Tab>
-      </TabList>
+      {/* View toggle — list (AppsList20Regular) / card (Grid20Regular).
+          v1.1.47: hidden when `showViewToggle === false` so a host form
+          can lock the surface to a single view (the parent simultaneously
+          forces `view` to `defaultView` so this also enforces the lock).
+          v1.1.49 (Item 7): icon-only tabs. The Tooltip wrap provides the
+          accessible name for hover + screen-reader readers; the Tab's own
+          `aria-label` is still set so AT users get the same label even
+          when the tooltip is not surfaced (e.g. touch). */}
+      {showViewToggle && (
+        <TabList
+          className={styles.viewToggle}
+          selectedValue={view}
+          onTabSelect={handleViewTabSelect}
+          appearance="subtle"
+          size="small"
+          aria-label="View toggle"
+        >
+          <Tooltip content="List view" relationship="label">
+            <Tab value="list" icon={<AppsList20Regular />} aria-label="List view" />
+          </Tooltip>
+          <Tooltip content="Card view" relationship="label">
+            <Tab value="card" icon={<Grid20Regular />} aria-label="Card view" />
+          </Tooltip>
+        </TabList>
+      )}
     </div>
   );
 };

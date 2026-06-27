@@ -1,0 +1,149 @@
+<task id="003" project="email-communication-solution-r3">
+  <metadata>
+    <title>BFF — Post-send `Internet-Message-Id` capture (UQ3 spike + implementation)</title>
+    <phase>Wave 0 — Foundations + Non-Breaking BFF</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>007, 008</blocks>
+    <tags>bff-api, communication, graph</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `CommunicationService.cs` (production send path); introduces Graph query call; best-effort error handling; touches outbound critical path so failure modes must not block send; closes UQ3 with a spike before implementation</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-22</fr-refs>
+  </metadata>
+
+  <prompt>
+    After `CommunicationService.SendAsync()` successfully calls Microsoft Graph `SendMail`, retrieve the real `Internet-Message-Id` of the sent message and stamp it onto `sprk_communication.sprk_internetmessageid`. This closes the reply-thread loop: inbound replies match outbound originals via `IncomingAssociationResolver.cs:171` (existing ADR-024 logic) by comparing the inbound `In-Reply-To` header against the stamped field.
+
+    UQ3 from spec is unresolved on retrieval STRATEGY: query `graphClient.Users[sender].Messages` filtered by either (a) `correlationId` extended property OR (b) `receivedDateTime` window + subject match. Start with a 1-hour spike to validate the chosen strategy in a dev mailbox; document the decision in `projects/email-communication-solution-r3/notes/spikes/003-message-id-strategy.md`. Then implement. Per FR-22 + spec A3, the capture MUST be best-effort: retrieval failure logs a warning but does NOT fail the send.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer with Microsoft Graph experience. Authoritative on `CommunicationService` outbound pipeline. Familiar with Graph `Users.Messages` query semantics, extended properties, and best-effort post-send enrichment patterns. Knows ADR-024 (the resolver consumer) and ADR-010 (DI registration).
+  </role>
+
+  <goal>
+    Outbound `sprk_communication` records have `sprk_internetmessageid` populated for successful sends (≥ 95% in dev exercise; 100% NOT required — best-effort by design). Retrieval failure logs a structured warning but does NOT throw or fail the send. `IncomingAssociationResolver.cs:171` (existing inbound logic) successfully matches a reply to the stamped field in an end-to-end smoke test.
+  </goal>
+
+  <context>
+    <background>
+      Empirical finding (CLAUDE.md row 4): `CommunicationService.cs` does NOT currently capture `Internet-Message-Id`. The inbound resolver expects it; without it, reply-thread closure is broken.
+
+      Spec FR-22 (Internet-Message-Id post-send capture) and UQ3 (retrieval strategy uncertainty) are jointly resolved by this task. Spec A3 mandates best-effort behavior: send-path stability is the primary invariant.
+
+      Spec calls out two candidate strategies:
+      (a) Stamp a `correlationId` into Graph extended properties on send, then query messages where that extended-property equals the correlationId. Robust if Graph supports extended properties on `SendMail`-created messages reliably.
+      (b) Query the Sent Items folder by `receivedDateTime` window (last few seconds) + subject match. Simpler but vulnerable to subject collision in high-volume mailboxes.
+
+      The spike (step 1) is decisive: validate strategy (a) first; fall back to (b) if extended properties don't survive Graph's send pipeline. Document the chosen path + evidence in `notes/spikes/003-message-id-strategy.md`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-22: capture is BEST-EFFORT. Retrieval failure MUST log a warning + proceed; MUST NOT throw or fail the send.</constraint>
+    <constraint source="project">A3 (spec): post-send enrichment MUST NOT break existing `SendAsync` side effects (daily-send count, SPE archival, etc.).</constraint>
+    <constraint source="ADR-024">`IncomingAssociationResolver` is unchanged. This task only stamps the field; the resolver already consumes it.</constraint>
+    <constraint source="ADR-010">If a new helper service is introduced (e.g., `GraphMessageIdResolver`), register it via `CommunicationModule` only.</constraint>
+    <constraint source="ADR-019">Any new error path surfaces as ProblemDetails IF it ever surfaces; for this task, the error path is internal (best-effort) and never reaches the caller.</constraint>
+    <constraint source="project">Single retry with backoff on retrieval failure (per task brief). Do NOT chain retries — keep send-path latency bounded.</constraint>
+    <constraint source="project">bff-extensions.md placement justification REQUIRED in PR description (per CLAUDE.md §10). Decision: helper lives in `Services/Communication/` under `CommunicationModule` — no new top-level service area.</constraint>
+    <constraint source="project">Publish-size delta MUST be reported (per CLAUDE.md §10 bullet 4). Expected ≈ 0 MB (uses existing Graph SDK).</constraint>
+    <constraint source="ADR-033">The new ADR (task 001) codifies the canonical pattern. Confirm this task aligns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Best-effort post-send enrichment" location="docs/architecture/communication-service-architecture.md">
+        Enrichment runs AFTER the primary `SendMail` succeeds; wrapped in try/catch; failure produces a structured warning log; never propagates to the caller.
+      </pattern>
+      <pattern name="Spike documentation" location="projects/email-communication-solution-r3/notes/spikes/">
+        Brief markdown note: strategy considered, evidence in dev mailbox, decision rationale. Keep it short — 30–60 lines.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">**UQ3 SPIKE (1 hour, hard cap)**: In dev mailbox, send a test message via Graph `SendMail` with a `correlationId` stamped as an extended property. Then query `graphClient.Users[sender].Messages` filtered by that extended-property value. Confirm whether (a) the property survives the send and is queryable. If yes → strategy (a). If no → fall back to strategy (b): receivedDateTime window + subject match. Document evidence + decision in `projects/email-communication-solution-r3/notes/spikes/003-message-id-strategy.md` (create dir if needed).</step>
+    <step order="2">Read `CommunicationService.cs` to locate the exact post-`SendMail` insertion point. Read `IncomingAssociationResolver.cs:171` to confirm the field name + matching logic (verify `sprk_internetmessageid` is the read target).</step>
+    <step order="3">Decide structure: introduce a new helper `GraphMessageIdResolver` (preferred — isolates Graph query logic + testable) OR inline into `CommunicationService` (acceptable if &lt;30 LOC). Decision: helper, registered via `CommunicationModule`. State decision in notes.</step>
+    <step order="4">Author `src/server/api/Sprk.Bff.Api/Services/Communication/GraphMessageIdResolver.cs` (or chosen file) implementing the chosen strategy. Interface: `Task&lt;string?&gt; TryResolveAsync(string senderId, string correlationId, DateTimeOffset sentAt, string subject, CancellationToken ct)`. Returns null on failure.</step>
+    <step order="5">In `CommunicationService.SendAsync()`: AFTER successful Graph `SendMail` AND AFTER the `sprk_communication` record is created (existing flow), invoke the resolver with single retry + 1-second backoff. On success → update `sprk_communication.sprk_internetmessageid` via existing Dataverse client. On failure → `_logger.LogWarning("Internet-Message-Id resolution failed for communicationId={Id}; reply-thread closure may be impaired.", id)` and continue.</step>
+    <step order="6">Register `IGraphMessageIdResolver` in `CommunicationModule.cs` (per ADR-010). Confirm no DI registrations outside this module.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` — confirm clean.</step>
+    <step order="8">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication` — confirm existing tests pass. (Unit tests for the new path live in task 008.)</step>
+    <step order="9">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/r3-003-publish/` and report compressed size + delta vs baseline (~45.65 MB). Expected ≈ 0 MB. Record in task notes/ if &gt;0.5 MB.</step>
+    <step order="9.1">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: invoke `code-review` skill on the diff; invoke `adr-check` skill against `spec.md`. Address any Critical findings.</step>
+    <step order="10">Smoke test in dev: send an email via BFF → confirm `sprk_communication.sprk_internetmessageid` is populated → reply to the email from the recipient mailbox → confirm `IncomingAssociationResolver` matches the inbound reply to the outbound original via the stamped field. Record evidence in task notes.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md`: mark task 003 ✅ completed; confirm task 007 + task 008 dependencies satisfied.</step>
+    <step order="12">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task; record spike outcome + strategy chosen in Decisions Made (CLAUDE.md).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect service + resolver + module shapes</tool>
+    <tool name="edit">Add resolver helper + post-send invocation + DI registration</tool>
+    <tool name="bash">Build, test, publish-size, CVE scan, dev smoke test</tool>
+    <tool name="code-review">FULL-rigor quality gate at step 9.5</tool>
+    <tool name="adr-check">FULL-rigor quality gate at step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r3/notes/spikes/003-message-id-strategy.md (NEW — strategy decision + evidence)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/GraphMessageIdResolver.cs (NEW — helper)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (UPDATED — post-send invocation + best-effort handling)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — register resolver)</output>
+    <output type="docs">PR description with bff-extensions placement justification + publish-size delta + spike outcome</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`projects/email-communication-solution-r3/notes/spikes/003-message-id-strategy.md` exists and documents the chosen strategy + evidence.</criterion>
+    <criterion testable="true">`GraphMessageIdResolver` (or inline equivalent) exists and is registered in `CommunicationModule`.</criterion>
+    <criterion testable="true">`CommunicationService.SendAsync()` calls the resolver AFTER `SendMail` succeeds; failure logs a warning but does NOT throw.</criterion>
+    <criterion testable="true">Single retry + 1-second backoff on resolver failure (not chained).</criterion>
+    <criterion testable="true">Outbound `sprk_communication` record receives `sprk_internetmessageid` value on successful resolution.</criterion>
+    <criterion testable="true">`dotnet build` clean; existing `dotnet test` passes.</criterion>
+    <criterion testable="true">Publish-size delta reported in PR description; ≤ +0.5 MB expected.</criterion>
+    <criterion testable="true">No new HIGH CVEs.</criterion>
+    <criterion testable="true">End-to-end dev smoke: outbound → reply → inbound resolver matches via stamped field (evidence in task notes).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The spike has a HARD 1-hour cap. If strategy (a) and (b) both fail in 1 hour, escalate to human with the evidence — do not improvise a third strategy unilaterally.
+
+    Strategy (a) (correlationId extended property) is preferred because it's deterministic. Strategy (b) (receivedDateTime + subject) is acceptable but produces false positives in high-volume mailboxes with duplicate subjects (e.g., "Re: meeting").
+
+    DI registration is in `CommunicationModule` only (per ADR-010 + bff-extensions.md). If the resolver needs Graph + Dataverse, inject both via existing module abstractions; do NOT create a new abstraction layer.
+
+    Task 008 covers unit tests for the new code path (success case + retrieval-failure case). Task 007 deploys the changes to dev. Both depend on this task.
+
+    Per CLAUDE.md §10 bullet 6 + spec.md §5.5: tests MUST follow per `bff-extensions.md` test obligation. PR description for task 003 must state "tests in task 008."
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply FULL rigor per `<rigor-hint>` — Step 9.5 quality gates (code-review + adr-check) are REQUIRED. The 1-hour spike cap (step 1) is non-negotiable: if the spike runs over, escalate to human before implementing. Per CLAUDE.md §10: publish-size delta + CVE scan + bff-extensions placement justification ALL required.
+    </protocol>
+  </execution>
+</task>

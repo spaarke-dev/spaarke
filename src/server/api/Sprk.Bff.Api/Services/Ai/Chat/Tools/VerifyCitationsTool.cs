@@ -119,13 +119,13 @@ public sealed class VerifyCitationsTool
 
         var results = report.All.Select(r => new
         {
-            raw        = r.Citation.RawText,
-            type       = r.Citation.CitationType.ToString(),
+            raw = r.Citation.RawText,
+            type = r.Citation.CitationType.ToString(),
             normalized = r.Citation.NormalizedKey,
             isVerified = r.IsVerified,
             confidence = r.ConfidenceScore,
-            sourceUrl  = r.SourceUrl,
-            provider   = r.VerificationProvider,
+            sourceUrl = r.SourceUrl,
+            provider = r.VerificationProvider,
             errorMessage = r.ErrorMessage
         }).ToArray();
 

@@ -1,0 +1,80 @@
+<task id="R4-042" project="smart-todo-r4">
+  <metadata>
+    <title>C — Retire TodoDetailPanel side-pane</title>
+    <phase>Phase 2: Wave 2b</phase>
+    <workstream>C</workstream>
+    <status>complete</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>code-page, smart-todo, cleanup, side-pane, retire</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>R4-040</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/components/TodoDetailPanel.tsx (delete)</file>
+      <file>src/solutions/SmartTodo/src/App.tsx (remove references)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Delete `TodoDetailPanel.tsx` (the broken R3 side-pane — OD-4: no save, "Completed" doesn't work) and remove all references. The hybrid modal (task 040) replaces it. This is a strict file deletion — no functionality preserved in the side-pane.
+  </prompt>
+
+  <role>React engineer cleaning up retired R3 component.</role>
+
+  <goal>`TodoDetailPanel.tsx` deleted; all imports + render sites removed; no references in source or tests; SmartTodo Code Page renders without the side-pane.</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="target-delete">src/solutions/SmartTodo/src/components/TodoDetailPanel.tsx</file>
+    <file purpose="callers">src/solutions/SmartTodo/src/App.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-18">MUST retire `TodoDetailPanel` side-pane</constraint>
+    <constraint source="spec OD-4">Side-pane bugs (no save, "Completed" doesn't work) are inherent to the side-pane pattern; modal replaces it</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>cleanup/retire</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>R3 introduced TodoDetailPanel as a side-pane editor; UAT surfaced bugs that the side-pane architecture can't fix (it's fundamentally the wrong tool for editing the full form). Modal replaces it.</background>
+    <dependencies>
+      <dependency task="R4-040" status="must-complete">Modal must be functional before side-pane is deleted (otherwise no edit UI exists)</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Verify task 040 deployed">Modal opens, save works, "Completed" statuscode works inside iframe — confirm OD-4 regressions are gone via modal path.</step>
+    <step order="2" name="Find all references">grep for `TodoDetailPanel` across `src/solutions/SmartTodo/`. List each file + line.</step>
+    <step order="3" name="Remove imports + render sites">Edit each referenced file; remove import + JSX + any state managing side-pane open/close.</step>
+    <step order="4" name="Delete file">`git rm src/solutions/SmartTodo/src/components/TodoDetailPanel.tsx` (and any associated test files / styles).</step>
+    <step order="5" name="Build">`npm run build:prod` — verify no broken imports.</step>
+    <step order="6" name="Run tests">`npm test` — verify no test failures.</step>
+    <step order="7" name="Smoke test in spaarkedev1">Open SmartTodo Code Page; verify no side-pane appears; verify modal still opens on card click.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">rm + commit deletion</tool>
+    <tool name="Grep">Find references</tool>
+    <tool name="npm">Build + test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/components/TodoDetailPanel.tsx (deleted)</output>
+    <output type="code">src/solutions/SmartTodo/src/App.tsx (modified — no more references)</output>
+    <output type="test">Updated tests — no references to deleted component</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`TodoDetailPanel.tsx` is deleted (file does not exist)</criterion>
+    <criterion testable="true">grep for `TodoDetailPanel` in src/ returns 0 functional hits</criterion>
+    <criterion testable="true">Build passes</criterion>
+    <criterion testable="true">All tests pass</criterion>
+    <criterion testable="true">SmartTodo Code Page renders without side-pane; modal still works</criterion>
+  </acceptance-criteria>
+</task>

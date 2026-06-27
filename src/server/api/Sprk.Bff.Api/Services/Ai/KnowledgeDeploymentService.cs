@@ -5,6 +5,7 @@ using Azure.Search.Documents.Indexes;
 using Azure.Security.KeyVault.Secrets;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -28,21 +29,51 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
     private readonly SearchIndexClient _searchIndexClient;
     private readonly SecretClient? _secretClient;
     private readonly AnalysisOptions _options;
+    private readonly AiSearchOptions? _aiSearchOptions;
+    private readonly IAllowedIndexesProvider? _allowedIndexesProvider;
     private readonly ILogger<KnowledgeDeploymentService> _logger;
 
     // In-memory cache for deployment configs (TRACKED: GitHub #229 - Move to Dataverse)
     private readonly ConcurrentDictionary<string, KnowledgeDeploymentConfig> _configCache = new();
     private readonly ConcurrentDictionary<string, SearchClient> _clientCache = new();
 
+    /// <summary>
+    /// Constructs the resolver.
+    /// </summary>
+    /// <remarks>
+    /// <para>The <paramref name="aiSearchOptions"/> and <paramref name="allowedIndexesProvider"/>
+    /// parameters are OPTIONAL (default to <c>null</c>) so existing test fixtures that construct
+    /// <see cref="KnowledgeDeploymentService"/> directly with only
+    /// (<c>SearchIndexClient</c>, <c>IOptions&lt;AnalysisOptions&gt;</c>, <c>ILogger</c>) continue
+    /// to compile UNCHANGED — multi-container-multi-index-r1 spec NFR-02 (backward-compat) is the
+    /// binding requirement.</para>
+    /// <para>In production DI: <c>IOptions&lt;AiSearchOptions&gt;</c> is registered by
+    /// <see cref="Sprk.Bff.Api.Infrastructure.DI.JobProcessingModule"/>; the
+    /// <see cref="IAllowedIndexesProvider"/> is registered by
+    /// <see cref="Sprk.Bff.Api.Infrastructure.DI.AnalysisServicesModule"/> (Phase G task 102) when
+    /// the compound AI gate is ON. Both parameters resolve automatically.</para>
+    /// <para><b>Allow-list resolution order</b> (Phase G):
+    /// (1) when <paramref name="allowedIndexesProvider"/> is non-null, the provider is consulted
+    /// (cached Dataverse query of <c>sprk_aisearchindex</c>; falls back internally to appsettings);
+    /// (2) when the provider is null but <paramref name="aiSearchOptions"/> is non-null, the
+    /// appsettings <see cref="AiSearchOptions.AllowedIndexes"/> array is used directly (legacy path
+    /// retained for tests + AI-OFF DI graph);
+    /// (3) when both are null, the call fails closed (no allow-list → no caller-supplied index
+    /// permitted).</para>
+    /// </remarks>
     public KnowledgeDeploymentService(
         SearchIndexClient searchIndexClient,
         IOptions<AnalysisOptions> options,
         ILogger<KnowledgeDeploymentService> logger,
-        SecretClient? secretClient = null)
+        SecretClient? secretClient = null,
+        IOptions<AiSearchOptions>? aiSearchOptions = null,
+        IAllowedIndexesProvider? allowedIndexesProvider = null)
     {
         _searchIndexClient = searchIndexClient;
         _secretClient = secretClient;
         _options = options.Value;
+        _aiSearchOptions = aiSearchOptions?.Value;
+        _allowedIndexesProvider = allowedIndexesProvider;
         _logger = logger;
     }
 
@@ -74,14 +105,141 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
     }
 
     /// <inheritdoc />
+    public Task<SearchClient> GetSearchClientAsync(
+        string tenantId,
+        CancellationToken cancellationToken = default)
+        => GetSearchClientAsync(tenantId, indexName: null, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<SearchClient> GetSearchClientAsync(
         string tenantId,
+        string? indexName,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(tenantId);
 
+        // Multi-container-multi-index-r1 Phase B (FR-BFF-01..04) — caller-supplied explicit index.
+        // When non-empty, validate against the allow-list and bind a SearchClient to that
+        // index name (resolved via the tenant's SearchIndexClient endpoint). When null/whitespace,
+        // fall through to the existing 2-tier chain (FR-BFF-04 backward-compat per NFR-02).
+        //
+        // Phase G (task 102): when an IAllowedIndexesProvider is registered, the provider is the
+        // source of truth (cached Dataverse query of sprk_aisearchindex). Otherwise the legacy
+        // appsettings AllowedIndexes array is used directly.
+        if (!string.IsNullOrWhiteSpace(indexName))
+        {
+            await ValidateAllowedIndexAsync(indexName, cancellationToken);
+            return GetOrCreateExplicitIndexClient(tenantId, indexName);
+        }
+
         var config = await GetDeploymentConfigAsync(tenantId, cancellationToken);
         return await GetOrCreateSearchClientAsync(config, cancellationToken);
+    }
+
+    /// <summary>
+    /// Validates a caller-supplied index name against the configured allow-list. On miss,
+    /// throws <see cref="SdapProblemException"/> with stable code <c>INDEX_NOT_ALLOWED</c>
+    /// mapping to ProblemDetails 400 per ADR-019 + spec NFR-08.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Allow-list resolution order (Phase G):
+    /// </para>
+    /// <list type="number">
+    ///   <item><description>When <see cref="IAllowedIndexesProvider"/> is registered, the provider
+    ///     is consulted (cached Dataverse query of <c>sprk_aisearchindex</c>; the provider itself
+    ///     falls back to <see cref="AiSearchOptions.AllowedIndexes"/> on Dataverse failure /
+    ///     empty result per Phase G spec §13 Q4).</description></item>
+    ///   <item><description>Otherwise the legacy appsettings array is used directly. This path is
+    ///     retained for (a) AI-OFF DI graphs that don't register the provider, and (b) test fixtures
+    ///     that construct the service without the optional dependency.</description></item>
+    ///   <item><description>When neither source is available, FAILS CLOSED — caller-supplied indexes
+    ///     are rejected outright.</description></item>
+    /// </list>
+    /// <para>
+    /// Case-insensitive comparison: Azure AI Search index names are documented as case-insensitive
+    /// at the service level, and operator-configured allow-list values should not require
+    /// exact-case matching by callers.
+    /// </para>
+    /// </remarks>
+    private async Task ValidateAllowedIndexAsync(string indexName, CancellationToken ct)
+    {
+        bool isAllowed;
+        int allowedCount;
+        string allowListSource;
+
+        if (_allowedIndexesProvider is not null)
+        {
+            // Phase G — Dataverse-backed source of truth (with internal appsettings fallback)
+            isAllowed = await _allowedIndexesProvider.IsAllowedAsync(indexName, ct);
+            // The provider does not expose a count; for diagnostic extension we fall back to the
+            // appsettings count when present (it is the floor — Dataverse-loaded set is always
+            // >= appsettings on the happy path).
+            allowedCount = _aiSearchOptions?.AllowedIndexes?.Length ?? -1;
+            allowListSource = "DataverseAllowedIndexesProvider";
+        }
+        else
+        {
+            // Legacy path — direct appsettings array. Fails closed when no options registered.
+            var allowedIndexes = _aiSearchOptions?.AllowedIndexes ?? Array.Empty<string>();
+            allowedCount = allowedIndexes.Length;
+            isAllowed = allowedIndexes.Any(allowed =>
+                string.Equals(allowed, indexName, StringComparison.OrdinalIgnoreCase));
+            allowListSource = "AiSearchOptions.AllowedIndexes";
+        }
+
+        if (!isAllowed)
+        {
+            _logger.LogWarning(
+                "Rejecting caller-supplied indexName '{RejectedIndexName}' — not present in allow-list (source: {AllowListSource}, knownCount: {AllowedCount}).",
+                indexName,
+                allowListSource,
+                allowedCount);
+
+            throw new SdapProblemException(
+                code: "INDEX_NOT_ALLOWED",
+                title: "AI Search index not allowed",
+                detail: $"The requested AI Search index '{indexName}' is not in the configured allow-list. Contact your administrator to enable this index.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object>
+                {
+                    ["indexName"] = indexName,
+                    // Preserve the wire shape — existing clients (and the test suite at task 010)
+                    // assert on the `allowedCount` extension key. When the provider is the source,
+                    // we use the appsettings count as a best-effort floor (the Dataverse-loaded
+                    // count isn't surfaced by the provider for caching reasons).
+                    ["allowedCount"] = Math.Max(allowedCount, 0)
+                });
+        }
+
+        _logger.LogDebug(
+            "Caller-supplied indexName '{IndexName}' validated against {AllowListSource}.",
+            indexName,
+            allowListSource);
+    }
+
+    /// <summary>
+    /// Returns a SearchClient bound to the explicit (validated) index name, reusing the
+    /// tenant's <see cref="SearchIndexClient"/> endpoint. Caches per (tenant, index) pair to
+    /// match the existing client-cache strategy in <see cref="GetOrCreateSearchClientAsync"/>.
+    /// </summary>
+    private SearchClient GetOrCreateExplicitIndexClient(string tenantId, string indexName)
+    {
+        var cacheKey = $"{tenantId}:explicit:{indexName}";
+
+        if (_clientCache.TryGetValue(cacheKey, out var cachedClient))
+        {
+            return cachedClient;
+        }
+
+        _logger.LogDebug(
+            "Creating explicit-index SearchClient for tenant {TenantId}, indexName={IndexName}",
+            tenantId,
+            indexName);
+
+        var client = _searchIndexClient.GetSearchClient(indexName);
+        _clientCache[cacheKey] = client;
+        return client;
     }
 
     /// <inheritdoc />

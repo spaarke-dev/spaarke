@@ -116,7 +116,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                     "sprk_emailsubject", "sprk_emailfrom", "sprk_emailto", "sprk_emailcc",
                     "sprk_emaildate", "sprk_emailbody", "sprk_isemailarchive", "sprk_parentdocument",
                     // Lookup fields (MapToDocumentEntityWithLookups)
-                    "sprk_matter", "sprk_project", "sprk_invoice", "sprk_emailconversationindex"),
+                    "sprk_matter", "sprk_project", "sprk_invoice", "sprk_emailconversationindex",
+                    // Search index tracking (multi-container-multi-index-r1 + R3 FR-3H3.2 dual-write) — required by
+                    // VisualizationService to bind the correct SearchClient for Find Similar.
+                    // Legacy sprk_searchindexed + sprk_searchindexedon preserved per spec line 366; new
+                    // sprk_searchindex{queued,completed}on are the canonical lifecycle markers post-R3.
+                    "sprk_searchindexed", "sprk_searchindexname", "sprk_searchindexedon",
+                    "sprk_searchindexqueuedon", "sprk_searchindexcompletedon"),
                 ct);
 
             if (entity == null)
@@ -320,6 +326,15 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return results;
     }
 
+    /// <inheritdoc />
+    public async Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(fetch);
+        var results = await _serviceClient.RetrieveMultipleAsync(fetch, ct);
+        _logger.LogDebug("[DATAVERSE] RetrieveMultiple(FetchXml) returned {Count} records", results.Entities.Count);
+        return results;
+    }
+
     /// <summary>
     /// Retrieves all pages of results for a QueryExpression using paging cookies.
     /// Dataverse silently truncates results at 5,000 records per page. This method
@@ -517,6 +532,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         // ═══════════════════════════════════════════════════════════════════════════
         // Search Index Tracking Fields (RAG/Semantic Search)
+        // R3 FR-3H3.2 dual-write: legacy bool sprk_searchindexed + sprk_searchindexedon are PRESERVED
+        // alongside sprk_searchindexqueuedon + sprk_searchindexcompletedon for the duration of R3 +
+        // one sprint per spec assumption (line 366). Removal is deferred to R4.
         // ═══════════════════════════════════════════════════════════════════════════
         if (request.SearchIndexed.HasValue)
             document["sprk_searchindexed"] = request.SearchIndexed.Value;
@@ -526,6 +544,12 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         if (request.SearchIndexedOn.HasValue)
             document["sprk_searchindexedon"] = request.SearchIndexedOn.Value;
+
+        if (request.SearchIndexQueuedOn.HasValue)
+            document["sprk_searchindexqueuedon"] = request.SearchIndexQueuedOn.Value;
+
+        if (request.SearchIndexCompletedOn.HasValue)
+            document["sprk_searchindexcompletedon"] = request.SearchIndexCompletedOn.Value;
 
         await _serviceClient.UpdateAsync(document, ct);
         _logger.LogInformation("Document updated: {DocumentId} ({FieldCount} fields)", id, document.Attributes.Count);
@@ -641,6 +665,11 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     public async Task<IEnumerable<DocumentEntity>> GetDocumentsByInvoiceAsync(Guid invoiceId, Guid? excludeDocumentId = null, CancellationToken ct = default)
     {
         return await GetDocumentsByLookupAsync("sprk_invoice", invoiceId, excludeDocumentId, "Invoice", ct);
+    }
+
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByWorkAssignmentAsync(Guid workAssignmentId, Guid? excludeDocumentId = null, CancellationToken ct = default)
+    {
+        return await GetDocumentsByLookupAsync("sprk_workassignment", workAssignmentId, excludeDocumentId, "WorkAssignment", ct);
     }
 
     private async Task<IEnumerable<DocumentEntity>> GetDocumentsByLookupAsync(
@@ -1072,7 +1101,18 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             GraphDriveId = entity.GetAttributeValue<string>("sprk_graphdriveid"),
             Status = (DocumentStatus)(entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 1),
             CreatedOn = entity.GetAttributeValue<DateTime>("createdon"),
-            ModifiedOn = entity.GetAttributeValue<DateTime>("modifiedon")
+            ModifiedOn = entity.GetAttributeValue<DateTime>("modifiedon"),
+
+            // Search index tracking (multi-container-multi-index-r1 + R3 FR-3H3.2 dual-write) — used
+            // by VisualizationService to bind the correct SearchClient for Find Similar against
+            // multi-index environments. Legacy SearchIndexed + SearchIndexedOn preserved per
+            // spec line 366; new SearchIndexQueuedOn + SearchIndexCompletedOn are the canonical
+            // lifecycle markers post-R3.
+            SearchIndexed = entity.Contains("sprk_searchindexed") ? entity.GetAttributeValue<bool>("sprk_searchindexed") : null,
+            SearchIndexName = entity.GetAttributeValue<string>("sprk_searchindexname"),
+            SearchIndexedOn = entity.Contains("sprk_searchindexedon") ? entity.GetAttributeValue<DateTime>("sprk_searchindexedon") : null,
+            SearchIndexQueuedOn = entity.Contains("sprk_searchindexqueuedon") ? entity.GetAttributeValue<DateTime>("sprk_searchindexqueuedon") : null,
+            SearchIndexCompletedOn = entity.Contains("sprk_searchindexcompletedon") ? entity.GetAttributeValue<DateTime>("sprk_searchindexcompletedon") : null
         };
     }
 
@@ -1718,6 +1758,70 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         {
             _logger.LogError(ex, "[DATAVERSE] Error deleting {EntityLogicalName} record {EntityId}", entityLogicalName, id);
             throw new InvalidOperationException($"Failed to delete {entityLogicalName} record {id}: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Generic N:N associate — used by Insights Engine task 012 (D-P3 admin endpoint)
+    /// to attach supporting matters to a new Precedent. Mirrors the SDK
+    /// <c>ServiceClient.AssociateAsync</c> shape so callers don't need to construct
+    /// SDK message envelopes themselves. Already-existing associations are tolerated.
+    /// </summary>
+    public async Task AssociateAsync(
+        string entityLogicalName,
+        Guid entityId,
+        string relationshipName,
+        IEnumerable<EntityReference> relatedEntities,
+        CancellationToken ct = default)
+    {
+        var references = relatedEntities as ICollection<EntityReference> ?? relatedEntities.ToList();
+        if (references.Count == 0)
+        {
+            _logger.LogDebug(
+                "[DATAVERSE] AssociateAsync({EntityLogicalName}/{EntityId}, {RelationshipName}) called with empty related set — no-op",
+                entityLogicalName, entityId, relationshipName);
+            return;
+        }
+
+        try
+        {
+            var collection = new EntityReferenceCollection();
+            foreach (var reference in references)
+            {
+                collection.Add(reference);
+            }
+
+            await _serviceClient.AssociateAsync(
+                entityLogicalName,
+                entityId,
+                new Relationship(relationshipName),
+                collection,
+                ct);
+
+            _logger.LogInformation(
+                "[DATAVERSE] Associated {RelatedCount} record(s) with {EntityLogicalName}/{EntityId} via {RelationshipName}",
+                references.Count, entityLogicalName, entityId, relationshipName);
+        }
+        catch (Exception ex) when (
+            // Dataverse surfaces "duplicate association" as a FaultException with
+            // message containing "Cannot insert duplicate key" or
+            // "An association already exists". Treat as idempotent success.
+            ex.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) ||
+            ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogDebug(
+                "[DATAVERSE] One or more associations already existed on {EntityLogicalName}/{EntityId} via {RelationshipName} — treated as idempotent success",
+                entityLogicalName, entityId, relationshipName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "[DATAVERSE] Error associating records with {EntityLogicalName}/{EntityId} via {RelationshipName}",
+                entityLogicalName, entityId, relationshipName);
+            throw new InvalidOperationException(
+                $"Failed to associate {references.Count} record(s) with {entityLogicalName}/{entityId} via {relationshipName}: {ex.Message}",
+                ex);
         }
     }
 

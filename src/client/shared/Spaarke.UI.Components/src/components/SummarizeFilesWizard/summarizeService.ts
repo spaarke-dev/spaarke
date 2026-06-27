@@ -16,10 +16,7 @@ const LOG_PREFIX = '[SummarizeService]';
 // ---------------------------------------------------------------------------
 
 /** Type for an authenticated fetch function matching the standard Fetch API signature. */
-export type AuthenticatedFetchFn = (
-  input: RequestInfo | URL,
-  init?: RequestInit,
-) => Promise<Response>;
+export type AuthenticatedFetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 // ---------------------------------------------------------------------------
 // SSE streaming entry point
@@ -41,7 +38,7 @@ export async function streamSummarize(
   callbacks: StreamSummarizeCallbacks = {},
   signal?: AbortSignal,
   authenticatedFetch?: AuthenticatedFetchFn,
-  bffBaseUrl?: string,
+  bffBaseUrl?: string
 ): Promise<ISummarizeResult> {
   const baseUrl = bffBaseUrl ?? '';
   const url = `${baseUrl}/api/workspace/files/summarize`;
@@ -141,9 +138,7 @@ function normalizeResult(raw: unknown): ISummarizeResult {
   // Unwrap rawResponse envelope if present (GenericAnalysisHandler wraps output this way)
   if (result && typeof result === 'object' && 'rawResponse' in result) {
     try {
-      result = typeof result.rawResponse === 'string'
-        ? JSON.parse(result.rawResponse)
-        : result.rawResponse;
+      result = typeof result.rawResponse === 'string' ? JSON.parse(result.rawResponse) : result.rawResponse;
     } catch {
       result = {
         tldr: String(result.rawResponse).substring(0, 200),
@@ -156,8 +151,10 @@ function normalizeResult(raw: unknown): ISummarizeResult {
 
   if (result && typeof result === 'object') {
     if (result.fileHighlights) {
-      console.info(`${LOG_PREFIX} fileHighlights (${Array.isArray(result.fileHighlights) ? result.fileHighlights.length : typeof result.fileHighlights} items):`,
-        JSON.stringify(result.fileHighlights).substring(0, 800));
+      console.info(
+        `${LOG_PREFIX} fileHighlights (${Array.isArray(result.fileHighlights) ? result.fileHighlights.length : typeof result.fileHighlights} items):`,
+        JSON.stringify(result.fileHighlights).substring(0, 800)
+      );
     }
     if (result.mentionedParties) {
       console.info(`${LOG_PREFIX} mentionedParties:`, JSON.stringify(result.mentionedParties).substring(0, 400));
@@ -218,9 +215,11 @@ function normalizeResult(raw: unknown): ISummarizeResult {
             const fileName = (obj.fileName ?? obj.file_name ?? obj.name ?? 'Unknown') as string;
             const documentType = (obj.documentType ?? obj.document_type ?? obj.type ?? '') as string;
             const summary = (obj.summary ?? obj.fileSummary ?? obj.file_summary ?? '') as string;
-            const highlights = Array.isArray(obj.highlights) ? obj.highlights
-              : Array.isArray(obj.key_points) ? obj.key_points
-              : [];
+            const highlights = Array.isArray(obj.highlights)
+              ? obj.highlights
+              : Array.isArray(obj.key_points)
+                ? obj.key_points
+                : [];
             return { fileName, documentType, summary, highlights };
           })
           .filter(Boolean);
@@ -263,7 +262,7 @@ export async function runSummarize(
   files: IUploadedFile[],
   signal?: AbortSignal,
   authenticatedFetch?: AuthenticatedFetchFn,
-  bffBaseUrl?: string,
+  bffBaseUrl?: string
 ): Promise<ISummarizeResult> {
   const baseUrl = bffBaseUrl ?? '';
   const url = `${baseUrl}/api/workspace/files/summarize`;

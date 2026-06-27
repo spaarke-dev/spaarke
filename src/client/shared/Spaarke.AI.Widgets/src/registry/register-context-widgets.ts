@@ -28,15 +28,25 @@
  */
 
 import { registerContextWidget } from './ContextWidgetRegistry';
+import { safeRegister } from '@spaarke/ui-components';
+import type { ContextWidgetComponent } from '../types/widget-types';
+
+// ai-spaarke-ai-workspace-UI-r1 brittleness Phase B.5 (2026-06-09):
+// Isolate each registration so a synchronous throw from one call (factory-
+// expression evaluation failure, malformed registration object) does not skip
+// the registrations that follow. See safeRegister docblock + the same pattern
+// in `register-workspace-widgets.ts`.
+function safeRegisterContext(...args: Parameters<typeof registerContextWidget>): void {
+  safeRegister('ContextWidget', args[0], () => registerContextWidget(...args));
+}
 
 // ---------------------------------------------------------------------------
 // progress-tracker
 // (also registered inline in index.ts — duplicate is safe, first wins)
 // ---------------------------------------------------------------------------
 
-registerContextWidget('progress-tracker', {
-  factory: () =>
-    import('../widgets/context/ProgressTrackerWidget').then((m) => ({ default: m.default })),
+safeRegisterContext('progress-tracker', {
+  factory: () => import('../widgets/context/ProgressTrackerWidget').then(m => ({ default: m.default })),
 });
 
 // ---------------------------------------------------------------------------
@@ -48,9 +58,14 @@ registerContextWidget('progress-tracker', {
 // (also registered inline in index.ts — duplicate is safe, first wins)
 // ---------------------------------------------------------------------------
 
-registerContextWidget('playbook-gallery', {
+safeRegisterContext('playbook-gallery', {
   factory: () =>
-    import('../widgets/context/PlaybookGalleryWidget').then((m) => ({ default: m.default })),
+    // Type-erasure cast: ContextWidgetComponent<unknown> at registry vs widget's
+    // typed default (ContextWidgetComponent<PlaybookGalleryData>) — registry
+    // boundary variance, see ../index.ts for the same pattern.
+    import('../widgets/context/PlaybookGalleryWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
 });
 
 // ---------------------------------------------------------------------------
@@ -65,9 +80,12 @@ registerContextWidget('playbook-gallery', {
 //              when the user navigates to a different entity record.
 // ---------------------------------------------------------------------------
 
-registerContextWidget('entity-info', {
+safeRegisterContext('entity-info', {
   factory: () =>
-    import('../widgets/context/EntityInfoWidget').then((m) => ({ default: m.default })),
+    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
+    import('../widgets/context/EntityInfoWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
 });
 
 // ---------------------------------------------------------------------------
@@ -82,9 +100,92 @@ registerContextWidget('entity-info', {
 // (also registered inline in index.ts — duplicate is safe, first wins)
 // ---------------------------------------------------------------------------
 
-registerContextWidget('findings', {
+safeRegisterContext('findings', {
   factory: () =>
-    import('../widgets/context/FindingsWidget').then((m) => ({ default: m.default })),
+    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
+    import('../widgets/context/FindingsWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
+});
+
+// ---------------------------------------------------------------------------
+// file-preview (R5 task 018 / D2-09)
+//
+// Widget type: 'file-preview'
+// Stage:       chat-driven Summarize vertical slice (Context-pane mount,
+//              non-modal)
+// Purpose:     Inline preview of files uploaded into the active chat session
+//              (`ChatSession.UploadedFiles`; spec NFR-02 hard-cap = 20).
+//              Wraps the extracted `RichFilePreview` renderer (task 013 /
+//              D2-08) instead of rebuilding iframe/metadata/menu UI (R5
+//              CLAUDE.md §3.1 reuse mandate).
+// Dispatches:  `context.file_selected` on the `context` channel when the
+//              user picks a different file from the multi-file list
+//              (additive ADR-030 event type added by task 016 / D2-06).
+//              Also dispatches `workspace.widget_load` for the
+//              `toggleWorkspace` per-file action so a file can be pinned
+//              into the Workspace pane as a `document-viewer` tab.
+// ---------------------------------------------------------------------------
+
+safeRegisterContext('file-preview', {
+  factory: () =>
+    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
+    import('../widgets/context/FilePreviewContextWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
+});
+
+// ---------------------------------------------------------------------------
+// execution-trace (R6 task 062 / D-C-15)
+//
+// Widget type: 'execution-trace'
+// Stage:       Active-chat (Context-pane primary widget when no entity is
+//              selected and trace events are flowing). Subscribes to the six
+//              `context.*` trace event types added by R6 task 059 (D-C-12):
+//              tool_call_started, tool_call_completed, knowledge_retrieved,
+//              playbook_node_executing, playbook_node_completed, decision_made.
+// Purpose:     Renders a Claude-Code-like ordered timeline of the chat agent's
+//              deterministic activity. Per ADR-015 BINDING: renders only the
+//              typed enumerated fields (tool name + decision + timestamp +
+//              numeric metrics) — NEVER user-message text or document content.
+// Channel:     Subscribes to the existing `context` PaneEventBus channel —
+//              NO new channel introduced (per ADR-030 + NFR-05).
+// (also registered inline in index.ts — duplicate is safe, first wins)
+// ---------------------------------------------------------------------------
+
+safeRegisterContext('execution-trace', {
+  factory: () =>
+    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
+    import('../widgets/context/ExecutionTraceWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
+});
+
+// ---------------------------------------------------------------------------
+// pinned-memory-list (R6 task 070 / D-C-24 + D-C-25, Pillar 7 — Q7 expansion)
+//
+// Widget type: 'pinned-memory-list'
+// Stage:       Active-chat (Context-pane primary widget when the user opens
+//              the Pinned Memory pane). Loads the caller's pinned items via
+//              `GET /api/memory/pins` and surfaces create / edit / delete CRUD.
+// Purpose:     Visualises + manages cross-session pinned memory items (user-
+//              preference / system-rule / matter-fact). Items are composed
+//              into the chat-agent system prompt per R6 task 067 memory
+//              composition, so creating / editing / deleting a pin here
+//              affects every subsequent chat session for the caller.
+// Standards:   ADR-008 + ADR-016 (auth + ai-context rate limit on BFF side),
+//              ADR-012 (Fluent v9 + shared lib), ADR-013 (HTTP-only BFF
+//              consumption), ADR-015 (title / content text NEVER logged in
+//              any telemetry; counts only), ADR-021 (zero hardcoded colours;
+//              semantic tokens only), ADR-028 (function-based auth surface).
+// ---------------------------------------------------------------------------
+
+safeRegisterContext('pinned-memory-list', {
+  factory: () =>
+    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
+    import('../widgets/context/PinnedMemoryListWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
 });
 
 // ---------------------------------------------------------------------------

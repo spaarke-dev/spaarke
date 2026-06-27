@@ -50,12 +50,8 @@
  */
 
 import { useCallback } from 'react';
-import {
-  useInlineAiToolbar,
-} from '@spaarke/ui-components/hooks/useInlineAiToolbar';
-import {
-  useInlineAiActions,
-} from '@spaarke/ui-components/hooks/useInlineAiActions';
+import { useInlineAiToolbar } from '@spaarke/ui-components/hooks/useInlineAiToolbar';
+import { useInlineAiActions } from '@spaarke/ui-components/hooks/useInlineAiActions';
 import type { InlineAiAction } from '@spaarke/ui-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,9 +126,7 @@ export interface UseInlineAiToolbarStateResult {
  * @param options - editorContainerRef + optional analysisId
  * @returns Toolbar display state and dispatch callback
  */
-export function useInlineAiToolbarState(
-  options: UseInlineAiToolbarStateOptions
-): UseInlineAiToolbarStateResult {
+export function useInlineAiToolbarState(options: UseInlineAiToolbarStateOptions): UseInlineAiToolbarStateResult {
   const { editorContainerRef, analysisId } = options;
 
   // ─────────────────────────────────────────────────────────────────────

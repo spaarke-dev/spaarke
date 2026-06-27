@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="087" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>RetrieveMatterMemoryHandler (T3) — read matter-scoped facts from Cosmos memory</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4d)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>091</blocks>
+    <tags>bff-api, services, handlers, tool-handler, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; creates new `.cs` handler file; new tool surface; ADR-013/ADR-015/ADR-033 binding</rigor-reason>
+    <parallel-group>4-G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `RetrieveMatterMemoryHandler` (NEW) at `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/RetrieveMatterMemoryHandler.cs` implementing the T3 `retrieve_matter_memory(matterId, query)` tool per architecture §8.1. Wraps the existing `IMatterMemoryService.GetFactsAsync(tenantId, matterId)` (R6 task 068 — already shipped) and returns the matter facts array shape: `{ factId, fact, source, confidence, category, createdAt, createdBy, sessionId? }`. Read-only from chat — no writes (writes go through task 088 promotion workflow). Implements FR-30 (retrieve_matter_memory row of the 8-tool surface).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat tool-handler authoring + R6 memory services reuse.</role>
+
+  <goal>
+    `RetrieveMatterMemoryHandler` lives at `Services/Ai/Handlers/RetrieveMatterMemoryHandler.cs` implementing `IToolHandler`. Wraps `IMatterMemoryService.GetFactsAsync` per architecture §4.3 (wire-not-build — existing R6 component). Returns the §8.1 facts array shape verbatim. Validates that `matterId` matches the active session's matter context (if any) — refuses with structured `{ status: "no_matter_context" }` when matter is absent (per architecture §9.2 + §8.2 routing). Single `ToolResult`; tier-1-safe telemetry (no fact content); ≤+0.1 MB publish-size delta. Unit tests cover hit, miss (no facts), no-matter-context refusal.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §3.1 (T3) + §4.3 (existing `MatterMemoryService` — DO NOT REBUILD) + §8.1 schema + §8.2 routing (always-on when matter context present). This is a thin wire-up of the R6 component; FR-30 + FR-45 invariants apply.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IMatterMemoryService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ManagePinnedContextHandler.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">No new endpoint.</constraint>
+    <constraint source="ADR-010">Auto-discovered; no manual DI here. `IMatterMemoryService` is already DI-registered by R6.</constraint>
+    <constraint source="ADR-013">Injects `IMatterMemoryService` directly (memory-services namespace is BFF-internal AI plumbing). No PublicContracts facade required.</constraint>
+    <constraint source="ADR-015">Telemetry payload: handlerName + sessionId + matterId (boolean present/absent — matter IDs are sensitive in some tenants per ADR-015) + factCount + durationMs ONLY. NEVER fact text, source text, query string.</constraint>
+    <constraint source="ADR-029">≤+0.1 MB publish-size delta (thin wrapper).</constraint>
+    <constraint source="ADR-033">SINGLE `ToolResult` return.</constraint>
+    <constraint source="architecture">§4.3 — reuse `MatterMemoryService`; do NOT build a parallel pipeline (architecture §4.5 NOT-to-build list).</constraint>
+    <constraint source="architecture">§8.2 — always-on when matter context present; structured refusal when absent.</constraint>
+    <constraint source="architecture">§3.2 rule 2 — T3 is read-only from this handler; T2 → T3 writes go through task 088 promotion workflow.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §3.1, §4.3 (wire-not-build), §8.1, §8.2.</step>
+    <step order="2">Read `IMatterMemoryService.cs` + `MatterMemoryService.cs` to confirm the `GetFactsAsync(tenantId, matterId)` signature and return shape.</step>
+    <step order="3">Author `Services/Ai/Handlers/RetrieveMatterMemoryHandler.cs` implementing `IToolHandler` with `matterId` (required) + `query` (required) parameters.</step>
+    <step order="4">Implement `ExecuteAsync`: if `ChatInvocationContext.MatterId` is null → return structured `{ status: "no_matter_context", message: "..." }`; else call `IMatterMemoryService.GetFactsAsync(tenantId, matterId)`; map to §8.1 array shape (factId, fact, source, confidence, category, createdAt, createdBy, sessionId?).</step>
+    <step order="5">CRITICAL: do NOT call `AppendFactAsync` here. Read-only.</step>
+    <step order="6">Add Dataverse seed-row JSON at `infra/dataverse/sprk_analysistool-retrieve-matter-memory-row.json`.</step>
+    <step order="7">Author unit tests: hit (facts returned), miss (empty), no_matter_context refusal, ADR-015 telemetry safety.</step>
+    <step order="8">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="9">Measure BFF publish-size delta; write `notes/handoffs/087-bff-publish-delta.md`.</step>
+    <step order="10">Run code-review + adr-check (Step 9.5).</step>
+    <step order="11">Update TASK-INDEX.md: 087 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">IMatterMemoryService + MatterMemoryService + exemplar handler</tool>
+    <tool name="Write">Handler + tests + seed-row JSON</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/RetrieveMatterMemoryHandler.cs</output>
+    <output type="code">infra/dataverse/sprk_analysistool-retrieve-matter-memory-row.json</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/RetrieveMatterMemoryHandlerTests.cs</output>
+    <output type="docs">notes/handoffs/087-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler exists at the specified path and implements `IToolHandler`.</criterion>
+    <criterion testable="true">Single `ToolResult` return.</criterion>
+    <criterion testable="true">Calls `IMatterMemoryService.GetFactsAsync` ONLY; no `AppendFactAsync` calls — `grep "AppendFactAsync" src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/RetrieveMatterMemoryHandler.cs` returns ZERO matches.</criterion>
+    <criterion testable="true">no_matter_context returns structured payload (NOT exception).</criterion>
+    <criterion testable="true">Telemetry payload contains no fact/source/query text.</criterion>
+    <criterion testable="true">BFF publish delta ≤+0.1 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Thin wrapper over existing R6 `MatterMemoryService`. Architecture §4.3 binding: do not build a parallel pipeline. Verify `IMatterMemoryService` is already registered (by R6) before relying on it — task 091 only handles NEW dependencies, not R6 ones.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

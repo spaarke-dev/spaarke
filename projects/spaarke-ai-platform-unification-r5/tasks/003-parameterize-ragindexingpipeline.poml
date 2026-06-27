@@ -1,0 +1,556 @@
+<task id="003" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D1-03 Parameterize `RagIndexingPipeline` for session-files writes</title>
+    <status>complete</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort>3 hours</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <phase>Phase 1 — Platform Extensions</phase>
+    <wave>P1-G2 (parallel with 002; runs after 001 ✅)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001 (D1-01 `spaarke-session-files` index provisioned; schema known)</dependencies>
+    <tags>bff, rag, indexing, ai-search</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Extend the existing `RagIndexingPipeline` so a single pipeline instance can write
+    chunked + embedded document content to EITHER the customer-corpus indexes
+    (`spaarke-knowledge-index-v2` + `discovery-index` — current behavior, unchanged) OR
+    the new session-scoped `spaarke-session-files` index (R5 vertical slice — new
+    behavior). The target is selected per-call by the call site (D2-03
+    `SessionSummarizeOrchestrator` and D1-07 cleanup service in later tasks), NOT by a
+    feature flag. Session-files writes MUST carry both `tenantId` AND `sessionId` on
+    every indexed document per ADR-014.
+
+    This is the canonical reuse-mandate task for R5: extend the existing pipeline,
+    DO NOT build a parallel `SessionFilesIndexingPipeline`. The customer-corpus write
+    path must remain behaviorally identical (back-compat for the existing wizard /
+    knowledge-base / Insights-ingest call sites).
+
+    R5 is configuration-first: no new feature flag, no new top-level `Program.cs` line.
+    The pipeline is already registered conditionally in `AiModule.cs` (gated on
+    `DocumentIntelligence:Enabled`); this task changes the SHAPE of the public API
+    (adds a parameterized overload or target-mode parameter) WITHOUT changing the
+    registration model.
+  </prompt>
+
+  <role>
+    Senior .NET developer with deep familiarity with Azure AI Search SDK
+    (`SearchClient`, `SearchIndexClient`, `MergeOrUpload`), Azure OpenAI embeddings,
+    and Spaarke's RAG indexing internals. Comfortable extending an existing concrete
+    sealed service with additive API surface while preserving every existing call
+    site's behavior.
+  </role>
+
+  <goal>
+    `RagIndexingPipeline` exposes a parameterized write path:
+
+    - **Existing path** (`IndexDocumentAsync` — unchanged signature): writes to
+      knowledge + discovery indexes via the current logic (customer-corpus
+      semantics). All existing call sites continue to compile and produce identical
+      output (verified by `RagIndexingPipelineTests` continuing to pass without
+      modification beyond additive new tests).
+
+    - **New path** (`IndexSessionFileAsync` — new method, OR `IndexDocumentAsync`
+      overload with `IndexingTarget`): writes to the `spaarke-session-files` index
+      ONLY (single chunk granularity per design — session-files index uses the
+      knowledge-chunk granularity, not the discovery-chunk granularity). The new
+      method accepts `sessionId` (required), emits it on every indexed document
+      alongside `tenantId`, and includes a parallel structured `IndexingCompleted` /
+      `IndexingFailed` log line tagged with `sessionId`.
+
+    Tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagIndexingPipelineTests.cs`
+    exist for both paths: a new `IndexSessionFile_emits_tenantId_and_sessionId_on_every_doc`
+    test asserts that the SearchClient receives a batch whose every document carries
+    both fields; a new `IndexSessionFile_does_not_write_to_knowledge_or_discovery_indexes`
+    test asserts the customer-corpus indexes are untouched on the new path; an
+    existing-shape regression test asserts `IndexDocumentAsync` behavior is unchanged.
+
+    DI registration in `AiModule.cs` is unchanged in shape — the pipeline remains a
+    conditionally registered concrete singleton; no new types are registered
+    (`AnalysisServicesModule.cs` is NOT modified by this task per R5 CLAUDE.md §3.3
+    — extension stays inside the existing module that already owns the pipeline).
+
+    BFF publish-size delta measured per CLAUDE.md §10 + R5 CLAUDE.md §3.6;
+    expected ≈ 0 MB (pure code reorganization + small API addition).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="target-file">src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</file>
+    <file purpose="document-model">src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs</file>
+    <file purpose="search-options">src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs</file>
+    <file purpose="existing-di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</file>
+    <file purpose="existing-tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagIndexingPipelineTests.cs</file>
+    <file purpose="canonical-index-schema">infrastructure/ai-search/spaarke-knowledge-index-v2.json</file>
+    <file purpose="new-index-schema-task-001">infrastructure/ai-search/spaarke-session-files.json</file>
+    <file purpose="bff-extensions-constraints">.claude/constraints/bff-extensions.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="sibling-task">projects/spaarke-ai-platform-unification-r5/tasks/001-provision-session-files-index.poml</file>
+    <file purpose="sibling-task">projects/spaarke-ai-platform-unification-r5/tasks/002-extend-ragsearchoptions-sessionid.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-014">Every document written to `spaarke-session-files` MUST carry BOTH `tenantId` AND `sessionId`. Both fields MUST be set on the indexed payload — never null, never empty, never default. Failure to populate either is a defect.</constraint>
+    <constraint source="ADR-010">DI minimalism — `RagIndexingPipeline` remains a concrete singleton registered conditionally inside `AiModule.cs` per existing pattern (AIPL-013). ZERO new top-level `Program.cs` lines. NO new interface introduced — extend the concrete sealed class additively.</constraint>
+    <constraint source="ADR-013">All R5 endpoints + services in BFF only. This task adds NO new endpoint and NO new service — it extends an existing service's API surface.</constraint>
+    <constraint source="ADR-018">R5 introduces NO new feature flags. The session-files write path is selected by call-site parameter, NOT by a `SessionFiles:Enabled` flag. Kill-switch coverage inherits from existing `DocumentIntelligence:Enabled` gate around the pipeline registration.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — verify publish-size delta per task. Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report absolute size + delta vs prior baseline in task notes. Expected ≤ +0.1 MB (pure code extension).</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 (Reuse Mandate)">MUST extend existing `RagIndexingPipeline` — MUST NOT build a parallel `SessionFilesIndexingPipeline`, MUST NOT introduce a new `IIndexingPipeline` interface, MUST NOT duplicate the chunking/embedding loop. Cite this constraint in the implementation PR description.</constraint>
+    <constraint source="R5 CLAUDE.md §3.2">NO new feature flags. Target index is a CALL-SITE PARAMETER, not a configuration toggle.</constraint>
+    <constraint source="R5 CLAUDE.md §3.3">If a new DI registration becomes necessary (it should NOT for this task — pipeline is already registered), it MUST be inside an existing feature module. ZERO new `Program.cs` lines.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6">Per-task BFF publish-size verification mandatory. Report absolute + delta in task notes.</constraint>
+    <constraint source="R5 CLAUDE.md §3.7">Tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagIndexingPipelineTests.cs` MUST be added/updated for the new write path. Existing tests MUST continue to pass without modification (back-compat).</constraint>
+    <constraint source="spec.md FR-02 / NFR-03">Multi-tenant + multi-session isolation — `tenantId` + `sessionId` filters on every session-files index document; both fields drive query-time isolation in task 002.</constraint>
+    <constraint source="spec.md NFR-02">Files &lt; 500 tokens skip chunking (single-chunk index). Document this behavior in the new path; default behavior should produce one indexed document per file when content is small.</constraint>
+    <constraint source="project (back-compat)">Existing `IndexDocumentAsync(ParsedDocument, documentId, tenantId, fileName, speFileId, ct)` signature MUST remain unchanged. All current call sites in `KnowledgeBaseEndpoints.cs`, RagIndexingJobHandler (Service Bus path), Insights universal-ingest (`FilesIndexIngestDocumentSource`), and any other discovered call site must compile + behave identically without source modification.</constraint>
+    <constraint source="project (idempotency)">The new session-files write path MUST be idempotent per ADR-004 pattern used by the existing path — re-indexing the same `(documentId, sessionId)` MUST replace prior chunks, not duplicate them.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Per BFF additions governance — this task does NOT add a new endpoint or new package; it extends an existing service's surface area in place. No Placement Justification section required (in-place extension), but PR description MUST cite the reuse-mandate fulfillment.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-ai-search/indexing-pipeline-parameterization</topic>
+    <files>
+      <file>docs/architecture/rag-architecture.md</file>
+      <file>docs/adr/ADR-014-ai-caching-tenant-isolation.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagIndexingPipelineTests.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing pipeline shape (reference)" location="src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs">
+        The existing `IndexDocumentAsync` method: (1) chunks at two granularities
+        (KnowledgeChunkingOptions = 2048ch/200 overlap; DiscoveryChunkingOptions =
+        4096ch/400 overlap); (2) embeds via `_openAiClient.GenerateEmbeddingAsync`
+        with a `SemaphoreSlim(MaxConcurrentEmbeddings = 16)`; (3) deletes stale
+        chunks in parallel via `_ragService.DeleteBySourceDocumentAsync` (knowledge)
+        + `DeleteDiscoveryChunksAsync` (discovery direct via `SearchClient`); (4)
+        builds `KnowledgeDocument[]` via `BuildKnowledgeDocuments(...)`; (5) uploads
+        via `_ragService.IndexDocumentsBatchAsync` (knowledge) +
+        `UploadDiscoveryDocumentsAsync` (discovery direct). The new session-files
+        path REUSES steps 1 (single granularity — knowledge chunk settings), 2
+        (embedding), and 4 (build docs with extra `SessionId` field). It uses a NEW
+        helper `DeleteSessionFileChunksAsync` mirroring `DeleteDiscoveryChunksAsync`
+        but filtering on `documentId + tenantId + sessionId`. It uses a NEW helper
+        `UploadSessionFileDocumentsAsync` mirroring `UploadDiscoveryDocumentsAsync`
+        but targeting `_aiSearchOptions.SessionFilesIndexName` (NEW property on
+        `AiSearchOptions` per this task — see Step 4).
+      </pattern>
+      <pattern name="KnowledgeDocument shape extension" location="src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs">
+        `KnowledgeDocument` currently carries `TenantId` but NOT `SessionId`. Add a
+        nullable `SessionId` property (NOT serialized when null — use
+        `JsonIgnore(Condition = WhenWritingNull)` or equivalent) so existing
+        knowledge-index + discovery-index writes are unchanged (back-compat) and
+        session-files writes populate it. Confirm the matching `sessionId` field
+        on the index JSON (task 001 owns the schema; field name MUST align). If
+        the schema field is `Edm.String` filterable, the model property is
+        `string?` with a `[SimpleField]` or `[SearchableField]` attribute matching
+        the existing `TenantId` shape.
+      </pattern>
+      <pattern name="AiSearchOptions extension" location="src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs">
+        Add `SessionFilesIndexName` (`string`, init-only, default
+        `"spaarke-session-files"`) following the same convention as
+        `KnowledgeIndexName`, `DiscoveryIndexName`, `FilesIndexName`,
+        `InsightsIndexName`. Admin-overridable via config in case the index name
+        differs per environment (matches the precedent set by `FilesIndexName`).
+      </pattern>
+      <pattern name="DI registration (no change required)" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs">
+        `RagIndexingPipeline` is registered conditionally inside the
+        `if (documentIntelligenceEnabled)` block as a concrete singleton (AIPL-013;
+        line 198 in current revision). This task does NOT touch the registration —
+        the new path is exposed via additive method on the existing concrete class.
+        Per R5 CLAUDE.md §3.3 zero new top-level lines + no new services to
+        register.
+      </pattern>
+      <pattern name="Test conventions" location="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagIndexingPipelineTests.cs">
+        Existing tests use mocked `ITextChunkingService`, `IRagService`,
+        `SearchIndexClient`, `IOpenAiClient`. Add new tests in the same file with
+        the `IndexSessionFile_*` naming prefix; mock the `SearchClient` returned by
+        `_searchIndexClient.GetSearchClient(SessionFilesIndexName)` to assert (a)
+        every uploaded document carries `TenantId` AND `SessionId`; (b) the
+        knowledge index client (`IRagService.IndexDocumentsBatchAsync`) is NEVER
+        called on this path; (c) the discovery index client is NEVER called on
+        this path; (d) idempotency — re-indexing the same `(documentId, sessionId)`
+        calls the session-files delete-then-upload sequence.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice. Users upload up
+      to 20 files per chat session; those files must be chunked, embedded, and
+      indexed into the new `spaarke-session-files` Azure AI Search index (provisioned
+      by task 001) so the RAG search path (extended by task 002 with a `sessionId`
+      filter) can scope grounded Q&amp;A retrieval and summarization to a single
+      session. The indexing work is owned by THIS task.
+
+      Design rationale (design.md §4.2, §4.4; spec.md Open Decisions): a dedicated
+      session-files index — rather than extending `spaarke-knowledge-index-v2` with
+      a `sessionId` filter — gives clean isolation, simple eviction (task 007's
+      cleanup `IHostedService`), and avoids polluting customer-corpus query metrics
+      with ephemeral session traffic. The pipeline that writes to it is the SAME
+      pipeline that writes the customer corpus (per R5 reuse mandate) — call sites
+      choose the target.
+    </background>
+    <dependencies>
+      <dependency task="001" status="dependency">
+        Task 001 provisions the `spaarke-session-files` Azure AI Search index on
+        Spaarke Dev and authors `infrastructure/ai-search/spaarke-session-files.json`
+        with the exact schema (including the `sessionId` field shape) that THIS task
+        must populate. This task can be authored against task 001's schema spec; the
+        actual end-to-end write test requires task 001's index to exist on Spaarke
+        Dev.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 002 (D1-02) extends `RagSearchOptions` with `SessionId` filter and
+        routes `RagService.SearchAsync` to read FROM this new index. Together with
+        task 003, the read-write pair lights up the session-files index.</item>
+      <item>Task 007 (D1-07) is the cleanup `IHostedService` that DELETES from this
+        index on session-end; it uses the same `SearchClient` /
+        `SessionFilesIndexName` plumbing this task introduces. Task 007 depends on
+        003.</item>
+      <item>Task 012 (D2-03) `SessionSummarizeOrchestrator` is the primary
+        consumer of `IndexSessionFileAsync` — invoked when a chat session uploads
+        a file via the chat-pane file-chip flow.</item>
+      <item>Existing knowledge-base reindex endpoint
+        (`KnowledgeBaseEndpoints.cs` → `RagIndexingJobHandler` via Service Bus
+        per ADR-001) is the canonical customer-corpus write call site. Its
+        behavior MUST be unchanged by this task.</item>
+      <item>Insights universal-ingest (`FilesIndexIngestDocumentSource`) reads from
+        `spaarke-files-index`; not directly affected, but useful as a sibling
+        per-index-name routing pattern.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, create handoff summary and request
+      `/compact`. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: BFF code change (Sprk.Bff.Api/Services/Ai/) + ADR-014 tenant
+         isolation contract + new test obligation + downstream blocker for
+         tasks 007 + 012. Per CLAUDE.md §8 FULL applies.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0–10 below; quality gates at 9.5.
+      Proceeding with Step 0...
+      ```
+    </step>
+
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 003 status is 🔲, dependencies
+      are `001`, parallel-safe = ✅ (with 002). Verify task 001 status is ✅ (or
+      that schema authoring in task 001 is far enough along to confirm the
+      `sessionId` field name + type). Read `current-task.md` to verify no
+      conflicting R5 task is in flight. Read project README for project status.
+    </step>
+
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+      - Read `RagIndexingPipeline.cs` end-to-end to confirm the current shape
+        (sealed partial class, concrete singleton, parallel knowledge+discovery
+        writes, `BuildKnowledgeDocuments` helper, parallel delete helpers).
+      - Read `KnowledgeDocument.cs` to confirm property shape + JSON serialization
+        attributes.
+      - Read `AiSearchOptions.cs` to confirm the precedent for new
+        `*IndexName` properties (`FilesIndexName`, `InsightsIndexName`).
+      - Read `RagIndexingPipelineTests.cs` to understand mock conventions.
+      - Read the new task-001 `spaarke-session-files.json` schema file (or task
+        001's POML if the JSON is not yet authored) to confirm the EXACT
+        `sessionId` field name (likely `sessionId` Edm.String filterable=true).
+      - Read ADR-014 to internalize tenant isolation contract.
+      - Read R5 CLAUDE.md §3.1 (reuse mandate) + §3.6 (publish-size).
+    </step>
+
+    <step order="3" name="Locate Existing Call Sites">
+      Search `src/server/api/Sprk.Bff.Api/` for all call sites of
+      `RagIndexingPipeline.IndexDocumentAsync` (grep for `IndexDocumentAsync` +
+      `RagIndexingPipeline`). Confirmed call sites from initial discovery:
+      - `KnowledgeBaseEndpoints.cs` (via `JobSubmissionService` → Service Bus →
+        `RagIndexingJobHandler` per ADR-001)
+      - Any direct test invocations
+      Build a list. ALL of these call sites MUST continue to compile and behave
+      identically after this task. Document the call-site list in task notes.
+    </step>
+
+    <step order="4" name="Plan Implementation — API Shape Decision">
+      Decide between (a) new method `IndexSessionFileAsync(ParsedDocument,
+      documentId, tenantId, sessionId, fileName, speFileId, ct)` OR (b) overload
+      of `IndexDocumentAsync` with an `IndexingTarget` enum parameter. RECOMMENDED:
+      option (a) — a dedicated new method. Rationale: (i) `sessionId` is REQUIRED
+      for session-files writes (validated by `ArgumentException.ThrowIfNullOrEmpty`)
+      but MUST NOT be present on customer-corpus writes; encoding it as a separate
+      method removes a runtime branch + makes the call site intent explicit; (ii)
+      back-compat is mechanically guaranteed — the existing `IndexDocumentAsync`
+      signature is literally untouched; (iii) cleaner test surface — one test class
+      per method shape; (iv) follows the existing pattern where the pipeline owns
+      multiple public methods (knowledge + discovery internally; now add a session
+      method). Record the decision in task notes with the rationale.
+    </step>
+
+    <step order="5" name="Implement — AiSearchOptions Extension">
+      Add `SessionFilesIndexName` property to
+      `src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs`:
+
+      ```csharp
+      /// &lt;summary&gt;
+      /// Name of the R5 session-scoped files index (provisioned by R5 task 001
+      /// per spec.md §4.2 + ADR-014). Holds chunked + embedded content for files
+      /// uploaded to a chat session. Documents carry both `tenantId` (per ADR-014)
+      /// and `sessionId` (for session-scoped retrieval + eviction). Read by R5
+      /// task 002 (RagService.SearchAsync session-scoped path); swept by R5 task
+      /// 007 (SessionFilesCleanupJob). Default matches infra schema; admin-
+      /// overridable per environment.
+      /// &lt;/summary&gt;
+      public string SessionFilesIndexName { get; init; } = "spaarke-session-files";
+      ```
+
+      Confirm no `appsettings.*.json` override is needed for Spaarke Dev (default
+      matches task 001's provisioned index name).
+    </step>
+
+    <step order="6" name="Implement — KnowledgeDocument SessionId Property">
+      Add a nullable `SessionId` property to
+      `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` mirroring the
+      `TenantId` attribute shape. Field MUST be:
+      - `string?` (nullable — null on knowledge + discovery index writes; set on
+        session-files writes)
+      - Serialized only when non-null (use the JSON serialization attribute
+        convention already in use — likely `[JsonPropertyName("sessionId")]` +
+        `[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]`)
+      - Marked with the Azure Search SDK attribute that matches the schema field
+        from task 001's `spaarke-session-files.json` (likely `[SimpleField(IsFilterable
+        = true, IsFacetable = true)]` matching the `tenantId` attribute pattern)
+
+      Verify by visual diff that `TenantId`'s attribute set is mirrored exactly
+      with the appropriate JSON name. If `KnowledgeDocument` is shared across
+      indexes whose schemas differ on `sessionId` presence, Azure Search SDK
+      ignores absent fields on documents — so a nullable property with
+      WhenWritingNull is safe for the knowledge + discovery indexes that lack
+      `sessionId`.
+    </step>
+
+    <step order="7" name="Implement — `IndexSessionFileAsync` Method">
+      Add the new public method to `RagIndexingPipeline.cs`:
+
+      ```csharp
+      public async Task&lt;PipelineIndexingResult&gt; IndexSessionFileAsync(
+          ParsedDocument document,
+          string documentId,
+          string tenantId,
+          string sessionId,
+          string fileName,
+          string speFileId,
+          CancellationToken cancellationToken = default)
+      ```
+
+      Implementation outline (mirrors `IndexDocumentAsync` but single-granularity
+      + single-index):
+      1. `ArgumentNullException.ThrowIfNull(document)`;
+         `ArgumentException.ThrowIfNullOrEmpty(documentId)`;
+         `ThrowIfNullOrEmpty(tenantId)`; `ThrowIfNullOrEmpty(sessionId)` (NEW —
+         ADR-014 contract);
+         `ThrowIfNullOrEmpty(speFileId)`.
+      2. Stopwatch + structured log "Starting session-files indexing for
+         documentId={DocumentId} tenantId={TenantId} sessionId={SessionId}
+         fileName={FileName}".
+      3. Chunk text at knowledge granularity ONLY (single
+         `KnowledgeChunkingOptions` call — no discovery chunks). Per NFR-02:
+         files &lt; 500 tokens skip chunking (single-chunk index) — confirm the
+         existing `ITextChunkingService` already produces a single chunk when
+         input is small, or explicitly fall back to a single chunk if
+         `document.Text` is below threshold.
+      4. Generate embeddings via existing `GenerateEmbeddingsInBatchesAsync`.
+      5. Get the session-files `SearchClient` via
+         `_searchIndexClient.GetSearchClient(_aiSearchOptions.SessionFilesIndexName)`.
+      6. Delete stale chunks for `(documentId, tenantId, sessionId)` using a new
+         private helper `DeleteSessionFileChunksAsync` modeled on
+         `DeleteDiscoveryChunksAsync`; filter is
+         `documentId eq '{escaped}' and tenantId eq '{escaped}' and sessionId eq '{escaped}'`.
+      7. Build `KnowledgeDocument[]` via the existing `BuildKnowledgeDocuments`
+         helper, but pass an additional `sessionId` parameter (extend the helper
+         to accept optional `string? sessionId = null` — default null preserves
+         customer-corpus shape exactly). In the loop, set
+         `docs[i].SessionId = sessionId`.
+      8. Upload via a new private helper `UploadSessionFileDocumentsAsync` modeled
+         on `UploadDiscoveryDocumentsAsync` (batched 1000;
+         `MergeOrUploadDocumentsAsync`).
+      9. Stopwatch.Stop + structured log
+         `IndexingCompleted` variant (EventId 5202 — new) including `SessionId` in
+         the message template. Add the matching `LoggerMessage` partial method
+         `LogSessionFileIndexingCompleted(string tenantId, string sessionId,
+         string documentId, int chunksIndexed, long elapsedMs)`. Match the
+         existing error-path log shape with EventId 5203
+         `LogSessionFileIndexingFailed`.
+      10. Return `PipelineIndexingResult { DocumentId, KnowledgeChunksIndexed =
+          chunksIndexed, DiscoveryChunksIndexed = 0, DurationMs }`. (Keep the
+          existing result shape; discovery count = 0 on this path. If a follow-on
+          task wants a dedicated `SessionFilesChunksIndexed` field, add it
+          additively then — not in this task.)
+
+      Add the helper extension to `BuildKnowledgeDocuments`:
+
+      ```csharp
+      private static IReadOnlyList&lt;KnowledgeDocument&gt; BuildKnowledgeDocuments(
+          IReadOnlyList&lt;TextChunk&gt; chunks,
+          IReadOnlyList&lt;ReadOnlyMemory&lt;float&gt;&gt; embeddings,
+          string documentId,
+          string tenantId,
+          string fileName,
+          string speFileId,
+          string chunkIdSuffix = "k",
+          string? sessionId = null)        // NEW — additive trailing optional
+      ```
+
+      Inside the loop set `SessionId = sessionId` on each `KnowledgeDocument`.
+      Default-null preserves customer-corpus call signatures unchanged.
+
+      Add a new chunk-id suffix `"s"` for session-files so chunk IDs are
+      distinguishable in logs / diagnostics: pass `chunkIdSuffix: "s"` from the
+      new method.
+    </step>
+
+    <step order="8" name="Implement — Tests">
+      Update `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagIndexingPipelineTests.cs`
+      with the new test cases. Use existing mock conventions
+      (`Mock&lt;ITextChunkingService&gt;`, `Mock&lt;IRagService&gt;`,
+      `Mock&lt;SearchIndexClient&gt;`, `Mock&lt;IOpenAiClient&gt;`):
+
+      1. `IndexSessionFile_emits_tenantId_and_sessionId_on_every_doc` — call
+         `IndexSessionFileAsync` with 3 chunks; capture the
+         `MergeOrUploadDocumentsAsync` invocation; assert every document in the
+         batch has `TenantId == "test-tenant"` AND `SessionId == "test-session-001"`.
+      2. `IndexSessionFile_does_not_call_knowledge_or_discovery_indexes` — verify
+         `IRagService.IndexDocumentsBatchAsync` is `Times.Never()`;
+         `_searchIndexClient.GetSearchClient(DiscoveryIndexName)` is `Never()`;
+         `_ragService.DeleteBySourceDocumentAsync` is `Never()`.
+      3. `IndexSessionFile_calls_GetSearchClient_with_SessionFilesIndexName` —
+         assert `_searchIndexClient.GetSearchClient("spaarke-session-files")` is
+         called exactly once.
+      4. `IndexSessionFile_throws_on_missing_sessionId` — pass `sessionId: ""`;
+         assert `ArgumentException` (ADR-014 contract).
+      5. `IndexSessionFile_throws_on_missing_tenantId` — pass `tenantId: ""`;
+         assert `ArgumentException`.
+      6. `IndexSessionFile_idempotency_deletes_before_upload` — verify the delete
+         filter is built with `documentId AND tenantId AND sessionId` (all three
+         predicates).
+      7. `IndexDocumentAsync_unchanged_behavior_regression` — explicit regression
+         test that the existing `IndexDocumentAsync` call writes to BOTH knowledge
+         and discovery indexes, populates `TenantId` but leaves `SessionId` null,
+         and produces the same `PipelineIndexingResult` shape as before this task.
+         (Likely already covered by existing tests; if so, add a comment
+         documenting that the existing tests stand as the regression suite.)
+
+      Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` and confirm all tests pass
+      including the new ones. Existing tests must NOT be modified beyond
+      additive new test methods.
+    </step>
+
+    <step order="9" name="Verify — Build + Publish Size + CVE">
+      1. Run `dotnet build src/server/api/Sprk.Bff.Api/` — confirm zero new
+         warnings.
+      2. Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — confirm green.
+      3. Per CLAUDE.md §10 + R5 CLAUDE.md §3.6: run
+         `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.
+         Measure compressed output size. Report absolute MB + delta vs prior
+         baseline (current baseline ~45.65 MB; expected ≤ +0.1 MB for this task).
+         If delta ≥ +5 MB → ESCALATE per CLAUDE.md §10.
+      4. Run `dotnet list package --vulnerable --include-transitive` and confirm
+         zero new HIGH-severity CVEs vs prior baseline.
+      5. Record all measurements in task notes
+         (`notes/task-003-verification-evidence.md`).
+    </step>
+
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run the `code-review` skill against the modified files
+      (`RagIndexingPipeline.cs`, `KnowledgeDocument.cs`, `AiSearchOptions.cs`,
+      `RagIndexingPipelineTests.cs`). Run the `adr-check` skill against the same
+      files; verify:
+      - ADR-014 (tenant isolation): `sessionId` required + populated; `tenantId`
+        unchanged behavior on existing path
+      - ADR-010 (DI minimalism): zero new top-level lines; pipeline registration
+        in `AiModule.cs` unchanged
+      - ADR-018 (Flag Scope Discipline): zero new feature flags
+      - ADR-029 (BFF publish hygiene): publish-size measured + reported
+      - ADR-013 (BFF-only): in-BFF extension; no AI service extraction
+      - Reuse mandate (R5 CLAUDE.md §3.1): single pipeline; no parallel orchestrator
+
+      Both quality gates MUST pass before marking the task complete. Address
+      every BLOCKER finding before proceeding to Step 10. Document any non-blocker
+      observations in task notes.
+    </step>
+
+    <step order="10" name="Document + Complete">
+      1. Update this task POML's `&lt;status&gt;` to `complete`; fill
+         `&lt;actual-effort&gt;`, `&lt;started&gt;`, `&lt;completed&gt;`.
+      2. Update `tasks/TASK-INDEX.md`: 003 🔲 → ✅ in the Phase 1 table; also
+         confirm 002 status (sibling P1-G2 task) for index hygiene.
+      3. Reset `current-task.md` for the next pending task per CLAUDE.md §7
+         (likely task 004 / 005 in P1-G3 if those haven't started; otherwise the
+         next unblocked task per TASK-INDEX.md).
+      4. Write a concise PR description summary including: (a) reuse-mandate
+         fulfillment citation; (b) call-site list confirming back-compat;
+         (c) publish-size delta + CVE-scan result; (d) quality-gate passes.
+      5. Note any cross-task signals for task 007 (cleanup job — same
+         `SessionFilesIndexName` + same `(documentId, tenantId, sessionId)`
+         filter shape) and task 012 (`SessionSummarizeOrchestrator` — calls
+         `IndexSessionFileAsync` per file in `ChatSession.UploadedFiles`).
+      6. Report task completion to the user.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF + run unit tests + publish + CVE scan (`build`, `test`, `publish`, `list package --vulnerable`)</tool>
+    <tool name="git">Stage + commit changes on the R5 branch; main session handles wave commit</tool>
+    <tool name="adr-check">Quality-gate skill — runs at Step 9.5</tool>
+    <tool name="code-review">Quality-gate skill — runs at Step 9.5</tool>
+    <tool name="context-handoff">Checkpointing per CLAUDE.md §5 (mandatory every 3 steps for FULL rigor)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs (extend with `IndexSessionFileAsync` method + private helpers + structured log events)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs (add nullable `SessionId` property with JSON + Azure Search attributes)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs (add `SessionFilesIndexName` property)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/RagIndexingPipelineTests.cs (add 6–7 new test methods covering session-files write path + dual-path isolation + idempotency)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 003 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/003-parameterize-ragindexingpipeline.poml (status: complete)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-003-verification-evidence.md (call-site list, API-shape decision rationale, build + test output, publish-size measurement + delta, CVE-scan result, quality-gate findings)</output>
+    <output type="report">Task completion report (per task-execute template Step 6) including cross-task signals to tasks 007 + 012</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`RagIndexingPipeline.cs` exposes a new public method `IndexSessionFileAsync(ParsedDocument, documentId, tenantId, sessionId, fileName, speFileId, ct)` that compiles, is well-XML-documented, and follows the existing pipeline's logging + error-handling conventions.</criterion>
+    <criterion testable="true">The existing public method `IndexDocumentAsync(ParsedDocument, documentId, tenantId, fileName, speFileId, ct)` signature is BYTE-FOR-BYTE unchanged. All current call sites (KnowledgeBaseEndpoints + Service Bus + Insights ingest) compile without source modification.</criterion>
+    <criterion testable="true">Every document written by `IndexSessionFileAsync` carries BOTH `TenantId` AND `SessionId` populated (non-null, non-empty), verified by unit test `IndexSessionFile_emits_tenantId_and_sessionId_on_every_doc`.</criterion>
+    <criterion testable="true">`IndexSessionFileAsync` writes ONLY to `_aiSearchOptions.SessionFilesIndexName` — it does NOT call `IRagService.IndexDocumentsBatchAsync` (knowledge index) and does NOT call the discovery index `SearchClient`. Verified by unit test `IndexSessionFile_does_not_call_knowledge_or_discovery_indexes`.</criterion>
+    <criterion testable="true">`IndexSessionFileAsync` throws `ArgumentException` when `sessionId` is null or empty. Verified by unit test `IndexSessionFile_throws_on_missing_sessionId`. Same for `tenantId` per ADR-014 contract.</criterion>
+    <criterion testable="true">`IndexSessionFileAsync` is idempotent — the same `(documentId, tenantId, sessionId)` triple invoked twice results in the second invocation deleting prior chunks before re-uploading. Verified by unit test `IndexSessionFile_idempotency_deletes_before_upload`.</criterion>
+    <criterion testable="true">`AiSearchOptions.SessionFilesIndexName` defaults to `"spaarke-session-files"` matching task 001's provisioned index name; admin-overridable via config (precedent: `FilesIndexName`).</criterion>
+    <criterion testable="true">`KnowledgeDocument.SessionId` is a nullable string (`string?`), null by default, serialized to JSON only when non-null, and tagged with the Azure Search SDK attribute mirroring `TenantId`'s shape. Existing knowledge + discovery index writes do NOT emit `sessionId` (back-compat).</criterion>
+    <criterion testable="true">`RagIndexingPipeline` DI registration in `AiModule.cs` is unchanged in shape — pipeline remains a conditional concrete singleton gated on `DocumentIntelligence:Enabled`. ZERO new top-level `Program.cs` lines added.</criterion>
+    <criterion testable="true">NO new feature flag introduced (per R5 CLAUDE.md §3.2). The session-files write path is selected by call-site invocation (`IndexSessionFileAsync` vs `IndexDocumentAsync`), not by a configuration toggle.</criterion>
+    <criterion testable="true">All existing tests in `RagIndexingPipelineTests.cs` pass WITHOUT modification (back-compat regression). New tests (6–7 added per Step 8) all pass.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with zero new warnings.</criterion>
+    <criterion testable="true">BFF publish-size measured per CLAUDE.md §10 + R5 CLAUDE.md §3.6. Absolute size + delta vs prior baseline recorded in task notes. Delta ≤ +0.5 MB compressed (expected ≈ +0.05–0.1 MB for this small additive code change). Total ≤ 47 MB per spec NFR-07.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` reports zero new HIGH-severity CVEs vs prior baseline.</criterion>
+    <criterion testable="true">`code-review` quality gate passes at Step 9.5 with no BLOCKER findings.</criterion>
+    <criterion testable="true">`adr-check` quality gate passes at Step 9.5 confirming compliance with ADR-014 (tenant isolation), ADR-010 (DI minimalism), ADR-018 (Flag Scope Discipline), ADR-029 (publish hygiene), ADR-013 (BFF-only), and R5 reuse mandate.</criterion>
+    <criterion testable="true">PR description / task notes cite the reuse-mandate fulfillment (extended existing `RagIndexingPipeline`; did NOT build parallel `SessionFilesIndexingPipeline`) per R5 CLAUDE.md §3.1.</criterion>
+  </acceptance-criteria>
+</task>

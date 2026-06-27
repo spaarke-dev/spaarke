@@ -5,30 +5,33 @@
  * All requests use `bffApiCall` from bff-client.ts which handles Azure AD B2B
  * authentication (MSAL) and Bearer token injection.
  *
- * BFF routes used (planned — require BFF implementation):
- *   GET  /api/v1/external/projects                           → list accessible projects
- *   GET  /api/v1/external/projects/{id}                     → single project
- *   GET  /api/v1/external/projects/{id}/documents           → project documents
- *   GET  /api/v1/external/projects/{id}/events              → project events
- *   GET  /api/v1/external/projects/{id}/contacts            → project contacts
- *   GET  /api/v1/external/projects/{id}/organizations       → project organizations
- *   POST /api/v1/external/projects/{id}/events              → create event
- *   PATCH /api/v1/external/events/{id}                      → update event
+ * BFF routes used:
+ *   GET   /api/v1/external/projects                           → list accessible projects
+ *   GET   /api/v1/external/projects/{id}                      → single project
+ *   GET   /api/v1/external/projects/{id}/documents            → project documents
+ *   GET   /api/v1/external/projects/{id}/events               → project events
+ *   GET   /api/v1/external/projects/{id}/todos                → project to-dos (NEW; replaces /events?todoflag=true)
+ *   GET   /api/v1/external/projects/{id}/contacts             → project contacts
+ *   GET   /api/v1/external/projects/{id}/organizations        → project organizations
+ *   POST  /api/v1/external/projects/{id}/events               → create event
+ *   POST  /api/v1/external/projects/{id}/todos                → create to-do (NEW)
+ *   PATCH /api/v1/external/events/{id}                        → update event
+ *   PATCH /api/v1/external/todos/{id}                         → update to-do (NEW)
  *
+ * Contract change (R3 task 007): the legacy event-as-todo boolean toggle was
+ * removed; to-dos are now first-class `sprk_todo` records with
+ * regarding-project resolver fields (ADR-024).
+ * See: projects/smart-todo-decoupling-r3/notes/external-access-contract-change.md
  * See: docs/architecture/external-access-architecture.md
  */
 
-// TODO: Data-read endpoints are pending BFF implementation.
-// These functions call planned BFF routes under /api/v1/external/*
-// that serve project data using managed-identity Dataverse access.
-// Once BFF GET endpoints are added, no changes are needed here.
-import { bffApiCall } from "../auth/bff-client";
+import { bffApiCall } from '../auth/bff-client';
 
 // ---------------------------------------------------------------------------
 // Re-export ApiError for module consumers
 // ---------------------------------------------------------------------------
 
-export { ApiError } from "../types";
+export { ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
 // OData entity type interfaces
@@ -75,11 +78,16 @@ export interface ODataDocument {
   /** ISO date string — record created */
   createdon?: string | null;
   /** Display name of the record creator */
-  "createdby@OData.Community.Display.V1.FormattedValue"?: string | null;
+  'createdby@OData.Community.Display.V1.FormattedValue'?: string | null;
 }
 
 /**
  * An Event record (sprk_event EntitySet: sprk_events).
+ *
+ * Events are now strictly calendar / project-timeline items. The legacy
+ * event-as-todo boolean toggle was removed in R3 task 007 — to-dos are
+ * first-class `sprk_todo` records (see `ODataTodo` below).
+ *
  * Fields must be listed in the `Webapi/sprk_event/fields` site setting.
  */
 export interface ODataEvent {
@@ -91,12 +99,62 @@ export interface ODataEvent {
   sprk_duedate?: string | null;
   /** Event status option set value */
   sprk_status?: number | null;
-  /** Whether this event is flagged as a To-Do item */
-  sprk_todoflag?: boolean | null;
   /** ISO date string — record created */
   createdon?: string | null;
   /** Lookup ID of the owning project */
   _sprk_projectid_value?: string | null;
+}
+
+/**
+ * A To-Do record (sprk_todo EntitySet: sprk_todos).
+ *
+ * NEW in R3 task 007 — replaces the legacy event-as-todo boolean-toggle
+ * pattern. The BFF synthesises this DTO from `sprk_todo` records scoped to
+ * the regarding project via `_sprk_regardingproject_value` plus ADR-024
+ * polymorphic-resolver fields.
+ *
+ * Status values (FR-24):
+ *   1         = Open
+ *   659490001 = In Progress
+ *   2         = Completed
+ *   659490002 = Dismissed
+ *
+ * Column values (sprk_todocolumn):
+ *   100000000 = Today
+ *   100000001 = Tomorrow
+ *   100000002 = Future
+ */
+export interface ODataTodo {
+  /** Primary key — Dataverse GUID */
+  sprk_todoid: string;
+  /** To-do display name (title) */
+  sprk_name: string;
+  /** Rich notes / description (memo up to 100000 chars) */
+  sprk_notes?: string | null;
+  /** ISO date string — due date */
+  sprk_duedate?: string | null;
+  /** Priority score 0-100 */
+  sprk_priorityscore?: number | null;
+  /** Effort score 0-100 */
+  sprk_effortscore?: number | null;
+  /** Kanban column: 100000000=Today / 100000001=Tomorrow / 100000002=Future */
+  sprk_todocolumn?: number | null;
+  /** Whether the column assignment is pinned (locks against auto-shifting) */
+  sprk_todopinned?: boolean | null;
+  /** Entity state: 0=Active / 1=Inactive */
+  statecode?: number | null;
+  /** Status reason: 1=Open / 659490001=In Progress / 2=Completed / 659490002=Dismissed */
+  statuscode?: number | null;
+  /** ISO date string — record created */
+  createdon?: string | null;
+  /** Regarding-project lookup value (GUID) */
+  _sprk_regardingproject_value?: string | null;
+  /** ADR-024 resolver: regarding record GUID */
+  sprk_regardingrecordid?: string | null;
+  /** ADR-024 resolver: regarding record display name */
+  sprk_regardingrecordname?: string | null;
+  /** ADR-024 resolver: regarding record deep-link URL (e.g. main.aspx?...) */
+  sprk_regardingrecordurl?: string | null;
 }
 
 /**
@@ -151,9 +209,9 @@ export interface ODataOrganization {
  * The Web API always wraps collection results in `{ "@odata.context": "...", "value": [...] }`.
  */
 interface ODataCollectionResponse<T> {
-  "@odata.context"?: string;
+  '@odata.context'?: string;
   value: T[];
-  "@odata.nextLink"?: string;
+  '@odata.nextLink'?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,7 +274,7 @@ function buildQueryString(options: ODataQueryOptions): string {
     params.push(`$top=${options.$top}`);
   }
 
-  return params.length > 0 ? `?${params.join("&")}` : "";
+  return params.length > 0 ? `?${params.join('&')}` : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -230,10 +288,7 @@ function buildQueryString(options: ODataQueryOptions): string {
  * @param bffPath  BFF API path (e.g. "/api/v1/external/projects")
  * @param _options OData query options — reserved for future BFF support
  */
-async function getCollection<T>(
-  bffPath: string,
-  _options: ODataQueryOptions = {}
-): Promise<T[]> {
+async function getCollection<T>(bffPath: string, _options: ODataQueryOptions = {}): Promise<T[]> {
   const response = await bffApiCall<ODataCollectionResponse<T>>(bffPath);
   return response.value ?? [];
 }
@@ -245,11 +300,7 @@ async function getCollection<T>(
  * @param id       Record GUID
  * @param _options OData query options — reserved for future BFF support
  */
-async function getById<T>(
-  bffPath: string,
-  id: string,
-  _options: ODataQueryOptions = {}
-): Promise<T> {
+async function getById<T>(bffPath: string, id: string, _options: ODataQueryOptions = {}): Promise<T> {
   return bffApiCall<T>(`${bffPath}/${id}`);
 }
 
@@ -260,12 +311,9 @@ async function getById<T>(
  * @param body     Record payload to create
  * @returns        The created record
  */
-async function createRecord<TBody, TResult = TBody>(
-  bffPath: string,
-  body: TBody
-): Promise<TResult> {
+async function createRecord<TBody, TResult = TBody>(bffPath: string, body: TBody): Promise<TResult> {
   return bffApiCall<TResult>(bffPath, {
-    method: "POST",
+    method: 'POST',
     body: JSON.stringify(body),
   });
 }
@@ -277,13 +325,9 @@ async function createRecord<TBody, TResult = TBody>(
  * @param id       Record GUID to update
  * @param body     Partial record payload with fields to update
  */
-async function updateRecord<TBody>(
-  bffPath: string,
-  id: string,
-  body: Partial<TBody>
-): Promise<void> {
+async function updateRecord<TBody>(bffPath: string, id: string, body: Partial<TBody>): Promise<void> {
   await bffApiCall<void>(`${bffPath}/${id}`, {
-    method: "PATCH",
+    method: 'PATCH',
     body: JSON.stringify(body),
   });
 }
@@ -301,17 +345,15 @@ async function updateRecord<TBody>(
  *
  * @param options  Optional OData query overrides ($filter, $top, etc.)
  */
-export async function getProjects(
-  options: ODataQueryOptions = {}
-): Promise<ODataProject[]> {
+export async function getProjects(options: ODataQueryOptions = {}): Promise<ODataProject[]> {
   const defaults: ODataQueryOptions = {
     $select:
-      "sprk_projectid,sprk_name,sprk_referencenumber,sprk_description,sprk_issecure,sprk_status,createdon,modifiedon",
-    $orderby: "sprk_name asc",
+      'sprk_projectid,sprk_name,sprk_referencenumber,sprk_description,sprk_issecure,sprk_status,createdon,modifiedon',
+    $orderby: 'sprk_name asc',
     $top: 100,
   };
 
-  return getCollection<ODataProject>("/api/v1/external/projects", { ...defaults, ...options });
+  return getCollection<ODataProject>('/api/v1/external/projects', { ...defaults, ...options });
 }
 
 /**
@@ -320,16 +362,13 @@ export async function getProjects(
  * @param projectId  Dataverse GUID of the sprk_project record
  * @param options    Optional OData query overrides ($select, $expand)
  */
-export async function getProjectById(
-  projectId: string,
-  options: ODataQueryOptions = {}
-): Promise<ODataProject> {
+export async function getProjectById(projectId: string, options: ODataQueryOptions = {}): Promise<ODataProject> {
   const defaults: ODataQueryOptions = {
     $select:
-      "sprk_projectid,sprk_name,sprk_referencenumber,sprk_description,sprk_issecure,sprk_status,createdon,modifiedon",
+      'sprk_projectid,sprk_name,sprk_referencenumber,sprk_description,sprk_issecure,sprk_status,createdon,modifiedon',
   };
 
-  return getById<ODataProject>("/api/v1/external/projects", projectId, { ...defaults, ...options });
+  return getById<ODataProject>('/api/v1/external/projects', projectId, { ...defaults, ...options });
 }
 
 // ---------------------------------------------------------------------------
@@ -345,15 +384,11 @@ export async function getProjectById(
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param options    Optional OData query overrides
  */
-export async function getDocuments(
-  projectId: string,
-  options: ODataQueryOptions = {}
-): Promise<ODataDocument[]> {
+export async function getDocuments(projectId: string, options: ODataQueryOptions = {}): Promise<ODataDocument[]> {
   const defaults: ODataQueryOptions = {
-    $select:
-      "sprk_documentid,sprk_name,sprk_documenttype,sprk_summary,_sprk_projectid_value,createdon",
+    $select: 'sprk_documentid,sprk_name,sprk_documenttype,sprk_summary,_sprk_projectid_value,createdon',
     $filter: `_sprk_projectid_value eq '${projectId}'`,
-    $orderby: "createdon desc",
+    $orderby: 'createdon desc',
     $top: 200,
   };
 
@@ -375,20 +410,17 @@ export async function getDocuments(
 /**
  * Retrieve all Events belonging to a Secure Project.
  *
- * Filters by the `_sprk_projectid_value` lookup column.
+ * Filters by the `_sprk_projectid_value` lookup column. Events no longer
+ * carry a to-do flag — see `getProjectTodos` for project to-do retrieval.
  *
  * @param projectId  Dataverse GUID of the parent sprk_project record
  * @param options    Optional OData query overrides
  */
-export async function getEvents(
-  projectId: string,
-  options: ODataQueryOptions = {}
-): Promise<ODataEvent[]> {
+export async function getEvents(projectId: string, options: ODataQueryOptions = {}): Promise<ODataEvent[]> {
   const defaults: ODataQueryOptions = {
-    $select:
-      "sprk_eventid,sprk_name,sprk_duedate,sprk_status,sprk_todoflag,_sprk_projectid_value,createdon",
+    $select: 'sprk_eventid,sprk_name,sprk_duedate,sprk_status,_sprk_projectid_value,createdon',
     $filter: `_sprk_projectid_value eq '${projectId}'`,
-    $orderby: "sprk_duedate asc",
+    $orderby: 'sprk_duedate asc',
     $top: 200,
   };
 
@@ -399,6 +431,35 @@ export async function getEvents(
   }
 
   return getCollection<ODataEvent>(`/api/v1/external/projects/${projectId}/events`, merged);
+}
+
+// ---------------------------------------------------------------------------
+// To-Do queries (NEW in R3 task 007 — replaces the legacy event-as-todo toggle)
+// ---------------------------------------------------------------------------
+
+/**
+ * Retrieve all To-Dos belonging to a Secure Project.
+ *
+ * Calls the BFF route `/api/v1/external/projects/{id}/todos`. The BFF
+ * resolves the regarding-project lookup server-side and returns DTOs
+ * with the ADR-024 resolver fields populated.
+ *
+ * Note: the BFF computes the `$select` server-side; client `$select`
+ * overrides are honoured but the field list is constrained to
+ * `ODataTodo` shape.
+ *
+ * @param projectId  Dataverse GUID of the parent sprk_project record
+ * @param options    Optional OData query overrides
+ */
+export async function getProjectTodos(projectId: string, options: ODataQueryOptions = {}): Promise<ODataTodo[]> {
+  const defaults: ODataQueryOptions = {
+    $orderby: 'sprk_duedate asc',
+    $top: 200,
+  };
+
+  const merged: ODataQueryOptions = { ...defaults, ...options };
+
+  return getCollection<ODataTodo>(`/api/v1/external/projects/${projectId}/todos`, merged);
 }
 
 // ---------------------------------------------------------------------------
@@ -418,18 +479,14 @@ export async function getEvents(
  * @param projectId  Dataverse GUID of the sprk_project record
  * @param options    Optional OData query overrides
  */
-export async function getContacts(
-  projectId: string,
-  options: ODataQueryOptions = {}
-): Promise<ODataContact[]> {
+export async function getContacts(projectId: string, options: ODataQueryOptions = {}): Promise<ODataContact[]> {
   const defaults: ODataQueryOptions = {
-    $select:
-      "contactid,fullname,firstname,lastname,emailaddress1,telephone1,jobtitle,_parentcustomerid_value",
+    $select: 'contactid,fullname,firstname,lastname,emailaddress1,telephone1,jobtitle,_parentcustomerid_value',
     // Filter contacts that have an active access record for this project.
     // The relationship is: contact → sprk_externalrecordaccess → sprk_project
     // We filter via the related entity navigation property.
     $filter: `sprk_externalrecordaccess_contact_contactid/any(a:a/_sprk_projectid_value eq '${projectId}' and a/statecode eq 0)`,
-    $orderby: "fullname asc",
+    $orderby: 'fullname asc',
     $top: 100,
   };
 
@@ -460,11 +517,10 @@ export async function getOrganizations(
   options: ODataQueryOptions = {}
 ): Promise<ODataOrganization[]> {
   const defaults: ODataQueryOptions = {
-    $select:
-      "accountid,name,websiteurl,telephone1,address1_city,address1_country",
+    $select: 'accountid,name,websiteurl,telephone1,address1_city,address1_country',
     // Filter accounts that have contacts with access to this project.
     $filter: `contact_customer_accounts/any(c:c/sprk_externalrecordaccess_contact_contactid/any(a:a/_sprk_projectid_value eq '${projectId}' and a/statecode eq 0))`,
-    $orderby: "name asc",
+    $orderby: 'name asc',
     $top: 100,
   };
 
@@ -492,13 +548,11 @@ export interface CreateEventPayload {
   sprk_duedate?: string;
   /** Event status option set value */
   sprk_status?: number;
-  /** Whether this is a To-Do item */
-  sprk_todoflag?: boolean;
   /**
    * OData binding syntax to associate the event with a project.
    * Example: "sprk_projects(b1c2d3e4-0000-0000-0000-000000000001)"
    */
-  "sprk_projectid@odata.bind"?: string;
+  'sprk_projectid@odata.bind'?: string;
 }
 
 /**
@@ -512,8 +566,6 @@ export interface UpdateEventPayload {
   sprk_duedate?: string;
   /** Event status option set value */
   sprk_status?: number;
-  /** Whether this is a To-Do item */
-  sprk_todoflag?: boolean;
 }
 
 /**
@@ -528,14 +580,11 @@ export interface UpdateEventPayload {
  * @param payload    Event fields to set on creation
  * @returns          The created ODataEvent record (with system fields populated)
  */
-export async function createEvent(
-  projectId: string,
-  payload: CreateEventPayload
-): Promise<ODataEvent> {
+export async function createEvent(projectId: string, payload: CreateEventPayload): Promise<ODataEvent> {
   const body: CreateEventPayload = {
     ...payload,
     // Bind to the project using OData navigation property syntax
-    "sprk_projectid@odata.bind": `sprk_projects(${projectId})`,
+    'sprk_projectid@odata.bind': `sprk_projects(${projectId})`,
   };
 
   return createRecord<CreateEventPayload, ODataEvent>(`/api/v1/external/projects/${projectId}/events`, body);
@@ -550,11 +599,89 @@ export async function createEvent(
  * @param eventId  Dataverse GUID of the sprk_event record to update
  * @param payload  Partial event fields to update
  */
-export async function updateEvent(
-  eventId: string,
-  payload: UpdateEventPayload
-): Promise<void> {
-  return updateRecord<UpdateEventPayload>("/api/v1/external/events", eventId, payload);
+export async function updateEvent(eventId: string, payload: UpdateEventPayload): Promise<void> {
+  return updateRecord<UpdateEventPayload>('/api/v1/external/events', eventId, payload);
+}
+
+// ---------------------------------------------------------------------------
+// To-Do write operations (NEW in R3 task 007)
+// ---------------------------------------------------------------------------
+
+/**
+ * Payload for creating a new To-Do record via the BFF.
+ *
+ * NOTE: regarding context (project lookup + ADR-024 resolver fields) is NOT
+ * in the request body. The BFF applies the regarding context server-side
+ * using the project id from the route — prevents external callers from
+ * regarding-ing a to-do to an arbitrary project they don't have access to.
+ */
+export interface CreateTodoPayload {
+  /** To-do title (required) */
+  sprk_name: string;
+  /** Rich notes / description */
+  sprk_notes?: string | null;
+  /** ISO date string for the due date */
+  sprk_duedate?: string | null;
+  /** Priority score 0-100 */
+  sprk_priorityscore?: number;
+  /** Effort score 0-100 */
+  sprk_effortscore?: number;
+  /** Kanban column: 100000000=Today / 100000001=Tomorrow / 100000002=Future */
+  sprk_todocolumn?: number;
+  /** Whether the column assignment is pinned */
+  sprk_todopinned?: boolean;
+}
+
+/**
+ * Payload for updating an existing To-Do record via the BFF.
+ *
+ * PATCH semantics — only provided fields are written. Regarding context
+ * cannot be changed via this surface (re-parent through the model-driven
+ * app form to keep resolver-field invariants intact per ADR-024).
+ */
+export interface UpdateTodoPayload {
+  /** To-do title */
+  sprk_name?: string | null;
+  /** Rich notes / description */
+  sprk_notes?: string | null;
+  /** ISO date string for the due date */
+  sprk_duedate?: string | null;
+  /** Priority score 0-100 */
+  sprk_priorityscore?: number;
+  /** Effort score 0-100 */
+  sprk_effortscore?: number;
+  /** Kanban column: 100000000=Today / 100000001=Tomorrow / 100000002=Future */
+  sprk_todocolumn?: number;
+  /** Whether the column assignment is pinned */
+  sprk_todopinned?: boolean;
+  /** Status reason: 1=Open / 659490001=In Progress / 2=Completed / 659490002=Dismissed */
+  statuscode?: number;
+}
+
+/**
+ * Create a new To-Do record via the BFF.
+ *
+ * The BFF applies the regarding-project lookup + 4 ADR-024 resolver fields
+ * server-side using `{projectId}` from the route.
+ *
+ * @param projectId  Dataverse GUID of the parent sprk_project record
+ * @param payload    To-Do fields to set on creation
+ * @returns          The created ODataTodo record (with system + resolver fields populated)
+ */
+export async function createTodo(projectId: string, payload: CreateTodoPayload): Promise<ODataTodo> {
+  return createRecord<CreateTodoPayload, ODataTodo>(`/api/v1/external/projects/${projectId}/todos`, payload);
+}
+
+/**
+ * Update an existing To-Do record via the BFF.
+ *
+ * PATCH semantics — only the fields included in `payload` are modified.
+ *
+ * @param todoId   Dataverse GUID of the sprk_todo record to update
+ * @param payload  Partial to-do fields to update
+ */
+export async function updateTodo(todoId: string, payload: UpdateTodoPayload): Promise<void> {
+  return updateRecord<UpdateTodoPayload>('/api/v1/external/todos', todoId, payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -572,7 +699,7 @@ export async function updateEvent(
  *
  * Or import individual functions directly for better tree-shaking:
  * ```typescript
- * import { getProjects, getEvents } from "../api/web-api-client";
+ * import { getProjects, getEvents, getProjectTodos } from "../api/web-api-client";
  * ```
  */
 export const webApiClient = {
@@ -585,6 +712,10 @@ export const webApiClient = {
   getEvents,
   createEvent,
   updateEvent,
+  // To-Dos (NEW)
+  getProjectTodos,
+  createTodo,
+  updateTodo,
   // Contacts
   getContacts,
   // Organizations

@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/project-prefill.schema.json",
+  "title": "New Project Field Extraction — Output Schema (ACT-024 / project-prefill)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='ACT-024' (sprk_analysisactionid=1e838114-7919-f111-8343-7ced8d1dc988, sprk_name='New Project Field Extraction'). R6 task 035 (D-B-06) — populates sprk_outputschemajson on the existing action row. NFR-07 BINDING — the schema MIRRORS VERBATIM the field shape currently consumed by (a) ProjectPreFillService.AiProjectPreFillResult (src/server/api/Sprk.Bff.Api/Services/Workspace/ProjectPreFillService.cs L414-442), (b) ProjectPreFillResponse (src/server/api/Sprk.Bff.Api/Api/Workspace/Models/PreFillResponse.cs L46-71), (c) the useAiPrefill hook consumer in CreateProjectStep.tsx (src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectStep.tsx L275-303), and (d) the existing playbook node's embedded extractionSchema (sprk_playbooknodeid=0893d69d-3460-f111-ab0b-70a8a59455f4, sprk_configjson.extractionSchema; verified 2026-06-09). The pre-fill flow uses json_object response format (not Structured Outputs), so additionalProperties is permissive: the playbook emits projectDescription which the server-side ParseAiResponse coalesces with description (ProjectPreFillService L364). NO required fields — the wizard tolerates partial outputs; the server emits PreFilledFields[] only for non-null/non-whitespace values (L367-373).",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "projectName": {
+      "type": ["string", "null"],
+      "description": "A concise descriptive name for the project. Should capture the key purpose or engagement type. Maximum 10 words. Consumed by CreateProjectStep.tsx as a text field (no lookup resolution). Server normalizes whitespace via NormalizeNullableString."
+    },
+    "projectDescription": {
+      "type": ["string", "null"],
+      "description": "Brief narrative describing the project scope, key parties, subject matter, and objectives. Maximum 500 words. Server-side ParseAiResponse coalesces this with the `description` alias (ProjectPreFillService.cs L364). Consumer field name is 'description' in the wizard; either key is accepted on the wire."
+    },
+    "description": {
+      "type": ["string", "null"],
+      "description": "Alias for projectDescription. Accepted by ParseAiResponse for backward compatibility (ProjectPreFillService.cs L364). Wizard surface field name. Either projectDescription or description may appear; the server coalesces."
+    },
+    "projectTypeName": {
+      "type": ["string", "null"],
+      "description": "The type of project (e.g., Litigation, Corporate Transaction, Regulatory Compliance). Display name; the client fuzzy-matches to sprk_mattertype_ref via searchProjectTypes(). Returned as display name only — NEVER as a Dataverse GUID."
+    },
+    "practiceAreaName": {
+      "type": ["string", "null"],
+      "description": "The practice area (e.g., Employment Law, Corporate Law, Intellectual Property). Display name; the client fuzzy-matches to sprk_practicearea_ref via searchPracticeAreas(). Returned as display name only — NEVER as a Dataverse GUID."
+    },
+    "assignedAttorneyName": {
+      "type": ["string", "null"],
+      "description": "Full name of the primary attorney as it would appear in the contact directory (e.g., 'Jane Smith', not 'J. Smith'). Display name; client fuzzy-matches to contact records via searchContacts(). Use full names per the playbook extractionRules."
+    },
+    "assignedParalegalName": {
+      "type": ["string", "null"],
+      "description": "Full name of the assigned paralegal as it would appear in the contact directory. Display name; client fuzzy-matches to contact records via searchContacts(). Use full names per the playbook extractionRules."
+    },
+    "assignedOutsideCounselName": {
+      "type": ["string", "null"],
+      "description": "Full legal name of the outside counsel organization (e.g., 'Wilson & Partners LLP', not 'Wilson'). Display name; client fuzzy-matches to organization records via searchOrganizations(). Use full legal entity name including suffixes (LLP, LLC, etc.)."
+    },
+    "confidence": {
+      "type": ["number", "null"],
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Overall extraction confidence from 0.0 to 1.0. Server clamps to [0,1] via Math.Clamp in ProjectPreFillService.cs L375. Should reflect how many fields were extractable and how certain the extractions are."
+    }
+  },
+  "$comment-nfr07": "NFR-07 BINDING — this schema is ADDITIVE METADATA. It declares the EXISTING data shape that the pre-fill flow has consumed since R5; it does NOT change the contract. The playbook node config retains its existing extractionSchema + extractionRules + parameters (NOT modified by task 035 beyond adding `destination=form-prefill` at the top level). Pre-fill flow signatures, the 45s timeout (ProjectPreFillService.cs L275), Workspace:ProjectPreFillPlaybookId config, and the useAiPrefill hook are UNCHANGED.",
+  "$comment-coalescing": "The `projectDescription` and `description` properties are BOTH declared because the server-side parser accepts either (ProjectPreFillService.cs L364: `var description = parsed.ProjectDescription ?? parsed.Description;`). The playbook today emits `projectDescription` per its extractionSchema; declaring both keeps the schema honest about what the wire format may carry.",
+  "$comment-additionalProperties": "additionalProperties=true matches the pre-fill response format (json_object, not Structured Outputs). The server's AiProjectPreFillResult uses JsonSerializerOptions.PropertyNameCaseInsensitive + WhenWritingNull semantics; unknown properties are silently ignored at parse time. Restricting additionalProperties would NOT change runtime behavior but could mislead future maintainers about the wire contract's strictness.",
+  "$comment-required": "No `required` array — the pre-fill flow tolerates partial outputs. The server emits PreFilledFields[] only for properties that returned non-null, non-whitespace values (ProjectPreFillService.cs L367-373). Requiring fields here would not be honored by the server and would mislead consumers.",
+  "$comment-node-extraction-schema": "The existing playbook node sprk_configjson contains a richer authoring-side extractionSchema (with `description` + `constraint` per field — the LLM prompt construction surface). This action-level outputSchema is the CONSUMER-side contract: same field set, but framed as JSON Schema for runtime tooling (R6 widget schema-awareness, CapabilityRouter dedup at action level). The two are byte-equivalent in terms of which fields appear on the wire."
+}

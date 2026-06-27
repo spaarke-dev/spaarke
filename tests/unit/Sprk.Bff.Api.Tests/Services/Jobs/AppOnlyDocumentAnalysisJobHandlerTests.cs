@@ -3,8 +3,8 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Jobs;
-using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Telemetry;
 using Xunit;
 

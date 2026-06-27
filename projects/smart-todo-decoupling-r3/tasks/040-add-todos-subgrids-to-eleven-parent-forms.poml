@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Add "To Dos" subgrid to all eleven parent-entity main forms (consolidated parallel-execution task)</title>
+    <phase>Phase 5: Parent-Form Subgrids</phase>
+    <status>not-started</status>
+    <estimated-effort>6-10 hours (11 sub-deliverables; parallelizable to ~1 hour wall-clock when fanned out)</estimated-effort>
+    <dependencies>002, 030, 031, 032</dependencies>
+    <blocks>none</blocks>
+    <tags>dataverse, solution, ribbon</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Form XML edits — eleven independent files, no code logic. STANDARD rigor; parallel-safe across the 11 sub-deliverables.</rigor-reason>
+    <parallel-group>P5-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a "To Dos" subgrid to the main form of each of the eleven regarding-target entities: Matter, Project, Event, Communication, WorkAssignment, Invoice, Budget, Analysis, Organization, Contact, Document. Each subgrid filters by the corresponding `sprk_regarding*` lookup; default view = Active todos; "All" view available; command bar includes "+ Create To Do" launching the wizard with regarding pre-filled.
+
+    **Execution note**: this task has 11 independent sub-deliverables (one per entity). The task-execute skill should fan out into 11 parallel sub-agents in two waves of 6+5 (per CLAUDE.md "Sub-Agent Write Boundary" + 6-agents-per-wave cap). Each sub-agent edits one form's `FormXml`.
+  </prompt>
+
+  <role>Spaarke Dataverse form developer.</role>
+
+  <goal>Eleven parent forms each have a "To Dos" subgrid with correct filter + correct command bar. Solution import clean. Each subgrid row count matches a direct OData query against `sprk_todo` filtered by the corresponding `sprk_regarding*` lookup.</goal>
+
+  <context>
+    <background>The subgrid is the primary discovery surface for parent-context todos. Each entity has its own form XML, so the 11 edits are independent and naturally parallel.</background>
+    <relevant-files>
+      <file>solutions/{spaarke-core}/Entities/sprk_matter/FormXml/</file>
+      <file>solutions/{spaarke-core}/Entities/sprk_project/FormXml/</file>
+      <file>solutions/{spaarke-core}/Entities/sprk_event/FormXml/</file>
+      <file>solutions/{spaarke-core}/Entities/sprk_communication/FormXml/</file>
+      <file>solutions/{spaarke-core}/Entities/sprk_workassignment/FormXml/</file>
+      <file>solutions/{spaarke-core}/Entities/sprk_invoice/FormXml/</file>
+      <file>solutions/{spaarke-core}/Entities/sprk_budget/FormXml/</file>
+      <file>solutions/{spaarke-core}/Entities/sprk_analysis/FormXml/</file>
+      <file>solutions/{spaarke-core}/Entities/sprk_organization/FormXml/</file>
+      <file>solutions/{spaarke-core}/Entities/contact/FormXml/</file>
+      <file>solutions/{spaarke-core}/Entities/sprk_document/FormXml/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-17">Subgrid added to all 11 entity main forms; filtered by corresponding `sprk_regarding*`; default Active view + All view; "+ Create To Do" command launches wizard with regarding pre-filled.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author two `sprk_todo` saved queries: (a) Active Todos for regarding (parameterized by lookup); (b) All Todos for regarding. These views are reused by every subgrid.</step>
+    <step order="2">For each of the 11 entities (parallel-safe — fan out to sub-agents in waves of 6+5):
+- Edit the main FormXml to add a "To Dos" subgrid section.
+- Configure filter: `sprk_todos` filtered by `_sprk_regarding{ENTITY}_value eq parent.recordid`.
+- Set default view = Active; expose All view.
+- Add command bar entry "+ Create To Do" launching the CreateTodo wizard with regarding pre-filled to the host record.</step>
+    <step order="3">Pack solution; import to target environment.</step>
+    <step order="4">Smoke test each form: open a parent record with at least one linked `sprk_todo`; verify subgrid renders correct rows; verify "+ Create To Do" launches wizard with regarding pre-filled.</step>
+    <step order="5">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="pac">Solution pack/import</tool>
+    <tool name="ribbon-edit-skill">Form XML + RibbonXml manipulation</tool>
+  </tools>
+
+  <outputs>
+    <output type="solution">Eleven entity FormXml files with new "To Dos" subgrid</output>
+    <output type="solution">Two new saved queries on `sprk_todo` (Active for regarding, All for regarding)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 11 parent forms render the "To Dos" subgrid.</criterion>
+    <criterion testable="true">Subgrid filter matches a direct OData query (row count parity).</criterion>
+    <criterion testable="true">"+ Create To Do" command launches wizard with regarding pre-filled to the host record.</criterion>
+    <criterion testable="true">Solution import clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use the `ribbon-edit` skill for command-bar additions. The 11 entity edits are file-isolated, so a wave of 6 + wave of 5 parallel sub-agents is safe per the project-pipeline's 6-agents-per-wave cap.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor. Sub-agent fan-out at execution time per the prompt instructions. Each sub-agent edits one entity's FormXml.</protocol>
+  </execution>
+</task>

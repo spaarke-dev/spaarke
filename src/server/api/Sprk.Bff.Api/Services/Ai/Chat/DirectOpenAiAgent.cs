@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
-using Sprk.Bff.Api.Services.Ai.Capabilities;
 
 // Explicit alias to resolve ChatMessage ambiguity between the Dataverse domain model
 // (Sprk.Bff.Api.Models.Ai.Chat.ChatMessage) and the Agent Framework type
@@ -19,7 +18,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///
 /// Design (AIPU2-060):
 ///   1. Builds an orchestrator system prompt via <see cref="IOrchestratorPromptBuilder"/>
-///      using a fallback routing result (no pre-classification in Phase 2).
+///      with an empty tool list (this agent does not surface tools).
 ///   2. Converts <see cref="AgentRequest.ConversationHistory"/> to
 ///      <see cref="AiChatMessage"/> list (role mapping: User → User, Assistant → Assistant,
 ///      System → System).
@@ -126,15 +125,12 @@ public sealed class DirectOpenAiAgent : ISprkAgent
         try
         {
             // 1. Build the two-layer system prompt (stable prefix + per-turn tool suffix).
-            //    Use a fallback routing result in Phase 2 — no pre-classification yet.
+            //    DirectOpenAiAgent does not surface tools at this layer; pass an empty list so
+            //    the prompt builder omits the "Active Tools" section.
             //    The prompt builder handles token budget enforcement and prefix caching.
             var promptContext = BuildPromptContext(request);
-            var routing = CapabilityRoutingResult.Fallback(
-                fallbackCapabilityNames: [],
-                selectedToolNames: [],
-                latencyMs: 0);
 
-            var prompt = _promptBuilder.BuildSystemPrompt(routing, promptContext);
+            var prompt = _promptBuilder.BuildSystemPrompt(activeToolNames: Array.Empty<string>(), promptContext);
 
             _logger.LogDebug(
                 "DirectOpenAiAgent: system prompt built — estimatedTokens={Tokens}, prefixCacheHit={CacheHit}",
@@ -265,10 +261,10 @@ public sealed class DirectOpenAiAgent : ISprkAgent
         {
             var role = turn.Role switch
             {
-                AgentRole.User      => ChatRole.User,
+                AgentRole.User => ChatRole.User,
                 AgentRole.Assistant => ChatRole.Assistant,
-                AgentRole.System    => ChatRole.System,
-                _                   => ChatRole.User
+                AgentRole.System => ChatRole.System,
+                _ => ChatRole.User
             };
 
             messages.Add(new AiChatMessage(role, turn.Content));

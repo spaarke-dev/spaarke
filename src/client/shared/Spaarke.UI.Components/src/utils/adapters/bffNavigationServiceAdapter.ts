@@ -60,11 +60,7 @@ export type NavigateFunction = (path: string) => void;
  * @param options - Optional dialog dimensions and title
  * @returns Promise resolving to the dialog result when the dialog is closed
  */
-export type DialogRenderer = (
-  webresourceName: string,
-  data?: string,
-  options?: DialogOptions
-) => Promise<DialogResult>;
+export type DialogRenderer = (webresourceName: string, data?: string, options?: DialogOptions) => Promise<DialogResult>;
 
 /**
  * Callback invoked when `closeDialog` is called.
@@ -135,11 +131,7 @@ export function createBffNavigationService(
       }
     },
 
-    async openDialog(
-      webresourceName: string,
-      data?: string,
-      options?: DialogOptions
-    ): Promise<DialogResult> {
+    async openDialog(webresourceName: string, data?: string, options?: DialogOptions): Promise<DialogResult> {
       // Delegate to the provided dialog renderer
       if (dialogRenderer) {
         return dialogRenderer(webresourceName, data, options);
@@ -164,7 +156,7 @@ export function createBffNavigationService(
         }
 
         // Wait for the dialog window to close
-        return new Promise<DialogResult>((resolve) => {
+        return new Promise<DialogResult>(resolve => {
           const interval = setInterval(() => {
             if (dialogWindow.closed) {
               clearInterval(interval);
@@ -205,7 +197,6 @@ export function createBffNavigationService(
       }
     },
 
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async openLookup(_options: LookupOptions): Promise<LookupResult[]> {
       // Xrm.Utility.lookupObjects is not available in a Power Pages SPA context.
       // Return an empty array as a graceful no-op so that components that call

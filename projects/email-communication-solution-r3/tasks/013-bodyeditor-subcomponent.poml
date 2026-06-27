@@ -1,0 +1,141 @@
+<task id="013" project="email-communication-solution-r3">
+  <metadata>
+    <title>BodyEditor sub-component — HTML + PlainText with bodyFormat toggle</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>020, 028</blocks>
+    <tags>react, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>User-facing editor; ADR-021 (Fluent v9) + NFR-09 (a11y / keyboard) + content-preservation-across-toggle decisions; load-bearing for every send scenario. FULL is appropriate.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-06</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build `<BodyEditor />` at `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/BodyEditor.tsx`. Supports two modes via `bodyFormat: 'html' | 'plaintext'` prop with an explicit user-facing toggle.
+
+    Requirements (FR-06):
+    - `bodyFormat='html'`: lightweight rich-text editor. Bare minimum toolbar: Bold, Italic, Underline, Bulleted list, Numbered list, Link. Output: clean HTML (no inline styles beyond what the toolbar produces; no `<font>` tags; no `<script>` / `<iframe>`).
+    - `bodyFormat='plaintext'`: monospace `<Textarea />` from Fluent v9. Output: plain text, no HTML tags.
+    - Toggle: explicit user control labeled "Format: HTML / Plain text" rendered as a Fluent `<RadioGroup />` or `<Switch />`. Toggling from HTML → PlainText strips HTML tags (best-effort, may lose markup). Toggling PlainText → HTML wraps text in `<p>` tags (best-effort).
+    - Component is CONTROLLED: receives `value: string`, `bodyFormat: 'html' | 'plaintext'`, `onChange(value: string, bodyFormat)` from engine reducer.
+    - Keyboard accessible: focus visible, Tab moves into editor, Esc moves focus to toggle.
+    - For the HTML editor implementation: use an existing minimal library OR roll a simple `contentEditable` div with sanitization. DO NOT pull in a heavy editor like TipTap, Lexical, or Quill — those add ~150 KB to the bundle (NFR-08 perf).
+
+    Files:
+    - `subcomponents/BodyEditor.tsx` (NEW)
+    - Update `EmailComposer/index.ts` to export `BodyEditor`
+  </prompt>
+
+  <role>
+    Frontend dev with Fluent UI v9 + light-rich-editor experience. Familiar with `contentEditable` quirks + HTML sanitization basics.
+  </role>
+
+  <goal>
+    `<BodyEditor />` compiles, lint-clean. Switching to HTML mode shows the toolbar + editable region; switching to PlainText shows a monospace Textarea. Toggle preserves content best-effort. No heavy editor library added. Bundle size delta < 20 KB.
+  </goal>
+
+  <context>
+    <background>
+      Per Owner Clarification + assessment: minimal editor sufficient. Spaarke's email pattern is mostly short replies / forwards / templated messages — not document-heavy formatting. Reuses Fluent v9 `Textarea` for plain text + a thin `contentEditable` wrapper for HTML.
+
+      HTML sanitization: minimum strip `<script>` and `<iframe>` and event handlers (`onclick=`). Use a small util (or `DOMParser` + manual scrub) — DO NOT pull in `DOMPurify` unless already in the lib's dependencies.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/BodyEditor.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (UPDATE — slot integration; engine reducer dispatches `SET_FIELD` for body + bodyFormat)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (UPDATE — export BodyEditor)</file>
+      <file>src/client/shared/Spaarke.UI.Components/package.json (READ — confirm no DOMPurify; estimate bundle delta)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only — `Textarea`, `Toolbar`, `Button`, `RadioGroup` / `Switch`, `Field`</constraint>
+    <constraint source="NFR-01">React 18 only</constraint>
+    <constraint source="NFR-08">Bundle size: do NOT add heavy editor libs (TipTap, Lexical, Quill); delta &lt; 20 KB</constraint>
+    <constraint source="NFR-09">Keyboard accessible; Tab moves into editor; toolbar buttons keyboard-actionable; `aria-label="Email body editor"` on the editor region</constraint>
+    <constraint source="project">Controlled component — engine reducer owns `body` + `bodyFormat` state</constraint>
+    <constraint source="project">HTML output sanitized — no `&lt;script&gt;`, `&lt;iframe&gt;`, `on*=` event handlers, `&lt;font&gt;` deprecated tags</constraint>
+    <constraint source="project">Toggle preserves content best-effort (acceptable to lose markup HTML→PlainText)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 Toolbar + Textarea" location=".claude/skills/fluent-v9-component/SKILL.md">
+        Reference for toolbar + textarea + radiogroup primitives.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Check `package.json` for existing sanitization util / DOMPurify availability — if absent, plan a small inline `sanitizeHtml(html: string): string` util.</step>
+    <step order="2">Author `BodyEditor.tsx`:
+      - Props: `{ value: string; bodyFormat: 'html' | 'plaintext'; onChange: (value: string, bodyFormat: 'html' | 'plaintext') =&gt; void; disabled?: boolean }`
+      - Top: `&lt;RadioGroup&gt;` with two radios "HTML" / "Plain text" — dispatches `onChange` with format toggle
+      - Conditional render:
+        * `bodyFormat='plaintext'`: `&lt;Textarea value={value} onChange={...} style={{fontFamily: tokens.fontFamilyMonospace}} aria-label="Email body, plain text" /&gt;`
+        * `bodyFormat='html'`: `&lt;Toolbar&gt;` (B, I, U, list buttons that wrap `document.execCommand` OR contentEditable selection manipulation) + `&lt;div contentEditable role="textbox" aria-label="Email body, HTML" /&gt;`
+      - Toggle handler: HTML→PlainText strips tags via `el.textContent`; PlainText→HTML wraps in `&lt;p&gt;` per line</step>
+    <step order="3">Inline `sanitizeHtml` util: strips `&lt;script&gt;`, `&lt;iframe&gt;`, `&lt;style&gt;`, all `on*=` attributes, `javascript:` URLs. Use `DOMParser` to parse + scrub + serialize.</step>
+    <step order="4">Wire into engine's `BodyRegion` slot in `EmailComposer.tsx` — dispatch reducer actions for `body` + `bodyFormat`.</step>
+    <step order="5">Update `EmailComposer/index.ts` — export `BodyEditor`.</step>
+    <step order="6">Smoke test: type in HTML mode → click Bold → text becomes bold; toggle to PlainText → tags stripped; toggle back to HTML → wrapped in paragraphs.</step>
+    <step order="7">Run `npm run build` + `npm run lint` clean. Measure bundle size delta (`stat dist/index.js` before/after).</step>
+    <step order="7.5">Step 9.5 quality gates — code-review + adr-check (ADR-021).</step>
+    <step order="8">Update `TASK-INDEX.md`: mark 013 ✅.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">package.json for sanitization libs</tool>
+    <tool name="write">BodyEditor.tsx</tool>
+    <tool name="edit">EmailComposer.tsx slot integration; index.ts barrel</tool>
+    <tool name="bash">npm run build + lint + bundle size check</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/subcomponents/BodyEditor.tsx (NEW)</output>
+    <output type="file">EmailComposer/EmailComposer.tsx (UPDATED — BodyRegion slot wired)</output>
+    <output type="file">EmailComposer/index.ts (UPDATED — export BodyEditor)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`BodyEditor.tsx` compiles + lint-clean.</criterion>
+    <criterion testable="true">HTML mode shows toolbar (B, I, U, lists, link) + editable region.</criterion>
+    <criterion testable="true">PlainText mode shows monospace Fluent `Textarea`.</criterion>
+    <criterion testable="true">Toggle HTML → PlainText strips HTML tags; PlainText → HTML wraps in `&lt;p&gt;`.</criterion>
+    <criterion testable="true">`sanitizeHtml` strips `&lt;script&gt;`, `&lt;iframe&gt;`, `on*=` attrs, `javascript:` URLs.</criterion>
+    <criterion testable="true">Component fully controlled (engine reducer owns state).</criterion>
+    <criterion testable="true">Keyboard nav: Tab into editor; toolbar buttons keyboard-actionable — NFR-09.</criterion>
+    <criterion testable="true">Bundle size delta &lt; 20 KB — NFR-08.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Intentionally minimal — Spaarke's email pattern doesn't need a Word-class rich editor. If a richer editor is later required, evaluate `@lexical/react` (Microsoft uses it) in a separate project — DO NOT add it here.
+
+    `document.execCommand` is deprecated but still widely functional for B/I/U/lists. Acceptable for this minimal use; revisit if Chrome/Firefox remove it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>`. Apply FULL rigor. Step 9.5 mandatory.
+    </protocol>
+  </execution>
+</task>

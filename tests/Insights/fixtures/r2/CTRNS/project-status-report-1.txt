@@ -1,0 +1,92 @@
+PROJECT STATUS REPORT — WEEK ENDING MARCH 13, 2026
+
+Project Code:        CTRNS-2026-038
+Project Name:        Verdant Solar / Pelican Bay APA — Closing & Post-Close Support
+Project Manager:     Camille Whittaker
+Reporting Period:    March 9, 2026 – March 13, 2026
+Project Status:      GREEN (on track)
+Days to Target Close: 35 (target April 17, 2026)
+
+1. EXECUTIVE SUMMARY
+
+The Verdant Solar / Pelican Bay APA transaction remains on schedule for an
+April 17, 2026 closing. APA was executed February 11, 2026; HSR was filed
+February 25, 2026; the waiting period expires April 1, 2026, and no second
+request has issued. The disclosure-schedule bring-down is in flight and on
+track for completion by April 8, 2026. No closing-blocking issues are open
+as of this report.
+
+2. MILESTONES STATUS
+
+   M-01  Diligence substantially complete            ✅ Feb 4, 2026
+   M-02  APA execution                                ✅ Feb 11, 2026
+   M-03  HSR filing                                   ✅ Feb 25, 2026
+   M-04  HSR waiting period expiry                   🟢 Apr 1, 2026 (on track)
+   M-05  Closing                                     🟢 Apr 17, 2026 (on track)
+
+3. KEY ACCOMPLISHMENTS THIS WEEK
+
+   a) Completed disclosure schedule refresh for Sections 4.7 (Material
+      Contracts), 4.10 (Employee Matters), and 4.14 (Environmental).
+   b) Held closing-mechanics planning call with Pelican Bay's counsel
+      (Holwell, Strand & Adichie LLP) and Linden Trust National Bank, N.A.,
+      Pelican Bay's lender; agreed on the funds-flow memorandum format and
+      target April 14 for final funds-flow circulation.
+   c) Received second draft of Transition Services Agreement from Pelican Bay's
+      counsel; counter-comments are being prepared for delivery March 17.
+   d) Resolved escrow-agent commercial terms with Atlas Trust Services Inc.;
+      escrow agreement is in final mark-up.
+
+4. ITEMS IN PROGRESS
+
+   - Final mark-up of Escrow Agreement (target completion March 17)
+   - Counter-comments on second draft Transition Services Agreement
+     (target delivery March 17)
+   - Coordination with environmental counsel (Penobscot & Reeves LLP) for
+     final remediation reserve calculation under Section 4.14
+   - Preparation of closing checklist and document index
+
+5. ITEMS AT RISK
+
+   - The Working Capital target-setting exercise (Schedule 2.3) is one week
+     behind plan because Verdant Solar's accounting team is still finalizing
+     the November 2025 cycle. Risk: medium; mitigation: requested daily
+     standups with Verdant Solar's controller.
+
+6. ESCALATIONS REQUIRING PARTNER ATTENTION
+
+   None this period.
+
+7. BUDGET STATUS
+
+   Total Budget Cap:                  $1,250,000.00
+   Fees Billed YTD (through 3/9):     $   612,400.00
+   Fees Booked, Not Yet Billed:        $   104,200.00
+   Total Fees To-Date (approx):        $   716,600.00  (57.3% of cap)
+   Remaining Budget:                   $   533,400.00
+
+   Projected at completion: $1,160,000 (within cap).
+
+8. STAFFING UPDATE
+
+   Roxanne Linder (mid-level associate) has rotated off the matter as of
+   March 6, 2026; her workload transitioned to Theodore Kawasaki-Funk.
+   No other staffing changes.
+
+9. UPCOMING WEEK (MARCH 16 – MARCH 20)
+
+   a) Deliver Transition Services Agreement counter-comments
+   b) Finalize Escrow Agreement
+   c) Complete remaining disclosure schedule refresh
+   d) Initial draft of closing checklist and funds-flow memorandum
+   e) Open closing logistics with the closing notary in Wilmington, DE
+
+10. APPENDICES
+
+    A — Detailed milestone matrix
+    B — Budget utilization detail by professional
+    C — Outstanding issues log (3 open, 4 closed this week)
+
+Prepared by:   Yusuf Ramirez, Paralegal Lead
+Reviewed by:   Camille Whittaker, Project Manager
+Distribution:  Project team; Lead Partner Anand; Client Project Sponsor (CFO)

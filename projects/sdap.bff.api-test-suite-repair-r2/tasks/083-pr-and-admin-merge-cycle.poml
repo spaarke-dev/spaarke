@@ -1,0 +1,140 @@
+<task id="083" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P5.4 — PR + admin-merge cycle (mirrors r1 close); merge to master ≤ 2026-08-31</title>
+    <phase>Phase 5</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>082</dependencies>
+    <blocks>090</blocks>
+    <tags>phase-5, deploy, governance, merge, admin-merge</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Process task: PR creation + admin-merge window + git ops. Minimal code change beyond git mechanics (potentially toggling `enforce_admins` via `gh api`). STANDARD per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>P5-final</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Merge gate; runs after task 082 produces green triple-run validation. Sequential by definition — cannot parallelize a PR-creation-and-merge step with anything else.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Execute the PR + admin-merge cycle to land r2 on master ≤ 2026-08-31 (FR-16). Mirrors r1's close pattern (PR #314 admin-merged on 2026-06-01).
+
+    Steps:
+    1. Push the current branch (`work/sdap.bff.api-test-suite-repair-r2`) to remote.
+    2. Create PR via `gh pr create` with cumulative project summary in description.
+    3. Verify CI runs to green (the 3 required-status-checks must pass).
+    4. Admin-merge window: temporarily toggle `enforce_admins: false` via `gh api PATCH /repos/spaarke-dev/spaarke/branches/master/protection/enforce_admins` IF (and only if) the PR cannot merge through normal flow.
+    5. Merge PR (admin-merge if window opened; regular squash-merge otherwise).
+    6. **IMMEDIATELY** restore `enforce_admins: true` after merge — outside the admin-merge window of THIS PR, the gate stays enforced (NFR-03 pattern from r1).
+    7. Tag the cumulative project commit.
+
+    **🚨 MUST NOT bypass `enforce_admins` outside the specific admin-merge window of this PR** (NFR-03 pattern). The window is: open immediately before admin-merge, close immediately after. No lingering open windows. No use of the window for unrelated merges.
+
+    Per FR-16, merge MUST land ≤ 2026-08-31. If CI failures or other blockers push past 2026-08-31, escalate to owner.
+  </prompt>
+
+  <role>Release AI agent executing PR + admin-merge cycle with strict gate-hygiene discipline.</role>
+
+  <goal>
+    PR merged to master on or before 2026-08-31. Outputs:
+    - PR opened against master with cumulative r2 summary in description (all 16 FRs satisfied; success criteria evidence; ledger closure summary; Phase 4 audit references)
+    - All 3 required-status-checks green
+    - PR merged (admin-merge if necessary; regular squash-merge preferred)
+    - `enforce_admins: true` confirmed on master AFTER merge (no lingering disabled state)
+    - Cumulative project commit on master cited in `current-task.md` + future task 090 wrap-up
+  </goal>
+
+  <inputs>
+    <file purpose="ci-workflow">.github/workflows/sdap-ci.yml</file>
+    <file purpose="task-index">projects/sdap.bff.api-test-suite-repair-r2/tasks/TASK-INDEX.md (cumulative status)</file>
+    <file purpose="r1-close-pattern">projects/sdap-bff.api-test-suite-repair/tasks/090-project-wrap-up.poml (r1 close reference)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-16">PR merged to master ≤ 2026-08-31 (hard deadline; beats September fix-by cliff)</constraint>
+    <constraint source="NFR-03 pattern from r1">MUST NOT bypass `enforce_admins` outside the admin-merge window of this PR. Window: open immediately before admin-merge, close immediately after.</constraint>
+    <constraint source="NFR-05">Triple-run validation required before merge (task 082 produces the gate; this task consumes it)</constraint>
+    <constraint source="r1 close pattern">Pattern reference: r1 PR #314 admin-merged 2026-06-01 with `enforce_admins` toggle window</constraint>
+    <constraint source="NFR-01">No `src/` modifications in this task — process only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>.claude/skills/merge-to-master/SKILL.md</file>
+      <file>.claude/skills/push-to-github/SKILL.md</file>
+      <file>.github/workflows/sdap-ci.yml</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The PR + admin-merge cycle is the project's terminal merge gate. The pattern was established by r1 (PR #314 admin-merged 2026-06-01) and codified in CLAUDE.md NFR-03 pattern: bypass `enforce_admins` ONLY in a specific PR's admin-merge window — never as a general state.
+
+      The window-hygiene discipline matters because: branch protection bypass is a security-sensitive operation. If left disabled, any PR can merge without status-check protection. The r1 pattern (open → admin-merge → close) is auditable; a lingering-disabled state is not.
+
+      Pre-conditions for this task:
+      - Task 082 (final triple-run) PASS verdict
+      - Tasks 080 + 081 complete (procedure doc + conditional constraint extension)
+      - All ledger entries closed (Phase 1-3 outcomes)
+      - Phase 4 audit deliverables published
+
+      Per FR-16, the merge MUST land by 2026-08-31. If unable (CI failures, owner unavailable, blocking conflicts), escalate via 🔔 Human Input Required per CLAUDE.md §6.
+    </background>
+    <dependencies>
+      <dependency task="082" status="not-started">Final triple-run validation — PASS verdict required</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>None directly modified in this task — git ops only on existing branch</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify task 082 PASS verdict in `baseline/final-triple-run-2026-08-XX.md`. If absent or FAIL, HALT and escalate.</step>
+    <step order="2">Verify `git status` clean on `work/sdap.bff.api-test-suite-repair-r2` branch. Any uncommitted changes: investigate; do not auto-commit at this stage.</step>
+    <step order="3">Invoke `push-to-github` skill to push branch to remote (or `git push` directly if skill not used).</step>
+    <step order="4">Draft cumulative PR description: project overview; all 16 FRs satisfied (with task-reference per FR); 14 success criteria checklist; ledger entry closure summary (20/20); Phase 4 audit deliverable list; Phase 5 governance update summary; reference to `baseline/final-triple-run-2026-08-XX.md` for stability evidence.</step>
+    <step order="5">Create PR via `gh pr create --base master --title "feat(tests): r2 closure — 20 real-bug fixes + Phase 4 pilots + governance updates" --body @pr-body.md`.</step>
+    <step order="6">Monitor CI: 3 required-status-checks must run green. If any fail, investigate; do NOT proceed with merge.</step>
+    <step order="7">Determine merge mode:
+      (a) **Regular squash-merge**: preferred if CI green + all approvals collected. Use `gh pr merge --squash`.
+      (b) **Admin-merge** (if necessary): only if normal flow blocked. Window protocol:
+         - Open: `gh api -X PATCH /repos/spaarke-dev/spaarke/branches/master/protection/enforce_admins -F enabled=false`
+         - Merge: `gh pr merge --admin --squash`
+         - Close IMMEDIATELY: `gh api -X POST /repos/spaarke-dev/spaarke/branches/master/protection/enforce_admins`
+    </step>
+    <step order="8">Verify post-merge state: `gh api /repos/spaarke-dev/spaarke/branches/master/protection/enforce_admins` returns `"enabled": true`. If FALSE, immediately re-enable + investigate.</step>
+    <step order="9">Pull master locally + verify cumulative project commit landed. Capture commit SHA for task 090 wrap-up reference.</step>
+    <step order="10">Update `current-task.md` with: merge timestamp, PR number, commit SHA, `enforce_admins` post-merge state. Note any deviations from r1's clean pattern.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">push-to-github (or direct `git push`)</tool>
+    <tool name="Bash">`gh pr create`, `gh pr merge`, `gh api` for protection toggle, `git status`, `git pull`</tool>
+    <tool name="Read">final triple-run summary; TASK-INDEX.md; r1 close pattern</tool>
+    <tool name="Write">PR body draft (temp); current-task.md update</tool>
+  </tools>
+
+  <outputs>
+    <output type="git">PR opened, CI green, merged to master ≤ 2026-08-31</output>
+    <output type="state">current-task.md updated with merge SHA + PR # + timestamp</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PR created against master with cumulative r2 summary in body</criterion>
+    <criterion testable="true">All 3 required-status-checks pass on the PR</criterion>
+    <criterion testable="true">PR merged to master on or before 2026-08-31 (FR-16)</criterion>
+    <criterion testable="true">If admin-merge used: `enforce_admins` was disabled IMMEDIATELY before merge and re-enabled IMMEDIATELY after (no lingering disabled state)</criterion>
+    <criterion testable="true">Post-merge `gh api ... /enforce_admins` returns `"enabled": true`</criterion>
+    <criterion testable="true">Cumulative project commit SHA captured in `current-task.md` for task 090 reference</criterion>
+    <criterion testable="true">Commit message references FR-16 + cumulative project scope</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. STANDARD rigor (process + git ops; no Step 9.5 quality gates required for merge-cycle execution).
+  </execution>
+</task>

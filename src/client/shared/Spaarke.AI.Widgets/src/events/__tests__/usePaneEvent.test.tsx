@@ -26,13 +26,7 @@ import type { WorkspacePaneEvent, ContextPaneEvent } from '../PaneEventTypes';
  * Wraps children in a PaneEventBusProvider that uses a caller-supplied bus
  * so tests can inspect subscriber counts and dispatch events directly.
  */
-function Wrapper({
-  bus,
-  children,
-}: {
-  bus: PaneEventBus;
-  children: React.ReactNode;
-}): React.JSX.Element {
+function Wrapper({ bus, children }: { bus: PaneEventBus; children: React.ReactNode }): React.JSX.Element {
   return <PaneEventBusProvider bus={bus}>{children}</PaneEventBusProvider>;
 }
 
@@ -50,7 +44,11 @@ describe('usePaneEvent — lifecycle', () => {
     }
 
     expect(bus.subscriberCount('workspace')).toBe(0);
-    render(<Wrapper bus={bus}><Subscriber /></Wrapper>);
+    render(
+      <Wrapper bus={bus}>
+        <Subscriber />
+      </Wrapper>
+    );
     expect(bus.subscriberCount('workspace')).toBe(1);
   });
 
@@ -62,7 +60,11 @@ describe('usePaneEvent — lifecycle', () => {
       return null;
     }
 
-    const { unmount } = render(<Wrapper bus={bus}><Subscriber /></Wrapper>);
+    const { unmount } = render(
+      <Wrapper bus={bus}>
+        <Subscriber />
+      </Wrapper>
+    );
     expect(bus.subscriberCount('workspace')).toBe(1);
 
     unmount();
@@ -74,11 +76,15 @@ describe('usePaneEvent — lifecycle', () => {
     const received: WorkspacePaneEvent[] = [];
 
     function Subscriber() {
-      usePaneEvent('workspace', (e) => received.push(e));
+      usePaneEvent('workspace', e => received.push(e));
       return null;
     }
 
-    render(<Wrapper bus={bus}><Subscriber /></Wrapper>);
+    render(
+      <Wrapper bus={bus}>
+        <Subscriber />
+      </Wrapper>
+    );
 
     act(() => {
       bus.dispatch('workspace', { type: 'tab_change', tabId: 'analysis' });
@@ -104,17 +110,21 @@ describe('usePaneEvent — inline handler reference', () => {
       renderCount = count;
 
       // Inline handler — new function reference each render
-      usePaneEvent('workspace', (e) => {
+      usePaneEvent('workspace', e => {
         if (e.type === 'tab_change') {
           capturedTabId = e.tabId;
-          setCount((c) => c + 1);
+          setCount(c => c + 1);
         }
       });
 
       return <div data-testid="count">{count}</div>;
     }
 
-    render(<Wrapper bus={bus}><Subscriber /></Wrapper>);
+    render(
+      <Wrapper bus={bus}>
+        <Subscriber />
+      </Wrapper>
+    );
 
     // Subscription count must be exactly 1 even after re-renders
     expect(bus.subscriberCount('workspace')).toBe(1);
@@ -140,14 +150,14 @@ describe('usePaneEvent — multiple hooks', () => {
     const bLog: string[] = [];
 
     function SubscriberA() {
-      usePaneEvent('context', (e) => {
+      usePaneEvent('context', e => {
         if (e.type === 'context_update') aLog.push('A');
       });
       return null;
     }
 
     function SubscriberB() {
-      usePaneEvent('context', (e) => {
+      usePaneEvent('context', e => {
         if (e.type === 'context_update') bLog.push('B');
       });
       return null;
@@ -193,7 +203,11 @@ describe('usePaneEvent — multiple hooks', () => {
       );
     }
 
-    render(<Wrapper bus={bus}><Parent /></Wrapper>);
+    render(
+      <Wrapper bus={bus}>
+        <Parent />
+      </Wrapper>
+    );
 
     act(() => {
       bus.dispatch('context', { type: 'stage_change' });
@@ -226,12 +240,14 @@ describe('useDispatchPaneEvent — stable reference', () => {
       dispatchRefs.push(dispatch);
 
       const [, forceRerender] = useState(0);
-      return (
-        <button onClick={() => forceRerender((n) => n + 1)}>rerender</button>
-      );
+      return <button onClick={() => forceRerender(n => n + 1)}>rerender</button>;
     }
 
-    render(<Wrapper bus={bus}><Dispatcher /></Wrapper>);
+    render(
+      <Wrapper bus={bus}>
+        <Dispatcher />
+      </Wrapper>
+    );
     expect(dispatchRefs).toHaveLength(1);
 
     act(() => {
@@ -249,18 +265,14 @@ describe('useDispatchPaneEvent — stable reference', () => {
     const received: ContextPaneEvent[] = [];
 
     function Subscriber() {
-      usePaneEvent('context', (e) => received.push(e));
+      usePaneEvent('context', e => received.push(e));
       return null;
     }
 
     function Dispatcher() {
       const dispatch = useDispatchPaneEvent();
       return (
-        <button
-          onClick={() =>
-            dispatch('context', { type: 'context_highlight', citationId: 'ref-1' })
-          }
-        >
+        <button onClick={() => dispatch('context', { type: 'context_highlight', citationId: 'ref-1' })}>
           dispatch
         </button>
       );
@@ -303,9 +315,7 @@ describe('hooks outside PaneEventBusProvider', () => {
       return null;
     }
 
-    expect(() => render(<BadComponent />)).toThrow(
-      /PaneEventBusProvider/
-    );
+    expect(() => render(<BadComponent />)).toThrow(/PaneEventBusProvider/);
   });
 
   it('useDispatchPaneEvent throws a descriptive error outside a provider', () => {
@@ -314,8 +324,6 @@ describe('hooks outside PaneEventBusProvider', () => {
       return null;
     }
 
-    expect(() => render(<BadComponent />)).toThrow(
-      /PaneEventBusProvider/
-    );
+    expect(() => render(<BadComponent />)).toThrow(/PaneEventBusProvider/);
   });
 });

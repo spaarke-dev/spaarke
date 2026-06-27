@@ -192,10 +192,16 @@ export async function applyResolverFields(
   parentRecordName: string,
   entityLookupHint?: string
 ): Promise<void> {
+  // Dataverse `Xrm.Utility.lookupObjects` returns GUIDs wrapped in curly braces
+  // (e.g. `{39CDE3E3-9D15-...}`). The OData `@odata.bind` URL syntax rejects
+  // braced GUIDs with HTTP 400 "Error in query syntax". Normalize once here so
+  // every downstream use sees a bare lowercase GUID.
+  const cleanRecordId = parentRecordId.replace(/[{}]/g, '').toLowerCase();
+
   // 1. Bind entity-specific regarding lookup
   const entityNavProp = findNavProp(navProps, parentEntityLogicalName, entityLookupHint);
   if (entityNavProp) {
-    entity[`${entityNavProp}@odata.bind`] = `/${parentEntitySet}(${parentRecordId})`;
+    entity[`${entityNavProp}@odata.bind`] = `/${parentEntitySet}(${cleanRecordId})`;
   } else {
     console.warn(
       `[PolymorphicResolver] No nav-prop for ${parentEntityLogicalName} (hint: ${entityLookupHint}), skipping entity-specific lookup`
@@ -203,9 +209,9 @@ export async function applyResolverFields(
   }
 
   // 2. Populate denormalized text/URL fields
-  entity['sprk_regardingrecordid'] = parentRecordId.replace(/[{}]/g, '').toLowerCase();
+  entity['sprk_regardingrecordid'] = cleanRecordId;
   entity['sprk_regardingrecordname'] = parentRecordName;
-  entity['sprk_regardingrecordurl'] = buildRecordUrl(parentEntityLogicalName, parentRecordId);
+  entity['sprk_regardingrecordurl'] = buildRecordUrl(parentEntityLogicalName, cleanRecordId);
 
   // 3. Bind sprk_regardingrecordtype lookup to sprk_recordtype_ref
   const recordType = await resolveRecordType(webApi, parentEntityLogicalName);

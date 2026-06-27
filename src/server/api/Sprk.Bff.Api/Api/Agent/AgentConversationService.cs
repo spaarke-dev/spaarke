@@ -1,10 +1,8 @@
 using System;
-using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
-using System.Text.Json;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Api.Agent;
 
@@ -15,19 +13,17 @@ namespace Sprk.Bff.Api.Api.Agent;
 /// </summary>
 public sealed class AgentConversationService
 {
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ILogger<AgentConversationService> _logger;
 
-    // Cache key prefix scoped by tenant per ADR-014
-    private const string CacheKeyPrefix = "agent:conv:";
-    private static readonly DistributedCacheEntryOptions CacheOptions = new()
-    {
-        SlidingExpiration = TimeSpan.FromHours(4),
-        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24)
-    };
+    // Resource identifier for ITenantCache (FR-05: tenant-scoped key format
+    // tenant:{tenantId}:agent-conversation:{conversationId}:v1).
+    private const string AgentConversationResource = "agent-conversation";
+    private const int CacheVersion = 1;
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
 
     public AgentConversationService(
-        IDistributedCache cache,
+        ITenantCache cache,
         ILogger<AgentConversationService> logger)
     {
         _cache = cache;
@@ -43,8 +39,11 @@ public sealed class AgentConversationService
         string userId,
         CancellationToken cancellationToken = default)
     {
-        var cacheKey = BuildCacheKey(tenantId, conversationId);
-        var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var cached = await _cache.GetAsync<AgentConversationContext>(
+            tenantId, AgentConversationResource, conversationId, CacheVersion,
+            ct: cancellationToken);
 
         if (cached is not null)
         {
@@ -52,8 +51,7 @@ public sealed class AgentConversationService
                 "Resuming agent conversation {ConversationId} for user {UserId}",
                 conversationId, userId);
 
-            return JsonSerializer.Deserialize<AgentConversationContext>(cached)
-                ?? CreateNewContext(tenantId, conversationId, userId);
+            return cached;
         }
 
         _logger.LogInformation(
@@ -70,10 +68,12 @@ public sealed class AgentConversationService
         AgentConversationContext context,
         CancellationToken cancellationToken = default)
     {
-        var cacheKey = BuildCacheKey(context.TenantId, context.ConversationId);
-        var json = JsonSerializer.Serialize(context);
+        cancellationToken.ThrowIfCancellationRequested();
 
-        await _cache.SetStringAsync(cacheKey, json, CacheOptions, cancellationToken);
+        await _cache.SetAsync(
+            context.TenantId, AgentConversationResource, context.ConversationId, CacheVersion,
+            context, CacheTtl,
+            ct: cancellationToken);
 
         _logger.LogInformation(
             "Updated agent conversation {ConversationId}, active document: {DocumentId}, active playbook: {PlaybookId}",
@@ -101,17 +101,14 @@ public sealed class AgentConversationService
         string bffSessionId,
         CancellationToken cancellationToken = default)
     {
-        var cacheKey = BuildCacheKey(tenantId, conversationId);
-        var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+        var context = await _cache.GetAsync<AgentConversationContext>(
+            tenantId, AgentConversationResource, conversationId, CacheVersion,
+            ct: cancellationToken);
 
-        if (cached is not null)
+        if (context is not null)
         {
-            var context = JsonSerializer.Deserialize<AgentConversationContext>(cached);
-            if (context is not null)
-            {
-                context.BffChatSessionId = bffSessionId;
-                await UpdateContextAsync(context, cancellationToken);
-            }
+            context.BffChatSessionId = bffSessionId;
+            await UpdateContextAsync(context, cancellationToken);
         }
     }
 
@@ -123,8 +120,11 @@ public sealed class AgentConversationService
         string conversationId,
         CancellationToken cancellationToken = default)
     {
-        var cacheKey = BuildCacheKey(tenantId, conversationId);
-        await _cache.RemoveAsync(cacheKey, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await _cache.RemoveAsync(
+            tenantId, AgentConversationResource, conversationId, CacheVersion,
+            ct: cancellationToken);
 
         _logger.LogInformation(
             "Removed agent conversation {ConversationId}", conversationId);
@@ -132,16 +132,12 @@ public sealed class AgentConversationService
 
     private static AgentConversationContext CreateNewContext(
         string tenantId, string conversationId, string userId) => new()
-    {
-        TenantId = tenantId,
-        ConversationId = conversationId,
-        UserId = userId,
-        CreatedAt = DateTimeOffset.UtcNow
-    };
-
-    // Keys scoped by tenant per ADR-014
-    private static string BuildCacheKey(string tenantId, string conversationId) =>
-        $"{CacheKeyPrefix}{tenantId}:{conversationId}";
+        {
+            TenantId = tenantId,
+            ConversationId = conversationId,
+            UserId = userId,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
 }
 
 /// <summary>

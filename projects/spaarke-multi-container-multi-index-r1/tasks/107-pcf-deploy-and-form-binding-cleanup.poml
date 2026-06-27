@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="107" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>PCF build + deploy via `/pcf-deploy`; remove obsolete `searchIndexName` text bindings on Main forms</title>
+    <phase>G: Lookup-driven multi-index</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>106</dependencies>
+    <blocks>110</blocks>
+    <tags>pcf, deploy, dataverse-form</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deploy + maker UI changes. No new code logic; invokes canonical pcf-deploy skill.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 106 — needs the v1.1.75 artifact.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build + deploy PCF v1.1.75 via the canonical `/pcf-deploy` skill (clean rebuild + 5-loc version verify + solution pack + Dataverse import + publish). Then, for each Main form that has the SemanticSearch PCF instance (Matter, Project, Invoice, Event, WorkAssignment), open the PCF control properties pane and REMOVE the obsolete `searchIndexName` bound property binding (the property no longer exists in v1.1.75; the form-instance binding would be a no-op but it should be cleaned up explicitly). Save + publish each form.
+  </prompt>
+
+  <role>
+    Dataverse maker + PCF deployer. Familiar with the `/pcf-deploy` skill and Power Apps form editor.
+  </role>
+
+  <goal>
+    `sprk_Sprk.SemanticSearchControl` v1.1.75 deployed and published in `spaarkedev1.crm.dynamics.com`. All Main forms that host the PCF have their (now-orphaned) `searchIndexName` text binding removed. Forms saved + published.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>src/client/pcf/SemanticSearchControl/Solution/pack.ps1</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source=".claude/skills/pcf-deploy/SKILL.md">Clean rebuild MANDATORY (rm -rf out/ + npm run build:prod). 5-location version verification BEFORE pack. ZIP entry names lowercase. `pac solution import` with `--publish-changes`.</constraint>
+    <constraint source="NFR-10">Stale `dist/` of `@spaarke/auth` or `@spaarke/ui-components` poisons bundle — rebuild those FIRST if their src changed since last PCF build. (Not expected for this task; verify nonetheless.)</constraint>
+    <constraint source="spec.md §5">Form-level cleanup: remove obsolete bindings on Matter / Project / Invoice / Event / WorkAssignment Main forms.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify @spaarke/ui-components + @spaarke/auth dist/ are up to date relative to src/ (run `npm run build` in each shared lib only if src is newer than dist).</step>
+    <step order="2">Invoke `/pcf-deploy` skill OR follow the procedure: `rm -rf out/ bin/`, `npm run build:prod`, copy bundle.js + ControlManifest.xml + styles.css from out/ to Solution/Controls/sprk_Sprk.SemanticSearchControl/, `cd Solution && powershell -File pack.ps1`, `pac solution import --path Solution/bin/SpaarkeSemanticSearch_v1.1.75.zip --publish-changes`.</step>
+    <step order="3">Verify control footer shows "v1.1.75" in a browser hard-refresh of any form hosting the control.</step>
+    <step order="4">For each of the 5 Main forms (Matter, Project, Invoice, Event, WorkAssignment): open form in Power Apps maker → click the SemanticSearch PCF control → in right pane Properties, locate any "Search Index Name" property (will appear as obsolete/unbound under v1.1.75) and remove it. Save + Publish.</step>
+    <step order="5">Hard-refresh a model-driven app + open a Matter; verify the PCF loads without console errors and that the new lookup-driven path is used (App Insights or browser dev-tools network tab confirms the BFF request body carries `searchIndexName` matching the Matter's `sprk_aisearchindexid` row).</step>
+    <step order="6">Update `TASK-INDEX.md`: 107 🔲 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">npm run build:prod, pack.ps1, pac solution import</tool>
+    <tool name="Bash">Optional: kusto query App Insights to confirm searchIndexName routing</tool>
+  </tools>
+
+  <outputs>
+    <output type="artifact">SpaarkeSemanticSearch_v1.1.75.zip imported and published</output>
+    <output type="config">5 Main forms cleaned of obsolete searchIndexName binding</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`pac solution list | grep SpaarkeSemanticSearch` shows v1.1.75.</criterion>
+    <criterion testable="true">Browser hard-refresh on a form shows "v1.1.75" footer.</criterion>
+    <criterion testable="true">Opening a Matter w/ `sprk_aisearchindexid` set fires `/api/ai/search` with `searchIndexName: &lt;the looked-up name&gt;` in the request body (verifiable in browser Network tab).</criterion>
+    <criterion testable="true">All 5 Main forms saved + published with no orphan `searchIndexName` binding.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <deploy-skill>.claude/skills/pcf-deploy/SKILL.md</deploy-skill>
+  </execution>
+</task>

@@ -86,6 +86,9 @@ describe('useChatSession', () => {
       expect(result.current.session).toEqual(sessionResponse);
       expect(result.current.messages).toEqual([]);
       expect(result.current.isLoading).toBe(false);
+      // Task 071: useChatSession.createSession now always serialises `hostContext`
+      // in the body (defaults to null when not provided). Updated body assertion
+      // to match the explicit-null contract.
       expect(mockFetch).toHaveBeenCalledWith(
         'https://api.example.com/api/ai/chat/sessions',
         expect.objectContaining({
@@ -93,6 +96,7 @@ describe('useChatSession', () => {
           body: JSON.stringify({
             documentId: 'doc-1',
             playbookId: 'playbook-1',
+            hostContext: null,
           }),
         })
       );

@@ -1,0 +1,56 @@
+<task id="025" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Document envelope schema for downstream consumers</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>2</phase>
+    <tags>docs, schema, downstream</tags>
+    <dependencies>022</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Per FR-15, document the JSON envelope schema in `notes/insight-envelope-schema.md` with extraction examples for downstream consumers (Power Fx for canvas apps, plugin/C# for server-side, view/column transformation for reports). This unblocks downstream teams to consume `.body` plaintext from the envelope.
+  </prompt>
+
+  <role>Technical documentation author.</role>
+
+  <goal>
+    `notes/insight-envelope-schema.md` containing: full schema definition (JSON Schema), narrative description of each field, 3 extraction examples (Power Fx, plugin C#, view column).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-14, FR-15)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-15">3 extraction examples minimum (Power Fx, plugin, view/column)</constraint>
+    <constraint source="Q-U1">schemaVersion type = string ("1.0")</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>json schema, power fx, dataverse plugin, downstream consumer patterns</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Compose JSON Schema definition">Match FR-14 envelope shape; schemaVersion: string</step>
+    <step order="2" name="Write Power Fx example">JSON parse + .body extract for canvas app</step>
+    <step order="3" name="Write plugin C# example">Newtonsoft.Json.Linq.JObject parse</step>
+    <step order="4" name="Write view/column example">Plain Text Annotation for column transformation</step>
+    <step order="5" name="Cross-link from spec.md FR-15">Update spec reference</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/insight-envelope-schema.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">JSON Schema file validates against the spec FR-14 envelope</criterion>
+    <criterion testable="true">3 extraction examples present (Power Fx + plugin + view/column)</criterion>
+    <criterion testable="true">schemaVersion documented as string semver</criterion>
+  </acceptance-criteria>
+</task>

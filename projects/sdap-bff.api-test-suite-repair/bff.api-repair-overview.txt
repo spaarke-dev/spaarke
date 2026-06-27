@@ -1,0 +1,63 @@
+The project 'sdap-bff-api-remediation-fix' did not address issues with the test suite.  The following issues are to be addressed in the new bff.api-repair- project
+
+The 283 failures cluster into roughly 3 groups (per the test file inventory):
+
+~50–100 failures: WebApplicationFactory startup — Program.cs registers services (like AiPersistenceModule, Cosmos clients, ServiceBus, etc.) that the test factory doesn't substitute. Fix: extend CustomWebAppFactory.cs (171 lines today) to substitute these services with mocks. Bounded work, ~4–6h.
+~30–50 failures: IChatClient streaming mocking — NSubstitute has a known limitation with IAsyncEnumerable<T> return types. Fix: add a test helper that returns a hand-rolled IAsyncEnumerable instead of NSubstitute's auto-mock. Bounded work, ~3–4h.
+~130–200 remaining: Individual test logic drift (assertions hardcoded against shapes that have since changed) — these are 1–5 minute fixes each, but there are many. Bounded work, ~6–10h if we set a target like "≤30 remaining" (same pattern as 071).
+
+What's actually missing today
+A broken test suite means we have these verification layers, but not all of them:
+
+Layer	What it catches	What it MISSES
+✅ Build verification (dotnet build)	Compile errors, type mismatches, signature breakage	Runtime behavior, business logic
+✅ Capture-BffBaseline.ps1 synthetic smoke	Route registration, startup health, auth pipeline, gross 500s on 323 routes	Edge cases, business logic correctness, error paths
+✅ Hash-verify + healthz (Deploy-BffApi.ps1)	Mechanical deploy success	Anything functional
+✅ User E2E testing	What the human user notices	Background jobs, rare paths, exception handling
+✅ App Insights observation	Production-rate exceptions, latency	Pre-prod regressions; takes days to surface
+❌ Unit tests	Business logic correctness, edge cases, regression prevention	—
+❌ Integration tests	What happens when ServiceBus throws / Cosmos rate-limits / Dataverse returns 403	—
+The bottom two are non-functional today. Every change to BFF business logic ships without unit-test verification.
+
+How this project survived without working tests
+The Phase 4 facade migration shipped successfully without tests, but partly by luck:
+
+It was a structural refactor (interface delegation, namespace moves) — no behavior change
+The synthetic smoke caught structural breaks (routes still register, auth still works)
+User E2E caught the one real bug (/api prefix in LegalWorkspace)
+Code review caught the 3 important findings
+But the next BFF change is likely business logic — edge cases in playbook resolution, error handling in invoice extraction, retry behavior in webhooks. Synthetic smoke + E2E won't catch those.
+
+What the gap actually costs
+Cost	Frequency	Severity
+Can't ask "did you add a test?" in PR review	Every PR	Low (most PRs skip this anyway)
+Can't gate CI on dotnet test (283 failures = noise)	Every PR	High — CI provides no functional signal
+Subtle regression escapes to App Insights → user reports → hotfix cycle	~1-2x/month estimate given BFF velocity	High — costs hours per incident
+Test debt compounds (more drift, more lost context)	Continuous	Medium — gets harder the longer you wait
+Refactor confidence is artificially low → smaller, more cautious changes	Continuous	Medium — slows velocity
+Is it urgent?
+Not blocking anything today. The other verification layers caught everything this project needed. But it's accumulating compound interest:
+
+Today: 283 failures, ~13-20h to repair to "≤30 remaining"
+In 3 months: more drift from in-flight projects, probably 350-400 failures, 20-30h to repair
+In 6 months: significant chunks may be unrepairable without rewriting the tests from scratch
+Eventually: the test suite becomes vestigial, gets deleted, BFF has no unit-test layer at all
+So: not an emergency, but it should be the next BFF project rather than the 5th-next.
+
+My recommendation (unchanged but clarified)
+Yes, do it. As its own project. Soon. Concretely:
+
+Scaffold sdap-bff-test-suite-repair as a follow-up project (via /project-pipeline or directly). Use the 3-group analysis as the spec input. Target: ≤30 failures remaining.
+Time it within the next 1-2 BFF iterations — not 6 months out.
+Make it a prerequisite for any major BFF business-logic change going forward (e.g., new Communications module work, AI Chat changes, Finance scoring tweaks). PRs touching those should have tests; tests should be expected to pass.
+If you want me to start scaffolding sdap-bff-test-suite-repair right now, I can:
+
+Draft the design.md from the 3-group analysis (~10 min)
+Run /project-pipeline to generate spec + plan + ~15 task POMLs
+Hand off ready to execute
+
+Two scope decisions that'll shape the project:
+
+Decision	Cheap option	Thorough option
+Failure target	"≤30 remaining" — declare done when meaningful failures resolved; document the 30 known stragglers	"Zero" — repair every test; ~10-20h more work for diminishing return
+In-flight project coordination	Lock the test project for the repair duration; sibling projects pause BFF test changes	Coordinate weekly; sibling projects keep moving but commit to not introducing new failures

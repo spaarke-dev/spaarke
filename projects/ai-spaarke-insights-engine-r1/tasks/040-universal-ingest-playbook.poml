@@ -1,0 +1,76 @@
+<task id="040" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P7 — Universal ingest playbook authoring (Layer 1 → conditional Layer 2 → gates → emission)</title>
+    <status>completed</status>
+    <wave>5</wave>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>playbook-authoring, ingest, orchestration, zone-a, dataverse-playbook</tags>
+    <dependencies>020, 021, 022, 025, 030, 031, 042</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P7</d-p>
+  </metadata>
+
+  <prompt>
+    Author the universal ingest playbook as a Spaarke playbook definition (D-54 questions-as-playbooks; the playbook IS the orchestration). Composes existing nodes (AiAnalysisNodeExecutor for Layer 1 + Layer 2) + new D-P12 nodes (ConditionNode for Layer 1 gating, custom emission for D-P10) + GroundingVerifier (D-P9). One playbook runs on every SPE upload via D-P8 consumer.
+  </prompt>
+
+  <role>Playbook author familiar with Spaarke playbook entity schema, node executors, conditional routing, and PlaybookExecutionEngine semantics.</role>
+
+  <goal>
+    Universal ingest playbook published in Dataverse playbook entity. On invocation with `{documentId, matterId, tenantId}`: runs Layer 1 classification → if outcome-bearing AND confidence ≥ 0.7 → runs Layer 2 extraction → applies GroundingVerifier on quotes → applies confidence-threshold gating → emits Observations to spaarke-insights-index + mirrors to sprk_analysis (D-P11). On non-outcome-bearing: Layer 1 Observation emitted only; playbook ends. `IInsightsAi.RunIngestAsync` invokes this playbook via PlaybookExecutionEngine.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P7, §4 architecture summary)</file>
+    <file purpose="rationale">projects/ai-spaarke-insights-engine-r1/SPEC-phase-1-minimum.md (§3 universal layered ingest, §3.1 layer table)</file>
+    <file purpose="existing-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs (engine semantics)</file>
+    <file purpose="existing-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ConditionNodeExecutor.cs (gating pattern)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="D-54">Implemented as a Spaarke playbook; NO parallel orchestration code</constraint>
+    <constraint source="D-59">Cheap layers gate expensive ones; Layer 2 conditional on Layer 1 outcome + confidence</constraint>
+    <constraint source="D-50">First step MUST be ISanitizer sanitization of any text content retrieved from spaarke-files-index before any LLM step</constraint>
+    <constraint source="§3.5">IngestOrchestrator lives in Zone A (Services/Ai/Insights/); facade method IInsightsAi.RunIngestAsync routes Zone B callers (D-P8) into this</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>playbook-authoring, orchestration, layered-extraction, ingest-pipeline</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read SPEC-phase-1-minimum.md §3">Confirm universal ingest flow and layer ordering</step>
+    <step order="2" name="Design playbook node graph">Sanitizer → Layer 1 (AiAnalysisNodeExecutor with classification config) → ConditionNode (classification check + confidence threshold) → [if pass] Layer 2 (AiAnalysisNodeExecutor with outcome extraction config) → GroundingVerifyNode → ObservationEmitter (D-P10) → DeliverToIndex (spaarke-insights-index)</step>
+    <step order="3" name="Author playbook definition">Insights-mode metadata (output mode = OnComplete; tier = observation; no evidence sufficiency rule needed at ingest layer; cache TTL = 0 — ingest is one-shot)</step>
+    <step order="4" name="Author IngestOrchestrator service">Wraps PlaybookExecutionEngine.ExecuteBatchAsync with ingest-specific context (documentId, matterId, tenantId); exposed via IInsightsAi.RunIngestAsync facade</step>
+    <step order="5" name="Author Observation mirror hook">Side-effect of ingest playbook completion: per emitted Observation, write a sprk_analysis row (D-P11 mirror); fire-and-forget pattern with error logging</step>
+    <step order="6" name="Integration test">Mock SPE upload event → invoke ingest playbook on a fixture closing-letter → verify Observations in spaarke-insights-index + sprk_analysis mirror rows</step>
+    <step order="7" name="Quality gates">code-review + adr-check; verify §3.5 facade boundary respected</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="dataverse">Playbook entity authoring (PAC CLI or Web API)</tool>
+  </tools>
+
+  <outputs>
+    <output type="playbook">Dataverse playbook entity row "universal-ingest@v1"</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/IngestOrchestrator.cs</output>
+    <output type="test">tests/integration/Services/Ai/Insights/UniversalIngestTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Ingest playbook publishes successfully to Dataverse playbook entity</criterion>
+    <criterion testable="true">End-to-end test: closing-letter fixture → Layer 1 classifies → Layer 2 extracts → gates pass → Observations written to spaarke-insights-index</criterion>
+    <criterion testable="true">End-to-end test: correspondence-email fixture → Layer 1 classifies → ConditionNode skips Layer 2 → only Classification Observation written</criterion>
+    <criterion testable="true">sprk_analysis mirror row written for every persisted Observation</criterion>
+    <criterion testable="true">ISanitizer invoked before any LLM step (verified via capture)</criterion>
+    <criterion testable="true">IInsightsAi.RunIngestAsync invokes this playbook (facade boundary respected)</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Delete 3 solution-local `MicrosoftToDoIcon` copies; update imports (FR-19b)</title>
+    <phase>DD: De-Duplication</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>062</blocks>
+    <tags>frontend, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Deletes files across 3 solutions; visual-diff verification required</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 050</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per FR-19: delete the 3 solution-local `MicrosoftToDoIcon.tsx` copies in `src/solutions/LegalWorkspace/src/icons/`, `src/solutions/SmartTodo/src/icons/`, and `src/solutions/DailyBriefing/src/icons/`. Update every consumer import to use `@spaarke/ui-components` instead. `find src/solutions -name "MicrosoftToDoIcon.tsx"` returns zero results.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in import refactoring + bulk find/replace.</role>
+
+  <goal>Zero `MicrosoftToDoIcon.tsx` files under `src/solutions/`; all consumers import from `@spaarke/ui-components`; visual rendering identical.</goal>
+
+  <context>
+    <background>
+      Per FR-19 acceptance: `find src/solutions -name "MicrosoftToDoIcon.tsx"` returns zero results; build green; visual diff null.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/icons/MicrosoftToDoIcon.tsx</file>
+      <file>src/solutions/SmartTodo/src/icons/MicrosoftToDoIcon.tsx</file>
+      <file>src/solutions/DailyBriefing/src/icons/MicrosoftToDoIcon.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Single canonical version in `@spaarke/ui-components`.</constraint>
+    <constraint source="project">FR-19 acceptance: find returns zero.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep for `MicrosoftToDoIcon` consumers across `src/solutions/` to inventory import sites.</step>
+    <step order="2">Update each consumer import to `import { MicrosoftToDoIcon } from '@spaarke/ui-components/icons'` (or appropriate subpath).</step>
+    <step order="3">Delete the 3 solution-local copies.</step>
+    <step order="4">Run `npm run build` on each solution (`LegalWorkspace`, `SmartTodo`, `DailyBriefing`); verify green.</step>
+    <step order="5">Verify `find src/solutions -name "MicrosoftToDoIcon.tsx"` returns zero results.</step>
+    <step order="6">Update TASK-INDEX.md: change task 051 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript packages.</tool>
+    <tool name="terminal">Find + grep + file ops.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/</output>
+    <output type="code">src/solutions/SmartTodo/</output>
+    <output type="code">src/solutions/DailyBriefing/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`find src/solutions -name "MicrosoftToDoIcon.tsx"` returns zero.</criterion>
+    <criterion testable="true">All 3 affected solutions build green.</criterion>
+    <criterion testable="true">Visual diff null (icon renders the same in each solution).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If a consumer was using a divergent custom prop or variant, surface in `notes/` and reconcile to the canonical version.
+
+    Completion (2026-06-18, Wave 2b sub-agent):
+    - Deleted 3 byte-identical copies (verified vs canonical pre-delete).
+    - Rewrote 3 consumer imports to `import { MicrosoftToDoIcon } from "@spaarke/ui-components"` (root subpath; canonical convention; the lib re-exports via src/index.ts -> ./icons).
+    - `find src/solutions -name "MicrosoftToDoIcon.tsx"` returns zero (Glob verified).
+    - `npm run build` blocked by environmental issues unrelated to this change: SmartTodo + LegalWorkspace lack `node_modules` ('vite' not on PATH); DailyBriefing fails on pre-existing `@spaarke/sdap-client` resolver error (called out as acceptable in Wave 2b ground rules).
+    - Fallback verification: `npx tsc --noEmit` in all 3 solutions; zero errors mention `MicrosoftToDoIcon`, `@spaarke/ui-components`, or the modified consumer import lines. All emitted errors are pre-existing infrastructure noise (missing react/@fluentui type decls because node_modules absent; ComponentFramework namespace gaps in shared lib).
+    - No consumer used a divergent prop — all 3 used `<MicrosoftToDoIcon size={20} active />` or `<MicrosoftToDoIcon ... />` against the same {size, active, className} contract. No reconciliation needed.
+    - Per Wave 2b ground rules: TASK-INDEX.md update + git commit deferred to main session at wave boundary.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

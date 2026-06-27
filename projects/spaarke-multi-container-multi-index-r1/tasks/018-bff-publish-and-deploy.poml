@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>BFF publish-size check + deploy via `/bff-deploy`</title>
+    <phase>B: BFF resolver extension (Deploy)</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>017</dependencies>
+    <blocks>020, 030, 070</blocks>
+    <tags>bff-api, deploy, azure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task; STANDARD rigor per task-execute rigor decision tree. Critical publish-size gate per CLAUDE.md §10 + ADR-029.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single deploy operation against a shared Azure resource; must serialize.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Publish the BFF in Release mode, verify compressed publish size is ≤ 60 MB (HARD STOP per CLAUDE.md §10 + spec NFR-01; baseline ~45.65 MB), then deploy via the `/bff-deploy` skill. Verify Azure App Service startup logs show the new `AiSearch.AllowedIndexes` allow-list at INFO level. Smoke check `/api/ai/search` after deploy.
+  </prompt>
+
+  <role>
+    BFF deployer with Azure CLI / App Service access. Read the `/bff-deploy` SKILL.md verbatim and follow it; do NOT improvise deploy steps (per saved lesson `feedback_deploy-asks-follow-skill-no-openended-questions`).
+  </role>
+
+  <goal>
+    BFF v with Phase B changes deployed to the target Azure App Service. Compressed publish size ≤ 60 MB. Startup log shows the allow-list at INFO. Smoke check confirms the endpoint is live.
+  </goal>
+
+  <context>
+    <background>
+      Final Phase B task. After this, Phases A (wizards), D (PCF), E (code page), and F (backfill) can deploy. Per spec.md §Dependencies, BFF deploy must land BEFORE PCF v1.1.74 deploy — PCF requires the BFF to accept the new `searchIndexName` field.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.Production.json</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md NFR-01">Compressed publish size ≤ 60 MB. Baseline ~45.65 MB (post-Phase 5 Outcome A, 2026-05-26). Threshold for escalation: ≥+5 MB single-task delta → explicit justification; ≥55 MB cumulative → architecture review; ≥60 MB → HARD STOP.</constraint>
+    <constraint source="spec.md NFR-12">BFF deploy MUST follow `/bff-deploy` skill — production-mode publish, framework-dependent linux-x64, transitive CVE override (ADR-029).</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — framework-dependent, transitive CVE override, size baseline maintained.</constraint>
+    <constraint source="CLAUDE.md §10 bullet 4">Publish-size verification mandatory on EVERY BFF-touching task — measure compressed output; report absolute + diff vs baseline; HARD STOP at 60 MB.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Binding pre-merge checklist — publish-size check is the final gate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Publish-size measurement" location="CLAUDE.md §10">
+        `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` → measure compressed (.zip) output → compare to baseline 45.65 MB → STOP at 60 MB.
+      </pattern>
+      <pattern name="bff-deploy invocation" location=".claude/skills/bff-deploy/SKILL.md">
+        Invoke the skill verbatim with the target environment + file paths. Do not ask open-ended questions (per saved lesson `feedback_deploy-asks-follow-skill-no-openended-questions`).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Verify the publish succeeds with no warnings about missing assets or transitive CVE issues (ADR-029).</step>
+    <step order="2">Zip the publish output (or use the existing compression step in `/bff-deploy`) and measure the compressed size in MB. Compare against the baseline ~45.65 MB. Expected delta: minimal (additive code only; no new NuGet packages).</step>
+    <step order="3">**HARD STOP gate**: If compressed size ≥ 60 MB, STOP immediately, escalate to human, and do NOT proceed to deploy. If ≥ +5 MB delta vs baseline, explicit justification required in task notes. If ≥ 55 MB cumulative, architecture review required.</step>
+    <step order="4">Invoke `/bff-deploy` skill verbatim against the target environment (Spaarke Test 1 first for smoke; Spaarke Demo + Spaarke for production deploy per operator schedule). Follow the skill steps exactly — do not improvise.</step>
+    <step order="5">After deploy completes, fetch Azure App Service startup logs (Log Stream or `az webapp log tail`). Verify the new INFO log line shows `AiSearch.AllowedIndexes` with the four expected values.</step>
+    <step order="6">Smoke check: `curl -X POST https://&lt;app-host&gt;/api/ai/search -H "Authorization: Bearer ..." -d '{"query":"smoke","searchIndexName":"spaarke-knowledge-index-v2"}'` (or equivalent). Expect 200 (or 401 if auth not arranged for smoke — but NOT 500 or routing errors). Full UAT is task 070. Update `TASK-INDEX.md`: 🔲 → ✅; update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run `dotnet publish`, measure size, compress</tool>
+    <tool name="Skill">Invoke `/bff-deploy` verbatim</tool>
+  </tools>
+
+  <outputs>
+    <output type="binary">deploy/api-publish/ (publish output)</output>
+    <output type="deploy">Azure App Service updated with Phase B BFF</output>
+    <output type="notes" ephemeral="true">Publish size + baseline diff; startup log snippet; smoke check result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">NFR-01: Compressed publish output ≤ 60 MB; documented diff vs baseline ~45.65 MB.</criterion>
+    <criterion testable="true">NFR-12: `/bff-deploy` skill followed verbatim; no improvised steps.</criterion>
+    <criterion testable="true">Azure App Service startup log shows `AiSearch.AllowedIndexes` at INFO level with 4 expected values.</criterion>
+    <criterion testable="true">Smoke check against `/api/ai/search` returns 200 (or expected auth code) — not 500.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The publish-size HARD STOP is non-negotiable per CLAUDE.md §10 — if 60 MB is exceeded, halt and escalate. No NuGet additions are expected in Phase B (additive code only), so the size should stay near baseline.
+
+    Full UAT is task 070 (later in the project). This task delivers the deploy + immediate-smoke gate only.
+
+    Saved lesson `feedback_deploy-asks-follow-skill-no-openended-questions`: when invoking `/bff-deploy`, hand over the file paths and target environment as parameters; do NOT ask open-ended questions about what to deploy.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute Step 0 (rigor declaration: STANDARD) before any deploy action.
+    </protocol>
+  </execution>
+</task>

@@ -26,13 +26,47 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 ## AI Playbook & Scope Provisioning
 
+### `dataverse/Seed-PlaybookConsumers.ps1`
+**Purpose:** Seed the `sprk_playbookconsumer` Dataverse table with the 6 initial consumer→playbook routing records (matter-pre-fill, project-pre-fill, ai-summary, summarize-file, chat-summarize, email-analysis) consumed by the BFF `IConsumerRoutingService` (chat-routing-redesign-r1 Phase 1R, FR-1R-07). Replaces the `Workspace__*PlaybookId` environment-variable pattern with Dataverse-backed routing.
+**Usage:** 🟡 Occasional - Run once per environment during Phase 1R rollout; rerun is a no-op (idempotent UPSERT by alternate key).
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`); Dataverse `sprk_playbookconsumer` table created with alternate key `sprk_ConsumerTypeCodeEnvironment` per spec FR-1R-01.
+**Owner:** AI Team
+
+**Idempotency**: Records are upserted via the alternate-key URL `sprk_playbookconsumers(sprk_consumertype='X',sprk_consumercode='default',sprk_environment='*')`. Existing records are updated in-place; missing records are created. The script prints all 6 rows BEFORE write — the binding defense against the 2026-06-24 UAT-2 env-var-misconfigured failure mode that motivated Phase 1R.
+
+**Environment-specific GUIDs**: Default record set ships with Dev GUIDs (verified 2026-06-24). When seeding a new environment, update the `$Records` hashtable in the script with that environment's playbook GUIDs first (look up via PAC CLI, MCP `read_query`, or Power Apps maker portal). The 6 consumer types (`matter-pre-fill`, `project-pre-fill`, `ai-summary`, `summarize-file`, `chat-summarize`, `email-analysis`) and the playbook display names referenced are stable across environments; only the GUIDs differ.
+
+**When to Use:**
+- Initial Phase 1R rollout to Dev / Test / Prod
+- Adding a new consumer type to the routing table (extend `$Records` hashtable + rerun)
+- Recovering after an accidental delete
+
+**Example:**
+```powershell
+# Dry-run preview
+.\scripts\dataverse\Seed-PlaybookConsumers.ps1 -DryRun
+
+# Live seed against Dev (default)
+.\scripts\dataverse\Seed-PlaybookConsumers.ps1
+
+# Live seed against a specific environment
+.\scripts\dataverse\Seed-PlaybookConsumers.ps1 -DataverseUrl "https://spaarketest1.crm.dynamics.com" -SkipConfirm
+```
+
+**Related**: spec `projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md` § Phase 1R; task POML `tasks/028b-seed-playbookconsumers-script.poml`; verification evidence at `notes/handoffs/028b-seed-verification-evidence.md`.
+
+---
+
 ### `Deploy-Playbook.ps1`
 **Purpose:** Create complete AI analysis playbooks in Dataverse from definition JSON files — resolves scope codes, creates playbook + nodes, associates N:N scopes, saves canvas layout
 **Usage:** 🟢 Active - Create new playbooks on-demand
 **Lifecycle:** ✅ Maintained
 **Dependencies:** Azure CLI (`az login`), Dataverse connection
 **Owner:** AI Team
-**Last Used:** March 2026
+**Last Used:** June 2026 (Insights Engine r2 Wave B)
+
+**Lint behavior (Wave B B3 — Insights Engine r2 D-01 path-b)**: Every node in the playbook definition MUST have an `actionCode` field referencing a `sprk_analysisaction` row. The script lints this immediately after JSON load (before any Dataverse writes) and FAILS the deploy with an explicit error listing nodes that lack action-code wiring. This prevents the regression mode described in `projects/ai-spaarke-insights-engine-r2/decisions/D-01-wave-b-root-cause-corrected.md` §2.4 (deployed nodes with no `sprk_actionid` FK → orchestrator falls into the canvas-Designer-clobbered configjson path → dispatch defaults to AiAnalysis(0) → "Node X in batch 1 failed" → defensive scaffold decline).
 
 **When to Use:**
 - After designing a playbook with `/jps-playbook-design` skill
@@ -55,6 +89,69 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 - `scripts/seed-data/` bootstraps base primitives (actions, skills, knowledge, tools) — run once per environment
 - `Deploy-Playbook.ps1` creates NEW playbooks from definition files using those existing primitives
 - Both use the same Dataverse entities (`sprk_analysisplaybooks`, `sprk_playbooknodes`, etc.)
+
+---
+
+### `Setup-InsightsEngineSchema.ps1`
+**Purpose:** Idempotent setup for Insights Engine Dataverse schema + lookup-target dispatch rows. Creates `sprk_executoractiontype` (Whole Number) on `sprk_analysisactiontype` if missing, backfills existing rows to 0 (AiAnalysis), and seeds the 7 Insights ActionType lookup rows (60 - Agent Service, 70 - Grounding Verify, 80 - Live Fact Resolver, 90 - Index Retrieve, 100 - Evidence Sufficiency, 110 - Decline to Find, 120 - Return Insight Artifact).
+**Usage:** 🟢 Active - Run on a new Dataverse environment after `git pull` to bring it up to Wave B baseline
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Dataverse connection
+**Owner:** AI Team / Insights Engine
+**Last Used:** June 2026 (Insights Engine r2 Wave B post-merge protection)
+
+**When to Use:**
+- New developer's first-time Dataverse env setup
+- After merging an Insights Engine PR that depends on the lookup-target dispatch architecture
+- Spinning up a new Spaarke environment (test, demo, customer-prod)
+- Re-running after a Dataverse env reset / restore
+
+**Why this exists** (per amended ADR-027 2026-06-02): Spaarke uses unmanaged solutions everywhere — there is no managed-solution promotion path. Schema changes that need to travel between environments use either (a) unmanaged solution export, or (b) idempotent setup scripts like this one. This script implements (b) for the Insights Engine schema dependencies introduced by r2 Wave B.
+
+**Command:**
+```powershell
+# Preview without modifying (recommended first)
+.\scripts\Setup-InsightsEngineSchema.ps1 -DataverseUrl "https://spaarkedev1.crm.dynamics.com" -DryRun
+
+# Apply
+.\scripts\Setup-InsightsEngineSchema.ps1 -DataverseUrl "https://spaarkedev1.crm.dynamics.com"
+```
+
+**What is NOT included:**
+- The 7 INS-* `sprk_analysisaction` rows (with JPS prompt content) — see `projects/ai-spaarke-insights-engine-r2/notes/drafts/wave-b-action-codes.md`
+- The predict-matter-cost@v1 playbook deploy — use `Deploy-Playbook.ps1 -Force`
+
+---
+
+### `Create-AiPersonaEntity.ps1`
+**Purpose:** Idempotent deployment of the `sprk_aipersona` Dataverse entity — R6 Pillar 1's 5th scope library entity. Creates entity + 6 attributes (`sprk_name`, `sprk_personacode`, `sprk_description`, `sprk_systemprompt`, `sprk_scopetype` picklist, `sprk_tags`, `sprk_availableadhoc`) + self-lookup relationship (`sprk_aipersona_parentpersona` adding `sprk_parentpersonaid`) for most-specific-wins inheritance per R6 Q1. Mirrors the canonical 4-scope schema pattern (`sprk_analysisaction`/skill/knowledge/tool) verbatim. SYS-/CUST- prefix enforcement is API-side via existing `OwnershipValidator.cs` (NOT entity-level — matches the canonical Spaarke scope pattern).
+**Usage:** 🟡 Occasional — One-time per environment (R6 Phase A); idempotent re-runs safe
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login`), Dataverse connection, PowerShell 7+
+**Owner:** AI Team / R6 spaarke-ai-platform-unification-r6
+**Last Used:** June 2026 (R6 task 001 — D-A-01)
+
+**When to Use:**
+- Bootstrapping a new Dataverse environment for R6 Pillar 1
+- Re-running after a Dataverse environment reset / restore
+- Verifying schema after a manual change
+
+**Command:**
+```powershell
+# Preview without modifying (recommended first run)
+.\scripts\Create-AiPersonaEntity.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -DryRun
+
+# Deploy (idempotent)
+.\scripts\Create-AiPersonaEntity.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+```
+
+**Pattern source:** `scripts/Deploy-ChartDefinitionEntity.ps1` (canonical exemplar per `dataverse-create-schema` SKILL.md) + `docs/architecture/scope-architecture.md` (scope schema canonical reference).
+
+**Related R6 tasks:**
+- Task 002 — `GET /api/ai/scopes/personas` endpoint (consumes this entity)
+- Task 003 — Persona resolver methods in `IScopeResolverService`
+- Task 004 — Seed default SYS- persona row (separate script — task-004-specific)
+- Task 005 — Wire `SprkChatAgentFactory.CreateAgentAsync` to scope persona
 
 ---
 
@@ -536,10 +633,10 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 **Deployment Sequence:**
 | # | Script Called | Web Resource |
 |---|-------------|--------------|
-| 1 | `Deploy-CorporateWorkspace.ps1` | `sprk_corporateworkspace` (HTML) |
+| 1 | ~~`Deploy-CorporateWorkspace.ps1`~~ | ~~`sprk_corporateworkspace` (HTML)~~ — **RETIRED 2026-05-26** (R4 task 041 / OC-R4-05; see [`docs/architecture/LEGALWORKSPACE-RETIREMENT.md`](../docs/architecture/LEGALWORKSPACE-RETIREMENT.md)) |
 | 2 | `Deploy-ExternalWorkspaceSpa.ps1` | `sprk_externalworkspace` (HTML + inline JS) |
 | 3 | `Deploy-SpeAdminApp.ps1` | `sprk_speadmin` (HTML) |
-| 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources |
+| 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources (note: `sprk_corporateworkspace` entry retired — see above) |
 | 5 | `Deploy-EventsPage.ps1` | `sprk_eventspage.html` |
 | 6 | `Deploy-PCFWebResources.ps1` | PCF bundle.js + CSS |
 | 7 | `Deploy-RibbonIcons.ps1` | 3 SVG ribbon icons |

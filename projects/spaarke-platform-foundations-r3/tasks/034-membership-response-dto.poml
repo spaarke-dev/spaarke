@@ -1,0 +1,77 @@
+<task id="R3-034" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`MembershipResponse` DTO + response shape</title>
+    <status>completed</status>
+    <phase>P4</phase>
+    <parallel-group>H (with 033)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1h</estimated-effort>
+    <tags>bff-api,membership,dto,api-contract</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Models/MembershipResponse.cs</file>
+    </relevant-files>
+    <dependencies>030</dependencies>
+  </metadata>
+  <prompt>Define the API response shape per spec.md FR-1A.9. Includes entityType, personIdentity, ids[], byRole map, count, cacheExpiresAt, continuationToken.</prompt>
+  <goal>DTO compiles. JSON serialization matches spec response shape exactly.</goal>
+  <constraints>
+    <constraint source="spec FR-1A.9">Response shape locked per design</constraint>
+  </constraints>
+  <knowledge>
+    <topic>api-contract-dto</topic>
+    <files>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-1A.9 response shape</step>
+    <step order="1">Author MembershipResponse record + PersonIdentity record</step>
+    <step order="2">Verify JSON serialization matches spec shape (snake_case if needed)</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">DTO compiles + serializes to spec shape</criterion>
+  </acceptance-criteria>
+  <notes>
+Completed 2026-06-21.
+
+Files created:
+- src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Models/MembershipResponse.cs
+  Authoritative response shape per design.md Part 1 §"Endpoint contract":
+  (EntityType, PersonIdentity, Ids, ByRole, Count, CacheExpiresAt, ContinuationToken?).
+  Self-locked JSON contract via [property: JsonPropertyName("camelCase")] on every
+  positional parameter (independent of host JsonSerializerOptions config so the
+  shape is stable in tests + logger contexts).
+- tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResponseTests.cs
+  10 tests covering: camelCase top-level, camelCase nested personIdentity, GUID
+  string D-form, ISO 8601 DateTimeOffset, explicit `continuationToken: null`,
+  preserved empty arrays in byRole, full roundtrip top-level, full roundtrip
+  PersonIdentity, continuationToken-present serialization, roundtrip with token.
+
+Files modified:
+- src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Models/PersonIdentity.cs
+  Added [JsonPropertyName] attributes on all 7 fields (5 via [property:] on
+  positional params, 2 via body attributes on the TeamIds + OrganizationIds
+  init-only redeclarations). Non-breaking: task 031's 10 IdentityNormalizationServiceTests
+  + task 032's OrganizationMembershipResolverTests still pass.
+
+Coordination with task 033:
+  At authoring time (2026-06-21) task 033 had NOT created MembershipResponse.cs
+  (both 033 and 034 were still 🔲 in TASK-INDEX). No reconciliation required.
+  Task 033 (MembershipResolverService) consumes this DTO as the authoritative
+  output shape.
+
+Tests: 10/10 new pass. Full Membership-namespace regression: 48/48 pass.
+Build: BFF build 0 errors / 16 pre-existing warnings (unchanged).
+Publish size: 46.16 MB compressed (delta 0.00 MB vs 46.16 baseline). No new NuGet.
+CVE: no new HIGH (only pre-existing Kiota.Abstractions 1.21.2).
+
+ADR compliance:
+- ADR-013: lives under Services/Ai/Membership/Models/ (correct namespace)
+- ADR-029: zero publish-size impact
+- TreatWarningsAsErrors honored (0 new warnings)
+
+Not committed per task brief.
+  </notes>
+</task>

@@ -1,0 +1,66 @@
+<task id="002" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Curate Spaarke-aligned .NET samples</title>
+    <phase>1</phase>
+    <tags>knowledge-base, agent-framework, samples, dotnet, curation</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Add ~6 curated .NET samples to knowledge/agent-framework/dotnet/samples/ chosen specifically because they map to patterns already present in Spaarke's BFF AI code (SprkChatAgent, middleware pipeline, AIFunction tool registration, IChatClient usage). Update SOURCE.md to document each new sample's upstream path, what it demonstrates, and why it was curated.</goal>
+    <context>The existing 4 curated samples (Foundry-flavored single-agent loop, OpenTelemetry observability, streaming workflow, handoff workflow) cover the upstream "_StartHere" categories. They do NOT cover the patterns Spaarke actually uses in production: ChatCompletionsAgent over Azure OpenAI with IChatClient, AIFunctionFactory tool registration with [Description] attributes, middleware composition via the IChatClient pipeline (Use* extensions), MCP client tools, structured outputs, and session/state persistence. Without these, Claude will reach for Foundry-only or Workflow-only idioms when modifying SprkChatAgent.cs and its middleware stack.</context>
+    <constraints>
+      - Use the SHA pinned by task 001 — do NOT re-clone or use a different SHA
+      - Each new sample MUST preserve the upstream path under knowledge/agent-framework/dotnet/samples/&lt;upstream-relative-path&gt;/
+      - Each new sample MUST include its original .csproj (preserved for reference; not built locally)
+      - Total curated size (existing + new) MUST stay under 300 KB
+      - 1–3 examples per pattern, NOT whole folders
+      - If a target pattern has no upstream sample (e.g., a Spaarke-specific pattern), log to SOURCE.md GAPs and stop — do NOT invent
+      - Sub-agents may write to knowledge/ but NOT to .claude/ (root CLAUDE.md §3); only `knowledge/` paths in this task
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>knowledge/agent-framework/SOURCE.md</file>
+      <file>projects/agent-framework-knowledge-r1/SPEC.md</file>
+      <file>projects/agent-framework-knowledge-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentTelemetryMiddleware.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentContentSafetyMiddleware.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentCostControlMiddleware.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read the 4 Spaarke files in &lt;knowledge&gt; to identify the concrete Agent Framework primitives currently used (IChatClient, AIFunctionFactory, ChatResponseUpdate, UseFunctionInvocation, etc.) — this drives sample selection</step>
+    <step>Shallow clone microsoft/agent-framework at the SHA pinned by task 001 to c:/tmp/agent-framework</step>
+    <step>Survey c:/tmp/agent-framework/dotnet/samples/ and identify candidates for: (a) Azure OpenAI / ChatCompletionsAgent over IChatClient, (b) function-tool registration with [Description] attributes + AIFunctionFactory.Create, (c) middleware composition via IChatClient.AsBuilder().Use*().Build() — Spaarke's middleware pipeline pattern, (d) MCP client tool consumption, (e) structured outputs / response format, (f) persistent session / context provider sample</step>
+    <step>For each candidate: copy the smallest self-contained sample folder (typically Program.cs + .csproj + at most 1-2 supporting files) verbatim from c:/tmp/agent-framework/dotnet/samples/&lt;path&gt; to knowledge/agent-framework/dotnet/samples/&lt;path&gt;/ — preserve upstream directory structure</step>
+    <step>For each pattern that has NO direct upstream sample (likely the middleware-composition case): log a GAP in SOURCE.md describing what's missing and the closest-available substitute</step>
+    <step>Update knowledge/agent-framework/SOURCE.md "Curated samples" table — add one row per new sample with: relative path, upstream path, "What it demonstrates" (one sentence mapping to a Spaarke pattern)</step>
+    <step>Verify total curated size (existing + new) under 300 KB via `du -sb knowledge/agent-framework/dotnet/samples/`</step>
+    <step>Delete c:/tmp/agent-framework</step>
+    <step>Commit: `feat(knowledge): curate Spaarke-aligned agent-framework .NET samples (R1 task 002)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Bash</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Agent(Explore)</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>knowledge/agent-framework/dotnet/samples/&lt;pattern-X&gt;/ × ~6</output>
+    <output>knowledge/agent-framework/SOURCE.md (updated Curated samples table + any GAPs)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>At least 6 new sample folders curated under dotnet/samples/, each preserving upstream path</criterion>
+    <criterion>Each new sample includes its original .csproj</criterion>
+    <criterion>SOURCE.md Curated samples table lists every new sample with upstream path and Spaarke-pattern mapping</criterion>
+    <criterion>Total curated samples size ≤ 300 KB</criterion>
+    <criterion>Any unrepresentable pattern logged in SOURCE.md GAPs, not silently skipped</criterion>
+  </acceptance-criteria>
+</task>

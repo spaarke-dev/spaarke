@@ -1,0 +1,127 @@
+<task id="040" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P4.A — PCF/Code Pages test rot audit (read-only; r3 scope recommendation)</title>
+    <phase>Phase 4</phase>
+    <status>not-started</status>
+    <estimated-effort>4-8 hours</estimated-effort>
+    <dependencies>039</dependencies>
+    <blocks>080</blocks>
+    <tags>phase-4, pcf, frontend, audit, react, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only audit; creates new audit document under `audits/` (not `src/`/.cs/.ts/.tsx code changes). STANDARD rigor per CLAUDE.md §8 (new file creation; no production logic touched).</rigor-reason>
+    <parallel-group>P4-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Track A is a read-only audit of `src/client/pcf/*` + `src/client/code-pages/*`. Output is a single audit doc in `projects/.../audits/`. Disjoint write path from Tracks B (baseline/mutation-testing), C (src/server Workspace + tests), D (.github/workflows + baseline/coverlet), E (baseline/anti-drift). No read overlap of consequence.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Apply r1's diagnostic playbook to the PCF + Code Pages client surfaces. This is a **READ-ONLY** audit — no fixes applied. Output a single per-control disposition document with an r3 scope recommendation per D-04 (Phase 4 tracks are pilot-grade).
+
+    The r1 playbook elements to apply:
+    1. **Factory config keys** — equivalent of `CustomWebAppFactory.cs` missing-config-key pattern. In PCF/Code Pages: missing environment variables, missing PCF manifest properties, missing context-mocking setup in test harnesses.
+    2. **Sibling-fixture pattern** — equivalent of r1's "5 fixture sites share 7 missing DI config keys". In PCF/Code Pages: shared test setup files (`setupTests.ts`, `vitest.setup.ts`, `jest.setup.ts`) used by multiple control test suites.
+    3. **Endpoint vs service registration alignment** — equivalent of RB-T028 cluster (production code calls a service; service is conditionally registered while caller is unconditional). In PCF/Code Pages: PCF control declares a property/binding but the manifest or React entry point doesn't supply it; or a service hook is called but provider scope is wrong.
+
+    Scope: every PCF control under `src/client/pcf/` and every Code Page under `src/client/code-pages/`. Read-only — no source-file edits.
+
+    Per D-04: ship a recommendation; do NOT execute repairs. r3 (if commissioned) is the execution vehicle.
+  </prompt>
+
+  <role>Frontend AI agent performing a read-only test-rot audit of PCF and Code Pages surfaces, producing a triage document with r3-scope recommendations.</role>
+
+  <goal>
+    A single document at `projects/sdap.bff.api-test-suite-repair-r2/audits/pcf-codepages-test-rot-2026-08-XX.md` containing:
+    - **Per-control inventory**: each PCF control and Code Page listed with: test file location(s), current test status (passing / failing / skipped / no tests), rot indicators (which of the 3 playbook elements apply).
+    - **Disposition**: per-control recommendation — `clean` / `playbook-applicable-LOW` / `playbook-applicable-MED` / `playbook-applicable-HIGH` / `requires-deeper-investigation`.
+    - **Aggregate findings**: counts of each disposition; top-3 most-impacted controls.
+    - **r3 scope recommendation**: explicit recommendation on whether r3 should commission PCF/Code Pages test repair, scoped batch sizing, and which controls to start with.
+    - **Comparison to BFF rot**: how this client-side rot compares (better / worse / similar) to the BFF surface r1 + r2 repaired.
+
+    NO source edits to `src/client/pcf/` or `src/client/code-pages/`. Audit doc is the sole output.
+  </goal>
+
+  <inputs>
+    <file purpose="target-surface-pcf">src/client/pcf/</file>
+    <file purpose="target-surface-code-pages">src/client/code-pages/</file>
+    <file purpose="r1-lessons">projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent design system patterns apply to UI test rot diagnosis (dark mode, theming consistency)</constraint>
+    <constraint source="ADR-022">PCF platform-libraries decision affects React 16/17 vs 19 boundary; relevant when categorizing PCF rot</constraint>
+    <constraint source="D-04">Phase 4 tracks are pilot-grade — measurement + recommendation only; NO remediation</constraint>
+    <constraint source="FR-11">Output is `audits/pcf-codepages-test-rot-2026-08-XX.md` with per-control disposition + r3 scope recommendation</constraint>
+    <constraint source="NFR-01">Read-only; no source file edits in `src/client/`</constraint>
+    <constraint source="NFR-06">Project-internal artifact under `projects/sdap.bff.api-test-suite-repair-r2/audits/`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The post-r1 synopsis flagged PCF + Code Pages as having "different stack, similar rot risk" (item 6 mid-term, design.md §2.3). The hypothesis: the BFF rot patterns r1 catalogued (factory-config drift, sibling-fixture co-evolution gaps, endpoint-vs-service registration misalignment) likely have analogs on the React/PCF side that have gone undetected because the test suites are smaller and less load-bearing for CI.
+
+      Per D-04, r2 does the **measurement** to validate or refute the hypothesis. If the hypothesis is right and rot is severe, r3 commissions repair. If rot is mild, r3 may not be needed. Either way, the deliverable is a single audit doc — not a remediation PR.
+
+      Per the r1 lessons-learned, the playbook scales well when applied with **cluster-level classification** (not file-by-file). Apply that same pattern: group PCF controls by rot pattern, not by name.
+    </background>
+    <dependencies>
+      <dependency task="039" status="not-started">Phase 3 exit (all 20 ledger entries closed) — Phase 4 starts when Phase 3 exits</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/audits/pcf-codepages-test-rot-2026-08-XX.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Enumerate every PCF control under `src/client/pcf/` (one directory = one control). Enumerate every Code Page under `src/client/code-pages/`. Build a working list with paths.</step>
+    <step order="2">For each control/page, identify its test file(s) — likely under `__tests__/` or `*.test.tsx` siblings. Capture: count of test files, count of test cases (best-effort via grep), current pass/fail/skip status if locally runnable (do NOT block on running them — capture intent).</step>
+    <step order="3">Apply playbook element 1 (Factory config keys): for each control/page, scan for: environment variable references, PCF manifest property references, context-mocking patterns in tests. Flag missing-config-key candidates.</step>
+    <step order="4">Apply playbook element 2 (Sibling-fixture pattern): identify shared test setup files (`setupTests.ts`, `vitest.setup.ts`, etc.). For each shared fixture, count consumer test files. Flag fixtures with high consumer count (>3) — these are RB-T028-cluster-equivalents.</step>
+    <step order="5">Apply playbook element 3 (Endpoint vs service registration alignment): for each control/page, scan for: PCF manifest property declarations vs React-side usage; useEffect/useQuery hook calls vs provider scope. Flag any mismatch candidates.</step>
+    <step order="6">Per-control disposition: classify each control as `clean` / `playbook-LOW` / `playbook-MED` / `playbook-HIGH` / `requires-deeper-investigation`. Document the rationale.</step>
+    <step order="7">Aggregate findings: counts per disposition; identify top-3 most-impacted controls; compare aggregate rot level to BFF (better / worse / similar).</step>
+    <step order="8">Write the audit document `projects/sdap.bff.api-test-suite-repair-r2/audits/pcf-codepages-test-rot-2026-08-XX.md`. Include: executive summary, per-control table, aggregate findings, r3 scope recommendation, BFF comparison.</step>
+    <step order="9">Verify `git status` shows only the new audit doc — no `src/client/` modifications.</step>
+    <step order="10">Commit message: "docs(audit): PCF + Code Pages test rot audit, r3 scope recommendation (FR-11)".</step>
+  </steps>
+
+  <tools>
+    <tool name="Glob">enumerate `src/client/pcf/*` and `src/client/code-pages/*`</tool>
+    <tool name="Grep">scan for test files, fixtures, manifest properties, provider scopes</tool>
+    <tool name="Read">control source for spot-check disposition rationale</tool>
+    <tool name="Write">audit doc</tool>
+    <tool name="Bash">`git status` for boundary verification; final commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/audits/pcf-codepages-test-rot-2026-08-XX.md (new audit document)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit document exists at `projects/sdap.bff.api-test-suite-repair-r2/audits/pcf-codepages-test-rot-2026-08-XX.md`</criterion>
+    <criterion testable="true">Document includes per-control inventory table (one row per PCF control + Code Page)</criterion>
+    <criterion testable="true">Document includes disposition classification for every entry: `clean` / `playbook-LOW` / `playbook-MED` / `playbook-HIGH` / `requires-deeper-investigation`</criterion>
+    <criterion testable="true">Document includes aggregate findings (counts per disposition; top-3 most-impacted)</criterion>
+    <criterion testable="true">Document includes explicit r3 scope recommendation (commission / don't commission; batch sizing if commission)</criterion>
+    <criterion testable="true">No source file modifications in `src/client/pcf/` or `src/client/code-pages/` (verified by `git status`)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. Read-only audit; STANDARD rigor (no Step 9.5 quality gates required for audit-only deliverable).
+  </execution>
+</task>

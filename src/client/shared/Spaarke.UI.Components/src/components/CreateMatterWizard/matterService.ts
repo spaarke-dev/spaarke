@@ -23,7 +23,11 @@ import type { IUploadedFile } from './wizardTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { EntityCreationService } from '../../services/EntityCreationService';
-import type { IUploadProgress, AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import type {
+  IUploadProgress,
+  AuthenticatedFetchFn,
+  IUserBuCascadeDefaults,
+} from '../../services/EntityCreationService';
 
 // ---------------------------------------------------------------------------
 // Contact type (used by AssignCounselStep search results)
@@ -150,13 +154,22 @@ function _resolveNavProp(navPropMap: Record<string, string>, columnLogical: stri
 export class MatterService {
   private readonly _dataService: IDataService;
   private readonly _entityService: EntityCreationService;
+  private readonly _tenantId: string;
 
   constructor(
     dataService: IDataService,
     authenticatedFetch: AuthenticatedFetchFn,
     bffBaseUrl: string,
-    private readonly _containerId?: string
+    private readonly _containerId?: string,
+    /**
+     * AAD tenant ID. Required to trigger post-upload RAG indexing via
+     * `EntityCreationService.indexUploadedFiles()`. When omitted or empty,
+     * the file upload still succeeds but indexing is skipped with a warning.
+     * Provided by the host solution (e.g. `config.tenantId` in main.tsx).
+     */
+    tenantId?: string
   ) {
+    this._tenantId = tenantId ?? '';
     this._dataService = dataService;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
@@ -183,17 +196,38 @@ export class MatterService {
 
   /**
    * Full matter creation flow:
-   *   1. Create sprk_matter record
+   *   1. Create sprk_matter record (with BU cascade applied if defaults provided)
    *   2. Upload files to SPE via BFF (using EntityCreationService)
    *   3. Create sprk_document records linking files to the matter
    *   4. Execute selected follow-on actions
    *
    * Returns ICreateMatterResult -- never throws.
+   *
+   * BU cascade (FR-WIZ-01): when `cascadeDefaults` is provided, applies
+   * `sprk_containerid` AND `sprk_searchindexname` from the user's owning Business
+   * Unit via {@link EntityCreationService.applyUserBuDefaults}. INV-5 enforced
+   * per-field — explicit values pre-existing on the payload are preserved.
+   *
+   * Aligned with the proven CreateProjectWizard pattern: the caller (typically
+   * `CreateMatterWizard.tsx` via `resolveUserBuDefaults` prop) resolves defaults
+   * using the host's `Xrm.Utility.getGlobalContext().userSettings.userId`. This
+   * replaces a prior broken inline implementation that called the non-existent
+   * `Xrm.Utility.getUserId()` API and silently skipped the cascade in the
+   * Code Page iframe runtime.
+   *
+   * @param form Form state captured by the wizard.
+   * @param uploadedFiles Files to upload to SPE after the matter is created.
+   * @param followOnActions Optional follow-on workflow steps (assign counsel, etc.).
+   * @param cascadeDefaults Optional BU-derived defaults (containerId, searchIndexName).
+   *   When omitted/undefined the cascade step is a no-op (legacy behavior preserved
+   *   for tests that omit it). Wizard call sites pass the resolved value.
+   * @param onUploadProgress Optional callback fired during SPE file uploads.
    */
   async createMatter(
     form: ICreateMatterFormState,
     uploadedFiles: IUploadedFile[],
     followOnActions: IFollowOnActions,
+    cascadeDefaults?: IUserBuCascadeDefaults,
     onUploadProgress?: (progress: IUploadProgress) => void
   ): Promise<ICreateMatterResult> {
     const warnings: string[] = [];
@@ -214,6 +248,20 @@ export class MatterService {
     // Store the SPE container ID on the matter record
     if (this._containerId) {
       entity['sprk_containerid'] = this._containerId;
+    }
+
+    // FR-WIZ-01 (spaarke-multi-container-multi-index-r1): cascade `sprk_containerid`
+    // AND `sprk_searchindexname` from the current user's owning Business Unit.
+    // INV-5 enforced per-field by applyUserBuDefaults — the host-injected
+    // this._containerId set above is preserved if already present on the payload.
+    //
+    // Defaults are resolved upstream by the wizard component (using the host's
+    // Xrm.Utility.getGlobalContext().userSettings.userId) and passed in via the
+    // `cascadeDefaults` parameter. Same dependency-injection pattern as
+    // CreateProjectWizard.tsx (verified working).
+    if (cascadeDefaults) {
+      const applied = EntityCreationService.applyUserBuDefaults(entity, cascadeDefaults);
+      console.info('[MatterService] BU cascade applied:', applied, '(BU:', cascadeDefaults.businessUnitId, ')');
     }
 
     // Generate matter number: {matterTypeCode}-{random 6 digits}
@@ -238,11 +286,31 @@ export class MatterService {
 
     // Add lookup bindings using discovered nav-prop names
     const lookups: Array<{ col: string; entitySet: string; guid: string }> = [];
-    if (form.matterTypeId) lookups.push({ col: 'sprk_mattertype', entitySet: 'sprk_mattertype_refs', guid: form.matterTypeId });
-    if (form.practiceAreaId) lookups.push({ col: 'sprk_practicearea', entitySet: 'sprk_practicearea_refs', guid: form.practiceAreaId });
-    if (form.assignedAttorneyId) lookups.push({ col: 'sprk_assignedattorney1', entitySet: 'contacts', guid: form.assignedAttorneyId });
-    if (form.assignedParalegalId) lookups.push({ col: 'sprk_assignedparalegal1', entitySet: 'contacts', guid: form.assignedParalegalId });
-    if (form.assignedOutsideCounselId) lookups.push({ col: 'sprk_assignedlawfirm1', entitySet: 'sprk_organizations', guid: form.assignedOutsideCounselId });
+    if (form.matterTypeId)
+      lookups.push({ col: 'sprk_mattertype', entitySet: 'sprk_mattertype_refs', guid: form.matterTypeId });
+    if (form.practiceAreaId)
+      lookups.push({ col: 'sprk_practicearea', entitySet: 'sprk_practicearea_refs', guid: form.practiceAreaId });
+    if (form.assignedAttorneyId)
+      lookups.push({ col: 'sprk_assignedattorney1', entitySet: 'contacts', guid: form.assignedAttorneyId });
+    if (form.assignedParalegalId)
+      lookups.push({ col: 'sprk_assignedparalegal1', entitySet: 'contacts', guid: form.assignedParalegalId });
+    if (form.assignedOutsideCounselId)
+      lookups.push({
+        col: 'sprk_assignedlawfirm1',
+        entitySet: 'sprk_organizations',
+        guid: form.assignedOutsideCounselId,
+      });
+
+    // Phase G (spaarke-multi-container-multi-index-r1): cascade BU's `sprk_ai_search_index`
+    // lookup onto the new Matter. Nav-prop discovered as `sprk_AI_Search_Index` (PascalCase).
+    // INV-5 moot — Matter create form has no field for the user to override this.
+    if (cascadeDefaults?.searchIndexId) {
+      lookups.push({
+        col: 'sprk_ai_search_index',
+        entitySet: 'sprk_aisearchindexes',
+        guid: cascadeDefaults.searchIndexId,
+      });
+    }
 
     for (const lk of lookups) {
       const navProp = navPropMap[lk.col] ?? lk.col;
@@ -277,7 +345,7 @@ export class MatterService {
       if (!uploadResult.success) {
         warnings.push(
           `File upload failed (${uploadResult.failureCount} of ${uploadedFiles.length}). ` +
-          'Files can be added from the matter record.'
+            'Files can be added from the matter record.'
         );
       } else if (uploadResult.uploadedFiles.length > 0) {
         // Discover nav-prop for sprk_document -> sprk_matter lookup
@@ -298,12 +366,30 @@ export class MatterService {
         if (linkResult.warnings.length > 0) {
           warnings.push(...linkResult.warnings);
         }
+
+        // -- Step 2b: Trigger RAG indexing for uploaded files --
+        // Uses the canonical sync-OBO path via `@spaarke/sdap-client.SdapApiClient.indexFile()`.
+        // Non-fatal — failures are surfaced as warnings; the matter + documents are already saved.
+        const indexingWarnings = await this._entityService.indexUploadedFiles(
+          uploadResult.uploadedFiles,
+          this._tenantId,
+          {
+            entityType: 'sprk_matter',
+            entityId: matterId,
+            entityName: form.matterName.trim(),
+          },
+          linkResult.createdDocumentIds,
+          cascadeDefaults?.searchIndexName
+        );
+        if (indexingWarnings.length > 0) {
+          warnings.push(...indexingWarnings);
+        }
       }
 
       if (uploadResult.failureCount > 0 && uploadResult.successCount > 0) {
         warnings.push(
           `${uploadResult.failureCount} file(s) failed to upload: ` +
-          uploadResult.errors.map((e) => e.fileName).join(', ')
+            uploadResult.errors.map(e => e.fileName).join(', ')
         );
       }
     } else if (uploadedFiles.length > 0 && !this._containerId) {
@@ -312,22 +398,14 @@ export class MatterService {
 
     // -- Step 3: Follow-on actions --
     if (followOnActions.assignCounsel) {
-      const counselResult = await this._assignCounsel(
-        matterId,
-        followOnActions.assignCounsel,
-        navPropMap
-      );
+      const counselResult = await this._assignCounsel(matterId, followOnActions.assignCounsel, navPropMap);
       if (!counselResult.success) {
         warnings.push(counselResult.warning ?? 'Failed to assign counsel. Please assign manually.');
       }
     }
 
     if (followOnActions.draftSummary) {
-      const summaryResult = await this._distributeSummary(
-        matterId,
-        form.matterName,
-        followOnActions.draftSummary
-      );
+      const summaryResult = await this._distributeSummary(matterId, form.matterName, followOnActions.draftSummary);
       if (!summaryResult.success) {
         warnings.push(summaryResult.warning ?? 'Failed to distribute summary email. Please send manually.');
       }
@@ -392,7 +470,6 @@ export class MatterService {
       associations: [{ entityType: 'sprk_matter', entityId: matterId, entityName: matterName }],
     });
   }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -405,10 +482,7 @@ export class MatterService {
  * Returns up to 10 matching contacts.
  * Throws on error -- callers should handle gracefully.
  */
-export async function searchContacts(
-  dataService: IDataService,
-  nameFilter: string
-): Promise<IContact[]> {
+export async function searchContacts(dataService: IDataService, nameFilter: string): Promise<IContact[]> {
   if (!nameFilter || nameFilter.trim().length < 2) {
     return [];
   }
@@ -425,7 +499,7 @@ export async function searchContacts(
     const result = await dataService.retrieveMultipleRecords('contact', query);
     console.info('[MatterService] searchContacts results:', result.entities.length);
     // Map to IContact shape for backward compatibility
-    return result.entities.map((e) => ({
+    return result.entities.map(e => ({
       sprk_contactid: e['contactid'] as string,
       sprk_name: e['fullname'] as string,
       sprk_email: (e['emailaddress1'] as string) || '',
@@ -439,12 +513,9 @@ export async function searchContacts(
 /**
  * Search contacts and return as ILookupItem[] (for LookupField compatibility).
  */
-export async function searchContactsAsLookup(
-  dataService: IDataService,
-  nameFilter: string
-): Promise<ILookupItem[]> {
+export async function searchContactsAsLookup(dataService: IDataService, nameFilter: string): Promise<ILookupItem[]> {
   const contacts = await searchContacts(dataService, nameFilter);
-  return contacts.map((c) => ({
+  return contacts.map(c => ({
     id: c.sprk_contactid,
     name: c.sprk_name + (c.sprk_email ? ` (${c.sprk_email})` : ''),
   }));
@@ -458,10 +529,7 @@ export async function searchContactsAsLookup(
  * Search sprk_mattertype records by name fragment.
  * Returns up to 10 matching matter types as ILookupItem.
  */
-export async function searchMatterTypes(
-  dataService: IDataService,
-  nameFilter: string
-): Promise<ILookupItem[]> {
+export async function searchMatterTypes(dataService: IDataService, nameFilter: string): Promise<ILookupItem[]> {
   if (!nameFilter || nameFilter.trim().length < 1) {
     return [];
   }
@@ -477,7 +545,7 @@ export async function searchMatterTypes(
   try {
     const result = await dataService.retrieveMultipleRecords('sprk_mattertype_ref', query);
     console.info('[MatterService] searchMatterTypes results:', result.entities.length, result.entities);
-    return result.entities.map((e) => ({
+    return result.entities.map(e => ({
       id: e['sprk_mattertype_refid'] as string,
       name: e['sprk_mattertypename'] as string,
     }));
@@ -495,10 +563,7 @@ export async function searchMatterTypes(
  * Search sprk_practicearea records by name fragment.
  * Returns up to 10 matching practice areas as ILookupItem.
  */
-export async function searchPracticeAreas(
-  dataService: IDataService,
-  nameFilter: string
-): Promise<ILookupItem[]> {
+export async function searchPracticeAreas(dataService: IDataService, nameFilter: string): Promise<ILookupItem[]> {
   if (!nameFilter || nameFilter.trim().length < 1) {
     return [];
   }
@@ -514,7 +579,7 @@ export async function searchPracticeAreas(
   try {
     const result = await dataService.retrieveMultipleRecords('sprk_practicearea_ref', query);
     console.info('[MatterService] searchPracticeAreas results:', result.entities.length, result.entities);
-    return result.entities.map((e) => ({
+    return result.entities.map(e => ({
       id: e['sprk_practicearea_refid'] as string,
       name: e['sprk_practiceareaname'] as string,
     }));
@@ -557,7 +622,7 @@ export async function streamAiDraftSummary(
   callbacks: StreamAiSummaryCallbacks = {},
   signal?: AbortSignal,
   authenticatedFetch?: (url: string, init?: RequestInit) => Promise<Response>,
-  bffBaseUrl?: string,
+  bffBaseUrl?: string
 ): Promise<IAiDraftSummaryResponse> {
   const { onProgress } = callbacks;
 
@@ -567,15 +632,12 @@ export async function streamAiDraftSummary(
   }
 
   try {
-    const response = await authenticatedFetch(
-      `${bffBaseUrl}/api/workspace/matters/ai-summary`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matterName, matterType, practiceArea }),
-        signal,
-      }
-    );
+    const response = await authenticatedFetch(`${bffBaseUrl}/api/workspace/matters/ai-summary`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matterName, matterType, practiceArea }),
+      signal,
+    });
 
     if (!response.ok || !response.body) {
       return buildFallbackSummary(matterName, matterType, practiceArea);
@@ -599,11 +661,18 @@ export async function streamAiDraftSummary(
         const line = part.trim();
         if (!line.startsWith('data:')) continue;
         const raw = line.slice(5).trim();
-        if (raw === '[DONE]') { streamDone = true; break; }
+        if (raw === '[DONE]') {
+          streamDone = true;
+          break;
+        }
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let chunk: any;
-        try { chunk = JSON.parse(raw); } catch { continue; }
+        try {
+          chunk = JSON.parse(raw);
+        } catch {
+          continue;
+        }
 
         if (chunk.type === 'progress' && chunk.step && onProgress) {
           onProgress(chunk.step as string);
@@ -612,7 +681,9 @@ export async function streamAiDraftSummary(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const parsed = JSON.parse(chunk.content as string) as any;
             if (parsed?.summary) resultSummary = String(parsed.summary);
-          } catch { /* skip malformed result */ }
+          } catch {
+            /* skip malformed result */
+          }
         } else if (chunk.type === 'error') {
           throw new Error((chunk.content as string) ?? 'Summary generation failed');
         }
@@ -623,7 +694,6 @@ export async function streamAiDraftSummary(
   } catch {
     return buildFallbackSummary(matterName, matterType, practiceArea);
   }
-
 }
 
 /**
@@ -641,7 +711,7 @@ export async function fetchAiDraftSummary(
   matterType: string,
   practiceArea: string,
   authenticatedFetch?: (url: string, init?: RequestInit) => Promise<Response>,
-  bffBaseUrl?: string,
+  bffBaseUrl?: string
 ): Promise<IAiDraftSummaryResponse> {
   return streamAiDraftSummary(matterName, matterType, practiceArea, {}, undefined, authenticatedFetch, bffBaseUrl);
 }
@@ -673,7 +743,7 @@ export async function searchOrganizationsAsLookup(
   try {
     const result = await dataService.retrieveMultipleRecords('sprk_organization', query);
     console.info('[MatterService] searchOrganizations results:', result.entities.length);
-    return result.entities.map((e) => ({
+    return result.entities.map(e => ({
       id: e['sprk_organizationid'] as string,
       name: e['sprk_organizationname'] as string,
     }));
@@ -692,10 +762,7 @@ export async function searchOrganizationsAsLookup(
  * Returns up to 10 active users as ILookupItem.
  * Name format: "Full Name (email)" for disambiguation.
  */
-export async function searchUsersAsLookup(
-  dataService: IDataService,
-  nameFilter: string
-): Promise<ILookupItem[]> {
+export async function searchUsersAsLookup(dataService: IDataService, nameFilter: string): Promise<ILookupItem[]> {
   if (!nameFilter || nameFilter.trim().length < 2) {
     return [];
   }
@@ -711,7 +778,7 @@ export async function searchUsersAsLookup(
   try {
     const result = await dataService.retrieveMultipleRecords('systemuser', query);
     console.info('[MatterService] searchUsers results:', result.entities.length);
-    return result.entities.map((e) => ({
+    return result.entities.map(e => ({
       id: e['systemuserid'] as string,
       name: (e['fullname'] as string) + (e['internalemailaddress'] ? ` (${e['internalemailaddress']})` : ''),
     }));
@@ -721,11 +788,7 @@ export async function searchUsersAsLookup(
   }
 }
 
-function buildFallbackSummary(
-  matterName: string,
-  matterType: string,
-  practiceArea: string
-): IAiDraftSummaryResponse {
+function buildFallbackSummary(matterName: string, matterType: string, practiceArea: string): IAiDraftSummaryResponse {
   const type = matterType || 'general';
   const area = practiceArea || 'legal services';
   return {

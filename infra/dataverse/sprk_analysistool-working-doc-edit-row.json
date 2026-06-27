@@ -1,0 +1,38 @@
+{
+  "_comment_top": "R6 Wave 9 — seed row for the WorkingDocumentHandler 'EditWorkingDocument' method. Replaces one of the three legacy hardcoded LLM functions previously registered on WorkingDocumentTools (removed from SprkChatAgentFactory.ResolveTools lines ~811-843 in Stage 4).",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'WorkingDocumentHandler'. The handler reads sprk_configuration.method = 'EditWorkingDocument' to dispatch to the targeted-edit streaming pipeline.",
+  "_comment_method_dispatch": "Three rows (WORKING-DOC-EDIT / WORKING-DOC-APPEND-SECTION / WORKING-DOC-WRITE-BACK) share one handler class — same pattern as CodeInterpreterHandler (Wave 8) and KnowledgeRetrievalHandler (Wave 7c). Each row's sprk_configuration.method discriminator selects the internal method.",
+  "_comment_security": "sprk_requiredcapability = 'write_back' (= PlaybookCapabilities.WriteBack) gates this tool to playbooks whose capability set includes 'write_back'. Standalone chat (no playbook, capabilities = CoreCapabilities) does NOT include 'write_back', so this handler is unreachable from standalone chat — preserving the pre-Wave-9 security boundary that the hardcoded `if (capabilities.Contains(PlaybookCapabilities.WriteBack))` block in SprkChatAgentFactory.ResolveTools enforced. Per R6 Wave 7b infrastructure (commit 66da08ca), the data-driven block applies IsCapabilityGateSatisfied at session start and silently withholds rows whose RequiredCapability is not in the current playbook's capability set.",
+  "_comment_streaming": "ADR-033 binding: this method emits document-stream SSE side-channel events (Start → N×Token → End) via ChatInvocationContext.DocumentStreamWriter. The chat-session entry point binds the delegate to ChatEndpoints.CreateDocumentStreamSseWriter; handlers emit directly during streaming, returning a single ToolResult summary to the LLM. The IToolHandler contract is unchanged.",
+  "_comment_adr015": "ADR-015 data governance: only caller-supplied 'instruction' is forwarded to the inner LLM call (alongside the current working document content fetched by IAnalysisOrchestrationService.GetAnalysisAsync). The handler does NOT auto-fetch external resources. Telemetry logs instruction LENGTH + token COUNTS + operation GUIDs only — never instruction content, never document content, never tokens.",
+  "_comment_adr014": "ADR-014: streaming tokens are TRANSIENT — never persisted to Redis / Cosmos. The accumulating StringBuilder used to compute the SHA-256 content hash lives only for the handler invocation; the per-call ContentHash is the cacheable artifact.",
+  "_comment_safety": "Spec FR-12 safety constraint: this method does NOT persist anything — it streams a preview the user reviews. Persistence happens via WORKING-DOC-WRITE-BACK after user approval (plan-preview-gated per FR-11). NEVER writes to SharePoint Embedded; NEVER calls SpeFileStore or Graph write methods.",
+  "_comment_description_loadbearing": "sprk_description is LOAD-BEARING per NFR-12: the LLM uses the description text to decide WHEN to invoke this tool. The exact phrasing below is preserved verbatim from the legacy hardcoded registration so the LLM's tool-selection behavior is unchanged after migration.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_toolcode + sprk_name 'SYS-%' filter; UPSERTs.",
+  "sprk_name": "SYS-Working Document Edit",
+  "sprk_toolcode": "WORKING-DOC-EDIT",
+  "sprk_description": "Apply a targeted edit to the current working document based on the user's instruction. Use this when the user wants to modify, rewrite, reorganize, or correct existing content (e.g., 'fix the grammar in the second paragraph', 'rewrite the conclusion to be more concise', 'add citations to the analysis section'). Streams the edited content token-by-token via the document-stream SSE side-channel so the editor renders updates in real time. Returns a summary; the user's approval is required before persistence.",
+  "sprk_handlerclass": "WorkingDocumentHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only. The legacy WorkingDocumentTools was registered exclusively for chat; document mutation tools must not be invocable from playbook orchestration per spec FR-12 safety constraint, and the 11 production node executors (NFR-08) do not include a document mutation executor. WorkingDocumentHandler.SupportedInvocationContexts matches (InvocationContextKind.Chat) and ExecuteAsync (playbook) returns a defensive validation error.",
+  "sprk_requiredcapability": "write_back",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "WorkingDocumentHandler.EditWorkingDocument Request",
+    "description": "Argument shape for chat-driven invocation of the EditWorkingDocument method. The 'instruction' is the targeted edit instruction the AI applies to the current working document content.",
+    "type": "object",
+    "required": ["instruction"],
+    "properties": {
+      "instruction": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The specific edit instruction to apply to the working document (e.g., 'fix the grammar in the second paragraph', 'rewrite the conclusion to be more concise')."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "method = 'EditWorkingDocument' is the dispatch discriminator. This row exposes only the targeted-edit method.",
+    "method": "EditWorkingDocument"
+  }
+}

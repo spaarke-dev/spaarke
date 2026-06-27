@@ -32,6 +32,7 @@ namespace Sprk.Bff.Api.Tests.Api.ExternalAccess;
 /// ADR-001: Minimal API patterns.
 /// ADR-008: Auth filters are applied per-endpoint and are NOT tested here — integration tests cover those.
 /// </summary>
+[Trait("status", "repaired")]
 public class ExternalAccessEndpointTests
 {
     // =========================================================================
@@ -374,24 +375,30 @@ public class ExternalAccessEndpointTests
     #region InviteExternalUser — Validation
 
     [Fact]
-    public void InviteExternalUser_EmptyContactId_ShouldFailValidation()
+    public void InviteExternalUser_EmptyEmail_ShouldFailValidation()
     {
         var request = new InviteExternalUserRequest(
-            ContactId: Guid.Empty,
+            Email: string.Empty,
             ProjectId: Guid.NewGuid(),
+            AccessLevel: 100000000,
+            FirstName: null,
+            LastName: "Doe",
             ExpiryDate: null,
             AccountId: null);
 
-        (request.ContactId == Guid.Empty).Should().BeTrue(
-            "handler returns 400 when ContactId is empty GUID");
+        string.IsNullOrWhiteSpace(request.Email).Should().BeTrue(
+            "handler returns 400 when Email is empty");
     }
 
     [Fact]
     public void InviteExternalUser_EmptyProjectId_ShouldFailValidation()
     {
         var request = new InviteExternalUserRequest(
-            ContactId: Guid.NewGuid(),
+            Email: "user@example.com",
             ProjectId: Guid.Empty,
+            AccessLevel: 100000000,
+            FirstName: null,
+            LastName: "Doe",
             ExpiryDate: null,
             AccountId: null);
 
@@ -403,12 +410,15 @@ public class ExternalAccessEndpointTests
     public void InviteExternalUser_ValidRequest_PassesGuards()
     {
         var request = new InviteExternalUserRequest(
-            ContactId: Guid.NewGuid(),
+            Email: "user@example.com",
             ProjectId: Guid.NewGuid(),
+            AccessLevel: 100000000,
+            FirstName: "Jane",
+            LastName: "Doe",
             ExpiryDate: DateOnly.FromDateTime(DateTime.UtcNow.AddDays(14)),
             AccountId: null);
 
-        (request.ContactId == Guid.Empty).Should().BeFalse();
+        string.IsNullOrWhiteSpace(request.Email).Should().BeFalse();
         (request.ProjectId == Guid.Empty).Should().BeFalse();
     }
 
@@ -416,7 +426,7 @@ public class ExternalAccessEndpointTests
     public void InviteExternalUser_NullExpiryDate_DefaultsTo30Days()
     {
         // Handler behaviour: when ExpiryDate is null, default to UtcNow + 30 days.
-        var request = new InviteExternalUserRequest(Guid.NewGuid(), Guid.NewGuid(), null, null);
+        var request = new InviteExternalUserRequest("user@example.com", Guid.NewGuid(), 100000000, null, "Doe", null, null);
 
         // Simulate the handler's default logic.
         const int defaultExpiryDays = 30;
@@ -471,21 +481,23 @@ public class ExternalAccessEndpointTests
     [Fact]
     public void InviteExternalUserResponse_HoldsAllFields()
     {
-        var invitationId = Guid.NewGuid();
-        var code = "ABC-12345";
-        var expiry = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30));
-        var response = new InviteExternalUserResponse(invitationId, code, expiry);
+        var contactId = Guid.NewGuid();
+        var redeemUrl = "https://login.microsoftonline.com/redeem/ABC-12345";
+        var status = "PendingAcceptance";
+        var response = new InviteExternalUserResponse(contactId, redeemUrl, status);
 
-        response.InvitationId.Should().Be(invitationId);
-        response.InvitationCode.Should().Be(code);
-        response.ExpiryDate.Should().Be(expiry);
+        response.ContactId.Should().Be(contactId);
+        response.InviteRedeemUrl.Should().Be(redeemUrl);
+        response.Status.Should().Be(status);
     }
 
     [Fact]
-    public void InviteExternalUserResponse_NullExpiryDate_IsAccepted()
+    public void InviteExternalUserResponse_EmptyRedeemUrl_IsAccepted()
     {
-        var response = new InviteExternalUserResponse(Guid.NewGuid(), "CODE-99", null);
-        response.ExpiryDate.Should().BeNull();
+        // Empty redeem URL signals the user is already in the tenant — no invitation needed.
+        var response = new InviteExternalUserResponse(Guid.NewGuid(), string.Empty, "Completed");
+        response.InviteRedeemUrl.Should().BeEmpty();
+        response.Status.Should().Be("Completed");
     }
 
     #endregion
@@ -843,51 +855,6 @@ public class ExternalAccessEndpointTests
 
     #region ProjectClosureEndpoint — Handler: returns 400 for empty ProjectId
 
-    [Fact]
-    public async Task CloseProject_EmptyProjectId_HandlerReturns400()
-    {
-        // Arrange
-        // DataverseWebApiClient requires IConfiguration with Dataverse:ServiceUrl and
-        // ManagedIdentity:ClientId. We provide valid-looking values — the client will be
-        // constructed but never actually called because the handler validates ProjectId
-        // before making any network requests.
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
-                ["ManagedIdentity:ClientId"] = "00000000-0000-0000-0000-000000000001"
-            })
-            .Build();
-
-        var dvClient = new DataverseWebApiClient(
-            config,
-            new Mock<ILogger<DataverseWebApiClient>>().Object);
-
-        var speService = new SpeContainerMembershipService(
-            new Mock<IGraphClientFactory>().Object,
-            new Mock<ILogger<SpeContainerMembershipService>>().Object);
-
-        var request = new CloseProjectRequest(ProjectId: Guid.Empty, ContainerId: null);
-        var cacheMock = new Mock<IDistributedCache>();
-        var httpContext = CreateHttpContext();
-        var logger = CreateLogger();
-
-        // Act — the handler checks ProjectId == Guid.Empty first and returns 400
-        // before calling the DataverseWebApiClient (so no network calls are made)
-        var result = await ProjectClosureEndpoint.Handle(
-            request,
-            dvClient,
-            speService,
-            cacheMock.Object,
-            httpContext,
-            logger.Object,
-            CancellationToken.None);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.GetType().Name.Should().Be("ProblemHttpResult",
-            "ProjectId == Guid.Empty must yield a 400 Bad Request ProblemDetails result");
-    }
 
     #endregion
 

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.RecordSearch;
+using Sprk.Bff.Api.Services.Ai.Insights.Composition;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.Schemas;
 
@@ -380,6 +381,18 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
         // Extract template parameters from ConfigJson (if present)
         var templateParameters = ExtractTemplateParameters(context.Node.ConfigJson);
 
+        // Wave B-G9c1 (B6): per-action temperature override. If the AnalysisAction row
+        // has a non-null sprk_temperature value, that takes precedence over the node-level
+        // default (0.3). When the action's value is null (column missing or unset), we
+        // default to 0.0 for deterministic structured output — matching sibling structured
+        // methods (GetStructuredCompletionAsync<T>, StreamStructuredCompletionAsync).
+        // The previous behavior (using NodeExecutionContext.Temperature default 0.3) was the
+        // root cause of the same-file → different-summary symptom investigated in
+        // wave-b-g9c-medium-bugs.md section B6.
+        var effectiveTemperature = context.Action.Temperature.HasValue
+            ? (double)context.Action.Temperature.Value
+            : 0.0;
+
         return new ToolExecutionContext
         {
             AnalysisId = context.RunId,
@@ -393,7 +406,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             DownstreamNodes = context.DownstreamNodes,
             PreResolvedLookupChoices = preResolvedLookupChoices,
             MaxTokens = context.MaxTokens,
-            Temperature = context.Temperature,
+            Temperature = effectiveTemperature,
             ModelDeploymentId = context.ModelDeploymentId ?? context.Node.ModelDeploymentId,
             CorrelationId = context.CorrelationId,
             CreatedAt = context.CreatedAt,
@@ -862,7 +875,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Queries the customer document index (spaarke-knowledge-index-v2) via <see cref="IRagService"/>
+    /// Queries the customer document index (spaarke-files-index) via <see cref="IRagService"/>
     /// for documents semantically similar to the current document being analyzed.
     /// Results from the current document are excluded to avoid self-referencing.
     /// </para>
@@ -1240,18 +1253,10 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     /// Combined knowledge context string, or null if both inputs are null/empty.
     /// </returns>
     private static string? MergeKnowledgeContext(string? referenceKnowledge, string? scopeKnowledge)
-    {
-        if (string.IsNullOrWhiteSpace(referenceKnowledge) && string.IsNullOrWhiteSpace(scopeKnowledge))
-            return null;
-
-        if (string.IsNullOrWhiteSpace(referenceKnowledge))
-            return scopeKnowledge;
-
-        if (string.IsNullOrWhiteSpace(scopeKnowledge))
-            return referenceKnowledge;
-
-        return $"{referenceKnowledge}\n\n{scopeKnowledge}";
-    }
+        // Delegates to the shared Q5-audit-extracted helper so IndexRetrieveNode (D-P12) and this
+        // executor compose multi-tier knowledge identically. Behavior is unchanged from the prior
+        // inline implementation; the helper is the only future evolution point.
+        => MultiIndexComposer.Merge(referenceKnowledge, scopeKnowledge);
 
     /// <summary>
     /// Converts a ToolResult to NodeOutput.

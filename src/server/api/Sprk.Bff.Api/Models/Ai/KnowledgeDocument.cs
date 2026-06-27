@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Models.Ai;
 /// Used for RAG (Retrieval-Augmented Generation) with hybrid search.
 /// </summary>
 /// <remarks>
-/// This model maps to the "spaarke-knowledge-index-v2" in Azure AI Search.
+/// This model maps to the "spaarke-files-index" in Azure AI Search.
 /// Supports 3 deployment models: Shared (filtered by tenantId), Dedicated (per-customer index), CustomerOwned.
 /// Vector dimensions: 1536 (text-embedding-3-small) and 3072 (text-embedding-3-large) during migration.
 /// </remarks>
@@ -30,24 +30,51 @@ public class KnowledgeDocument
     public string TenantId { get; set; } = string.Empty;
 
     /// <summary>
-    /// Deployment identifier (sprk_aiknowledgedeployment record ID).
+    /// R5 (spec.md §4.2 / FR-09 / ADR-014): chat-session identifier for session-scoped
+    /// retrieval and eviction in the <c>spaarke-session-files</c> index. NULL on writes
+    /// to the knowledge / discovery / references indexes (those schemas do not declare
+    /// a <c>sessionId</c> field; Azure Search SDK ignores absent fields on incoming
+    /// documents, so back-compat is preserved). REQUIRED (non-null, non-empty) on writes
+    /// to the session-files index per ADR-014 tenant + session isolation invariant —
+    /// enforced at the call boundary by
+    /// <see cref="Sprk.Bff.Api.Services.Ai.RagIndexingPipeline.IndexSessionFileAsync"/>.
+    /// Serialized only when non-null so existing customer-corpus payloads are byte-for-byte
+    /// unchanged.
     /// </summary>
     [SimpleField(IsFilterable = true, IsFacetable = true)]
+    [JsonPropertyName("sessionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionId { get; set; }
+
+    /// <summary>
+    /// Deployment identifier (sprk_aiknowledgedeployment record ID).
+    /// </summary>
+    /// <remarks>
+    /// Suppressed from JSON when null so writes to the <c>spaarke-session-files</c> index
+    /// (which does not declare this field) do not trigger 400 "property does not exist".
+    /// Customer-corpus writers that need this field set it explicitly.
+    /// </remarks>
+    [SimpleField(IsFilterable = true, IsFacetable = true)]
     [JsonPropertyName("deploymentId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DeploymentId { get; set; }
 
     /// <summary>
-    /// Deployment model type: Shared, Dedicated, or CustomerOwned.
+    /// Deployment model type: Shared, Dedicated, or CustomerOwned. Default "Shared" preserves
+    /// existing customer-corpus behavior; session-files writers null this out explicitly to
+    /// suppress serialization per the same pattern as <see cref="SessionId"/>.
     /// </summary>
     [SimpleField(IsFilterable = true, IsFacetable = true)]
     [JsonPropertyName("deploymentModel")]
-    public string DeploymentModel { get; set; } = "Shared";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeploymentModel { get; set; } = "Shared";
 
     /// <summary>
     /// Source knowledge record ID (sprk_analysisknowledge).
     /// </summary>
     [SimpleField(IsFilterable = true, IsFacetable = true)]
     [JsonPropertyName("knowledgeSourceId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? KnowledgeSourceId { get; set; }
 
     /// <summary>
@@ -55,6 +82,7 @@ public class KnowledgeDocument
     /// </summary>
     [SearchableField(AnalyzerName = LexicalAnalyzerName.Values.StandardLucene, IsSortable = true)]
     [JsonPropertyName("knowledgeSourceName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? KnowledgeSourceName { get; set; }
 
     /// <summary>
@@ -100,9 +128,16 @@ public class KnowledgeDocument
     /// <summary>
     /// Zero-based index of this chunk within the document.
     /// </summary>
+    /// <remarks>
+    /// Made nullable 2026-06-10 (Phase G UAT hot-fix). Some indexes
+    /// (notably <c>spaarke-files-index</c>) contain chunks where this
+    /// field is null/missing, breaking deserialization to <c>int</c> with
+    /// "JSON value could not be converted to System.Int32" at $.chunkIndex.
+    /// Read sites coalesce with <c>?? 0</c> when arithmetic is required.
+    /// </remarks>
     [SimpleField(IsSortable = true)]
     [JsonPropertyName("chunkIndex")]
-    public int ChunkIndex { get; set; }
+    public int? ChunkIndex { get; set; }
 
     /// <summary>
     /// Total number of chunks for this document.
@@ -129,8 +164,15 @@ public class KnowledgeDocument
     /// Document-level vector embedding (3072 dimensions for text-embedding-3-large).
     /// Used for document similarity visualization.
     /// </summary>
+    /// <remarks>
+    /// Suppressed from JSON when default (empty <see cref="ReadOnlyMemory{T}"/>) — session-files
+    /// writers leave this default and the index would reject an empty 0-dimensional vector
+    /// against its declared 3072-dimension profile. Customer-corpus writers that populate it
+    /// are unaffected.
+    /// </remarks>
     [VectorSearchField(VectorSearchDimensions = 3072, VectorSearchProfileName = "knowledge-vector-profile-3072")]
     [JsonPropertyName("documentVector3072")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public ReadOnlyMemory<float> DocumentVector { get; set; }
 
     /// <summary>
@@ -167,10 +209,12 @@ public class KnowledgeDocument
     /// </summary>
     /// <remarks>
     /// Used for entity-scoped semantic search. Nullable to support documents
-    /// indexed before parent entity tracking was implemented.
+    /// indexed before parent entity tracking was implemented. Suppressed from JSON when null
+    /// (session-files index lacks this field).
     /// </remarks>
     [SimpleField(IsFilterable = true, IsFacetable = true)]
     [JsonPropertyName("parentEntityType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ParentEntityType { get; set; }
 
     /// <summary>
@@ -178,10 +222,12 @@ public class KnowledgeDocument
     /// </summary>
     /// <remarks>
     /// Combined with ParentEntityType for entity-scoped filtering.
-    /// Nullable to support legacy documents without entity association.
+    /// Nullable to support legacy documents without entity association. Suppressed from JSON
+    /// when null (session-files index lacks this field).
     /// </remarks>
     [SimpleField(IsFilterable = true)]
     [JsonPropertyName("parentEntityId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ParentEntityId { get; set; }
 
     /// <summary>
@@ -189,10 +235,12 @@ public class KnowledgeDocument
     /// </summary>
     /// <remarks>
     /// Searchable field to allow finding documents by entity name.
-    /// Nullable to support legacy documents without entity association.
+    /// Nullable to support legacy documents without entity association. Suppressed from JSON
+    /// when null (session-files index lacks this field).
     /// </remarks>
     [SearchableField(AnalyzerName = LexicalAnalyzerName.Values.StandardLucene, IsSortable = true)]
     [JsonPropertyName("parentEntityname")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ParentEntityName { get; set; }
 
     /// <summary>
@@ -200,11 +248,15 @@ public class KnowledgeDocument
     /// Empty collection means the document is public (no privilege restriction).
     /// Filterable string collection — used by privilege-aware retrieval (AIPU2-027).
     /// </summary>
+    /// <remarks>
+    /// Default empty list preserves customer-corpus behavior (Collection(Edm.String) is
+    /// implicitly Nullable=False — rejects null writes with 400). Session-files writers
+    /// explicitly null this out so JsonIgnore.WhenWritingNull suppresses it — the
+    /// session-files index does not declare this field.
+    /// </remarks>
     [SimpleField(IsFilterable = true)]
     [JsonPropertyName("privilege_group_ids")]
-    // Default to empty list — Azure Search Collection(Edm.String) is implicitly Nullable=False
-    // and rejects null writes (400 Bad Request). Empty list correctly signals "public document"
-    // to the privilege filter (matches "not privilege_group_ids/any()" clause).
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IList<string>? PrivilegeGroupIds { get; set; } = new List<string>();
 }
 

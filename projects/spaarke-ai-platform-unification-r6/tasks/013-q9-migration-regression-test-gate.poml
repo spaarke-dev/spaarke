@@ -1,0 +1,135 @@
+<task id="013" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-11 (continued) — Q9 Migration Regression Test Gate (Staging Validation)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>012</dependencies>
+    <blocks>028</blocks>
+    <tags>bff-api, integration-test, ai, chat, migration</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Validation gate task; runs existing regression suite + adds end-to-end smoke against staging; no new `.cs` implementation (test additions only).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential gate after 012; must complete before Pillar 3 tasks (020+) start.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Run the Q9 batch-migration regression test gate. Validate that all 10 migrated chat
+    tools (task 012) are functional in staging through end-to-end exercise: invoke each
+    tool from a chat session, verify the response matches pre-migration expected behavior,
+    confirm telemetry events emit ADR-015-compliant payloads, confirm safety pipeline
+    middleware chain (NFR-13) wraps every invocation, confirm conversational primacy
+    (NFR-01) — agent answers conversationally between tool calls.
+
+    Critical-path context: this is the gate task that blocks Pillar 3 (tasks 020-023) and
+    the rest of Phase A from continuing. A red gate = roll back task 012 per its documented
+    plan; do NOT continue to Pillar 3 until this gate is green.
+
+    Test approach: (a) load the 60+ unit tests authored in task 012 → all green;
+    (b) add end-to-end integration tests that exercise each tool through the real chat-agent
+    pipeline against a staging Dataverse environment; (c) confirm rollback drill still
+    works (one tool removed → fallback to hardcoded → restore).
+  </prompt>
+
+  <role>
+    Senior BFF QA engineer with integration-test experience. Familiar with the chat-agent
+    pipeline + staging deployment + ADR-015 trace verification + NFR-13 safety pipeline.
+  </role>
+
+  <goal>
+    All 10 migrated chat tools verified functional in staging via end-to-end test.
+    60+ unit regression tests green. Rollback drill re-verified. Telemetry payloads
+    confirmed ADR-015-compliant. Safety pipeline + conversational primacy verified.
+    Gate green; Pillar 3 unblocked.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="migration-evidence">projects/spaarke-ai-platform-unification-r6/notes/task-012-migration-evidence.md</file>
+    <file purpose="rollback-plan">projects/spaarke-ai-platform-unification-r6/notes/task-012-rollback-plan.md</file>
+    <file purpose="factory">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-015">Telemetry verification — confirm only tool name + decision + timestamp logged; no user message content.</constraint>
+    <constraint source="ADR-018">No new feature flags introduced in test infrastructure.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 (tests only). Report explicitly.</constraint>
+    <constraint source="spec NFR-01">Conversational primacy preserved through end-to-end test.</constraint>
+    <constraint source="spec NFR-13">Safety pipeline middleware chain wraps every tool invocation; confirm via integration test.</constraint>
+    <constraint source="spec FR-12">Acceptance: incremental per Q9 — but Q9 chose batch; this gate validates the batch landed without regression.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/integration-test</topic>
+    <files>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: STANDARD — integration test + validation gate; tests-only addition".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 012 ✅. Update `current-task.md` to task 013.
+    </step>
+    <step order="2" name="Re-run 60+ Unit Tests">
+      Run all task 012 unit regression tests locally. MUST be 100% green.
+    </step>
+    <step order="3" name="Add End-to-End Integration Tests">
+      For each of 10 migrated tools, add an integration test that exercises the tool through the chat-agent pipeline (real DI graph; staged Dataverse rows; safety middleware applied). Verify: response shape matches pre-migration; telemetry events emit tool name + decision + timestamp only; no user content logged; safety pipeline applied.
+    </step>
+    <step order="4" name="Conversational Primacy E2E Test">
+      Test asserting: chat agent responds conversationally between tool invocations (NFR-01); refinement / follow-up / context-injection still work.
+    </step>
+    <step order="5" name="Re-execute Rollback Drill">
+      Delete one `sprk_analysistool` row in staging → confirm task 011's fallback re-activates with hardcoded class; re-insert row → confirm data-driven path returns. Record evidence.
+    </step>
+    <step order="6" name="Telemetry Audit">
+      Inspect staging logs for last 10 tool invocations; confirm zero entries contain user message text. Record evidence in `notes/task-013-telemetry-audit.md`.
+    </step>
+    <step order="7" name="🛑 Gate Sign-off">
+      All checks green = gate PASSED; report and unblock Pillar 3. Any red = gate FAILED; execute task 012 rollback plan; reset to PR-revert state; do NOT continue.
+    </step>
+    <step order="8" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 013 ✅. Reset `current-task.md`. Report gate result + evidence file paths.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test (unit + integration)</tool>
+    <tool name="pac">staging Dataverse row manipulation for rollback drill</tool>
+    <tool name="mcp__dataverse__read_query">MCP — query staging rows for verification</tool>
+    <tool name="git">stage + commit test additions</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests/Services/Ai/Chat/MigratedToolsIntegrationTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (013 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-013-gate-evidence.md</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-013-telemetry-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 60+ unit regression tests from task 012 are green.</criterion>
+    <criterion testable="true">10 end-to-end integration tests pass (one per migrated tool).</criterion>
+    <criterion testable="true">Conversational primacy E2E test passes (NFR-01).</criterion>
+    <criterion testable="true">Safety pipeline middleware chain confirmed wrapping every tool invocation (NFR-13).</criterion>
+    <criterion testable="true">Telemetry audit shows zero entries with user message content (ADR-015).</criterion>
+    <criterion testable="true">Rollback drill re-executed: tool row delete → hardcoded fallback re-activates → tool row restore → data-driven path returns.</criterion>
+    <criterion testable="true">Gate decision recorded (green/red) with evidence; Pillar 3 unblock confirmed.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (tests only).</criterion>
+  </acceptance-criteria>
+</task>

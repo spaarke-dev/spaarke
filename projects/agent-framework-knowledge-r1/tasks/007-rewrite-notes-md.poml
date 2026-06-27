@@ -1,0 +1,75 @@
+<task id="007" project="agent-framework-knowledge-r1">
+  <metadata>
+    <title>Rewrite NOTES.md substantively from Spaarke code</title>
+    <phase>3</phase>
+    <tags>knowledge-base, agent-framework, notes, spaarke-specific, adr-013</tags>
+    <estimate>2h</estimate>
+    <status>pending</status>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>002, 003, 004, 005</dependencies>
+  </metadata>
+  <prompt>
+    <goal>Replace the stub NOTES.md with substantive, Spaarke-specific commentary grounded in actual reading of the production code under src/server/api/Sprk.Bff.Api/Services/Ai/. Remove the `⚠️ STUB` banner only when both §1 (architecture fit) and §2 (how we build) have substance. NOTES.md is the most-cited file by the new skill — quality here determines whether the knowledge base actually changes agent output.</goal>
+    <context>The existing NOTES.md is a structured stub with TODOs awaiting "Phase 4 senior engineer annotation pass" — this is that pass. The user asked Claude to act as a Senior AI Developer expert in both Agent Framework + Spaarke. NOTES.md must answer questions Claude will face when asked to extend SprkChatAgent or its middleware: where do Agent Framework primitives end and Spaarke patterns begin, what naming-clash gotchas exist, what middleware composition rules apply, what does the OTel pipeline look like, when reach for Agent Framework Workflows vs. JPS playbook engine vs. Foundry Agent Service.</context>
+    <constraints>
+      - NO fabrication — every claim about Spaarke code MUST be backed by a Read of the actual file (cite paths)
+      - NO repeating upstream docs — NOTES.md is Spaarke-specific commentary, not a re-summary of /agents/ or /workflows/
+      - The ⚠️ STUB banner is REMOVED only when both §1 and §2 have substantive content. Honest TODOs for what cannot yet be known (e.g., "first production use will reveal X") are acceptable
+      - File path references MUST resolve — verify each path with Glob/Read before citing
+      - Honor ADR-013 vocabulary: PublicContracts/ facade, AI Tool Framework (IAiToolHandler) vs Agent Framework tools, BFF-extension governance per .claude/constraints/bff-extensions.md
+      - Keep total length ~150-250 lines (deep enough to be useful, not so deep it overflows the skill's load budget)
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>knowledge/agent-framework/NOTES.md</file>
+      <file>knowledge/fluent-ui-v9/NOTES.md</file>
+      <file>knowledge/agent-framework/docs/overview.md</file>
+      <file>knowledge/agent-framework/SOURCE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentTelemetryMiddleware.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentContentSafetyMiddleware.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentCostControlMiddleware.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/CompoundIntentDetector.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisQueryTools.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WebSearchTools.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAiToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Read SprkChatAgent.cs in full + SprkChatAgentFactory.cs + the 3 middleware files. Inventory: (a) what Agent Framework / Microsoft.Extensions.AI types are used and how, (b) the IChatClient wrapping pattern, (c) the UseFunctionInvocation vs raw-client split + why (compound intent detection per task 071), (d) the middleware composition order (outermost = telemetry per the comment in AgentTelemetryMiddleware.cs), (e) the ChatMessage namespace alias gotcha</step>
+    <step>Read AnalysisQueryTools.cs + WebSearchTools.cs. Inventory: (a) how tools are registered (AIFunctionFactory.Create with [Description] attributes?), (b) parameter types, (c) how citation context threads through tool execution</step>
+    <step>Read IAiToolHandler.cs + AnalysisOrchestrationService.cs. Identify the boundary between Agent Framework tools (chat-time, IChatClient-bound) and the AI Tool Framework (IAiToolHandler — analysis-time, orchestration-driven)</step>
+    <step>Read ADR-013 + bff-extensions.md to capture the binding rules: PublicContracts/ facade requirement, BFF-extension governance, the categorical "no separate AI microservice unless 4 criteria met" rule</step>
+    <step>Draft §1 (How this fits Spaarke's architecture) — sections: (a) Agent Framework's place in the BFF (chat surface, in-process, IChatClient-bound) vs. JPS-driven multi-step orchestration (AnalysisOrchestrationService), (b) When to use Agent Framework agents vs. Foundry Agent Service (lifetime + durability + HITL + A2A criteria), (c) Intersection with the AI Tool Framework (IAiToolHandler — keep the seam clear: chat-time IChatClient tools vs analysis-time AiToolHandler), (d) Hosting model: in-process only; ADR-001 prohibits Functions for new AI work; durability deferred to Foundry Agent Service</step>
+    <step>Draft §2 (How we build with it) — sections: (a) Tool definition idioms (AIFunctionFactory.Create + [Description] — cite the Tools/*.cs files), (b) Middleware composition order (outermost = telemetry; cite AgentTelemetryMiddleware.cs lines 22-24), (c) The UseFunctionInvocation vs raw-client split for compound intent detection (cite SprkChatAgent.cs lines 60-69 + CompoundIntentDetector.cs), (d) Namespace alias gotcha (cite SprkChatAgent.cs lines 5-10 — `using AiChatMessage = Microsoft.Extensions.AI.ChatMessage`), (e) Streaming response handling (IAsyncEnumerable&lt;ChatResponseUpdate&gt;), (f) OTel + Application Insights wiring (where does the source-name come from, how does it line up with Sprk.Bff.Api's existing OTel pipeline), (g) Credential choice in production (ManagedIdentityCredential over DefaultAzureCredential per ADR-028 + upstream warnings — cite the providers.md upstream caveat), (h) Code review checklist (5-10 items targeting common drift — e.g., "must use AiChatMessage alias when both Models.Ai.Chat and Microsoft.Extensions.AI are imported")</step>
+    <step>Verify every file path cited in NOTES.md resolves (Glob each path)</step>
+    <step>If both §1 and §2 have substantive content: remove the `⚠️ STUB — senior engineer review pending` banner at the top. If any section is still TODO-only, keep the banner and mark NOTES.md as still-stub</step>
+    <step>Write the new NOTES.md to knowledge/agent-framework/NOTES.md</step>
+    <step>Commit: `docs(knowledge): rewrite agent-framework NOTES.md with Spaarke-grounded commentary (R1 task 007)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Glob</tool>
+    <tool>Grep</tool>
+    <tool>Write</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>knowledge/agent-framework/NOTES.md (substantively rewritten)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>Both §1 and §2 have substantive content — no surviving TODOs as the only content in any subsection</criterion>
+    <criterion>Every claim about Spaarke code is backed by a citable file path that resolves</criterion>
+    <criterion>Document length 150-250 lines</criterion>
+    <criterion>STUB banner removed (banner remains if any subsection is TODO-only — but Phase 4 acceptance is the banner removed)</criterion>
+    <criterion>Code review checklist in §2 has 5-10 items, each targeting a specific drift Claude is at risk of</criterion>
+    <criterion>ADR-013 cited at least twice (in §1 architecture context AND §2 PublicContracts/ facade requirement)</criterion>
+  </acceptance-criteria>
+</task>

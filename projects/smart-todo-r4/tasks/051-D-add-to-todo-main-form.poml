@@ -1,0 +1,101 @@
+<task id="R4-051" project="smart-todo-r4">
+  <metadata>
+    <title>D — Add regarding resolver to To Do main form</title>
+    <phase>Phase 2: Wave 2a</phase>
+    <workstream>D</workstream>
+    <status>complete</status>
+    <estimated-effort>0.5-1 day</estimated-effort>
+    <tags>dataverse, form-designer, regarding, deploy</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>R4-050</dependencies>
+    <relevant-files>
+      <file>Dataverse To Do main form `eca59df4-1364-f111-ab0c-7ced8ddc4cc6` (form-designer change)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Add the regarding resolver (built in task 050) to the OOB MDA To Do main form `eca59df4-1364-f111-ab0c-7ced8ddc4cc6`. Visible on main form; saving persists all 5 fields atomically. Deploy via solution import.
+  </prompt>
+
+  <role>Dataverse form-designer + solution manager.</role>
+
+  <goal>Regarding picker visible on To Do main form; functional in spaarkedev1.</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="audit-outcome">projects/smart-todo-r4/notes/regarding-resolver-audit.md</file>
+    <file purpose="impl">per audit (PCF/WebRes/CodePage)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-23">Added to To Do main form `eca59df4-1364-f111-ab0c-7ced8ddc4cc6`; visible; saving persists all 5 fields</constraint>
+    <constraint source="spec NFR-04">Form-designer changes propagate without R4 code change (validates hybrid modal architecture)</constraint>
+    <constraint source="spec NFR-09">PR description identifies deployed surface(s) + rebuild/redeploy</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/form-designer</topic>
+    <files>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R4-050" status="must-complete">Resolver component implemented and deployed</dependency>
+    </dependencies>
+    <related-work>
+      <item>NFR-04 validation: form-designer changes propagate cleanly (the hybrid modal iframe pulls live form definition)</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Open To Do main form in form designer">Locate form `eca59df4-1364-f111-ab0c-7ced8ddc4cc6` in spaarkedev1.</step>
+    <step order="2" name="Add resolver to form">Per audit outcome: drop PCF control / register Web Resource / embed Code Page iframe.</step>
+    <step order="3" name="Configure binding">Per resolver's API — typically bind to a hidden lookup or use the PCF's manifest-defined parameters.</step>
+    <step order="4" name="Publish form changes">Save + Publish in form designer.</step>
+    <step order="5" name="Export + commit solution">Export the modified solution; commit XML diff to repo (per Spaarke solution-as-code pattern).</step>
+    <step order="6" name="Smoke test">Open a To Do record in spaarkedev1; verify resolver is visible; pick an entity; save; reload; verify all 5 fields persisted.</step>
+    <step order="7" name="Verify NFR-04">Open the same To Do via the hybrid modal (task 040). Confirm the resolver appears inside the iframe with no R4 source change required.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-deploy">Solution export/import</tool>
+    <tool name="pac">Power Platform CLI for solution operations</tool>
+    <tool name="ui-test">Smoke + NFR-04 verify</tool>
+  </tools>
+
+  <outputs>
+    <output type="form-update">To Do main form modified — resolver added</output>
+    <output type="solution-xml">Updated solution XML committed</output>
+    <output type="deploy">Deployed to spaarkedev1</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Resolver visible + functional on form">
+      <steps>
+        <step>Open To Do record in spaarkedev1</step>
+        <step>Verify resolver picker visible</step>
+        <step>Pick a Matter target; save</step>
+        <step>Reload; verify all 5 fields persisted</step>
+      </steps>
+      <expected>Resolver functional; 5 fields persisted</expected>
+    </test>
+    <test name="NFR-04: form propagates to hybrid modal without source change">
+      <steps>
+        <step>Open SmartTodo Code Page → click a To Do card to open modal</step>
+        <step>Verify iframe contains resolver picker</step>
+        <step>Pick a target inside iframe; save</step>
+      </steps>
+      <expected>Resolver works inside modal iframe with no R4 source change</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Resolver picker visible on To Do main form</criterion>
+    <criterion testable="true">Saving persists all 5 fields (sprk_regarding&lt;X&gt;, sprk_regardingrecordtype, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl)</criterion>
+    <criterion testable="true">NFR-04 verified: resolver appears inside hybrid modal iframe with no R4 code change</criterion>
+    <criterion testable="true">Solution XML committed to repo</criterion>
+  </acceptance-criteria>
+</task>

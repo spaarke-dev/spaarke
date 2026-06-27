@@ -12,6 +12,7 @@ namespace Sprk.Bff.Api.Tests.Services;
 /// historical average, trend data, edge cases, and matter update verification.
 /// Validates acceptance criteria from tasks 011, 012, and 013.
 /// </summary>
+[Trait("status", "repaired")]
 public class ScorecardCalculatorServiceTests
 {
     private readonly Mock<IDataverseService> _dataverseServiceMock;

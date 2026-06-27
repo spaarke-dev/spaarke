@@ -1,0 +1,77 @@
+PROJECT STATUS REPORT — WEEK ENDING APRIL 24, 2026
+
+Project Code:        IPPAT-2026-019
+Project Name:        Helios Quantum Compute — Thermal Management Patent Family
+                     Prosecution Plan
+Project Manager:     Patrick Devanney (Outside Counsel Lead)
+Reporting Period:    April 20, 2026 – April 24, 2026
+Project Status:      GREEN
+Days to Next Milestone (PCT filing): 193 (target November 3, 2026)
+
+1. EXECUTIVE SUMMARY
+
+The Helios Quantum Compute thermal-management patent prosecution project
+remains on track. US Application 18/734,521 was filed March 11, 2026 and is
+docketed awaiting examination. PCT planning for the November 3, 2026 deadline
+is on schedule. CIP planning continues to track HQC's internal R&D milestones
+for the per-microvalve dispersion-compensation feature.
+
+2. MILESTONES STATUS
+
+   M-01  Non-Provisional filed                  ✅ Mar 11, 2026
+   M-02  Inventor declaration drafts circulated  🟢 In progress; complete by
+                                                    May 1, 2026
+   M-03  PCT filing                               🟢 On track (Nov 3, 2026)
+   M-04  CIP target                               🟡 At risk; gated on HQC R&D
+                                                    completion (Q4 2026 internal
+                                                    target slipped 2 weeks)
+   M-05  National phase entries                  🟢 On track (May 3, 2028)
+
+3. KEY ACTIVITIES THIS WEEK
+
+   a) Prepared and circulated draft Examiner Interview Request (App. 18/734,521)
+      to be filed after first Office Action issues.
+   b) Coordinated with HQC R&D team (Maitreyi Saraswat, co-inventor) on the
+      experimental data set required to support non-obviousness over Singh et
+      al. — data set received April 22.
+   c) Began preparation of PCT specification — initial draft 35% complete.
+   d) Completed prior-art landscape report; report submitted to HQC IP Steering
+      Committee for review.
+
+4. ITEMS AT RISK
+
+   M-04 (CIP target Q1 2027): HQC R&D has reported a 2-week slip in the
+   per-microvalve prototype completion. If the slip extends beyond 6 weeks,
+   the CIP filing window may move to Q2 2027. Current status: monitoring;
+   no action required this week.
+
+5. BUDGET STATUS
+
+   Annual Budget (2026):                   $420,000
+   YTD Spend (through April 24, 2026):     $111,200  (26.5%)
+   Projected at year-end:                   $415,000  (within budget)
+
+6. KEY DEPENDENCIES
+
+   - HQC R&D Lab Notebook entries LN-2026-014 through LN-2026-028 (received)
+   - HQC IP Steering Committee feedback on prior-art landscape (pending —
+     target May 6, 2026)
+   - Foreign associate selection for EP/JP/KR/CN (in progress; quotes
+     requested from three associate networks)
+
+7. UPCOMING WEEK ACTIVITIES (APRIL 27 – MAY 1)
+
+   a) Finalize inventor declarations and obtain signatures from Bekele,
+      Saraswat, Wronski
+   b) Continue PCT specification drafting (target: 60% complete by May 1)
+   c) IP Steering Committee meeting May 6 — prepare briefing materials
+   d) Begin US Information Disclosure Statement (IDS) for application
+
+8. ESCALATIONS
+
+   None this week.
+
+Prepared by:   Yusuf Ramirez, Paralegal
+Reviewed by:   Patrick Devanney, Lead Counsel
+Distribution:  HQC CTO Lior Bekele; HQC IP Steering Committee Secretary;
+               Greene Marlow Patent Group LLP project file

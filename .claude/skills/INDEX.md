@@ -2,7 +2,7 @@
 
 > **Purpose**: Central registry of all Claude Code skills — the **single source of truth** for what skills exist, their triggers, and how to create new ones.
 >
-> **Last Updated**: February 24, 2026 (added code-page-deploy skill, enhanced bff-deploy and pcf-deploy with path maps)
+> **Last Updated**: June 18, 2026 (added prototype-harness-setup, prototype-harness-extend, prototype-experiment-init for the spaarke-prototype UI iteration framework)
 
 ---
 
@@ -47,12 +47,14 @@
 | [pcf-deploy](pcf-deploy/SKILL.md) | Build, pack, and deploy PCF controls via solution ZIP import | No | "deploy pcf", "build and deploy pcf", "pcf solution import" |
 | [code-page-deploy](code-page-deploy/SKILL.md) | Build and deploy React Code Page web resources to Dataverse | No | "deploy code page", "deploy web resource", "build webresource" |
 | [power-page-deploy](power-page-deploy/SKILL.md) | Build and deploy Vite/React SPA to Dataverse as a Power Pages web resource | No | `/power-page-deploy`, "deploy power pages", "deploy spa", "deploy external workspace" |
+| [master-deploy](master-deploy/SKILL.md) | **End-to-end unified-master deploy** — all 19 web resources + BFF API from one master HEAD. Encodes today's lessons (build-script fallbacks, Reporting workaround, BFF restore bug). Use after multiple PRs merge. | No | `/master-deploy`, "master deploy", "deploy from master", "deploy everything from master", "unified deploy" |
 | [design-to-spec](design-to-spec/SKILL.md) | Transform human design documents into AI-optimized spec.md | No | `/design-to-spec`, "design to spec" |
 | [pull-from-github](pull-from-github/SKILL.md) | Pull latest changes from GitHub | No | `/pull-from-github`, "pull from github" |
 | [push-to-github](push-to-github/SKILL.md) | Commit changes and push to GitHub | No | `/push-to-github`, "push to github" |
 | [project-pipeline](project-pipeline/SKILL.md) | **🚀 RECOMMENDED**: Full automated pipeline SPEC.md → ready tasks + branch | No | `/project-pipeline`, "start project" |
 | [project-setup](project-setup/SKILL.md) | Generate project artifacts (README, PLAN, CLAUDE.md) only | No | `/project-setup`, "create artifacts" |
 | [repo-cleanup](repo-cleanup/SKILL.md) | Repository hygiene audit and ephemeral file cleanup | No | `/repo-cleanup`, "clean up repo" |
+| [test-diet](test-diet/SKILL.md) | Project-close test reconciliation — classifies tests touched during the project as scaffolding (delete) vs maintain (keep) per ADR-038 §7 (17-ban B1-B17). Read-only: emits `git rm`/`git mv` commands for reviewer judgment. **Binding** for every project's 090 wrap-up per spec FR-B09. | No | `/test-diet`, "test diet", "project close test review", "reconcile build vs maintain tests" |
 | [spaarke-conventions](spaarke-conventions/SKILL.md) | Coding standards and naming conventions | **Yes** | Auto-applied |
 | [task-create](task-create/SKILL.md) | Decompose plan.md into POML task files | No | `/task-create`, "create tasks" |
 | [task-execute](task-execute/SKILL.md) | Execute POML task with mandatory knowledge loading | No | "execute task", "run task", "work on task" |
@@ -79,6 +81,18 @@
 | [spe-integration](spe-integration/SKILL.md) | Integrate with SharePoint Embedded — containers, permissions, agent grounding, webUrl opens (reads `knowledge/sharepoint-embedded/`) | No | "SharePoint Embedded", "SPE container", "container type", "webUrl document open" |
 | [widget-design](widget-design/SKILL.md) | Design MCP App widget — inline or side-by-side, Fluent v9, sandboxed iframe constraints (reads `knowledge/mcp-apps/`) | No | "MCP App widget", "Copilot widget", "side-by-side widget", "inline widget" |
 | [fluent-v9-component](fluent-v9-component/SKILL.md) | Author/modify any Fluent UI v9 React component across Spaarke surfaces — loads `.claude/patterns/{ui,pcf}/fluent-v9-*.md` + drills into `knowledge/fluent-ui-v9/` | No | "Fluent UI", "Fluent v9", "build component", "theming", "FluentProvider", "Griffel", "makeStyles", "Popover/Tooltip/Dialog/Menu/Toast" |
+| [prototype-harness-setup](prototype-harness-setup/SKILL.md) | Scaffold a Mode 2 production component harness in `spaarke-prototype` for sub-second visual iteration on a worktree component | No | `/prototype-harness-setup`, "set up prototype harness", "create UAT harness", "stand up local dev for X widget", "iterate on UI visually" |
+| [prototype-harness-extend](prototype-harness-extend/SKILL.md) | Add a new Dataverse entity factory + preset to `spaarke-prototype/_infra/seed/` for harness consumption | No | `/prototype-harness-extend`, "add entity to prototype seed", "create factory for sprk_X", "extend the harness with X entity" |
+| [prototype-experiment-init](prototype-experiment-init/SKILL.md) | Scaffold a Mode 1 standalone UX experiment for greenfield design work (no production code yet) | No | `/prototype-experiment-init`, "start UX experiment", "design new prototype for X", "greenfield design for Y" |
+| [devops-portfolio-setup](devops-portfolio-setup/SKILL.md) | One-shot idempotent bootstrap of Project #2 portfolio schema (Type=Project, 6 fields, 7 labels, 3 issue templates). Snapshot → mutate → reconcile pattern. | No | `/devops-portfolio-setup`, "bootstrap portfolio", "setup portfolio schema" |
+| [devops-epic-create](devops-epic-create/SKILL.md) | Create an Epic Issue on Project #2 with Type=Epic + label epic + populated fields | No | `/devops-epic-create`, "create epic", "new portfolio epic" |
+| [devops-idea-create](devops-idea-create/SKILL.md) | Capture idea as GitHub Issue (Type=Idea, label backlog). NO local folder/worktree side-effects. | No | `/devops-idea-create`, "capture idea", "add to backlog" |
+| [devops-idea-promote](devops-idea-promote/SKILL.md) | Promote Ideas → Project. Path A (1→1: flip type+labels) or Path B (N→1: package as sub-issues). | No | `/devops-idea-promote`, "promote idea", "package ideas" |
+| [devops-project-start](devops-project-start/SKILL.md) | **THE BLESSED HANDOFF** — Issue → folder + worktree + design.md skeleton + field round-trip. The one canonical bridge from portfolio to local. | No | `/devops-project-start`, "start project from issue", "blessed handoff" |
+| [devops-project-register](devops-project-register/SKILL.md) | Inverse of project-start — existing worktree → Project Issue + fields. Used for Phase 3 backfill. | No | `/devops-project-register`, "register project", "backfill on portfolio" |
+| [devops-project-sync](devops-project-sync/SKILL.md) | Workhorse — re-read local state + idempotently update Issue fields. Called by 5 hook tasks. | No | `/devops-project-sync`, "sync portfolio", "update project fields" |
+| [devops-portfolio-status](devops-portfolio-status/SKILL.md) | Portfolio dashboard (terminal); `--snapshot` writes stakeholder narrative to docs/portfolio/ | No | `/devops-portfolio-status`, "portfolio dashboard", "what's running" |
+| [devops-project-archive](devops-project-archive/SKILL.md) | **DESTRUCTIVE** — set Project Status, close Issue, **DELETE worktree**, retain folder + .archived marker | No | `/devops-project-archive`, "archive project", "close project" |
 
 ## Skill Categories
 
@@ -110,6 +124,11 @@
 - **jps-scope-refresh** - Operational: Refresh scope-model-index.json from Dataverse (Tier 3)
 - **jps-validate** - Component: Validate JPS JSON against schema and test rendering (Tier 1)
 - **add-reference-to-index** - Operational: Index golden reference documents into AI Search for L1 knowledge retrieval
+
+### 🎨 UI Prototyping (sub-second iteration via `spaarke-prototype` framework)
+- **prototype-harness-setup** - Scaffold Mode 2 production harness (aliases worktree source, mocks Xrm/auth, seeded data, HMR)
+- **prototype-harness-extend** - Add new entity factory + preset to shared `_infra/seed/`
+- **prototype-experiment-init** - Scaffold Mode 1 standalone UX experiment (greenfield, no production source yet)
 
 ### 🔧 Maintenance
 - **ai-procedure-maintenance** - Propagate updates when adding ADRs, constraints, patterns, skills

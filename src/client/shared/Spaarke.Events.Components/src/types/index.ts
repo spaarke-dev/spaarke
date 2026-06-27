@@ -13,33 +13,19 @@ export type {
   CalendarFilterClear,
   CalendarFilterType,
   IEventDateInfo,
-} from "../components/CalendarSection/CalendarSection";
+} from '../components/CalendarSection/CalendarSection';
 
-export type {
-  IEventRecord,
-} from "../components/GridSection/GridSection";
+// IUserOption, IEventTypeOption, IStatusOption — RETIRED in task 032
+// (2026-06-03) along with their component directories. No external
+// consumers; CalendarWorkspaceWidget has its own inline IStatusOption.
+//
+// IEventRecord — RETIRED in task 033b (2026-06-03) with the GridSection
+// directory deletion. The DataGrid framework uses `Record<string, unknown>`
+// for record rows; consumers that need typed event fields define them inline.
 
-export type {
-  IUserOption,
-} from "../components/AssignedToFilter/AssignedToFilter";
+export type { SavedView } from '../components/ViewSelectorDropdown/ViewSelectorDropdown';
 
-export type {
-  IEventTypeOption,
-} from "../components/RecordTypeFilter/RecordTypeFilter";
-
-export type {
-  IStatusOption,
-} from "../components/StatusFilter/StatusFilter";
-
-export type {
-  SavedView,
-} from "../components/ViewSelectorDropdown/ViewSelectorDropdown";
-
-export type {
-  FetchXmlResult,
-  ViewDefinition,
-  LayoutColumn,
-} from "../services/FetchXmlService";
+export type { FetchXmlResult, ViewDefinition, LayoutColumn } from '../services/FetchXmlService';
 
 export type {
   EventsPageFilters,
@@ -47,4 +33,4 @@ export type {
   EventsPageActions,
   EventsPageContextValue,
   EventsPageProviderProps,
-} from "../context/EventsPageContext";
+} from '../context/EventsPageContext';

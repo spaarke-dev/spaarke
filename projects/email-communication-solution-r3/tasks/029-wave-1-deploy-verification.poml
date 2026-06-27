@@ -1,0 +1,141 @@
+<task id="029" project="email-communication-solution-r3">
+  <metadata>
+    <title>Wave 1 deploy verification — shared lib clean build + consumer smoke-build</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>028</dependencies>
+    <blocks>030</blocks>
+    <tags>deploy, frontend, react</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Build + lint verification + downstream-consumer smoke-build. No new code; mechanical confirmation that Wave 1 outputs are consumable.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Gates Wave 2 start; serial.</parallel-reason>
+    <fr-refs>FR-01, FR-02, FR-03, FR-04, FR-05, FR-06, FR-07, FR-08, FR-09, FR-10, FR-11, FR-12, FR-13</fr-refs>
+  </metadata>
+
+  <prompt>
+    Verify Wave 1 outputs are deploy-ready and consumable by downstream solutions. NO actual deployment in this task — surface deployments happen in Waves 3-5. This is a smoke-build pass.
+
+    Steps:
+    1. `@spaarke/ui-components` clean build: `npm run build` exits 0 with no errors / warnings.
+    2. `@spaarke/ui-components` lint: `npm run lint` exits 0.
+    3. `@spaarke/ui-components` tests: `npm run test` all green; coverage of `EmailComposer/` ≥ 80%.
+    4. Bundle size delta vs pre-Wave-1 baseline: target ≤ +50 KB gzipped (engine + 4 source pickers + 3 wrappers + mode logic — reasonable budget per NFR-08).
+    5. Public API surface audit: grep for `EmailComposer`, `SendEmailStep`, `SendEmailDialog`, `SendEmailPage`, `IComposerSourceRecord`, `IEmailComposerHandle`, etc. in the public barrel (`src/index.ts`). Confirm all expected exports.
+    6. Downstream consumer smoke-builds — for each LIVE consumer of `@spaarke/ui-components`, run `npm run build`:
+       - `src/solutions/LegalWorkspace/` (consumes SendEmailDialog via FilePreviewDialog — expect TS error at consumer post-task-022 wrapper rewrite; document the expected error; Wave 3 task 051 will fix)
+       - `src/solutions/SummarizeFilesWizard/` (if it consumes lib)
+       - Any other solutions importing the lib (audit `package.json` workspaces or grep `"@spaarke/ui-components"` in `dependencies`)
+    7. Per FR-25 / NFR-07: confirm Form Component Control swap not yet attempted (Wave 2 handles); confirm standard form still default — no Dataverse changes in this task.
+    8. Document: Wave 1 outputs ready for Wave 2 consumption.
+
+    EXPECTED FAILURES — note in task notes:
+    - `LegalWorkspace/.../FilePreviewDialog.tsx` will have a TS error (consuming the legacy `onSend` callback removed in task 022). Document; Wave 3 task 051 fixes.
+    - Any consumers of `SendEmailStep` shared step that haven't migrated yet (Wave 5 task 071) — none expected (Wave 1 didn't change that file).
+
+    OK to proceed if ONLY the expected failure above is the gap. Any other failure blocks Wave 2.
+  </prompt>
+
+  <role>
+    Build engineer / release coordinator comfortable with `npm run build` across a monorepo.
+  </role>
+
+  <goal>
+    Wave 1 shared lib outputs build clean. Tests green + coverage ≥ 80%. Bundle size delta within budget. Consumer smoke-builds pass (modulo expected LegalWorkspace FilePreviewDialog TS error pending Wave 3 task 051). Wave 2 unblocked.
+  </goal>
+
+  <context>
+    <background>
+      Wave 1 has built the engine + wrappers + sub-components + modes + tests. Before Wave 2 starts the Code Page work, we want a mechanical confirmation that:
+      (a) the shared lib's public API surface is exporting the right symbols,
+      (b) downstream consumers don't have surprises (other than expected ones),
+      (c) bundle size hasn't ballooned.
+
+      No actual solution deployment in this task. Wave 2 deploys the Code Page; Wave 3+ deploys migrated solutions.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/ (clean build target)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (barrel — audit exports)</file>
+      <file>src/solutions/LegalWorkspace/ (consumer smoke build — expected FilePreviewDialog TS error)</file>
+      <file>src/solutions/ (other consumers — audit by grep)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-08">Bundle size delta ≤ +50 KB gzipped per the canonical engine budget</constraint>
+    <constraint source="NFR-01">Shared lib remains React 18 only — no React 16 compat shims added</constraint>
+    <constraint source="project">No Dataverse changes in this task — Form Component Control swap deferred to Wave 2</constraint>
+    <constraint source="project">Expected TS error in LegalWorkspace/FilePreviewDialog is documented; not a blocker for Wave 2 start (Wave 3 task 051 fixes)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">In `src/client/shared/Spaarke.UI.Components/`, run `npm run build` — must exit 0 with no warnings. Capture build output size (`dist/` size) for the bundle-delta comparison.</step>
+    <step order="2">Run `npm run lint` — must exit 0.</step>
+    <step order="3">Run `npm run test` — all suites green; coverage of `EmailComposer/` ≥ 80% lines.</step>
+    <step order="4">Compute bundle delta: compare `dist/` total size vs pre-Wave-1 baseline (note baseline from git history at Wave 0 completion). Target: gzipped delta ≤ +50 KB.</step>
+    <step order="5">Audit `src/index.ts` barrel — grep for expected exports: `EmailComposer`, `SendEmailStep`, `SendEmailDialog`, `SendEmailPage`, `IEmailComposerHandle`, `IEmailComposerProps`, `IComposerSourceRecord`, `IComposerAttachmentSource`, `IComposerAssociation`, `IRecipient`, `IAttachment`, `IValidationResult`, `EmailComposerMode`, `EmailComposerMount`, `EmailComposerValidationCode`, `SendCommunicationError`. Note any missing.</step>
+    <step order="6">Audit downstream consumers — grep `"@spaarke/ui-components"` in all `package.json` files. For each consumer solution:
+      - Run `npm install --legacy-peer-deps --no-audit --no-fund` (per CLAUDE.md §11 Vite solutions guidance)
+      - Run `npm run build`
+      - Capture output. Pass = clean build. Expected failure = LegalWorkspace/FilePreviewDialog.tsx (document).
+    </step>
+    <step order="7">Write summary report to PR description / task notes:
+      - Shared lib: build ✅ / lint ✅ / test ✅ + coverage %
+      - Bundle delta: +N KB gzipped (within ≤ +50 KB budget)
+      - Public API surface: all expected exports present
+      - Consumer smoke-builds: list each, pass/fail; document expected FilePreviewDialog failure
+      - Conclusion: Wave 2 unblocked / blocked-on-X</step>
+    <step order="8">Update `TASK-INDEX.md`: 029 ✅. Mark Wave 1 as complete.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol — advance to first Wave 2 task (030).</step>
+  </steps>
+
+  <tools>
+    <tool name="bash">npm run build + lint + test + size comparison</tool>
+    <tool name="grep">audit public exports + consumer package.json files</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">Wave 1 deploy verification report in PR description (or task notes)</output>
+    <output type="docs">TASK-INDEX.md updated — Wave 1 marked complete</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`@spaarke/ui-components` `npm run build` exits 0 with no warnings.</criterion>
+    <criterion testable="true">`npm run lint` exits 0.</criterion>
+    <criterion testable="true">`npm run test` all green; coverage of `EmailComposer/` ≥ 80%.</criterion>
+    <criterion testable="true">Bundle gzipped delta ≤ +50 KB (NFR-08).</criterion>
+    <criterion testable="true">All expected exports present in shared lib barrel.</criterion>
+    <criterion testable="true">All consumer solutions build clean EXCEPT the documented LegalWorkspace/FilePreviewDialog TS error (which Wave 3 task 051 fixes).</criterion>
+    <criterion testable="true">No new HIGH-severity vulnerabilities introduced (per `npm audit` snapshot).</criterion>
+    <criterion testable="true">Wave 1 marked complete in TASK-INDEX.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task is the Wave 1 → Wave 2 transition gate. After it passes, Wave 2 (Code Page + 3 entry surfaces) can start consuming the canonical wrappers.
+
+    The 50 KB gzipped budget is approximate — engine (~10 KB), 4 source pickers (~8 KB combined), 3 wrappers (~3 KB combined), mode logic (~5 KB), sub-components (RecipientField, BodyEditor, AttachmentList, ComposerActionBar — ~15 KB combined) totals ~41 KB. Leaves headroom. If exceeded, audit for accidental heavy-dep imports.
+
+    Per CLAUDE.md §11: Vite solutions use `npm install --legacy-peer-deps`, NOT `npm ci`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      STANDARD rigor. Step 9.5 quality gates SKIPPED for STANDARD.
+    </protocol>
+  </execution>
+</task>

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/r6/node-routing-config.schema.json",
+  "title": "NodeRoutingConfig",
+  "description": "R6 Pillar 5 / FR-27 per-playbook node routing contract. Lives inside sprk_playbooknode.sprk_configjson as additive properties on the existing node-config blob. Default-on backward compatibility: nodes without these fields default to destination=chat (current pre-R6 behavior). NFR-08 binding: the 11 production node executors are NOT modified — this contract is consumed by the FR-24 render-routing dedup site and StructuredOutputStreamWidget (tasks 040/041), not by the executors themselves. The DeliverOutputNodeExecutor's existing DeliveryNodeConfig record silently ignores these properties (additive-safe per System.Text.Json default UnmappedMemberHandling.Skip; confirmed at DeliverOutputNodeExecutor.cs:271-286).",
+  "type": "object",
+  "additionalProperties": true,
+  "$comment-additionalProperties": "additionalProperties is TRUE because this schema describes only the routing-config subset of the larger sprk_configjson blob. The blob also carries deliveryType, template, outputFormat, outputType, targetPage, prePopulateFields, requiresConfirmation, and node-type-specific fields (sessionIdFrom, fileIdsFrom, etc.) read by other contracts. Validators MUST NOT reject blobs that contain those other properties.",
+  "properties": {
+    "destination": {
+      "type": "string",
+      "description": "Per-playbook routing destination for this node's output. Optional — when absent, defaults to 'chat' (FR-27 backward compatibility). Q5 RE-SHAPED counterpart to action-level outputSchema (intrinsic shape on the action; routing on the node).",
+      "enum": ["chat", "workspace", "form-prefill", "side-effect"],
+      "default": "chat",
+      "$comment-values": "chat: inline in conversation (default, pre-R6 behavior). workspace: streams to a workspace tab via StructuredOutputStreamWidget (REQUIRES widgetType). form-prefill: pre-fills a form via existing MatterPreFillService/ProjectPreFillService/useAiPrefill hook (NFR-07 — signatures UNCHANGED). side-effect: consumed for side-effect only (Dataverse mutation, indexing, notification) — no user-visible chat/workspace render."
+    },
+    "widgetType": {
+      "type": "string",
+      "description": "Workspace widget type — REQUIRED when destination=workspace; IGNORED for all other destinations. String to allow extension by downstream widget tasks (Summary, DocumentViewer, Table, Dashboard, …) without recompiling the contract. Matched against WorkspaceWidgetRegistry at render time (tasks 040/041); unknown widget types degrade gracefully via registry fallback.",
+      "minLength": 1
+    }
+  },
+  "allOf": [
+    {
+      "$comment": "Conditional-required rule: when destination=workspace, widgetType MUST be a non-empty string. Implemented as if/then per Draft 2020-12 idiom. This rule is also enforced in C# by NodeRoutingConfig.Validate() (see Models/Ai/NodeRoutingConfig.cs) — the C# validation is the authoritative check at runtime; this JSON Schema is for write-time tooling (Playbook Builder AI Assistant — Services/Ai/Builder/BuilderToolDefinitions.cs).",
+      "if": {
+        "properties": {
+          "destination": { "const": "workspace" }
+        },
+        "required": ["destination"]
+      },
+      "then": {
+        "required": ["widgetType"],
+        "properties": {
+          "widgetType": { "minLength": 1 }
+        }
+      }
+    }
+  ],
+  "examples": [
+    {
+      "$comment": "Workspace destination — widgetType required",
+      "destination": "workspace",
+      "widgetType": "Summary"
+    },
+    {
+      "$comment": "Form-prefill destination — widgetType ignored",
+      "destination": "form-prefill"
+    },
+    {
+      "$comment": "Side-effect destination — widgetType ignored",
+      "destination": "side-effect"
+    },
+    {
+      "$comment": "Backward compatibility — no routing properties; defaults to chat",
+      "deliveryType": "markdown",
+      "template": "## Summary\n{{summary.output.tldr}}"
+    }
+  ]
+}

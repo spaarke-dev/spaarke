@@ -41,7 +41,7 @@ module.exports = {
     '^diff$': '<rootDir>/src/__mocks__/diff.js'
   },
   transformIgnorePatterns: [
-    'node_modules/(?!(d3-force|d3-dispatch|d3-quadtree|d3-timer)/)'
+    'node_modules/(?!(d3-force|d3-dispatch|d3-quadtree|d3-timer|marked)/)'
   ],
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {

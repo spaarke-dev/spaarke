@@ -135,7 +135,7 @@ public sealed class DemoProvisioningService
 
             // ── Step 5: Assign licenses ──
             _logger.LogInformation("[Step 5/9] Assigning licenses to user {UserId}", entraUserId);
-            await _graphUserService.AssignLicensesAsync(entraUserId, ct);
+            await _graphUserService.AssignLicensesAsync(entraUserId, environment.Licenses, ct);
             completedSteps.Add("AssignLicenses");
             _logger.LogInformation("[Step 5/9] Licenses assigned");
 

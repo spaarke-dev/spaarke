@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Wire `loadSpaarkeAiNotificationContext` injection in SpaarkeAi `main.tsx`</title>
+    <phase>P1: Wiring Seam Fix</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>003, 010</blocks>
+    <tags>frontend, react, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .tsx bootstrap code; observable behavior change in SpaarkeAi widget</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches SpaarkeAi main.tsx; needs 001 in place first</parallel-reason>
+  </metadata>
+
+  <prompt>
+    In `src/solutions/SpaarkeAi/src/main.tsx`, invoke the Daily Briefing registration factory with `loadNotificationContext: loadSpaarkeAiNotificationContext` alongside the existing `setDefaultWorkspaceRenderer` call. After this change, cold-load of the SpaarkeAi workspace pane MUST populate Daily Briefing with TL;DR + non-empty channel bullets for users with N&gt;0 unread `appnotification` rows.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in SpaarkeAi workspace bootstrap, LegalWorkspace section registration, and the `loadSpaarkeAiNotificationContext` helper.</role>
+
+  <goal>SpaarkeAi `main.tsx` injects `loadSpaarkeAiNotificationContext` into the Daily Briefing section registration factory; cold-load of the workspace pane renders real notifications for `ralph.schroeder@spaarke.com` (or any user with unread rows) in spaarkedev1.</goal>
+
+  <context>
+    <background>
+      Per spec FR-02 and design.md §D1: `loadSpaarkeAiNotificationContext` already exists but is orphaned (no caller wires it through to BFF `/narrate`). Task 001 added the factory option; this task wires the actual injection.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/main.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/notifications/loadSpaarkeAiNotificationContext.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/dailyBriefingRegistration.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">SpaarkeAi remains a Vite + React 19 + Fluent v9 Code Page.</constraint>
+    <constraint source="ADR-028">Auth flow unchanged — `loadSpaarkeAiNotificationContext` uses the existing `@spaarke/auth` SSO contract.</constraint>
+    <constraint source="ADR-010">No new DI registrations; this is a wiring change at the existing factory call site.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-006-ui-surface-architecture.md</file>
+      <file>docs/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read SpaarkeAi `main.tsx` and locate the existing `setDefaultWorkspaceRenderer` call.</step>
+    <step order="2">Read `loadSpaarkeAiNotificationContext.ts` to confirm signature matches the factory option from task 001.</step>
+    <step order="3">Add the factory invocation with `loadNotificationContext: loadSpaarkeAiNotificationContext` alongside the existing renderer setup.</step>
+    <step order="4">Verify nothing else in `main.tsx` shadows or short-circuits the registration.</step>
+    <step order="5">Run `npm run build` on `src/solutions/SpaarkeAi/` and confirm no type or build errors.</step>
+    <step order="6">Update TASK-INDEX.md: change task 002 status from 🔲 to ✅.</step>
+    <step order="7">If any deviation from spec FR-02, document in projects/spaarke-daily-update-service-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript / Vite project.</tool>
+    <tool name="terminal">Run shell commands.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/main.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a user with N&gt;0 unread `appnotification` rows, when the SpaarkeAi workspace pane cold-loads, then Daily Briefing renders TL;DR + channel bullets matching the data (no empty state).</criterion>
+    <criterion testable="true">SpaarkeAi `npm run build` succeeds with no new errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Manual smoke verification happens in task 003 (spaarkedev1). This task is code-only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

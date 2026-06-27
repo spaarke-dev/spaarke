@@ -7,9 +7,165 @@
  * @see spec.md for navigation requirements
  */
 
-import { SearchResult, SearchFilters, SearchScope } from '../types';
+import { SearchResult, SearchFilters, SearchScope, SearchMode } from '../types';
 import { resolveTenantIdSync } from '@spaarke/auth';
 import { getEffectiveDarkMode } from './ThemeService';
+
+/**
+ * Envelope literal type for `searchMode`. MUST stay aligned with the
+ * code-page parser's `EnvelopeSearchMode` (see
+ * `src/client/code-pages/SemanticSearch/src/utils/parseUrlParams.ts`).
+ * Identical to PCF's `SearchMode` today; kept as a distinct alias so the
+ * envelope contract is self-documenting and decoupled from API-level types.
+ */
+export type EnvelopeSearchMode = 'hybrid' | 'vectorOnly' | 'keywordOnly';
+
+/**
+ * Shape of the PCF filter state consumed by `buildSemanticSearchEnvelope`.
+ *
+ * Narrower than `SearchFilters` because the envelope only carries the keys
+ * the code-page parser understands (FR-PARITY-01). `tags` is included as
+ * an optional input because the code-page parser supports it (see
+ * `parseUrlParams.ts`) even though the PCF doesn't yet manage a tags
+ * filter — when the PCF adds tag filtering, the envelope already handles
+ * it without further changes.
+ */
+export interface ISemanticSearchEnvelopeFilters {
+  /** Current search query. Empty / undefined → omitted. */
+  query?: string;
+  /** Search scope. `"all"` → omitted (parity with code-page default). */
+  scope?: SearchScope;
+  /** Scope entity ID. Empty / undefined → omitted. Curly braces stripped. */
+  entityId?: string | null;
+  /** Minimum relevance threshold (0-100). `0` (no-floor default) → omitted. */
+  threshold?: number;
+  /** Search mode literal. `"hybrid"` (default) → omitted. */
+  searchMode?: SearchMode | EnvelopeSearchMode;
+  /** File-type filter (extensions). Empty array → omitted. */
+  fileTypes?: string[];
+  /** ISO date string lower bound. Empty / undefined → omitted. */
+  dateFrom?: string | null;
+  /** ISO date string upper bound. Empty / undefined → omitted. */
+  dateTo?: string | null;
+  /** Tag filter. Empty array → omitted. */
+  tags?: string[];
+  /** "Associated only" toggle. `false` (default) → omitted. */
+  associatedOnly?: boolean;
+}
+
+/**
+ * Build the URL-encoded data envelope passed to
+ * `Xrm.Navigation.navigateTo({ pageType: "webresource", data: ... })` when
+ * launching the SemanticSearch Code Page from the PCF.
+ *
+ * Contract: FR-PCF-03 + FR-PARITY-01
+ * (`projects/spaarke-multi-container-multi-index-r1/spec.md`).
+ *
+ * Encoding rules:
+ * - `key=value` pairs joined by `&` (the parser at
+ *   `src/client/code-pages/SemanticSearch/src/utils/parseUrlParams.ts`
+ *   feeds the result through `new URLSearchParams(...)` once unwrapped
+ *   from the outer `?data=` envelope).
+ * - Each VALUE is `encodeURIComponent`-encoded so special chars
+ *   (spaces, `&`, `=`, `+`, ...) survive the round-trip.
+ * - DEFAULT / EMPTY values are OMITTED to keep the envelope short
+ *   (Dataverse `navigateTo({data})` has a finite URL budget).
+ *
+ * Default / omit rules (mirrors the code-page parser's "absent" branch):
+ * - `query`: empty / whitespace → omit
+ * - `scope`: `"all"` or empty → omit
+ * - `entityId`: empty → omit; braces stripped (`{abc}` → `abc`)
+ * - `threshold`: `0` (no-floor default) → omit
+ * - `searchMode`: `"hybrid"` (default) → omit
+ * - `fileTypes`: empty array → omit; otherwise CSV
+ * - `dateFrom` / `dateTo`: empty / undefined → omit
+ * - `tags`: empty array → omit; otherwise CSV
+ * - `associatedOnly`: `false` → omit; `true` → encoded as `"true"`
+ * - `theme`: empty / undefined → omit
+ * - `searchIndexName`: empty / whitespace → omit
+ *
+ * The function is exported so unit tests can verify the envelope shape
+ * without going through `Xrm.Navigation`.
+ */
+export function buildSemanticSearchEnvelope(
+  filters: ISemanticSearchEnvelopeFilters | undefined,
+  theme: string | undefined,
+  searchIndexName: string | undefined
+): string {
+  const params: string[] = [];
+
+  const push = (key: string, value: string): void => {
+    params.push(`${key}=${encodeURIComponent(value)}`);
+  };
+
+  const f = filters ?? {};
+
+  // query — omit when empty / whitespace
+  if (typeof f.query === 'string' && f.query.trim().length > 0) {
+    push('query', f.query);
+  }
+
+  // scope — omit when "all" or empty (parser default)
+  if (typeof f.scope === 'string' && f.scope.length > 0 && f.scope !== 'all') {
+    push('scope', f.scope);
+  }
+
+  // entityId — strip braces, omit when empty
+  if (typeof f.entityId === 'string' && f.entityId.length > 0) {
+    const stripped = f.entityId.replace(/[{}]/g, '');
+    if (stripped.length > 0) {
+      push('entityId', stripped);
+    }
+  }
+
+  // threshold — omit at default (0 = no floor); guard against non-finite
+  if (typeof f.threshold === 'number' && Number.isFinite(f.threshold) && f.threshold !== 0) {
+    push('threshold', String(f.threshold));
+  }
+
+  // searchMode — omit at default ('hybrid')
+  if (typeof f.searchMode === 'string' && f.searchMode.length > 0 && f.searchMode !== 'hybrid') {
+    push('searchMode', f.searchMode);
+  }
+
+  // fileTypes — omit empty array; CSV-encode otherwise
+  if (Array.isArray(f.fileTypes) && f.fileTypes.length > 0) {
+    push('fileTypes', f.fileTypes.join(','));
+  }
+
+  // dateFrom — omit empty/undefined
+  if (typeof f.dateFrom === 'string' && f.dateFrom.length > 0) {
+    push('dateFrom', f.dateFrom);
+  }
+
+  // dateTo — omit empty/undefined
+  if (typeof f.dateTo === 'string' && f.dateTo.length > 0) {
+    push('dateTo', f.dateTo);
+  }
+
+  // tags — omit empty array; CSV-encode otherwise
+  if (Array.isArray(f.tags) && f.tags.length > 0) {
+    push('tags', f.tags.join(','));
+  }
+
+  // associatedOnly — omit false (default); encode true as "true"
+  if (f.associatedOnly === true) {
+    push('associatedOnly', 'true');
+  }
+
+  // theme — omit empty/undefined (no default value to compare against;
+  // a missing theme means "inherit from host")
+  if (typeof theme === 'string' && theme.trim().length > 0) {
+    push('theme', theme);
+  }
+
+  // searchIndexName — omit empty/whitespace (FR-PCF-03)
+  if (typeof searchIndexName === 'string' && searchIndexName.trim().length > 0) {
+    push('searchIndexName', searchIndexName.trim());
+  }
+
+  return params.join('&');
+}
 
 /**
  * Navigation target modes
@@ -267,6 +423,85 @@ export class NavigationService {
       const err = error as { errorCode?: number };
       if (err?.errorCode !== 2) {
         console.error('NavigationService.openAddDocument: Navigation failed', error);
+      }
+    }
+  }
+
+  /**
+   * Open the SemanticSearch Code Page web resource (`sprk_semanticsearch`)
+   * in a modal dialog, prefilled with the caller's current query, scope,
+   * and (optionally) filter state + search-index binding. The code page's
+   * `parseUrlParams` reads the full envelope from the Dataverse `data`
+   * field and seeds its initial state, so the dialog renders showing the
+   * same result set the PCF was showing (FR-PARITY-01).
+   *
+   * Envelope contract (FR-PCF-03 + FR-PARITY-01): every set parameter
+   * round-trips via `buildSemanticSearchEnvelope`; empty/default values
+   * are omitted to keep the URL short. See `buildSemanticSearchEnvelope`
+   * for per-key default rules.
+   *
+   * @param query - Current search query (empty string is allowed)
+   * @param scope - Current PCF search scope (passed through to code page)
+   * @param scopeId - Current scope entity ID (passed as `entityId`)
+   * @param isDarkMode - PCF's resolved theme (passed as `theme`)
+   * @param options - Optional modal sizing options (default 80% x 80%)
+   * @param filters - Optional current PCF filter state. When supplied,
+   *   non-default keys (threshold, searchMode, fileTypes, dateRange,
+   *   tags, associatedOnly) are encoded into the envelope.
+   * @param searchIndexName - Optional bound Azure AI Search index name
+   *   (FR-PCF-03 / FR-PCF-01). When non-empty, encoded as
+   *   `searchIndexName=...` so the code page routes to the same index.
+   */
+  async openSemanticSearchPage(
+    query: string,
+    scope: SearchScope,
+    scopeId: string | null,
+    isDarkMode: boolean = false,
+    options: ModalOptions = DEFAULT_MODAL_OPTIONS,
+    filters?: Omit<ISemanticSearchEnvelopeFilters, 'query' | 'scope' | 'entityId'>,
+    searchIndexName?: string
+  ): Promise<void> {
+    const theme = isDarkMode ? 'dark' : 'light';
+    const dataString = buildSemanticSearchEnvelope(
+      {
+        query,
+        scope,
+        entityId: scopeId,
+        ...(filters ?? {}),
+      },
+      theme,
+      searchIndexName
+    );
+
+    const xrm = this.getXrm();
+    if (!xrm?.Navigation?.navigateTo) {
+      console.warn(
+        'NavigationService.openSemanticSearchPage: Xrm.Navigation not available — falling back to window.open'
+      );
+      const clientUrl = this.getClientUrl();
+      const url = `${clientUrl}/WebResources/sprk_semanticsearch?data=${encodeURIComponent(dataString)}`;
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    try {
+      await xrm.Navigation.navigateTo(
+        {
+          pageType: 'webresource' as Xrm.Navigation.PageInputHtmlWebResource['pageType'],
+          webresourceName: 'sprk_semanticsearch',
+          data: encodeURIComponent(dataString),
+        } as Xrm.Navigation.PageInputHtmlWebResource,
+        {
+          target: 2,
+          width: { value: options.width, unit: options.unit },
+          height: { value: options.height, unit: options.unit },
+        }
+      );
+    } catch (error) {
+      // errorCode 2 = user cancelled — not an error
+      const err = error as { errorCode?: number };
+      if (err?.errorCode !== 2) {
+        console.error('NavigationService.openSemanticSearchPage: Navigation failed', error);
       }
     }
   }

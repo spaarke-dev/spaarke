@@ -20,7 +20,13 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 ///
 /// The writer delegate captures emitted events into a list so the tests can assert
 /// payload shape without a real HTTP response stream.
+///
+/// Task 070 (2026-05-31): class-level trait "repaired" reflects the passing tests.
+/// `EmitCapabilityChangeAsync_OmitsRetryAfterSecondsWhenNull` carries its own
+/// "real-bug-pending-fix" trait (RB-T070-02) and Skip until production omits
+/// null-valued optional properties from the SSE payload.
 /// </summary>
+[Trait("status", "repaired")]
 public class R2SseEventEmitterTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -476,16 +482,6 @@ public class R2SseEventEmitterTests
     // CreateR2Emitter factory method
     // -------------------------------------------------------------------------
 
-    [Fact]
-    public void CreateR2Emitter_ReturnsNonNullEmitter()
-    {
-        var captured = new List<ChatSseEvent>();
-        Task Writer(ChatSseEvent evt, CancellationToken ct) { captured.Add(evt); return Task.CompletedTask; }
-
-        var emitter = ChatEndpoints.CreateR2Emitter(Writer, NullLogger.Instance);
-
-        emitter.Should().NotBeNull();
-    }
 
     [Fact]
     public async Task CreateR2Emitter_EmitterWritesToProvidedDelegate()

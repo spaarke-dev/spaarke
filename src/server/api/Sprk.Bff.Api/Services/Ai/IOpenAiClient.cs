@@ -148,10 +148,53 @@ public interface IOpenAiClient
     /// <param name="schemaName">A name identifying the schema (e.g., "prompt_response").</param>
     /// <param name="model">Optional model override. Defaults to configured SummarizeModel.</param>
     /// <param name="maxOutputTokens">Optional per-call MaxOutputTokens override. Defaults to configured value.</param>
+    /// <param name="temperature">
+    /// Optional per-call temperature override (0.0–2.0). When null, defaults to <c>0.0f</c>
+    /// for deterministic structured output — matching the sibling
+    /// <c>GetStructuredCompletionAsync&lt;T&gt;</c> and <c>StreamStructuredCompletionAsync</c>
+    /// hardcoded Temperature=0 behavior. Wave B-G9c1 (B6) fix; previously this method used
+    /// the global <c>_options.Temperature</c> (default 0.3) which produced non-deterministic
+    /// structured tool handler output. Callers needing creative variation (rare for structured
+    /// schemas) pass an explicit non-zero value sourced from the per-action
+    /// <c>sprk_analysisaction.sprk_temperature</c> column.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The raw JSON string response conforming to the schema.</returns>
     Task<string> GetStructuredCompletionRawAsync(
         string prompt,
+        BinaryData jsonSchema,
+        string schemaName,
+        string? model = null,
+        int? maxOutputTokens = null,
+        float? temperature = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stream a structured completion (json_schema strict mode + streaming). Yields raw content-token
+    /// strings as Azure OpenAI emits them; the caller accumulates and feeds tokens to
+    /// <see cref="Streaming.IncrementalJsonParser"/> for FieldDelta extraction.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added to the interface in R5 task 012 (D2-03 <c>SessionSummarizeOrchestrator</c>) so that
+    /// the orchestrator can be unit-tested against a mocked <see cref="IOpenAiClient"/> while still
+    /// honoring ADR-010 (concrete-by-default consumer; interface kept only because OpenAiClient
+    /// was already an interface for the same testability reason). Live implementation lives on
+    /// <see cref="OpenAiClient.StreamStructuredCompletionAsync"/>.
+    /// </para>
+    /// <para>
+    /// Per the R5 task 006 spike, Azure OpenAI streams JSON in property-declaration order with
+    /// ~3-8 char per-token granularity; first content event arrives within NFR-01's TTFB ceiling.
+    /// </para>
+    /// </remarks>
+    /// <param name="messages">Conversation messages (system + user prompts).</param>
+    /// <param name="jsonSchema">JSON schema the response must conform to (strict mode enforced).</param>
+    /// <param name="schemaName">Schema name identifier (e.g., <c>DocumentSummary</c>).</param>
+    /// <param name="model">Optional model override; defaults to configured SummarizeModel.</param>
+    /// <param name="maxOutputTokens">Optional max-output-tokens override.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    IAsyncEnumerable<string> StreamStructuredCompletionAsync(
+        IEnumerable<ChatMessage> messages,
         BinaryData jsonSchema,
         string schemaName,
         string? model = null,

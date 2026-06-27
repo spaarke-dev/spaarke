@@ -16,7 +16,7 @@
  * ADR-022: React 18 component (bundled, not platform-provided).
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -37,14 +37,10 @@ import {
   Select,
   MessageBar,
   MessageBarBody,
-} from "@fluentui/react-components";
-import {
-  CalendarRegular,
-  AddRegular,
-  CalendarEmptyRegular,
-} from "@fluentui/react-icons";
-import { getEvents, createEvent, ODataEvent, CreateEventPayload } from "../api/web-api-client";
-import { AccessLevel, ApiError } from "../types";
+} from '@fluentui/react-components';
+import { CalendarRegular, AddRegular, CalendarEmptyRegular } from '@fluentui/react-icons';
+import { getEvents, createEvent, ODataEvent, CreateEventPayload } from '../api/web-api-client';
+import { AccessLevel, ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -52,81 +48,81 @@ import { AccessLevel, ApiError } from "../types";
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   toolbar: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingBottom: tokens.spacingVerticalS,
   },
   toolbarTitle: {
     color: tokens.colorNeutralForeground1,
   },
   loadingContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "180px",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '180px',
     gap: tokens.spacingHorizontalM,
   },
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "180px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '180px',
     gap: tokens.spacingVerticalM,
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
     padding: tokens.spacingHorizontalXL,
-    borderWidth: "1px",
-    borderStyle: "dashed",
+    borderWidth: '1px',
+    borderStyle: 'dashed',
     borderColor: tokens.colorNeutralStroke2,
   },
   emptyStateIcon: {
-    fontSize: "40px",
+    fontSize: '40px',
     color: tokens.colorNeutralForeground4,
   },
   emptyStateText: {
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
   },
   eventList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "0",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0',
   },
   eventRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "flex-start",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
   },
   eventDateCol: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    minWidth: "60px",
-    paddingTop: "2px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    minWidth: '60px',
+    paddingTop: '2px',
   },
   eventDateMonth: {
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase100,
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
     fontWeight: tokens.fontWeightSemibold,
   },
   eventDateDay: {
     color: tokens.colorNeutralForeground1,
     fontSize: tokens.fontSizeBase500,
     fontWeight: tokens.fontWeightSemibold,
-    lineHeight: "1",
+    lineHeight: '1',
   },
   eventDateYear: {
     color: tokens.colorNeutralForeground3,
@@ -135,21 +131,21 @@ const useStyles = makeStyles({
   eventDateNoDate: {
     color: tokens.colorNeutralForeground4,
     fontSize: tokens.fontSizeBase100,
-    fontStyle: "italic",
-    textAlign: "center",
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
   eventContent: {
-    flex: "1",
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
+    flex: '1',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
   },
   eventTitleRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
   },
   eventTitle: {
     color: tokens.colorNeutralForeground1,
@@ -160,16 +156,16 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
   divider: {
-    marginTop: "0",
-    marginBottom: "0",
+    marginTop: '0',
+    marginBottom: '0',
   },
   errorBar: {
     marginBottom: tokens.spacingVerticalS,
   },
   // Dialog form layout
   dialogForm: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     paddingTop: tokens.spacingVerticalS,
   },
@@ -186,15 +182,15 @@ const useStyles = makeStyles({
 function getEventStatusLabel(status: number | null | undefined): string {
   switch (status) {
     case 1:
-      return "Open";
+      return 'Open';
     case 2:
-      return "In Progress";
+      return 'In Progress';
     case 3:
-      return "Completed";
+      return 'Completed';
     case 4:
-      return "Cancelled";
+      return 'Cancelled';
     default:
-      return "Open";
+      return 'Open';
   }
 }
 
@@ -204,18 +200,18 @@ function getEventStatusLabel(status: number | null | undefined): string {
  */
 function getEventStatusColor(
   status: number | null | undefined
-): "brand" | "success" | "warning" | "danger" | "informative" | undefined {
+): 'brand' | 'success' | 'warning' | 'danger' | 'informative' | undefined {
   switch (status) {
     case 1:
-      return "brand";
+      return 'brand';
     case 2:
-      return "warning";
+      return 'warning';
     case 3:
-      return "success";
+      return 'success';
     case 4:
-      return "danger";
+      return 'danger';
     default:
-      return "brand";
+      return 'brand';
   }
 }
 
@@ -236,10 +232,10 @@ function parseDateParts(iso: string | null | undefined): ParsedDate | null {
   if (isNaN(d.getTime())) return null;
 
   return {
-    month: d.toLocaleDateString("en-US", { month: "short" }),
+    month: d.toLocaleDateString('en-US', { month: 'short' }),
     day: String(d.getDate()),
     year: String(d.getFullYear()),
-    full: d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
+    full: d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
   };
 }
 
@@ -296,27 +292,19 @@ const EventRow: React.FC<EventRowProps> = ({ event, isLast }) => {
             <Text className={styles.eventTitle}>{event.sprk_name}</Text>
 
             {/* Status badge */}
-            <Badge
-              appearance="tint"
-              color={getEventStatusColor(event.sprk_status)}
-              size="small"
-            >
+            <Badge appearance="tint" color={getEventStatusColor(event.sprk_status)} size="small">
               {getEventStatusLabel(event.sprk_status)}
             </Badge>
-
-            {/* To-Do flag badge */}
-            {event.sprk_todoflag && (
-              <Badge appearance="tint" color="warning" size="small">
-                To-Do
-              </Badge>
-            )}
+            {/*
+             * To-Do badge removed (R3 task 008): events no longer carry a
+             * to-do boolean toggle. To-dos are first-class `sprk_todo` records
+             * surfaced by the SmartTodo component / `getProjectTodos` route.
+             */}
           </div>
 
           {/* Created on meta */}
           {event.createdon && (
-            <Text className={styles.eventMeta}>
-              Added {parseDateParts(event.createdon)?.full ?? ""}
-            </Text>
+            <Text className={styles.eventMeta}>Added {parseDateParts(event.createdon)?.full ?? ''}</Text>
           )}
         </div>
       </div>
@@ -337,34 +325,29 @@ interface CreateEventDialogProps {
   onCreated: (event: ODataEvent) => void;
 }
 
-const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
-  projectId,
-  open,
-  onClose,
-  onCreated,
-}) => {
+const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, onClose, onCreated }) => {
   const styles = useStyles();
 
-  const [title, setTitle] = React.useState<string>("");
-  const [dueDate, setDueDate] = React.useState<string>("");
-  const [description, setDescription] = React.useState<string>("");
-  const [eventType, setEventType] = React.useState<string>("meeting");
+  const [title, setTitle] = React.useState<string>('');
+  const [dueDate, setDueDate] = React.useState<string>('');
+  const [description, setDescription] = React.useState<string>('');
+  const [eventType, setEventType] = React.useState<string>('meeting');
   const [submitting, setSubmitting] = React.useState<boolean>(false);
   const [submitError, setSubmitError] = React.useState<string | null>(null);
 
   // Validation state
-  const [titleError, setTitleError] = React.useState<string>("");
+  const [titleError, setTitleError] = React.useState<string>('');
 
   // Reset form when dialog opens
   React.useEffect(() => {
     if (open) {
-      setTitle("");
-      setDueDate("");
-      setDescription("");
-      setEventType("meeting");
+      setTitle('');
+      setDueDate('');
+      setDescription('');
+      setEventType('meeting');
       setSubmitting(false);
       setSubmitError(null);
-      setTitleError("");
+      setTitleError('');
     }
   }, [open]);
 
@@ -372,10 +355,10 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
     let valid = true;
 
     if (!title.trim()) {
-      setTitleError("Event title is required.");
+      setTitleError('Event title is required.');
       valid = false;
     } else {
-      setTitleError("");
+      setTitleError('');
     }
 
     return valid;
@@ -392,8 +375,8 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
         sprk_name: title.trim(),
         ...(dueDate ? { sprk_duedate: new Date(dueDate).toISOString() } : {}),
         sprk_status: 1, // Open
-        sprk_todoflag: false,
-        "sprk_projectid@odata.bind": `sprk_projects(${projectId})`,
+        // Note: the event-as-todo toggle was removed in R3 task 007 — events are not to-dos.
+        'sprk_projectid@odata.bind': `sprk_projects(${projectId})`,
       };
 
       const created = await createEvent(projectId, payload);
@@ -403,7 +386,7 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
       if (err instanceof ApiError) {
         setSubmitError(`Failed to create event: ${err.message}`);
       } else {
-        setSubmitError("An unexpected error occurred. Please try again.");
+        setSubmitError('An unexpected error occurred. Please try again.');
       }
     } finally {
       setSubmitting(false);
@@ -430,7 +413,7 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
                 label="Title"
                 required
                 validationMessage={titleError || undefined}
-                validationState={titleError ? "error" : "none"}
+                validationState={titleError ? 'error' : 'none'}
               >
                 <Input
                   value={title}
@@ -443,11 +426,7 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
 
               {/* Event type */}
               <Field label="Type">
-                <Select
-                  value={eventType}
-                  onChange={(_ev, data) => setEventType(data.value)}
-                  disabled={submitting}
-                >
+                <Select value={eventType} onChange={(_ev, data) => setEventType(data.value)} disabled={submitting}>
                   <option value="meeting">Meeting</option>
                   <option value="deadline">Deadline</option>
                   <option value="milestone">Milestone</option>
@@ -483,11 +462,7 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
           </DialogContent>
 
           <DialogActions>
-            <Button
-              appearance="secondary"
-              onClick={onClose}
-              disabled={submitting}
-            >
+            <Button appearance="secondary" onClick={onClose} disabled={submitting}>
               Cancel
             </Button>
             <Button
@@ -496,7 +471,7 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({
               disabled={submitting || !title.trim()}
               icon={submitting ? <Spinner size="tiny" /> : undefined}
             >
-              {submitting ? "Creating..." : "Create Event"}
+              {submitting ? 'Creating...' : 'Create Event'}
             </Button>
           </DialogActions>
         </DialogBody>
@@ -528,10 +503,7 @@ export interface EventsCalendarProps {
  * Loading and empty states follow the SectionCard + PageContainer pattern
  * established by other SPA components.
  */
-export const EventsCalendar: React.FC<EventsCalendarProps> = ({
-  projectId,
-  accessLevel,
-}) => {
+export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, accessLevel }) => {
   const styles = useStyles();
 
   // -------------------------------------------------------------------------
@@ -547,8 +519,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   // Access level check
   // -------------------------------------------------------------------------
 
-  const canCreate =
-    accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess;
+  const canCreate = accessLevel === AccessLevel.Collaborate || accessLevel === AccessLevel.FullAccess;
 
   // -------------------------------------------------------------------------
   // Data fetching
@@ -566,7 +537,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
       try {
         const data = await getEvents(projectId, {
           // Upcoming: order by due date ascending, exclude completed and cancelled
-          $orderby: "sprk_duedate asc",
+          $orderby: 'sprk_duedate asc',
           $top: 50,
         });
 
@@ -578,7 +549,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
           if (err instanceof ApiError) {
             setLoadError(`Failed to load events: ${err.message}`);
           } else {
-            setLoadError("An unexpected error occurred loading events.");
+            setLoadError('An unexpected error occurred loading events.');
           }
         }
       } finally {
@@ -600,7 +571,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
   // -------------------------------------------------------------------------
 
   const handleEventCreated = (newEvent: ODataEvent) => {
-    setEvents((prev) => {
+    setEvents(prev => {
       // Insert new event and re-sort by due date ascending
       const updated = [...prev, newEvent];
       updated.sort((a, b) => {
@@ -652,12 +623,7 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
         </Text>
 
         {canCreate && (
-          <Button
-            appearance="primary"
-            icon={<AddRegular />}
-            onClick={() => setDialogOpen(true)}
-            size="small"
-          >
+          <Button appearance="primary" icon={<AddRegular />} onClick={() => setDialogOpen(true)} size="small">
             Create Event
           </Button>
         )}
@@ -672,18 +638,14 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({
           </Text>
           <Text size={300} className={styles.emptyStateText}>
             {canCreate
-              ? "No events have been added to this project. Use the Create Event button to add the first event."
-              : "No events have been added to this project yet."}
+              ? 'No events have been added to this project. Use the Create Event button to add the first event.'
+              : 'No events have been added to this project yet.'}
           </Text>
         </div>
       ) : (
         <div className={styles.eventList}>
           {events.map((event, index) => (
-            <EventRow
-              key={event.sprk_eventid}
-              event={event}
-              isLast={index === events.length - 1}
-            />
+            <EventRow key={event.sprk_eventid} event={event} isLast={index === events.length - 1} />
           ))}
         </div>
       )}

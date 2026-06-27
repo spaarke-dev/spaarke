@@ -157,6 +157,10 @@ jest.mock('../widgets/context/FindingsWidget', () => ({
   __esModule: true,
   default: createMockWidget('FindingsWidget'),
 }));
+jest.mock('../widgets/context/PinnedMemoryListWidget', () => ({
+  __esModule: true,
+  default: createMockWidget('PinnedMemoryListWidget'),
+}));
 
 // ---------------------------------------------------------------------------
 // Setup / teardown
@@ -262,6 +266,15 @@ const EXPECTED_CONTEXT_WIDGETS = [
   'playbook-gallery',
   'entity-info',
   'findings',
+  // R6 task 062 / D-C-15: ExecutionTraceWidget — Claude-Code-like activity
+  // timeline. Subscribes to the six `context.*` trace event types added by
+  // R6 task 059 (D-C-12). Per ADR-015 BINDING: renders only typed enumerated
+  // fields (tool name + decision + timestamp + numeric metrics).
+  'execution-trace',
+  // R6 task 070 / D-C-24 + D-C-25: PinnedMemoryListWidget — Q7 scope expansion
+  // (Pillar 7). Visualises + manages cross-session pinned memory items. Loads
+  // via GET /api/memory/pins and supports create / edit / delete.
+  'pinned-memory-list',
 ] as const;
 
 // ===========================================================================
@@ -278,12 +291,9 @@ describe('Workspace widget serialize/restore — registration', () => {
     expect(types).toHaveLength(EXPECTED_WORKSPACE_WIDGETS.length);
   });
 
-  it.each(EXPECTED_WORKSPACE_WIDGETS)(
-    '$type is registered in WorkspaceWidgetRegistry',
-    ({ type }) => {
-      expect(hasWorkspaceWidget(type)).toBe(true);
-    }
-  );
+  it.each(EXPECTED_WORKSPACE_WIDGETS)('$type is registered in WorkspaceWidgetRegistry', ({ type }) => {
+    expect(hasWorkspaceWidget(type)).toBe(true);
+  });
 });
 
 describe('Workspace widget serialize/restore — metadata', () => {
@@ -291,33 +301,24 @@ describe('Workspace widget serialize/restore — metadata', () => {
     loadWorkspaceRegistrations();
   });
 
-  it.each(EXPECTED_WORKSPACE_WIDGETS)(
-    '$type has correct displayName "$displayName"',
-    ({ type, displayName }) => {
-      const meta = getWorkspaceWidgetMetadata(type);
-      expect(meta).toBeDefined();
-      expect(meta!.displayName).toBe(displayName);
-    }
-  );
+  it.each(EXPECTED_WORKSPACE_WIDGETS)('$type has correct displayName "$displayName"', ({ type, displayName }) => {
+    const meta = getWorkspaceWidgetMetadata(type);
+    expect(meta).toBeDefined();
+    expect(meta!.displayName).toBe(displayName);
+  });
 
-  it.each(EXPECTED_WORKSPACE_WIDGETS)(
-    '$type has correct category "$category"',
-    ({ type, category }) => {
-      const meta = getWorkspaceWidgetMetadata(type);
-      expect(meta).toBeDefined();
-      expect(meta!.category).toBe(category);
-    }
-  );
+  it.each(EXPECTED_WORKSPACE_WIDGETS)('$type has correct category "$category"', ({ type, category }) => {
+    const meta = getWorkspaceWidgetMetadata(type);
+    expect(meta).toBeDefined();
+    expect(meta!.category).toBe(category);
+  });
 
-  it.each(EXPECTED_WORKSPACE_WIDGETS)(
-    '$type metadata includes displayName (non-empty string)',
-    ({ type }) => {
-      const meta = getWorkspaceWidgetMetadata(type);
-      expect(meta).toBeDefined();
-      expect(typeof meta!.displayName).toBe('string');
-      expect(meta!.displayName.length).toBeGreaterThan(0);
-    }
-  );
+  it.each(EXPECTED_WORKSPACE_WIDGETS)('$type metadata includes displayName (non-empty string)', ({ type }) => {
+    const meta = getWorkspaceWidgetMetadata(type);
+    expect(meta).toBeDefined();
+    expect(typeof meta!.displayName).toBe('string');
+    expect(meta!.displayName.length).toBeGreaterThan(0);
+  });
 });
 
 describe('Workspace widget serialize/restore — factory resolution', () => {
@@ -325,23 +326,17 @@ describe('Workspace widget serialize/restore — factory resolution', () => {
     loadWorkspaceRegistrations();
   });
 
-  it.each(EXPECTED_WORKSPACE_WIDGETS)(
-    '$type resolves to a non-null, non-undefined component',
-    async ({ type }) => {
-      const resolved = await resolveWorkspaceWidget(type);
-      expect(resolved).not.toBeNull();
-      expect(resolved).not.toBeUndefined();
-    }
-  );
+  it.each(EXPECTED_WORKSPACE_WIDGETS)('$type resolves to a non-null, non-undefined component', async ({ type }) => {
+    const resolved = await resolveWorkspaceWidget(type);
+    expect(resolved).not.toBeNull();
+    expect(resolved).not.toBeUndefined();
+  });
 
-  it.each(EXPECTED_WORKSPACE_WIDGETS)(
-    '$type resolves to a valid React component type',
-    async ({ type }) => {
-      const resolved = await resolveWorkspaceWidget(type);
-      // React components are either functions or classes
-      expect(typeof resolved).toBe('function');
-    }
-  );
+  it.each(EXPECTED_WORKSPACE_WIDGETS)('$type resolves to a valid React component type', async ({ type }) => {
+    const resolved = await resolveWorkspaceWidget(type);
+    // React components are either functions or classes
+    expect(typeof resolved).toBe('function');
+  });
 
   it('unknown workspace type falls back to GenericTextWidget', async () => {
     const resolved = await resolveWorkspaceWidget('__nonexistent_widget__');
@@ -358,17 +353,14 @@ describe('Context widget serialize/restore — registration', () => {
     loadContextRegistrations();
   });
 
-  it('registers all 10 context widget types', () => {
+  it('registers all 12 context widget types', () => {
     const types = getAllContextWidgetTypes();
     expect(types).toHaveLength(EXPECTED_CONTEXT_WIDGETS.length);
   });
 
-  it.each(EXPECTED_CONTEXT_WIDGETS)(
-    '%s is registered in ContextWidgetRegistry',
-    (type) => {
-      expect(hasContextWidget(type)).toBe(true);
-    }
-  );
+  it.each(EXPECTED_CONTEXT_WIDGETS)('%s is registered in ContextWidgetRegistry', type => {
+    expect(hasContextWidget(type)).toBe(true);
+  });
 });
 
 describe('Context widget serialize/restore — factory resolution', () => {
@@ -376,22 +368,16 @@ describe('Context widget serialize/restore — factory resolution', () => {
     loadContextRegistrations();
   });
 
-  it.each(EXPECTED_CONTEXT_WIDGETS)(
-    '%s resolves to a non-null component',
-    async (type) => {
-      const component = await resolveContextWidget(type);
-      expect(component).not.toBeNull();
-    }
-  );
+  it.each(EXPECTED_CONTEXT_WIDGETS)('%s resolves to a non-null component', async type => {
+    const component = await resolveContextWidget(type);
+    expect(component).not.toBeNull();
+  });
 
-  it.each(EXPECTED_CONTEXT_WIDGETS)(
-    '%s resolves to a valid React component type',
-    async (type) => {
-      const component = await resolveContextWidget(type);
-      expect(component).not.toBeUndefined();
-      expect(typeof component).toBe('function');
-    }
-  );
+  it.each(EXPECTED_CONTEXT_WIDGETS)('%s resolves to a valid React component type', async type => {
+    const component = await resolveContextWidget(type);
+    expect(component).not.toBeUndefined();
+    expect(typeof component).toBe('function');
+  });
 
   it('unknown context type returns null (not a fallback)', async () => {
     const result = await resolveContextWidget('__nonexistent_context_widget__');
@@ -418,9 +404,9 @@ describe('Widget registries — cross-registry consistency', () => {
     }
   });
 
-  it('total registered widgets across both registries is 21', () => {
-    const total =
-      getAllWorkspaceWidgetTypes().length + getAllContextWidgetTypes().length;
-    expect(total).toBe(21);
+  it('total registered widgets across both registries is 23', () => {
+    // 11 workspace + 12 context (added pinned-memory-list in R6 task 070).
+    const total = getAllWorkspaceWidgetTypes().length + getAllContextWidgetTypes().length;
+    expect(total).toBe(23);
   });
 });

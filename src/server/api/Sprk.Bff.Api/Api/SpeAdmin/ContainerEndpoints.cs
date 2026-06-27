@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
 
@@ -179,11 +178,9 @@ public static class ContainerEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // Use paginated list — supports $top and $skipToken for cursor-based pagination.
-            var page = await graphService.ListContainersPageAsync(
-                graphClient, config.ContainerTypeId, top, skipToken, ct);
+            var page = await graphService.ListContainersPageForConfigAsync(
+                config, config.ContainerTypeId, top, skipToken, ct);
 
             var result = new ContainerListResponse(
                 page.Items.Select(ContainerDto.FromSummary).ToList(),
@@ -208,17 +205,17 @@ public static class ContainerEndpoints
                 statusCode: StatusCodes.Status400BadRequest,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
             logger.LogError(
-                odataError, "ListContainers: Graph API error for configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
+                ex, "ListContainers: Graph API error for configId {ConfigId}, Status={Status}, TraceId={TraceId}",
+                configGuid, ex.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 title: "Graph API Error",
-                detail: odataError.Error?.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: odataError.ResponseStatusCode is >= 400 and < 600
-                    ? odataError.ResponseStatusCode
+                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
+                statusCode: ex.StatusCode is >= 400 and < 600
+                    ? ex.StatusCode.Value
                     : StatusCodes.Status502BadGateway,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
@@ -282,10 +279,9 @@ public static class ContainerEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // Retrieve single container directly from Graph (more efficient than listing all).
-            var container = await graphService.GetContainerAsync(graphClient, containerId, ct);
+            var container = await graphService.GetContainerForConfigAsync(
+                config, containerId, ct);
 
             if (container is null)
             {
@@ -318,7 +314,7 @@ public static class ContainerEndpoints
                 statusCode: StatusCodes.Status400BadRequest,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError) when (odataError.ResponseStatusCode == StatusCodes.Status404NotFound)
+        catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status404NotFound)
         {
             logger.LogInformation(
                 "GetContainer: Graph returned 404 for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -330,18 +326,18 @@ public static class ContainerEndpoints
                 statusCode: StatusCodes.Status404NotFound,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
             logger.LogError(
-                odataError,
+                ex,
                 "GetContainer: Graph API error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
+                containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 title: "Graph API Error",
-                detail: odataError.Error?.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: odataError.ResponseStatusCode is >= 400 and < 600
-                    ? odataError.ResponseStatusCode
+                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
+                statusCode: ex.StatusCode is >= 400 and < 600
+                    ? ex.StatusCode.Value
                     : StatusCodes.Status502BadGateway,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
@@ -429,11 +425,9 @@ public static class ContainerEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // Create the container in SharePoint Embedded via Graph API.
-            var created = await graphService.CreateContainerAsync(
-                graphClient,
+            var created = await graphService.CreateContainerForConfigAsync(
+                config,
                 config.ContainerTypeId,
                 request.DisplayName,
                 request.Description,
@@ -467,18 +461,18 @@ public static class ContainerEndpoints
                 statusCode: StatusCodes.Status400BadRequest,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
             logger.LogError(
-                odataError,
+                ex,
                 "CreateContainer: Graph API error for configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
+                configGuid, ex.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 title: "Graph API Error",
-                detail: odataError.Error?.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: odataError.ResponseStatusCode is >= 400 and < 600
-                    ? odataError.ResponseStatusCode
+                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
+                statusCode: ex.StatusCode is >= 400 and < 600
+                    ? ex.StatusCode.Value
                     : StatusCodes.Status502BadGateway,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
@@ -562,10 +556,8 @@ public static class ContainerEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var found = await graphService.UpdateContainerAsync(
-                graphClient, containerId, request.DisplayName, request.Description, ct);
+            var found = await graphService.UpdateContainerForConfigAsync(
+                config, containerId, request.DisplayName, request.Description, ct);
 
             if (!found)
             {
@@ -601,17 +593,17 @@ public static class ContainerEndpoints
                 statusCode: StatusCodes.Status400BadRequest,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            logger.LogError(odataError,
+            logger.LogError(ex,
                 "PatchContainer: Graph error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
+                containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 title: "Graph API Error",
-                detail: odataError.Error?.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: odataError.ResponseStatusCode is >= 400 and < 600
-                    ? odataError.ResponseStatusCode
+                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
+                statusCode: ex.StatusCode is >= 400 and < 600
+                    ? ex.StatusCode.Value
                     : StatusCodes.Status502BadGateway,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
@@ -648,7 +640,7 @@ public static class ContainerEndpoints
             containerId, configId, graphService, auditService, logger, context, ct,
             operationName: "ActivateContainer",
             auditCategory: "ContainerActivated",
-            graphOperation: (svc, client, id, token) => svc.ActivateContainerAsync(client, id, token));
+            graphOperation: graphService.ActivateContainerForConfigAsync);
     }
 
     /// <summary>
@@ -670,7 +662,7 @@ public static class ContainerEndpoints
             containerId, configId, graphService, auditService, logger, context, ct,
             operationName: "LockContainer",
             auditCategory: "ContainerLocked",
-            graphOperation: (svc, client, id, token) => svc.LockContainerAsync(client, id, token));
+            graphOperation: graphService.LockContainerForConfigAsync);
     }
 
     /// <summary>
@@ -692,12 +684,14 @@ public static class ContainerEndpoints
             containerId, configId, graphService, auditService, logger, context, ct,
             operationName: "UnlockContainer",
             auditCategory: "ContainerUnlocked",
-            graphOperation: (svc, client, id, token) => svc.UnlockContainerAsync(client, id, token));
+            graphOperation: graphService.UnlockContainerForConfigAsync);
     }
 
     /// <summary>
     /// Shared implementation for activate, lock, and unlock lifecycle operations.
-    /// Validates inputs, resolves the Graph client, invokes the Graph operation,
+    /// Validates inputs, invokes the Graph operation (caller-supplied closure that
+    /// captures graphService + builds the graphClient internally — keeps
+    /// Microsoft.Graph.GraphServiceClient out of this file per ADR-007),
     /// logs the result, and fires an audit log entry.
     /// </summary>
     private static async Task<IResult> ExecuteLifecycleOperationAsync(
@@ -710,7 +704,7 @@ public static class ContainerEndpoints
         CancellationToken ct,
         string operationName,
         string auditCategory,
-        Func<SpeAdminGraphService, Microsoft.Graph.GraphServiceClient, string, CancellationToken, Task<bool>> graphOperation)
+        Func<SpeAdminGraphService.ContainerTypeConfig, string, CancellationToken, Task<bool>> graphOperation)
     {
         if (string.IsNullOrWhiteSpace(configId) || !Guid.TryParse(configId, out var configGuid))
         {
@@ -738,9 +732,10 @@ public static class ContainerEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
-            var found = await graphOperation(graphService, graphClient, containerId, ct);
+            // Caller delegate calls a *ForConfig* facade on SpeAdminGraphService — keeps
+            // Microsoft.Graph.GraphServiceClient out of this file per ADR-007 §1. The
+            // facade also translates ODataError to SpaarkeStorageException internally.
+            var found = await graphOperation(config, containerId, ct);
 
             if (!found)
             {
@@ -777,7 +772,7 @@ public static class ContainerEndpoints
                 statusCode: StatusCodes.Status400BadRequest,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError) when (odataError.ResponseStatusCode == StatusCodes.Status409Conflict)
+        catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status409Conflict)
         {
             // Invalid state transition (e.g., activating already active, locking already locked)
             logger.LogWarning(
@@ -786,21 +781,21 @@ public static class ContainerEndpoints
 
             return Results.Problem(
                 title: "Conflict",
-                detail: odataError.Error?.Message ?? "The container is already in the requested state or the state transition is not permitted.",
+                detail: ex.Message ?? "The container is already in the requested state or the state transition is not permitted.",
                 statusCode: StatusCodes.Status409Conflict,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            logger.LogError(odataError,
+            logger.LogError(ex,
                 "{Operation}: Graph error for container '{ContainerId}', configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                operationName, containerId, configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
+                operationName, containerId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 title: "Graph API Error",
-                detail: odataError.Error?.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: odataError.ResponseStatusCode is >= 400 and < 600
-                    ? odataError.ResponseStatusCode
+                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
+                statusCode: ex.StatusCode is >= 400 and < 600
+                    ? ex.StatusCode.Value
                     : StatusCodes.Status502BadGateway,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }

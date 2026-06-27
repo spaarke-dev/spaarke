@@ -51,6 +51,28 @@ ELSE:
   MODE = full-audit
 ```
 
+### Step 1.5: Invoke /test-diet (project-completion mode only) — BINDING per spec FR-B09
+
+**Added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-081.**
+
+```
+IF MODE == project-completion:
+  CHECK if `projects/{project-name}/notes/test-diet-report.md` already exists for this run
+  IF report missing OR stale (older than the most recent test-file commit on the branch):
+    → INVOKE `/test-diet projects/{project-name}`
+    → BLOCK on completion (the diet report is a binding artifact for the wrap-up PR)
+    → If `/test-diet` reports DELETE candidates: surface them to user; reviewer applies the `git rm` commands BEFORE Step 2
+
+  IF user explicitly skips `/test-diet` with rationale:
+    → LOG the skip + rationale in `projects/{project-name}/current-task.md` Decisions section
+    → Continue, BUT mark the wrap-up PR description with "test-diet: SKIPPED (rationale required)"
+
+IF MODE == full-audit:
+  → SKIP this step (`/test-diet` is project-scoped only)
+```
+
+`/test-diet` is read-only (emits `git rm` / `git mv` commands; reviewer applies them). The classifier is the 17-ban B1-B17 list from [`docs/adr/ADR-038-testing-strategy.md`](../../../docs/adr/ADR-038-testing-strategy.md) §7. Skipping the gate is a HARD WARNING per spec FR-B09.
+
 ### Step 2: Load Repository Standards
 
 ```
@@ -520,3 +542,24 @@ Proceed with cleanup? (y/n)
 | Pre-merge check fails because skill flags legitimate WIP files | Skill ran on a branch mid-development | Pre-merge check should only run when branch is "ready to merge" — not mid-development. Operator should know which mode to invoke. |
 | Cleanup report shows "0 issues" but project clearly has cruft | Skill's required_directories list is out of date — cruft is in dirs the skill doesn't audit | The required_directories list is the skill's audit scope. If a new directory category emerges in the repo, add it to the list. |
 | 215 inbound references — high blast radius for any restructure | This is hub #4 | Refinements must be ADDITIVE ONLY (the constraint applied throughout Wave 2b). No section renames or removals; only stamp updates, frontmatter normalization, and inline data corrections (like the ai-knowledge path fix). |
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 037 · FR-23)
+
+**Mid-skill** (after archive-candidate detection): for each archive candidate (merged + no recent activity), enumerate and prompt per project:
+
+```
+Archive candidate detected: projects/{name}/
+  Last commit: {date}
+  PR status: merged (#M)
+  Worktree exists: yes
+
+Archive this project? [y/N]
+```
+
+On explicit `y` (default N — destructive): invoke `/devops-project-archive --status Completed --pr-number #M`. This removes the worktree per D-18, retains `projects/{name}/` folder + `.archived` marker.
+
+Confirmation prompt is MANDATORY per safety contract — do NOT auto-archive.
+
+See: [`.claude/skills/devops-project-archive/SKILL.md`](../devops-project-archive/SKILL.md).

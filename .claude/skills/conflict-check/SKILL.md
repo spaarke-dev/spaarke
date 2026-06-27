@@ -1,18 +1,18 @@
 ---
-description: Detect potential file conflicts between active PRs and current work
-tags: [git, conflict, parallel-development, operations]
+description: Detect potential file conflicts between active PRs and current work; auto-trigger on hot-path-watchlist matches
+tags: [git, conflict, parallel-development, operations, hot-path]
 techStack: [git, gh-cli]
-appliesTo: ["parallel sessions", "before merge", "conflict detection"]
+appliesTo: ["parallel sessions", "before merge", "conflict detection", "hot-path edits"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-16
+last-reviewed: 2026-06-26
 ---
 
 # Conflict Check
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-05-16
-> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Last Reviewed**: 2026-06-26
+> **Reviewed By**: ci-cd-unit-test-remediation-r1 task CICD-031 (Stream C — added Hot-Path Watchlist + Auto-Trigger Criteria per spec FR-C03)
 > **Exemplar rationale**: Conflict detection runs against ephemeral PR state and live branches — no stable artifact to reference.
 
 ---
@@ -135,6 +135,55 @@ Run rebase after other PR merges:
   git rebase origin/master
   git push --force-with-lease
 ```
+
+---
+
+## Hot-Path Watchlist & Auto-Trigger Criteria
+
+**Added 2026-06-26** by `ci-cd-unit-test-remediation-r1` task CICD-031 per spec FR-C03. The watchlist is consumed by `task-execute` Step 0.5 (modified in task CICD-060) which auto-invokes `/conflict-check` when any changed file in a task matches a watchlist entry.
+
+### Hot-Path Watchlist (machine-readable for task-execute Step 0.5)
+
+| Hot path | Glob pattern(s) | Coordination target |
+|---|---|---|
+| **BFF API** | `src/server/api/Sprk.Bff.Api/**`, `src/server/shared/Spaarke.Core/**`, `src/server/shared/Spaarke.Dataverse/**` | Other active worktrees touching BFF; check `projects/INDEX.md` BFF column |
+| **BFF entry/DI** | `src/server/api/Sprk.Bff.Api/Program.cs`, `src/server/api/Sprk.Bff.Api/*.csproj`, `src/server/api/Sprk.Bff.Api/Services/Ai/*Module.cs` | Highest-conflict files — sequence merges via INDEX.md |
+| **SpaarkeAi code page** | `src/solutions/SpaarkeAi/**`, especially `src/solutions/SpaarkeAi/src/*Registry*`, `src/solutions/SpaarkeAi/package.json` | Other active worktrees touching SpaarkeAi; check `projects/INDEX.md` SpaarkeAi column |
+| **CI workflows** | `.github/workflows/**` | Only one active project should own CI changes at a time (currently `ci-cd-unit-test-remediation-r1`) |
+| **Skill directives** | `.claude/skills/**`, `.claude/constraints/**` | Serial PRs only — never parallel edits to the same SKILL.md |
+| **Root CLAUDE.md** | `CLAUDE.md` (repo root only) | Single-file edit; coordinate via INDEX.md |
+
+### Auto-Trigger Criteria
+
+`task-execute` Step 0.5 invokes `/conflict-check` automatically when **ANY** of the following conditions hold for the current task:
+
+1. Task POML's `<outputs>` or `<inputs>` reference a file matching any watchlist glob.
+2. Task execution at any step modifies a file matching any watchlist glob (detected via `git status` / `git diff --name-only` after each step).
+3. Task POML metadata `<tags>` contains: `bff-api`, `spaarke-ai`, `ci-workflows`, `skill-directive`, `root-claude`.
+
+When triggered, the conflict-check runs the standard Steps 1–5 plus an additional **Step 6: Cross-reference projects/INDEX.md** — for each matched hot-path, lookup other active worktrees with the same hot-path declaration (BFF=YES, SpaarkeAi=YES, etc.) and surface them as coordination targets.
+
+### Decision: silent pass vs. loud warn
+
+| Scenario | Outcome |
+|---|---|
+| Watchlist match BUT no other active worktree shares the hot-path | Silent log: `✅ Hot-path {X} touched — no concurrent active projects on this surface.` |
+| Watchlist match AND another active worktree shares the hot-path AND no overlapping files between PRs | Soft warn: `⚠️ Hot-path {X} also owned by {project-Y}. No file overlap yet — coordinate ordering.` |
+| Watchlist match AND another active worktree shares the hot-path AND files overlap | **Hard warn + escalation**: `🛑 Hot-path {X} overlap with {project-Y} on files {list}. Coordinate before proceeding.` |
+
+This skill does NOT block task execution on its own — it surfaces information. The decision to proceed, coordinate, or defer is the task author's. (Per autonomous-mode rules of projects that have explicitly opted in, the skill can be informational only.)
+
+### Maintenance contract for `projects/INDEX.md`
+
+- `project-pipeline` skill adds a new project's row at start-of-project (per task CICD-061 modification).
+- `task-execute` Step 0.5 reads INDEX.md at every task start; updates the row when hot-path declaration drifts.
+- No cron; updates are atomic and event-driven.
+
+### Reference
+
+- Source: `ci-cd-unit-test-remediation-r1` spec FR-C03 + design.md §86-89
+- Consumer skills: `task-execute` Step 0.5 (CICD-060), `project-pipeline` Step 2 (CICD-061)
+- Constraint cross-reference: `.claude/constraints/bff-extensions.md` Hot-Path Declaration section (CICD-062)
 
 ---
 

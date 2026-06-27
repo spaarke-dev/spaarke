@@ -1,6 +1,8 @@
-using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
@@ -8,9 +10,16 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// <summary>
 /// Node executor for querying Dataverse via FetchXML from playbook execution.
 /// Resolves template variables in FetchXML (date tokens, user references),
-/// executes the query via OData Web API, and returns structured results
-/// for downstream condition/notification nodes.
+/// executes the query via <see cref="IGenericEntityService"/>, and returns
+/// structured results for downstream condition/notification nodes.
 /// </summary>
+/// <remarks>
+/// Uses the canonical <see cref="IGenericEntityService"/> shared library
+/// (which forwards to <c>DataverseServiceClientImpl</c>) rather than an
+/// app-private named HttpClient. This gives correct BaseAddress + token
+/// acquisition + lifecycle management for app-only execution paths
+/// (background scheduler, Daily Briefing producer).
+/// </remarks>
 public sealed class QueryDataverseNodeExecutor : INodeExecutor
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
@@ -19,16 +28,16 @@ public sealed class QueryDataverseNodeExecutor : INodeExecutor
     private const int DefaultTimeWindowHours = 24;
 
     private readonly ITemplateEngine _templateEngine;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IGenericEntityService _entityService;
     private readonly ILogger<QueryDataverseNodeExecutor> _logger;
 
     public QueryDataverseNodeExecutor(
         ITemplateEngine templateEngine,
-        IHttpClientFactory httpClientFactory,
+        IGenericEntityService entityService,
         ILogger<QueryDataverseNodeExecutor> logger)
     {
         _templateEngine = templateEngine;
-        _httpClientFactory = httpClientFactory;
+        _entityService = entityService;
         _logger = logger;
     }
 
@@ -110,10 +119,7 @@ public sealed class QueryDataverseNodeExecutor : INodeExecutor
                 config.EntityLogicalName,
                 resolvedFetchXml.Length);
 
-            var results = await ExecuteFetchXmlAsync(
-                config.EntityLogicalName!,
-                resolvedFetchXml,
-                cancellationToken);
+            var results = await ExecuteFetchXmlAsync(resolvedFetchXml, cancellationToken);
 
             _logger.LogInformation(
                 "QueryDataverse node {NodeId} completed -- entity: {Entity}, results: {ResultCount}",
@@ -195,78 +201,44 @@ public sealed class QueryDataverseNodeExecutor : INodeExecutor
     }
 
     private async Task<List<Dictionary<string, object?>>> ExecuteFetchXmlAsync(
-        string entityLogicalName,
         string fetchXml,
         CancellationToken cancellationToken)
     {
-        var client = _httpClientFactory.CreateClient("DataverseApi");
-        var entitySetName = GetEntitySetName(entityLogicalName);
-        var encodedFetchXml = Uri.EscapeDataString(fetchXml);
-        var requestUrl = $"{entitySetName}?fetchXml={encodedFetchXml}";
+        var entityCollection = await _entityService.RetrieveMultipleAsync(
+            new FetchExpression(fetchXml), cancellationToken);
 
-        _logger.LogDebug("Executing FetchXML query against {EntitySet}", entitySetName);
-
-        var response = await client.GetAsync(requestUrl, cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
+        var results = new List<Dictionary<string, object?>>(entityCollection.Entities.Count);
+        foreach (var entity in entityCollection.Entities)
         {
-            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-            _logger.LogError(
-                "FetchXML query failed with status {StatusCode}: {ErrorContent}",
-                response.StatusCode,
-                errorContent.Length > 500 ? errorContent[..500] : errorContent);
-
-            throw new HttpRequestException(
-                $"Dataverse FetchXML query failed with status {(int)response.StatusCode}: {response.ReasonPhrase}");
-        }
-
-        var content = await response.Content.ReadAsStringAsync(cancellationToken);
-        using var doc = JsonDocument.Parse(content);
-        var results = new List<Dictionary<string, object?>>();
-
-        if (doc.RootElement.TryGetProperty("value", out var valueArray))
-        {
-            foreach (var item in valueArray.EnumerateArray())
+            var record = new Dictionary<string, object?>(entity.Attributes.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var (key, value) in entity.Attributes)
             {
-                var record = new Dictionary<string, object?>();
-                foreach (var prop in item.EnumerateObject())
-                {
-                    if (prop.Name.StartsWith("@odata.") || prop.Name.StartsWith("@Microsoft."))
-                        continue;
-
-                    record[prop.Name] = prop.Value.ValueKind switch
-                    {
-                        JsonValueKind.String => prop.Value.GetString(),
-                        JsonValueKind.Number => prop.Value.TryGetInt64(out var l) ? l : prop.Value.GetDouble(),
-                        JsonValueKind.True => true,
-                        JsonValueKind.False => false,
-                        JsonValueKind.Null => null,
-                        _ => prop.Value.GetRawText()
-                    };
-                }
-                results.Add(record);
+                record[key] = ConvertAttributeValue(value);
             }
+            results.Add(record);
         }
-
         return results;
     }
 
-    private static string GetEntitySetName(string entityLogicalName)
+    /// <summary>
+    /// Converts an SDK <see cref="Entity"/> attribute value into a primitive shape
+    /// suitable for downstream template substitution. Mirrors the scalar values
+    /// the Web API previously returned (e.g. lookups → GUID string, option sets → int).
+    /// </summary>
+    private static object? ConvertAttributeValue(object? value)
     {
-        return entityLogicalName switch
+        return value switch
         {
-            "sprk_event" => "sprk_events",
-            "sprk_document" => "sprk_documents",
-            "sprk_matter" => "sprk_matters",
-            "sprk_project" => "sprk_projects",
-            "sprk_todoitem" => "sprk_todoitems",
-            "account" => "accounts",
-            "contact" => "contacts",
-            "task" => "tasks",
-            "email" => "emails",
-            "appointment" => "appointments",
-            "appnotification" => "appnotifications",
-            _ => entityLogicalName.EndsWith("s") ? entityLogicalName : entityLogicalName + "s"
+            null => null,
+            AliasedValue av => ConvertAttributeValue(av.Value),
+            EntityReference er => er.Id.ToString(),
+            OptionSetValue osv => osv.Value,
+            OptionSetValueCollection osvc => osvc.Select(x => x.Value).ToArray(),
+            Money m => m.Value,
+            Guid g => g.ToString(),
+            DateTime dt => dt.ToString("o"),
+            DateTimeOffset dto => dto.ToString("o"),
+            _ => value
         };
     }
 }

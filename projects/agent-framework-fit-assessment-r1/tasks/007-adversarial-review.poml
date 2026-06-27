@@ -1,0 +1,78 @@
+<task id="007" project="agent-framework-fit-assessment-r1">
+  <metadata>
+    <title>Adversarial review of assessment conclusions; revise as needed</title>
+    <phase>6</phase>
+    <tags>assessment, adversarial-review, quality-gate, revision</tags>
+    <estimate>1.5h</estimate>
+    <status>completed</status>
+    <completion-summary>Completed 2026-06-03. Draft via sub-agent (commit 32235fc1); Step 9.5 quality gates in main session. Outputs: notes/07-review-log.md (494 lines) + revised docs/assessments/agent-framework-fit-assessment-2026-06-03.md (893 → 959 lines, +66). 13 distinct adversarial inputs (10 per-surface + 3 cross-cutting probes A/B/C). Adjudication distribution: 10 WEAKENS (framing strengthened, no verdict change) + 3 NEW open questions + 0 CHANGES + 0 NOT APPLICABLE — zero verdict flips, all 10 surfaces held under adversarial pressure. Three new open questions added (§8 now Q1-Q9): Q7 (S1 #6268 reproduction-scope exposure verification — the bug title qualifies reproduction as "reasoning model + stateless Responses API" which S1's GPT-4o + Chat Completions stack does NOT match; if empirical test confirms non-exposure, PARTIAL downgrades to ADOPT-with-flag), Q8 (S3 framework-validation pilot ahead of S1 lift), Q9 (S8a/S8b F5 asymmetry empirical test). Source freshness re-check on top 5 URLs (P2, P3, P6, I1, I2): no material change except I1 #6268 title qualifier finding above (#6268 status itself unchanged — OPEN, needs-maintainer-triage). Recency 100% preserved. Task 006 Step 9.5 warnings adjudicated: W1 FALSE ALARM (carry-forward summary was wrong — notes/04 §S8a IS DON'T ADOPT, synthesis matched notes/04 all along); W2(a) RESOLVED via §7.1 inline disclosure footnote acknowledging "implied ADR-013 amendment" as synthesis-level inference; W2(b) FALSE ALARM (Q5/Q6 trace to notes/04 §S2.6 OQ1 + §S6.6 OQ1, not synthesis-level). New §5.11.1 PARTIAL bucket decomposition added — distinguishes bundle-with-S1 / sequencing / contingent-on-contract PARTIAL shapes. §1 executive summary absorbs Q7 reviewer note inline without flipping S1 verdict. Step 9.5: adr-check ✅ no violations (2 forward-looking warnings resolved or correctly deferred); code-review ✅ Quality Direction = Improved (adversarial pass added genuine analytical depth without verdict drift, growth concentrated in honest qualification). Self-skepticism check: re-attempt NOT warranted — zero flips + three substantive new questions + framing strengthenings is the right shape, not insufficient aggression.</completion-summary>
+    <parallel-group>—</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>006</dependencies>
+    <rigor-level>FULL</rigor-level>
+    <rigor-reason>The assessment's conclusions will guide multiple downstream projects. Adversarial review is the load-bearing safeguard against confirmation bias. Runs adr-check + code-review at Step 9.5 against the revised document.</rigor-reason>
+  </metadata>
+  <prompt>
+    <goal>Run an adversarial review of the assessment document — specifically asking "what would I write if I were arguing AGAINST every ADOPT recommendation, and AGAINST every DON'T ADOPT recommendation?" — and revise any conclusion that doesn't survive the challenge. The revised document is the project's final deliverable.</goal>
+    <context>Assessments by intuition fail predictably. They claim more certainty than the evidence supports, miss the strongest counter-arguments, and surface "open questions" that conveniently don't threaten the recommendations. The adversarial pass is the explicit guard against this. Spaarke's BFF AI extraction assessment delivered "structurally AI-dominant but operationally justified" — a finding that only survives because the assessment took the counter-argument seriously. This task replicates that discipline.</context>
+    <constraints>
+      - The reviewer hat is ADVERSARIAL — not collaborative. For each major conclusion in §5 (recommendations) and §6 (deployment models), the reviewer's job is to find the strongest argument AGAINST that conclusion
+      - Spawn a sub-agent (general-purpose or researcher) with explicit "you are arguing against the assessment's conclusions" framing; the sub-agent reads the assessment + notes and returns the strongest counter-arguments per recommendation
+      - For each counter-argument: evaluate "does this weaken the recommendation, change it, or surface a new open question?"
+      - For each finding: revise the assessment in main session — either (a) strengthen the rationale to address the counter, (b) downgrade ADOPT → PARTIAL or PARTIAL → DON'T ADOPT (or vice versa), or (c) add a new entry to §8 open questions
+      - Revisions are TRACKED in projects/agent-framework-fit-assessment-r1/notes/07-review-log.md — what counter-argument was raised, what change was made (or why no change)
+      - **Source recency re-check (MANDATORY)**: re-WebFetch the top 5 most-cited Microsoft Learn URLs from the §10 Sources appendix. Compare against the captures in notes/00-primary-source-baseline.md and task 003 captures. If ANY page has materially changed since first fetched (added/removed sections, changed recommendations, deprecation notices): treat as a new finding — either revise the affected assessment conclusion OR add to §8 as a "platform-evolved-mid-project" open question
+      - **Citation freshness audit**: re-verify §10 Sources appendix shows ≥80% citations dated 2026-04-01 onwards as required by task 006. Any drift below that threshold during synthesis = revise
+      - Also: run adr-check and code-review against the revised document at Step 9.5
+      - If the assessment survives review with NO changes, document that explicitly — but be honest: if no changes are needed it suggests the review wasn't aggressive enough; re-attempt with sharper counter-questions
+      - Final commit only after revisions land
+    </constraints>
+  </prompt>
+  <knowledge>
+    <files>
+      <file>projects/agent-framework-fit-assessment-r1/SPEC.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/00-primary-source-baseline.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/03-agent-framework-feature-map.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/04-per-surface-decision-matrix.md</file>
+      <file>projects/agent-framework-fit-assessment-r1/notes/05-deployment-and-migration.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step>Glob docs/assessments/ to find the assessment file just written (agent-framework-fit-assessment-YYYY-MM-DD.md) — use the most recent</step>
+    <step>Spawn an adversarial sub-agent with prompt: "You are a senior architect on the Spaarke team who has been asked to push back on this assessment's conclusions. For each ADOPT recommendation, write the strongest argument for DON'T ADOPT. For each DON'T ADOPT recommendation, write the strongest argument for ADOPT. For each deployment model recommendation, write the strongest argument for a different model. Be specific — cite the inventory notes, the ADRs, the publish-size constraint. Return findings as a list, one per recommendation."</step>
+    <step>Receive sub-agent findings — at least 6 counter-arguments expected (one per surface evaluated)</step>
+    <step>For each counter-argument: read the relevant section of the assessment + the underlying notes/04 + notes/05. Decide: weakens / changes / new open question / not applicable. Document decision + reasoning in notes/07-review-log.md</step>
+    <step>For weakens or changes findings: revise the assessment in main session using Edit. Strengthen rationale, downgrade/upgrade recommendation, or add to §8 open questions as appropriate</step>
+    <step>**Source recency re-check**: from §10 Sources appendix, identify the top 5 most-cited Microsoft Learn URLs. WebFetch each NOW. Diff against the captures in notes/00- and task 003 captures. For any page that materially changed (added/removed sections, deprecation notices, recommendation changes): treat as a counter-argument input — revise affected conclusion OR add §8 "platform-evolved-mid-project" open question. Document in notes/07-review-log.md "Source freshness audit" subsection</step>
+    <step>**Citation freshness audit**: re-tabulate §10 Sources appendix — confirm ≥80% citations dated 2026-04-01 onwards. If drift below threshold: log in review log + flag in §8</step>
+    <step>If any recommendation flipped (ADOPT → DON'T ADOPT or vice versa): update §1 Executive summary to reflect the change</step>
+    <step>Run adr-check skill against the revised assessment document</step>
+    <step>Run code-review skill against the revised assessment as a written deliverable</step>
+    <step>Re-read the entire revised assessment for internal consistency — recommendations in §1 must match §5; deployment in §1 summary must match §6 detail; §10 Sources appendix matches actual citations in body</step>
+    <step>Commit: `docs(assessment): adversarial review + revisions to agent-framework fit assessment (R1 task 007)`</step>
+  </steps>
+  <tools>
+    <tool>Read</tool>
+    <tool>Edit</tool>
+    <tool>Glob</tool>
+    <tool>Agent(general-purpose)</tool>
+    <tool>Skill(adr-check)</tool>
+    <tool>Skill(code-review)</tool>
+    <tool>Skill(task-execute)</tool>
+  </tools>
+  <outputs>
+    <output>projects/agent-framework-fit-assessment-r1/notes/07-review-log.md</output>
+    <output>docs/assessments/agent-framework-fit-assessment-YYYY-MM-DD.md (revised)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion>At least 6 counter-arguments raised (one per surface in scope at minimum)</criterion>
+    <criterion>For each counter-argument: explicit decision (weakens / changes / new open question / not applicable) in notes/07-review-log.md</criterion>
+    <criterion>Source recency re-check ran — top 5 most-cited URLs WebFetched at review time + diff vs. original capture documented in notes/07-review-log.md</criterion>
+    <criterion>Citation freshness audit confirms §10 Sources appendix still meets ≥80% ≥2026-04-01 threshold (or drift logged)</criterion>
+    <criterion>If recommendations changed: §1 Executive summary updated accordingly</criterion>
+    <criterion>adr-check + code-review both run at Step 9.5 against the revised document</criterion>
+    <criterion>Internal consistency check passed — §1 matches §5 + §6 + §10 in revised version</criterion>
+    <criterion>Either revisions land OR an explicit honest note in notes/07-review-log.md explains why no revisions were warranted (with self-skepticism)</criterion>
+  </acceptance-criteria>
+</task>

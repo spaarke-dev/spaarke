@@ -1,0 +1,135 @@
+<task id="035" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>P2-CLOSEOUT-04 Re-run SC-18 SME walkthrough end-to-end after 032+033+034 deployed; capture solo-SME signoff</title>
+    <status>🔲</status>
+    <status-note>Closeout task added 2026-06-04. Walkthrough first attempt (task 030) surfaced Sev-1 integration gap blocking the Summarize vertical end-to-end. After 032+033+034 deploy, this task validates the full UX flow and captures Phase 1.5 acceptance signoff. Without this task closing ✅, task 030 and task 031 cannot close, and Phase 2 cannot transition to Phase 3.</status-note>
+    <estimated-effort>30 minutes operator + ~5 min agent (signoff capture)</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>Operator + AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration (CLOSEOUT)</phase>
+    <wave>P2-G11-CLOSEOUT (serial; runs LAST after 032+033+034 all deployed + verified)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>032 (upload populates session manifest + indexes to AI Search), 033 (chat agent sees uploaded files in context), 034 (frontend auto-trigger on upload completion)</dependencies>
+    <tags>testing, e2e-test, walkthrough, sc-18, closeout</tags>
+    <rigor-level>STANDARD</rigor-level>
+  </metadata>
+
+  <prompt>
+    Re-execute the SC-18 SME walkthrough end-to-end on Spaarke Dev now that
+    the 3 closeout tasks (032+033+034) have deployed. Validate the full
+    Summarize vertical UX flow per the operator's clarified expectation
+    (2026-06-04):
+
+    1. User opens SpaarkeAi standalone Code Page on Dev
+    2. Types "let's work on summarizing a document" (or similar) → Assistant
+       responds with upload prompt + [action:upload] link
+    3. User clicks [action:upload] (or paperclip — Sev-2 finding §6 #1 in
+       task-030-summarize-walkthrough is R6 territory; either path
+       acceptable for this task), picks a small PDF
+    4. Upload completes successfully (HTTP 200)
+    5. WITHIN 2 SECONDS, no additional user message needed:
+       - "Summarizing your file..." chip appears in chat (from task 034)
+       - Workspace pane shows streaming indicator
+       - TL;DR section streams first (per FR-02, task 005/006/017
+         declaration-order streaming)
+       - Summary section streams second
+       - Keywords + Entities sections follow
+       - Final state: structured envelope rendered, no spinner
+    6. Repeat with a multi-file scenario (Phase C from original walkthrough):
+       upload 2 small files, watch the combined-summary interjection (FR-04)
+       render in chat: "I'll provide a combined summary for the files you
+       uploaded."
+    7. Per-file affordance (Phase D): single-file Summarize from Context pane
+       file row → streams in Workspace pane for THAT file only.
+    8. Cap behavior (Phase E): attempt 21+ uploads; verify graceful 400
+       ProblemDetails with errorCode `summarize.too-many-files`.
+
+    For each phase verdict, capture in
+    `notes/task-030-summarize-walkthrough.md` §3 (per-phase checkboxes) + §4
+    (verdict summary). For Phase 1.5 acceptance verdict, fill §7 signoff.
+
+    Operator mode: solo SME stand-in (per 2026-06-04 session). Phase 1.5
+    acceptance verdict targets ≥ 4/5 aggregate score for the Summarize
+    vertical. Anything < 3/5 → Sev-1 escalation per §5 of remediation plan,
+    blocks Phase 2 close.
+
+    Insights vertical (15-question matrix in task-030-sme-walkthrough.md)
+    remains DEFERRED to Phase 3 — Insights Engine r2 Wave F not deployed
+    yet; not a R5 deliverable for Phase 2 closeout.
+
+    When SME signoff captured + verdict ≥ 4/5: flip
+    - task 030 → ✅ (signoff captured)
+    - task 031 → ✅ (Phase 2 verification — depends on task 030 outcome)
+    - task 032/033/034 → already ✅ from prior execution (verify status)
+    - this task (035) → ✅
+    - Phase 2 → ✅ in plan.md
+    - Unblocks Phase 3 (tasks 040-044 + 090)
+
+    If SME signoff = "no" or aggregate < 3/5 → STOP, capture new findings in
+    §6 of walkthrough doc, file additional remediation tasks (036, 037, ...)
+    as needed, re-loop.
+  </prompt>
+
+  <context>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/task-030-summarize-walkthrough.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/summarize-vertical-remediation-plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/task-030-sme-walkthrough.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/030-insights-tool-smoke-tests.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/031-phase-2-tests-integration-verification.poml</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/summarize-vertical-remediation-plan.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint>This task does NOT execute fixes — it validates that 032+033+034 produced the expected end-to-end behavior. If gaps remain, additional remediation tasks are filed.</constraint>
+    <constraint>Solo SME stand-in mode: capture signoff verdict as "yes-with-conditions" max for Phase 1.5 acceptance; full credentialed legal-ops SME re-validation deferred to Phase 3 (task 044 lessons-learned + R6 backlog).</constraint>
+    <constraint>NO-VERBATIM-CONTENT rule per ADR-018 + walkthrough doc top — paraphrase response text + citation excerpts; verbatim OK for question text, file names, correlationIds, signoff statement.</constraint>
+    <constraint>Aggregate verdict ≥ 4/5 required to close Phase 2; ≥ 3/5 is "with conditions" (acceptable but file Sev-2 findings for R6); &lt; 3/5 = Sev-1 blocker, loop back.</constraint>
+  </constraints>
+
+  <steps>
+    <step>Verify 032+033+034 all deployed to Spaarke Dev (curl + visual check on SpaarkeAi shell).</step>
+    <step>Pre-curl: `Authorization: Bearer notarealtoken` to `/api/ai/chat/sessions/{id}/summarize` and `/documents` — expect 401 (auth rejection at middleware), NOT "Tenant identity not found" detail (that detail is the bug we fixed mid-session).</step>
+    <step>Open SpaarkeAi shell on Spaarke Dev (sprk_SpaarkeAi Code Page).</step>
+    <step>Execute Phase A (Smoke) — should still pass.</step>
+    <step>Execute Phase B (Direct /summarize) — the auto-trigger flow described in task prompt above.</step>
+    <step>Execute Phase C (Multi-file convergence) — verify combined-summary interjection (FR-04) + multi-file output.</step>
+    <step>Execute Phase D (Per-file affordance) — verify single-file Summarize from Context pane.</step>
+    <step>Execute Phase E (Cap behavior) — verify 21st upload rejected with errorCode summarize.too-many-files.</step>
+    <step>Fill per-phase checkboxes + verdict summary in task-030-summarize-walkthrough.md §3 + §4.</step>
+    <step>Capture solo-SME signoff in §7 — record aggregate verdict 1-5 + verbatim signoff statement.</step>
+    <step>If verdict ≥ 4/5: flip tasks 030, 031, 035 all to ✅ in TASK-INDEX.md. Update plan.md Phase 2 status to ✅.</step>
+    <step>If verdict 3-3.9/5: flip task 030 ✅ with conditions; file Sev-2 findings as R6 backlog rows in §6 of walkthrough doc; flip 031 ✅; flip 035 ✅.</step>
+    <step>If verdict &lt; 3/5: STOP. File new remediation tasks (036+). DO NOT close 030 or 031.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All 5 phases (A-E) executed; per-phase verdicts captured in walkthrough doc §3+§4.</criterion>
+    <criterion>Operator-as-SME signoff captured verbatim in walkthrough doc §7.</criterion>
+    <criterion>Aggregate Phase 1.5 verdict ≥ 4/5 — Summarize vertical works end-to-end without third-message ceremony.</criterion>
+    <criterion>FR-01 convergence validated: at least one direct path AND one agent-tool path produce equivalent rendered output for the same uploaded file.</criterion>
+    <criterion>FR-02 TL;DR-first streaming visible (TL;DR section renders before Summary section).</criterion>
+    <criterion>FR-04 multi-file combined-summary interjection rendered verbatim in chat for ≥2 file uploads.</criterion>
+    <criterion>NFR-02 20-file cap enforced gracefully (400 with stable errorCode).</criterion>
+    <criterion>SC-08 byte-shape convergence: same prompt + same files via either path = same envelope shape.</criterion>
+    <criterion>SC-18 SME signoff captured (solo stand-in mode, conditional on credentialed-SME re-validation in Phase 3 per spec §SC-18 phrasing).</criterion>
+    <criterion>Tasks 030, 031, 035 all flipped ✅ in TASK-INDEX.md; Phase 2 closed in plan.md.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output>Filled-out notes/task-030-summarize-walkthrough.md §1 (session metadata), §3 (per-phase checkboxes), §4 (verdict summary), §5 (aggregate), §6 (any new findings), §7 (signoff)</output>
+    <output>TASK-INDEX.md rows 030, 031, 035 all flipped 🔲/🔄 → ✅</output>
+    <output>Plan.md Phase 2 status → ✅</output>
+    <output>Updated current-task.md → "Phase 3 ready: start with task 040 D3-01 /analyze proof point"</output>
+  </outputs>
+</task>

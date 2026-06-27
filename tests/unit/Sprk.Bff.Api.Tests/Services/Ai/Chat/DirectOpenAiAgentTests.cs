@@ -2,7 +2,6 @@ using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Moq;
-using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Xunit;
 
@@ -24,6 +23,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 ///   - Exception during streaming → "error" + "done" emitted cleanly (ADR-019)
 ///   - Content filter finish reason → "error" + "done" emitted cleanly
 /// </summary>
+[Trait("status", "repaired")]
 public class DirectOpenAiAgentTests
 {
     private readonly Mock<IChatClient> _chatClientMock;
@@ -39,7 +39,7 @@ public class DirectOpenAiAgentTests
         // Default prompt builder setup: return a minimal OrchestratorPrompt.
         _promptBuilderMock
             .Setup(b => b.BuildSystemPrompt(
-                It.IsAny<CapabilityRoutingResult>(),
+                It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<OrchestratorPromptContext>()))
             .Returns(new OrchestratorPrompt(
                 SystemPromptPrefix: "You are Spaarke AI.",
@@ -170,7 +170,12 @@ public class DirectOpenAiAgentTests
     [Fact]
     public async Task ProcessAsync_StopsEmitting_WhenCancellationTriggered()
     {
-        // Arrange — stream that yields many tokens but we cancel after 1
+        // Arrange — stream that yields many tokens but we cancel after 1.
+        // Per DirectOpenAiAgent.cs:176, the producer calls cancellationToken.ThrowIfCancellationRequested()
+        // inside the streaming loop, so a triggered cancellation surfaces as
+        // OperationCanceledException to the caller (standard .NET cooperative-cancellation
+        // contract). The behavioral guarantee is: streaming halts EARLY (fewer than the full
+        // 10 tokens) once the token is cancelled, not that the producer silently completes.
         using var cts = new CancellationTokenSource();
 
         var updates = CreateManyTokenUpdates(10);
@@ -181,11 +186,18 @@ public class DirectOpenAiAgentTests
 
         // Act — cancel after collecting first token event
         var events = new List<SseEvent>();
-        await foreach (var evt in agent.ProcessAsync(request, cts.Token))
+        try
         {
-            events.Add(evt);
-            if (evt.Type == "token")
-                cts.Cancel();
+            await foreach (var evt in agent.ProcessAsync(request, cts.Token))
+            {
+                events.Add(evt);
+                if (evt.Type == "token")
+                    cts.Cancel();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected: cooperative cancellation propagates from the producer.
         }
 
         // Assert: cancelled early — fewer than 10 tokens
@@ -222,9 +234,9 @@ public class DirectOpenAiAgentTests
         // Arrange — prompt builder throws
         _promptBuilderMock
             .Setup(b => b.BuildSystemPrompt(
-                It.IsAny<CapabilityRoutingResult>(),
+                It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<OrchestratorPromptContext>()))
-            .Throws(new ArgumentNullException("manifest"));
+            .Throws(new ArgumentNullException("activeToolNames"));
 
         var agent = CreateAgent();
         var request = CreateRequest("Test");
@@ -343,18 +355,18 @@ public class DirectOpenAiAgentTests
     // ── Prompt builder integration ────────────────────────────────────────────
 
     [Fact]
-    public async Task ProcessAsync_CallsPromptBuilder_WithFallbackRoutingResult()
+    public async Task ProcessAsync_CallsPromptBuilder_WithEmptyToolNames()
     {
         // Arrange
         SetupStreamingResponse(["ok"]);
 
-        CapabilityRoutingResult? capturedRouting = null;
+        IReadOnlyList<string>? capturedToolNames = null;
         _promptBuilderMock
             .Setup(b => b.BuildSystemPrompt(
-                It.IsAny<CapabilityRoutingResult>(),
+                It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<OrchestratorPromptContext>()))
-            .Callback<CapabilityRoutingResult, OrchestratorPromptContext>(
-                (r, _) => capturedRouting = r)
+            .Callback<IReadOnlyList<string>, OrchestratorPromptContext>(
+                (toolNames, _) => capturedToolNames = toolNames)
             .Returns(new OrchestratorPrompt("sys", "", [], 2, false));
 
         var agent = CreateAgent();
@@ -363,10 +375,9 @@ public class DirectOpenAiAgentTests
         // Act
         await CollectEventsAsync(agent, request);
 
-        // Assert: the routing result passed to the builder is a fallback (not confident)
-        capturedRouting.Should().NotBeNull();
-        capturedRouting!.IsConfident.Should().BeFalse();
-        capturedRouting.Layer.Should().Be(3);
+        // Assert: DirectOpenAiAgent does not surface tools — passes an empty list.
+        capturedToolNames.Should().NotBeNull();
+        capturedToolNames!.Should().BeEmpty();
     }
 
     [Fact]
@@ -378,9 +389,9 @@ public class DirectOpenAiAgentTests
         OrchestratorPromptContext? capturedContext = null;
         _promptBuilderMock
             .Setup(b => b.BuildSystemPrompt(
-                It.IsAny<CapabilityRoutingResult>(),
+                It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<OrchestratorPromptContext>()))
-            .Callback<CapabilityRoutingResult, OrchestratorPromptContext>(
+            .Callback<IReadOnlyList<string>, OrchestratorPromptContext>(
                 (_, ctx) => capturedContext = ctx)
             .Returns(new OrchestratorPrompt("sys", "", [], 2, false));
 

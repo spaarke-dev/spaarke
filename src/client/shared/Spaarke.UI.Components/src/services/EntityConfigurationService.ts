@@ -122,9 +122,14 @@ export class EntityConfigurationService {
       }
 
       // Validate custom commands
-      Object.entries(parsed.entityConfigs || {}).forEach(([entityName, config]: [string, any]) => {
+      Object.entries(
+        (parsed.entityConfigs || {}) as Record<
+          string,
+          { customCommands?: Record<string, { label?: string; actionType?: string; actionName?: string }> }
+        >
+      ).forEach(([entityName, config]) => {
         if (config.customCommands) {
-          Object.entries(config.customCommands).forEach(([key, cmd]: [string, any]) => {
+          Object.entries(config.customCommands).forEach(([key, cmd]) => {
             if (!cmd.label) errors.push(`${entityName}.${key}: Missing label`);
             if (!cmd.actionType) errors.push(`${entityName}.${key}: Missing actionType`);
             if (!cmd.actionName) errors.push(`${entityName}.${key}: Missing actionName`);

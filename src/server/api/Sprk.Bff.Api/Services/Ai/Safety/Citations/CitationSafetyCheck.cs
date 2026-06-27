@@ -102,7 +102,7 @@ public sealed class CitationSafetyCheck
         ILogger<CitationSafetyCheck> logger)
     {
         _verificationService = verificationService ?? throw new ArgumentNullException(nameof(verificationService));
-        _logger              = logger               ?? throw new ArgumentNullException(nameof(logger));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>
@@ -153,12 +153,12 @@ public sealed class CitationSafetyCheck
 
             var entries = report.All
                 .Select(r => new CitationAnnotationEntry(
-                    Raw:        r.Citation.RawText,
-                    Type:       r.Citation.CitationType.ToString(),
+                    Raw: r.Citation.RawText,
+                    Type: r.Citation.CitationType.ToString(),
                     Normalized: r.Citation.NormalizedKey,
                     IsVerified: r.IsVerified,
                     Confidence: r.ConfidenceScore,
-                    SourceUrl:  r.SourceUrl))
+                    SourceUrl: r.SourceUrl))
                 .ToList()
                 .AsReadOnly();
 

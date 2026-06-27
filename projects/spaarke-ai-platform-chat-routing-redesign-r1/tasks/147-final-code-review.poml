@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="147" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Final code-review pass across project surface (/code-review)</title>
+    <phase>7: WP4 Retirement + Project Closeout</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>144,145</dependencies>
+    <blocks>146</blocks>
+    <tags>quality-gate</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Quality-gate task; invokes code-review skill; runs BEFORE UAT per CRIT-7 fix; STANDARD per task-execute Step 0.5</rigor-reason>
+    <parallel-group>7-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Run `/code-review` (`.claude/skills/code-review/SKILL.md`) across the project's full code surface — every `.cs`, `.ts`, `.tsx`, `.json`, `.ps1` modified or created in Phases 0-7. Quality gate runs BEFORE UAT (task 146) per CRIT-7 fix to catch defects before user-acceptance scenarios. Critical findings MUST be fixed before task 146 begins.
+  </prompt>
+
+  <role>SPAARKE platform code reviewer. Applies the canonical code-review skill methodology.</role>
+
+  <goal>
+    `/code-review` skill invoked; full project surface reviewed; findings categorized (critical / major / minor); critical findings fixed in-line; minor findings logged for R7 backlog. Report at `notes/handoffs/147-code-review.md` confirms exit-0 readiness for UAT.
+  </goal>
+
+  <context>
+    <background>
+      Per CRIT-7 fix + spec Success Criteria. Quality gates moved BEFORE UAT to avoid the anti-pattern of running expensive UAT scenarios on un-reviewed code. Critical findings here gate task 146 (UAT).
+    </background>
+    <relevant-files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/solutions/SpaarkeAi/</file>
+      <file>scripts/seed-data/</file>
+      <file>tests/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Critical findings BLOCK task 146. Major findings escalated to owner. Minor findings logged for R7.</constraint>
+    <constraint source="ADR-013">Reviewer enforces ADR-013 facade boundary across project surface.</constraint>
+    <constraint source="ADR-029">Reviewer confirms publish-size discipline maintained (no `<PublishTrimmed>` or `<PublishAot>` introduced).</constraint>
+    <constraint source="ADR-033">Reviewer confirms streaming hot-path discipline preserved.</constraint>
+    <constraint source="project">Skill invocation per CLAUDE.md §4 — invoke Skill tool with `code-review`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Invoke the `code-review` skill via the Skill tool against the project's branch diff vs master.</step>
+    <step order="2">Capture findings; categorize as critical / major / minor.</step>
+    <step order="3">For each CRITICAL finding: fix in-line if scope is bounded; escalate to owner if scope exceeds. NO CRITICAL FINDINGS may persist past task 147.</step>
+    <step order="4">For each MAJOR finding: discuss with owner; either fix or document as accepted risk in R7 backlog.</step>
+    <step order="5">For each MINOR finding: log into R7 backlog at `notes/r7-backlog.md` (task 150 consolidates).</step>
+    <step order="6">Author report at `notes/handoffs/147-code-review.md` with: critical fix log, major decisions, minor list, exit-0 readiness confirmation.</step>
+    <step order="7">Update TASK-INDEX.md: task 147 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">code-review</tool>
+    <tool name="Edit">Apply critical-finding fixes</tool>
+    <tool name="Write">notes/handoffs/147-code-review.md + notes/r7-backlog.md (append)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/147-code-review.md — review report</output>
+    <output type="docs">notes/r7-backlog.md — appended minor findings</output>
+    <output type="code">Critical-finding fixes applied in-line where scope permitted</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">code-review skill invoked + report generated.</criterion>
+    <criterion testable="true">Zero CRITICAL findings remain unfixed.</criterion>
+    <criterion testable="true">MAJOR findings have owner-accepted disposition.</criterion>
+    <criterion testable="true">MINOR findings logged for R7.</criterion>
+    <criterion testable="true">Exit-0 readiness for UAT confirmed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 148 (adr-check) — different skills, different findings categories. Both gate task 146 entry.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol; sub-skill code-review invoked.</protocol>
+  </execution>
+</task>

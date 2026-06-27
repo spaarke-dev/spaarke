@@ -609,9 +609,14 @@ public class DataverseWebApiService : IDataverseService
             payload["sprk_sourcetype"] = request.SourceType.Value;
 
         // Search index tracking fields
+        // R3 FR-3H3.2 dual-write: legacy bool sprk_searchindexed + sprk_searchindexedon are PRESERVED
+        // alongside the new lifecycle datetimes sprk_searchindexqueuedon + sprk_searchindexcompletedon
+        // for the duration of R3 + one sprint per spec assumption (line 366). Removal is deferred to R4.
         if (request.SearchIndexed.HasValue) payload["sprk_searchindexed"] = request.SearchIndexed.Value;
         if (request.SearchIndexName != null) payload["sprk_searchindexname"] = request.SearchIndexName;
         if (request.SearchIndexedOn.HasValue) payload["sprk_searchindexedon"] = request.SearchIndexedOn.Value;
+        if (request.SearchIndexQueuedOn.HasValue) payload["sprk_searchindexqueuedon"] = request.SearchIndexQueuedOn.Value;
+        if (request.SearchIndexCompletedOn.HasValue) payload["sprk_searchindexcompletedon"] = request.SearchIndexCompletedOn.Value;
 
         var url = $"{_entitySetName}({guid})";
 
@@ -781,7 +786,17 @@ public class DataverseWebApiService : IDataverseService
             // AI-generated summaries (populated by RAG pipeline)
             // Dataverse fields: sprk_filesummary and sprk_filetldr (matching write operations)
             Summary = GetStringValue(data, "sprk_filesummary"),
-            Tldr = GetStringValue(data, "sprk_filetldr")
+            Tldr = GetStringValue(data, "sprk_filetldr"),
+
+            // Search index tracking (multi-container-multi-index-r1 + R3 FR-3H3.2 dual-write)
+            // Populated by RagEndpoints.IndexFile + RagIndexingJobHandler after successful AI Search write.
+            // VisualizationService reads SearchIndexName to bind the correct SearchClient.
+            // Legacy SearchIndexed + SearchIndexedOn preserved for dual-write transition (R3 spec line 366).
+            SearchIndexed = GetNullableBoolValue(data, "sprk_searchindexed"),
+            SearchIndexName = GetStringValue(data, "sprk_searchindexname"),
+            SearchIndexedOn = GetDateTimeValue(data, "sprk_searchindexedon"),
+            SearchIndexQueuedOn = GetDateTimeValue(data, "sprk_searchindexqueuedon"),
+            SearchIndexCompletedOn = GetDateTimeValue(data, "sprk_searchindexcompletedon")
         };
     }
 
@@ -955,6 +970,12 @@ public class DataverseWebApiService : IDataverseService
     public async Task<IEnumerable<DocumentEntity>> GetDocumentsByInvoiceAsync(Guid invoiceId, Guid? excludeDocumentId = null, CancellationToken ct = default)
     {
         return await GetDocumentsByLookupAsync("_sprk_invoice_value", invoiceId, excludeDocumentId, "Invoice", ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<DocumentEntity>> GetDocumentsByWorkAssignmentAsync(Guid workAssignmentId, Guid? excludeDocumentId = null, CancellationToken ct = default)
+    {
+        return await GetDocumentsByLookupAsync("_sprk_workassignment_value", workAssignmentId, excludeDocumentId, "WorkAssignment", ct);
     }
 
     /// <summary>
@@ -2119,6 +2140,25 @@ public class DataverseWebApiService : IDataverseService
             "Configure DI to use ServiceClient implementation.");
     }
 
+    /// <summary>
+    /// Generic N:N associate. The Web API surface stubs this out — the BFF runtime
+    /// resolves <see cref="IGenericEntityService"/> to <c>DataverseServiceClientImpl</c>
+    /// (see <c>GraphModule</c>), which provides the real implementation via the
+    /// ServiceClient SDK. Kept as a NotImplementedException to fail loud if anyone
+    /// ever rewires the Web API service onto the generic interface seam.
+    /// </summary>
+    public Task AssociateAsync(
+        string entityLogicalName,
+        Guid entityId,
+        string relationshipName,
+        IEnumerable<EntityReference> relatedEntities,
+        CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "AssociateAsync is implemented in DataverseServiceClientImpl. " +
+            "Configure DI to use ServiceClient implementation for N:N associations.");
+    }
+
     public Task<Entity> RetrieveByAlternateKeyAsync(
         string entityLogicalName,
         KeyAttributeCollection alternateKeyValues,
@@ -2190,5 +2230,11 @@ public class DataverseWebApiService : IDataverseService
     {
         throw new NotImplementedException(
             "RetrieveMultipleAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<EntityCollection> RetrieveMultipleAsync(FetchExpression fetch, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "RetrieveMultipleAsync(FetchExpression) is implemented in DataverseServiceClientImpl.");
     }
 }

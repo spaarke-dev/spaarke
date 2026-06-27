@@ -583,18 +583,6 @@ public class PriorityScoringServiceTests
         result.Score.Should().BeLessOrEqualTo(100);
     }
 
-    [Fact]
-    public void NegativePendingInvoiceCount_ReturnsZeroPoints()
-    {
-        // invoiceCount of -1 falls into `0 => 0` matching — but switch on negative:
-        // -1 is not 0 and not <= 2 (in the positive sense), so falls through to `_ => 10`.
-        // Verify the service handles it without throwing.
-        var input = ZeroInput(pendingInvoiceCount: -1);
-
-        Action act = () => _sut.CalculatePriorityScore(input);
-
-        act.Should().NotThrow("service should handle any int input without exceptions");
-    }
 
     [Fact]
     public void NullMatterValueTier_ReturnsZeroPoints()

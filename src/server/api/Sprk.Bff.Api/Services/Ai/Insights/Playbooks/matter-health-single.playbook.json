@@ -1,0 +1,288 @@
+{
+  "$comment": "Insights Engine Widgets r1 task 021 — matter-health-single playbook. The first proven topic for the topic/subject-scoped Insight Summary Card framework (project ai-spaarke-insights-engine-widgets-r1). Wires the Task 020 synthesis prompt (sprk_analysisaction row id 5981632e-4165-f111-ab0c-7ced8ddc4cc6, actionCode 'matter-health-synthesis', executor action type 60 Agent Service) into the canonical Insights synthesis graph established by predict-matter-cost (Insights Engine r2 Wave B). Persists output via existing UpdateRecord node (action type 22) into sprk_matter.sprk_performancesummary per FR-14. Deploy via: scripts/Deploy-Playbook.ps1 -DefinitionFile <this-file> after az login.",
+  "$comment-publication": "Published as a Dataverse sprk_analysisplaybook row + 8 sprk_playbooknodes rows. The IInsightsAi.AnswerQuestionAsync facade resolves topic 'matter-health' (via sprk_aitopicregistry, Wave 1B sibling task 013) -> playbook row -> nodes via INodeService.GetNodesAsync; PlaybookOrchestrationService.ExecuteAppOnlyAsync drains the stream; InsightsPlaybookExecutionCache extracts the final ReturnInsightArtifactNode output as the cached InsightArtifact. UpdateRecord persistence is configured in sibling task 022 (this file establishes the node skeleton + envelope-shaped configJson; 022 wires the exact field mappings to sprk_matter.sprk_performancesummary).",
+  "$comment-naming": "Per project Q-U1 owner ban: the playbook name is bare 'matter-health-single' with NO '@v1' suffix anywhere in this file. Versioning is via sprk_analysisplaybook.sprk_version column (Dataverse-side) and the schemaVersion:\"1.0\" string in the persisted JSON envelope (FR-14). This deviates intentionally from r2's '@v1' convention (predict-matter-cost@v1 / universal-ingest@v1) and is the proven first instance of the new naming convention for r1+.",
+  "$comment-deviation": "Synthesis LLM call uses AgentServiceNodeExecutor (action_type=60) rather than AiAnalysisNodeExecutor (action_type=0). Rationale matches predict-matter-cost.playbook.json $comment-deviation: AiAnalysisNodeExecutor requires NodeExecutionContext.Document with extracted text (document-bound). Synthesis playbooks have NO document — they compose retrieved evidence from prior nodes. AgentServiceNodeExecutor accepts pure prompt + tenantId via ConfigJson, matching synthesis semantics. The synthesis prompt content lives in sprk_analysisaction[matter-health-synthesis].sprk_systemprompt (Task 020 row); AgentServiceNodeExecutor reads it at runtime via the actionCode FK.",
+
+  "playbook": {
+    "name": "matter-health-single",
+    "description": "Insights Engine Widgets r1 — matter-health-single playbook (first proven topic). Composes QueryDataverse-resolved Matter context + KPI Assessments + spaarke-insights-index Observations into a 7-dimension diagnostic narrative (composite-grade, trend, themes, inflection, critical-assessments, forward-risk, evidence-gap) via the Task 020 synthesis prompt. Evidence-sufficiency rule kpiAssessments.min=2 routes to DeclineToFindNode on insufficient assessment count. Persists the synthesized envelope to sprk_matter.sprk_performancesummary per FR-14 via the existing UpdateRecord node executor. Cache TTL is read from sprk_aitopicregistry.sprk_cachettlminutes (60 minutes default) per FR-21.",
+    "isPublic": true,
+    "isSystemPlaybook": true,
+    "sprk_playbooktype": 0,
+    "$comment-type": "sprk_playbooktype=0 (AiAnalysis) — matches predict-matter-cost convention. The Phase 1 discriminator for Insights synthesis vs Analysis vs Ingest is isSystemPlaybook=true + the playbook name. Resolution from topic to playbook is via sprk_aitopicregistry.sprk_playbookname FK (r1 Wave 1A task 013 seeds the matter-health/single row pointing here).",
+    "sprk_configjson": {
+      "mode": "insights",
+      "tier": "inference",
+      "cacheTtlSeconds": 3600,
+      "$comment-cacheTtl": "60 minutes per FR-21 (matter-health topic default). Authoritative source is sprk_aitopicregistry.sprk_cachettlminutes (per topic, SME-editable). The value here is a fallback for direct playbook invocation; the topic-registry-driven cache layer (IInsightsPlaybookExecutionCache extension per spec) overrides at request time. Deviates from r2's universal 15-minute default per FR-21.",
+      "evidenceRule": {
+        "kpiAssessments": { "min": 2 }
+      },
+      "$comment-evidenceRule": "Mirrors EvidenceSufficiencyNode 'checkSufficiency' config below. Recorded on the playbook record so admin tooling can audit evidence rules without traversing node configs. Threshold 2 per design.md §4.4 Decline path + Task 020 prompt D7 Decline-path semantics (assessments.length < 2 OR all Notes empty -> structured Decline).",
+      "insufficientEvidenceTemplate": "Insufficient data is available to provide Insights Analysis: only {have} KPI assessments are available for this Matter (need {need} per rule '{rule}' from {from}). Add at least {need} assessments per Performance Area to enable diagnostic Insights.",
+      "$comment-insufficientTemplate": "FR-24 + design.md §4.4 owner-confirmed Decline copy. Tokens: {have}=assessmentCount, {need}=2, {rule}='kpiAssessments.min', {from}='queryMatterContext'. The UI maps this to the FR-06 Decline card state.",
+      "parameterSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "required": ["matterId", "tenantId"],
+        "properties": {
+          "matterId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Subject Matter Guid (passed via Subject field at runtime in 'matter:GUID' form per r2 multi-entity subject scheme). The orchestrator parses the matterId out of the Subject. Used in QueryDataverse FetchXml + AiAnalysis template parameters."
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "Tenant ID for multi-tenant isolation. Required by index retrieval + UpdateRecord OBO/MI scoping."
+          },
+          "currentGrade": {
+            "type": "string",
+            "description": "OPTIONAL — pre-computed composite grade (e.g., 'D-'). Resolved from Matter row by QueryDataverse when absent. Surfaced as {{currentGrade}} in the synthesis prompt (Task 020 templateParameters)."
+          }
+        }
+      }
+    },
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    },
+    "$comment-scopes": "Insights-mode playbooks bypass the legacy skill/action/knowledge/tool resolution — the node executors are auto-discovered by NodeExecutorRegistry via SupportedActionTypes. Scopes left empty intentionally; the seed script tolerates empty arrays per resolution-loop guards."
+  },
+
+  "nodes": [
+    {
+      "name": "queryMatterContext",
+      "nodeType": "AIAnalysis",
+      "actionCode": "INS-FACT@v1",
+      "$comment-actionCode": "Task 023 deploy decision (option b): re-key to r2's existing INS-FACT@v1 row (sprk_analysisactionid=5137365a-825e-f111-a825-6045bdebafa9, sprk_name='Insights — Live Fact Resolver'). Verified via Dataverse Web API GET 2026-06-10: no bare-code 'INS-FACT' row exists in spaarkedev1; only the @v1 form does. Per Q-U1 the ban applies to NEW identifiers authored by r1 — r2 row references are allowed as-is. This avoids creating a redundant alias row for a single playbook reference.",
+      "actionType": 80,
+      "$comment-actionType": "ActionType.LiveFact = 80; handled by LiveFactNode. Resolves Matter Live Facts (matter type, client, attorney, current spend, duration, current composite grade) via ILiveFactResolver — input to the synthesis prompt's {{matterContext}} + {{currentGrade}} placeholders.",
+      "outputVariable": "matterContext",
+      "positionX": 100, "positionY": 200,
+      "configJson": {
+        "subject": "matter:{{matterId}}",
+        "predicate": "currentMatterFacts",
+        "$comment": "Resolves Matter scalar facts (matter type, attorney, client, opposing counsel, current spend, duration, current composite grade) via ILiveFactResolver. {{matterId}} substituted from Parameters at runtime by ApplyConfigJsonTemplates."
+      }
+    },
+    {
+      "name": "queryKpiAssessments",
+      "nodeType": "AIAnalysis",
+      "actionCode": "INS-FETCH-KPI",
+      "$comment-actionCode": "NEW action row to be deployed by Wave 1B task 023: sprk_analysisaction row sprk_actioncode='INS-FETCH-KPI' (no @v suffix per Q-U1), sprk_executoractiontype=51 (QueryDataverse). The QueryDataverseNodeExecutor reads entityLogicalName + fetchXml from configJson — no JPS payload required on the action row. Bare 'INS-FETCH-KPI' code aligns with the matter-health-synthesis bare convention (Task 020).",
+      "actionType": 51,
+      "$comment-actionType": "ActionType.QueryDataverse = 51; handled by QueryDataverseNodeExecutor. Reads all sprk_kpiassessment rows for this Matter (across the 3 Performance Areas per FR-13). Used by EvidenceSufficiencyNode for the kpiAssessments.min=2 rule + by AiAnalysis as the {{assessments}} prompt placeholder.",
+      "outputVariable": "assessments",
+      "positionX": 400, "positionY": 100,
+      "dependsOn": ["queryMatterContext"],
+      "configJson": {
+        "entityLogicalName": "sprk_kpiassessment",
+        "fetchXml": "<fetch version='1.0' mapping='logical' distinct='false'><entity name='sprk_kpiassessment'><attribute name='sprk_kpiassessmentid' /><attribute name='sprk_performancearea' /><attribute name='sprk_grade' /><attribute name='sprk_notes' /><attribute name='sprk_assessmentdate' /><attribute name='createdon' /><filter type='and'><condition attribute='sprk_matter' operator='eq' value='{{matterId}}' /></filter><order attribute='sprk_assessmentdate' descending='true' /></entity></fetch>",
+        "$comment-fetchXml": "Reads all KPI assessments for the Matter across all 3 Performance Areas per FR-13 (Guideline Compliance 100000000, Budget Compliance 100000001, Outcomes Achievement 100000002). {{matterId}} substituted at runtime. QueryDataverseNodeExecutor returns NodeOutput.StructuredData={count,items,entityLogicalName}; the synthesis prompt's {{assessments}} placeholder consumes this via PlaybookOrchestrationService.ApplyConfigJsonTemplates."
+      }
+    },
+    {
+      "name": "retrieveObservations",
+      "nodeType": "AIAnalysis",
+      "actionCode": "INS-IDXR@v1",
+      "$comment-actionCode": "Task 023 deploy decision (option b): re-key to r2's existing INS-IDXR@v1 row (sprk_analysisactionid=23939266-825e-f111-a825-6045bdebafa9, sprk_name='Insights — Index Retrieve'). Same rationale as INS-FACT@v1 above.",
+      "actionType": 90,
+      "$comment-actionType": "ActionType.IndexRetrieve = 90; handled by IndexRetrieveNode. Pulls per-Matter Observations from spaarke-insights-index (gracefully empty if files-index pipeline unhealthy per FR-11). requireEvidence=false because empty observations is acceptable — EvidenceSufficiencyNode gates on KPI assessment count (the harder constraint), not observation count.",
+      "outputVariable": "observations",
+      "positionX": 400, "positionY": 300,
+      "dependsOn": ["queryMatterContext"],
+      "configJson": {
+        "indexName": "spaarke-insights-index",
+        "artifactType": "observation",
+        "filter": "matterId eq '{{matterId}}'",
+        "vectorQuery": "{{matterContext.matterType}} performance themes inflection points client copy gaps deadlines scope",
+        "topK": 25,
+        "requireEvidence": false,
+        "$comment-requireEvidence": "false — empty observations is acceptable per FR-11 ('optional — graceful empty if files-index pipeline unhealthy'). EvidenceSufficiencyNode gates on KPI assessment count instead."
+      }
+    },
+    {
+      "name": "checkSufficiency",
+      "nodeType": "Control",
+      "actionCode": "INS-EVID@v1",
+      "$comment-actionCode": "Task 023 deploy decision (option b): re-key to r2's existing INS-EVID@v1 row (sprk_analysisactionid=6139aa6c-825e-f111-a825-6045bdebafa9, sprk_name='Insights — Evidence Sufficiency'). Same rationale as INS-FACT@v1 above.",
+      "actionType": 100,
+      "$comment-actionType": "ActionType.EvidenceSufficiency = 100; handled by EvidenceSufficiencyNode. Gates on KPI assessment count: <2 -> DeclineToFind branch; >=2 -> synthesize branch.",
+      "outputVariable": "sufficiency",
+      "positionX": 700, "positionY": 200,
+      "dependsOn": ["queryKpiAssessments", "retrieveObservations"],
+      "configJson": {
+        "rules": [
+          {
+            "name": "kpiAssessments",
+            "from": "assessments",
+            "countFrom": "count",
+            "minCount": 2,
+            "$comment-minCount": "Decline threshold per design.md §4.4 + Task 020 prompt D7. <2 assessments (or all Notes empty/whitespace — checked secondarily inside the synthesis prompt) yields verdict=insufficient + structured gap (have:N, need:2-N, rule:'kpiAssessments.min')."
+          }
+        ],
+        "sufficientBranch": "synthesize",
+        "insufficientBranch": "declineInsufficient",
+        "$comment-branches": "EvidenceSufficiencyNode emits selectedBranch=sufficientBranch | insufficientBranch. Per the Wave C1 Gap #2 patch (PlaybookOrchestrationService branch-aware skip) shipped by universal-ingest, downstream nodes on the non-selected path are skipped."
+      }
+    },
+    {
+      "name": "synthesize",
+      "nodeType": "AIAnalysis",
+      "actionCode": "matter-health-synthesis",
+      "$comment-actionCode": "Task 020 sprk_analysisaction row id 5981632e-4165-f111-ab0c-7ced8ddc4cc6 — bare 'matter-health-synthesis' actionCode (no @v1 per Q-U1 owner ban). Executor action type 60 (Agent Service). Carries the 7-dimension diagnostic synthesis prompt (≈14.7 KB JPS) in sprk_systemprompt per audit DR-007 / canonical-architecture-decisions.md §2.7. Deploy-Playbook.ps1 line 673 resolves actionCode -> sprk_actionid FK at deploy time.",
+      "actionType": 60,
+      "$comment-actionType": "ActionType.AgentService = 60; handled by AgentServiceNodeExecutor. Used here (not AiAnalysisNodeExecutor) because synthesis composes prior-node outputs into a prompt — no document bound. See top-of-file $comment-deviation. The synthesis prompt JPS produces the FR-14 envelope shape ({body, citations[], dimensions[]}) — see Task 020 handoff at notes/handoffs/matter-health-prompt-design.md.",
+      "outputVariable": "synthesis",
+      "positionX": 1000, "positionY": 200,
+      "dependsOn": ["checkSufficiency"],
+      "configJson": {
+        "tenantId": "{{tenantId}}",
+        "templateParameters": {
+          "matterId": "{{matterId}}",
+          "currentGrade": "{{currentGrade}}",
+          "matterContext": "{{matterContext}}",
+          "assessments": "{{assessments}}",
+          "observations": "{{observations}}"
+        },
+        "$comment-prompt-source": "Synthesis prompt content lives in sprk_analysisaction[matter-health-synthesis].sprk_systemprompt (Task 020 row 5981632e-4165-f111-ab0c-7ced8ddc4cc6). AgentServiceNodeExecutor reads the prompt at runtime via the actionCode FK; the templateParameters above feed the JPS placeholders {{matterId}}, {{currentGrade}}, {{matterContext}}, {{assessments}}, {{observations}} per Task 020 §9 prompt design. PlaybookOrchestrationService.ApplyConfigJsonTemplates resolves prior-node OutputVariables.",
+        "$comment-branching": "This node executes ONLY when checkSufficiency.verdict == 'sufficient'. Branch routing handled by checkSufficiency's selectedBranch output + the engine's downstream node skip logic (universal-ingest Wave C1 Gap #2 patch: a node whose upstream EvidenceSufficiency emitted 'insufficient' is skipped per EvidenceSufficiencyNode docs).",
+        "$comment-output-shape": "The synthesis prompt's output.fields per Task 020 §6 produces: { body: string (markdown narrative), citations: array (assessment + document refs), dimensions: array (composite-grade|trend|themes|inflection|critical-assessments|forward-risk|evidence-gap), confidence: number, reasoning: string }. ReturnInsightArtifactNode downstream maps these to InferenceArtifact envelope fields."
+      }
+    },
+    {
+      "name": "groundCitations",
+      "nodeType": "Control",
+      "actionCode": "INS-GRND@v1",
+      "$comment-actionCode": "Task 023 deploy decision (option b): re-key to r2's existing INS-GRND@v1 row (sprk_analysisactionid=32eafa72-825e-f111-a825-6045bdebafa9, sprk_name='Insights — Grounding Verify'). Same rationale as INS-FACT@v1 above.",
+      "actionType": 70,
+      "$comment-actionType": "ActionType.GroundingVerify = 70; handled by GroundingVerifyNode. Mechanically verifies every synthesis citation against the source observation chunks' verbatim text. Failed citations are stripped (not annotated) before ReturnInsightArtifactNode emits the final InferenceArtifact. EvidenceGuard (allowEmptyEvidence on ReturnInsightArtifact) decides post-stripping handling.",
+      "outputVariable": "groundedSynthesis",
+      "positionX": 1300, "positionY": 200,
+      "dependsOn": ["synthesize"],
+      "configJson": {
+        "citationsFrom": "synthesize",
+        "citationsJsonPath": "citations",
+        "sourceChunksFrom": "retrieveObservations",
+        "sourceChunksJsonPath": "documents",
+        "annotationText": "[citation could not be verified]",
+        "$comment": "Verifies the synthesis citations' excerpts against retrieved observation chunks. Assessment-type citations (FR-07: { type: 'assessment', id: <sprk_kpiassessment Guid>, label, excerpt }) verify against the assessments node output's items (not retrieveObservations); GroundingVerifyNode handles type-discriminated citation streams via citationsJsonPath. Phase 1 implementation may need a follow-up to add 'sourceChunks2From' for the assessments stream — flagged for downstream task 022/023 if needed."
+      }
+    },
+    {
+      "name": "ReturnInsightArtifactNode",
+      "$comment-name": "MUST be exactly 'ReturnInsightArtifactNode' (case-sensitive). InsightsPlaybookExecutionCache.ReturnInsightArtifactNodeName is hardcoded to this string for stream draining — see InsightsPlaybookExecutionCache.cs line 59.",
+      "nodeType": "Output",
+      "actionCode": "INS-RART@v1",
+      "$comment-actionCode": "Task 023 deploy decision (option b): re-key to r2's existing INS-RART@v1 row (sprk_analysisactionid=96d52e7f-825e-f111-a825-6045bdebafa9, sprk_name='Insights — Return Insight Artifact'). Same rationale as INS-FACT@v1 above.",
+      "actionType": 120,
+      "$comment-actionType": "ActionType.ReturnInsightArtifact = 120; handled by ReturnInsightArtifactNode. Serializes the grounded synthesis into an InferenceArtifact envelope per FR-14.",
+      "outputVariable": "inferenceArtifact",
+      "positionX": 1600, "positionY": 200,
+      "dependsOn": ["groundCitations"],
+      "configJson": {
+        "from": "groundCitations",
+        "artifactKind": "inference",
+        "subject": "matter:{{matterId}}",
+        "predicate": "matterHealthDiagnostic",
+        "displayHint": "diagnostic-narrative",
+        "producedById": "playbook://matter-health-single",
+        "producedByKind": "playbook",
+        "producedByVersion": "1.0",
+        "$comment-producedByVersion": "Bare '1.0' string version per Q-U1 (NOT 'v1'). Authoritative version source is sprk_analysisplaybook.sprk_version (Dataverse-side) — this field is the in-envelope projection per FR-14 'playbookVersion' envelope field.",
+        "valueFrom": "body",
+        "evidenceFrom": "citations",
+        "confidenceFrom": "confidence",
+        "reasoningFrom": "reasoning",
+        "allowEmptyEvidence": false,
+        "$comment-evidenceGuard": "allowEmptyEvidence=false enforces D-A23 / D-48 EvidenceGuard: empty citations after GroundingVerifyNode stripping yields node-level EVIDENCE_REQUIRED error. The orchestrator's null-artifact handling surfaces this as a DeclineResponse to the InsightSummaryCard, which renders the FR-06 Decline state."
+      }
+    },
+    {
+      "name": "declineInsufficient",
+      "nodeType": "Output",
+      "actionCode": "INS-DECL@v1",
+      "$comment-actionCode": "Task 023 deploy decision (option b): re-key to r2's existing INS-DECL@v1 row (sprk_analysisactionid=d1121079-825e-f111-a825-6045bdebafa9, sprk_name='Insights — Decline to Find'). Same rationale as INS-FACT@v1 above.",
+      "actionType": 110,
+      "$comment-actionType": "ActionType.DeclineToFind = 110; handled by DeclineToFindNode. Insufficient-evidence branch — fires ONLY when checkSufficiency.verdict == 'insufficient'.",
+      "outputVariable": "decline",
+      "positionX": 1000, "positionY": 400,
+      "dependsOn": ["checkSufficiency"],
+      "configJson": {
+        "reason": "insufficient-evidence",
+        "from": "checkSufficiency",
+        "explanationTemplate": "Insufficient data is available to provide Insights Analysis: only {have} KPI assessments are available for this Matter (need {need} per rule 'kpiAssessments.min' from queryKpiAssessments). Add at least {need} assessments per Performance Area to enable diagnostic Insights.",
+        "$comment-explanationTemplate": "FR-24 + design.md §4.4 owner-confirmed copy. Surfaced to InsightSummaryCard via the DeclineResponse path; UI renders this verbatim in the FR-06 Decline state alongside the suggested action ('add N more assessments').",
+        "suggestedActions": [
+          "Add KPI assessments for the Guideline Compliance, Budget Compliance, and Outcomes Achievement Performance Areas (per FR-13)",
+          "Ensure each assessment's Notes field is populated with substantive evaluator commentary (the synthesis prompt's themes/inflection dimensions require Notes text)"
+        ],
+        "confidenceInDecline": 0.95,
+        "$comment": "This node fires ONLY when checkSufficiency.verdict == 'insufficient'. Emits a DeclineResponse — the cache's DrainEngineStreamAsync returns null (no ReturnInsightArtifactNode output), the orchestrator's null-handling returns Declined(...) to the InsightSummaryCard. Matches r2 predict-matter-cost decline path semantics."
+      }
+    },
+    {
+      "name": "persistEnvelope",
+      "nodeType": "Output",
+      "actionCode": "INS-UPDR",
+      "$comment-actionCode": "NEW action row to be deployed by Wave 1B task 023: sprk_analysisaction row sprk_actioncode='INS-UPDR' (Insights — Update Record persistence; bare code form per Q-U1 owner ban on version-suffix vernacular). sprk_executoractiontype=22 (UpdateRecord). The UpdateRecordNodeExecutor reads entityLogicalName + recordId + fieldMappings from configJson — no JPS payload required on the action row.",
+      "actionType": 22,
+      "$comment-actionType": "ActionType.UpdateRecord = 22; handled by UpdateRecordNodeExecutor (src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs). Persists the FR-14 JSON envelope to existing sprk_matter.sprk_performancesummary (longtext, R5-era field) per FR-14 + FR-16 (no new fields). Uses the typed fieldMappings path with type='string' so the rendered template value is stored verbatim as serialized JSON (no Dataverse-side coercion).",
+      "outputVariable": "persistResult",
+      "positionX": 1900, "positionY": 200,
+      "dependsOn": ["ReturnInsightArtifactNode"],
+      "configJson": {
+        "entityLogicalName": "sprk_matter",
+        "$comment-entityLogicalName": "Per FR-16 — write to existing sprk_matter entity (no new entity, no new fields). Resolved to entity-set 'sprk_matters' inside UpdateRecordNodeExecutor.GetEntitySetName for the OData PATCH URL.",
+        "recordId": "{{matterId}}",
+        "$comment-recordId": "Subject Matter Guid extracted from playbook Parameters at runtime via ApplyConfigJsonTemplates. The {{matterId}} placeholder resolves to the Guid that the orchestrator parsed out of the 'matter:GUID' Subject (per r2 multi-entity subject scheme). UpdateRecordNodeExecutor.ExecuteAsync calls Guid.TryParse on the rendered value.",
+        "fieldMappings": [
+          {
+            "field": "sprk_performancesummary",
+            "$comment-field": "Per FR-14 + FR-16 — the EXISTING longtext field on sprk_matter that previously held R5 placeholder static text. This UpdateRecord call REPLACES that placeholder with the AI-generated JSON envelope. NO new field is added per FR-16 / Q-U6.",
+            "type": "string",
+            "$comment-type": "type='string' (FieldMappingType.String) → UpdateRecordNodeExecutor.CoerceFieldValue returns the rendered string verbatim. We deliberately store serialized JSON as a string in the longtext column (rather than relying on JSON-typed coercion); downstream consumers per FR-15 parse the string as JSON via Power Fx / plugin / view transformations.",
+            "value": "{\"schemaVersion\":\"1.0\",\"body\":{{{groundCitations.output.body}}},\"citations\":{{{groundCitations.output.citations}}},\"generatedAt\":\"{{run.startedAtIso}}\",\"playbookName\":\"matter-health-single\",\"tenantId\":\"{{tenantId}}\",\"dimensions\":{{{groundCitations.output.dimensions}}}}",
+            "$comment-value": "FR-14 envelope construction as a Handlebars-templated JSON string. The 7 envelope fields per Q-U1 + FR-14: (1) schemaVersion = literal string '1.0' (NOT int 1) per Q-U1; (2) body = markdown narrative from GroundingVerifyNode output (post-citation-stripping synthesis text from the AgentService synthesize node — groundCitations carries forward the synthesis output with verified citations only); (3) citations = type-discriminated array (FR-07 assessment + document refs); (4) generatedAt = ISO 8601 timestamp from run context (TemplateEngine populates run.startedAtIso); (5) playbookName = BARE 'matter-health-single' (NO @v1 suffix per Q-U1 owner ban); (6) tenantId = from playbook Parameters; (7) dimensions = the 7-element array from synthesis output (composite|trend|themes|inflection|critical|risk|evidenceGaps per FR-13 / Task 020 prompt §6).",
+            "$comment-triple-stash": "Triple-stash Handlebars ({{{var}}}) on body/citations/dimensions ensures the renderer emits raw values (already-quoted JSON for strings, raw JSON for arrays/objects) without HTML-escaping. The synthesize node's StructuredData output flows through PlaybookOrchestrationService.ApplyConfigJsonTemplates into UpdateRecordNodeExecutor.BuildTemplateContext, which exposes prior outputs as `{{nodeName.output.fieldPath}}`. The synthesis prompt (Task 020 §6 output schema) emits body as a JSON string literal and citations/dimensions as arrays — Handlebars triple-stash preserves their JSON shape inside the envelope.",
+            "$comment-playbookVersion-omission": "spec FR-14 example envelope mentions a 'playbookVersion' field, but POML acceptance criterion 'All 7 envelope fields present' enumerates exactly: schemaVersion, body, citations, generatedAt, playbookName, tenantId, dimensions. Per project Q-U1 owner ban + design.md §4.5, version is conveyed via schemaVersion='1.0' (envelope contract version, NOT playbook code version). The Dataverse-side sprk_analysisplaybook.sprk_version row column is authoritative for playbook versioning; the envelope schemaVersion describes the envelope shape itself. Omitting playbookVersion keeps the 7-field count exact and avoids reintroducing version-suffix vernacular."
+          }
+        ],
+        "$comment-fieldMappings-shape": "Single-entry fieldMappings array because FR-16 binds us to ONE field (sprk_performancesummary). The typed-mappings path is preferred over the legacy flat 'fields' dict per UpdateRecordNodeExecutor.cs XML doc (lines 18-31) — explicit type='string' avoids HeuristicParse mis-coercion (e.g., a JSON value that starts with a number would be int-parsed under the legacy path)."
+      }
+    }
+  ],
+
+  "dependsOnGraph": {
+    "$comment": "Documentation-only view of the dependency graph. Realized in Dataverse via sprk_dependsonjson on each node row. The seed script Deploy-Playbook.ps1 sets these from the 'dependsOn' arrays above. Branch labels feed the universal-ingest Wave C1 Gap #2 engine patch (ExecutionGraph stores per-edge branch; PlaybookOrchestrationService.ExecuteNodeAsync consults selectedBranch on EvidenceSufficiencyResult to skip non-selected-branch downstream nodes). Per task 022 Wave 1B sub-wave 2: persistEnvelope depends on ReturnInsightArtifactNode (writes the FR-14 envelope to sprk_matter.sprk_performancesummary AFTER the final InferenceArtifact is emitted, so the cache layer's DrainEngineStreamAsync still finds ReturnInsightArtifactNode as the terminal artifact-producing node — persistEnvelope is a side-effect tail).",
+    "edges": [
+      { "from": "queryMatterContext", "to": "queryKpiAssessments" },
+      { "from": "queryMatterContext", "to": "retrieveObservations" },
+      { "from": "queryKpiAssessments", "to": "checkSufficiency" },
+      { "from": "retrieveObservations", "to": "checkSufficiency" },
+      { "from": "checkSufficiency", "to": "synthesize", "branch": "synthesize" },
+      { "from": "checkSufficiency", "to": "declineInsufficient", "branch": "declineInsufficient" },
+      { "from": "synthesize", "to": "groundCitations" },
+      { "from": "groundCitations", "to": "ReturnInsightArtifactNode" },
+      { "from": "ReturnInsightArtifactNode", "to": "persistEnvelope" }
+    ]
+  },
+
+  "acceptanceCriteria": {
+    "$comment": "Mirrors task 021 POML <acceptance-criteria>. Used as documentation + as fixture targets for MatterHealthSinglePlaybookTests.cs (downstream).",
+    "criteria": [
+      "Playbook publishes successfully (sprk_analysisplaybook row + 9 sprk_playbooknodes rows in Dataverse — 8 nodes from task 021 + 1 persistEnvelope node from task 022; name='matter-health-single' (bare per Q-U1 owner ban on version-suffix vernacular), isSystemPlaybook=true)",
+      "Lint check: zero version-suffix-vernacular substring in this file (Q-U1 owner ban enforced)",
+      "All referenced actionCodes resolve at Deploy-Playbook.ps1 pre-flight: matter-health-synthesis (Task 020 row), INS-FACT/INS-IDXR/INS-EVID/INS-GRND/INS-RART/INS-DECL (r2 Wave B rows, deploy decides aliasing vs reuse per node $comment-actionCode notes), INS-FETCH-KPI + INS-UPDR (NEW r1 Wave 1B task 023 rows)",
+      "All referenced executor types exist in ActionType enum: LiveFact=80, QueryDataverse=51, IndexRetrieve=90, EvidenceSufficiency=100, AgentService=60, GroundingVerify=70, ReturnInsightArtifact=120, DeclineToFind=110, UpdateRecord=22",
+      "DeclineToFind branch covers EvidenceSufficiency failure path (checkSufficiency.insufficientBranch='declineInsufficient' + declineInsufficient node dependsOn=['checkSufficiency'])",
+      "Sufficient-evidence test: 5 mock KPI assessments + non-empty Notes -> 9 nodes execute end-to-end, synthesize -> groundCitations -> ReturnInsightArtifactNode emits InferenceArtifact carrying body + dimensions[] from Task 020 prompt -> persistEnvelope writes FR-14 envelope to sprk_matter.sprk_performancesummary",
+      "Insufficient-evidence test: 1 mock KPI assessment -> checkSufficiency.verdict='insufficient' -> declineInsufficient fires, synthesize+groundCitations+ReturnInsightArtifactNode+persistEnvelope SKIPPED via branch-aware skip; orchestrator returns DeclineResponse to InsightSummaryCard (FR-06 Decline state); sprk_performancesummary is NOT overwritten on decline",
+      "FR-14 envelope shape: persistEnvelope.configJson.fieldMappings[0].value renders to JSON with exactly 7 fields (schemaVersion, body, citations, generatedAt, playbookName, tenantId, dimensions); schemaVersion is literal string '1.0' (NOT int 1); playbookName is bare 'matter-health-single' (NO @v suffix)",
+      "FR-16 compliance: persistEnvelope writes to existing sprk_matter.sprk_performancesummary only; no new fields, no new entities"
+    ]
+  }
+}

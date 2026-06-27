@@ -1,15 +1,13 @@
 using System;
 using System.Collections.Generic;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Api.Agent;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Agent;
@@ -18,16 +16,16 @@ namespace Sprk.Bff.Api.Tests.Api.Agent;
 /// Unit tests for AgentConfigurationService.
 /// Validates caching behavior, capability toggles, and role-based access.
 /// </summary>
+[Trait("status", "repaired")]
 public class AgentConfigurationServiceTests
 {
     private const string TenantId = "test-tenant-001";
-    private readonly MemoryDistributedCache _cache;
+    private readonly InMemoryTenantCache _cache;
     private readonly Mock<ILogger<AgentConfigurationService>> _loggerMock;
 
     public AgentConfigurationServiceTests()
     {
-        _cache = new MemoryDistributedCache(
-            Options.Create(new MemoryDistributedCacheOptions()));
+        _cache = new InMemoryTenantCache();
         _loggerMock = new Mock<ILogger<AgentConfigurationService>>();
     }
 
@@ -63,9 +61,9 @@ public class AgentConfigurationServiceTests
     public async Task GetExposedPlaybookIdsAsync_WhenCached_ReturnsCachedValues()
     {
         var cachedIds = new List<Guid> { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
-        await _cache.SetStringAsync(
-            $"agent:config:{TenantId}:exposed-playbooks",
-            JsonSerializer.Serialize(cachedIds));
+        await _cache.SetAsync<List<Guid>>(
+            TenantId, "agent-config", "exposed-playbooks", 1,
+            cachedIds);
 
         var service = CreateService(new AgentConfigurationOptions
         {
@@ -104,10 +102,9 @@ public class AgentConfigurationServiceTests
         await service.GetExposedPlaybookIdsAsync(TenantId);
 
         // Verify cache was populated
-        var cached = await _cache.GetStringAsync($"agent:config:{TenantId}:exposed-playbooks");
-        cached.Should().NotBeNull();
-
-        var cachedIds = JsonSerializer.Deserialize<List<Guid>>(cached!);
+        var cachedIds = await _cache.GetAsync<List<Guid>>(
+            TenantId, "agent-config", "exposed-playbooks", 1);
+        cachedIds.Should().NotBeNull();
         cachedIds.Should().Contain(playbookId);
     }
 
@@ -117,12 +114,12 @@ public class AgentConfigurationServiceTests
         var tenant1Id = Guid.NewGuid();
         var tenant2Id = Guid.NewGuid();
 
-        await _cache.SetStringAsync(
-            "agent:config:tenant-A:exposed-playbooks",
-            JsonSerializer.Serialize(new List<Guid> { tenant1Id }));
-        await _cache.SetStringAsync(
-            "agent:config:tenant-B:exposed-playbooks",
-            JsonSerializer.Serialize(new List<Guid> { tenant2Id }));
+        await _cache.SetAsync<List<Guid>>(
+            "tenant-A", "agent-config", "exposed-playbooks", 1,
+            new List<Guid> { tenant1Id });
+        await _cache.SetAsync<List<Guid>>(
+            "tenant-B", "agent-config", "exposed-playbooks", 1,
+            new List<Guid> { tenant2Id });
 
         var service = CreateService();
 
@@ -227,9 +224,9 @@ public class AgentConfigurationServiceTests
             [AgentCapability.DocumentSearch.ToString()] = false,
             [AgentCapability.EmailDrafting.ToString()] = true
         };
-        await _cache.SetStringAsync(
-            $"agent:config:{TenantId}:capabilities",
-            JsonSerializer.Serialize(capabilities));
+        await _cache.SetAsync<Dictionary<string, bool>>(
+            TenantId, "agent-config", "capabilities", 1,
+            capabilities);
 
         // Options say enabled, but cache says disabled
         var service = CreateService(new AgentConfigurationOptions
@@ -249,9 +246,9 @@ public class AgentConfigurationServiceTests
         {
             [AgentCapability.DocumentSearch.ToString()] = false
         };
-        await _cache.SetStringAsync(
-            $"agent:config:{TenantId}:capabilities",
-            JsonSerializer.Serialize(capabilities));
+        await _cache.SetAsync<Dictionary<string, bool>>(
+            TenantId, "agent-config", "capabilities", 1,
+            capabilities);
 
         var service = CreateService(new AgentConfigurationOptions
         {
@@ -363,28 +360,30 @@ public class AgentConfigurationServiceTests
     [Fact]
     public async Task InvalidateCacheAsync_RemovesPlaybookCache()
     {
-        await _cache.SetStringAsync(
-            $"agent:config:{TenantId}:exposed-playbooks",
-            JsonSerializer.Serialize(new List<Guid> { Guid.NewGuid() }));
+        await _cache.SetAsync<List<Guid>>(
+            TenantId, "agent-config", "exposed-playbooks", 1,
+            new List<Guid> { Guid.NewGuid() });
 
         var service = CreateService();
         await service.InvalidateCacheAsync(TenantId);
 
-        var cached = await _cache.GetStringAsync($"agent:config:{TenantId}:exposed-playbooks");
+        var cached = await _cache.GetAsync<List<Guid>>(
+            TenantId, "agent-config", "exposed-playbooks", 1);
         cached.Should().BeNull();
     }
 
     [Fact]
     public async Task InvalidateCacheAsync_RemovesCapabilitiesCache()
     {
-        await _cache.SetStringAsync(
-            $"agent:config:{TenantId}:capabilities",
-            JsonSerializer.Serialize(new Dictionary<string, bool> { ["DocumentSearch"] = false }));
+        await _cache.SetAsync<Dictionary<string, bool>>(
+            TenantId, "agent-config", "capabilities", 1,
+            new Dictionary<string, bool> { ["DocumentSearch"] = false });
 
         var service = CreateService();
         await service.InvalidateCacheAsync(TenantId);
 
-        var cached = await _cache.GetStringAsync($"agent:config:{TenantId}:capabilities");
+        var cached = await _cache.GetAsync<Dictionary<string, bool>>(
+            TenantId, "agent-config", "capabilities", 1);
         cached.Should().BeNull();
     }
 
@@ -392,21 +391,24 @@ public class AgentConfigurationServiceTests
     public async Task InvalidateCacheAsync_DoesNotAffectOtherTenants()
     {
         var otherTenant = "other-tenant";
-        await _cache.SetStringAsync(
-            $"agent:config:{TenantId}:exposed-playbooks",
-            "will-be-cleared");
-        await _cache.SetStringAsync(
-            $"agent:config:{otherTenant}:exposed-playbooks",
-            "should-remain");
+        await _cache.SetAsync<List<Guid>>(
+            TenantId, "agent-config", "exposed-playbooks", 1,
+            new List<Guid> { Guid.NewGuid() });
+        var remainingIds = new List<Guid> { Guid.NewGuid() };
+        await _cache.SetAsync<List<Guid>>(
+            otherTenant, "agent-config", "exposed-playbooks", 1,
+            remainingIds);
 
         var service = CreateService();
         await service.InvalidateCacheAsync(TenantId);
 
-        var cleared = await _cache.GetStringAsync($"agent:config:{TenantId}:exposed-playbooks");
-        var remaining = await _cache.GetStringAsync($"agent:config:{otherTenant}:exposed-playbooks");
+        var cleared = await _cache.GetAsync<List<Guid>>(
+            TenantId, "agent-config", "exposed-playbooks", 1);
+        var remaining = await _cache.GetAsync<List<Guid>>(
+            otherTenant, "agent-config", "exposed-playbooks", 1);
 
         cleared.Should().BeNull();
-        remaining.Should().Be("should-remain");
+        remaining.Should().BeEquivalentTo(remainingIds);
     }
 
     [Fact]

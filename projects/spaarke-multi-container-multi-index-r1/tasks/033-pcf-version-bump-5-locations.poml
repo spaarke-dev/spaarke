@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>PCF — 5-location version bump v1.1.73 → v1.1.74 (FR-PCF-04)</title>
+    <phase>D: PCF v1.1.74</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>031, 032</dependencies>
+    <blocks>034</blocks>
+    <tags>pcf, deploy, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Mechanical 5-location version bump per `/pcf-deploy` skill contract. No source-code logic changes; carries explicit constraints (FR-PCF-04, NFR-10). Not vague docs; not Dataverse production records.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Must follow 031 + 032 (both PCF code changes complete) and precede 034 (tests) + 035 (deploy).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Bump the PCF version from v1.1.73 → v1.1.74 in all 5 mandatory locations per the `/pcf-deploy` skill contract. After the bump, run `npm run build:prod` to verify the production build still produces a bundle ≤ 1 MB (NFR-03 — v1.1.73 baseline ~754 KB so headroom is plentiful). Capture the build size to handoff notes.
+  </prompt>
+
+  <role>
+    PCF deployer with familiarity with the `/pcf-deploy` skill contract. The 5-location bump is non-negotiable: skipping any location causes solution-import drift between Dataverse and the built artifact.
+  </role>
+
+  <goal>
+    All 5 PCF version locations show `1.1.74`; production build (`npm run build:prod`) succeeds with bundle ≤ 1 MB; footer string in `SemanticSearchControl.tsx` reads `v1.1.74 • Built {YYYY-MM-DD}`. Downstream tasks (034 tests, 035 deploy) can consume the bumped artifact.
+  </goal>
+
+  <context>
+    <background>
+      The `/pcf-deploy` skill mandates a 5-location version bump for every PCF release to prevent Dataverse solution-import version drift. Baseline v1.1.73 came from PR #363 (UI tweaks). This project's PCF v1.1.74 strictly succeeds #363. Tasks 030-032 added the new bound property + service + envelope changes; this task wraps the bump.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+      <file>src/client/pcf/SemanticSearchControl/Solution/solution.xml</file>
+      <file>src/client/pcf/SemanticSearchControl/Solution/Controls/sprk_Sprk.SemanticSearchControl/ControlManifest.xml</file>
+      <file>src/client/pcf/SemanticSearchControl/Solution/pack.ps1</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-PCF-04">PCF version bump to v1.1.74 in all 5 locations: ControlManifest.Input.xml + SemanticSearchControl.tsx footer + Solution/solution.xml + Solution/Controls/sprk_Sprk.SemanticSearchControl/ControlManifest.xml + Solution/pack.ps1.</constraint>
+    <constraint source="spec.md NFR-03">Production-mode bundle MUST be ≤ 1 MB.</constraint>
+    <constraint source="spec.md NFR-10">Per `/pcf-deploy` skill — 5-location bump is non-negotiable.</constraint>
+    <constraint source=".claude/skills/pcf-deploy/SKILL.md">Use `npm run build:prod` (NOT `npm run build`) for production builds.</constraint>
+    <constraint source="project">No source-code logic changes in this task — purely version metadata + a single build verification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF 5-location version bump" location=".claude/skills/pcf-deploy/SKILL.md">
+        Bump version in 5 places: manifest (input), tsx footer, solution.xml, solution-controls manifest, pack.ps1. Missing any one causes solution import to silently use the previous version's resources.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update `src/client/pcf/SemanticSearchControl/SemanticSearchControl/ControlManifest.Input.xml`: set `version="1.1.74"` attribute. If a description tag references the version, update there too.</step>
+    <step order="2">Update `src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx`: change the footer string to `v1.1.74 • Built YYYY-MM-DD` (use today's date).</step>
+    <step order="3">Update `src/client/pcf/SemanticSearchControl/Solution/solution.xml`: set `&lt;Version&gt;1.1.74&lt;/Version&gt;`.</step>
+    <step order="4">Update `src/client/pcf/SemanticSearchControl/Solution/Controls/sprk_Sprk.SemanticSearchControl/ControlManifest.xml`: set `version="1.1.74"`.</step>
+    <step order="5">Update `src/client/pcf/SemanticSearchControl/Solution/pack.ps1`: set `$version = "1.1.74"`.</step>
+    <step order="6">Run `npm run build:prod` in `src/client/pcf/SemanticSearchControl/`. Verify production bundle (`bundle.js` or equivalent) is ≤ 1 MB (NFR-03 acceptance gate). Capture the build size + 5-location-bump confirmation in `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/033-pcf-version-bump.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read each of the 5 version-location files</tool>
+    <tool name="Edit">Apply the version change in each file</tool>
+    <tool name="Bash">Run `npm run build:prod` and measure bundle size</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">5 files updated with v1.1.74</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/033-pcf-version-bump.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-PCF-04: All 5 locations show version `1.1.74`. Verified by file inspection.</criterion>
+    <criterion testable="true">NFR-03: `npm run build:prod` succeeds; bundle is ≤ 1 MB. Verified by file size.</criterion>
+    <criterion testable="true">Footer string in `SemanticSearchControl.tsx` reads `v1.1.74 • Built YYYY-MM-DD` with today's date.</criterion>
+    <criterion testable="true">Build summary captured in handoff notes for downstream tasks.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Mechanical bump — no logic changes. Confirm via the `/pcf-deploy` skill checklist that no 6th version location exists in the repo (rare, but skill docs the canonical list).
+
+    Use `npm run build:prod` not `npm run build`. The latter is dev mode and produces a much larger bundle; the production gate is the 1 MB ceiling per NFR-03 (v1.1.73 baseline is ~754 KB).
+
+    The deploy itself is task 035. This task is bump + production-build verification only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load .claude/skills/pcf-deploy/SKILL.md + docs/guides/PCF-DEPLOYMENT-GUIDE.md before Step 1. Declare rigor (STANDARD) per task-execute Step 0.
+    </protocol>
+  </execution>
+</task>

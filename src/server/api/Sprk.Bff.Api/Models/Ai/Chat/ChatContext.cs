@@ -77,9 +77,30 @@ public record ChatKnowledgeScope(
 /// Knowledge scope resolved from the playbook's skills and knowledge source relationships.
 /// Null when the playbook has no knowledge or skill scopes configured.
 /// </param>
+/// <param name="UploadedFiles">
+/// Optional manifest of files the end user uploaded into the current chat session
+/// (via <see cref="Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints"/> — R5 task 032 / 033).
+/// Surfaced verbatim from <see cref="ChatSession.UploadedFiles"/> by
+/// <see cref="Sprk.Bff.Api.Services.Ai.Chat.PlaybookChatContextProvider"/> so the agent
+/// (and downstream tool-call reasoning in
+/// <see cref="Sprk.Bff.Api.Services.Ai.Chat.SprkChatAgentFactory"/>) can see which files
+/// exist in the session and decide whether to invoke
+/// <see cref="Sprk.Bff.Api.Services.Ai.Chat.Tools.InvokeSummarizePlaybookTool"/>.
+/// <para>
+/// Carries manifest metadata only (fileId + fileName + MIME + size + index doc IDs +
+/// uploaded-at). Extracted text content is NEVER carried here — ADR-015 (no-leakage)
+/// and R5 task 033 acceptance both bind the system prompt to manifest-only surfacing.
+/// </para>
+/// <para>
+/// Default <c>null</c> for backward compatibility — pre-R5 sessions and call sites that
+/// omit the parameter are semantically equivalent to "no files uploaded into this session".
+/// Treat <c>null</c> and an empty list identically (both mean "no manifest").
+/// </para>
+/// </param>
 public record ChatContext(
     string SystemPrompt,
     string? DocumentSummary,
     IReadOnlyDictionary<string, string>? AnalysisMetadata,
     Guid? PlaybookId,
-    ChatKnowledgeScope? KnowledgeScope = null);
+    ChatKnowledgeScope? KnowledgeScope = null,
+    IReadOnlyList<ChatSessionFile>? UploadedFiles = null);

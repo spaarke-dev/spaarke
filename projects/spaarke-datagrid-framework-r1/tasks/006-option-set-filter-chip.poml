@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>OptionSetMultiFilterChip with metadata-driven options + status colors</title>
+    <phase>1: Phase A — Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003</dependencies>
+    <blocks>009</blocks>
+    <tags>fluent-ui, frontend, react, typescript, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>UI primitive with entity-metadata integration; ADR-021 + NFR-03; Storybook required</rigor-reason>
+    <parallel-group>A2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build `<OptionSetMultiFilterChip />` — a Fluent v9 `<Menu>` + `<MenuItemCheckbox>` filter chip whose options come from entity metadata `optionSet.options[]` with colors from `optionSet.options[i].color`. Works for `Picklist`, `Status`, and `State` attribute types.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Fluent v9 `Menu`/`MenuItemCheckbox` + Dataverse entity metadata option-set color encoding.
+  </role>
+
+  <goal>
+    `src/components/DataGrid/chips/OptionSetMultiFilterChip.tsx` ships, options derived from `entityMetadata.attributes[columnLogicalName].optionSet.options`, colors rendered as Fluent v9 `Badge` swatches, Storybook stories cover Picklist + Status + State attribute types with multi-select + empty + cleared states.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-DG-07 (chip primitive). The chip auto-derives options from entity metadata — no hardcoded values. For Status / State attributes, `optionSet.options[i].color` provides the badge color; for Picklist without colors, neutral badge. Multi-select via Fluent v9 `<Menu>` + `<MenuItemCheckbox>` (one of the few Fluent native controls that supports multi-check).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/OptionSetMultiFilterChip.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/storybook/OptionSetMultiFilterChip.stories.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; tokens; dark mode required.</constraint>
+    <constraint source="ADR-022">React-16-safe.</constraint>
+    <constraint source="NFR-03">`applyStylesToPortals` on Menu's inner FluentProvider.</constraint>
+    <constraint source="project">Options derived from `entityMetadata.attributes[columnLogicalName].optionSet.options`; colors from `option.color` (string `#rrggbb` allowed here as DATA — not styling — since it comes from Dataverse).</constraint>
+    <constraint source="project">Multi-select semantics: OR within chip; chip emits selected `Value` array (number) — not labels.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 Menu + MenuItemCheckbox" location="https://react.fluentui.dev/?path=/docs/components-menu--default">Controlled `checkedValues` model; `onCheckedValueChange` for each menu item.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/fluent-v9-component` skill Step 0.5 checklist.</step>
+    <step order="2">Author `OptionSetMultiFilterChip.tsx` with props: `{ columnLogicalName, entityMetadata, value: Set&lt;number&gt;, onChange, label }`.</step>
+    <step order="3">Derive `options = entityMetadata.attributes[columnLogicalName].optionSet.options`; for each, render `<MenuItemCheckbox name="optionset" value={String(option.Value)} hasIcons>` with a `<Badge style={{backgroundColor: option.color}}>{option.Label.UserLocalizedLabel.Label}</Badge>`.</step>
+    <step order="4">Controlled `checkedValues` from `value: Set&lt;number&gt;` mapped to `string[]`; `onCheckedValueChange` converts back to `Set&lt;number&gt;`.</step>
+    <step order="5">Chip display: `"{first-label} +{N more}"` pattern when multi-select.</step>
+    <step order="6">Wrap Menu surface in inner `<FluentProvider applyStylesToPortals theme={inheritedTheme}>`.</step>
+    <step order="7">Author Storybook stories: Picklist (priority Low/Med/High), Status (Active/Resolved/Cancelled), State (Active/Inactive); light + dark each; multi + cleared.</step>
+    <step order="8">axe-core scan; verify zero serious/critical.</step>
+    <step order="9">Build + verify; update TASK-INDEX (006 ✅).</step>
+    <step order="10">Document deviations if any.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + Storybook + axe</tool>
+    <tool name="Edit">Author the file</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/chips/OptionSetMultiFilterChip.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/storybook/OptionSetMultiFilterChip.stories.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given entityMetadata for `sprk_event` with `sprk_eventstatus` Status attribute, when chip mounts, then options auto-derive from metadata with their colors.</criterion>
+    <criterion testable="true">Given user checks 2 options, when menu closes, then chip shows "First Label +1" and `onChange` emits `Set&lt;number&gt;` of 2 values.</criterion>
+    <criterion testable="true">Given dark mode, when Menu opens, then it renders dark-theme via applyStylesToPortals.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Multi-select with Status colors">
+      <url>http://localhost:6006/?path=/story/optionsetmultifilterchip--status</url>
+      <steps>
+        <step>Open chip; verify Active/Resolved/Cancelled options render with their colors</step>
+        <step>Check 2; verify chip closes showing "Active +1"</step>
+      </steps>
+      <expected>Options auto-derived, colors visible</expected>
+    </test>
+    <test name="Dark mode (NFR-03)">
+      <steps>
+        <step>Toggle dark mode; open Menu</step>
+        <step>Verify Menu surface dark-themed</step>
+      </steps>
+      <expected>No light-mode bleed</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Note that `option.color` from Dataverse is data (a string from metadata), not styling intent — so it's exempt from the NO-RAW-HEX rule (which applies to design-time `tokens.ts`). Parallels tasks 004, 005, 007, 008 (Wave A2).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory `/fluent-v9-component` Step 0.5. Verify dark mode + axe before marking complete.</protocol>
+  </execution>
+</task>

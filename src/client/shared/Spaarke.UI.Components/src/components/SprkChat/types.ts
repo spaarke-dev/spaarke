@@ -9,6 +9,16 @@
  * @see ADR-022 - React 16 APIs only
  */
 
+// Type-only import: keeps types.ts free of runtime dependencies on the hook.
+// `ChatAttachment` is the canonical attachment-ready payload shape produced
+// by `useChatFileAttachment`. Used by `ISprkChatProps.onAttachmentReady`
+// (R4 task 042 / W-4).
+// `AttachmentChip` is the in-flight chip shape (status: extracting | ready |
+// error) used by R5 task 020 / D2-11 chat-pane orchestration props for the
+// "N files attached" indicator, per-file remove cascade, and ready-batch
+// inline-confirmation injection.
+import type { ChatAttachment, AttachmentChip } from './hooks/useChatFileAttachment';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat Message Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,6 +72,10 @@ export interface IChatMessageMetadata {
     | 'action_confirmation'
     | 'plan_preview'
     | 'document_status'
+    // chat-routing-redesign-r1 task 117b — file-aware playbook options card.
+    // Rendered by SprkChatMessageRenderer with click handlers passed from
+    // SprkChat (onSelectPlaybook, onOpenLibraryModal) — FR-50 + FR-51.
+    | 'playbook_options'
     | string;
 
   /**
@@ -190,7 +204,10 @@ export type ChatSseEventType =
   | 'navigate'
   | 'document_stream_start'
   | 'document_stream_token'
-  | 'document_stream_end';
+  | 'document_stream_end'
+  // chat-routing-redesign-r1 task 117a/117b — file-aware playbook routing
+  // surfaces top-N candidates + an Open Library CTA inline in the chat.
+  | 'playbook_options';
 
 /** A parsed SSE event from the stream, matching ChatSseEvent from the server. */
 export interface IChatSseEvent {
@@ -277,6 +294,81 @@ export interface IChatSseEventData {
   playbookId?: string;
   /** Playbook display name. In 'dialog_open' and 'navigate' events. */
   playbookName?: string;
+
+  // ── playbook_options fields (chat-routing-redesign-r1 task 117a/117b) ───────
+  // Carried verbatim in the SSE `data` envelope. Locked by spec FR-49.
+  /** Top-N candidate playbooks. Present only in `playbook_options` events. */
+  candidates?: IPlaybookOptionCandidate[];
+  /** Whether the chat should also render the Open Library CTA. Always `true` per FR-51. */
+  libraryModalCta?: boolean;
+  /** Session attachment identifiers correlating the candidates to uploaded files. */
+  sessionAttachmentIds?: string[];
+  /** Whether the upstream reranker ran for this event. Telemetry signal. */
+  rerankInvoked?: boolean;
+  /** Controlled-vocabulary tag describing the rerank outcome (when invoked). */
+  rerankReason?: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Playbook Options Types (chat-routing-redesign-r1 task 117a/117b — FR-49 / 50 / 51)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A single playbook candidate surfaced in a `playbook_options` SSE event.
+ * Mirrors the BFF `PlaybookOptionCandidate` record in
+ * `Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes.PlaybookOptionsSseEvent`.
+ *
+ * ADR-015: All fields are tier-1 safe — admin-facing display name + opaque IDs +
+ * controlled-vocabulary reason. No user message content, no file content.
+ */
+export interface IPlaybookOptionCandidate {
+  /** Opaque immutable Dataverse PK (`sprk_aiplaybook` GUID, string form). */
+  playbookId: string;
+  /**
+   * Portable cross-environment short code. May be empty string when the upstream
+   * selector did not supply a code (the orchestrator may enrich before emit).
+   */
+  playbookCode: string;
+  /** Admin-facing playbook name (`sprk_name`). Tier-1 safe — configuration content. */
+  displayName: string;
+  /** Aggregated similarity score in the unit interval [0, 1]. */
+  confidence: number;
+  /**
+   * Controlled-vocabulary reason tag (e.g. `top-confidence`, `llm-rerank-from-5`,
+   * `timeout-graceful-degrade`). NEVER free-form NL.
+   */
+  reason: string;
+}
+
+/**
+ * Payload for the `playbook_options` SSE event emitted by the BFF after
+ * file-aware classification. Locked by spec FR-49.
+ *
+ * @see `Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes.PlaybookOptionsSseEventData`
+ */
+export interface IPlaybookOptionsPayload {
+  /**
+   * Ordered top-N candidates (highest confidence first). May be empty when no
+   * playbook crossed the secondary confidence threshold (graceful no-match path).
+   */
+  candidates: IPlaybookOptionCandidate[];
+  /**
+   * Always `true` per FR-51 — the chat ALWAYS renders an Open Library CTA
+   * alongside the candidates (or alone in the no-match case).
+   */
+  libraryModalCta: boolean;
+  /**
+   * Deterministic session attachment identifiers. Opaque IDs only — NO filenames,
+   * MIME types, sizes, or content (ADR-015 tier-1).
+   */
+  sessionAttachmentIds: string[];
+  /** Whether the upstream `IIntentRerankerService` was invoked to refine the list. */
+  rerankInvoked: boolean;
+  /**
+   * Controlled-vocabulary tag explaining the rerank outcome. `null`/absent when
+   * `rerankInvoked` is `false`.
+   */
+  rerankReason?: string | null;
 }
 
 /**
@@ -461,7 +553,7 @@ export interface ISprkChatProps {
   /** Predefined prompt suggestions shown before conversation starts */
   predefinedPrompts?: IPredefinedPrompt[];
   /** Content element ref for highlight-refine feature (detects text selection) */
-  contentRef?: React.RefObject<HTMLElement>;
+  contentRef?: React.RefObject<HTMLElement | null>;
   /** Maximum character count for input (default 2000) */
   maxCharCount?: number;
   /** Host context describing where SprkChat is embedded (entity type, entity ID, workspace) */
@@ -511,6 +603,248 @@ export interface ISprkChatProps {
    * delivered synchronously from the fetch loop without React state batching.
    */
   onPaneEvent?: ((event: IAiPaneEvent) => void) | null;
+
+  /**
+   * Callback fired for `playbook_options` SSE events
+   * (chat-routing-redesign-r1 task 117a/117b — FR-49 / 50 / 51).
+   *
+   * When provided, SprkChat forwards the BFF-emitted top-N candidate playbook list
+   * + Open Library CTA flag verbatim. The host (typically ConversationPane) renders
+   * the candidates as inline link buttons within the chat thread and wires click
+   * handlers to dispatch playbook execution.
+   *
+   * Uses the synchronous callback-ref pattern (same as onPaneEvent) — delivered
+   * from the fetch loop without React state batching.
+   *
+   * ADR-015 (binding): the callback MUST NOT be logged verbatim by the host. The
+   * payload is tier-1 safe by construction but accumulating it in telemetry
+   * defeats the point.
+   */
+  onPlaybookOptions?: ((payload: IPlaybookOptionsPayload) => void) | null;
+
+  /**
+   * Callback fired when the user clicks a candidate playbook link button rendered
+   * by `SprkChatMessageRenderer` for `responseType === 'playbook_options'`
+   * (chat-routing-redesign-r1 task 117b — FR-50).
+   *
+   * SprkChat threads this through to `SprkChatMessage` when rendering a structured
+   * playbook_options message. Implementations typically POST to
+   * `/api/ai/playbook-dispatch/execute` with `{ playbookId, sessionAttachmentIds,
+   * originalMessage, sessionId }` so the dispatcher executes the chosen playbook
+   * against the same session context.
+   *
+   * When the prop is omitted the candidate buttons render disabled.
+   */
+  onSelectPlaybook?: (playbookId: string, sessionAttachmentIds: string[]) => void;
+
+  /**
+   * Callback fired when the user clicks the "Open Library" link rendered alongside
+   * a `playbook_options` message (chat-routing-redesign-r1 task 117b — FR-51).
+   *
+   * Receives the session attachment IDs so the host can pre-filter the Library
+   * modal by attachment classification when available. When the prop is omitted
+   * the link renders disabled.
+   */
+  onOpenLibraryModal?: (sessionAttachmentIds: string[]) => void;
+
+  /**
+   * Callback fired when a chat attachment finishes client-side extraction and
+   * transitions to "ready" status (R4 task 042 / W-4).
+   *
+   * Fires ONCE per file that reaches `ready` state — files in `extracting` or
+   * `error` state do NOT fire. Hosts (e.g. ConversationPane in SpaarkeAi) use
+   * this to dispatch `widget_load` on the workspace PaneEventBus channel so
+   * the file mounts as a workspace tab while the user composes their message.
+   *
+   * The callback receives ONE `ChatAttachment` per invocation (per ready file).
+   * If multiple files are added together, the callback is called multiple
+   * times — once per file as each finishes extraction.
+   *
+   * Out of scope by design (per Risk R-7): batched delivery, cancellation,
+   * progress reporting. Hosts that need batching can debounce in their own
+   * handler.
+   *
+   * The host MUST treat this callback as a SIDE-EFFECT signal — SprkChat
+   * still owns the attachment chip lifecycle and the outbound message body
+   * carries the attachments regardless of whether the host responds. The
+   * callback fires AFTER text extraction completes so `textContent` is
+   * always populated on the delivered attachment.
+   *
+   * Auth invariant (ADR-028): no auth context flows through this callback.
+   * The host calls back into its own auth surface if it needs to make BFF
+   * requests downstream.
+   */
+  onAttachmentReady?: (attachment: ChatAttachment) => void;
+
+  /**
+   * Callback fired whenever the chat-attachment chip list changes (add, remove,
+   * status transition) — R5 task 020 / D2-11.
+   *
+   * Fires with the current chip array (NOT a delta). Hosts use this to render a
+   * persistent "N files attached" indicator, derive an `uploadedFileCount` for
+   * tri-mode `/summarize` routing (R5 FR-03), or sync their own session-side
+   * mirror of the chip lifecycle.
+   *
+   * Independent of `onAttachmentReady`:
+   *   - `onAttachmentReady` fires ONCE per file that reaches `status === 'ready'`.
+   *   - `onAttachmentsChanged` fires on EVERY chip list mutation (including
+   *      `extracting`-state inserts and `removeFile` splices).
+   *
+   * The chip array is a new reference on every change so React equality guards
+   * fire correctly when host state subscribes via `useEffect([chips])`.
+   *
+   * The host MUST treat this as a SIDE-EFFECT signal — SprkChat still owns the
+   * chip lifecycle. The callback fires inside a React effect so it runs after
+   * the chip render has committed.
+   *
+   * ADR-012 invariant: the callback receives the generic `AttachmentChip` shape
+   * (chip id, filename, mimeType, status, etc.) — NO host-specific types cross
+   * the shared-library boundary.
+   */
+  onAttachmentsChanged?: (chips: AttachmentChip[]) => void;
+
+  /**
+   * Callback fired when the user clicks the dismiss button on an attachment
+   * chip — R5 task 020 / D2-11.
+   *
+   * Fires BEFORE `useChatFileAttachment.removeFile(index)` is invoked, so the
+   * host can capture the chip metadata (id, filename, etc.) before it's spliced
+   * from local state. SprkChat still calls `removeFile(index)` immediately
+   * after this callback returns — the host MUST NOT splice the chip itself.
+   *
+   * Hosts (e.g. ConversationPane) use this to cascade the removal to the BFF
+   * session manifest (task 004's `ChatSession.UploadedFiles[]`) and the AI
+   * Search session-files index (task 007's cleanup path). The host owns its
+   * own auth boundary for those BFF calls.
+   *
+   * The callback is fire-and-forget: SprkChat does NOT await any returned
+   * Promise. Host failures (e.g. transient HTTP errors during cleanup) do NOT
+   * block the local chip removal — orphaned manifest/index entries are
+   * bounded by the session-end cleanup HostedService (R5 task 007).
+   */
+  onAttachmentRemoved?: (chip: AttachmentChip, index: number) => void;
+
+  /**
+   * One-shot local message to inject into the chat thread — R5 task 020 / D2-11.
+   *
+   * When this prop transitions from `null` (or absent) to a non-null message,
+   * SprkChat appends the message to its in-memory thread via the same
+   * `useChatSession.addMessage` path used for streamed turns. The host is
+   * responsible for clearing the prop back to `null` after dispatch (typically
+   * via the `onLocalMessageInjected` callback below) so the same message is
+   * not injected twice across renders.
+   *
+   * Use cases (R5 chat-pane orchestration UX):
+   *   - Inline file-confirmation: "I have your 3 files: a.pdf, b.docx, c.md"
+   *   - Multi-file combined-summary deterministic interjection:
+   *     "I'll combine all 3 files into a single summary."
+   *
+   * Per R5 spec FR-03 + ADR-012: these messages are CLIENT-RENDERED only —
+   * NOT persisted server-side as model-generated turns. The host emits them
+   * deterministically; the BFF chat history does NOT contain them.
+   *
+   * ADR-022 invariant: the message follows the standard `IChatMessage` shape
+   * with `role: 'Assistant'` (so it renders in the assistant message slot
+   * with the existing styles); use `metadata.responseType === 'markdown'` for
+   * plain-text confirmations. No new chat-message role is introduced.
+   *
+   * @example
+   * const [pendingInjection, setPendingInjection] = useState<IChatMessage | null>(null);
+   * // ... in a useEffect on chip-ready transitions:
+   * setPendingInjection({
+   *   role: 'Assistant',
+   *   content: "I have your 3 files: a.pdf, b.docx, c.md",
+   *   timestamp: new Date().toISOString(),
+   * });
+   * // Pass to SprkChat:
+   * <SprkChat injectLocalMessage={pendingInjection} onLocalMessageInjected={() => setPendingInjection(null)} />
+   */
+  injectLocalMessage?: IChatMessage | null;
+
+  /**
+   * Callback fired after a `injectLocalMessage` is dispatched to the chat
+   * thread — R5 task 020 / D2-11.
+   *
+   * The host uses this to clear the `injectLocalMessage` prop back to `null`
+   * so subsequent renders do not re-inject the same message. Pairs with
+   * `injectLocalMessage` above.
+   */
+  onLocalMessageInjected?: () => void;
+
+  /**
+   * Hook fired BEFORE SprkChat starts an outbound message stream — R5 task
+   * 020 / D2-11.
+   *
+   * Receives the message text the user is about to send. The host MAY use this
+   * to inject a deterministic interjection (e.g. R5 FR-03 multi-file combined-
+   * summary interjection: "I'll combine all 3 files into a single summary.")
+   * via `injectLocalMessage` BEFORE the model response begins.
+   *
+   * This callback is INFORMATIONAL — it does NOT short-circuit or cancel the
+   * send. The host cannot abort the message via this hook; that decision
+   * remains owned by SprkChat (the user clicked Send).
+   *
+   * The callback fires synchronously before `addMessage` runs, so any
+   * `injectLocalMessage` set during the callback is processed in the SAME
+   * render pass and appears in the thread BEFORE the user's message + the
+   * assistant streaming placeholder. This guarantees the FR-03 "interjection
+   * appears before the model response begins" semantics.
+   *
+   * ADR-012 invariant: the callback receives the generic message text only —
+   * NO host-specific context. The host owns its own state (uploadedFileCount,
+   * routing decisions) and consults its own helpers (`routeSummarizeIntent`).
+   */
+  onBeforeSendMessage?: (messageText: string) => void;
+
+  /**
+   * Outbound-body decoration hook — R6 task 080+ Pillar 8 (Command Router)
+   * integration point. Fires BETWEEN body construction and `startStream`.
+   *
+   * The host receives the base outbound body (`{ message, documentId, attachments? }`)
+   * and MAY return:
+   *   - the body unchanged (no decoration);
+   *   - a NEW body with additional fields (e.g. `intentHint`, `resolvedReferences`);
+   *   - `null` to CANCEL the BFF send (hard-slash commands like `/clear`, `/help`,
+   *     `/export` are dispatched client-side and produce no LLM round-trip).
+   *
+   * The hook is async-capable: implementations awaiting reference resolution
+   * (e.g. `@matter`, `#contract.pdf`) return a `Promise`. SprkChat awaits the
+   * result before starting the stream.
+   *
+   * ADR-012 invariant: SprkChat is context-agnostic. The shared lib applies the
+   * returned body verbatim; it has no knowledge of Pillar 8 vocabulary. The host
+   * (ConversationPane in SpaarkeAi) owns CommandRouter, HardSlashExecutor,
+   * SoftSlashRouter, and ReferenceResolver. This prop is the single, generic
+   * integration seam.
+   *
+   * Failure handling: if the hook throws or rejects, SprkChat logs and falls
+   * back to the undecorated base body (send proceeds). Host failures must not
+   * break the send lifecycle.
+   *
+   * @example Hard-slash cancel (client-side dispatch only)
+   * onDecorateOutboundBody={async (body) => {
+   *   const intent = parse(body.message as string);
+   *   if (intent.isHardSlash) {
+   *     await executeHardSlash(intent, ctx);
+   *     return null;  // cancel BFF send
+   *   }
+   *   return body;
+   * }}
+   *
+   * @example Soft-slash + reference decoration
+   * onDecorateOutboundBody={async (body) => {
+   *   const intent = parse(body.message as string);
+   *   let decorated = decorateBody(intent, body);
+   *   if (intent.references.length > 0) {
+   *     const resolved = await ReferenceResolver.resolveAll(intent.references, ctx);
+   *     decorated = { ...decorated, resolvedReferences: resolved };
+   *   }
+   *   return decorated;
+   * }}
+   */
+  onDecorateOutboundBody?: (
+    body: Record<string, unknown>
+  ) => Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
 }
 
 /** Props for SprkChatMessage sub-component. */
@@ -654,7 +988,7 @@ export interface IRefineRequest {
 /** Props for SprkChatHighlightRefine sub-component. */
 export interface ISprkChatHighlightRefineProps {
   /** Ref to the content area where text selection is detected */
-  contentRef: React.RefObject<HTMLElement>;
+  contentRef: React.RefObject<HTMLElement | null>;
   /** Callback to initiate refinement (legacy: selectedText + instruction) */
   onRefine: (selectedText: string, instruction: string) => void;
   /** Callback emitting a structured RefineRequest (preferred over onRefine) */
@@ -1091,6 +1425,20 @@ export interface IUseSseStreamResult {
    * Pass null to unregister.
    */
   setOnPaneEvent: (handler: ((event: IAiPaneEvent) => void) | null) => void;
+
+  /**
+   * Register a callback for `playbook_options` SSE events
+   * (chat-routing-redesign-r1 task 117a/117b — FR-49 / 50 / 51).
+   *
+   * Uses the same synchronous callback-ref pattern as `setOnPaneEvent` so the
+   * payload is delivered from the fetch loop without React state batching.
+   * Pass `null` to unregister.
+   *
+   * ADR-015: the callback receives ONLY tier-1 safe data — opaque IDs, admin
+   * display names, controlled-vocabulary reason tags. The host MUST NOT log the
+   * payload verbatim into Application Insights / browser telemetry.
+   */
+  setOnPlaybookOptions: (handler: ((payload: IPlaybookOptionsPayload) => void) | null) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

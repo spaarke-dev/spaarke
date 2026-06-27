@@ -50,6 +50,7 @@ import type {
   IAiPaneEvent,
   IUseSseStreamResult,
   ICitationSseItem,
+  IPlaybookOptionsPayload,
   AccessTokenGetter,
 } from '../components/SprkChat/types';
 
@@ -196,6 +197,11 @@ interface SseEventHandlers {
   onPlanPreview: (planId: string, planData: IChatSseEventData) => void;
   onActionEvent: (event: PendingActionEvent) => void;
   onDocumentStreamEvent: (event: IDocumentStreamSseEvent) => void;
+  /**
+   * chat-routing-redesign-r1 task 117a/117b. Receives the full SSE payload
+   * verbatim — caller is responsible for ADR-015 logging discipline.
+   */
+  onPlaybookOptions: (payload: IPlaybookOptionsPayload) => void;
   onDone: () => void;
   onError: (message: string) => void;
 }
@@ -263,6 +269,20 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
         totalTokens: (raw.totalTokens as number) || 0,
       });
     }
+  } else if (event.type === 'playbook_options') {
+    // chat-routing-redesign-r1 task 117a/117b — FR-49 / 50 / 51.
+    // Locked payload shape (see PlaybookOptionsSseEvent.cs):
+    //   { candidates: [...], libraryModalCta: true, sessionAttachmentIds: [...],
+    //     rerankInvoked: bool, rerankReason?: string }
+    // Forwarded verbatim to the consumer; tier-1 safe by BFF construction.
+    const data = event.data ?? ({} as IChatSseEventData);
+    handlers.onPlaybookOptions({
+      candidates: Array.isArray(data.candidates) ? data.candidates : [],
+      libraryModalCta: typeof data.libraryModalCta === 'boolean' ? data.libraryModalCta : true,
+      sessionAttachmentIds: Array.isArray(data.sessionAttachmentIds) ? data.sessionAttachmentIds : [],
+      rerankInvoked: typeof data.rerankInvoked === 'boolean' ? data.rerankInvoked : false,
+      rerankReason: data.rerankReason ?? null,
+    });
   } else if (event.type === 'done') {
     handlers.onDone();
   } else if (event.type === 'error') {
@@ -333,6 +353,12 @@ export function useSseStream(): IUseSseStreamResult {
   // OutputPanel and SourcePanel subscribe via StandaloneAiContext to receive these.
   const onPaneEventRef = useRef<((event: IAiPaneEvent) => void) | null>(null);
 
+  // chat-routing-redesign-r1 task 117a/117b — callback ref for `playbook_options`
+  // SSE events. Same synchronous callback-ref pattern as setOnPaneEvent. SprkChat
+  // wires this to the `onPlaybookOptions` prop so the host (ConversationPane) can
+  // append a structured playbook_options chat message to its in-memory thread.
+  const onPlaybookOptionsRef = useRef<((payload: IPlaybookOptionsPayload) => void) | null>(null);
+
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const cancelStream = useCallback(() => {
@@ -364,6 +390,14 @@ export function useSseStream(): IUseSseStreamResult {
   // OutputPanel and SourcePanel can react to output_pane / source_pane / source_highlight events.
   const setOnPaneEvent = useCallback((handler: ((event: IAiPaneEvent) => void) | null) => {
     onPaneEventRef.current = handler;
+  }, []);
+
+  // chat-routing-redesign-r1 task 117b: register/unregister the playbook_options callback.
+  // SprkChat wires this to the host (typically ConversationPane in SpaarkeAi)
+  // via the `onPlaybookOptions` prop so the host can synthesize a structured
+  // chat message + handle click → playbook execute.
+  const setOnPlaybookOptions = useCallback((handler: ((payload: IPlaybookOptionsPayload) => void) | null) => {
+    onPlaybookOptionsRef.current = handler;
   }, []);
 
   const startStream = useCallback(
@@ -449,6 +483,14 @@ export function useSseStream(): IUseSseStreamResult {
               const handler = onDocumentStreamEventRef.current;
               if (handler) {
                 handler(evt);
+              }
+            },
+            onPlaybookOptions: (payload: IPlaybookOptionsPayload) => {
+              // Synchronous callback (same pattern as onDocumentStreamEvent and onPaneEvent).
+              // No React state on the hook for this event — caller manages its own state.
+              const handler = onPlaybookOptionsRef.current;
+              if (handler) {
+                handler(payload);
               }
             },
             onDone: () => {
@@ -560,5 +602,6 @@ export function useSseStream(): IUseSseStreamResult {
     clearPendingDocumentStreamEvent: () => {}, // No-op: callback pattern doesn't need clearing
     setOnDocumentStreamEvent,
     setOnPaneEvent,
+    setOnPlaybookOptions,
   };
 }

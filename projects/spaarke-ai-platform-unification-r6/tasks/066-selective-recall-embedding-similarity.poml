@@ -1,0 +1,98 @@
+<task id="066" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-19 — Selective recall via embedding similarity (vectorize at write, retrieve by similarity)</title>
+    <status>pending</status>
+    <estimated-effort>1 day</estimated-effort>
+    <phase>Phase C — Cross-Conversation Memory (Pillar 7)</phase>
+    <wave>C-G2 (sequential after 064)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>064 (summarization compression service)</dependencies>
+    <tags>bff-api, ai, services, memory</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Embedding generation + similarity recall is expensive path; budget interaction + tenant isolation critical.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Build selective recall via embedding similarity. At write time, vectorize each chat
+    turn (or compressed summary) using the existing `IEmbeddingCache` infrastructure;
+    persist vector alongside the turn metadata in Cosmos `sessions`. At read time
+    (during prompt assembly in `PlaybookChatContextProvider`), when the current question
+    relates to old turns beyond the recent verbatim window, retrieve top-K (e.g., 3-5)
+    most similar old turns by cosine similarity. Respects token budget (NFR-10) — recall
+    capped so total prompt stays ≤8K. Per-tenant isolation via partition key.
+  </prompt>
+
+  <role>
+    Senior AI platform engineer with experience in embedding-based retrieval +
+    vector similarity + token budget management.
+  </role>
+
+  <goal>
+    Selective recall implemented; vectorize at write; retrieve top-K by similarity at
+    read; budget capped; per-tenant isolated.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="ai-arch">docs/architecture/AI-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Register in existing module.</constraint>
+    <constraint source="ADR-013">BFF-side AI service.</constraint>
+    <constraint source="ADR-014">Per-tenant cache key in `IEmbeddingCache`.</constraint>
+    <constraint source="ADR-029">Publish-size delta verified.</constraint>
+    <constraint source="spec FR-43">Vectorize at write; retrieve old turns by similarity; respects budget.</constraint>
+    <constraint source="spec NFR-10">8K total system prompt budget; recall capped.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/ai-memory-vector</topic>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/patterns/ai/indexing-pipeline.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — Embedding recall path; budget + tenant isolation critical."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 064 complete.</step>
+    <step order="2" name="Gather Resources">Read AI-ARCHITECTURE memory layer + existing IEmbeddingCache contract.</step>
+    <step order="3" name="Author Service">`ISelectiveRecallService` + impl in `Services/Ai/Memory/`. Vectorize on write; cosine similarity on read.</step>
+    <step order="4" name="Wire Write Path">In compression service or chat persistence path, vectorize each turn / summary + persist alongside metadata.</step>
+    <step order="5" name="Wire Read Path">In `PlaybookChatContextProvider` memory composition step, call recall for top-K.</step>
+    <step order="6" name="Tests">Unit tests: top-K returned, budget cap respected, tenant isolation.</step>
+    <step order="7" name="Publish-Size + CVE">dotnet publish + vulnerable check.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 066 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/ISelectiveRecallService.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/SelectiveRecallService.cs (NEW)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/SelectiveRecallServiceTests.cs (NEW)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Turns vectorized at write time using existing `IEmbeddingCache`.</criterion>
+    <criterion testable="true">Top-K similarity retrieval works at read time.</criterion>
+    <criterion testable="true">Token budget cap respected (NFR-10).</criterion>
+    <criterion testable="true">Per-tenant isolation enforced.</criterion>
+    <criterion testable="true">Service registered in existing module; ZERO new Program.cs lines.</criterion>
+    <criterion testable="true">Publish-size delta within budget.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

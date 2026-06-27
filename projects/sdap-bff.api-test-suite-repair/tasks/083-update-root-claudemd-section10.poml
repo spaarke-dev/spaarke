@@ -1,0 +1,118 @@
+<task id="083" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P4.A4 — Update root `CLAUDE.md` §10 to reference test-update obligation (FR-25)</title>
+    <status>completed</status>
+    <estimated-effort>30-45 minutes</estimated-effort>
+    <assigned>AI agent (main session only)</assigned>
+    <tags>phase-4, governance, anti-drift, root-claude, main-session-only</tags>
+    <parallel-group>4-main-seq</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Main-session-only — root `CLAUDE.md` write requires main session per sub-agent write boundary. Per project convention (see project CLAUDE.md §Sub-agent write boundary), any root `CLAUDE.md` edit is main-session-only because the file is the canonical agent-loaded source of truth; the same boundary discipline as `.claude/` applies. Task-execute MUST refuse Agent delegation for this task.</parallel-reason>
+    <main-session-only>true</main-session-only>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Update root `CLAUDE.md` §10 (BFF Hygiene — Binding Governance) to add a bullet referencing the test-update obligation per FR-25. The bullet cross-references `.claude/constraints/bff-extensions.md` "Test update obligation" section (codified by task 080).
+
+    Per design.md §5.5 anti-drift enforcement, this is the fourth and final coordination point for the test-update obligation: (1) constraint section in task 080, (2) PR template question in task 081, (3) code review checklist line in task 082, (4) THIS root CLAUDE.md §10 bullet. The root CLAUDE.md §10 already binds: "every project that adds code to the BFF MUST have a `design.md` section titled **Placement Justification**." The FR-25 bullet extends that binding to test-coverage obligation.
+
+    🚨 CRITICAL — task-execute MUST refuse Agent delegation for this task. Root `CLAUDE.md` is the canonical agent-loaded source of truth — every Claude Code session loads it before doing anything. Editing it via a sub-agent risks subtle corruption of agent context. Per project convention (project CLAUDE.md §Sub-agent write boundary), the same boundary discipline as `.claude/` applies here. Main session edits this file directly via the Edit tool.
+
+    NO production code changes. NO test changes. Single bullet addition (plus surrounding markdown to fit existing §10 structure).
+
+    Hard dependency on task 080: this task adds the cross-reference to `.claude/constraints/bff-extensions.md` "Test update obligation" section. That section MUST exist before this task lands (otherwise the cross-reference points to nothing).
+  </prompt>
+
+  <role>Main-session AI agent extending root CLAUDE.md §10 BFF Hygiene to include the test-update obligation cross-reference.</role>
+
+  <goal>
+    Root `CLAUDE.md` §10 (BFF Hygiene — Binding Governance) updated with a NEW bullet referencing the test-update obligation per FR-25. The bullet:
+    (a) States that any PR modifying `src/server/api/Sprk.Bff.Api/Services/` MUST include corresponding test additions/updates;
+    (b) Cross-references `.claude/constraints/bff-extensions.md` "Test update obligation" section as the canonical source;
+    (c) References that the PR template (task 081) and code review checklist (task 082) enforce this in PR process.
+
+    Existing §10 content (Placement Justification, publish-size, CVE checks, etc.) preserved unchanged. Existing §10 cross-references to `.claude/constraints/bff-extensions.md` and `.claude/constraints/azure-deployment.md` preserved. The new bullet integrates into the existing numbered checklist.
+  </goal>
+
+  <inputs>
+    <file purpose="target-file">CLAUDE.md</file>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="constraint-canonical">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-25">Root `CLAUDE.md` §10 (BFF Hygiene) gains a bullet referencing the test-update obligation; cross-reference target is `.claude/constraints/bff-extensions.md`</constraint>
+    <constraint source="design.md §5.5">Anti-drift via constraint + PR template + checklist + root CLAUDE.md bullet; NO CI script</constraint>
+    <constraint source="project CLAUDE.md §Sub-agent write boundary">Root CLAUDE.md edits are main-session-only per project convention; task-execute MUST refuse Agent delegation</constraint>
+    <constraint source="NFR-01">No production code changes (root CLAUDE.md is project doc, not `src/`)</constraint>
+    <constraint source="NFR-09">Task POML metadata declares `repair-not-rewrite: true`</constraint>
+    <constraint source="root CLAUDE.md §10">§10 is the binding workflow rule for every BFF-touching task; new bullet must integrate without breaking existing rule chain</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Root CLAUDE.md §10 is the canonical entry point for BFF Hygiene binding rules — every BFF-touching task loads it. It currently binds five rules: (1) load `.claude/constraints/bff-extensions.md`, (2) state Placement Justification, (3) use facade for AI capability, (4) verify publish-size impact, (5) verify no new HIGH-severity CVE. FR-25 adds a sixth: verify test-update obligation per `.claude/constraints/bff-extensions.md` "Test update obligation" section. Without this bullet, the root CLAUDE.md §10 binding chain has a gap that the anti-drift mechanism cannot close — task agents may load §10 and miss the test-coverage rule.
+
+      Per the project CLAUDE.md §Sub-agent write boundary section: "Sub-agent write boundary — Phase 4 tasks 080 + 083 (`.claude/` paths) are main-session-only sequential." Root CLAUDE.md is in repo root (not `.claude/`), but project convention treats it with the same boundary discipline because (a) it is the agent-loaded source of truth, (b) sub-agent edits risk silent corruption that would not surface until next session.
+    </background>
+    <dependencies>
+      <dependency task="080" status="not-started">HARD — root CLAUDE.md bullet cross-references `.claude/constraints/bff-extensions.md` "Test update obligation" section; that section MUST exist before this task lands</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>CLAUDE.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read root `CLAUDE.md` in full; locate §10 "BFF Hygiene — Binding Governance" section. Confirm existing 5 bullets present (load constraint, Placement Justification, facade, publish-size, CVE).</step>
+    <step order="2">Verify task 080 has shipped — i.e., `.claude/constraints/bff-extensions.md` "Test update obligation" section exists. If not, HALT and request that task 080 ship first (hard dependency).</step>
+    <step order="3">Draft the new §10 bullet:
+      ```
+      6. **Verify the test-update obligation** — when a PR modifies `src/server/api/Sprk.Bff.Api/Services/`, it MUST include corresponding test additions/updates per the "Test update obligation" section of [`.claude/constraints/bff-extensions.md`](.claude/constraints/bff-extensions.md). Enforced by the PR template (`.github/pull_request_template.md`) + code review checklist (`docs/procedures/testing-and-code-quality.md`). NOT enforced by CI script (design.md §5.5).
+      ```
+      Adjust numbering to match the existing §10 list. Place the bullet after the existing CVE-check bullet (logical grouping: quality-of-work checks).
+    </step>
+    <step order="4">Apply the edit via the Edit tool (main session only — DO NOT delegate to sub-agent). Verify §10 numbering is internally consistent post-edit; existing bullets unchanged in wording.</step>
+    <step order="5">Verify the §10 "Evidence base" paragraph + "This is **not advisory**" paragraph remain unchanged at the end of §10.</step>
+    <step order="6">Verify `git status` shows ONLY `CLAUDE.md` modified. Per the rule in §11 (PR touching CLAUDE.md must add entry to `.claude/CHANGELOG.md`), append a CHANGELOG entry — BUT this requires a separate main-session edit to `.claude/CHANGELOG.md` (also under sub-agent boundary). Add the CHANGELOG entry in the same task; commit both files together.</step>
+    <step order="7">Commit message: "docs(claude): add test-update obligation to BFF Hygiene §10 (FR-25)".</step>
+    <step order="8">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with completion + cite the new §10 bullet number + paragraph count + CHANGELOG entry confirmation.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Root `CLAUDE.md` for current §10 structure; `.claude/constraints/bff-extensions.md` to verify section exists</tool>
+    <tool name="Edit">Append new §10 bullet; append `.claude/CHANGELOG.md` entry</tool>
+    <tool name="Bash">`git status` for boundary verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">CLAUDE.md (updated §10 with new test-update obligation bullet)</output>
+    <output type="docs">.claude/CHANGELOG.md (appended entry per root CLAUDE.md §11 rule)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File diff shows new bullet in root `CLAUDE.md` §10 referencing the test-update obligation</criterion>
+    <criterion testable="true">Bullet cross-references `.claude/constraints/bff-extensions.md` "Test update obligation" section</criterion>
+    <criterion testable="true">Bullet references PR template (task 081 output) and code review checklist (task 082 output) as enforcement mechanisms</criterion>
+    <criterion testable="true">§10 numbering is internally consistent; existing bullets (1-5) preserved unchanged in wording</criterion>
+    <criterion testable="true">§10 "Evidence base" + "This is **not advisory**" paragraphs preserved unchanged</criterion>
+    <criterion testable="true">`.claude/CHANGELOG.md` entry appended per root CLAUDE.md §11 rule (any CLAUDE.md PR must add CHANGELOG entry)</criterion>
+    <criterion testable="true">`git status` shows ONLY `CLAUDE.md` + `.claude/CHANGELOG.md` modified</criterion>
+    <criterion testable="true">Edit performed by main session (not delegated to Agent sub-agent — would risk silent corruption of agent context)</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="076" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B.5: Migrate CalendarSidePane App.tsx from CalendarFilterOutput to CalendarFilterPaneOutput shape (B-6 follow-up)</title>
+    <phase>6.5: R4 add-on cleanup</phase>
+    <status>completed</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>055</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, typescript, code-page</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Single own-src error; small shape migration in one file. STANDARD per Step 3.5.5.</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches src/solutions/CalendarSidePane/ only — different from all other parallel tasks</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-27. Task 067 carry-over (CO-4) cataloged 1 pre-existing tsc error in
+    CalendarSidePane. It's a loose end from R4's own B-6 (task 055) work — the local
+    CalendarFilterPane was promoted, and CalendarSidePane App.tsx still uses the legacy
+    CalendarFilterOutput shape. Migrate to CalendarFilterPaneOutput.
+  </prompt>
+
+  <role>
+    SPAARKE Code Page engineer. Single-file fix.
+  </role>
+
+  <goal>
+    `npx tsc --noEmit` in `src/solutions/CalendarSidePane/` → 0 own-src errors (down from 1).
+  </goal>
+
+  <context>
+    <background>
+      Per notes/b11-cast-inventory.md CO-4: `src/solutions/CalendarSidePane/src/App.tsx:61` —
+      `CalendarFilterOutput` (legacy) vs `CalendarFilterPaneOutput` (B-6 hoist) shape mismatch.
+      `CalendarFilterPaneSingle` requires `dateFields` property not present on
+      `CalendarFilterSingle`.
+
+      Fix: migrate `getInitialFilterState` (and any related callers in App.tsx) to use
+      `CalendarFilterPaneOutput` shape. Add the `dateFields` property — the value will likely
+      come from the same source the new CalendarFilterPane uses internally.
+    </background>
+    <relevant-files>
+      <file>src/solutions/CalendarSidePane/src/App.tsx</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/components/CalendarFilterPane/CalendarFilterPane.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Migrate to the new shape — don't keep the legacy `CalendarFilterOutput` type around as a parallel option.</constraint>
+    <constraint source="project">No behavior change unless inevitable due to the shape change. If behavior changes, document why.</constraint>
+    <constraint source="ADR-012">Use the type exactly as exported from `@spaarke/events-components`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/b11-cast-inventory.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/b6-option-b-execution-2026-05-26.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Inspect">Read `src/solutions/CalendarSidePane/src/App.tsx` (focus on line 61 + surrounding context). Read `CalendarFilterPane.tsx` to find the `CalendarFilterPaneOutput` type definition.</step>
+    <step order="2" name="Migrate">Update `getInitialFilterState` (and any other consumer) to produce `CalendarFilterPaneOutput` shape — including the `dateFields` property.</step>
+    <step order="3" name="Typecheck">`npx tsc --noEmit` → 0 errors.</step>
+    <step order="4" name="Build">`npm run build` → 0 errors.</step>
+    <step order="5" name="Document">Write `projects/spaarke-ai-platform-unification-r4/notes/076-calendarsidepane-shape-fix.md` summarizing the change.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect App.tsx + CalendarFilterPane types</tool>
+    <tool name="Edit">Apply shape migration</tool>
+    <tool name="Bash">npx tsc --noEmit, npm run build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/CalendarSidePane/src/App.tsx (shape migration)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/076-calendarsidepane-shape-fix.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the fix, When `npx tsc --noEmit` runs in `src/solutions/CalendarSidePane/`, Then 0 own-src errors.</criterion>
+    <criterion testable="true">Given the change, When `npm run build` runs, Then 0 errors.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+
+  <notes>
+    Completed 2026-05-27. Migrated parseParams.ts and postMessage.ts from legacy
+    CalendarFilterOutput shape to CalendarFilterPaneOutput from @spaarke/events-components.
+    Removed all legacy in-file types (no parallel option retained per constraint). Added
+    dateFields: [] to getInitialFilterState range/single returns (no behavior change — see
+    memo for analysis). tsc own-src errors: 0 (was 1). npm run build: 0 errors. Memo:
+    notes/076-calendarsidepane-shape-fix.md.
+  </notes>
+</task>

@@ -24,15 +24,7 @@
  *   - ADR-012: shared library component, no solution-specific imports
  */
 import * as React from 'react';
-import {
-  Text,
-  Input,
-  Textarea,
-  Select,
-  Field,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Text, Input, Textarea, Select, Field, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from '../../LookupField/LookupField';
 import type { ILookupItem } from '../../../types/LookupTypes';
 
@@ -47,8 +39,7 @@ export const WORK_ASSIGNMENT_PRIORITY = {
   Critical: 100000003,
 } as const;
 
-export type WorkAssignmentPriorityValue =
-  (typeof WORK_ASSIGNMENT_PRIORITY)[keyof typeof WORK_ASSIGNMENT_PRIORITY];
+export type WorkAssignmentPriorityValue = (typeof WORK_ASSIGNMENT_PRIORITY)[keyof typeof WORK_ASSIGNMENT_PRIORITY];
 
 // ---------------------------------------------------------------------------
 // Props
@@ -253,9 +244,7 @@ export const AssignWorkFollowOnStep: React.FC<IAssignWorkFollowOnStepProps> = ({
             <Field label="Priority">
               <Select
                 value={String(priorityValue)}
-                onChange={(_e, data) =>
-                  onPriorityChange(Number(data.value) as WorkAssignmentPriorityValue)
-                }
+                onChange={(_e, data) => onPriorityChange(Number(data.value) as WorkAssignmentPriorityValue)}
                 className={styles.fullWidth}
               >
                 <option value={String(WORK_ASSIGNMENT_PRIORITY.Low)}>Low</option>

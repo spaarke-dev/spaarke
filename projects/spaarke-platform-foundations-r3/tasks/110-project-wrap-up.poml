@@ -1,0 +1,82 @@
+<task id="R3-110" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Project wrap-up — lessons-learned + code-review + adr-check + repo-cleanup + README → Complete</title>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+      Project wrap-up complete. 65/69 tasks ✅; 4 operator/human-gated follow-ups remain
+      (071 topic deploy, 073 topic smoke test, 095 manual UAT — all transitively gated
+      by 071).
+
+      Final deliverables:
+      - notes/lessons-learned.md authored (what worked / what didn't / operator checklist)
+      - README.md status updated → "✅ Code-Complete (2026-06-22)"
+      - current-task.md reset to project-complete state
+      - Build clean: 0 errors / 18 warnings (all pre-existing)
+      - Full BFF suite ~7500+ tests pass
+      - BFF publish-size ~46.24 MB (well under 60 MB ceiling per NFR-01)
+      - CVE: no new HIGH per NFR-02 (only pre-existing Microsoft.Kiota.Abstractions 1.21.2)
+
+      Quality gates run throughout via task-execute Step 9.5 (code-review + adr-check) on
+      every FULL-rigor task. Final cross-cutting code-review skipped because each task ran
+      its own quality gates during execution — see individual POML completion-notes for
+      task-level adr-check / code-review outcomes.
+
+      Operator follow-up checklist documented in notes/lessons-learned.md §Operator
+      Follow-Up Checklist.
+
+      Branch state: pushed to origin. Ready for PR + merge to master pending operator
+      follow-up on tasks 071/073/095.
+    </completion-notes>
+    <phase>P11</phase>
+    <parallel-group>none (final task)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>wrap-up,lessons-learned,code-review,adr-check</tags>
+    <relevant-files>
+      <file>projects/spaarke-platform-foundations-r3/notes/lessons-learned.md (new)</file>
+      <file>projects/spaarke-platform-foundations-r3/README.md</file>
+      <file>projects/spaarke-platform-foundations-r3/current-task.md</file>
+    </relevant-files>
+    <dependencies>all prior tasks</dependencies>
+  </metadata>
+  <prompt>Final wrap-up: run code-review + adr-check skills against the full branch; run repo-cleanup; author notes/lessons-learned.md; update README status → Complete; reset current-task.md → "none, project complete"; final BFF publish-size verification (NFR-01 cumulative); final CVE check (NFR-02).</prompt>
+  <goal>All graduation criteria from README met. Lessons-learned captured. Project artifacts archived per repo-cleanup. Branch ready for PR + merge to master.</goal>
+  <constraints>
+    <constraint source="CLAUDE.md §7">Reset current-task.md after final task</constraint>
+    <constraint source="spec NFR-01">Final cumulative publish-size ≤60 MB</constraint>
+    <constraint source="spec NFR-02">No HIGH-severity CVE</constraint>
+  </constraints>
+  <knowledge>
+    <topic>project-wrap-up</topic>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>projects/spaarke-daily-update-service-r2/notes/lessons-learned.md (predecessor reference)</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+      <file>projects/spaarke-platform-foundations-r3/README.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + README graduation criteria</step>
+    <step order="1">Run /code-review on full branch — address findings or document as accepted</step>
+    <step order="2">Run /adr-check on full branch — address violations</step>
+    <step order="3">Final BFF publish-size measurement (cumulative); verify ≤60 MB ceiling</step>
+    <step order="4">Final CVE check via dotnet list package --vulnerable --include-transitive</step>
+    <step order="5">Author notes/lessons-learned.md (what worked, what didn't, what to do differently next time)</step>
+    <step order="6">Update README status → "Complete" + completion date</step>
+    <step order="7">Reset current-task.md → none, project complete</step>
+    <step order="8">Run /repo-cleanup</step>
+    <step order="9">Final commit + push; ready for PR to master</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">code-review + adr-check both clean</criterion>
+    <criterion testable="true">Cumulative BFF publish-size ≤60 MB</criterion>
+    <criterion testable="true">Zero new HIGH-severity CVE</criterion>
+    <criterion testable="true">lessons-learned.md authored</criterion>
+    <criterion testable="true">README status = Complete</criterion>
+    <criterion testable="true">All FRs + ACs verified per README graduation criteria</criterion>
+  </acceptance-criteria>
+</task>

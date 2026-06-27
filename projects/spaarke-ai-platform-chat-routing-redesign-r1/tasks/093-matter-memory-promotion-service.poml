@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="093" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>MatterMemoryPromotionService (NEW) — pending-approval Cosmos doc-type matter-memory-promotion</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4e)</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>092</dependencies>
+    <blocks>094,095,096,097</blocks>
+    <tags>bff-api, services, ai, ADR-013</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; creates new `.cs` service implementing T2 → T3 promotion (privacy-critical boundary); ADR-013/ADR-015 binding</rigor-reason>
+    <parallel-group>4-K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `MatterMemoryPromotionService` (NEW) at `src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryPromotionService.cs` (+ interface `IMatterMemoryPromotionService` if not already authored by task 088) implementing the T2 → T3 user-approval promotion workflow per architecture §4.4 + §6.4 + §7.1. Three methods: `QueueForApprovalAsync(tenantId, matterId, sessionId, fact, source, confidence, ct)` writes a pending record to Cosmos `memory` container with doc-type `matter-memory-promotion` and id `promotion-pending_{guid}`; `ApproveAsync(promotionId, ct)` reads pending → calls existing `IMatterMemoryService.AppendFactAsync` → updates status to `approved`; `RejectAsync(promotionId, ct)` updates status to `rejected`. Dispatch of `memory.*` PaneEventBus events happens in task 096/097 (separate dispatch sites). Implements FR-32 (promotion workflow + Cosmos doc-type).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in Cosmos memory-container discriminator pattern + R6 MatterMemoryService reuse.</role>
+
+  <goal>
+    `MatterMemoryPromotionService` lives at `Services/Ai/Memory/MatterMemoryPromotionService.cs` implementing `IMatterMemoryPromotionService`. Uses existing Cosmos `memory` container per architecture §7.1 (NO new container — discriminator pattern via `documentType` field). Writes/reads/updates pending records. Delegates the actual T3 durable write to existing `IMatterMemoryService.AppendFactAsync` on approve (architecture §4.3 wire-not-build). Unit tests cover Queue/Approve/Reject + race-condition handling (concurrent approve attempts → ETag) + ADR-015 telemetry safety (no fact text logged).
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §3.2 rule 2 (T2 → T3 promotion is EXPLICIT), §4.4 (NEW service), §6.4 (promotion flow), §7.1 (Cosmos `memory` container; doc-type discriminator). The architectural rule is binding: this service is the ONLY path from T2 to T3; T2 → T3 NEVER auto-promotes; user approval is mediated via this service. The actual T3 write reuses existing `MatterMemoryService.AppendFactAsync` (architecture §4.3 — wire-not-build).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IMatterMemoryService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Workspace/WorkspaceStateService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">No endpoint added here (tasks 094, 095 add endpoints).</constraint>
+    <constraint source="ADR-010">Register concrete service in AiModule (already wired by task 091 if interface stub from task 088 was used; if task 088 created the stub, this task replaces it with concrete and updates DI accordingly).</constraint>
+    <constraint source="ADR-013">Service in `Services/Ai/Memory/` — BFF-internal. No PublicContracts facade required for chat-internal memory plumbing. `IMatterMemoryService` injection is allowed (cousin memory service).</constraint>
+    <constraint source="ADR-015">Telemetry payload: serviceName + tenantId + matterId (boolean present/absent) + sessionId (deterministic ID) + promotionId (deterministic GUID) + status discriminator + durationMs ONLY. NEVER fact text, source text.</constraint>
+    <constraint source="ADR-029">≤+0.2 MB delta.</constraint>
+    <constraint source="architecture">§3.2 rule 2 — T2 → T3 mediation is explicit. `QueueForApprovalAsync` MUST NOT call `IMatterMemoryService.AppendFactAsync`. `ApproveAsync` is the ONLY site that does so.</constraint>
+    <constraint source="architecture">§7.1 — doc-type discriminator pattern: id format `promotion-pending_{guid}`, `documentType: "matter-memory-promotion"`. Partition `/tenantId`. 90d TTL inherits from container default.</constraint>
+    <constraint source="architecture">§6.4 — schema of pending record matches: `{ id, documentType, tenantId, matterId, sessionId, fact, source, confidence, createdAt, status: "pending_approval" | "approved" | "rejected" }`.</constraint>
+    <constraint source="project">Concurrency: use Cosmos ETag (`IfMatch`) on Approve/Reject to detect duplicate processing.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §3.2, §4.4, §6.4 (flow diagram), §7.1 (Cosmos discriminator).</step>
+    <step order="2">Read `MatterMemoryService.cs` to understand the Cosmos memory-container access pattern + `AppendFactAsync` signature.</step>
+    <step order="3">Author `Services/Ai/Memory/IMatterMemoryPromotionService.cs` (if not already from task 088): methods `QueueForApprovalAsync`, `ApproveAsync`, `RejectAsync` returning `MatterMemoryPromotionResult` record.</step>
+    <step order="4">Author `Services/Ai/Memory/MatterMemoryPromotionService.cs`:
+      (a) `QueueForApprovalAsync` writes pending Cosmos doc per §6.4 schema; emits event in task 096;
+      (b) `ApproveAsync` reads pending (404 → return `not_found`), calls `IMatterMemoryService.AppendFactAsync`, updates pending status to `approved` with ETag; event in task 097;
+      (c) `RejectAsync` updates pending status to `rejected` with ETag; event in task 097.
+    </step>
+    <step order="5">Inject `IMatterMemoryService` (existing) + Cosmos client (existing, used by MatterMemoryService) + `TimeProvider` + `ILogger`.</step>
+    <step order="6">Update `AiModule.cs` to register `IMatterMemoryPromotionService` → `MatterMemoryPromotionService` (concrete). If task 091 already registered the stub, replace with concrete.</step>
+    <step order="7">Author unit tests at `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/MatterMemoryPromotionServiceTests.cs`:
+      - Queue creates Cosmos doc with correct shape + id format
+      - Approve reads pending + calls AppendFactAsync + updates status with ETag
+      - Reject updates status with ETag
+      - not_found returns structured result (not exception)
+      - Concurrent approve attempts → ETag mismatch returns `already_resolved`
+      - ADR-015 telemetry safety verified
+    </step>
+    <step order="8">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="9">Measure BFF publish-size delta; write `notes/handoffs/093-bff-publish-delta.md`.</step>
+    <step order="10">Run code-review + adr-check.</step>
+    <step order="11">Update TASK-INDEX.md: 093 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">MatterMemoryService + IMatterMemoryService</tool>
+    <tool name="Write">Service + interface + tests</tool>
+    <tool name="Edit">AiModule.cs (registration concrete swap)</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IMatterMemoryPromotionService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryPromotionService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs (registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/MatterMemoryPromotionServiceTests.cs</output>
+    <output type="docs">notes/handoffs/093-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Service exists; implements `IMatterMemoryPromotionService` per the architecture §4.4 contract.</criterion>
+    <criterion testable="true">`QueueForApprovalAsync` MUST NOT call `AppendFactAsync` — `grep "AppendFactAsync" src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryPromotionService.cs` ONLY shows one call inside `ApproveAsync`.</criterion>
+    <criterion testable="true">Pending Cosmos doc id matches `promotion-pending_{guid}` format; `documentType = "matter-memory-promotion"`.</criterion>
+    <criterion testable="true">Approve uses Cosmos ETag IfMatch for concurrency.</criterion>
+    <criterion testable="true">Unit tests pass — Queue/Approve/Reject/not_found/already_resolved.</criterion>
+    <criterion testable="true">Telemetry payload contains no fact/source text.</criterion>
+    <criterion testable="true">BFF publish delta ≤+0.2 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Event dispatch is intentionally OUT of scope here — tasks 096 (pending) + 097 (resolved) cover the PaneEventBus dispatch sites. This task ONLY does the persistence + T3 mediation. Architecture §3.2 + §6.4 binding rule: this is the ONLY service path from T2 to T3.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

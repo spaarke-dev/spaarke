@@ -1,0 +1,38 @@
+{
+  "_comment_top": "R6 Wave 7 (Q9 batch migration) — seed row for the TextRefinementHandler 'keypoints' method.",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'TextRefinementHandler'. The handler reads sprk_configuration.method = 'keypoints' to dispatch to the key-point extraction pipeline.",
+  "_comment_method_dispatch": "Three rows (TEXT-REFINE / TEXT-KEYPOINTS / TEXT-SUMMARY) share one handler class. Each row's sprk_configuration.method discriminator selects the internal method.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_name 'SYS-%' filter; UPSERTs.",
+  "sprk_name": "SYS-Text Key Points",
+  "sprk_toolcode": "TEXT-KEYPOINTS",
+  "sprk_description": "Extract the most important key points from a text passage as a bullet list. Use when the user wants to identify main takeaways, action items, or critical information from a document section or analysis output.",
+  "sprk_handlerclass": "TextRefinementHandler",
+  "sprk_availableincontexts": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat). Q9 batch migration: invocable from both playbook orchestration and chat-driven function calling.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "TextRefinementHandler.ExtractKeyPoints Request",
+    "description": "Argument shape for chat-driven invocation of the keypoints method. The 'text' field carries the content to analyse; optional 'maxPoints' caps the result count.",
+    "type": "object",
+    "required": ["text"],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The text passage to extract key points from. The handler does NOT pre-process this — it is the literal input to the LLM."
+      },
+      "maxPoints": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20,
+        "description": "Maximum number of key points to extract. Defaults to 5 if omitted; clamped to [1, 20]."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "method = 'keypoints' is the dispatch discriminator. Default maxPoints = 5; per-invocation tool args may override.",
+    "method": "keypoints",
+    "maxPoints": 5
+  }
+}

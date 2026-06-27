@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.44"
+  <control namespace="Sprk" constructor="SemanticSearchControl" version="1.1.76"
            display-name-key="Semantic Search Control"
-           description-key="PCF control for semantic document search with natural language queries (v1.1.44)"
+           description-key="PCF control for semantic document search with natural language queries (v1.1.76)"
            control-type="virtual">
 
     <external-service-usage enabled="true">
@@ -57,6 +57,17 @@
     <!-- Input: Compact mode for form sections -->
     <property name="compactMode" display-name-key="Compact Mode" description-key="Enable compact layout for form sections"
               of-type="TwoOptions" usage="input" required="false" />
+
+    <!-- Input: Show or hide the list/card view toggle in the command bar (v1.1.47) -->
+    <property name="showViewToggle" display-name-key="Show View Toggle" description-key="Show the list/card view toggle group in the command bar. When false, the view is locked to defaultView."
+              of-type="TwoOptions" usage="input" required="false" />
+
+    <!-- Input: Default view mode (also the locked view when toggle is hidden) (v1.1.47) -->
+    <property name="defaultView" display-name-key="Default View" description-key="Initial view mode. Also the locked view when Show View Toggle is false."
+              of-type="Enum" usage="input" required="false">
+      <value name="list" display-name-key="List">list</value>
+      <value name="card" display-name-key="Card">card</value>
+    </property>
 
     <!-- Output: Selected document ID -->
     <property name="selectedDocumentId" display-name-key="Selected Document ID" description-key="The document selected by the user"

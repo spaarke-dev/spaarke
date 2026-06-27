@@ -1,0 +1,120 @@
+<task id="006" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>Capture D-02..D-06 decision files (§5 locked decisions audit trail)</title>
+    <status>completed</status>
+    <estimated-effort>45-60 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-0, decision-capture, audit-trail</tags>
+    <parallel-group>0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes only to 5 distinct files in decisions/ (D-02 through D-06); disjoint from tasks 001, 002, 003 (D-01), 007</parallel-reason>
+    <rigor>MINIMAL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Per design.md §7 Phase 0 deliverables, the project produces D-01 through D-06 decision
+    capture files (single-purpose files for audit + future-project reference). Task 003 produces
+    D-01 (researcher verdict). THIS task produces D-02 through D-06 capturing the remaining
+    §5 locked decisions in single-page form.
+
+    Decisions to capture:
+    - D-02: §5.2 — CI gate full enforce_admins + documented incident-response emergency path
+    - D-03: §5.3 — Integration tests IN SCOPE
+    - D-04: §5.4 — Triage authority (agent judges per §6 binding rules + §4.8 escalation)
+    - D-05: §5.5 — Anti-drift via code review checklist + PR template (NO CI script)
+    - D-06: §5.6 — KEEP the 3 in-progress namespace fixes
+
+    Each file is ~1 page (title, context, decision, rationale, downstream impact).
+    NO source-code changes.
+  </prompt>
+
+  <role>AI agent codifying §5 locked decisions into discoverable single-purpose files.</role>
+
+  <goal>
+    5 decision files exist in `projects/sdap-bff.api-test-suite-repair/decisions/`:
+    - `D-02-ci-gate-strict.md`
+    - `D-03-integration-in-scope.md`
+    - `D-04-triage-authority.md`
+    - `D-05-anti-drift-no-ci-script.md`
+    - `D-06-keep-namespace-fixes.md`
+
+    Each file has consistent structure: Title + dated header, Context (1 paragraph), Decision
+    (verbatim from design.md §5.X), Rationale (1-2 paragraphs), Downstream Impact (FRs and/or
+    tasks affected).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="§7 Phase 0">Phase 0 deliverables include D-01 through D-06 single-purpose decision files</constraint>
+    <constraint source="§5">Locked decisions are binding; D-02..D-06 capture without modification</constraint>
+    <constraint source="NFR-01">No production code changes</constraint>
+    <constraint source="NFR-09">`repair-not-rewrite: true` declared in metadata</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Decision capture in single-purpose files serves two purposes: (1) auditability — each
+      decision is independently citable in future PRs and project reviews; (2) future-project
+      reference — sibling/successor projects can grep `decisions/` for "what did the predecessor
+      decide about X." Pattern matches predecessor `sdap-bff-api-remediation-fix` decision-style
+      capture in its CLAUDE.md "Decisions Made" section.
+    </background>
+    <dependencies>
+      <dependency task="none" status="n/a">No upstream — Phase 0 task; reads only locked decisions from design.md §5</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/decisions/D-02-ci-gate-strict.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/decisions/D-03-integration-in-scope.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/decisions/D-04-triage-authority.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/decisions/D-05-anti-drift-no-ci-script.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/decisions/D-06-keep-namespace-fixes.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read design.md §5.2 through §5.6 fully. For each, identify: Title (one line), Context (why was this open?), Decision (the locked answer), Rationale (1-2 paragraphs), Downstream Impact (which FRs and/or tasks depend on this decision).</step>
+    <step order="2">Write `D-02-ci-gate-strict.md`. Title: "CI gate: full enforce_admins + documented incident-response emergency path". Decision: full `enforce_admins: true` for `Build &amp; Test (Debug)`, `Build &amp; Test (Release)`, `Code Quality` + `skip-tests` workflow_dispatch input REMOVED + emergency procedure documented with owner-only approver + 5-business-day follow-up clause. Rationale: per §5.2 "robust over easy" — anything less recreates the rot. Downstream: FR-09 (enforce_admins flip), FR-10 (skip-tests removal), FR-11 (emergency procedure doc), FR-12 (operational verification), §5.2 reference.</step>
+    <step order="3">Write `D-03-integration-in-scope.md`. Title: "Integration tests in scope (Spe.Integration.Tests)". Decision: `tests/integration/Spe.Integration.Tests/` IN SCOPE per §5.3. Phase 0 baseline captures starting state (task 002); repair sequences into Phase 2+3 P23.I. Rationale: integration tests catch real Graph/SPE behavior unit tests cannot; 2026-05-29 BFF audit identified Graph drift as recurring incident source. Effort: +12-20h to project total. Downstream: FR-01 (integration baseline), FR-13 (P1.E classification), FR-18 (P23.I repair).</step>
+    <step order="4">Write `D-04-triage-authority.md`. Title: "Triage authority: agent judges, following §6 binding rules". Decision: AI agent makes per-file repair-vs-archive decisions, STRICTLY bounded by §6 binding rules + §4.8 escalation procedure. Owner reviews per-phase exit ledger, NOT per-decision PRs. Rationale: per-decision owner approval would burden owner with hundreds of micro-decisions; binding rules + escalation + ledger gives agent judgment AND owner oversight without per-decision friction. Downstream: §6.2 triage taxonomy enforcement (every task), §4.8 escalation procedure (rewrite gating), NFR-04 (archive count >10 escalation), Phase 4 exit ledger (FR-27).</step>
+    <step order="5">Write `D-05-anti-drift-no-ci-script.md`. Title: "Anti-drift enforcement via code review + PR template (NO CI script)". Decision: anti-drift is enforced by (1) new "Test update obligation" section in `.claude/constraints/bff-extensions.md`, (2) PR template question, (3) code review checklist line. NO CI script per owner direction "do not want PR process overburdened." Rationale: every project shipped tests; the failure mode was "tests drifted after services evolved, nobody owned correction" — that's a code-review-discipline problem, not a CI-enforcement problem. Downstream: FR-22 (bff-extensions.md update — Phase 4 task), FR-23 (PR template), FR-24 (code review checklist), FR-25 (CLAUDE.md §10 reference).</step>
+    <step order="6">Write `D-06-keep-namespace-fixes.md`. Title: "KEEP the 3 in-progress namespace fixes". Decision: per §5.6, the 3 in-progress namespace fix edits (currently in working tree per spec.md Owner Clarifications) are KEPT and become the project's first commit. Rationale: they are legitimate drift fixes from prior work; reverting would discard correct work as process theater. The fixes are exactly what Phase 1 would re-do; doing them now saves the re-discovery cost. Downstream: task 007 (commits the fixes). If no in-progress fixes exist at execution time, this decision is documented but operationally N/A.</step>
+    <step order="7">Verify all 5 files exist; each cites the design.md §5.X subsection in its header.</step>
+    <step order="8">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with completion + 5 file paths.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">design.md §5</tool>
+    <tool name="Write">5 decision files</tool>
+  </tools>
+
+  <outputs>
+    <output type="decision">projects/sdap-bff.api-test-suite-repair/decisions/D-02-ci-gate-strict.md</output>
+    <output type="decision">projects/sdap-bff.api-test-suite-repair/decisions/D-03-integration-in-scope.md</output>
+    <output type="decision">projects/sdap-bff.api-test-suite-repair/decisions/D-04-triage-authority.md</output>
+    <output type="decision">projects/sdap-bff.api-test-suite-repair/decisions/D-05-anti-drift-no-ci-script.md</output>
+    <output type="decision">projects/sdap-bff.api-test-suite-repair/decisions/D-06-keep-namespace-fixes.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 decision files exist in `projects/sdap-bff.api-test-suite-repair/decisions/`</criterion>
+    <criterion testable="true">Each file references the design.md §5.X subsection it captures (verifiable by grep for "§5.2" / "§5.3" / "§5.4" / "§5.5" / "§5.6" in each respective file)</criterion>
+    <criterion testable="true">Each file has 5 sections: Title, Context, Decision, Rationale, Downstream Impact</criterion>
+    <criterion testable="true">Each file's Downstream Impact section names at least one FR or task affected</criterion>
+    <criterion testable="true">No files outside `projects/sdap-bff.api-test-suite-repair/decisions/` modified</criterion>
+  </acceptance-criteria>
+</task>

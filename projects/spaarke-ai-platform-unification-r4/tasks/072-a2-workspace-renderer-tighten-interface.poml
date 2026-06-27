@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>A.2: Tighten WorkspaceRendererWebApi to require IWebApi methods (Path 2a, no wrapper)</title>
+    <phase>6.5: R4 add-on cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>052</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, typescript, refactoring, shared-lib</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code refactor on shared library interface used by LegalWorkspace renderer. Static type tightening with cast removal. FULL per Step 3.5.5 (modifies code with ADR-012 constraint + downstream-revealing nature).</rigor-reason>
+    <parallel-group>K</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches @spaarke/ui-components/workspace/ only — different files from 073, 074, 075, 076, 077</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Operator decision 2026-05-27 (Path 2a): instead of the wrapper component originally proposed,
+    tighten WorkspaceRendererWebApi to REQUIRE the methods that IWebApi requires. Drop the
+    `LegalWorkspaceApp as unknown as WorkspaceRenderer` cast. TypeScript proves correctness
+    statically — no runtime wrapper, no architectural debt for fictional flexibility.
+
+    Rationale: per operator architectural direction, LegalWorkspace IS the dashboard renderer;
+    new dashboard pieces are added INSIDE that library, not as separate renderers. The
+    "many renderers, each with different method needs" use case that motivated the loose
+    interface doesn't exist and won't exist.
+  </prompt>
+
+  <role>
+    SPAARKE TypeScript developer. Variance-literate. Bias toward honest type contracts over
+    static-type lies. Per-cast commit discipline (this task is ONE focused commit).
+  </role>
+
+  <goal>
+    (1) `WorkspaceRendererWebApi` (in `@spaarke/ui-components/workspace/`) tightened from
+    all-optional methods to `Pick<IWebApi, 'createRecord' | 'retrieveRecord' |
+    'retrieveMultipleRecords' | 'updateRecord' | 'deleteRecord'>` — methods REQUIRED.
+    (2) `LegalWorkspaceApp as unknown as WorkspaceRenderer` cast REMOVED at its call site
+    (find via grep). (3) `tsc --noEmit` passes on `@spaarke/ui-components` AND on
+    `@spaarke/legal-workspace` (the consumer). (4) No new wrapper component introduced.
+    (5) Existing tests pass.
+  </goal>
+
+  <context>
+    <background>
+      Task 052 (C-4) introduced the WorkspaceRenderer interface to decouple `LegalWorkspaceApp`
+      from being hard-wired as the only renderer. To make the interface generic, methods on
+      `WorkspaceRendererWebApi` were marked OPTIONAL. But `LegalWorkspaceApp` expects strict
+      `IWebApi` (methods REQUIRED). TypeScript's contravariance correctly refuses the assignment
+      (loose-to-strict is unsafe), forcing a `LegalWorkspaceApp as unknown as WorkspaceRenderer`
+      cast.
+
+      Operator decision 2026-05-27: the loose-interface flexibility was for a fictional use case
+      (multiple renderers with different method needs). Going forward, LegalWorkspace IS the
+      renderer; new dashboard pieces are added INSIDE that library. So tighten the interface to
+      reflect reality.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/workspace/WorkspaceRenderer.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/workspace/defaultWorkspaceRenderer.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/WorkspaceLayoutWidget.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared components live in `@spaarke/*` lib family and remain context-agnostic.</constraint>
+    <constraint source="project">NO wrapper component. The fix is interface tightening only. If a wrapper appears in the diff, STOP — that's not the approved approach.</constraint>
+    <constraint source="project">NO new abstractions. Use TypeScript's `Pick<IWebApi, '...' | '...'>` utility type — that's the entire fix.</constraint>
+    <constraint source="project">Remove the cast `as unknown as WorkspaceRenderer` everywhere. Grep first to find all call sites.</constraint>
+    <constraint source="project">Existing tests at `__tests__/WorkspaceLayoutWidget.test.tsx` MUST continue to pass.</constraint>
+    <constraint source="ADR-022">React 19 only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/c4-interface-design.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/r5-backlog-candidates.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Inspect current state">Read `WorkspaceRenderer.ts` and `defaultWorkspaceRenderer.ts`. Identify the `WorkspaceRendererWebApi` interface definition. Note all methods marked optional.</step>
+    <step order="2" name="Grep cast sites">Run `grep -rn "as unknown as WorkspaceRenderer\|as WorkspaceRenderer" --include="*.ts" --include="*.tsx" src/`. Catalog every match. Expected: at least 1 site in WorkspaceLayoutWidget.tsx.</step>
+    <step order="3" name="Tighten the interface">Edit `WorkspaceRenderer.ts`: change `WorkspaceRendererWebApi` from manually-listed optional methods to `Pick&lt;IWebApi, 'createRecord' | 'retrieveRecord' | 'retrieveMultipleRecords' | 'updateRecord' | 'deleteRecord'&gt;`. Import `IWebApi` from wherever it's defined in the legal-workspace shared lib (likely `@spaarke/legal-workspace` types or `@spaarke/ui-components/types`).</step>
+    <step order="4" name="Remove all casts">For each cast site from step 2: remove the `as unknown as WorkspaceRenderer` cast. TypeScript should now accept the assignment directly.</step>
+    <step order="5" name="Typecheck verification">Run `npx tsc --noEmit` on `@spaarke/ui-components` AND on `@spaarke/legal-workspace` AND on `src/solutions/SpaarkeAi/` (the consumer code page). All 0 errors.</step>
+    <step order="6" name="Test verification">Run `npm test` in `@spaarke/ui-components`. The WorkspaceLayoutWidget tests must pass. If new failures appear, they are likely a sign the interface change is wider than expected — ESCALATE.</step>
+    <step order="7" name="Document in notes">Write `projects/spaarke-ai-platform-unification-r4/notes/072-workspace-renderer-fix.md` summarizing: cast sites removed, interface diff, test results, any downstream surprises.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect WorkspaceRenderer.ts + consumer files</tool>
+    <tool name="Grep">Find all cast sites</tool>
+    <tool name="Edit">Tighten interface + remove casts</tool>
+    <tool name="Bash">tsc --noEmit, npm test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/workspace/WorkspaceRenderer.ts (modified — interface tightened)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx (modified — cast removed)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/072-workspace-renderer-fix.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the interface change, When `WorkspaceRendererWebApi` is inspected, Then methods are REQUIRED (no `?:` markers) and the type is expressed via `Pick&lt;IWebApi, ...&gt;`.</criterion>
+    <criterion testable="true">Given the cast removal, When `grep -rn "as unknown as WorkspaceRenderer\|as WorkspaceRenderer"` runs across `src/`, Then 0 matches in production code.</criterion>
+    <criterion testable="true">Given the change, When `npx tsc --noEmit` runs on `@spaarke/ui-components`, `@spaarke/legal-workspace`, and `src/solutions/SpaarkeAi/`, Then all 0 errors.</criterion>
+    <criterion testable="true">Given the change, When `npm test` runs in `@spaarke/ui-components`, Then WorkspaceLayoutWidget tests pass.</criterion>
+    <criterion testable="true">Given the change, When the diff is inspected, Then NO new wrapper component appears.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Per operator decision 2026-05-27 — the wrapper approach is REJECTED. This is the entire fix:
+    one interface tightening + cast removal at call sites. If the work expands beyond that
+    scope, STOP and report.
+
+    Pairs naturally with task 074 (UI.Components 24 tsc errors) since both touch the same
+    package's types. But they're in different files — parallel-safe.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor — Step 9.5 quality gates (code-review + adr-check) after implementation. Checkpointing every 3 steps.</protocol>
+  </execution>
+</task>

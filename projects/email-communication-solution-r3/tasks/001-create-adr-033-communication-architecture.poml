@@ -1,0 +1,137 @@
+<task id="001" project="email-communication-solution-r3">
+  <metadata>
+    <title>Create ADR-033 — Communication Architecture (canonical client-side pattern)</title>
+    <phase>Wave 0 — Foundations + Non-Breaking BFF</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 005, 088</blocks>
+    <tags>adr, docs, architecture, communication</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Documentation task creating a binding ADR file; not code implementation but high-leverage governance artifact that all subsequent waves reference</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `.claude/adr/` — sub-agent write boundary (main-session-only per CLAUDE.md §3)</parallel-reason>
+    <fr-refs>FR-26</fr-refs>
+  </metadata>
+
+  <prompt>
+    Create the new ADR-033 (Communication Architecture) codifying the canonical client-side Communication pattern that R3 implements. This ADR is the binding pre-write checkpoint for every subsequent R3 wave — without it landed first, the rest of the project lacks an authoritative anchor.
+
+    The ADR must (a) confirm the canonical engine + wrappers + Code Page + typed wrapper structure, (b) capture the boundaries (what's in-scope vs out-of-scope per `sprk_communication` Code Page + `CommunicationType=Email` only), (c) reference ADR-024 (polymorphic resolver), ADR-028 (auth v2), ADR-026 (full-page custom page), and ADR-007 (SPE), and (d) be cross-referenced from `CLAUDE.md` §16 and `.claude/constraints/bff-extensions.md` so the agent loads it on Communication-touching tasks.
+
+    Re-verify ADR-033 is still the next free slot before creating (pre-flight confirmed it was free as of 2026-06-05 — `.claude/adr/ADR-032-*.md` is the highest existing). If a parallel project has claimed 033 in the interim, use the next free number and update all subsequent task references.
+  </prompt>
+
+  <role>
+    Spaarke platform architect. Authoritative on Communication architecture (R1 + R2 + R3 history). Familiar with the project's ADR conventions (concise `.claude/adr/` form, ~100–150 lines, MUST/MUST-NOT structure).
+  </role>
+
+  <goal>
+    A new ADR file at `.claude/adr/ADR-033-communication-architecture.md` (concise form, ~100–150 lines) that codifies the canonical Communication architecture and is cross-referenced from `CLAUDE.md` §16 + `.claude/constraints/bff-extensions.md`. ADR passes `/adr-check` against `spec.md`. No regressions in existing ADR loading.
+  </goal>
+
+  <context>
+    <background>
+      R1 built early email integration. R2 built the server-side Communication Service. R3 (this project) is the client-side consolidation — replaces 6 ad-hoc send-email implementations with one canonical engine + 3 wrappers + 1 Code Page + 1 typed BFF wrapper. ADR-033 codifies this so future surfaces don't re-fragment.
+
+      The ADR is the FIRST artifact of R3 because every subsequent wave's code review and `/adr-check` cite it. Writing code first and ADR later would invert the discipline this project is designed to enforce.
+    </background>
+    <relevant-files>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>docs/adr/INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">Server-side `IncomingAssociationResolver` unchanged; ADR-033 explicitly cites this boundary</constraint>
+    <constraint source="ADR-026">Code Page architecture follows Full-Page Custom Page standard</constraint>
+    <constraint source="ADR-028">`@spaarke/auth` v2 is the only auth bootstrap; shared lib injects `authenticatedFetch`</constraint>
+    <constraint source="ADR-007">SPE archival uses existing facade; no client reaches SPE directly</constraint>
+    <constraint source="ADR-010">Communication services register via `CommunicationModule` only</constraint>
+    <constraint source="project">ADR-033 must be cross-referenced from `CLAUDE.md` §16 pointer table</constraint>
+    <constraint source="project">ADR-033 must be cross-referenced from `.claude/constraints/bff-extensions.md` ("Communication as sensitive surface" addition planned in Wave 6 task 087)</constraint>
+    <constraint source="project">Concise ADR form per `.claude/adr/` conventions — NOT the full-history form in `docs/adr/`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/design.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-007-spe-filestore.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="ADR concise form" location=".claude/adr/ADR-032-bff-nullobject-kill-switch.md">
+        Latest concise ADR — use as structural exemplar (Status / Context / Decision / Consequences / Related sections; MUST / MUST NOT rules; ~100–150 lines).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Re-verify ADR-033 slot is still free: `ls .claude/adr/ADR-0*` and confirm highest is ADR-032. If 033 is taken (parallel project claimed it), use next free number and note in task notes/.</step>
+    <step order="2">Read `spec.md` FR-26 + design.md §11 + the driver assessment for ADR scope inputs.</step>
+    <step order="3">Read `ADR-032-bff-nullobject-kill-switch.md` for the latest concise-ADR structural exemplar.</step>
+    <step order="4">Read existing ADRs 007, 010, 024, 026, 028 to ensure ADR-033 correctly cites them in the Related section.</step>
+    <step order="5">Author `.claude/adr/ADR-033-communication-architecture.md` with sections: Status (Accepted, 2026-06-05), Context (cite assessment + R1/R2 history), Decision (canonical engine + 3 wrappers + Code Page + typed wrapper + LegalWorkspace forks retired; MUST / MUST NOT rules — pull from spec §MUST Rules and §MUST NOT Rules), Consequences, Related (ADR-024, ADR-026, ADR-028, ADR-007, ADR-010 + driver assessment + spec).</step>
+    <step order="6">Update `.claude/adr/INDEX.md` with ADR-033 row.</step>
+    <step order="7">Update `docs/adr/INDEX.md` if it has a separate index (concise + full live in different places per CLAUDE.md §13).</step>
+    <step order="8">Update root `CLAUDE.md` §16 (Pointers table) with a new row pointing to ADR-033 OR ensure the existing "ADRs (concise)" row covers it via the INDEX. Confirm `CLAUDE.md` §10 ("BFF Hygiene") references ADR-033 where appropriate (Communication as sensitive surface) — but defer the bff-extensions.md cross-reference to Wave 6 task 087.</step>
+    <step order="9">Run `/adr-check` skill (or equivalent grep) against `spec.md` to confirm ADR-033 has no contradictions with existing ADRs and passes constraint validation.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 001 ✅ completed.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol: status → completed, advance to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Verify ADR slot availability + cross-reference checks</tool>
+    <tool name="edit">Author ADR + update CLAUDE.md + indexes</tool>
+    <tool name="adr-check">Validate ADR against spec</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-033-communication-architecture.md (NEW)</output>
+    <output type="docs">.claude/adr/INDEX.md (UPDATED — add ADR-033 row)</output>
+    <output type="docs">CLAUDE.md (UPDATED — confirm ADR-033 reachable via §16)</output>
+    <output type="docs">docs/adr/INDEX.md (UPDATED if separate index)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.claude/adr/ADR-033-communication-architecture.md` exists and is ~100–150 lines.</criterion>
+    <criterion testable="true">ADR includes Status, Context, Decision (with MUST / MUST NOT rules), Consequences, and Related sections.</criterion>
+    <criterion testable="true">ADR cites ADR-024, ADR-026, ADR-028, ADR-007, ADR-010 in Related.</criterion>
+    <criterion testable="true">`.claude/adr/INDEX.md` lists ADR-033.</criterion>
+    <criterion testable="true">Root `CLAUDE.md` §16 reachable to ADR-033 (via index or direct row).</criterion>
+    <criterion testable="true">`/adr-check` skill passes against spec.md with ADR-033 included.</criterion>
+    <criterion testable="true">No regressions in existing ADR cross-references (grep for ADR-007/008/010/019/021/024/026/028 references — all still resolve).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The Wave 6 task 087 will further update `.claude/constraints/bff-extensions.md` to add a "Communication as sensitive surface" reference citing ADR-033. Do NOT update bff-extensions.md in this task — only confirm ADR-033 exists in a form that bff-extensions.md can later cite.
+
+    Empirical findings from project pipeline (relevant here):
+    - ADR-033 slot was free at pre-flight (2026-06-05). Highest existing = ADR-032 (bff-nullobject-kill-switch).
+    - Active PR #360 (audit-r1-docs-update) touches `.claude/patterns/` + `.claude/constraints/` — does NOT touch `.claude/adr/`. No conflict for this task.
+
+    UQ4 in spec is resolved by step 1 (re-verify slot).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 (adr-check + code-review) are SKIPPED for STANDARD rigor but main-session `/adr-check` invocation in step 9 above is REQUIRED.
+    </protocol>
+  </execution>
+</task>

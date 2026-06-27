@@ -89,6 +89,8 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
 
                 // Redis — disabled so Program.cs uses AddDistributedMemoryCache
                 ["Redis:Enabled"] = "false",
+                // spaarke-redis-cache-remediation-r1 task 003 (FR-02): opt into in-memory fallback for tests.
+                ["Redis:AllowInMemoryFallback"] = "true",
 
                 // Document Intelligence — enabled so all AI services register
                 ["DocumentIntelligence:Enabled"] = "true",
@@ -136,6 +138,25 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
 
                 // ManagedIdentity options (required by DataverseWebApiClient in SpeAdminModule)
                 ["ManagedIdentity:ClientId"] = "test-managed-identity-client-id",
+
+                // ---------------------------------------------------------------
+                // Wave 2.4 task 060 — mirror CustomWebAppFactory Wave 1.3 additions
+                // (CosmosPersistence + AgentService keys). Root-cause fix: all 54
+                // Workspace.* failures are a single startup-config gap — the
+                // shared fixture must satisfy AiPersistenceModule + AgentService
+                // validators, identical to what task 018 added to CustomWebAppFactory.
+                // No production change; test-fixture parity only.
+                // ---------------------------------------------------------------
+                // CosmosPersistence — required by AiPersistenceModule registration
+                ["CosmosPersistence:Endpoint"] = "https://test.documents.azure.com:443/",
+                ["CosmosPersistence:DatabaseName"] = "spaarke-ai-test",
+
+                // AgentService — kill-switch OFF (ADR-018) so Foundry agent not exercised
+                ["AgentService:Enabled"] = "false",
+                ["AgentService:Endpoint"] = "https://test.services.ai.azure.com/api/projects/test-project",
+                ["AgentService:AgentId"] = "test-agent-id",
+                ["AgentService:MaxConcurrency"] = "4",
+                ["AgentService:ThreadCacheExpiryMinutes"] = "60",
             };
             config.AddInMemoryCollection(settings);
         });
@@ -145,7 +166,14 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        // spaarke-redis-cache-remediation-r1 task 003 (FR-02): switch to Development for in-memory
+        // cache fallback; disable ValidateScopes to preserve pre-existing test behavior.
+        builder.UseEnvironment("Development");
+        builder.UseDefaultServiceProvider(options =>
+        {
+            options.ValidateScopes = false;
+            options.ValidateOnBuild = false;
+        });
 
         builder.ConfigureTestServices(services =>
         {

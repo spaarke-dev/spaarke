@@ -27,6 +27,7 @@ public class RagIndexingJobHandlerTests
     private readonly Mock<IFileIndexingService> _fileIndexingServiceMock;
     private readonly Mock<IIdempotencyService> _idempotencyServiceMock;
     private readonly Mock<IDataverseService> _dataverseServiceMock;
+    private readonly Mock<ISearchIndexNameResolver> _searchIndexNameResolverMock;
     private readonly Mock<ILogger<RagIndexingJobHandler>> _loggerMock;
     private readonly RagIndexingJobHandler _handler;
 
@@ -41,12 +42,24 @@ public class RagIndexingJobHandlerTests
         _fileIndexingServiceMock = new Mock<IFileIndexingService>();
         _idempotencyServiceMock = new Mock<IIdempotencyService>();
         _dataverseServiceMock = new Mock<IDataverseService>();
+        _searchIndexNameResolverMock = new Mock<ISearchIndexNameResolver>();
         _loggerMock = new Mock<ILogger<RagIndexingJobHandler>>();
 
         var analysisOptions = Options.Create(new AnalysisOptions
         {
             SharedIndexName = "spaarke-knowledge-index-v2"
         });
+
+        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — default the resolver to
+        // return null (tenant-default fall-through) so existing tests behave UNCHANGED. Tests
+        // exercising explicit-routing branches override this Setup.
+        _searchIndexNameResolverMock
+            .Setup(x => x.ResolveAsync(
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
 
         // RagTelemetry is a concrete class — create a real instance.
         // Its methods are not virtual so cannot be mocked; telemetry
@@ -58,6 +71,7 @@ public class RagIndexingJobHandlerTests
             _fileIndexingServiceMock.Object,
             _idempotencyServiceMock.Object,
             _dataverseServiceMock.Object,
+            _searchIndexNameResolverMock.Object,
             analysisOptions,
             telemetry,
             _loggerMock.Object);
@@ -412,6 +426,296 @@ public class RagIndexingJobHandlerTests
             x => x.ReleaseProcessingLockAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    #endregion
+
+    #region SearchIndexName Threading (multi-container-multi-index-r1 indexer-routing-fix Tier 3)
+
+    private static JobContract CreateJobContractWithSearchIndexName(string? searchIndexName)
+    {
+        var payload = new RagIndexingJobPayload
+        {
+            TenantId = TestTenantId,
+            DriveId = TestDriveId,
+            ItemId = TestItemId,
+            FileName = TestFileName,
+            DocumentId = TestDocumentId,
+            Source = "UnitTest",
+            EnqueuedAt = DateTimeOffset.UtcNow,
+            SearchIndexName = searchIndexName
+        };
+
+        return new JobContract
+        {
+            JobId = Guid.NewGuid(),
+            JobType = RagIndexingJobHandler.JobTypeName,
+            SubjectId = TestDocumentId,
+            CorrelationId = Guid.NewGuid().ToString(),
+            IdempotencyKey = string.Empty,
+            Attempt = 1,
+            MaxAttempts = 3,
+            Payload = JsonDocument.Parse(JsonSerializer.Serialize(payload))
+        };
+    }
+
+    [Fact]
+    public async Task ProcessAsync_PayloadSearchIndexNameSet_ThreadsToFileIndexRequest()
+    {
+        // Arrange — payload carries an explicit SearchIndexName (enqueueing site set it).
+        // The handler MUST pass it through to FileIndexRequest verbatim WITHOUT calling
+        // the resolver (the resolver is a fall-back only).
+        var job = CreateJobContractWithSearchIndexName("spaarke-file-index");
+        SetupSuccessfulIdempotencyFlow();
+
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(
+                It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Succeeded(chunksIndexed: 3, duration: TimeSpan.FromSeconds(1)));
+
+        // Act
+        await _handler.ProcessAsync(job, CancellationToken.None);
+
+        // Assert — FileIndexRequest.SearchIndexName carries the payload value
+        _fileIndexingServiceMock.Verify(
+            x => x.IndexFileAppOnlyAsync(
+                It.Is<FileIndexRequest>(r => r.SearchIndexName == "spaarke-file-index"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        // Resolver MUST NOT be invoked when payload value is present
+        _searchIndexNameResolverMock.Verify(
+            x => x.ResolveAsync(
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_PayloadSearchIndexNameNull_InvokesResolverAsFallback()
+    {
+        // Arrange — payload.SearchIndexName is null. Handler MUST call the resolver and
+        // pass the result to FileIndexRequest.
+        var job = CreateJobContractWithSearchIndexName(searchIndexName: null);
+        SetupSuccessfulIdempotencyFlow();
+
+        _searchIndexNameResolverMock
+            .Setup(x => x.ResolveAsync(
+                TestDocumentId, It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync("spaarke-knowledge-index-v2");
+
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(
+                It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Succeeded(chunksIndexed: 3, duration: TimeSpan.FromSeconds(1)));
+
+        // Act
+        await _handler.ProcessAsync(job, CancellationToken.None);
+
+        // Assert — resolver consulted, FileIndexRequest carries resolver result
+        _searchIndexNameResolverMock.Verify(
+            x => x.ResolveAsync(
+                TestDocumentId, It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        _fileIndexingServiceMock.Verify(
+            x => x.IndexFileAppOnlyAsync(
+                It.Is<FileIndexRequest>(r => r.SearchIndexName == "spaarke-knowledge-index-v2"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_IndexNotAllowed_FallsBackToTenantDefaultAndRetries()
+    {
+        // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — user-confirmed
+        // decision: background jobs default-fall-back on INDEX_NOT_ALLOWED. Handler MUST
+        // catch the exception, log WARN, and retry IndexFileAppOnlyAsync with
+        // SearchIndexName=null so the batch still lands in the tenant default.
+
+        // Arrange — payload has a stale searchIndexName that the allow-list rejects.
+        var job = CreateJobContractWithSearchIndexName("stale-index-name");
+        SetupSuccessfulIdempotencyFlow();
+
+        var callCount = 0;
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(
+                It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .Returns<FileIndexRequest, CancellationToken>((req, ct) =>
+            {
+                callCount++;
+                if (callCount == 1)
+                {
+                    // First call: throw INDEX_NOT_ALLOWED (simulating allow-list rejection).
+                    throw new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
+                        code: "INDEX_NOT_ALLOWED",
+                        title: "AI Search index not allowed",
+                        detail: $"The requested AI Search index '{req.SearchIndexName}' is not in the allow-list.",
+                        statusCode: 400);
+                }
+                // Second call: retried with SearchIndexName=null → succeeds.
+                return Task.FromResult(FileIndexingResult.Succeeded(chunksIndexed: 3, duration: TimeSpan.FromSeconds(1)));
+            });
+
+        // Act
+        var result = await _handler.ProcessAsync(job, CancellationToken.None);
+
+        // Assert — job ultimately succeeds (default-fall-back retry succeeded)
+        result.Status.Should().Be(JobStatus.Completed);
+
+        // First call had the rejected index name, second call had null
+        _fileIndexingServiceMock.Verify(
+            x => x.IndexFileAppOnlyAsync(
+                It.Is<FileIndexRequest>(r => r.SearchIndexName == "stale-index-name"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        _fileIndexingServiceMock.Verify(
+            x => x.IndexFileAppOnlyAsync(
+                It.Is<FileIndexRequest>(r => r.SearchIndexName == null),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    #endregion
+
+    #region Search-Index Lifecycle Dual-Write (R3 FR-3H3.2 / AC-H3.2 — task 062)
+
+    /// <summary>
+    /// R3 FR-3H3.2 / AC-H3.2: when indexing completes successfully, the handler MUST
+    /// dual-write — set the new <c>SearchIndexCompletedOn</c> lifecycle marker AND keep
+    /// the legacy <c>SearchIndexed</c>=true + <c>SearchIndexedOn</c> for the duration of
+    /// R3 + one sprint per spec assumption line 366.
+    ///
+    /// The dual-write lives at three writer call-sites; this test covers the background
+    /// (Service Bus) path. The other two (RagEndpoints.IndexFile, RagEndpoints.SendToIndex)
+    /// are covered by the model-contract tests in
+    /// <c>DataverseEntitySchemaTests.BuildEntity_OnCompletion_DualWritesNewAndLegacyFields</c>.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_SuccessfulIndexing_DualWritesNewAndLegacySearchIndexFields()
+    {
+        // Arrange
+        var job = CreateJobContract();
+        SetupSuccessfulIdempotencyFlow();
+
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(
+                It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Succeeded(chunksIndexed: 5, duration: TimeSpan.FromSeconds(1)));
+
+        UpdateDocumentRequest? capturedUpdate = null;
+        _dataverseServiceMock
+            .Setup(x => x.UpdateDocumentAsync(
+                It.IsAny<string>(),
+                It.IsAny<UpdateDocumentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, UpdateDocumentRequest, CancellationToken>((_, req, _) => capturedUpdate = req)
+            .Returns(Task.CompletedTask);
+
+        var before = DateTime.UtcNow;
+
+        // Act
+        var result = await _handler.ProcessAsync(job, CancellationToken.None);
+
+        var after = DateTime.UtcNow;
+
+        // Assert
+        result.Status.Should().Be(JobStatus.Completed);
+
+        capturedUpdate.Should().NotBeNull(
+            "the handler MUST call IDocumentDataverseService.UpdateDocumentAsync after successful indexing");
+
+        // New canonical lifecycle marker (R3+)
+        capturedUpdate!.SearchIndexCompletedOn.Should().NotBeNull(
+            "AC-H3.2: completed doc has sprk_searchindexcompletedon set");
+        capturedUpdate.SearchIndexCompletedOn!.Value.Should().BeOnOrAfter(before).And.BeOnOrBefore(after,
+            "SearchIndexCompletedOn should be stamped at UtcNow during the handler execution window");
+
+        // Legacy dual-write (preserved during R3 transition per spec line 366)
+        capturedUpdate.SearchIndexed.Should().BeTrue(
+            "AC-H3.2: completed doc still has sprk_searchindexed=true (dual-write transition)");
+        capturedUpdate.SearchIndexedOn.Should().Be(capturedUpdate.SearchIndexCompletedOn,
+            "legacy SearchIndexedOn MUST mirror the new SearchIndexCompletedOn during dual-write");
+
+        // Index routing (unchanged behaviour)
+        capturedUpdate.SearchIndexName.Should().Be("spaarke-knowledge-index-v2",
+            "SearchIndexName is the index routing field — unchanged by the lifecycle migration");
+
+        // Queuedon MUST NOT be set on completion — that was stamped at enqueue time
+        capturedUpdate.SearchIndexQueuedOn.Should().BeNull(
+            "completion writer does not re-stamp queuedon — that was set at the enqueue site");
+    }
+
+    /// <summary>
+    /// R3 FR-3H3.2 failure semantics: when indexing fails (transient or permanent), the
+    /// handler MUST NOT write the completion fields — the document remains in its previous
+    /// state (either queued or untouched), and the next retry attempt has a fresh chance
+    /// to complete. This preserves the contract that <c>SearchIndexCompletedOn</c> is
+    /// stamped only on confirmed success, fixing the long-standing pitfall.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_IndexingFailure_DoesNotWriteCompletionFields()
+    {
+        // Arrange — failure path
+        var job = CreateJobContract();
+        SetupSuccessfulIdempotencyFlow();
+
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(
+                It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Failed("Transient downstream error"));
+
+        // Act
+        var result = await _handler.ProcessAsync(job, CancellationToken.None);
+
+        // Assert — failure outcome, no completion writes
+        result.Status.Should().NotBe(JobStatus.Completed,
+            "transient failure should result in JobStatus.Failed (retryable) — not Completed");
+
+        _dataverseServiceMock.Verify(
+            x => x.UpdateDocumentAsync(
+                It.IsAny<string>(),
+                It.IsAny<UpdateDocumentRequest>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never,
+            "on indexing failure the handler MUST NOT stamp SearchIndexCompletedOn — that would lie about completion");
+    }
+
+    /// <summary>
+    /// R3 FR-3H3.2: when the Dataverse update itself throws (e.g., entity locked,
+    /// transient network blip), the handler MUST swallow the exception and still report
+    /// the job as successful — indexing did succeed, the Dataverse tracking-field update
+    /// is non-critical. Mirrors the existing try/catch around the legacy SearchIndexed=true
+    /// write; the new dual-write must preserve this resilience guarantee.
+    /// </summary>
+    [Fact]
+    public async Task ProcessAsync_DataverseUpdateFails_StillReportsSuccessfulOutcome()
+    {
+        // Arrange
+        var job = CreateJobContract();
+        SetupSuccessfulIdempotencyFlow();
+
+        _fileIndexingServiceMock
+            .Setup(x => x.IndexFileAppOnlyAsync(
+                It.IsAny<FileIndexRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(FileIndexingResult.Succeeded(chunksIndexed: 5, duration: TimeSpan.FromSeconds(1)));
+
+        _dataverseServiceMock
+            .Setup(x => x.UpdateDocumentAsync(
+                It.IsAny<string>(),
+                It.IsAny<UpdateDocumentRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse entity locked"));
+
+        // Act
+        var result = await _handler.ProcessAsync(job, CancellationToken.None);
+
+        // Assert — indexing succeeded; Dataverse update failure is non-fatal
+        result.Status.Should().Be(JobStatus.Completed,
+            "Dataverse tracking write is non-critical — indexing succeeded so the job outcome is Completed");
     }
 
     #endregion

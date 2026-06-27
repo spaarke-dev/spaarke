@@ -1,0 +1,230 @@
+<task id="109" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-H-09 + D-H-10 Handler Dispatch Tests (Playbook + Chat Contexts)</title>
+    <phase>Parallel — 8 Typed Tool Handlers</phase>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <estimated-effort>6 hours</estimated-effort>
+    <completion-notes>
+      HandlerDispatchTests.cs (791 LOC) created. 15 dispatch tests pass — 8 playbook-context (one per handler: 101-108) + 7 chat-context (chat-available handlers wrapped via ToolHandlerToAIFunctionAdapter). Tests use TypedToolHandlerTestFixture for shared context-builders + LLM mock pattern established by task 105. No handler bugs surfaced. ADR-015 telemetry surface re-verified across dispatch paths via existing sentinel patterns in handler-specific test suites. Build clean. BFF size delta: 0 MB (test code doesn't ship with BFF). Closes 8-typed-handler workstream end-to-end.
+    </completion-notes>
+    <dependencies>105, 106, 107, 108</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, ai, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration tests for existing handler code; no new production handler code; tests strengthen coverage and verify dispatch wiring. STANDARD per Spaarke task rigor table (testing tags → STANDARD).</rigor-reason>
+    <parallel-group>H-G3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final gate of handler workstream; sequential to ensure Wave 2 fully complete before dispatch tests run.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the combined dispatch tests that prove each of the 8 typed handlers is reachable
+    from both playbook context (via `PlaybookExecutionEngine` per FR-13–20 acceptance)
+    AND chat context where applicable (handlers with `AvailableInContexts = "Both"`
+    invoked via `ToolHandlerToAIFunctionAdapter`).
+
+    This task delivers D-H-09 (playbook-context dispatch test) + D-H-10 (chat-context
+    dispatch test) as a single integration-test suite in
+    `tests/integration/Sprk.Bff.Api.IntegrationTests/Handlers/` (or equivalent).
+
+    Playbook dispatch test (D-H-09): for each of the 8 handlers (`DateExtractorHandler`,
+    `FinancialCalculatorHandler`, `ClauseComparisonHandler`, `FinancialCalculationToolHandler`,
+    `EntityExtractorHandler`, `ClauseAnalyzerHandler`, `RiskDetectorHandler`,
+    `InvoiceExtractionToolHandler`), invoke via `PlaybookExecutionEngine` with a
+    synthetic playbook that references the handler's `sprk_analysistool` row by
+    `sprk_handlerclass`. Verify: structured output emitted; `ToolExecutionContext` correctly
+    populated; LLM-assisted handlers use mocked `IOpenAiClient` for hermetic tests;
+    telemetry per ADR-015.
+
+    Chat dispatch test (D-H-10): for handlers with `AvailableInContexts = "Both"`
+    (typically the 4 LLM-assisted handlers from Wave 2 — EntityExtractor, ClauseAnalyzer,
+    RiskDetector, InvoiceExtraction), invoke via `ToolHandlerToAIFunctionAdapter` from
+    a synthetic `ChatInvocationContext`. Verify: adapter wraps the handler as
+    `Microsoft.Extensions.AI.AIFunction`; LLM sees standard function-calling tool; output
+    correctly returned; safety pipeline (NFR-13) still runs.
+
+    Each handler dispatch (playbook + chat where applicable) is a separate `[Fact]` so
+    a single failure isolates to its handler. Tests run in CI per existing integration
+    test pattern.
+  </prompt>
+
+  <role>
+    Senior BFF integration-test engineer with .NET 8 + xUnit + `PlaybookExecutionEngine`
+    + `ToolHandlerToAIFunctionAdapter` experience. Familiar with hermetic LLM mocking
+    + synthetic playbook fixtures.
+  </role>
+
+  <goal>
+    Integration tests deliver: 8 playbook-dispatch tests (one per handler) all green;
+    4+ chat-dispatch tests (one per `AvailableInContexts = "Both"` handler) all green;
+    each test verifies structured output + correct context population + telemetry
+    compliance; LLM-assisted handlers use mocked `IOpenAiClient` (hermetic); tests run
+    in CI; `code-review` recommended (STANDARD rigor — adr-check skipped per rigor table).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="handler-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+    <file purpose="handler-conventions">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/HandlerRegistrationConventions.md</file>
+    <file purpose="existing-handler-example">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — integration test fixture lives under `tests/integration/`; no new DI registrations in production code.</constraint>
+    <constraint source="ADR-013">Tests verify handlers stay inside `Services/Ai/Handlers/`; chat-context test verifies dispatch through `ToolHandlerToAIFunctionAdapter` per FR-10.</constraint>
+    <constraint source="ADR-015">Test assertions verify telemetry logs handler name + execution outcome + timestamp ONLY; never input content. LLM mock returns canned data; tests assert logs never contain mock input.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB (test code does not ship in production binary). Confirm in task notes.</constraint>
+    <constraint source="spec FR-13 through FR-20">Each handler MUST be dispatchable via playbook context per its FR acceptance criterion.</constraint>
+    <constraint source="spec NFR-13">Safety pipeline preserved — chat dispatch test verifies handler invocation still flows through `SafetyPipelineMiddleware`.</constraint>
+    <constraint source="project CLAUDE.md Pillar 2">All 8 handlers registered + discoverable + dispatchable; integration tests prove the contract.</constraint>
+    <constraint source="hermetic-LLM-binding">LLM-assisted handlers use mocked `IOpenAiClient` for hermetic tests — no live Azure OpenAI calls in CI.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/handler-dispatch-integration-tests</topic>
+    <files>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/HandlerRegistrationConventions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Tasks 101–108 each ship their own unit tests + contract test proving the handler
+      is registered + metadata is valid + positive/error cases work. This task is the
+      cross-handler integration layer — proves that the same handler, accessed via the
+      playbook execution path (FR-13–20 acceptance), produces correct structured output,
+      AND that handlers declared `AvailableInContexts = "Both"` are correctly wrapped
+      by `ToolHandlerToAIFunctionAdapter` (FR-10) for chat dispatch.
+
+      Combining D-H-09 + D-H-10 in one task keeps related test fixtures co-located.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Handlers/PlaybookContextDispatchTests.cs (NEW — 8 [Fact] tests, one per handler)</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Handlers/ChatContextDispatchTests.cs (NEW — 4+ [Fact] tests, one per AvailableInContexts=Both handler)</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Handlers/SyntheticPlaybookFixtureBuilder.cs (NEW — helper to build synthetic playbook + node referencing a handler by sprk_handlerclass)</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Handlers/MockedOpenAiClientFixture.cs (NEW — shared hermetic LLM mock)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-109-dispatch-test-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Tasks 101–108 — all 8 typed handlers. Hard dependency (Wave 2 must be complete).</item>
+      <item>Phase A task 010 — `ToolHandlerToAIFunctionAdapter`. Reused for chat dispatch.</item>
+      <item>Phase A task 009 — context split (`ToolExecutionContext` + `ChatInvocationContext`). Reused for context fixtures.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. If &gt;70%, run `context-handoff` then `/compact`. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: STANDARD
+      📋 REASON: Integration tests; testing tag → STANDARD per rigor table; no new production code
+      📖 PROTOCOL STEPS TO EXECUTE: steps 0–10 (Step 9.5 quality gates SKIPPED per STANDARD rigor)
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX; confirm 109 is 🔲; dependencies (105, 106, 107, 108) all complete
+      (Wave 2 done).
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every &lt;inputs&gt; + &lt;knowledge&gt; file. Inspect each handler's
+      `sprk_analysistool` row payload (from tasks 101–108) to confirm `AvailableInContexts`
+      values + `sprk_handlerclass` strings.
+    </step>
+    <step order="3" name="Author Shared Test Fixtures">
+      Create `SyntheticPlaybookFixtureBuilder.cs` — builds a synthetic playbook + node
+      referencing a handler by `sprk_handlerclass`; populates a `ToolExecutionContext`
+      with realistic synthetic input.
+      Create `MockedOpenAiClientFixture.cs` — shared hermetic LLM mock with canned
+      structured outputs per handler; reusable across all LLM-assisted handler tests.
+    </step>
+    <step order="4" name="Author Playbook-Context Dispatch Tests (D-H-09)">
+      Create `PlaybookContextDispatchTests.cs`. Add one `[Fact]` per handler (8 total).
+      Each test: build synthetic playbook referencing handler's `sprk_handlerclass`;
+      invoke via `PlaybookExecutionEngine.ExecuteAsync(...)`; assert structured output
+      shape matches handler's output schema; assert telemetry logs handler name +
+      outcome + timestamp ONLY (no input content).
+    </step>
+    <step order="5" name="Author Chat-Context Dispatch Tests (D-H-10)">
+      Create `ChatContextDispatchTests.cs`. Add one `[Fact]` per handler with
+      `AvailableInContexts = "Both"` (typically the 4 Wave 2 LLM-assisted handlers — but
+      include all Wave 1 handlers that also declared "Both"). Each test: build synthetic
+      `ChatInvocationContext`; wrap handler via `ToolHandlerToAIFunctionAdapter`; invoke
+      as if LLM tool call; assert returned `AIFunction` result matches handler output;
+      verify safety pipeline middleware ran (NFR-13).
+    </step>
+    <step order="6" name="Verify Build + Run Tests">
+      `dotnet build` + `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/ --filter "Dispatch"`.
+      All 8 playbook-dispatch tests pass; all chat-dispatch tests for "Both" handlers
+      pass.
+    </step>
+    <step order="7" name="Confirm BFF Publish-Size Delta = 0">
+      Confirm in task notes: BFF publish-size delta = 0 MB. Test code does not ship in
+      production binary.
+    </step>
+    <step order="8" name="Verify CI Integration">
+      Verify the new test file matches the existing integration-test naming pattern
+      so it auto-runs in CI (`.github/workflows/sdap-ci.yml`).
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through criteria; record evidence in task notes.
+    </step>
+    <step order="9.5" name="Quality Gates (STANDARD rigor — SKIPPED)">
+      Per STANDARD rigor table, code-review + adr-check are SKIPPED. Mark as skipped in
+      notes. (Reviewer may optionally run `code-review` if test code is non-trivial.)
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 109 🔲 → ✅. Reset
+      `current-task.md`. Note in task-109-dispatch-test-evidence.md that the 8-typed-handler
+      workstream is now COMPLETE.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run integration tests</tool>
+    <tool name="git">Commit integration tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/integration/Sprk.Bff.Api.IntegrationTests/Handlers/PlaybookContextDispatchTests.cs (NEW)</output>
+    <output type="code">tests/integration/Sprk.Bff.Api.IntegrationTests/Handlers/ChatContextDispatchTests.cs (NEW)</output>
+    <output type="code">tests/integration/Sprk.Bff.Api.IntegrationTests/Handlers/SyntheticPlaybookFixtureBuilder.cs (NEW)</output>
+    <output type="code">tests/integration/Sprk.Bff.Api.IntegrationTests/Handlers/MockedOpenAiClientFixture.cs (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-109-dispatch-test-evidence.md (test run output, handler-by-handler dispatch confirmation)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 109 🔲 → ✅; handler workstream COMPLETE)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`PlaybookContextDispatchTests.cs` exists with 8 `[Fact]` tests — one per handler — all green.</criterion>
+    <criterion testable="true">`ChatContextDispatchTests.cs` exists with one `[Fact]` per handler declaring `AvailableInContexts = "Both"` — all green.</criterion>
+    <criterion testable="true">Each playbook-dispatch test invokes the handler via `PlaybookExecutionEngine` using a synthetic playbook referencing the handler's `sprk_handlerclass`.</criterion>
+    <criterion testable="true">Each chat-dispatch test invokes the handler via `ToolHandlerToAIFunctionAdapter` from a `ChatInvocationContext`.</criterion>
+    <criterion testable="true">LLM-assisted handlers use mocked `IOpenAiClient` (hermetic) — no live Azure OpenAI calls in CI.</criterion>
+    <criterion testable="true">Telemetry assertions verify ADR-015 compliance — handler name + outcome + timestamp ONLY; no input/output content in logs.</criterion>
+    <criterion testable="true">Chat-dispatch tests verify safety pipeline (`SafetyPipelineMiddleware`) still runs per NFR-13.</criterion>
+    <criterion testable="true">BFF build succeeds.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB confirmed (test code does not ship).</criterion>
+    <criterion testable="true">Tests auto-run in CI per existing integration-test pattern.</criterion>
+    <criterion testable="true">Task notes record that the 8-typed-handler workstream is COMPLETE.</criterion>
+  </acceptance-criteria>
+</task>

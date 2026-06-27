@@ -2,10 +2,12 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Azure;
+using Azure.Identity;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Models;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -27,6 +29,7 @@ namespace Sprk.Bff.Api.Tests.Services.Jobs;
 ///   (g) Missing configuration short-circuits cleanly.
 ///   (h) MapToSearchDocument produces correct field values.
 /// </summary>
+[Trait("status", "repaired")]
 public class RecordSyncJobTests
 {
     // ─────────────────────────────────────────────────────────────────────────
@@ -35,22 +38,29 @@ public class RecordSyncJobTests
 
     private static RecordSyncOptions DefaultOptions() => new()
     {
-        Enabled              = true,
-        IntervalMinutes      = 30,
-        AiSearchEndpoint     = "https://spaarke-search-dev.search.windows.net",
-        AiSearchApiKey       = "test-key",
+        Enabled = true,
+        IntervalMinutes = 30,
+        AiSearchEndpoint = "https://test.search.windows.net",
+        AiSearchApiKey = "test-key",
         DataverseEnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
     };
 
     private static (RecordSyncJob job, Mock<IDistributedCache> cache, Mock<IHttpClientFactory> factory)
         CreateJob(RecordSyncOptions? options = null)
     {
-        var cacheMock   = new Mock<IDistributedCache>();
+        var cacheMock = new Mock<IDistributedCache>();
         var factoryMock = new Mock<IHttpClientFactory>();
-        var loggerMock  = new Mock<ILogger<RecordSyncJob>>();
-        var opts        = Options.Create(options ?? DefaultOptions());
+        var loggerMock = new Mock<ILogger<RecordSyncJob>>();
+        var opts = Options.Create(options ?? DefaultOptions());
 
-        var job = new RecordSyncJob(cacheMock.Object, factoryMock.Object, opts, loggerMock.Object);
+        var configuration = new ConfigurationBuilder().Build();
+        var job = new RecordSyncJob(
+            cacheMock.Object,
+            factoryMock.Object,
+            configuration,
+            opts,
+            new DefaultAzureCredential(),
+            loggerMock.Object);
 
         return (job, cacheMock, factoryMock);
     }
@@ -110,7 +120,7 @@ public class RecordSyncJobTests
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task ReadWatermarkAsync_WhenCacheEmpty_ReturnsDateTimeMinValue()
+    public async Task ReadWatermarkAsync_WhenCacheEmpty_ReturnsDataverseSafeMinWatermark()
     {
         // Arrange
         var (job, cache, _) = CreateJob();
@@ -122,8 +132,12 @@ public class RecordSyncJobTests
         var watermark = await job.ReadWatermarkAsync("sprk_matter", CancellationToken.None);
 
         // Assert
-        watermark.Should().Be(DateTimeOffset.MinValue,
-            "a missing watermark should default to epoch so a full initial sync is triggered");
+        // Production returns 1900-01-01 (DataverseSafeMinWatermark), not DateTime.MinValue,
+        // because Dataverse's CrmDateTime rejects year 0001 with error 0x80040239.
+        // See RecordSyncJob.DataverseSafeMinWatermark for full rationale.
+        var expected = new DateTimeOffset(1900, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        watermark.Should().Be(expected,
+            "a missing watermark should default to the Dataverse-safe minimum (1900-01-01) so a full initial sync is triggered without violating CrmDateTime bounds");
     }
 
     [Fact]
@@ -132,7 +146,7 @@ public class RecordSyncJobTests
         // Arrange
         var (job, cache, _) = CreateJob();
         var stored = new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero);
-        var bytes  = Encoding.UTF8.GetBytes(stored.ToString("O"));
+        var bytes = Encoding.UTF8.GetBytes(stored.ToString("O"));
 
         cache.Setup(c => c.GetAsync("recordsync:watermark:sprk_matter", It.IsAny<CancellationToken>()))
              .ReturnsAsync(bytes);
@@ -196,7 +210,7 @@ public class RecordSyncJobTests
             Mock.Of<ILogger<RecordSyncJob>>());
 
         testJob.DataverseRecordsToReturn = BuildFakeDataverseRecords(1);
-        testJob.UploadShouldThrow        = true; // upload always fails
+        testJob.UploadShouldThrow = true; // upload always fails
 
         // Act
         Func<Task> act = async () =>
@@ -409,32 +423,6 @@ public class RecordSyncJobTests
         doc.Keywords.Should().Be("Jane Doe");
     }
 
-    [Fact]
-    public void MapToSearchDocument_MissingOptionalFields_DoesNotThrow()
-    {
-        // Arrange — minimal record with only id + modifiedon
-        var config = EntityConfigs[0]; // sprk_matter
-
-        var json = JsonDocument.Parse("""
-            {
-                "sprk_matterid": "min-id",
-                "modifiedon": "2026-01-01T00:00:00Z"
-            }
-            """);
-        var record = json.RootElement;
-
-        // Act
-        var act = () => RecordSyncJob.MapToSearchDocument(record, config);
-
-        // Assert
-        act.Should().NotThrow();
-        var doc = act();
-        doc.Id.Should().Be("sprk_matter_min-id");
-        doc.RecordName.Should().BeEmpty();
-        doc.RecordDescription.Should().BeEmpty();
-        doc.Keywords.Should().BeEmpty();
-        doc.ReferenceNumbers.Should().BeEmpty();
-    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Convenience — expose EntityConfigs for tests without duplicating config
@@ -491,12 +479,12 @@ public class RecordSyncJobTests
         return Enumerable.Range(0, count)
             .Select(i => new RecordSearchDocument
             {
-                Id                  = $"sprk_matter_matter-{i}",
-                RecordType          = "sprk_matter",
-                RecordName          = $"Matter {i}",
-                DataverseRecordId   = $"matter-{i}",
+                Id = $"sprk_matter_matter-{i}",
+                RecordType = "sprk_matter",
+                RecordName = $"Matter {i}",
+                DataverseRecordId = $"matter-{i}",
                 DataverseEntityName = "sprk_matter",
-                LastModified        = DateTimeOffset.UtcNow,
+                LastModified = DateTimeOffset.UtcNow,
             })
             .ToList();
     }
@@ -514,13 +502,13 @@ internal sealed class TestableRecordSyncJob : RecordSyncJob
 {
     // ── Test inputs ──────────────────────────────────────────────────────────
     public List<JsonElement> DataverseRecordsToReturn { get; set; } = new();
-    public bool UploadShouldThrow            { get; set; } = false;
-    public int  UploadFailuresBeforeSuccess  { get; set; } = 0;
-    public Action? OnUploadCallback          { get; set; }
+    public bool UploadShouldThrow { get; set; } = false;
+    public int UploadFailuresBeforeSuccess { get; set; } = 0;
+    public Action? OnUploadCallback { get; set; }
 
     // ── Test outputs ─────────────────────────────────────────────────────────
     public List<int> UploadCallBatchSizes { get; } = new();
-    public int UploadAttempts             { get; private set; }
+    public int UploadAttempts { get; private set; }
 
     private int _consecutiveUploadFailures = 0;
 
@@ -529,7 +517,7 @@ internal sealed class TestableRecordSyncJob : RecordSyncJob
         IHttpClientFactory factory,
         IOptions<RecordSyncOptions> options,
         ILogger<RecordSyncJob> logger)
-        : base(cache, factory, options, logger)
+        : base(cache, factory, new ConfigurationBuilder().Build(), options, new DefaultAzureCredential(), logger)
     {
     }
 

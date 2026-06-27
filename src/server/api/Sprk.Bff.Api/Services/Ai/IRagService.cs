@@ -22,10 +22,33 @@ public interface IRagService
     /// <summary>
     /// Search for relevant knowledge documents using hybrid search.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>chat-routing-redesign-r1 task 100 — Architecture §5.2.1 binding-NEGATIVE
+    /// (spec FR-36)</strong>: when this method is called with
+    /// <see cref="RagSearchOptions.SessionId"/> set (chat-memory T2/T5 retrieval), the
+    /// implementation routes the underlying SearchClient to the chat-domain session-files
+    /// index (<see cref="Sprk.Bff.Api.Configuration.AiSearchOptions.SessionFilesIndexName"/>,
+    /// default <c>spaarke-session-files</c>). The session-scoped chat-memory retrieval path
+    /// MUST NOT target <c>spaarke-insights-index</c> — that index is owned by the Insights
+    /// subsystem and using it from chat-memory paths is a categorical-mismatch design
+    /// violation. The session-scoped routing branch enforces this as a fail-fast guard
+    /// (<see cref="InvalidOperationException"/>); operators MUST configure
+    /// <c>SessionFilesIndexName</c> to one of: <c>spaarke-session-files</c>,
+    /// <c>spaarke-files-index</c>, or <c>spaarke-rag-references</c>.
+    /// </para>
+    /// </remarks>
     /// <param name="query">The search query text.</param>
     /// <param name="options">Search options including tenant, filters, and limits.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Ranked search results with relevance scores.</returns>
+    /// <exception cref="System.InvalidOperationException">
+    /// Thrown (chat-routing-redesign-r1 task 100) when <see cref="RagSearchOptions.SessionId"/>
+    /// is set AND
+    /// <see cref="Sprk.Bff.Api.Configuration.AiSearchOptions.SessionFilesIndexName"/> is
+    /// configured to <c>spaarke-insights-index</c> — defense against operator
+    /// misconfiguration per architecture §5.2.1.
+    /// </exception>
     Task<RagSearchResponse> SearchAsync(
         string query,
         RagSearchOptions options,
@@ -68,8 +91,44 @@ public interface IRagService
     /// <param name="documents">The document chunks to index.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Results for each indexed document.</returns>
+    /// <remarks>
+    /// This 2-argument overload preserves the original signature exactly so all existing
+    /// callers (and Moq expression-tree setups using <c>It.IsAny&lt;...&gt;()</c> matchers) continue
+    /// to compile and behave UNCHANGED — backward compatibility is the binding requirement
+    /// (multi-container-multi-index-r1 spec NFR-02). It delegates to the 3-argument
+    /// overload below with <c>searchIndexName = null</c>, which routes via the tenant-
+    /// default chain.
+    /// </remarks>
     Task<IReadOnlyList<IndexResult>> IndexDocumentsBatchAsync(
         IEnumerable<KnowledgeDocument> documents,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Batch-indexes documents, routing the batch to a named Azure AI Search index.
+    /// FR-BFF-07 / multi-container-multi-index-r1 indexer-routing-fix: when
+    /// <paramref name="searchIndexName"/> is non-empty, the batch is written to that index
+    /// after allow-list validation (FR-BFF-02). When null/empty, falls through to the tenant-
+    /// default chain (existing 2-arg behavior).
+    /// </summary>
+    /// <param name="documents">The document chunks to index.</param>
+    /// <param name="searchIndexName">
+    /// Optional explicit Azure AI Search index name. When non-null/whitespace, the underlying
+    /// <c>IKnowledgeDeploymentService.GetSearchClientAsync(tenantId, indexName, ct)</c> 3-arg
+    /// overload validates the value against <c>AiSearchOptions.AllowedIndexes</c> and rejects
+    /// non-allow-listed values with <c>SdapProblemException(INDEX_NOT_ALLOWED, 400)</c>. When
+    /// null/whitespace, the existing 2-tier fall-through chain applies
+    /// (<c>sprk_aiknowledgedeployment</c> → <c>AiSearchOptions.KnowledgeIndexName</c>) —
+    /// byte-for-byte backward-compatible (FR-BFF-04 / NFR-02).
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Results for each indexed document.</returns>
+    /// <exception cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException">
+    /// Thrown with code <c>INDEX_NOT_ALLOWED</c> (status 400) when <paramref name="searchIndexName"/>
+    /// is non-empty AND not present in <c>AiSearchOptions.AllowedIndexes</c>.
+    /// </exception>
+    Task<IReadOnlyList<IndexResult>> IndexDocumentsBatchAsync(
+        IEnumerable<KnowledgeDocument> documents,
+        string? searchIndexName,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -106,7 +165,92 @@ public interface IRagService
     Task<ReadOnlyMemory<float>> GetEmbeddingAsync(
         string text,
         CancellationToken cancellationToken = default);
+
+    // ── Knowledge-base index administration (D-09 §2 B8, task 011 Phase 1b Tier 3) ────
+    // Endpoints (KnowledgeBaseEndpoints) used to inject Azure SDK SearchIndexClient directly
+    // and call its index/search APIs. Per ADR-007 (facade pattern) endpoints should consume
+    // domain services, not Azure SDK clients. The following 3 methods absorb those direct
+    // SDK calls so the endpoints depend only on IRagService — which has a fail-fast
+    // Null-Object implementation (NullRagService) registered when the kill switch is off.
+
+    /// <summary>
+    /// Returns document chunk counts for the knowledge and discovery indexes scoped to the
+    /// requesting tenant. Used by the knowledge-base admin health endpoint.
+    /// </summary>
+    /// <param name="tenantId">Tenant ID scoping the count filter (ADR-014).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Health summary with per-index document counts and timestamp.</returns>
+    Task<KnowledgeIndexHealth> GetIndexHealthAsync(
+        string tenantId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns a paged list of indexed document summaries for the requesting tenant in the
+    /// specified index. Used by the knowledge-base admin "list documents" endpoint.
+    /// </summary>
+    /// <param name="indexName">Target index name (knowledge or discovery).</param>
+    /// <param name="tenantId">Tenant ID scoping the filter (ADR-014).</param>
+    /// <param name="page">1-based page number.</param>
+    /// <param name="pageSize">Page size (1-200).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Paged indexed-document listing.</returns>
+    /// <exception cref="System.ArgumentException">Thrown when <paramref name="indexName"/> is not a known index.</exception>
+    Task<IndexedDocumentsPage> GetIndexedDocumentsAsync(
+        string indexName,
+        string tenantId,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes all chunks for a source document from the specified index, scoped to tenant.
+    /// Used by the knowledge-base admin "delete document" endpoint.
+    /// </summary>
+    /// <param name="indexName">Target index name (knowledge or discovery).</param>
+    /// <param name="documentId">Source document ID.</param>
+    /// <param name="tenantId">Tenant ID scoping the filter (ADR-014).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Number of chunks deleted (zero when no chunks match).</returns>
+    /// <exception cref="System.ArgumentException">Thrown when <paramref name="indexName"/> is not a known index.</exception>
+    Task<int> DeleteIndexedDocumentAsync(
+        string indexName,
+        string documentId,
+        string tenantId,
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Health summary returned by <see cref="IRagService.GetIndexHealthAsync"/>.
+/// Mirrors the previous <c>KnowledgeIndexHealthResult</c> shape verbatim (D-09 §2 B8).
+/// </summary>
+public sealed record KnowledgeIndexHealth(
+    long KnowledgeDocCount,
+    long DiscoveryDocCount,
+    DateTimeOffset LastUpdated,
+    string KnowledgeIndexName,
+    string DiscoveryIndexName);
+
+/// <summary>
+/// Paged list of indexed-document summaries returned by
+/// <see cref="IRagService.GetIndexedDocumentsAsync"/>.
+/// </summary>
+public sealed record IndexedDocumentsPage(
+    string IndexName,
+    IReadOnlyList<IndexedDocumentSummary> Documents,
+    int Page,
+    int PageSize,
+    long TotalCount);
+
+/// <summary>
+/// Summary of a single indexed document chunk; mirrors the previous
+/// <c>KnowledgeDocumentSummary</c> verbatim.
+/// </summary>
+public sealed record IndexedDocumentSummary(
+    string ChunkId,
+    string? DocumentId,
+    string FileName,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
 
 /// <summary>
 /// Options for RAG search operations.
@@ -201,6 +345,38 @@ public record RagSearchOptions
     /// Both ParentEntityType and ParentEntityId must be set for entity scoping.
     /// </summary>
     public string? ParentEntityId { get; init; }
+
+    /// <summary>
+    /// multi-container-multi-index-r1 FR-BFF-07 — optional explicit Azure AI Search index name
+    /// to target for this search request. When provided (non-null / non-whitespace), the BFF
+    /// resolver routes via the 3-argument <see cref="IKnowledgeDeploymentService.GetSearchClientAsync(string, string?, System.Threading.CancellationToken)"/>
+    /// overload which validates the value against <c>AiSearchOptions.AllowedIndexes</c>
+    /// (rejecting non-allow-listed values with <c>INDEX_NOT_ALLOWED</c> → 400 per FR-BFF-02 /
+    /// NFR-08). When null or whitespace, the resolver falls through to the existing 2-tier
+    /// chain (<c>sprk_aiknowledgedeployment</c> Dataverse entity → <c>AiSearchOptions.KnowledgeIndexName</c>
+    /// fallback) — byte-for-byte backward-compatible with all existing callers (FR-BFF-04 /
+    /// NFR-02). Has no effect under session-scoped routing (when <see cref="SessionId"/> is set,
+    /// the session-files index is selected directly via the injected <c>SearchIndexClient</c>).
+    /// </summary>
+    public string? SearchIndexName { get; init; }
+
+    /// <summary>
+    /// R5 spec §4.2 / FR-09 — optional session identifier for session-scoped retrieval.
+    /// When set (non-null/non-empty), <see cref="IRagService.SearchAsync(string, RagSearchOptions, CancellationToken)"/>
+    /// routes the underlying <c>SearchClient</c> to the session-files index
+    /// (see <c>AiSearchOptions.SessionFilesIndexName</c>) instead of the tenant-scoped
+    /// knowledge index, and appends a <c>sessionId eq '...'</c> clause to the OData
+    /// filter ANDed with the existing unconditional <c>tenantId eq '...'</c> clause —
+    /// preserving the ADR-014 tenant-isolation invariant (a session query in tenant A
+    /// can never leak across to tenant B). When null/empty, behavior is byte-for-byte
+    /// identical to the pre-R5 path: tenant-deployment routing via
+    /// <c>IKnowledgeDeploymentService</c>. Under session-scoped routing, the
+    /// <c>KnowledgeSourceId(s)</c> / <c>ExcludeKnowledgeSourceIds</c> /
+    /// <c>ParentEntityType</c>+<c>ParentEntityId</c> / privilege-group filters are
+    /// SKIPPED (with debug log) because the session-files schema does not carry those
+    /// columns (per task 001 schema).
+    /// </summary>
+    public string? SessionId { get; init; }
 
     /// <summary>
     /// Whether to use semantic ranking.

@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="078" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>B.3: ESLint warning sweep on @spaarke/ui-components — bring 161 warnings down to ≤30</title>
+    <phase>6.5: R4 add-on cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>073, 074</dependencies>
+    <blocks>none</blocks>
+    <tags>frontend, typescript, refactoring, hygiene</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Mechanical lint fixes across many files. No behavior change intended. STANDARD per Step 3.5.5.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequence after 073 + 074 — shares files with both. Run on its own focused commit set so the warning sweep stays surgical and reviewable.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-27 per operator mandate: "this r4 project is a clean up project so we need
+    to address this now because it keeps getting lost/overlooked/deferred". Bring the
+    @spaarke/ui-components warning count from 161 down to ≤30. Bulk-pattern approach.
+
+    DO NOT mass-silence rules via // eslint-disable comments. DO NOT add // @ts-ignore.
+    DO NOT modify code to silence warnings unless the silencing is a legitimate type-correctness
+    improvement.
+  </prompt>
+
+  <role>
+    TypeScript hygiene engineer. Bulk-pattern bias. Skip surgical rewrites — if a warning needs
+    more than a small fix, document as carry-over.
+  </role>
+
+  <goal>
+    `npm run lint` in `@spaarke/ui-components` reports ≤30 warnings (down from 161). 0 errors.
+    No `// eslint-disable-next-line` additions. No behavior changes. Remaining warnings
+    documented with reason in `notes/078-eslint-sweep.md`.
+  </goal>
+
+  <context>
+    <background>
+      Per notes/b9-lint-warnings.md, the 161 warnings break down:
+      - 78 `@typescript-eslint/no-explicit-any` — replace `any` with `unknown` and narrow
+      - 42 `@typescript-eslint/no-unused-vars` — prefix with `_` or delete dead code
+      - 22 `react-hooks/exhaustive-deps` — case-by-case; some are real missing deps
+      - 11 unused `eslint-disable` directives — delete the comments
+      - 3 `@typescript-eslint/no-require-imports` — replace `require()` with ES imports
+      - 2 `@typescript-eslint/no-var-requires` — companion of above
+      - 2 `import/first` (directive-only) — resolved by 065 plugin registration
+      - 2 `jsx-a11y/...` (directive-only) — resolved by 065 plugin registration
+      - 1 `@typescript-eslint/prefer-as-const`
+      - 1 `prefer-const`
+      - 1 `@typescript-eslint/no-empty-object-type`
+      - (10 rules-of-hooks already fixed by task 073)
+
+      Bulk patterns:
+      1. Delete unused `eslint-disable` comments — easy, all 11 in one pass
+      2. Prefix unused-var args with `_` (existing convention) — ~30 of the 42 should be quick
+      3. Replace `any` → `unknown` + add narrowing — careful pass; some `any`s are at SDK boundaries (annotate per the task 067 pattern)
+      4. Replace `require()` → ES imports — 5 errors total
+      5. Address misc one-offs
+
+      Realistic target: get to ≤30 within 8h budget. Anything more invasive than that becomes
+      carry-over (next "type tightening" project).
+
+      DO NOT touch DatasetGrid/GridView.tsx + ListView.tsx beyond what task 073 changed.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/eslint.config.js</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">NO `// eslint-disable-line` or `// eslint-disable-next-line` additions. If a warning genuinely can't be fixed, downgrade the rule's scope (e.g., file-scoped override) or leave it and document as carry-over.</constraint>
+    <constraint source="project">NO `// @ts-ignore` or `// @ts-nocheck` additions.</constraint>
+    <constraint source="project">NO behavior change. Type fixes only. If a fix requires behavior change, document as escalation candidate; do NOT make the change without operator approval.</constraint>
+    <constraint source="project">Hard budget cap: 8h. If approaching budget without hitting ≤30 target, STOP and document remaining warnings as carry-overs.</constraint>
+    <constraint source="project">For `any → unknown` conversions: narrow at use site. If narrowing requires substantial logic, leave as `any` and document.</constraint>
+    <constraint source="project">For `unused-vars`: `_`-prefix unused args (existing convention from b9 memo); delete clearly-dead-code unused locals.</constraint>
+    <constraint source="ADR-022">React 19 patterns. For `exhaustive-deps`: don't silence; if the dep is genuinely irrelevant, restructure to remove the dep; else add the dep and verify no infinite loops.</constraint>
+    <constraint source="project">After sweep: verify `npm test` still passes — type fixes should not break tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/b9-lint-warnings.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/b11-cast-inventory.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Baseline">Run `npm run lint` in `@spaarke/ui-components`. Capture full warning list. Confirm count is 151 (after 073 removed 10 rules-of-hooks). Group by rule.</step>
+    <step order="2" name="Quick wins (Pass 1)">Bulk pass on the lowest-friction patterns:
+      - Delete 11 unused `eslint-disable` directives
+      - `_`-prefix the unused-args portion of the 42 unused-vars warnings (~30 of 42 likely)
+      - Replace 5 `require()` calls with ES imports
+      - Fix the 5 misc one-offs (prefer-as-const, prefer-const, no-empty-object-type, jsx-a11y/import directive-only)
+      Re-run lint. Expect ~60-80 fewer warnings after this pass.</step>
+    <step order="3" name="any → unknown (Pass 2)">Walk the 78 `no-explicit-any` warnings. For each: replace `any` with `unknown` and narrow at use site. Skip if narrowing requires substantial logic — document the skip. Re-run lint after each ~10 fixes to verify no regression.</step>
+    <step order="4" name="exhaustive-deps (Pass 3)">Walk the 22 `react-hooks/exhaustive-deps` warnings. For each: read the surrounding code carefully. If dep is genuinely missing, add it; verify no infinite loop. If dep is genuinely irrelevant, restructure to remove the dep (e.g., move logic outside the effect). Skip if restructure is non-trivial — document.</step>
+    <step order="5" name="Tally + carry-overs">Re-run lint. If ≤30: SUCCESS. If between 30-60: document remaining + reason; still SUCCESS by acceptance. If >60: STOP and document — flag as carry-over to a follow-up project.</step>
+    <step order="6" name="Test verification">`npm test` in `@spaarke/ui-components` — all tests pass.</step>
+    <step order="7" name="Build verification">`npm run build` — 0 errors. (If new tsc errors appear from type tightening, address them.)</step>
+    <step order="8" name="Document">Write `projects/spaarke-ai-platform-unification-r4/notes/078-eslint-sweep.md` with:
+      - Initial vs final warning counts (per rule)
+      - Bulk patterns applied
+      - Skipped warnings + reasons (carry-overs)
+      - Recommendation: which rules can be promoted to `error` in a future pass
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect affected files</tool>
+    <tool name="Edit">Apply fixes</tool>
+    <tool name="Bash">npm run lint, npm test, npm run build</tool>
+    <tool name="Grep">Find rule occurrences</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">multiple files in src/client/shared/Spaarke.UI.Components/src/ (warnings fixed)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/078-eslint-sweep.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the sweep, When `npm run lint` runs in `@spaarke/ui-components`, Then ≤30 warnings remain (target; preferred is ≤15).</criterion>
+    <criterion testable="true">Given the change, When `grep -rn "// eslint-disable" src/client/shared/Spaarke.UI.Components/src/` runs, Then no NEW occurrences vs baseline (count from step 1 vs after step 7 — count should DECREASE or stay equal, never increase).</criterion>
+    <criterion testable="true">Given the change, When `grep -rn "// @ts-ignore\|// @ts-nocheck" src/client/shared/Spaarke.UI.Components/src/` runs, Then no NEW occurrences.</criterion>
+    <criterion testable="true">Given the change, When `npm test` runs in `@spaarke/ui-components`, Then tests pass (≤4 failures from 077 carry-overs is acceptable).</criterion>
+    <criterion testable="true">Given the change, When `npm run build` runs, Then 0 errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the "lint warning debt sweep" the operator called out by name. The R4 build-hygiene
+    cluster has been deferring this for too long. Hard budget at 8h — if cascade reveals deeper
+    issues, that's a separate project.
+
+    Common patterns to expect:
+    - Mock files in `__mocks__/` and `__tests__/` are full of `any` casts; these are
+      legitimate test-scaffolding. Use a file-scoped override in eslint.config.js if needed
+      (already configured per the b9 memo).
+    - SDK-boundary `(window as any).Xrm` casts — annotate with `// SDK boundary: Xrm runtime`
+      comment (pattern from task 067) and leave the cast.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor. No production behavior changes; pure type/style cleanup.</protocol>
+  </execution>
+</task>

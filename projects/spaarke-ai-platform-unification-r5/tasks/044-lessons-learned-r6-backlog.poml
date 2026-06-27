@@ -1,0 +1,344 @@
+<task id="044" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D3-05 Lessons-learned + R6 backlog</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent + Operator (collaborative)</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 3 — Polish + Future-Use Validation</phase>
+    <wave>P3-3 (serial; final non-wrap-up content task; blocks 090)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>043</dependencies>
+    <tags>documentation, lessons-learned, r6-backlog, closeout</tags>
+    <rigor-level>STANDARD</rigor-level>
+  </metadata>
+
+  <prompt>
+    Author the R5 lessons-learned wrap-up document per CLAUDE.md §7 convention. This is
+    the project's closeout knowledge-capture artifact. It captures (a) lessons learned
+    across all three R5 phases (Phase 1 Platform Extensions, Phase 2 Vertical Slice +
+    Insights Tool Integration, Phase 3 Polish + Future-Use Validation), (b) surprises —
+    things that did NOT go as planned (contract negotiation outcomes, schema-plumbing
+    spike results, BFF publish-size deltas, Structured Outputs streaming behavior,
+    tool-routing disambiguation observations, Wave F coordination timing, etc.),
+    (c) the R6 backlog — deferred items and net-new candidates surfaced during R5
+    execution (Tier 3 file grounding, editor widget, extracted-text widget, additional
+    playbooks, any UR-01..UR-05 items not closed, testing-pass findings carried forward
+    from task 043).
+
+    This is a documentation-only task: no code, no quality gates. The AI agent drafts
+    the document by reading task evidence across all completed R5 task notes + the task
+    043 testing-pass results; the operator reviews + adds personal observations
+    (especially in the "surprises" section where lived experience matters more than
+    artifact mining). Once the operator signs off, the project status is ready to flip
+    to Complete — task 090 handles the actual flip + PR + merge.
+  </prompt>
+
+  <role>
+    Technical writer + AI engineering retrospective facilitator. Capable of mining task
+    notes, PR descriptions, and coordination logs to synthesize cross-phase patterns
+    and producing a balanced retrospective document that captures wins, surprises, and
+    forward-looking R6 backlog items. Operates collaboratively with the project
+    operator — drafts and structures, then yields to the operator for personal
+    observations and final sign-off.
+  </role>
+
+  <goal>
+    `projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md` exists and
+    contains four explicit sections: (1) Lessons by phase — what worked, what was
+    discovered, what would be done differently next time, organized per phase; (2)
+    Surprises — explicit list of things that did NOT go as planned, with root-cause
+    framing; (3) R6 backlog candidates — deferred items, UR-01..UR-05 items not closed,
+    testing-pass severity-2/3 findings carried forward, and net-new ideas; (4) Operator
+    observations — section where the operator's personal observations are added during
+    review. The operator has reviewed the document and signed off. Project status is
+    ready for task 090 to flip to Complete.
+  </goal>
+
+  <inputs>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="testing-pass-results">projects/spaarke-ai-platform-unification-r5/notes/testing-pass-results.md</file>
+    <file purpose="task-evidence-folder">projects/spaarke-ai-platform-unification-r5/notes/</file>
+    <file purpose="coordination-log">projects/spaarke-ai-platform-unification-r5/notes/insights-r2-coordination.md</file>
+    <file purpose="insights-contract">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    <file purpose="insights-v1.1-negotiation">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §7">Lessons-learned doc is the closeout artifact convention; produced before the wrap-up task (090) flips project status to Complete. Task 044 produces the artifact; task 090 reads it as evidence + flips status.</constraint>
+    <constraint source="R5 project rigor">This is a documentation-only task — rigor STANDARD per CLAUDE.md §8 decision tree. Quality gates (code-review + adr-check) at Step 9.5 are SKIPPED. No BFF code modified → no publish-size measurement. No Dataverse changes → no deploy verification.</constraint>
+    <constraint source="project">Lessons-learned MUST cover ALL THREE phases (Phase 1 Platform Extensions, Phase 2 Vertical Slice + Insights Tool Integration, Phase 3 Polish + Future-Use Validation) — not just Phase 3.</constraint>
+    <constraint source="project">Surprises section MUST explicitly document things that did NOT go as planned. Be candid — this is the highest-leverage section for R6 planning. Cover contract-negotiation outcomes (Wave F v1.1 spike result), schema-plumbing decisions (`citations[].href`), BFF publish-size deltas vs the +0.5 MB target, Structured Outputs behavior vs expectation (D1-06), tool-routing disambiguation observations from task 030/031/043, any other unexpected outcomes captured in task notes.</constraint>
+    <constraint source="project">R6 backlog MUST explicitly enumerate (a) Tier 3 file grounding (large-doc summarization on uploaded files exceeding context window — deferred per R5 scope); (b) editor widget (deferred per design.md); (c) extracted-text widget (deferred per design.md); (d) additional playbooks beyond Summarize + analyze (configuration-only follow-ons); (e) any UR-01..UR-05 items not closed during R5; (f) testing-pass findings carried forward from task 043 by severity.</constraint>
+    <constraint source="project">Operator-collaboration pattern: AI drafts; operator reviews + adds personal observations in the dedicated "Operator observations" section. The doc is NOT complete until operator review is recorded.</constraint>
+    <constraint source="repo path drift">Use `infrastructure/ai-search/` paths in any file references (NOT the legacy `infra/ai-search/` form). Confirmed canonical path for Bicep + index JSON.</constraint>
+    <constraint source="project">No new code introduced. No tests added. No build/test execution required. The acceptance gate is operator review + sign-off.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-closeout/retrospective</topic>
+    <files>
+      <file>CLAUDE.md (root §7 task completion + transition convention)</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md (§7 cross-project awareness; §11 pointers including lessons-learned location)</file>
+      <file>projects/spaarke-ai-platform-unification-r5/plan.md (D3-05 deliverable description; high-risk items table; phase-gating criteria)</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md (FR/NFR/DR/PR enumeration; success criteria; UR-01..UR-05 if defined)</file>
+      <file>projects/spaarke-ai-platform-unification-r5/design.md (vision; reuse mandate §2.11; phasing §7; deferred items noted as R6 candidates)</file>
+    </files>
+    <patterns>
+      <pattern name="Lessons-learned section structure" location="prior project lessons-learned files (e.g., projects/ai-spaarke-insights-engine-r2/notes/lessons-learned.md if present)">
+        Conventional shape: (a) executive summary, (b) lessons by phase, (c) surprises,
+        (d) R6 backlog (forward-looking deferred items + new candidates), (e) operator
+        observations section. Each lesson is a tight 2–4 sentence vignette: what
+        happened, why it mattered, what to do differently. Surprises are NOT softened
+        — explicit "did NOT go as planned" framing surfaces process debt.
+      </pattern>
+      <pattern name="Evidence-mining across task notes" location="projects/spaarke-ai-platform-unification-r5/notes/">
+        Walk every `task-NNN-*.md` evidence file produced during R5 execution. Extract:
+        publish-size deltas (per-task verification per CLAUDE.md §10 + ADR-029); ADR
+        compliance observations from Step 9.5 quality gates; coordination touchpoints
+        documented in `insights-r2-coordination.md` §8 changelog; smoke-test results
+        from task 030 + 031 + 043; D1–D6 Insights contract decisions recorded in §10
+        review log (cross-worktree); any blockers / escalations / human-input events.
+      </pattern>
+      <pattern name="R6 backlog framing" location="design.md §7 phasing + spec.md Open Decisions">
+        Items explicitly marked "deferred to R6" or "deferred to Phase 1 spike" in
+        spec/design are the backlog seed. Add testing-pass findings (task 043) carried
+        forward by severity. Add net-new candidates surfaced during R5 execution.
+        Format: ID + 1-sentence intent + driver + suggested phase placement
+        (foundational / capability / polish).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ran ~2.5–3 weeks across 3 phases + wrap-up, decomposed into 31 implementation
+      tasks (001–031) plus 5 Phase 3 tasks (040–044) plus the project wrap-up (090). The
+      project shipped: a chat-driven "Summarize a Document" vertical slice, Insights
+      tool integration (`insights.query`) consuming the Insights r2 Wave F contract,
+      session-scoped AI Search infrastructure (`spaarke-session-files` index), and a
+      configuration-only `/analyze` proof point validating the platform-extension claim
+      (SC-19). R5 is the FIRST Spaarke project to deliver an operationally complete
+      Spaarke Assistant — chat agent hosting two AI tool capabilities alongside the
+      existing ad-hoc grounded-LLM mode. The lessons-learned doc is therefore unusually
+      load-bearing for R6 planning: it captures the working pattern + the rough edges.
+
+      Per CLAUDE.md §7, this is also where the project archives the wrap-up convention.
+      The doc is consumed by (a) task 090 as project-status-flip evidence, (b) R6
+      project initialization as backlog seed, (c) the broader engineering team as a
+      retrospective artifact accessible from `projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md`.
+    </background>
+    <dependencies>
+      <dependency task="043" status="must-be-complete">
+        D3-04 Operator-led end-to-end testing — produces `notes/testing-pass-results.md`
+        which seeds the R6 backlog section with severity-ranked findings carried
+        forward.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>R5 task notes folder `projects/spaarke-ai-platform-unification-r5/notes/`
+        is the primary evidence mine — every R5 task that produced ephemeral evidence
+        (deployment outputs, smoke-test responses, BFF publish-size measurements, ADR
+        compliance walks) stored those files here.</item>
+      <item>`insights-r2-coordination.md` §8 changelog tracks Wave F + integration
+        touchpoint outcomes — primary source for the surprises section's
+        "contract-negotiation outcomes" and "schema-plumbing spike results"
+        sub-sections.</item>
+      <item>Task 090 (project wrap-up) reads this lessons-learned doc as evidence
+        that the project closeout convention is satisfied, then flips the project
+        README status from "In Progress" to "Complete", updates the coordination doc
+        §8 changelog with the R5 completion entry, and opens the R5 PR against
+        master. Task 044 does NOT flip the status — that's 090's job.</item>
+      <item>R6 project (whenever initialized) will read the R6 backlog section here
+        as its seed inventory.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, create handoff summary and request `/compact`.
+      Declare RIGOR LEVEL: STANDARD per CLAUDE.md §8 (documentation task; no code; no
+      build verification; no quality gates at Step 9.5). Confirm dependency: task 043
+      must be ✅ before this task runs (testing-pass-results.md must exist).
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 044 status is 🔲, dependency on 043
+      is ✅, parallel-safe = false. Confirm 043 produced `notes/testing-pass-results.md`.
+      Read `current-task.md` to verify task 043 was the most-recently-completed task
+      and is properly handed off.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read all files listed in &lt;inputs&gt;. Specifically extract: (a) D3-05 plan.md
+      deliverable description; (b) CLAUDE.md §7 wrap-up convention; (c) project-CLAUDE.md
+      §11 lessons-learned pointer; (d) design.md deferred items + R6 candidates; (e)
+      spec.md UR-01..UR-05 items + any not-closed by R5 acceptance.
+
+      Walk the `notes/` folder and inventory every per-task evidence file. Specifically
+      look for: publish-size deltas (per CLAUDE.md §10 verification mandate), Wave F
+      coordination touchpoints (Insights r2 status changes), D1–D6 Insights contract
+      decisions recorded in design-e3-tool-call-contract.md §10 review log,
+      Structured Outputs streaming behavior observations from task 006 evidence, tool
+      routing disambiguation observations from tasks 030 + 031 + 043,
+      `citations[].href` schema-plumbing spike outcome from Insights Wave F.
+    </step>
+    <step order="3" name="Enumerate Lessons by Phase">
+      For each of the 3 phases, draft 3–6 lesson vignettes (2–4 sentences each) covering
+      what worked, what surprised, what would be done differently next time. Phase 1
+      lessons emphasize platform-extension hygiene (additive event types, additive
+      RagSearchOptions parameter, idempotent Bicep, session-files cleanup
+      IHostedService, Structured Outputs spike outcome). Phase 2 lessons emphasize the
+      vertical-slice + Insights-tool-integration pattern (one-endpoint-per-capability
+      with internal routing, two-path response renderer for playbook vs RAG vs decline
+      vs empty, 12-error-code handling rigor, R5-lead contract sign-off gate). Phase 3
+      lessons emphasize platform-extension validation (`/analyze` proof point cost vs
+      target), telemetry observability uptake, operator-led testing pass findings.
+    </step>
+    <step order="4" name="Enumerate Surprises">
+      Explicit "did NOT go as planned" section. Mine candidates from: (a) Wave F
+      Insights r2 v1.1 contract negotiation outcome — did Wave F deploy ahead of /
+      alongside / behind R5 Phase 2 W3 need? Did `citations[].href` schema-plumbing
+      spike land in v1.1 or defer to v1.2? (b) BFF publish-size deltas — did R5 stay
+      under the +0.5 MB target / +1 MB budget / 60 MB ceiling? Which task surprised by
+      adding more than expected? (c) Structured Outputs (D1-06) — did Azure OpenAI
+      streaming behavior match expectation per plan.md high-risk item #1? (d) Tool
+      routing disambiguation between `summarize` and `insights.query` — did the
+      LLM tool-call routing produce misroutes? Per plan.md high-risk #4 + spec UR-01.
+      (e) `StructuredOutputStreamWidget` schema-driven complexity — was UR-02
+      complexity manageable in practice? (f) Any task that escalated to human input
+      per CLAUDE.md §6. Frame each surprise with a tight root-cause line + a "what
+      we'd do differently" line.
+    </step>
+    <step order="5" name="Enumerate R6 Backlog Candidates">
+      Compile the R6 backlog inventory. MUST include the items explicitly enumerated
+      in the task prompt: (a) Tier 3 file grounding (large-doc summarization on
+      uploaded files exceeding context window); (b) editor widget; (c) extracted-text
+      widget; (d) additional playbooks beyond Summarize + analyze; (e) any UR-01..UR-05
+      items not closed during R5; (f) testing-pass severity-2/3 findings carried
+      forward from task 043. Add any net-new candidates surfaced during R5 execution
+      (e.g., per-tenant dedicated session-files index if Phase 1 spike recommended
+      it; v1.2 `citations[].href` document-URL plumbing if Insights deferred it from
+      v1.1; cost telemetry dashboards expansion if Phase 3 dashboards revealed gaps).
+      Format each item: ID + 1-sentence intent + driver (what surfaced it) + suggested
+      phase placement (foundational / capability / polish).
+    </step>
+    <step order="6" name="Operator Review Stub Section">
+      Add the "Operator observations" section as an empty stub with a header note:
+      "Operator review: drafted by AI agent; operator adds personal observations
+      below before sign-off." Include 4–6 prompt sub-headings to guide operator
+      input: (i) Personal observations on AI/human collaboration cadence during R5;
+      (ii) Process improvements for R6; (iii) Skill effectiveness (task-execute +
+      adr-check + code-review + context-handoff); (iv) Cross-project coordination
+      (Insights r2 Wave F coordination quality); (v) Reuse mandate compliance
+      observation (did R5 actually avoid rebuilding existing platform pieces?);
+      (vi) Anything else worth capturing.
+    </step>
+    <step order="7" name="Write the Document">
+      Create `projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md`.
+      Document structure:
+
+      ```
+      # Lessons Learned — Spaarke AI Platform Unification R5
+
+      > Status: Draft (AI-authored; awaiting operator review + sign-off)
+      > Created: {today's date}
+      > Authors: AI Agent (initial draft) + Operator (review + observations)
+
+      ## 1. Executive Summary
+      {2–3 paragraphs: project shape, what shipped, headline lessons}
+
+      ## 2. Lessons by Phase
+
+      ### Phase 1 — Platform Extensions
+      {3–6 lesson vignettes}
+
+      ### Phase 2 — Vertical Slice + Insights Tool Integration
+      {3–6 lesson vignettes}
+
+      ### Phase 3 — Polish + Future-Use Validation
+      {3–6 lesson vignettes}
+
+      ## 3. Surprises — What Did NOT Go As Planned
+      {Itemized: each surprise has Context → Root Cause → What We'd Do Differently}
+
+      ## 4. R6 Backlog Candidates
+      {Itemized table: ID | Intent | Driver | Suggested phase placement}
+
+      ## 5. Operator Observations
+      {Stub section with prompt sub-headings; operator fills in during review}
+
+      ## 6. Sign-off
+      {Operator records sign-off here; AI agent leaves blank line for operator}
+      ```
+
+      Use absolute markdown links to source artifacts where relevant (task POMLs,
+      coordination doc, contract docs). Length target: ~800–1500 lines of prose +
+      structured items — substantive but not bloated.
+    </step>
+    <step order="8" name="Operator Review">
+      Present the drafted document to the operator. Request: (a) review the lessons +
+      surprises + R6 backlog for accuracy + completeness; (b) add personal observations
+      in §5; (c) record sign-off in §6 with the operator's name + date. The AI agent
+      MUST WAIT for operator confirmation before marking the task complete — this is
+      explicitly a collaborative artifact per CLAUDE.md §7 convention.
+
+      If operator requests revisions: apply revisions, re-present, repeat until
+      operator records sign-off.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below. Confirm: (a) doc exists at
+      the canonical path; (b) all 4 mandatory sections present (lessons by phase /
+      surprises / R6 backlog / operator observations + sign-off); (c) all 3 phases
+      covered in the lessons section; (d) surprises section is explicit (not soft); (e)
+      R6 backlog enumerates the 6 mandatory item categories; (f) operator review +
+      sign-off recorded. Per STANDARD rigor: Step 9.5 quality gates (code-review +
+      adr-check) are SKIPPED per CLAUDE.md §8.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 044 🔲 → ✅. Reset
+      `current-task.md` per CLAUDE.md §7 — set to task 090 (project wrap-up) as the
+      next pending task. Report task completion to the operator. Note explicitly: this
+      task does NOT flip the project status to Complete; task 090 handles the actual
+      status flip + R5 PR open + merge. Final task notes: confirm BFF publish-size
+      delta = 0 MB (no BFF code modified by this task); confirm no Dataverse changes;
+      confirm STANDARD rigor was applied per CLAUDE.md §8 decision tree.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read all input files + task evidence in notes/ folder</tool>
+    <tool name="Write">Create the lessons-learned.md document</tool>
+    <tool name="Edit">Apply operator revisions during review iterations</tool>
+    <tool name="Grep">Search task evidence files for specific signals (publish-size deltas, ADR compliance notes, Wave F status, etc.)</tool>
+    <tool name="Glob">Inventory task evidence files in notes/ folder</tool>
+    <tool name="git">Stage + commit the new lessons-learned doc on the R5 branch (operator-led commit; task 044 does NOT auto-commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md (NEW; final R5 closeout artifact)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 044 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset; next task = 090)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`projects/spaarke-ai-platform-unification-r5/notes/lessons-learned.md` exists at the canonical path.</criterion>
+    <criterion testable="true">Document contains an "Executive Summary" section (§1).</criterion>
+    <criterion testable="true">Document contains a "Lessons by Phase" section (§2) with explicit sub-sections for ALL THREE phases (Phase 1 Platform Extensions, Phase 2 Vertical Slice + Insights Tool Integration, Phase 3 Polish + Future-Use Validation).</criterion>
+    <criterion testable="true">Document contains a "Surprises — What Did NOT Go As Planned" section (§3) with explicit framing — soft hedging is not acceptable. Surprises explicitly cover contract-negotiation outcomes (Wave F v1.1), schema-plumbing spike results (`citations[].href`), BFF publish-size deltas vs the +0.5 MB target, Structured Outputs streaming behavior (D1-06), and tool-routing disambiguation observations.</criterion>
+    <criterion testable="true">Document contains an "R6 Backlog Candidates" section (§4) that explicitly enumerates the six mandatory item categories: (a) Tier 3 file grounding; (b) editor widget; (c) extracted-text widget; (d) additional playbooks; (e) UR-01..UR-05 items not closed; (f) testing-pass findings carried forward from task 043.</criterion>
+    <criterion testable="true">Document contains an "Operator Observations" section (§5) with prompt sub-headings to guide the operator's personal observations.</criterion>
+    <criterion testable="true">Document contains a "Sign-off" section (§6) with the operator's recorded sign-off (name + date).</criterion>
+    <criterion testable="true">Operator has reviewed the document and recorded sign-off in §6. Without operator sign-off the task is NOT complete.</criterion>
+    <criterion testable="true">All file-path references in the document use the canonical `infrastructure/ai-search/` form, NOT the legacy `infra/ai-search/` form.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` shows task 044 status flipped from 🔲 to ✅; `current-task.md` is reset to task 090.</criterion>
+    <criterion testable="true">Task notes confirm: BFF publish-size delta = 0 MB (no BFF code modified); no Dataverse changes; STANDARD rigor applied per CLAUDE.md §8; quality gates at Step 9.5 SKIPPED per rigor level.</criterion>
+    <criterion testable="true">Task 044 does NOT flip the project README status to Complete — that is explicitly task 090's responsibility. Task 044's acceptance is "project status ready to flip" only.</criterion>
+  </acceptance-criteria>
+</task>

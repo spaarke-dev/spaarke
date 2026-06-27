@@ -671,6 +671,16 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
                 ["GraphResilience:RetryDelay"] = "00:00:01",
                 ["GraphResilience:CircuitBreakerFailureThreshold"] = "5",
                 ["GraphResilience:CircuitBreakerDuration"] = "00:00:30",
+
+                // SpeAdmin — required by SpeAdminModule (KeyVault SecretClient).
+                // Per sdap-bff.api-test-suite-repair task 027 (sibling-fixture absorption).
+                // Mirrors IntegrationTestFixture.cs line 74 (canonical fix in task 062).
+                ["SpeAdmin:KeyVaultUri"] = "https://test-keyvault.vault.azure.net/",
+
+                // CosmosPersistence — required by AiPersistenceModule (raw config read).
+                // Per sdap-bff.api-test-suite-repair task 027 (sibling-fixture absorption).
+                // Mirrors IntegrationTestFixture.cs line 81 (canonical fix in task 062).
+                ["CosmosPersistence:Endpoint"] = "https://test.documents.azure.com:443/",
             };
             config.AddInMemoryCollection(dict!);
         });
@@ -725,9 +735,7 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Mock<IScopeManagementService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IModelSelector>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IIntentClassificationService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IEntityResolutionService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IClarificationService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<ISemanticSearchService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IRecordSearchService>(MockBehavior.Loose).Object);
 
@@ -757,7 +765,7 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
             });
             services.AddScoped(sp =>
             {
-                var cache = sp.GetRequiredService<IDistributedCache>();
+                var cache = sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
                 var repo = sp.GetRequiredService<IChatDataverseRepository>();
                 var logger = NullLogger<ChatSessionManager>.Instance;
                 return new ChatSessionManager(cache, repo, logger);

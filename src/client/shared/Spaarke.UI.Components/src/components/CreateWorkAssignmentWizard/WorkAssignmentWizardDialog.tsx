@@ -25,11 +25,7 @@ import { Button, Text, Spinner, tokens } from '@fluentui/react-components';
 import { CheckmarkCircleFilled } from '@fluentui/react-icons';
 
 import { WizardShell } from '../Wizard/WizardShell';
-import type {
-  IWizardShellHandle,
-  IWizardStepConfig,
-  IWizardSuccessConfig,
-} from '../Wizard/wizardShellTypes';
+import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 import { SendEmailStep } from '../CreateRecordWizard/steps/SendEmailStep';
 import { searchUsersAsLookup } from './workAssignmentService';
 
@@ -97,6 +93,12 @@ export interface IWorkAssignmentWizardDialogProps {
    * not set, file uploads will be skipped.
    */
   resolveSpeContainerId?: () => Promise<string>;
+  /**
+   * AAD tenant ID. Forwarded to `WorkAssignmentService` so post-upload RAG
+   * indexing via `@spaarke/sdap-client` routes to the correct multi-tenant
+   * index. When omitted, indexing is skipped (files still upload to SPE).
+   */
+  tenantId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +115,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   navigationService,
   embedded,
   resolveSpeContainerId,
+  tenantId,
 }) => {
   const shellRef = React.useRef<IWizardShellHandle>(null);
 
@@ -121,13 +124,16 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   const [uploadedFiles, setUploadedFiles] = React.useState<IUploadedFile[]>([]);
   const [selectedActions, setSelectedActions] = React.useState<WorkAssignmentFollowOnId[]>([]);
   const [assignWorkState, setAssignWorkState] = React.useState<IAssignWorkState>(EMPTY_ASSIGN_WORK_STATE);
-  const [followOnEventState, setFollowOnEventState] = React.useState<ICreateFollowOnEventState>(EMPTY_FOLLOW_ON_EVENT_STATE);
+  const [followOnEventState, setFollowOnEventState] =
+    React.useState<ICreateFollowOnEventState>(EMPTY_FOLLOW_ON_EVENT_STATE);
   const [emailTo, setEmailTo] = React.useState('');
   const [emailSubject, setEmailSubject] = React.useState('');
   const [emailBody, setEmailBody] = React.useState('');
 
   // Pre-fill values from selected record (loaded asynchronously)
-  const [prefillValues, setPrefillValues] = React.useState<Partial<ICreateWorkAssignmentFormState> | undefined>(undefined);
+  const [prefillValues, setPrefillValues] = React.useState<Partial<ICreateWorkAssignmentFormState> | undefined>(
+    undefined
+  );
   const [isPrefilling, setIsPrefilling] = React.useState(false);
 
   // Email CC state
@@ -168,7 +174,13 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   const [resolvedContainerId, setResolvedContainerId] = React.useState(containerId ?? '');
   const serviceRef = React.useRef<WorkAssignmentService | null>(null);
   if (!serviceRef.current) {
-    serviceRef.current = new WorkAssignmentService(dataService, authenticatedFetch, bffBaseUrl, resolvedContainerId || containerId);
+    serviceRef.current = new WorkAssignmentService(
+      dataService,
+      authenticatedFetch,
+      bffBaseUrl,
+      resolvedContainerId || containerId,
+      tenantId
+    );
   }
 
   // -- Resolve container ID on open ------------------------------------------
@@ -176,20 +188,30 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
     if (!open) return;
     if (containerId) {
       setResolvedContainerId(containerId);
-      serviceRef.current = new WorkAssignmentService(dataService, authenticatedFetch, bffBaseUrl, containerId);
+      serviceRef.current = new WorkAssignmentService(
+        dataService,
+        authenticatedFetch,
+        bffBaseUrl,
+        containerId,
+        tenantId
+      );
       return;
     }
     if (resolveSpeContainerId) {
       let cancelled = false;
-      resolveSpeContainerId().then((cid) => {
-        if (!cancelled && cid) {
-          setResolvedContainerId(cid);
-          serviceRef.current = new WorkAssignmentService(dataService, authenticatedFetch, bffBaseUrl, cid);
-        }
-      }).catch((err) => {
-        console.warn('[WorkAssignmentWizard] Container ID resolution failed:', err);
-      });
-      return () => { cancelled = true; };
+      resolveSpeContainerId()
+        .then(cid => {
+          if (!cancelled && cid) {
+            setResolvedContainerId(cid);
+            serviceRef.current = new WorkAssignmentService(dataService, authenticatedFetch, bffBaseUrl, cid, tenantId);
+          }
+        })
+        .catch(err => {
+          console.warn('[WorkAssignmentWizard] Container ID resolution failed:', err);
+        });
+      return () => {
+        cancelled = true;
+      };
     }
     return undefined;
   }, [open, dataService, authenticatedFetch, bffBaseUrl, containerId, resolveSpeContainerId]);
@@ -222,7 +244,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
   const handleSelectWorkValues = React.useCallback(
     (values: Pick<ICreateWorkAssignmentFormState, 'recordType' | 'recordId' | 'recordName'>) => {
-      setFormState((prev) => ({ ...prev, ...values }));
+      setFormState(prev => ({ ...prev, ...values }));
     },
     []
   );
@@ -253,7 +275,9 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [formState.recordId, formState.recordType]);
 
   const handleUploadedFilesChange = React.useCallback((files: IUploadedFile[]) => setUploadedFiles(files), []);
@@ -264,8 +288,20 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   }, []);
 
   const handleEnterInfoValues = React.useCallback(
-    (values: Pick<ICreateWorkAssignmentFormState, 'name' | 'description' | 'matterTypeId' | 'matterTypeName' | 'practiceAreaId' | 'practiceAreaName' | 'priority' | 'responseDueDate'>) => {
-      setFormState((prev) => ({ ...prev, ...values }));
+    (
+      values: Pick<
+        ICreateWorkAssignmentFormState,
+        | 'name'
+        | 'description'
+        | 'matterTypeId'
+        | 'matterTypeName'
+        | 'practiceAreaId'
+        | 'practiceAreaName'
+        | 'priority'
+        | 'responseDueDate'
+      >
+    ) => {
+      setFormState(prev => ({ ...prev, ...values }));
     },
     []
   );
@@ -287,7 +323,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
     const prev = prevSelectedActionsRef.current;
     const next = selectedActions;
 
-    next.forEach((actionId) => {
+    next.forEach(actionId => {
       if (!prev.includes(actionId)) {
         const stepId = WA_FOLLOW_ON_STEP_ID_MAP[actionId];
         const stepLabel = WA_FOLLOW_ON_STEP_LABEL_MAP[actionId];
@@ -355,14 +391,22 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       }
     });
 
-    prev.forEach((actionId) => {
+    prev.forEach(actionId => {
       if (!next.includes(actionId)) {
         shellRef.current?.removeDynamicStep(WA_FOLLOW_ON_STEP_ID_MAP[actionId]);
       }
     });
 
     prevSelectedActionsRef.current = [...next];
-  }, [selectedActions, dataService, authenticatedFetch, bffBaseUrl, containerId, handleFollowOnEventValid, handleSearchUsers]);
+  }, [
+    selectedActions,
+    dataService,
+    authenticatedFetch,
+    bffBaseUrl,
+    containerId,
+    handleFollowOnEventValid,
+    handleSearchUsers,
+  ]);
 
   // -- Pre-fill email when entering Send Email step --------------------------
   React.useEffect(() => {
@@ -379,9 +423,11 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
       // Auto-CC the current user
       if (!emailCc) {
-        resolveCurrentUserEmail(dataService).then((email) => {
-          if (email) setEmailCc(email);
-        }).catch(() => {});
+        resolveCurrentUserEmail(dataService)
+          .then(email => {
+            if (email) setEmailCc(email);
+          })
+          .catch(() => {});
       }
     }
   }, [selectedActions, emailSubject, emailCc, dataService]);
@@ -407,11 +453,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         label: 'Add Files',
         canAdvance: () => true,
         isSkippable: true,
-        renderContent: () => (
-          <AddFilesStep
-            onUploadedFilesChange={handleUploadedFilesChange}
-          />
-        ),
+        renderContent: () => <AddFilesStep onUploadedFilesChange={handleUploadedFilesChange} />,
       },
       {
         id: 'enter-info',
@@ -420,7 +462,15 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         renderContent: () => {
           if (isPrefillRef.current) {
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: tokens.spacingVerticalL, padding: tokens.spacingVerticalXXL }}>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: tokens.spacingVerticalL,
+                  padding: tokens.spacingVerticalXXL,
+                }}
+              >
                 <Spinner size="medium" label="Loading record details..." />
               </div>
             );
@@ -445,14 +495,22 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
         canAdvance: () => true,
         isEarlyFinish: () => selectedActionsRef.current.length === 0,
         renderContent: () => (
-          <NextStepsSelectionStep
-            selectedActions={selectedActions}
-            onSelectedActionsChange={setSelectedActions}
-          />
+          <NextStepsSelectionStep selectedActions={selectedActions} onSelectedActionsChange={setSelectedActions} />
         ),
       },
     ],
-    [dataService, authenticatedFetch, bffBaseUrl, containerId, selectedActions, handleSelectWorkValid, handleSelectWorkValues, handleUploadedFilesChange, handleEnterInfoValid, handleEnterInfoValues]
+    [
+      dataService,
+      authenticatedFetch,
+      bffBaseUrl,
+      containerId,
+      selectedActions,
+      handleSelectWorkValid,
+      handleSelectWorkValues,
+      handleUploadedFilesChange,
+      handleEnterInfoValid,
+      handleEnterInfoValues,
+    ]
   );
 
   // -- Finish handler --------------------------------------------------------
@@ -508,10 +566,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
     // 3. Execute follow-on: Create Event
     if (actions.includes('create-event')) {
-      const eventResult = await service.createFollowOnEvent(
-        waId,
-        followOnEventStateRef.current
-      );
+      const eventResult = await service.createFollowOnEvent(waId, followOnEventStateRef.current);
       if (!eventResult.success && eventResult.warning) {
         warnings.push(eventResult.warning);
       }
@@ -531,14 +586,21 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       title: hasWarnings ? 'Work assignment created with warnings' : 'Work assignment created!',
       body: (
         <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-          <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{form.name}&rdquo;</span>{' '}
-          has been created{hasWarnings ? ', though some follow-on actions could not complete. See details below.' : ' and is ready to use.'}
+          <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{form.name}&rdquo;</span> has
+          been created
+          {hasWarnings
+            ? ', though some follow-on actions could not complete. See details below.'
+            : ' and is ready to use.'}
         </Text>
       ),
       actions: (
         <>
-          <Button appearance="primary" onClick={viewRecord} aria-label={`View record: ${form.name}`}>View Record</Button>
-          <Button appearance="secondary" onClick={onClose}>Close</Button>
+          <Button appearance="primary" onClick={viewRecord} aria-label={`View record: ${form.name}`}>
+            View Record
+          </Button>
+          <Button appearance="secondary" onClick={onClose}>
+            Close
+          </Button>
         </>
       ),
       warnings: hasWarnings ? warnings : undefined,
@@ -574,8 +636,16 @@ async function resolveCurrentUserEmail(dataService: IDataService): Promise<strin
   try {
     // Get current user ID from Xrm
     const frames: Window[] = [window];
-    try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-    try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
+    try {
+      if (window.parent !== window) frames.push(window.parent);
+    } catch {
+      /* cross-origin */
+    }
+    try {
+      if (window.top && window.top !== window) frames.push(window.top);
+    } catch {
+      /* cross-origin */
+    }
 
     let userId = '';
     for (const frame of frames) {
@@ -587,14 +657,13 @@ async function resolveCurrentUserEmail(dataService: IDataService): Promise<strin
           userId = ctx.userSettings?.userId?.replace(/[{}]/g, '').toLowerCase() ?? '';
           if (userId) break;
         }
-      } catch { /* cross-origin */ }
+      } catch {
+        /* cross-origin */
+      }
     }
     if (!userId) return null;
 
-    const result = await dataService.retrieveRecord(
-      'systemuser', userId,
-      '?$select=internalemailaddress'
-    );
+    const result = await dataService.retrieveRecord('systemuser', userId, '?$select=internalemailaddress');
     return (result['internalemailaddress'] as string) || null;
   } catch {
     return null;
@@ -603,11 +672,16 @@ async function resolveCurrentUserEmail(dataService: IDataService): Promise<strin
 
 function getPriorityLabel(priority: number): string {
   switch (priority) {
-    case 100000000: return 'Low';
-    case 100000001: return 'Normal';
-    case 100000002: return 'High';
-    case 100000003: return 'Urgent';
-    default: return 'Normal';
+    case 100000000:
+      return 'Low';
+    case 100000001:
+      return 'Normal';
+    case 100000002:
+      return 'High';
+    case 100000003:
+      return 'Urgent';
+    default:
+      return 'Normal';
   }
 }
 

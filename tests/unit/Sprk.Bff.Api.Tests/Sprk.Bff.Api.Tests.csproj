@@ -39,11 +39,39 @@
       <ExcludeAssets>all</ExcludeAssets>
     </PackageReference>
 
-    <!-- Microsoft.Extensions.AI: needed to resolve IChatClient, ChatCompletion, ChatMessage for CapabilityRouter tests (AIPU2-013/014) -->
+    <!-- Microsoft.Extensions.AI: needed to resolve IChatClient, ChatCompletion, ChatMessage for chat agent tests -->
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.3.0" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj" />
     <ProjectReference Include="..\..\..\src\server\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
+  </ItemGroup>
+
+  <!-- Insights Engine test fixtures (task 030+: Layer 1 / Layer 2 / D-P7 ingest tests).
+       Linked from tests/Insights/fixtures/ so the same fixtures can be consumed by
+       unit tests here, D-P16 smoke tests, and D-P14 synthesis playbook integration
+       tests without duplication. Copied next to the test assembly at build time so
+       tests resolve them via AppContext.BaseDirectory + "Insights/fixtures/...".
+       The r2 subtree (task 036 — D7 synthetic fixtures) holds (area × type) and
+       project-context fixtures across CTRNS / IPPAT / BNKF; the recursive glob
+       below preserves their relative folder layout under the test bin output
+       (Insights/fixtures/r2/{area}/{filename}.txt) so SyntheticDocuments.cs can
+       resolve them via AppContext.BaseDirectory + relative-path. -->
+  <ItemGroup>
+    <Content Include="..\..\Insights\fixtures\*.*" Link="Insights\fixtures\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\Insights\fixtures\r2\**\*.*" Link="Insights\fixtures\r2\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Insights Engine D-P16 golden dataset (task 070): drives the predict-matter-cost
+       eval harness (Eval/PredictMatterCostEvalHarnessTests.cs). Linked so the harness
+       can resolve the file via AppContext.BaseDirectory + "Insights/golden/...". -->
+  <ItemGroup>
+    <Content Include="..\..\Insights\golden\*.*" Link="Insights\golden\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 </Project>

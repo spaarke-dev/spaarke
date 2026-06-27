@@ -38,14 +38,8 @@ import {
   useId,
   useToastController,
 } from '@fluentui/react-components';
-import { Add20Regular, ArrowClockwise20Regular } from '@fluentui/react-icons';
-import {
-  ISemanticSearchControlProps,
-  SearchFilters,
-  SearchResult,
-  SearchScope,
-  SummaryData,
-} from './types';
+import { Add20Regular, ArrowClockwise20Regular, Open20Regular } from '@fluentui/react-icons';
+import { ISemanticSearchControlProps, SearchFilters, SearchResult, SearchScope, SummaryData } from './types';
 import {
   SearchInput,
   ResultsList,
@@ -55,21 +49,24 @@ import {
   ListView,
   CommandBar,
   BulkActionBar,
+  FilePreviewDialog,
   type ListSortColumn,
   type ListSortDirection,
 } from './components';
 import { useSemanticSearch, useFilters, useFilterOptions, useDocumentListPrefs } from './hooks';
 import { SemanticSearchApiService, NavigationService, DataverseMetadataService } from './services';
+import { resolveSearchIndexNameAsync } from './services/SearchIndexResolver';
 import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilter';
-import { authenticatedFetch, resolveTenantIdSync } from '@spaarke/auth';
+import { authenticatedFetch } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
 import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
-import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components/dist/components/SendEmailDialog';
 import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
-import { DocumentEmailWizard, type IDocumentEmailWizardItem } from '@spaarke/ui-components/dist/components/DocumentEmailWizard';
+import {
+  DocumentEmailWizard,
+  type IDocumentEmailWizardItem,
+} from '@spaarke/ui-components/dist/components/DocumentEmailWizard';
 import { AppInsightsService } from '@spaarke/ui-components/dist/services/AppInsightsService';
 import type { IDataService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
-import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
 
 /**
  * Styles using makeStyles with Fluent design tokens.
@@ -95,13 +92,40 @@ const useStyles = makeStyles({
     maxHeight: '400px',
   },
 
-  // Header region (search input)
+  // Header region (title row + search-input row stacked vertically)
   header: {
     display: 'flex',
     flexDirection: 'column',
     ...shorthands.padding(tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground2,
     ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
+  },
+
+  // v1.1.73 — "DOCUMENTS" title row. Matches VisualHost CardChrome's
+  // `<Text size={300}>` (fontSizeBase300 = 14px) so the PCF reads as a
+  // titled section consistent with the rest of the page.
+  titleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    marginBottom: tokens.spacingVerticalXS,
+  },
+
+  // v1.1.73 — Search row: SearchInput + the 3 trailing action icons
+  // (Reload / Add / Open Full Viewer) on a single line. Previously the
+  // icons lived in the per-results-state toolbar below CommandBar; that
+  // toolbar now only appears when ≥1 row is selected (bulk-action mode).
+  searchRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  searchInputWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  inlineToolbarButton: {
+    minWidth: 'auto',
+    ...shorthands.padding('0px'),
   },
 
   // Main content area (single column, no sidebar — FR-DOC-06)
@@ -154,14 +178,18 @@ const useStyles = makeStyles({
     ...shorthands.padding(tokens.spacingHorizontalL),
   },
 
-  // Toolbar above empty/initial states — mirrors ResultsList's header so the
-  // action icons (refresh / + Add Document / open viewer) stay in one place
-  // regardless of whether documents are present.
+  // Toolbar above the list/card surface — same row hosts the bulk-action
+  // group (leading edge, icon-only) and the Reload/Add buttons (trailing
+  // edge). The internal <BulkActionBar> renders null at zero selection
+  // so the row gracefully collapses to just Reload + Add when nothing is
+  // selected (UAT request — no separate sticky bulk bar).
+  // v1.1.49 — UAT Item 3: bump the horizontal gap between toolbar icons
+  // from `S` to `M` so refresh / add / open-full-view + the bulk-action
+  // icon group breathe. Other rules unchanged.
   emptyStateToolbar: {
     display: 'flex',
-    justifyContent: 'flex-end',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
+    gap: tokens.spacingHorizontalM,
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
   },
@@ -200,10 +228,28 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const [isAuthInitialized, setIsAuthInitialized] = useState(false);
   const [resolvedApiBaseUrl, setResolvedApiBaseUrl] = useState('');
 
-  // Get control properties from context
+  // Get control properties from context.
+  // NOTE (v1.1.45): `showFilters` is intentionally read but unused — the
+  // command bar always renders in non-compact mode (see render block below).
+  // Kept for manifest backward compatibility; treat as deprecated.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const showFilters = context.parameters.showFilters?.raw ?? true;
+  void showFilters;
   const compactMode = context.parameters.compactMode?.raw ?? false;
   const placeholder = context.parameters.placeholder?.raw ?? 'Search documents...';
+
+  // v1.1.47 — Host-level view-mode config.
+  // - `showViewToggle` (TwoOptions, default true): when false, the CommandBar
+  //    hides the list/card tab group AND we lock `view` to `defaultView`
+  //    (ignoring the per-(user, matter) localStorage pref so the lock is
+  //    actually enforced rather than just visually hidden).
+  // - `defaultView` (Enum 'list'|'card', default 'list'): initial view when
+  //    no localStorage pref exists, AND the locked view when the toggle is
+  //    hidden.
+  // Defaults preserve v1.1.46 behavior (toggle visible, list-first initial).
+  const showViewToggle = context.parameters.showViewToggle?.raw ?? true;
+  const rawDefaultView = (context.parameters as unknown as { defaultView?: { raw?: string | null } }).defaultView?.raw;
+  const defaultView: 'list' | 'card' = rawDefaultView === 'card' ? 'card' : 'list';
   // BFF API base URL — resolved by auth useEffect below, stored in state
   const apiBaseUrl = resolvedApiBaseUrl;
 
@@ -279,13 +325,31 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Find Similar dialog state — URL of the web resource to show in the iframe dialog
   const [findSimilarUrl, setFindSimilarUrl] = useState<string | null>(null);
 
-  // Email dialog state (per-row email — emails ONE document)
-  const [emailDialogResult, setEmailDialogResult] = useState<SearchResult | null>(null);
+  // ── v1.1.49 — Host-level preview dialog state (Item 6) ─────────────────
+  // Both list view AND card view now route preview-open through the SAME
+  // host-mounted FilePreviewDialog so the navigation set (Prev/Next) is
+  // shared across views. When the user picks 5 cards then clicks one
+  // preview, Prev/Next walks the 5; when nothing is selected, it walks
+  // the full current result set. ListView's internal preview state is
+  // retained for back-compat (it now stays unused since the host owns the
+  // dialog, but pulling it out would be a larger refactor of ListView's
+  // public surface — leave for future cleanup).
+  const [hostPreviewDocId, setHostPreviewDocId] = useState<string | null>(null);
 
   // Multi-document email wizard state. When open, passes the current results
   // (top N visible) into the wizard's first step where the user can deselect
   // any docs they don't want before composing.
   const [emailWizardOpen, setEmailWizardOpen] = useState(false);
+
+  // Holds the single document item when DocumentEmailWizard is launched
+  // from a row's 3-dot menu; null when launched from the bulk-toolbar
+  // Email icon (in which case the wizard receives
+  // `emailWizardItemsSelected` — only the CHECKED docs as of v1.1.63;
+  // previously the entire result set was passed and the user had to
+  // prune in step 1). The wizard's `selectedDocuments` prop reads
+  // `singleDocForWizard ? [it] : emailWizardItemsSelected` so one
+  // wizard instance serves both flows.
+  const [singleDocForWizard, setSingleDocForWizard] = useState<IDocumentEmailWizardItem | null>(null);
 
   // Initialize services (memoized to prevent recreation)
   const apiService = useMemo(() => new SemanticSearchApiService(apiBaseUrl), [apiBaseUrl]);
@@ -300,23 +364,44 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // userId from PCF user settings; matterId from the resolved scopeId (the
   // entity ID of the current record form). Both are nullable during the
   // initial auth bootstrap — useDocumentListPrefs handles that gracefully.
-  const userIdForPrefs =
-    (context.userSettings as unknown as { userId?: string } | undefined)?.userId ?? null;
+  const userIdForPrefs = (context.userSettings as unknown as { userId?: string } | undefined)?.userId ?? null;
   // `isPinned` from the hook is unused at this scope — ListView consults `pinnedIds`
   // directly. Keeping the destructure simple by omitting it.
-  const { view, setView, pinnedIds, togglePin } = useDocumentListPrefs(
+  const { view, setView, pinnedIds, togglePin, columnWidths, setColumnWidth } = useDocumentListPrefs(
     userIdForPrefs,
     pageEntityId
   );
 
+  // v1.1.47 — Effective view: when the host hides the view-toggle group via
+  // `showViewToggle === false`, lock the view to `defaultView` (ignore the
+  // per-(user, matter) localStorage pref). Otherwise, use the persisted pref
+  // as-is — the hook already falls back to its internal default when storage
+  // is empty, but we override the hook's default with the manifest default
+  // when the user has no persisted pref yet (initial mount path).
+  //
+  // We detect "no persisted pref" by comparing the hook's view to its own
+  // internal default ('list'). When that matches AND the host has chosen
+  // `defaultView='card'`, we honor the host preference. This keeps the hook
+  // signature stable (back-compat for the unchanged FR-DOC-04 contract).
+  const HOOK_DEFAULT_VIEW: 'list' | 'card' = 'list';
+  const effectiveView: 'list' | 'card' = !showViewToggle
+    ? defaultView
+    : view === HOOK_DEFAULT_VIEW && defaultView !== HOOK_DEFAULT_VIEW
+      ? defaultView
+      : view;
+
   // FR-DOC-07: wrap setView with telemetry. The CommandBar's view toggle and
   // any other caller flow through this wrapper so we observe every change.
+  // v1.1.47 — when the toggle is hidden the host has locked the view; ignore
+  // writes silently (the CommandBar also doesn't render the toggle, so this is
+  // defense-in-depth against any other caller).
   const handleViewChange = useCallback(
     (next: 'list' | 'card') => {
+      if (!showViewToggle) return;
       AppInsightsService.trackEvent('view_toggled', { value: next });
       setView(next);
     },
-    [setView]
+    [setView, showViewToggle]
   );
 
   // ── FR-DOC-04: list-view sort + selection state ─────────────────────────
@@ -325,13 +410,10 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const [sortColumn, setSortColumn] = useState<ListSortColumn>('modifiedAt');
   const [sortDirection, setSortDirection] = useState<ListSortDirection>('desc');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const handleSortChange = useCallback(
-    (next: { column: ListSortColumn; direction: ListSortDirection }) => {
-      setSortColumn(next.column);
-      setSortDirection(next.direction);
-    },
-    []
-  );
+  const handleSortChange = useCallback((next: { column: ListSortColumn; direction: ListSortDirection }) => {
+    setSortColumn(next.column);
+    setSortDirection(next.direction);
+  }, []);
 
   // ── FR-DOC-05: Tags filter state ────────────────────────────────────────
   const [tagOptions, setTagOptions] = useState<TagFilterOption[]>([]);
@@ -400,10 +482,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     const doAuth = async () => {
       const apiBaseUrlResolved = manifestApiBaseUrl || (await getApiBaseUrl(webApi));
       const tenantId = manifestTenantId || (await getEnvironmentVariable(webApi, 'sprk_TenantId')) || '';
-      const clientAppId =
-        manifestClientAppId || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId')) || '';
-      const bffAppId =
-        manifestBffAppId || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
+      const clientAppId = manifestClientAppId || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId')) || '';
+      const bffAppId = manifestBffAppId || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
 
       await initializeAuth(tenantId, clientAppId, bffAppId, apiBaseUrlResolved, dataverseUrl);
 
@@ -427,9 +507,51 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Filter state management — declared BEFORE auth effects so useEffect can reference filters
   const { filters, setFilters, clearFilters, hasActiveFilters } = useFilters();
 
+  // FR-PCF-02 / FR-PCF-03 — resolve the Azure AI Search index name via the
+  // host record's `sprk_ai_search_index` lookup column (Phase G, v1.1.75).
+  //
+  // v1.1.74 read this from the manifest bound property `searchIndexName`
+  // (SingleLine.Text) which was fed from `sprk_searchindexname` on the host
+  // record. Phase G replaces that text column with a lookup to the new
+  // master-data table `sprk_aisearchindex`; the bound property is dropped
+  // from the manifest and the PCF resolves the name itself on mount via
+  // `context.webAPI.retrieveRecord(...)$expand=sprk_ai_search_index(...)`.
+  //
+  // State semantics (React 16 — no React 18 transitions/suspense):
+  //   - `null` (initial)            → "not yet resolved" — downstream treats
+  //                                    same as "use BFF tenant default" per
+  //                                    the omit-on-empty contract (tasks
+  //                                    031/032). The initial load fires before
+  //                                    resolution completes; that's acceptable
+  //                                    behaviour (BFF default is the same
+  //                                    fallback the resolver would produce on
+  //                                    failure).
+  //   - non-empty string            → host record has a lookup pointing at a
+  //                                    valid `sprk_aisearchindex` row.
+  //   - `null` (after resolve fail) → BFF tenant default applies.
+  //
+  // Resolution runs once on mount; entityType + entityId are stable for the
+  // control's lifetime (page navigation re-mounts the PCF).
+  const [resolvedSearchIndexName, setResolvedSearchIndexName] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void resolveSearchIndexNameAsync(context).then(name => {
+      if (!cancelled) {
+        setResolvedSearchIndexName(name);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally empty deps — context.webAPI + context.mode are stable for
+    // the control's lifetime per PCF contract. Re-resolving on every render
+    // would spam Dataverse. (Same pattern as the auth-init useEffect below.)
+  }, []);
+  const boundSearchIndexName = resolvedSearchIndexName;
+
   // Search state management — declared BEFORE auth effects so useEffect can reference search
   const { results, totalCount, isLoading, isLoadingMore, error, hasMore, query, search, loadMore, reset } =
-    useSemanticSearch(apiService, searchScope, scopeId);
+    useSemanticSearch(apiService, searchScope, scopeId, boundSearchIndexName);
 
   // Auto-load all documents once auth is ready (shows documents without requiring a search query).
   // search and filters intentionally omitted from deps — we only want to fire once on auth ready.
@@ -481,6 +603,34 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     },
     [setFilters]
   );
+
+  // v1.1.51 (Item 1) — Clear filters callback wired into CommandBar.
+  //
+  // Resets ONLY: fileTypes, dateRange, threshold, searchMode, selectedTags.
+  //
+  // BINDING (FR-DOC-06): preserves `filters.associatedOnly` verbatim. The
+  // scope toggle is NOT a filter — it triggers the auto-search effect
+  // (see lines ~509-530 above) and the spec mandates that toggle behavior
+  // remain untouched. If a user has "Associated Only" selected, the Clear
+  // button must not silently flip them back to "All Documents" (which
+  // would re-fire the union path and surprise the user).
+  //
+  // We use a single batched `setFilters` call so the parent's auto-search
+  // effect compares the new associatedOnly value against the ref — which
+  // is unchanged — and therefore does NOT re-fire. The user must still hit
+  // Search (or Enter) to apply the cleared filters; this mirrors the
+  // existing handleFiltersChange contract.
+  const handleClearFilters = useCallback(() => {
+    setFilters({
+      ...filters,
+      fileTypes: [],
+      dateRange: null,
+      threshold: 0,
+      searchMode: 'hybrid',
+      // associatedOnly intentionally unchanged (FR-DOC-06)
+    });
+    setSelectedTags([]);
+  }, [filters, setFilters]);
 
   // Handle retry after error
   const handleRetry = useCallback(() => {
@@ -630,35 +780,51 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     [context.webAPI]
   );
 
-  // Handle Open Viewer — opens DocumentRelationshipViewer via navigateTo
+  // v1.1.73 — Handle Open Viewer: opens the SemanticSearch Code Page
+  // (`sprk_semanticsearch` web resource) in a modal, prefilled with the
+  // current query + scope. The code page reads `query`, `theme`, `scope`,
+  // `entityId` from the Dataverse data envelope (parseUrlParams) so the
+  // dialog renders showing the same result set the PCF was showing.
+  //
+  // Previously this opened the DocumentRelationshipViewer scoped to the
+  // first result's documentId. The per-row "Find Similar" action retains
+  // that behavior; only the toolbar Open icon was redirected.
   const handleOpenViewer = useCallback(() => {
-    // Use the first result's documentId (most recent) or fall back to scopeId
-    const targetDocId = results.length > 0 ? results[0].documentId : null;
-    if (!targetDocId) return;
-
-    try {
-      const clientUrl =
-        (context as unknown as { page?: { getClientUrl?: () => string } }).page?.getClientUrl?.() ??
-        window.location.origin;
-      const theme = isDarkMode ? 'dark' : 'light';
-      const tenantId = resolvedApiBaseUrl ? '' : ''; // tenantId resolved from auth
-      let tid = '';
-      try { tid = resolveTenantIdSync(); } catch { /* */ }
-
-      const data = `documentId=${targetDocId}&tenantId=${encodeURIComponent(tid)}&theme=${theme}`;
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm;
-      if (xrm?.Navigation?.navigateTo) {
-        void xrm.Navigation.navigateTo(
-          { pageType: 'webresource', webresourceName: 'sprk_documentrelationshipviewer', data },
-          { target: 2, width: { value: 85, unit: '%' }, height: { value: 85, unit: '%' } }
-        );
-      }
-    } catch (err) {
-      console.error('[SemanticSearchControl] Failed to open viewer:', err);
-    }
-  }, [results, context, isDarkMode, resolvedApiBaseUrl]);
+    // FR-PCF-03 + FR-PARITY-01 (Wave 9 wiring) — surface the PCF's current
+    // filter state + the manifest-bound search-index binding into the code
+    // page envelope so the dialog opens showing the SAME result set the PCF
+    // is currently showing. `buildSemanticSearchEnvelope` handles default /
+    // empty omission per-key, so passing all keys here is safe.
+    void navigationService.openSemanticSearchPage(
+      query ?? queryInput ?? '',
+      searchScope,
+      scopeId,
+      isDarkMode,
+      undefined, // use default modal options (80% x 80%)
+      {
+        threshold: filters.threshold,
+        searchMode: filters.searchMode,
+        fileTypes: filters.fileTypes,
+        dateFrom: filters.dateRange?.from ?? null,
+        dateTo: filters.dateRange?.to ?? null,
+        // PCF surfaces tag filtering via `selectedTags` (FR-DOC-05/07); the
+        // code-page parser supports `tags` so we forward it for parity.
+        tags: selectedTags,
+        associatedOnly: filters.associatedOnly,
+      },
+      boundSearchIndexName ?? undefined
+    );
+  }, [
+    navigationService,
+    query,
+    queryInput,
+    searchScope,
+    scopeId,
+    isDarkMode,
+    filters,
+    selectedTags,
+    boundSearchIndexName,
+  ]);
 
   // Handle Add Document — opens DocumentUploadWizard Code Page dialog.
   // After upload completes, always re-run the search (empty query returns all
@@ -682,9 +848,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   const dataService: IDataService = useMemo(
     () => ({
       createRecord: (entityName, data) =>
-        context.webAPI
-          .createRecord(entityName, data as ComponentFramework.WebApi.Entity)
-          .then(r => r.id),
+        context.webAPI.createRecord(entityName, data as ComponentFramework.WebApi.Entity).then(r => r.id),
       retrieveRecord: (entityName, id, options) =>
         context.webAPI.retrieveRecord(entityName, id, options ?? '') as Promise<Record<string, unknown>>,
       retrieveMultipleRecords: (entityName, options) =>
@@ -692,20 +856,32 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           .retrieveMultipleRecords(entityName, options ?? '')
           .then(r => ({ entities: r.entities as Record<string, unknown>[] })),
       updateRecord: (entityName, id, data) =>
-        context.webAPI
-          .updateRecord(entityName, id, data as ComponentFramework.WebApi.Entity)
-          .then(() => undefined),
-      deleteRecord: (entityName, id) =>
-        context.webAPI.deleteRecord(entityName, id).then(() => undefined),
+        context.webAPI.updateRecord(entityName, id, data as ComponentFramework.WebApi.Entity).then(() => undefined),
+      deleteRecord: (entityName, id) => context.webAPI.deleteRecord(entityName, id).then(() => undefined),
     }),
     [context.webAPI]
   );
 
   // Map current results into the wizard's lightweight item shape.
-  // driveId + itemId are required to run AI analysis (Document Profile playbook)
-  // in the wizard's Summary step — without them the wizard falls back to the
-  // cached summary/tldr text.
-  const emailWizardItems: IDocumentEmailWizardItem[] = useMemo(
+  // driveId + itemId are required to run AI analysis (Document Profile
+  // playbook) in the wizard's Summary step — without them the wizard
+  // falls back to the cached summary/tldr text.
+  //
+  // v1.1.63 — renamed from `emailWizardItems` → `emailWizardItemsAll`.
+  // This is now the UNFILTERED mapping of every result row. The
+  // `emailWizardItemsSelected` memo below filters to only the
+  // user-checked rows, and the wizard receives that subset for the
+  // bulk Email path (UAT round 17 — "Bulk Email should only load the
+  // docs I selected, not the entire result set"). The full mapping
+  // is still computed once so the selection filter is O(n) over a
+  // stable identity-array.
+  //
+  // fileSizeBytes flows from BFF SearchResult.fileSize (sprk_filesize via Dataverse
+  // enrichment, added in BFF PR #310). Drives the DocumentEmailWizard's 25 MB
+  // attachment-cap warning. Null/undefined values mean "size unknown" — the wizard
+  // falls back gracefully (warning won't fire on unknown sizes; "—" rendered in the
+  // size column).
+  const emailWizardItemsAll: IDocumentEmailWizardItem[] = useMemo(
     () =>
       results.map(r => ({
         documentId: r.documentId ?? '',
@@ -714,13 +890,50 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         tldr: r.tldr ?? undefined,
         driveId: r.driveId ?? undefined,
         itemId: r.speFileId ?? undefined,
+        fileSizeBytes: r.fileSize ?? undefined,
       })),
     [results]
   );
 
-  // Handle Email Document — opens SendEmailDialog with result context
+  // v1.1.63 — bulk Email subset: only items the user has checked.
+  // Drives the wizard `selectedDocuments` prop when the wizard is
+  // launched via the bulk-toolbar Email button (singleDocForWizard
+  // is null). The single-doc path bypasses this memo entirely —
+  // `handleEmailDocument` populates `singleDocForWizard` with the
+  // one targeted row and the wizard receives `[it]`.
+  const emailWizardItemsSelected: IDocumentEmailWizardItem[] = useMemo(
+    () => emailWizardItemsAll.filter(i => selectedIds.has(i.documentId)),
+    [emailWizardItemsAll, selectedIds]
+  );
+
+  // Handle Email Document — opens DocumentEmailWizard scoped to a single
+  // document. Single-doc and bulk Email share the same wizard so the UX
+  // is consistent (combined users+contacts picker, AI Summary step,
+  // sprk_communication tracking, Attach Files + Send Document Links
+  // toggles).
+  //
+  // v1.1.63 — preview stays visible behind the wizard for BOTH entry
+  // points (row-menu Email AND preview-dialog Email). Previously
+  // (v1.1.61) the preview-dialog path closed the preview via
+  // `setHostPreviewDocId(null)`, so the wizard rendered against an
+  // empty background; UAT flagged the inconsistent feel between the
+  // two paths. The wizard is a Fluent v9 Dialog and renders as a
+  // modal-over-modal on top of the FilePreviewDialog without conflict
+  // (same pattern that already worked for row-menu Email + open preview
+  // simultaneously). On wizard close (Cancel, X, or successful Send),
+  // the user lands back on the preview at the same docId, which is the
+  // natural mental-model continuation.
   const handleEmailDocument = useCallback((result: SearchResult) => {
-    setEmailDialogResult(result);
+    // No setHostPreviewDocId(null) — preview stays open behind wizard.
+    setSingleDocForWizard({
+      documentId: result.documentId ?? '',
+      name: result.name ?? '(untitled)',
+      summary: result.summary ?? undefined,
+      tldr: result.tldr ?? undefined,
+      driveId: result.driveId ?? undefined,
+      itemId: result.speFileId ?? undefined,
+    });
+    setEmailWizardOpen(true);
   }, []);
 
   // Handle Copy Link — copies Dataverse record URL to clipboard
@@ -763,7 +976,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           const filter = batch.join(' or ');
           const resp = await context.webAPI.retrieveMultipleRecords(
             'sprk_document',
-            `?$select=sprk_documentid,sprk_inworkspace&$filter=(${filter}) and sprk_inworkspace eq true`
+            `?$select=sprk_documentid,sprk_workspaceflag&$filter=(${filter}) and sprk_workspaceflag eq true`
           );
           for (const entity of resp.entities || []) {
             const docId = entity.sprk_documentid as string;
@@ -779,7 +992,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     void loadWorkspaceFlags();
   }, [results, context.webAPI]);
 
-  // Handle Toggle Workspace — toggles the sprk_inworkspace flag on the document.
+  // Handle Toggle Workspace — toggles the sprk_workspaceflag column on the document.
   // Uses functional setState to avoid stale-closure issues with workspaceSet.
   const handleToggleWorkspace = useCallback(
     (result: SearchResult) => {
@@ -795,7 +1008,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         // Update Dataverse (fire-and-forget with revert on failure)
         context.webAPI
           .updateRecord('sprk_document', result.documentId, {
-            sprk_inworkspace: newFlag,
+            sprk_workspaceflag: newFlag,
           })
           .catch((err: unknown) => {
             console.error('[SemanticSearchControl] Failed to toggle workspace flag:', err);
@@ -818,68 +1031,6 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
   // Check if a document is in the workspace
   const isInWorkspace = useCallback((result: SearchResult) => workspaceSet.has(result.documentId), [workspaceSet]);
-
-  // Email dialog: search users via Dataverse WebAPI
-  const handleSearchUsers = useCallback(
-    async (query: string): Promise<ILookupItem[]> => {
-      try {
-        const filter = `contains(fullname,'${query.replace(/'/g, "''")}') or contains(internalemailaddress,'${query.replace(/'/g, "''")}')`;
-        const result = await context.webAPI.retrieveMultipleRecords(
-          'systemuser',
-          `?$select=systemuserid,fullname,internalemailaddress&$filter=${filter}&$top=10`
-        );
-        return (result.entities || [])
-          .filter((u: Record<string, unknown>) => u.internalemailaddress)
-          .map((u: Record<string, unknown>) => ({
-            id: u.systemuserid as string,
-            name: `${u.fullname || 'Unknown'} (${u.internalemailaddress})`,
-          }));
-      } catch (err) {
-        console.error('[SemanticSearchControl] User search failed:', err);
-        return [];
-      }
-    },
-    [context.webAPI]
-  );
-
-  // Email dialog: send email via BFF
-  const handleSendEmail = useCallback(
-    async (payload: ISendEmailPayload) => {
-      // Extract email from "Full Name (email@example.com)" format
-      const emailMatch = payload.to.name.match(/\(([^)]+@[^)]+)\)/);
-      const toEmail = emailMatch ? emailMatch[1] : payload.to.name;
-
-      const response = await authenticatedFetch(`${apiBaseUrl}/api/communications/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to: [toEmail],
-          subject: payload.subject,
-          body: payload.body,
-          bodyFormat: 'PlainText', // BFF enum is BodyFormat.{PlainText,HTML} (2026-05-25)
-          associations: emailDialogResult
-            ? [
-                {
-                  entityType: 'sprk_document',
-                  entityId: emailDialogResult.documentId,
-                },
-              ]
-            : [],
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to send email: ${response.status}`);
-      }
-    },
-    [apiBaseUrl, emailDialogResult]
-  );
-
-  // Build email defaults from result context
-  const emailDefaultSubject = emailDialogResult ? `Document: ${emailDialogResult.name}` : '';
-  const emailDefaultBody = emailDialogResult
-    ? `Dear Colleague,\n\nPlease find the following document for your review:\n\nDocument: ${emailDialogResult.name}\n\n────\n\n${emailDialogResult.summary || emailDialogResult.tldr || 'No summary available.'}\n\n────\n\nKind regards`
-    : '';
 
   // Load file type options for the command-bar File Type filter. Document type
   // options now flow through the dedicated Tags filter (`tagOptions` state above)
@@ -906,12 +1057,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     // Apply optimistic doc-type overrides first so the tag filter (below)
     // sees the post-edit values — otherwise an in-flight bulk doc-type change
     // could hide rows from the user mid-update.
-    const overriddenResults = Object.keys(docTypeOverrides).length === 0
-      ? results
-      : results.map(r => {
-          const override = docTypeOverrides[r.documentId];
-          return override !== undefined ? { ...r, documentType: override } : r;
-        });
+    const overriddenResults =
+      Object.keys(docTypeOverrides).length === 0
+        ? results
+        : results.map(r => {
+            const override = docTypeOverrides[r.documentId];
+            return override !== undefined ? { ...r, documentType: override } : r;
+          });
     if (selectedTags.length === 0) return overriddenResults;
     return overriddenResults.filter(r => selectedTags.includes(r.documentType));
   }, [results, selectedTags, docTypeOverrides]);
@@ -1002,6 +1154,61 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     [filteredResults, selectedIds]
   );
 
+  // ── v1.1.49 — Card-view selection helper (Item 1) ─────────────────────
+  // Single-id toggle wrapper so each ResultCard can flip its own selection
+  // through the parent-owned `selectedIds` set.
+  const handleToggleCardSelect = useCallback((documentId: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(documentId)) {
+        next.delete(documentId);
+      } else {
+        next.add(documentId);
+      }
+      return next;
+    });
+  }, []);
+
+  // ── v1.1.49 — Host-level preview navigation set (Item 6) ───────────────
+  // Mirrors ListView's previewNavigationSet logic so list AND card views
+  // share the same Prev/Next nav semantics. Selection wins; otherwise
+  // walk the full filteredResults.
+  const hostPreviewNavSet = useMemo<SearchResult[]>(() => {
+    if (selectedIds.size > 0) {
+      return filteredResults.filter(r => selectedIds.has(r.documentId));
+    }
+    return filteredResults;
+  }, [selectedIds, filteredResults]);
+
+  const hostPreviewTarget = useMemo<SearchResult | null>(() => {
+    if (!hostPreviewDocId) return null;
+    return (
+      hostPreviewNavSet.find(r => r.documentId === hostPreviewDocId) ??
+      filteredResults.find(r => r.documentId === hostPreviewDocId) ??
+      null
+    );
+  }, [hostPreviewDocId, hostPreviewNavSet, filteredResults]);
+
+  const hostPreviewIndex = useMemo<number>(() => {
+    if (!hostPreviewDocId) return -1;
+    return hostPreviewNavSet.findIndex(r => r.documentId === hostPreviewDocId);
+  }, [hostPreviewDocId, hostPreviewNavSet]);
+
+  const handleHostPreviewNavigate = useCallback(
+    (nextIndex: number) => {
+      if (nextIndex < 0 || nextIndex >= hostPreviewNavSet.length) return;
+      setHostPreviewDocId(hostPreviewNavSet[nextIndex].documentId);
+    },
+    [hostPreviewNavSet]
+  );
+
+  // Card-view preview-open handler — fired by ResultCard via the new
+  // `onOpenPreview` prop (Item 6).
+  const handleOpenHostPreview = useCallback((result: SearchResult) => {
+    setHostPreviewDocId(result.documentId);
+    AppInsightsService.trackEvent('preview_dialog_opened', { source: 'card' });
+  }, []);
+
   // Toast dispatch helpers — small wrappers so handlers below stay readable.
   const showToast = useCallback(
     (
@@ -1015,13 +1222,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         <Toast>
           <ToastTitle
             action={
-              action
-                ? (
-                  <Button appearance="transparent" size="small" onClick={action.onClick}>
-                    {action.label}
-                  </Button>
-                )
-                : undefined
+              action ? (
+                <Button appearance="transparent" size="small" onClick={action.onClick}>
+                  {action.label}
+                </Button>
+              ) : undefined
             }
           >
             {title}
@@ -1060,19 +1265,16 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       });
 
       if (response.status === 413) {
-        showToast(
-          'Too many documents',
-          'Maximum 500 documents per bulk download.',
-          'error'
-        );
+        showToast('Too many documents', 'Maximum 500 documents per bulk download.', 'error');
         return;
       }
 
       if (!response.ok) {
         // Surface BFF ProblemDetails 4xx (404 "no accessible documents", 403, 401).
-        const detail = response.status === 404
-          ? 'No accessible documents in the current selection.'
-          : `Download failed (${response.status}).`;
+        const detail =
+          response.status === 404
+            ? 'No accessible documents in the current selection.'
+            : `Download failed (${response.status}).`;
         showToast('Download failed', detail, 'error', TOAST_DEFAULT_MS, {
           label: 'Retry',
           onClick: () => {
@@ -1161,11 +1363,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     );
 
     if (failures.length === 0) {
-      showToast(
-        'Deleted',
-        `${ids.length} document${ids.length !== 1 ? 's' : ''} deleted.`,
-        'success'
-      );
+      showToast('Deleted', `${ids.length} document${ids.length !== 1 ? 's' : ''} deleted.`, 'success');
       setSelectedIds(new Set());
       // Refresh the result set so deleted rows disappear.
       void search(queryInput, filters);
@@ -1256,19 +1454,11 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
                   )
                 )
                   .then(() => {
-                    showToast(
-                      'Undo applied',
-                      'Document types reverted.',
-                      'info'
-                    );
+                    showToast('Undo applied', 'Document types reverted.', 'info');
                     void search(queryInput, filters);
                   })
                   .catch(() => {
-                    showToast(
-                      'Undo failed',
-                      'Could not revert document types — please try again.',
-                      'error'
-                    );
+                    showToast('Undo failed', 'Could not revert document types — please try again.', 'error');
                   });
               },
             }
@@ -1331,23 +1521,16 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       return `${r.name ?? '(untitled)'} → ${url}`;
     });
     const body = encodeURIComponent(
-      `Sharing ${items.length} document${items.length !== 1 ? 's' : ''}:\n\n` +
-        lines.join('\n')
+      `Sharing ${items.length} document${items.length !== 1 ? 's' : ''}:\n\n` + lines.join('\n')
     );
     const subject = encodeURIComponent(
-      items.length === 1
-        ? `Document link: ${items[0].name ?? 'document'}`
-        : `${items.length} document links`
+      items.length === 1 ? `Document link: ${items[0].name ?? 'document'}` : `${items.length} document links`
     );
     const href = `mailto:?subject=${subject}&body=${body}`;
     try {
       window.location.href = href;
     } catch {
-      showToast(
-        'Share link failed',
-        'Could not open the email composer.',
-        'error'
-      );
+      showToast('Share link failed', 'Could not open the email composer.', 'error');
     }
   }, [context, selectedResults, showToast]);
 
@@ -1396,27 +1579,19 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       );
     }
 
-    // Results — list view (FR-DOC-04 default) or card view based on persisted pref
+    // Results — list view (FR-DOC-04 default) or card view based on persisted pref.
+    // v1.1.47 — `effectiveView` honors the host's `showViewToggle` + `defaultView`
+    // settings (locks the surface to a single view when the toggle is hidden).
     if (filteredResults.length > 0) {
-      if (view === 'list' && !compactMode) {
-        // Card-view's existing toolbar surface (Reload / Add / Email / Open viewer)
-        // is folded into the renderActionsToolbar block above. For the list view
-        // we render the same toolbar slim-line + the BulkActionBar (when
-        // ≥1 row checked — FR-DOC-02) + the ListView body below.
+      if (effectiveView === 'list' && !compactMode) {
+        // v1.1.45 — single toolbar row hosts the bulk-action icon group
+        // INLINE alongside Reload + Add. The BulkActionBar component is
+        // rendered inside renderActionsToolbar() and returns null when
+        // nothing is selected, so the row collapses to Reload + Add at
+        // zero selection.
         return (
           <>
             {renderActionsToolbar()}
-            <BulkActionBar
-              selectedIds={selectedIds}
-              docTypeOptions={tagOptions}
-              onClear={handleBulkClear}
-              onEmail={handleBulkEmail}
-              onDownload={handleBulkDownload}
-              onPin={handleBulkPin}
-              onDelete={handleBulkDelete}
-              onDocTypeChange={handleBulkDocTypeChange}
-              onShareLink={handleBulkShareLink}
-            />
             <ListView
               results={filteredResults}
               selectedIds={selectedIds}
@@ -1426,6 +1601,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
               sortColumn={sortColumn}
               sortDirection={sortDirection}
               onSortChange={handleSortChange}
+              columnWidths={columnWidths}
+              onColumnWidthChange={setColumnWidth}
               onOpenFile={handleOpenFileTelemetry}
               onOpenRecord={handleOpenRecordTelemetry}
               onFindSimilar={handleFindSimilarTelemetry}
@@ -1435,26 +1612,26 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
               onCopyLink={handleCopyLinkTelemetry}
               onToggleWorkspace={handleToggleWorkspaceTelemetry}
               isInWorkspace={isInWorkspace}
+              // v1.1.50 (Item 2) — Route list-view preview through the
+              // SAME host-mounted FilePreviewDialog as the card view so
+              // Prev/Next nav set is shared across views.
+              onOpenPreview={setHostPreviewDocId}
+              // v1.1.50 (Item 1) — Lazy-load sentinel parity with the
+              // card view. Same gating as ResultsList: only attach when
+              // there's more to load AND we're not already loading.
+              onLoadMoreSentinel={!filters.associatedOnly && hasMore && !isLoadingMore ? loadMore : undefined}
             />
           </>
         );
       }
       return (
         <>
-          {/* Card view also surfaces the BulkActionBar when ≥1 row is selected
-              via the row checkbox (selection state persists across view toggles
-              per FR-DOC-04 Owner Clarification). */}
-          <BulkActionBar
-            selectedIds={selectedIds}
-            docTypeOptions={tagOptions}
-            onClear={handleBulkClear}
-            onEmail={handleBulkEmail}
-            onDownload={handleBulkDownload}
-            onPin={handleBulkPin}
-            onDelete={handleBulkDelete}
-            onDocTypeChange={handleBulkDocTypeChange}
-            onShareLink={handleBulkShareLink}
-          />
+          {/* Card view also surfaces the toolbar (which contains the
+              BulkActionBar when ≥1 row is selected). Selection state
+              persists across view toggles per FR-DOC-04 Owner
+              Clarification. ResultsList still owns the inner header on
+              the card surface for its own per-card affordances. */}
+          {renderActionsToolbar()}
           <ResultsList
             results={filteredResults}
             isLoading={isLoading}
@@ -1477,7 +1654,19 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
             onReload={handleReload}
             onAddDocument={handleAddDocument}
             onOpenViewer={handleOpenViewer}
-            onEmailDocuments={emailWizardItems.length > 0 ? handleEmailDocuments : undefined}
+            onEmailDocuments={selectedIds.size > 0 ? handleEmailDocuments : undefined}
+            // v1.1.49 — Item 1: card selection wiring (host-owned).
+            selectedIds={selectedIds}
+            onToggleSelect={handleToggleCardSelect}
+            // v1.1.49 — Item 6: card preview routes through the SAME host-mounted
+            // FilePreviewDialog as the list view, so Prev/Next nav set is shared.
+            onOpenPreview={handleOpenHostPreview}
+            // v1.1.49 — Item 2: the host renders the consolidated single-row
+            // toolbar above ResultsList; suppress the duplicate inner toolbar.
+            hideToolbar
+            // v1.1.49 — Item 9: lazy-load sentinel — fires loadMore when the
+            // bottom of the card grid enters the viewport.
+            onLoadMoreSentinel={!filters.associatedOnly && hasMore && !isLoadingMore ? loadMore : undefined}
             compactMode={compactMode}
           />
         </>
@@ -1496,54 +1685,92 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     );
   };
 
-  // Renders the actions toolbar (refresh / + Add Document / open viewer) above
-  // empty and initial states so the icons are always reachable, matching the
-  // toolbar rendered inside ResultsList when documents are present.
-  const renderActionsToolbar = () => (
-    <div className={styles.emptyStateToolbar}>
-      <Tooltip content="Reload results" relationship="label">
-        <Button
-          className={styles.emptyStateToolbarButton}
-          appearance="subtle"
-          size="small"
-          icon={<ArrowClockwise20Regular />}
-          aria-label="Reload results"
-          onClick={handleReload}
+  // Renders the bulk-action toolbar above the list/card surface ONLY when
+  // ≥1 row is selected. The Reload / Add / Open icons that used to live
+  // here moved up into the header search row in v1.1.73, so this row now
+  // exists solely to host the BulkActionBar. Returning null at zero
+  // selection lets the grid sit flush under the CommandBar (FR-DOC-04).
+  const renderActionsToolbar = () => {
+    if (selectedIds.size === 0) {
+      return null;
+    }
+    return (
+      <div className={styles.emptyStateToolbar}>
+        <BulkActionBar
+          selectedIds={selectedIds}
+          docTypeOptions={tagOptions}
+          onClear={handleBulkClear}
+          onEmail={handleBulkEmail}
+          onDownload={handleBulkDownload}
+          onPin={handleBulkPin}
+          onDelete={handleBulkDelete}
+          onDocTypeChange={handleBulkDocTypeChange}
+          onShareLink={handleBulkShareLink}
         />
-      </Tooltip>
-      {handleAddDocument && (
-        <Tooltip content="Add Document" relationship="label">
-          <Button
-            className={styles.emptyStateToolbarButton}
-            appearance="subtle"
-            size="small"
-            icon={<Add20Regular />}
-            aria-label="Add Document"
-            onClick={handleAddDocument}
-          />
-        </Tooltip>
-      )}
-      {/* "Open full viewer" is intentionally omitted in the empty state.
-          DocumentRelationshipViewer is single-document-centric (requires a
-          documentId) — opening it with no results would just show a
-          "Missing Parameters" error. */}
-    </div>
-  );
+      </div>
+    );
+  };
 
   // Combine root styles based on mode
   const rootClassName = compactMode ? `${styles.root} ${styles.rootCompact}` : styles.root;
 
   return (
     <div className={rootClassName}>
-      {/* Header Region: Search Input + Document Count */}
+      {/* Header Region: Title row + Search row (with inline action icons) + count.
+          v1.1.73 — adds a "DOCUMENTS" title row (matches VisualHost CardChrome
+          font/size), and inlines the Reload / Add / Open-full-viewer icons next
+          to the search input so the row reads "[search] [Search] [⟳][+][↗]".
+          The previous standalone action-toolbar row below CommandBar now only
+          renders when ≥1 row is selected (bulk-action mode). */}
       <div className={styles.header}>
-        <SearchInput
-          value={queryInput}
-          placeholder={placeholder}
-          disabled={isLoading}
-          onValueChange={setQueryInput}
-          onSearch={handleSearch}
-        />
+        <div className={styles.titleRow}>
+          <Text size={300} weight="semibold">
+            Documents
+          </Text>
+        </div>
+        <div className={styles.searchRow}>
+          <div className={styles.searchInputWrap}>
+            <SearchInput
+              value={queryInput}
+              placeholder={placeholder}
+              disabled={isLoading}
+              onValueChange={setQueryInput}
+              onSearch={handleSearch}
+            />
+          </div>
+          <Tooltip content="Reload results" relationship="label">
+            <Button
+              className={styles.inlineToolbarButton}
+              appearance="subtle"
+              size="small"
+              icon={<ArrowClockwise20Regular />}
+              aria-label="Reload results"
+              onClick={handleReload}
+            />
+          </Tooltip>
+          {handleAddDocument && (
+            <Tooltip content="Add Document" relationship="label">
+              <Button
+                className={styles.inlineToolbarButton}
+                appearance="subtle"
+                size="small"
+                icon={<Add20Regular />}
+                aria-label="Add Document"
+                onClick={handleAddDocument}
+              />
+            </Tooltip>
+          )}
+          <Tooltip content="Open in Semantic Search" relationship="label">
+            <Button
+              className={styles.inlineToolbarButton}
+              appearance="subtle"
+              size="small"
+              icon={<Open20Regular />}
+              aria-label="Open in Semantic Search"
+              onClick={handleOpenViewer}
+            />
+          </Tooltip>
+        </div>
         {hasSearched && !isLoading && totalCount > 0 && (
           <Text size={200} style={{ color: tokens.colorNeutralForeground3, marginTop: '4px' }}>
             {filters.associatedOnly
@@ -1558,8 +1785,15 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           (Associated Only / File Type / Date Range / Threshold / Mode / Tags)
           plus the list/card view toggle. The auto-search useEffect on
           `filters.associatedOnly` is unchanged (the binding constraint from
-          spec FR-DOC-06). */}
-      {showFilters && !compactMode && (
+          spec FR-DOC-06).
+          v1.1.45: the `showFilters` PCF property is intentionally NOT
+          honored as a gate any more — it was a v0 legacy flag for the old
+          sidebar `FilterPanel`. UAT confirmed that the command bar must
+          always render in non-compact mode (otherwise the AssociatedOnly
+          switch and the five filter dropdowns are invisible, which is what
+          the user reported). The `showFilters` property remains in the
+          manifest for backward compat but only affects nothing here. */}
+      {!compactMode && (
         <CommandBar
           filters={filters}
           onFiltersChange={handleFiltersChange}
@@ -1569,8 +1803,10 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
           optionsLoading={filterOptionsLoading}
           selectedTags={selectedTags}
           onSelectedTagsChange={handleSelectedTagsChange}
-          view={view}
+          onClearFilters={handleClearFilters}
+          view={effectiveView}
           onViewChange={handleViewChange}
+          showViewToggle={showViewToggle}
           disabled={isLoading}
         />
       )}
@@ -1586,8 +1822,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       {hasSearched && !isLoading && selectedTags.length > 0 && (
         <div className={styles.footerCount}>
           <Text size={200}>
-            Showing {filteredResults.length} of {filteredTotalCount} documents · filtered by{' '}
-            {selectedTags.length} tag{selectedTags.length !== 1 ? 's' : ''}
+            Showing {filteredResults.length} of {filteredTotalCount} documents · filtered by {selectedTags.length} tag
+            {selectedTags.length !== 1 ? 's' : ''}
           </Text>
         </div>
       )}
@@ -1601,36 +1837,91 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.44 • Built 2026-05-27</Text>
+        <Text size={100}>v1.1.76 • Built 2026-06-10</Text>
       </div>
+
+      {/* Host-mounted preview dialog. Single instance per PCF surface so
+          list AND card views share the navigation set. The callbacks all
+          close over the CURRENT target — when the user clicks Next,
+          `hostPreviewDocId` flips and the closures rebind on the next
+          render.
+
+          v1.1.49 (Item 6) — card view routed through this dialog.
+          v1.1.50 (Item 2) — list view also routed through this dialog
+          via the new `ListView.onOpenPreview` prop. ListView no longer
+          mounts its own FilePreviewDialog when wired, so Prev/Next nav
+          set is shared across list and card views. */}
+      {hostPreviewTarget && (
+        <FilePreviewDialog
+          open={!!hostPreviewTarget}
+          documentName={hostPreviewTarget.name}
+          documentId={hostPreviewTarget.documentId}
+          documentType={hostPreviewTarget.documentType}
+          createdAt={hostPreviewTarget.createdAt}
+          createdBy={hostPreviewTarget.createdBy}
+          onClose={() => setHostPreviewDocId(null)}
+          fetchPreviewUrl={() => handlePreviewTelemetry(hostPreviewTarget)}
+          onFetchSummary={() => handleSummary(hostPreviewTarget)}
+          onOpenFile={mode => handleOpenFileTelemetry(hostPreviewTarget, mode)}
+          onOpenRecord={() => handleOpenRecordTelemetry(hostPreviewTarget, false)}
+          onEmailDocument={() => handleEmailDocumentTelemetry(hostPreviewTarget)}
+          onCopyLink={() => handleCopyLinkTelemetry(hostPreviewTarget)}
+          onToggleWorkspace={() => handleToggleWorkspaceTelemetry(hostPreviewTarget)}
+          isInWorkspace={isInWorkspace(hostPreviewTarget)}
+          onFindSimilar={() => handleFindSimilarTelemetry(hostPreviewTarget)}
+          navigationTotal={hostPreviewNavSet.length}
+          currentIndex={hostPreviewIndex >= 0 ? hostPreviewIndex : undefined}
+          onNavigate={handleHostPreviewNavigate}
+        />
+      )}
 
       {/* Find Similar — shared iframe dialog */}
       <FindSimilarDialog open={!!findSimilarUrl} onClose={() => setFindSimilarUrl(null)} url={findSimilarUrl} />
 
-      {/* Send Email Dialog (single-document, legacy) */}
-      <SendEmailDialog
-        open={!!emailDialogResult}
-        onClose={() => setEmailDialogResult(null)}
-        defaultSubject={emailDefaultSubject}
-        defaultBody={emailDefaultBody}
-        onSearchUsers={handleSearchUsers}
-        onSend={handleSendEmail}
-      />
-
-      {/* Document Email Wizard (multi-document, new) — opens from the toolbar
-          Email icon. Wizard step 1 lets the user prune the selection. */}
+      {/* Document Email Wizard — unified single-doc + bulk Email surface.
+          When launched from a row's 3-dot menu, `handleEmailDocument`
+          populates `singleDocForWizard` and the wizard receives `[it]`
+          as its selected set. When launched from the bulk-toolbar
+          Email icon, `singleDocForWizard` is null and the wizard
+          receives `emailWizardItemsSelected` — the CHECKED docs only
+          (v1.1.63, UAT round 17). Pre-v1.1.63 the wizard received the
+          full result set and the user had to prune in step 1; the
+          bulk-toolbar Email button is now gated on `selectedIds.size
+          > 0` so launching with zero selection is impossible.
+          v1.1.63 — `maxWidth='1280px'` + `height='85vh'` mirror the
+          FilePreviewDialog so the wizard footprint matches when
+          stacked over an open preview (Item 3 + Item 2 combine: the
+          preview stays open behind the wizard for both row-menu and
+          preview-launched single-doc Email). */}
       <DocumentEmailWizard
         open={emailWizardOpen}
-        onClose={() => setEmailWizardOpen(false)}
-        selectedDocuments={emailWizardItems}
-        parentEntityType={searchScope === 'matter' ? 'sprk_matter'
-          : searchScope === 'project' ? 'sprk_project'
-          : searchScope === 'invoice' ? 'sprk_invoice'
-          : undefined}
+        onClose={() => {
+          setEmailWizardOpen(false);
+          setSingleDocForWizard(null);
+        }}
+        selectedDocuments={singleDocForWizard ? [singleDocForWizard] : emailWizardItemsSelected}
+        parentEntityType={
+          searchScope === 'matter'
+            ? 'sprk_matter'
+            : searchScope === 'project'
+              ? 'sprk_project'
+              : searchScope === 'invoice'
+                ? 'sprk_invoice'
+                : undefined
+        }
         parentEntityId={scopeId ?? undefined}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={apiBaseUrl}
         dataService={dataService}
+        // v1.1.63 — match the FilePreviewDialog footprint so the wizard
+        // doesn't feel mismatched when stacked over an open preview.
+        // FilePreviewDialog uses maxWidth='1280px' height='85vh' (see
+        // SemanticSearchControl/components/FilePreviewDialog.tsx
+        // styles.surface). Mirroring those values here removes the
+        // visual size jump UAT flagged when the wizard launches with
+        // the preview still open.
+        maxWidth="1280px"
+        height="85vh"
       />
 
       {/* Toaster — single instance per PCF surface (FR-DOC-02 bulk-action

@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.Net.Http.Headers;
 using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Api.Workspace;
@@ -81,12 +82,19 @@ public static class WorkspaceLayoutEndpoints
             .WithDescription(
                 "Updates an existing user workspace layout. System layouts cannot be modified " +
                 "and will return 403 Forbidden. Returns 404 if the layout does not exist or " +
-                "does not belong to the authenticated user.")
+                "does not belong to the authenticated user. " +
+                "R4 task 054 (B-5 / FR-08): supports optimistic concurrency via the standard " +
+                "HTTP `If-Match` request header (RFC 7232). The header value is a weak ETag " +
+                "of the layout's `modifiedOn` (e.g., `W/\"638536008000000000\"`) — clients " +
+                "obtain it from the `ETag` response header on GET or from the `modifiedOn` " +
+                "field in the layout DTO. Mismatch → 412 Precondition Failed. Missing header " +
+                "→ 200 OK (soft-mode policy — last-write-wins for back-compat).")
             .Produces<WorkspaceLayoutDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status412PreconditionFailed)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         group.MapDelete("/layouts/{id:guid}", DeleteLayout)
@@ -250,6 +258,11 @@ public static class WorkspaceLayoutEndpoints
                     });
             }
 
+            // R4 task 054 (B-5 / FR-08): emit ETag response header derived
+            // from ModifiedOn so the client can submit it as If-Match on the
+            // next PUT. Weak-validator semantics per RFC 7232 §2.3.
+            httpContext.Response.Headers[HeaderNames.ETag] =
+                WorkspaceLayoutService.FormatWeakETag(layout.ModifiedOn);
             return TypedResults.Ok(layout);
         }
         catch (Exception ex)
@@ -325,6 +338,10 @@ public static class WorkspaceLayoutEndpoints
     /// <summary>
     /// Updates an existing workspace layout.
     /// PUT /api/workspace/layouts/{id}
+    /// R4 task 054 (B-5 / FR-08): reads the standard HTTP <c>If-Match</c>
+    /// request header (RFC 7232) as a weak ETag of the layout's
+    /// <c>modifiedOn</c>. Mismatch → 412 Precondition Failed. Missing →
+    /// 200 OK (soft-mode per <c>notes/b5-design-decision.md</c> §5).
     /// </summary>
     private static async Task<IResult> UpdateLayout(
         Guid id,
@@ -338,21 +355,24 @@ public static class WorkspaceLayoutEndpoints
         if (userId is null)
             return UnauthorizedProblem(httpContext);
 
+        // R4 task 054 (B-5): parse the optional If-Match header. Missing or
+        // unparseable → null → service skips the concurrency check
+        // (soft-mode policy).
+        var ifMatchHeader = httpContext.Request.Headers[HeaderNames.IfMatch].ToString();
+        var expectedModifiedOn = WorkspaceLayoutService.TryParseIfMatchHeader(ifMatchHeader);
+
         try
         {
-            var (layout, error) = await layoutService.UpdateLayoutAsync(id, request, userId, ct);
+            var result = await layoutService.UpdateLayoutAsync(id, request, userId, expectedModifiedOn, ct);
 
-            if (layout is null)
+            switch (result.Outcome)
             {
-                // Determine the appropriate status code based on the error
-                if (error?.Contains("System", StringComparison.OrdinalIgnoreCase) == true)
-                {
+                case WorkspaceLayoutService.UpdateOutcome.Forbidden:
                     logger.LogWarning(
                         "Update denied — system layout {LayoutId}. UserId={UserId}, CorrelationId={CorrelationId}",
                         id, userId, httpContext.TraceIdentifier);
-
                     return Results.Problem(
-                        detail: error,
+                        detail: result.Error,
                         statusCode: StatusCodes.Status403Forbidden,
                         title: "Forbidden",
                         type: "https://tools.ietf.org/html/rfc7231#section-6.5.3",
@@ -360,16 +380,13 @@ public static class WorkspaceLayoutEndpoints
                         {
                             ["correlationId"] = httpContext.TraceIdentifier
                         });
-                }
 
-                if (error?.Contains("not found", StringComparison.OrdinalIgnoreCase) == true)
-                {
+                case WorkspaceLayoutService.UpdateOutcome.NotFound:
                     logger.LogInformation(
                         "Layout {LayoutId} not found for update. UserId={UserId}, CorrelationId={CorrelationId}",
                         id, userId, httpContext.TraceIdentifier);
-
                     return Results.Problem(
-                        detail: error,
+                        detail: result.Error,
                         statusCode: StatusCodes.Status404NotFound,
                         title: "Not Found",
                         type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
@@ -377,16 +394,53 @@ public static class WorkspaceLayoutEndpoints
                         {
                             ["correlationId"] = httpContext.TraceIdentifier
                         });
-                }
 
-                return ServerErrorProblem(httpContext, error ?? "Failed to update workspace layout");
+                case WorkspaceLayoutService.UpdateOutcome.Conflict:
+                    // R4 task 054 (B-5 / FR-08): 412 Precondition Failed per
+                    // RFC 7232 §4.2. Echo the current ModifiedOn in the
+                    // ProblemDetails extensions so the client knows the value
+                    // to retry with. Also emit it as ETag response header so
+                    // standard HTTP-aware clients can read it directly.
+                    logger.LogInformation(
+                        "PUT layout {LayoutId} rejected — If-Match mismatch. UserId={UserId}, CorrelationId={CorrelationId}",
+                        id, userId, httpContext.TraceIdentifier);
+                    if (result.CurrentModifiedOn.HasValue)
+                    {
+                        httpContext.Response.Headers[HeaderNames.ETag] =
+                            WorkspaceLayoutService.FormatWeakETag(result.CurrentModifiedOn.Value);
+                    }
+                    return Results.Problem(
+                        detail: result.Error,
+                        statusCode: StatusCodes.Status412PreconditionFailed,
+                        title: "Precondition Failed",
+                        type: "https://tools.ietf.org/html/rfc7232#section-4.2",
+                        extensions: new Dictionary<string, object?>
+                        {
+                            ["correlationId"] = httpContext.TraceIdentifier,
+                            // ISO-8601 wire shape mirrors WorkspaceLayoutDto.modifiedOn
+                            ["currentModifiedOn"] = result.CurrentModifiedOn?
+                                .ToString("o", System.Globalization.CultureInfo.InvariantCulture)
+                        });
+
+                case WorkspaceLayoutService.UpdateOutcome.ServerError:
+                    return ServerErrorProblem(httpContext, result.Error ?? "Failed to update workspace layout");
+
+                case WorkspaceLayoutService.UpdateOutcome.Success:
+                default:
+                    if (result.Layout is null)
+                    {
+                        // Defensive: should never happen on Success.
+                        return ServerErrorProblem(httpContext, "Update succeeded but no layout was returned.");
+                    }
+                    logger.LogInformation(
+                        "Updated layout {LayoutId} for user {UserId}. CorrelationId={CorrelationId}",
+                        result.Layout.Id, userId, httpContext.TraceIdentifier);
+                    // R4 task 054 (B-5): emit fresh ETag so client has the
+                    // value to use as If-Match on the next write.
+                    httpContext.Response.Headers[HeaderNames.ETag] =
+                        WorkspaceLayoutService.FormatWeakETag(result.Layout.ModifiedOn);
+                    return TypedResults.Ok(result.Layout);
             }
-
-            logger.LogInformation(
-                "Updated layout {LayoutId} for user {UserId}. CorrelationId={CorrelationId}",
-                layout.Id, userId, httpContext.TraceIdentifier);
-
-            return TypedResults.Ok(layout);
         }
         catch (Exception ex)
         {

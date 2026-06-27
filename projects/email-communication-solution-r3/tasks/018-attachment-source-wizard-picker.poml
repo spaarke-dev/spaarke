@@ -1,0 +1,122 @@
+<task id="018" project="email-communication-solution-r3">
+  <metadata>
+    <title>WizardAttachmentSource — wizard-context uploaded-files picker</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>020</blocks>
+    <tags>react, frontend, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Source-specific picker; uses `wizardContext.uploadedFiles` convention; straightforward read-and-map; no architecture decisions. STANDARD covers it.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-07</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build `WizardAttachmentSource.tsx` at `subcomponents/sources/WizardAttachmentSource.tsx`. Renders files uploaded earlier in the parent wizard (e.g., DocumentEmailWizard, SummarizeFilesWizard) and lets the user select which to attach.
+
+    Behavior:
+    - Receives `wizardContext: { uploadedFiles: Array<{ documentId: string; driveItemId: string; name: string; sizeBytes: number; mimeType?: string }> }` from props (engine forwards from host)
+    - Per UQ5 resolution: `wizardContext.uploadedFiles` shape includes BOTH `documentId` AND `driveItemId`. Composer uses `driveItemId` as the canonical attachment reference (NOT documentId).
+    - Renders a Dialog or inline list of uploaded files with checkboxes
+    - On confirm, produces `IAttachment[]` with `source='wizard'`, `driveItemId: file.driveItemId`, `name`, `sizeBytes`, `mimeType`
+
+    If `wizardContext.uploadedFiles` is empty or undefined, the picker button is disabled with a hint "No files uploaded in this wizard yet".
+  </prompt>
+
+  <role>
+    Frontend developer comfortable with the shared lib's wizardContext conventions.
+  </role>
+
+  <goal>
+    `WizardAttachmentSource.tsx` compiles + lint-clean. Picker lists wizardContext.uploadedFiles; selected entries add to AttachmentList with `driveItemId` correctly populated (NOT documentId).
+  </goal>
+
+  <context>
+    <background>
+      Per UQ5 resolution + FR-07: wizardContext is the existing convention in shared lib wizards (DocumentEmailWizard, SummarizeFilesWizard pass it to their send-email step). The shape includes `documentId` (Dataverse `sprk_document` GUID) AND `driveItemId` (SPE driveItem ID).
+
+      EmailComposer always uses `driveItemId` — this consistency closes the FR-17 / DocumentEmailWizard:494 latent bug class at the engine level.
+
+      Audit existing wizardContext shape in `DocumentEmailWizard.tsx` and `SummarizeFilesDialog.tsx` to confirm the field names match. If the existing shape differs, document the delta and adapt.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/sources/WizardAttachmentSource.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.tsx (UPDATE — wire wizard picker)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (UPDATE)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx (READ — confirm wizardContext shape)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only — `Dialog`, `Checkbox`, `Button`, `List`</constraint>
+    <constraint source="ADR-033">Canonical wizard picker — replaces ad-hoc usage</constraint>
+    <constraint source="project">Use `driveItemId` (NOT `documentId`) as the canonical attachment reference per UQ5 resolution</constraint>
+    <constraint source="project">Disable picker button when `wizardContext.uploadedFiles` is empty/undefined</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `DocumentEmailWizard.tsx` + `SummarizeFilesWizard/SummarizeFilesDialog.tsx` to confirm `wizardContext.uploadedFiles` shape. Note any field-name deltas in task notes.</step>
+    <step order="2">Author `WizardAttachmentSource.tsx`:
+      - Props: `{ wizardContext?: { uploadedFiles?: Array&lt;{ documentId: string; driveItemId: string; name: string; sizeBytes: number; mimeType?: string }&gt; }; onAdd: (attachments: IAttachment[]) =&gt; void; disabled?: boolean }`
+      - Compute `available = wizardContext?.uploadedFiles ?? []`
+      - Compute `canOpen = available.length &gt; 0 &amp;&amp; !disabled`
+      - Render Button "Add from wizard files (N)" disabled when `!canOpen`
+      - On click, open Dialog with checkbox list of available files
+      - On confirm: map selected files → `IAttachment[]` with `source: 'wizard'`, `driveItemId: file.driveItemId`</step>
+    <step order="3">Wire into AttachmentList — when `attachmentSources` includes `{ kind: 'wizard' }`, render this picker; `wizardContext` forwarded from engine props.</step>
+    <step order="4">Update `EmailComposer/index.ts` — export `WizardAttachmentSource`.</step>
+    <step order="5">Smoke test: simulate wizardContext with 2 uploaded files, open picker, select one, verify it appears in AttachmentList with source badge "Wizard" + driveItemId.</step>
+    <step order="6">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="7">Update `TASK-INDEX.md`: 018 ✅.</step>
+    <step order="8">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">DocumentEmailWizard.tsx to confirm wizardContext shape</tool>
+    <tool name="write">WizardAttachmentSource.tsx</tool>
+    <tool name="edit">AttachmentList.tsx, index.ts</tool>
+    <tool name="bash">npm run build + lint</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/subcomponents/sources/WizardAttachmentSource.tsx (NEW)</output>
+    <output type="file">EmailComposer/subcomponents/AttachmentList.tsx (UPDATED — wizard picker wired)</output>
+    <output type="file">EmailComposer/index.ts (UPDATED)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`WizardAttachmentSource.tsx` compiles + lint-clean.</criterion>
+    <criterion testable="true">Picker lists `wizardContext.uploadedFiles` with name + size.</criterion>
+    <criterion testable="true">Selected files produce `IAttachment` with `driveItemId` (NOT `documentId`) populated — UQ5 resolution.</criterion>
+    <criterion testable="true">Button disabled when no files in wizardContext.</criterion>
+    <criterion testable="true">Source badge displays "Wizard".</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Engine forwards `wizardContext` from the host (wrapper props). Wave 5 task 075 (DocumentEmailWizard fix) is the canonical caller that supplies the `driveItemId` field — this task ensures the composer side reads it correctly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      STANDARD rigor. Step 9.5 skipped.
+    </protocol>
+  </execution>
+</task>

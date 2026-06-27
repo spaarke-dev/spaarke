@@ -1,94 +1,111 @@
 # Build a New Workspace Widget
 
-> **Purpose**: Step-by-step tutorial for adding a new system workspace (or extending the existing pipeline). Walks through the file edits, the Dataverse seed update, the BFF impact analysis, and the deploy sequence. Includes a worked example: the **Calendar widget** — now a real shipped implementation (tasks 114/115, Round 9, 2026-05-22) rather than a forward projection.
+> **Purpose**: Operator-side decision guide + step-by-step tutorial for adding a new widget to the SpaarkeAi shell. Walks through the **two-wrapper decision tree first**, then the five archetypes that fall out of it, then the file edits + Dataverse seed + deploy sequence. The canonical worked example is the **Calendar widget** (Pattern D — dual-use, shipped R3 tasks 114 + 115, polished through R13).
 >
-> **Last reviewed**: 2026-05-22 (Task 123, Round 13). Refreshed from task 113 (Round 9) — Calendar widget shipped + Pattern D added + new pitfalls. Periodic review required.
-
-> **Required reading before starting**:
-> - [`../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — pipeline reference
-> - [`../architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md`](../architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md) — known coupling that affects new-widget design choices
-> - [`CLAUDE.md` §10 — BFF Hygiene](../../CLAUDE.md) — binding rules if you add ANY BFF code
-> - [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) — required pre-merge checklist for BFF additions
-
----
-
-## 1. Decision tree: which pattern fits your new widget?
-
-Before writing code, classify the new feature:
-
-```
-Is the new widget a "workspace" — i.e. one or more sections inside the workspace pipeline?
-├── YES → Does the section need to be reusable across non-LegalWorkspace hosts
-│         (or does the implementation already live in / fit a shared lib)?
-│         ├── YES → Pattern D: SHARED-LIB WIDGET + THIN LW SHIM (Calendar pattern)
-│         │         Worked example: Calendar (tasks 114 + 115)
-│         │         - Widget proper in @spaarke/<lib>-components
-│         │         - LegalWorkspace registration is a ~60-line shim that imports
-│         │           the widget and renders it
-│         │         - The 5 original sections (get-started, quick-summary,
-│         │           latest-updates, todo, documents) do NOT yet follow this —
-│         │           they remain LW-internal (still Pattern A); only NEW widgets
-│         │           should default to Pattern D unless there's a reason not to
-│         │
-│         └── NO  → Pattern A: Section factory + Dataverse layout (LW-internal)
-│                   Examples: Daily Briefing, My Work, Documents, Smart To Do List
-│                   The section component lives in src/solutions/LegalWorkspace/
-│                   and the registration factory reaches into LW-local
-│                   DataverseService / FeedTodoSyncContext / hooks
-│
-└── NO  → Is it a one-off Code Page dispatcher (open an existing wizard) or AI output?
-          ├── Code Page dispatcher → Pattern B: register a new workspace widget type with a
-          │   thin wrapper that calls Xrm.Navigation.navigateTo
-          │   Examples: create-project-wizard, find-similar-wizard
-          │
-          └── AI output (chat-driven) → Pattern C: register a new workspace widget type with
-              a React component that renders the AI tool's output
-              Examples: RedlineViewer, AnalysisEditor
-```
-
-**Pattern D is the recommended default for new widgets going forward** (task 115 proved it). Pattern A is still valid for sections that genuinely belong inside LegalWorkspace (e.g. they reuse `FeedTodoSyncContext` or LW-specific data shapes). Patterns B and C follow simpler paths in `register-workspace-widgets.ts` and are not unique to this guide.
+> **Last reviewed**: 2026-06-18 (project `spaarke-daily-update-service-r2` task 063 / SC14). §1.1 archetypes table row 3 (dual-use) updated to list Daily Briefing (`@spaarke/daily-briefing-components`, R2 task 010, with `loadNotificationContext` factory option seam) and Smart Todo (`@spaarke/smart-todo-components`) alongside the canonical Calendar example. Previous review: 2026-05-26 (R4 task 011 / W-2; rewritten around the two-wrapper model now codified in [`SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md)).
+>
+> **Audience**: A developer who has never built a SpaarkeAi widget. After §1 you should know which wrapper / archetype you need; the rest of the doc is implementation detail per archetype.
+>
+> **Required reading before this guide**:
+> - [`../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md) — **the model this guide implements**. Read §1 (three surfaces), §2 (two wrappers), §3 (four mount sources), §4 (dual-use pattern).
+> - [`../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — cold-load → widget render pipeline.
+> - [`../architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md`](../architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md) §2A — Calendar canonical Pattern D reference.
+> - [`../../CLAUDE.md`](../../CLAUDE.md) §10 — **binding** rules if you add ANY BFF code.
+> - [`../../.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) — required pre-merge checklist for BFF additions.
 
 ---
 
-## 2. Pattern A: Adding a new system workspace section
+## 1. Decision tree — which wrapper / archetype do I need?
 
-### Steps overview
+**Two wrappers exist** (operator-finalized OC-R4-06, model doc §2). Pick one. Everything else follows from this choice.
 
-1. Decide whether the section needs new components, or whether an existing section's content suffices.
-2. Implement the section component(s) inside LegalWorkspace.
-3. Create the `<sectionName>.registration.ts` file in `src/solutions/LegalWorkspace/src/sections/`.
-4. Add the registration to `src/solutions/LegalWorkspace/src/sectionRegistry.ts`.
-5. Add the layout to `scripts/system-layouts.json` (or design a multi-section layout).
-6. Run `scripts/Deploy-SystemWorkspaceLayouts.ps1` to seed the layout in Dataverse.
-7. Verify cold load in dev (operator smoke).
-8. Deploy `LegalWorkspace` web resource via `code-page-deploy` skill.
+```
+START
+  │
+  │  Q1. Does my widget compose MULTIPLE sections inside ONE Workspace tab,
+  │      and should users be able to add/remove/re-order the sections via
+  │      the WorkspaceLayoutWizard (i.e. is the unit of mount a Dataverse
+  │      sprk_workspacelayout record)?
+  │
+  ├── YES ──▶ Dashboard wrapper (the 'workspace' widget registration)
+  │            │
+  │            │  Q2. Is the section logic LegalWorkspace-internal (reaches
+  │            │      into FeedTodoSyncContext, LW DataverseService, LW hooks)?
+  │            │
+  │            ├── YES ──▶ ARCHETYPE 1: Composable section (Pattern A, LW-internal)
+  │            │            §2 — the 5 original sections shape
+  │            │
+  │            └── NO  ──▶ ARCHETYPE 3: Dual-use section (Pattern D)
+  │                         §4 — Calendar shape (shared-lib widget + thin LW shim)
+  │
+  └── NO ──▶ Direct widget wrapper (a per-widget-type registration in WorkspaceWidgetRegistry)
+              │
+              │  Q3. What is the widget's body?
+              │
+              ├── A sophisticated single-purpose React component (its own data, UX, chrome)
+              │   that owns the whole tab and is NOT composable with other sections.
+              │     ──▶ ARCHETYPE 2: Sophisticated single-purpose direct widget
+              │          §3 — Patterns B (Code Page dispatcher) and C (AI output)
+              │
+              ├── A thin wrapper that calls Xrm.Navigation.navigateTo to open a
+              │   Code Page wizard / form / page as a MODAL — the widget itself
+              │   just launches and re-launches the modal.
+              │     ──▶ ARCHETYPE 5: Modal-launcher (Pattern B variant)
+              │          §6
+              │
+              └── A widget that originates IN THE CONTEXT PANE (a wizard, a card,
+                  a gallery picker) and dispatches a separate widget_load to the
+                  Workspace pane on completion.
+                    ──▶ ARCHETYPE 4: Context-pane widget (with §3.3 dispatcher)
+                         §5
+```
 
-NO BFF code changes are required IF:
-- The section reads data only via `Xrm.WebApi` (Dataverse-side).
-- The section does not need new BFF endpoints for cross-tenant data, AI grounding, or SharePoint Embedded operations.
+### 1.1 The five archetypes at a glance
 
-If the section needs new BFF endpoints, you MUST follow CLAUDE.md §10 (BFF Hygiene) and load [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) before designing the addition.
+| # | Archetype | Wrapper | Pattern (legacy name) | Canonical example | When to use |
+|---|---|---|---|---|---|
+| 1 | Composable section (LW-internal) | Dashboard | A | Quick Summary, Documents, To Do, Latest Updates | New section that genuinely depends on LegalWorkspace context (FeedTodoSyncContext, LW DataverseService) and won't ship in a non-LW host. |
+| 2 | Sophisticated single-purpose direct widget | Direct | B (Code Page dispatcher) or C (AI output) | RedlineViewer, AnalysisEditor, future DocumentViewer | One sophisticated component owns the whole tab. Not composable. Mounted from Assistant or Context (or future surfaces). |
+| 3 | Dual-use section (shared-lib widget + thin LW shim) | Dashboard (Direct optional) | D | **Calendar** (R3 task 115 — canonical) · **Smart Todo** (`@spaarke/smart-todo-components`) · **Daily Briefing** (`@spaarke/daily-briefing-components`, R2 task 010 — `loadNotificationContext` factory option seam) | New widget that could ship in **both** a Dashboard layout AND as a standalone Direct tab. Default for new widgets going forward. |
+| 4 | Context-pane widget (with workspace dispatch) | (Context-surface UI; dispatches to Direct wrapper) | (Pattern C, but originating in Context) | Create Project wizard, Create Matter wizard final step | Widget body lives in the Context pane; on completion, dispatches `widget_load` to mount a result widget in the Workspace pane. R4 W-5 (FR-03) ships first such dispatch. |
+| 5 | Modal-launcher | Direct (thin) | B (canonical) | create-project-wizard, find-similar-wizard | The "widget" is conceptually a launcher button — it calls `Xrm.Navigation.navigateTo` to open a wizard / Code Page / form as a modal at 80% × 80%. The tab content is small (launch / relaunch / status). |
 
-### Step 1 — Decide section scope
+### 1.2 Two checks before you write any code
 
-Examples of section scope:
-- **Single-data-source section** (e.g. todo): one Dataverse entity, one query pattern. Maps cleanly to one `ContentSectionConfig` with one query hook.
-- **Multi-card aggregation section** (e.g. quick-summary): N independent counts, presented as a card grid. Maps to a `MetricCardSectionConfig` (or a `ContentSectionConfig` if cards are interactive).
-- **AI-curated section** (e.g. daily-briefing): server-side analysis returned by a BFF endpoint. Maps to `ContentSectionConfig` with a TTL-cached fetch hook.
+1. **Pick the wrapper before the language.** If you can't yet explain *out loud* why your widget is Dashboard vs. Direct, re-read [`SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md) §2.3. Choosing wrong is the most expensive mistake in this surface — a Direct widget that turns out to need composition has to be rewritten as a Dashboard section (and vice versa).
+2. **If in doubt, build dual-use (Pattern D).** Put the actual component in a shared lib (`@spaarke/<lib>-components`) from day one and write a thin LW section shim. You can always register it as a Direct widget later without rewriting. Calendar's whole point is that the same `CalendarWorkspaceWidget` works in both wrappers because it has zero host coupling.
 
-### Step 2 — Implement section components
+### 1.3 What the wrapper choice locks in
 
-Place under `src/solutions/LegalWorkspace/src/components/<SectionName>/`. Required for the widget to be data-correct in BOTH embedded (SpaarkeAi tab) and standalone (LegalWorkspace) hosts:
+| Wrapper | What you can do | What you can't do (without changing wrappers) |
+|---|---|---|
+| **Dashboard** | Compose your widget with other sections in a user-customizable layout; ship it as a system layout via `system-layouts.json`; let users add it to custom layouts via WorkspaceLayoutWizard; persist layouts as `sprk_workspacelayout` rows. | Mount as a single sophisticated standalone tab without going through `LegalWorkspaceApp` (cost: full embedded LW shell loads). |
+| **Direct** | Mount a single sophisticated component as its own tab; pass widget-instance-scoped data (`{ documentId, ... }`); have per-widget `allowMultiple`. | Be re-composed by users alongside other sections (would require refactor into a section + Dashboard wrapper). |
 
-- Use the `webApi` + `userId` props passed via `SectionFactoryContext` — NEVER reach for the Xrm global directly.
-- Use the `scope` + `businessUnitId` context if the section needs "my records" vs "all in my BU" filtering.
+---
+
+## 2. Archetype 1 — Composable section (Pattern A, LW-internal)
+
+**Use when**: New section that legitimately depends on LegalWorkspace context (`FeedTodoSyncContext` cross-section badge counts, LW `DataverseService`, LW-local hooks) and you do not expect to ship it in a non-LegalWorkspace host. The 5 original sections (`getStarted`, `quickSummary`, `latestUpdates`, `todo`, `documents`) are this shape; **for NEW work prefer Archetype 3 (Pattern D) unless you have a specific reason to stay LW-internal.**
+
+### 2.1 Files you'll edit
+
+1. **Create** `src/solutions/LegalWorkspace/src/components/<SectionName>/<SectionName>Section.tsx` — the component.
+2. **(Optional) Create** `src/solutions/LegalWorkspace/src/hooks/use<SectionName>Data.ts` — Xrm.WebApi fetch hook.
+3. **Create** `src/solutions/LegalWorkspace/src/sections/<sectionName>.registration.ts` — `SectionRegistration` factory.
+4. **Edit** `src/solutions/LegalWorkspace/src/sectionRegistry.ts` — add to `SECTION_REGISTRY`.
+5. **Edit** `scripts/system-layouts.json` — add the system-layout entry pointing at the new `sectionId`.
+6. **Run** `scripts/Deploy-SystemWorkspaceLayouts.ps1` — seeds the `sprk_workspacelayout` row.
+7. **Deploy** LegalWorkspace via `code-page-deploy` (the new lib code lands in the LW bundle; SpaarkeAi consumes LW via dependency, so the standalone SpaarkeAi bundle picks it up at next SpaarkeAi deploy).
+
+### 2.2 Section component rules
+
+- Use the `webApi` + `userId` props passed via `SectionFactoryContext` — **never** reach for `Xrm` global directly. This keeps the section data-correct in both embedded (SpaarkeAi tab) and standalone-LW historical contexts.
+- Use `scope` + `businessUnitId` from context if the section needs "my records vs. all in my BU" filtering.
 - Honor `context.onNavigate`, `context.onOpenWizard`, `context.onBadgeCountChange`, `context.onRefetchReady` callbacks for cross-section UX.
+- Reference: `quickSummary.registration.ts` (single content section with 6-card grid) or `documents.registration.ts` (single content section with view picker).
 
-Reference the existing `quickSummary.registration.ts` (single content section with custom toolbar + 6-card grid) or `documents.registration.ts` (single content section with a per-card grid + view picker).
-
-### Step 3 — Create the registration file
-
-File: `src/solutions/LegalWorkspace/src/sections/<sectionName>.registration.ts`.
+### 2.3 Registration file template
 
 ```ts
 import * as React from "react";
@@ -98,24 +115,24 @@ import type {
   SectionFactoryContext,
   ContentSectionConfig,
 } from "@spaarke/ui-components";
-import { CalendarSection } from "../components/Calendar/CalendarSection";
+import { MySection } from "../components/MySection/MySection";
 
-export const calendarRegistration: SectionRegistration = {
-  id: "calendar",                          // UNIQUE — must not clash with existing IDs
-  label: "Calendar",                       // shown in wizard step 2
-  description: "Upcoming events and deadlines",
+export const mySectionRegistration: SectionRegistration = {
+  id: "my-section",                        // UNIQUE — clash = dev-mode console.error
+  label: "My Section",                     // shown in WorkspaceLayoutWizard step 2
+  description: "What it does",
   icon: CalendarRegular,
-  category: "productivity",                // overview | data | ai | productivity
+  category: "data",                        // overview | data | ai | productivity
   defaultHeight: "440px",
 
   factory(context: SectionFactoryContext): ContentSectionConfig {
     return {
-      id: "calendar",
+      id: "my-section",
       type: "content",
-      title: "Calendar",
+      title: "My Section",
       style: {},
       renderContent: () =>
-        React.createElement(CalendarSection, {
+        React.createElement(MySection, {
           webApi: context.webApi as any,
           userId: context.userId,
           scope: context.scope,
@@ -125,186 +142,145 @@ export const calendarRegistration: SectionRegistration = {
   },
 };
 
-export default calendarRegistration;
+export default mySectionRegistration;
 ```
 
-### Step 4 — Register in `sectionRegistry.ts`
-
-```ts
-import { calendarRegistration } from "./sections/calendar.registration";
-
-export const SECTION_REGISTRY: readonly SectionRegistration[] = [
-  getStartedRegistration,
-  quickSummaryRegistration,
-  latestUpdatesRegistration,
-  todoRegistration,
-  documentsRegistration,
-  dailyBriefingRegistration,
-  calendarRegistration,                  // NEW
-] as const;
-```
-
-The dev-mode guard at the bottom of `sectionRegistry.ts` will alert in console if you accidentally duplicate an ID.
-
-### Step 5 — Add the system layout
-
-Open `scripts/system-layouts.json` and add a new entry:
+### 2.4 System-layout seed entry
 
 ```json
 {
-  "name": "Calendar",
-  "sectionId": "calendar",
+  "name": "My Section",
+  "sectionId": "my-section",
   "layoutTemplateId": "single-column",
-  "sortOrder": 4,
+  "sortOrder": 6,
   "isDefault": false,
-  "description": "Upcoming events and deadlines. Operator request 2026-MM-DD."
+  "description": "Single-section layout exposing my-section. Operator request 2026-MM-DD."
 }
 ```
 
-- `name`: appears in the Workspaces dropdown.
-- `sectionId`: must match the registration `id` above.
-- `layoutTemplateId`: typically `single-column` for a single-section workspace. Use `3-row-mixed` for the Corporate Workspace pattern.
-- `sortOrder`: position among the Dataverse-system layouts (Daily Briefing=0, todo=1, quick-summary=2, documents=3, calendar=4).
-- `isDefault`: set TRUE for ONLY ONE layout. Setting two will pick the lowest-sortOrder one (the BFF's `GetDefaultLayoutAsync` Step 2 orders by sortOrder ASC).
+- `sortOrder` is dropdown position; existing entries 0..5 are reserved. Pick the next free integer.
+- `isDefault: true` on exactly **one** layout system-wide. The BFF's `GetDefaultLayoutAsync` Step 2 orders by `sortOrder ASC` if multiple are flagged.
 
-### Step 6 — Seed the Dataverse record
+### 2.5 Verify cold load
 
-Run the seed script:
-
-```pwsh
-pwsh scripts/Deploy-SystemWorkspaceLayouts.ps1 -EnvironmentUrl <DataverseUrl>
-```
-
-The script reads `system-layouts.json` and upserts each layout via the `sprk_workspacelayout` Web API with `sprk_issystem=true`. The user running the script becomes the `ownerid`, but this does NOT gate visibility — system records are visible to all authenticated users.
-
-Verify via:
-
-```pwsh
-pwsh scripts/Verify-SystemWorkspaceLayouts.ps1 -EnvironmentUrl <DataverseUrl>
-```
-
-(If a verify script doesn't exist for your environment, query Dataverse directly: `GET /api/data/v9.2/sprk_workspacelayouts?$filter=sprk_issystem eq true&$select=sprk_name,sprk_sortorder,sprk_isdefault`.)
-
-### Step 7 — Verify cold load in dev
-
-After seeding, restart SpaarkeAi (or hit `localStorage.removeItem('lw-layout-cache')` + refresh):
-
-1. The Workspaces dropdown should show **Calendar** in the system section (between Documents and any user layouts).
-2. Click **Calendar** → a new tab opens with title "Calendar".
-3. The tab renders the embedded LegalWorkspaceApp with `initialWorkspaceId` set to the new layout's GUID.
-4. `WorkspaceGrid` calls LegalWorkspace's `useWorkspaceLayouts`, parses the sectionsJson, and resolves `calendar` from `SECTION_REGISTRY`.
-5. The `CalendarSection` component renders.
-
-Standalone test (in a SEPARATE browser tab):
-1. Open the LegalWorkspace web resource directly.
-2. Switch to **Calendar** via LegalWorkspace's internal workspace dropdown.
-3. Verify byte-identical rendering with embedded mode (FR-25 / NFR-10 invariant — see audit §5).
-
-### Step 8 — Deploy
-
-Use the appropriate deploy skill:
-
-- **LegalWorkspace web resource**: `code-page-deploy` skill (or `Deploy-LegalWorkspace.ps1`)
-- **SpaarkeAi web resource**: `code-page-deploy` skill (or `Deploy-SpaarkeAi.ps1`) — only needed if SpaarkeAi code changed, which Pattern A does NOT require
-- **System layouts seed**: `scripts/Deploy-SystemWorkspaceLayouts.ps1` per environment
+1. Run `Deploy-SystemWorkspaceLayouts.ps1`.
+2. Restart SpaarkeAi (or `localStorage.removeItem('lw-layout-cache')` + refresh).
+3. Workspaces dropdown shows the new entry; clicking it opens a tab; the tab renders `MySection`.
+4. (Optional) Add the section to a multi-section custom layout via WorkspaceLayoutWizard to verify it composes.
 
 ---
 
-## 3. Pattern B — New BFF endpoint (if your section needs server-side data)
+## 3. Archetype 2 — Sophisticated single-purpose direct widget (Patterns B + C)
 
-**STOP and read CLAUDE.md §10 first.** Then load [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md). Then:
+**Use when**: One React component owns the entire Workspace tab. It is not composable with other sections. It is launched from a non-dropdown mount source — typically the Assistant pane (chat result → AI output widget, R4 W-4 / FR-02) or a Code Page dispatcher.
 
-1. Justify placement in your design doc's **Placement Justification** section (mandatory).
-2. Verify publish-size impact stays under the baseline 60 MB compressed.
-3. Verify no new HIGH-severity CVE from `dotnet list package --vulnerable --include-transitive`.
-4. Endpoint goes in an existing endpoint group if topical (`WorkspaceFileEndpoints`, `WorkspaceAiEndpoints`, ...) or a NEW endpoint group registered in `Program.cs`.
-5. Use `RequireAuthorization()` (the `/api/workspace` group already does this).
-6. Service goes in `Services/<Area>/` as a concrete type registered Scoped (ADR-010 — no interface unless multiple impls).
+### 3.1 Files you'll edit
 
-The decision criteria from CLAUDE.md §10 boil down to: does this CRUD code need to inject AI types directly? If yes, route through the `Services/Ai/PublicContracts/` facade. Do NOT inject `IOpenAiClient`, `IPlaybookService`, or other AI-internal types.
+1. **Create** the widget component in `@spaarke/ai-widgets` or a more specific shared lib (e.g. `@spaarke/legal-domain-widgets` for matter-specific widgets).
+2. **Edit** `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts` — add a `registerWorkspaceWidget(...)` call.
+3. **(If needed)** the dispatching surface (`ConversationPane.tsx` for Assistant, `ContextPaneController.tsx` for Context) calls `bus.publish('workspace', { type: 'widget_load', widgetType: 'my-widget', widgetData: {...} })`.
 
----
-
-## 4. Pattern B + C — New widget type (Code Page dispatcher OR AI output)
-
-For non-workspace widgets, edit `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts`:
+### 3.2 Registration
 
 ```ts
 registerWorkspaceWidget(
-  'my-new-widget',                        // type string — must match server / dispatcher
+  'pdf-viewer',                          // type string — MUST be unique
   {
-    displayName: 'My New Widget',
-    category: 'wizard',                   // or 'ai' / 'document' / etc.
-    icon: 'CalendarRegular',
+    displayName: 'PDF Viewer',
+    category: 'document',                // overview | document | ai | wizard | other
+    icon: 'DocumentPdfRegular',
     allowMultiple: true,
-    defaultOrder: 150,                    // append after existing entries
+    defaultOrder: 150,                   // append after existing entries
   },
-  () => import('./MyNewWidget').then((m) => ({ default: m.MyNewWidget as WorkspaceWidgetComponent })),
+  () => import('./PdfViewerWidget').then((m) => ({
+    default: m.PdfViewerWidget as WorkspaceWidgetComponent,
+  })),
 );
 ```
 
-Then implement `MyNewWidget.tsx` as a `WorkspaceWidgetComponent`:
+### 3.3 Component template
 
 ```tsx
-export const MyNewWidget: WorkspaceWidgetComponent<MyData> = ({ data }) => {
-  // ... render ...
+import type { WorkspaceWidgetComponent } from '@spaarke/ai-widgets';
+
+interface PdfViewerData {
+  documentId: string;
+  blobUrl: string;
+  mimeType: string;
+}
+
+export const PdfViewerWidget: WorkspaceWidgetComponent<PdfViewerData> = ({ data }) => {
+  // data is the widgetData payload from widget_load dispatch
+  return (
+    <div style={{ width: '100%', height: '100%' }}>
+      {/* render */}
+    </div>
+  );
 };
-MyNewWidget.displayName = 'MyNewWidget';
+PdfViewerWidget.displayName = 'PdfViewerWidget';
 ```
 
-Pattern B (Code Page dispatcher) — body of MyNewWidget calls `Xrm.Navigation.navigateTo({ pageType: 'webresource', webresourceName: 'sprk_mywizard', ... })` and renders a launch/relaunch button.
+### 3.4 The two flavors (B vs C)
 
-Pattern C (AI output) — body of MyNewWidget renders the AI tool's output payload (passed via `data`).
+- **Pattern B — Code Page dispatcher**: The widget body is mostly a launch button. On render (or on user click), it calls `Xrm.Navigation.navigateTo({ pageType: 'webresource', webresourceName: 'sprk_mywizard', ... })`. The tab itself stays small (launch / relaunch / status display). See Archetype 5 (§6) for the modal-launcher variant.
+- **Pattern C — AI output**: The widget body renders the AI tool's output payload (passed via `data`). The result of an Assistant-pane orchestration: tool runs server-side, payload comes back, widget visualizes it. Examples: `BudgetDashboard`, `ContractComparison`, `AnalysisEditor`, `RedlineViewer`.
+
+### 3.5 No BFF changes? Don't add them.
+
+For most direct widgets, the data comes from the dispatching surface (Assistant orchestrator payload, Context wizard result). You usually do NOT need a new BFF endpoint. If you think you do, **STOP** and read [`../../CLAUDE.md`](../../CLAUDE.md) §10 + [`../../.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) before designing the addition.
 
 ---
 
-## 5. Worked example: Calendar widget (shipped tasks 114 + 115, 2026-05-22)
+## 4. Archetype 3 — Dual-use widget (Pattern D, shared-lib widget + thin LW shim) — RECOMMENDED DEFAULT
 
-**Operator request (Round 9, 2026-05-22)**: "Add a Calendar system workspace that surfaces all events + tasks the user has access to (matches standalone EventsPage), with a full Events toolbar, a horizontal month strip, and event detail opens as a modal via `Xrm.Navigation.navigateTo` (NOT `Xrm.App.sidePanes`)."
+**Use when**: New widget that COULD ship as either a section inside a Dashboard layout OR a standalone Direct tab — now or in the future. This is the recommended default for new widgets going forward; Calendar (R3 task 115) proved the pattern.
 
-This shipped end-to-end in two tasks:
+The defining trait: the widget proper lives in a shared lib with **zero LegalWorkspace coupling**, and BOTH wrapper paths render the same component.
 
-- **Task 114** (`53e3323e`) — hoisted EventsPage components to a new shared library `@spaarke/events-components` so the standalone EventsPage code page AND the embedded Calendar widget could share components (architectural unity).
-- **Task 115** (`cc83a68a`) — built `CalendarWorkspaceWidget` in the shared lib, wrote the 62-line LegalWorkspace section shim, added the Dataverse-system layout entry, and deployed.
+### 4.1 The Calendar canonical worked example (R3 tasks 114 + 115, polished R10–R13)
 
-It is the canonical **Pattern D** example.
+**Operator goal (Round 9, 2026-05-22)**: A Calendar system workspace that surfaces all events + tasks the user has access to (matching the standalone EventsPage Code Page), with a full Events toolbar, a horizontal month strip, and event detail opens as a modal via `Xrm.Navigation.navigateTo`. Architectural unity required: the Calendar workspace and the EventsPage must share their components.
 
-### 5.1 Scope decision (Step 1)
+**It shipped in two tasks**:
 
-Operator decided Pattern D (NOT Pattern A) because:
-- The Events components are already used by a standalone Code Page (EventsPage / `sprk_eventspage`). The Calendar workspace and the standalone EventsPage should share the components — operator-stated "architectural unity."
-- The widget's data access is Xrm.WebApi-only via the shared services in `@spaarke/events-components/services/` — no LegalWorkspace coupling needed.
+- **Task 114** (`53e3323e`) — created the shared library `@spaarke/events-components` (folder `src/client/shared/Spaarke.Events.Components/`) by hoisting EventsPage components: `CalendarSection`, `CalendarDrawer`, `GridSection`, `AssignedToFilter`, `RecordTypeFilter`, `StatusFilter`, `ColumnFilterHeader`, `ColumnHeaderMenu`, `ViewSelectorDropdown`, the Xrm.WebApi FetchXML query services, view + filter hooks, `EventsPageContext` provider, type unions, date utils.
+- **Task 115** (`cc83a68a`) — built `CalendarWorkspaceWidget` in the new lib, wrote the 62-line LegalWorkspace section shim, added the Dataverse-system layout entry, deployed.
 
-### 5.2 Hoist the shared library (task 114)
+**Six polish rounds R10–R13** (tasks 116, 118, 120, 121, 122) all landed in `@spaarke/events-components` — the shared lib — and propagated automatically to both the Calendar workspace AND the standalone EventsPage. The LW shim was untouched after the initial ship. **That's the dual-use payoff.**
 
-Created `src/client/shared/Spaarke.Events.Components/` with:
-- `components/` — CalendarSection (+ CalendarDrawer), GridSection, AssignedToFilter, RecordTypeFilter, StatusFilter, ColumnFilterHeader, ColumnHeaderMenu, ViewSelectorDropdown
-- `services/` — Xrm.WebApi-based FetchXML query builders
-- `hooks/` — view + filter hooks
-- `context/` — EventsPageContext + EventsPageProvider
-- `types/` — IEventRecord, IEventDateInfo, filter type unions
-- `utils/` — date helpers
-- `widgets/` (added in task 115)
+### 4.2 Step-by-step (pattern that you copy for new dual-use widgets)
 
-Barrel file `src/index.ts` exports the public surface. EventsPage migrated to import from `@spaarke/events-components`; pre-existing standalone import paths in EventsPage were re-wired.
+#### Step 1 — Decide the shared-lib home
 
-### 5.3 Build the widget (task 115)
+For Calendar it was a NEW lib (`@spaarke/events-components`) because there was a parallel Code Page consumer (EventsPage). For a new widget without an existing parallel consumer, you can put it in `@spaarke/ai-widgets` (general-purpose AI widget home) or `@spaarke/ui-components` (general UI). Avoid putting it in `@spaarke/legal-workspace` — that's the dashboard engine; widgets should not be coupled to it.
 
-`src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx` (~1100 LOC) composes:
+Confirm the closure is portable: only `Xrm.WebApi` + shared services + `authenticatedFetch` (from `@spaarke/auth`). No `FeedTodoSyncContext`. No LW `DataverseService`. No LW-local hooks.
 
-- Date-range filter row inline: Fluent v9 `<Dropdown>` for date-field selection + two `<Input type="date">` for From/To + collapse caret on the right edge (task 118).
-- Single `<CalendarSection layout="horizontal">` with responsive month count (1→5 by viewport breakpoints via ResizeObserver) + external ◀ ▶ arrow navigation. The strip is collapsible — persists in `localStorage["spaarke:calendar:collapsed"]` (task 116).
-- Full Events toolbar: `<Toolbar size="small">` with 9 CRUD buttons (New/Delete/Complete/Close/Cancel/On Hold/Archive/Refresh/Calendar) + flex spacer + `<Open24Regular>` icon at right (task 120 moved the Open icon here from the view-selector row).
-- View-selector row: `<ViewSelectorDropdown>` with `useViewSelection` defaulted to Active Events.
-- `<GridSection>` auto-binding via `EventsPageContext.filters`, with `onRecordsLoaded={handleRecordsLoaded}` (task 120 added this prop) feeding event-date highlighting back into the calendar.
+#### Step 2 — Build the widget proper
 
-Side-pane behavior: the widget overrides `Xrm.App.sidePanes` and instead uses `Xrm.Navigation.navigateTo({pageType:'entitylist', entityName:'sprk_event'}, {target:2, width:80%, height:80%})` for the Open click target — matches task 111 Documents Expand UX.
+```
+src/client/shared/Spaarke.<Lib>.Components/src/widgets/<Name>WorkspaceWidget/
+├── <Name>WorkspaceWidget.tsx       — main component
+├── <Name>WorkspaceWidget.css       — Griffel via makeStyles, ADR-021 tokens only
+└── (any internal subcomponents)
+```
 
-### 5.4 Write the LegalWorkspace shim (task 115)
+Compose existing shared components from the same lib + Fluent v9. Treat the widget as if it has no host: all data via `Xrm.WebApi` or `authenticatedFetch` from `@spaarke/auth`. No host-specific props (no `webApi` passed in, no `userId` injected) — read them yourself if needed.
 
-`src/solutions/LegalWorkspace/src/sections/calendar.registration.ts` is 62 lines total. The factory:
+Calendar's widget is ~1100 LOC. It composes `CalendarSection layout="horizontal"`, a Fluent v9 Toolbar with 9 CRUD buttons, `ViewSelectorDropdown` defaulted to "Active Events", and `GridSection` auto-bound to `EventsPageContext.filters`. It uses `Xrm.Navigation.navigateTo({pageType:'entitylist', entityName:'sprk_event'}, {target:2, width:80%, height:80%})` for the Open click target — NOT `Xrm.App.sidePanes` (operator decision: matches task 111 Documents Expand UX).
+
+#### Step 3 — Add the LegalWorkspace section shim
+
+`src/solutions/LegalWorkspace/src/sections/<sectionName>.registration.ts` (Calendar's version is 62 lines):
 
 ```ts
+import * as React from "react";
+import { CalendarLtr24Regular } from "@fluentui/react-icons";
+import type {
+  SectionRegistration,
+  SectionFactoryContext,
+  ContentSectionConfig,
+} from "@spaarke/ui-components";
 import { CalendarWorkspaceWidget } from "@spaarke/events-components";
 
 export const calendarRegistration: SectionRegistration = {
@@ -324,11 +300,13 @@ export const calendarRegistration: SectionRegistration = {
     };
   },
 };
+
+export default calendarRegistration;
 ```
 
-Note that `factory` does NOT forward `SectionFactoryContext` props — the widget is self-contained via `Xrm.WebApi` + the shared `@spaarke/events-components` services. This is the defining trait of Pattern D versus Pattern A.
+**Note the discriminator**: `factory` does NOT forward `SectionFactoryContext` props to the widget. The widget is self-contained. This is the defining trait of Pattern D versus Pattern A.
 
-### 5.5 Register in `sectionRegistry.ts` (task 115)
+#### Step 4 — Register in `sectionRegistry.ts`
 
 ```ts
 import { calendarRegistration } from "./sections/calendar.registration";
@@ -340,11 +318,13 @@ export const SECTION_REGISTRY: readonly SectionRegistration[] = [
   todoRegistration,
   documentsRegistration,
   dailyBriefingRegistration,
-  calendarRegistration,                  // task 115
+  calendarRegistration,        // dual-use entry
 ] as const;
 ```
 
-### 5.6 Add the layout seed + deploy (task 115)
+The dev-mode guard at the bottom of `sectionRegistry.ts` warns on duplicate IDs.
+
+#### Step 5 — Add the system layout seed entry
 
 `scripts/system-layouts.json`:
 
@@ -360,77 +340,586 @@ export const SECTION_REGISTRY: readonly SectionRegistration[] = [
 
 Run `pwsh scripts/Deploy-SystemWorkspaceLayouts.ps1 -EnvironmentUrl <url>`.
 
-Deploy LegalWorkspace via `code-page-deploy`. Deploy SpaarkeAi via `Deploy-SpaarkeAi.ps1` so the new `@spaarke/events-components` lib lands in the SpaarkeAi bundle (the lib is a workspace dep — bundle delta was ~+30 KB gzip).
+#### Step 6 — (Optional) Register as a Direct widget too
 
-### 5.7 Polish rounds — R10–R13
+If you want the SAME widget to ALSO be mountable as a standalone tab dispatched from the Assistant or Context surface, add a `WorkspaceWidgetRegistry` registration:
 
-After the initial Round 9 ship, the widget got 6 follow-up polish rounds based on operator smoke testing:
+```ts
+// src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts
+registerWorkspaceWidget(
+  'calendar',                          // distinct type — NOT 'workspace'
+  {
+    displayName: 'Calendar',
+    category: 'data',
+    icon: 'CalendarLtr24Regular',
+    allowMultiple: false,
+    defaultOrder: 200,
+  },
+  () => import('@spaarke/events-components').then((m) => ({
+    default: m.CalendarWorkspaceWidget as WorkspaceWidgetComponent,
+  })),
+);
+```
 
-- **Task 116** (R10) — horizontal-strip responsive month count + external ◀ ▶ arrow navigation + collapsible strip (`spaarke:calendar:collapsed`).
-- **Task 118** (R11) — collapse chevron moved to filter row right edge (filter row stays visible when calendar collapsed); CaretUp/Down24 icons distinct from month chevrons; "📅 Calendar" sub-heading removed; ~20px gap between months; event-day highlighting via `dayWithEvents` Griffel class + click-to-filter via new `selectedDate` / `onSelectDate` controlled props on `CalendarSection`; grid Open icon.
-- **Task 120** (R13) — event-day highlight bug fix: `GridSection` got optional `onRecordsLoaded` callback; widget added `handleRecordsLoaded` to derive `IEventDateInfo[]` from records using LOCAL date components + dispatch `setEventDates`; `CalendarSection.toIsoDateString` rewritten to use local components (UTC timezone bug fix). Grid spacing: `marginTop: tokens.spacingVerticalL` on grid container. Open icon moved from view-selector row to toolbar row.
-- **Task 121** (R13 follow-up) — calendar date fallback policy: removed `sprk_startdate` from the chain. Events without a due date anchor to `sprk_duedate || createdon` only.
-- **Task 122** (R13 follow-up #2) — removed `dateState !== "in-range"` exclusion from `showEventsTint` so event-day highlight wins over From/To range visualization; `dayWithEvents` uses solid `colorBrandBackground` + `colorNeutralForegroundOnBrand` ("blue background, white font"); Clear button on filter row (Dismiss24Regular, conditionally rendered when `fromDate || toDate` non-empty); inter-month divider via `borderLeft: 1px solid colorNeutralStroke2` on every non-first horizontal month container.
+Now `widget_load { widgetType: 'calendar' }` dispatched from Assistant or Context mounts the widget directly (no `LegalWorkspaceApp` wrapper, no layout fetch). Same component, two wrappers. Calendar today is registered only on the section side; the direct registration is a future option.
 
-The polish-round history demonstrates how Pattern D scales: every change landed in `@spaarke/events-components` (shared lib) and the standalone EventsPage benefited from most of them automatically (the timezone fix in particular). The LW section shim was untouched after the initial ship.
+#### Step 7 — Deploy
 
-### 5.8 What changes were NOT required
+```pwsh
+# Shared lib lands in BOTH consumers' bundles via dependency.
+# LegalWorkspace consumes @spaarke/<lib>-components; SpaarkeAi consumes LW.
 
-- **NO** changes to SpaarkeAi source code (zero across all 9 tasks 114–122) — the existing `workspace` widget type covers every new layout.
-- **NO** changes to BFF — the existing `WorkspaceLayoutService.GetLayoutsAsync` already includes ALL `sprk_issystem=true` records via `QueryDataverseSystemLayoutsAsync`. Zero BFF endpoints / services / DI / NuGet / publish-size delta on any of tasks 114–122.
+# Deploy LegalWorkspace:
+pac auth select --index N      # the dev environment
+# (build LW + push)
+# Use: code-page-deploy skill, target LegalWorkspace
+
+# Deploy SpaarkeAi so the new lib lands in the SpaarkeAi bundle:
+pwsh scripts/Deploy-SpaarkeAi.ps1 -EnvironmentUrl <url>
+# Bundle delta typically <40 KB gzip for a single widget.
+
+# Seed the system layout:
+pwsh scripts/Deploy-SystemWorkspaceLayouts.ps1 -EnvironmentUrl <url>
+```
+
+> **R4 NOTE** (forward-looking, per W-6): The standalone LegalWorkspace Code Page (`sprk_corporateworkspace`) is being retired in R4. After W-6 ships, the LegalWorkspace package remains as a library consumed by SpaarkeAi, but it is no longer self-deployed. Pattern D widgets continue to work because they live in a shared lib (`@spaarke/events-components`, etc.) — the shim just re-exports.
+
+### 4.3 What Calendar did NOT need to change
+
+- **NO** changes to SpaarkeAi source code (zero, across all 9 tasks 114–122) — the existing `workspace` widget type covers every new Dashboard layout.
+- **NO** changes to BFF — `WorkspaceLayoutService.GetLayoutsAsync` already includes all `sprk_issystem=true` records. Zero BFF endpoints, services, DI, NuGet, or publish-size delta.
 - **NO** changes to `@spaarke/ai-widgets` — `WorkspaceLayoutWidget` is unchanged.
 - **NO** new auth wiring — `useAuth` + `authenticatedFetch` + `Xrm.WebApi` already in place.
-- **NO** new ADRs — Pattern D extends Pattern A's pipeline with a clean placement choice.
+- **NO** new ADRs — Pattern D extends the existing Dashboard wrapper pipeline.
 
-### 5.9 What's still imperfect (honest answer)
+### 4.4 What Calendar still has imperfect (honest answer)
 
-- **`CalendarSidePane` (separate web resource)** carries its own legacy copy of `CalendarSection` divergent from `@spaarke/events-components`. Pre-existing follow-up flagged across 114/115/116/118/119/120/121/122 — pending reconciliation.
-- **Bulk-action handlers** are partially duplicated between standalone EventsPage's `App.tsx` and `CalendarWorkspaceWidget`. Pending extraction to a shared `useEventsBulkActions` hook.
-- **`CalendarDrawer.eventDates: string[]` vs `IEventDateInfo[]` API drift** — the drawer still accepts strings, the widget produces `IEventDateInfo[]`. Pending reconciliation.
-- **Xrm.WebApi vs BFF decision criteria** STILL undocumented at the `docs/standards/` level. Task 114 reinforced the unwritten norm (all Events services use Xrm.WebApi); the rationale is not codified. See audit §4.
-
----
-
-## 6. Cheat sheet — file edit list for the Calendar example
-
-| File | Action | Notes |
-|---|---|---|
-| `src/solutions/LegalWorkspace/src/components/Calendar/CalendarSection.tsx` | CREATE | Section component |
-| `src/solutions/LegalWorkspace/src/components/Calendar/CalendarItemCard.tsx` | CREATE | Card component |
-| `src/solutions/LegalWorkspace/src/hooks/useCalendarEvents.ts` | CREATE | Xrm.WebApi fetch hook |
-| `src/solutions/LegalWorkspace/src/sections/calendar.registration.ts` | CREATE | `SectionRegistration` factory |
-| `src/solutions/LegalWorkspace/src/sectionRegistry.ts` | EDIT | Add `calendarRegistration` import + entry |
-| `scripts/system-layouts.json` | EDIT | Add Calendar layout entry |
-| (run) `scripts/Deploy-SystemWorkspaceLayouts.ps1` | RUN | Seed Dataverse |
-| (deploy) `code-page-deploy` for LegalWorkspace | RUN | Push LegalWorkspace web resource |
-
-Total: 5 new files + 2 edits + 2 commands. NO SpaarkeAi changes. NO BFF changes. NO new packages.
+- `CalendarSidePane` (separate web resource) carries its own legacy copy of `CalendarSection` divergent from `@spaarke/events-components`. R4 B-6 / B-7 / B-8 work targets this reconciliation.
+- Bulk-action handlers are partially duplicated between the standalone EventsPage's `App.tsx` and `CalendarWorkspaceWidget`. Pending extraction to a shared `useEventsBulkActions` hook.
+- `CalendarDrawer.eventDates: string[]` vs `IEventDateInfo[]` API drift — drawer still accepts strings.
+- `Xrm.WebApi` vs BFF decision criteria still undocumented at `docs/standards/` level — Calendar reinforced the unwritten norm.
 
 ---
 
-## 7. Common pitfalls
+## 5. Archetype 4 — Context-pane widget (with workspace dispatch)
+
+**Use when**: The widget's primary UX lives in the **Context pane** (right pane) — a wizard, a card, a gallery picker, a Get Started shortcut. On completion (or on demand), it dispatches `widget_load` to mount a result widget in the **Workspace pane**.
+
+The Context pane is not a "wrapper" in the model-doc sense (model doc §1, §2). It is a separate **surface** that hosts pane-local UI **and** acts as a mount source (model doc §3.3). The result widget that lands in the Workspace pane is itself either a Dashboard wrapper (rare — only if the wizard produces a `sprk_workspacelayout`) or a Direct wrapper (typical — a single-purpose result widget).
+
+### 5.1 The two halves
+
+1. **The Context-pane UI itself** — lives in `src/solutions/SpaarkeAi/src/components/context/` (or a Context-controlled subtree). React components, possibly multi-step. Examples shipped today: Get Started cards, Create Project wizard (R4 W-5 target), Create Matter wizard.
+2. **The dispatch** — on completion (or user click), publish a `widget_load` event on the `workspace` channel:
+
+```ts
+import { bus } from '@spaarke/ai-widgets';
+
+bus.publish('workspace', {
+  type: 'widget_load',
+  widgetType: 'project-summary',      // a Direct widget OR 'workspace' (Dashboard)
+  widgetData: { projectId, ... },
+});
+```
+
+The Workspace pane's `widget_load` subscriber resolves the widget type via `WorkspaceWidgetRegistry`, mounts the resulting React tree as a new tab, and acks (model doc §3.3).
+
+### 5.2 R4 W-5 (FR-03) — first end-to-end Context → Workspace wiring
+
+The R4 W-5 task wires the Create Project wizard's final step to dispatch `widget_load` on the `workspace` channel. Result: completing the wizard mounts a project-summary widget in the Workspace pane as a new tab. The result widget can be either:
+
+- A new Direct widget (`'project-summary'`) registered in `WorkspaceWidgetRegistry` — typical case.
+- A constructed Dashboard layout — only if the wizard builds a `sprk_workspacelayout` and dispatches `widgetType: 'workspace'`.
+
+Code references:
+- Dispatcher: `src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx` + the per-wizard final-step handler.
+- Wrapper: whatever widget type is dispatched (see §3 for Direct or §4 for Dashboard-via-layout).
+
+### 5.3 Channels to use
+
+- **`context` channel** — for events that stay in the Context pane (gallery selection, wizard step navigation).
+- **`workspace` channel** — to mount a widget in the Workspace pane. ALWAYS use this for cross-pane dispatch.
+- **`conversation` channel** — only if your Context widget also needs to inject a message into the Assistant chat (rare).
+
+See [`SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md) §3.3 + ADR-025 (NEW in R4) for typed channel contracts. Do **not** invent new channels.
+
+---
+
+## 6. Archetype 5 — Modal-launcher widget (Pattern B canonical)
+
+**Use when**: The "widget" is conceptually a launcher button. Its tab content is small — a launch button, status text, a relaunch affordance, maybe a thumbnail of last-result. The actual work happens inside a modal opened via `Xrm.Navigation.navigateTo({ pageType: 'webresource', webresourceName: 'sprk_mywizard', ... })` at 80% × 80%.
+
+Examples shipped today: `create-project-wizard`, `find-similar-wizard`, `email-compose`, `meeting-schedule`. These are all Direct widgets registered in `WorkspaceWidgetRegistry`; the body of each is a thin component that opens the corresponding Code Page wizard as a modal.
+
+### 6.1 Why this is its own archetype
+
+A modal-launcher is a Direct widget *implementation pattern*, but it's distinct enough to flag separately because:
+
+1. The widget body has very little real UX — it's a launch chrome around a modal.
+2. The actual feature lives in a separate Code Page web resource, not in the widget itself.
+3. Decisions about modal vs side-pane vs in-tab are operator-bound (Calendar's Open chose modal navigateTo; some wizards choose side-pane; document tabs render in-tab).
+
+### 6.2 Files you'll edit
+
+1. **(One-time)** the wizard / form Code Page itself exists as a web resource (`sprk_mywizard`) deployed separately.
+2. **Create** `src/client/shared/Spaarke.AI.Widgets/src/widgets/<MyLauncher>/<MyLauncherWidget>.tsx` — the launcher body.
+3. **Edit** `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts` — register the widget type.
+
+### 6.3 Launcher body template
+
+```tsx
+import * as React from 'react';
+import { Button } from '@fluentui/react-components';
+import { OpenRegular } from '@fluentui/react-icons';
+import type { WorkspaceWidgetComponent } from '@spaarke/ai-widgets';
+
+interface MyWizardLauncherData {
+  matterId?: string;
+}
+
+export const MyWizardLauncherWidget: WorkspaceWidgetComponent<MyWizardLauncherData> = ({ data }) => {
+  const launch = React.useCallback(() => {
+    // @ts-ignore — Xrm provided by host
+    Xrm.Navigation.navigateTo(
+      {
+        pageType: 'webresource',
+        webresourceName: 'sprk_mywizard',
+        data: data ? JSON.stringify(data) : undefined,
+      },
+      { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } },
+    );
+  }, [data]);
+
+  return (
+    <div style={{ padding: 24 }}>
+      <p>Open My Wizard to start the flow.</p>
+      <Button icon={<OpenRegular />} onClick={launch}>
+        Open My Wizard
+      </Button>
+    </div>
+  );
+};
+
+MyWizardLauncherWidget.displayName = 'MyWizardLauncherWidget';
+```
+
+### 6.4 Registration
+
+Same shape as §3.2. `category: 'wizard'` is appropriate for modal launchers.
+
+### 6.5 Operator decision points
+
+- **Side-pane vs modal navigateTo**: Calendar (task 115) explicitly rejected `Xrm.App.sidePanes` in favor of `Xrm.Navigation.navigateTo` at 80% × 80%. Operator preference; if your widget should live in a side-pane instead, document it in the design doc.
+- **target: 2 means modal**. `target: 1` is in-line navigation; almost never what you want for a launcher widget.
+
+---
+
+## 7. Cheat sheet — file edits per archetype
+
+| Archetype | Files created | Files edited | Scripts run | Deploys |
+|---|---|---|---|---|
+| 1. Composable section (Pattern A) | Section + hook + registration | `sectionRegistry.ts`, `system-layouts.json` | `Deploy-SystemWorkspaceLayouts.ps1` | LegalWorkspace (+ SpaarkeAi next deploy) |
+| 2. Direct widget (Pattern B/C) | Widget component | `register-workspace-widgets.ts` (+ dispatching surface) | — | SpaarkeAi (or `@spaarke/ai-widgets` consumer) |
+| 3. Dual-use (Pattern D) | Widget in shared lib + LW shim | `sectionRegistry.ts`, `system-layouts.json` (+ optional `register-workspace-widgets.ts`) | `Deploy-SystemWorkspaceLayouts.ps1` | LegalWorkspace + SpaarkeAi |
+| 4. Context-pane widget | Context UI components | `ContextPaneController.tsx` (or equivalent) + the result widget per #2 or #3 | — | SpaarkeAi |
+| 5. Modal-launcher | Launcher body | `register-workspace-widgets.ts` | — | SpaarkeAi (+ the modal's Code Page if new) |
+
+---
+
+## 7.1 Sizing & layout — the constraint chain (NEW 2026-06-09, post iter-2 round 11)
+
+If your widget renders ANY component whose intrinsic width can exceed its
+container — DataGrid, wide tables, side-by-side cards, image galleries,
+horizontal scrollers — the workspace pane will be **forced to grow to fit
+that content** unless every flex/grid ancestor in the chain explicitly opts
+out of the default `min-width: auto` behavior.
+
+This was the root cause of an 11-round debug cycle on the embedded
+DataverseEntityViewWidget (Documents/Matters/Projects/Invoices/WorkAssignments
+direct widgets). The single-row §9 of [`DATAGRID-CODE-PAGE-HOST-CONTRACT.md`](DATAGRID-CODE-PAGE-HOST-CONTRACT.md)
+that flagged "⚠️ Partial — workspace shell owns FluentProvider" understated
+the host obligation enormously. The full requirement is now §9.1 of that
+doc; below is the short version every workspace-widget author MUST follow.
+
+### 7.1.1 The four-step contract
+
+1. **Host Code Page's `index.html` MUST have the box-sizing reset.** If
+   missing, every grid cell renders `+24px` wider than declared. Audit:
+   ```bash
+   grep -l "box-sizing" src/solutions/<YourHost>/index.html
+   ```
+   Add the §2 block from [`DATAGRID-CODE-PAGE-HOST-CONTRACT.md`](DATAGRID-CODE-PAGE-HOST-CONTRACT.md#2-the-indexhtml-css-contract-non-negotiable)
+   if it's missing. As of 2026-06-09, 17 of 23 host Code Pages were missing
+   this — assume nothing.
+
+2. **Your widget's root container MUST set `min-width: 0` and `width: 100%`.**
+   ```ts
+   const useStyles = makeStyles({
+     root: {
+       flex: 1,
+       minHeight: 0,
+       minWidth: 0,   // ← required; default 'auto' = max-content
+       width: '100%',
+       display: 'flex',
+       flexDirection: 'column',
+       overflow: 'hidden',
+     },
+   });
+   ```
+   Reference: [`DataverseEntityViewWidget.tsx`](../../src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DataverseEntityViewWidget.tsx)
+   styles.root.
+
+3. **Widget MUST measure its own outer width with ResizeObserver and apply
+   it as an explicit pixel cap** on an inner wrapper, so the descendant
+   content has an explicit containing block (mimics the
+   `body { overflow: hidden }` boundary that a standalone Code Page gets
+   for free).
+   ```ts
+   const rootRef = React.useRef<HTMLDivElement | null>(null);
+   const [width, setWidth] = React.useState(0);
+   React.useLayoutEffect(() => {
+     if (rootRef.current) setWidth(rootRef.current.clientWidth);
+   }, []);
+   React.useEffect(() => {
+     const el = rootRef.current;
+     if (!el || typeof ResizeObserver === 'undefined') return;
+     const ro = new ResizeObserver(es => es.forEach(e => setWidth(e.contentRect.width)));
+     ro.observe(el);
+     return () => ro.disconnect();
+   }, []);
+   return (
+     <div ref={rootRef} className={styles.root}>
+       <div style={{
+         width: width > 0 ? `${width}px` : '100%',
+         maxWidth: width > 0 ? `${width}px` : '100%',
+         flex: 1,
+         minHeight: 0,
+         minWidth: 0,
+         display: 'flex',
+         flexDirection: 'column',
+         overflow: 'hidden',
+       }}>
+         {/* your wide content here */}
+       </div>
+     </div>
+   );
+   ```
+   Reference: [`DataverseEntityViewWidget.tsx`](../../src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DataverseEntityViewWidget.tsx)
+   (round 9 pattern).
+
+4. **If your widget mounts `<DataGrid>`, you get the rest for free.** The
+   shared `<DataGrid>` already includes:
+   - Griffel `!important` override for Fluent v9's hardcoded
+     `min-width: fit-content` (round 8).
+   - 2-pass `columnSizingOptions` math with minWidth-floor-aware redistribution
+     (round 10).
+   - `visibleColumns.length * 24` padding reserve in the `available`
+     calculation as defense against missed §7.1.1.1 resets (round 11).
+   - `min-width: 0` on root, innerCard, gridScroll (rounds 6-7).
+
+   If you build a non-DataGrid wide component, you'll need to replicate
+   patterns 8/10/11 yourself or use the `<DataGrid>`-equivalent shared
+   primitive (TBD as new wide components emerge).
+
+### 7.1.2 Diagnostic when something looks wrong
+
+Switch DevTools Console to the Code Page's iframe and run the script at
+[`DATAGRID-CODE-PAGE-HOST-CONTRACT.md` §9.1.6](DATAGRID-CODE-PAGE-HOST-CONTRACT.md#916-diagnostic-script).
+The output tells you:
+- `col[N] rendered = declared + 24` → §7.1.1.1 box-sizing reset missing.
+- Section card `cw` differs from row track width → §7.1.1.2 min-width:0
+  chain broken — walk up the parent list until you find the inflated layer.
+- Table `sw > container cw` but rendered ≈ declared → DataGrid column math
+  regression; file a bug, don't try to fix at the widget level.
+
+### 7.1.3 Anti-patterns specific to sizing
+
+- ❌ **Setting `width: 100%` without `min-width: 0`.** The flex item still
+  refuses to shrink below its content's intrinsic width. The combination
+  matters.
+- ❌ **Using CSS class with `min-width: 0` (no `!important`) to override
+  Fluent v9 inline styles.** Inline beats class in CSS specificity. Use
+  the `!important` Griffel pattern from DataGrid's `gridTableOverride`
+  style if you must override a Fluent inline style.
+- ❌ **Measuring `gridScroll` clientWidth and assuming it equals available
+  cell width.** The cell-padding reserve is real; either include the reset
+  or subtract `cellCount * 24` from your math.
+- ❌ **Relying on the workspace pane being narrow enough that overshoot is
+  invisible.** The operator can resize panes; the widget must constrain
+  itself regardless of current pane width.
+
+---
+
+## 7.2 Sizing & layout — the HEIGHT chain (updated 2026-06-23, smart-todo-r4 R4-110 chain audit)
+
+If your widget's body should grow to fill the SectionPanel area (kanban,
+list, grid, anything that benefits from vertical space) — and you see it
+capping at content height even though the surrounding section has more
+room — the height chain has a break somewhere between the workspace tab
+content and your widget's innermost flex child.
+
+This was the root cause of a 7-round debug cycle on the SmartTodo widget
+(smart-todo-r4 UAT 4 → 12, June 2026). The widget kept rendering at
+~600px (or its minHeight floor) even when the section panel was 900+ px
+tall. Working widgets in the same pane (Daily Briefing, Calendar) fill
+correctly because they follow the contract below.
+
+### 7.2.1 The chain contract (post R4-110, 2026-06-23)
+
+The full height chain is:
+
+```
+viewport
+  → SpaarkeAi 3-pane shell                  (✓ established, don't touch)
+  → WorkspacePane.root                       (✓ display:flex; height:100%)
+  → WorkspaceTabManagerComponent.root        (✓ display:flex; height:100%)
+  → WorkspaceTabManagerComponent.content     (✓ display:flex + flex:1, R4-110)
+  → widgetWrapper                            (✓ height:100%)
+  → WorkspaceLayoutWidget.root               (✓ flex:1 + height:100%, round 11)
+  → LegalWorkspaceApp root                   (✓ already height:100%)
+  → WorkspaceShell.shell                     (✓ flex:1 1 auto)
+  → WorkspaceShell.row                       (✓ flex:1 1 0 + alignItems:stretch, round 12)
+  → SectionPanel.card                        (✓ stretches via grid alignItems:stretch)
+  → SectionPanel.content                     (✓ flex:1 1 auto)
+  → YOUR WIDGET ROOT                         ★ Your responsibility — Rule 1
+  → ...inner widget wrappers...              ★ Your responsibility — Rule 2
+  → your scrollable body / kanban / list
+```
+
+**The shell-side chain is now FORGIVING** (post-R4-110). Every layer above
+your widget supplies determinate height. You do NOT need per-section
+`style: { height: "calc(100vh - X)" }` workarounds — the SectionPanel
+stretches to fill the grid row, and the grid row claims the shell's
+available height.
+
+**Rule 1 — Widget root anchors to parent height.** Use EITHER `height:
+100%` OR `flex: 1` (R4-110 made both work — pre-R4-110 only `height:
+100%` did, because `WorkspaceTabManagerComponent.content` was block).
+
+**Rule 2 — Every intermediate wrapper inside the widget must be a flex
+container** (`display: flex` or `display: grid`). A `div` defaults to
+`block`, and a block parent IGNORES child flex props. This is the most
+common widget-author trap.
+
+```typescript
+// ✅ CORRECT — every wrapper in the chain is flex
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',          // anchor to parent's supplied height
+    overflow: 'hidden',
+  },
+  body: {
+    display: 'flex',         // ← CRITICAL: without this, child flex props don't work
+    flexDirection: 'column',
+    flex: '1 1 auto',
+    minHeight: 0,
+    overflowY: 'auto',
+  },
+  kanbanContainer: {
+    flex: '1 1 auto',        // claims body's height
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+});
+
+// ❌ THE TRAP — the body div is implicitly display:block, so the kanbanContainer
+// child's `flex: 1 1 auto` is IGNORED. Kanban falls back to content height.
+const broken = makeStyles({
+  body: {
+    flex: '1 1 auto',
+    minHeight: 0,
+    overflowY: 'auto',
+    // MISSING: display: 'flex'  ← caused the smart-todo-r4 round 4-12 cycle
+  },
+});
+```
+
+### 7.2.2 Working reference widgets (clone this layout)
+
+If in doubt, copy the proven pattern from these widgets — they fill
+correctly with NO height-cap workarounds:
+
+- **`DailyBriefingApp`** — `src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx` —
+  `container: { display: flex, flexDirection: column, height: '100%' }` +
+  `scrollContent: { flex: 1 }`. Note `height: 100%` instead of `flex: 1` on
+  the root anchors against the block-parent-crossing problem.
+- **`CalendarWorkspaceWidget`** — `src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx` —
+  `root: { display: flex, flexDirection: column, height: '100%' }` +
+  `gridContainer: { flex: '1 1 auto', minHeight: 0 }`. Canonical Pattern D
+  reference.
+
+### 7.2.3 Per-section sizing (post R4-110 — no calc() needed)
+
+`SectionPanel.card` does NOT have `height: 100%` and does NOT need it.
+It is a direct grid item of `WorkspaceShell.row` which has
+`alignItems: stretch` (the CSS grid default for the cross axis), so the
+card automatically stretches to fill the row's track height. The row in
+turn shares the shell's vertical space equally with sibling rows
+(`flex: 1 1 0`).
+
+**Recommended pattern for new sections** — supply a `minHeight` floor
+only (as a safety net for tiny viewports / broken host layouts) and let
+the chain supply real height:
+
+```typescript
+// For Path A (LegalWorkspace static workspaceConfig.tsx default dashboard)
+{
+  id: "your-widget",
+  type: "content",
+  title: "Your Widget",
+  style: { minHeight: "560px" },        // floor only — chain supplies real height
+  renderContent: () => <YourWidget />,
+}
+
+// For Path B (SpaarkeAi dynamic workspace layouts via buildDynamicWorkspaceConfig)
+// Set defaultHeight in the SectionRegistration; buildDynamicWorkspaceConfig
+// promotes it to minHeight automatically:
+export const yourRegistration: SectionRegistration = {
+  id: "your-widget",
+  defaultHeight: "560px",               // → becomes style.minHeight on the SectionPanel
+  factory(ctx) {
+    return { id: "your-widget", type: "content", title: "Your Widget", ... };
+  },
+};
+```
+
+**To make a widget DOMINATE its tab visually**, do NOT override `style.height`
+on the section. Instead, create a single-section workspace layout via the
+WorkspaceLayoutWizard (one row, one section). With only one row,
+`flex: 1 1 0` distribution gives that row 100% of the shell height, and
+the SectionPanel + widget fill the full Workspace tab area.
+
+### 7.2.4 Diagnostic script when something looks wrong
+
+Open DevTools console on the SpaarkeAi page with your widget visible
+and paste:
+
+```javascript
+(function dumpHeightChain() {
+  var start = document.querySelector('[role="region"][aria-label*="your-widget-name"]') ||
+              document.querySelector('main');
+  var el = start, depth = 0;
+  while (el && depth < 25) {
+    var cs = getComputedStyle(el);
+    var rect = el.getBoundingClientRect();
+    var cls = (typeof el.className === 'string'
+      ? '.' + el.className.split(/\s+/)[0] : '');
+    console.log('  '.repeat(depth) + el.tagName.toLowerCase() + cls +
+      ' | h=' + Math.round(rect.height) + 'px' +
+      ' | display=' + cs.display +
+      ' | flex=' + cs.flex);
+    el = el.parentElement; depth++;
+  }
+})();
+```
+
+The output walks UP from your widget to viewport. Look for:
+- The first `display: block` parent that has more height than its child
+  → that's where flex children are being ignored.
+- Any `flex: 1 1 0` or `flex: 1 1 auto` element NOT growing to fill its
+  parent → that level needs `height: 100%` instead, OR its parent isn't
+  a flex container.
+
+For a worked-through example see `projects/smart-todo-r4/notes/` — the
+UAT rounds 4-12 debugging artifacts (kept as a reference for the height
+chain investigation methodology).
+
+### 7.2.5 Anti-patterns specific to height sizing
+
+- ❌ **Using `flex: 1 1 0` on a child of `display: block`.** Flex
+  properties only work in flex parents. `display: block` ignores them
+  and child sizes to content. Either make the parent `display: flex` or
+  use `height: 100%` on the child.
+- ❌ **Forgetting `display: flex` on intermediate wrappers.** A div with
+  `flex: 1 1 auto, overflowY: auto` looks like a flex item but its
+  CHILDREN can't use flex (because the div itself is block). Add
+  `display: flex, flexDirection: column` to make it a flex container.
+- ❌ **Setting `minHeight: 400px` (or any pixel floor) on the scrollable
+  body to "guarantee" it renders.** That's masking a broken chain. Fix
+  the chain; use `minHeight: 0` so the chain can supply natural height.
+- ❌ **Inventing a per-widget height fallback like `height: 'calc(100vh
+  - 200px)'`** ON the widget itself rather than on the section config.
+  Sections own height; widgets fill what they're given.
+- ❌ **Adding `style: { height: "calc(100vh - X)" }` to a section
+  config** to force a widget to dominate. Post-R4-110 the chain
+  delivers determinate height to every section; calc overrides force the
+  shell to overflow (master-scroll), which is rarely the intended UX.
+  If you want a widget to dominate, give it its own single-section
+  workspace layout via the WorkspaceLayoutWizard instead.
+
+---
+
+## 8. Anti-patterns
+
+- **❌ Do not invent a third wrapper.** The two wrappers (Dashboard + Direct) are intentionally retained per OC-R4-06 (model doc §2.3). If you find yourself wanting a third — "but my widget is sort-of-composable" or "but my widget needs Dataverse persistence too" — re-read the model doc. Dual-use (§4 here) is almost always the right answer.
+- **❌ Do not duplicate section code in both LegalWorkspace and SpaarkeAi.** Either it's a Pattern A LW-internal section (lives in LW only, consumed via embedded `LegalWorkspaceApp`) or it's a Pattern D shared-lib widget (lives in a shared lib, consumed by BOTH). Never two divergent copies. The R3 `useWorkspaceLayouts` duplication is being remediated in R4 C-3 precisely because dual-source-of-truth bit us.
+- **❌ Do not add Direct widgets that need composition.** If users will want to combine your widget with other content in one tab, you need a Dashboard wrapper (probably Pattern D). Adding a Direct widget and then trying to retro-fit composition requires rewriting it as a section + Dashboard wrapper.
+- **❌ Do not create new Code Page entry points for LegalWorkspace functionality.** Per W-6 / OC-R4-05, the standalone LegalWorkspace Code Page is retired. Use the SpaarkeAi `sprk_spaarkeai` Code Page (the only deployed entry point) + the embedded LW engine. New LW deploys are not the path forward.
+- **❌ Do not reach into `Xrm` globals from a shared-lib widget without an abstraction.** Pattern D widgets are portable because they only consume `@spaarke/auth` + `Xrm.WebApi` (via shared services in their own lib). If you have to invent direct `Xrm` access in the widget, encapsulate it in a service so the widget stays host-agnostic.
+- **❌ Do not invent new PaneEventBus channels.** Use `workspace`, `context`, `conversation`, `safety` (the four ADR-025 channels). Channel proliferation is a coupling smell.
+- **❌ Do not add BFF endpoints "just in case" for a new widget.** Almost every shipped widget reuses existing endpoints (or `Xrm.WebApi` directly). If you genuinely need a new endpoint, follow [`../../CLAUDE.md`](../../CLAUDE.md) §10 BFF Hygiene + [`../../.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md). Placement Justification is **mandatory** before adding code.
+- **❌ Do not skip the decision tree (§1) "to save time".** Choosing the wrong wrapper is the most expensive mistake on this surface. Five minutes with §1 saves hours of rework.
+
+---
+
+## 9. Common pitfalls
 
 | Pitfall | Symptom | Fix |
 |---|---|---|
 | Forgot to add to `SECTION_REGISTRY` | Tab opens but section doesn't render | Dev-mode console warns about unknown section ID — check `sectionRegistry.ts` |
 | Duplicate section ID | Dev-mode `console.error` at load | Pick a unique ID |
-| `sortOrder` collision with existing system layouts | Layout appears in unexpected dropdown position | Verify all existing `sortOrder` values (the 5 Dataverse-system layouts use 1..5) and pick the next free integer |
-| Tried to set TWO layouts `isDefault: true` | Only one appears as default; other behaves as non-default | Only ONE Dataverse-system layout can be the global default |
-| Section needs auth-bearing fetch from BFF | Uses `webApi` instead — works in MDA, but fails when embedded in a future non-Xrm host | Use `authenticatedFetch` from a new hook; pass `bffBaseUrl` from `SectionFactoryContext` |
-| Forgot to seed the layout | Workspaces dropdown doesn't show the new entry | Run `Deploy-SystemWorkspaceLayouts.ps1`; verify with the API query in §2.6 |
-| Section behaves differently in embedded vs standalone | Section uses LegalWorkspace-internal context (e.g. FeedTodoSyncContext) that doesn't exist if its provider isn't mounted | Only depend on `SectionFactoryContext`; if you need extra context, hoist its provider into `WorkspaceShell`. **Pattern D widgets (Calendar-style) avoid this trap by design** — they live in a shared lib and never reach into LW. |
-| **Timezone-asymmetric date keys** (NEW, task 120) | Event-day highlight does not appear on the expected calendar cell for users in positive UTC offsets | Any new component that derives date-only keys from a `Date` must use LOCAL components (`getFullYear/Month/Date`) — never `date.toISOString().split('T')[0]`. The widget side that PRODUCES `IEventDateInfo[]` and the calendar side that CONSUMES `eventDateMap` must use the same key derivation. See task 120's diagnosis (CAUSE D). |
-| **Filter-state conflicts with passive indicators** (NEW, task 122) | A passive visual indicator (event-day highlight, today, in-range, etc.) gets clobbered by an active filter-state indicator | When a component has multiple visual states (selected, in-range, has-events, today, other-month, etc.), be deliberate about which states are mutually exclusive vs which can coexist. Task 122 fixed an exclusion bug where `dateState !== "in-range"` suppressed the event-day tint inside an active From/To range. General rule: explicit user actions (selected) win, but passive indicators (has-events) should still be visible whenever possible. |
-| **Field-priority chain for date derivation** (NEW, task 121) | The date used for highlighting / sorting doesn't match what the user expects from the UI | When a record-set drives a date-based highlight, use the SAME field-priority chain the user expects from the UI. For Events: `sprk_duedate → createdon` (operator decision task 121 — skipped `sprk_startdate` because events without a due date should anchor to creation date, not scheduled-start, which can mislead about deadline visibility). Document the rationale; operator expectations rarely match the schema's apparent semantic order. |
-| **localStorage key drift between sessions** (NEW, task 116) | Per-component collapse state doesn't persist | Use a consistent key scheme. New `spaarke:calendar:collapsed` follows the same `spaarke:<surface>:<feature>` pattern as `spaarke:workspace:pinned-list` + `spaarke:panes:collapsed`. See SPAARKEAI-WORKSPACE-ARCHITECTURE.md §7. |
-| **Pattern A vs Pattern D placement choice not justified upfront** (NEW) | Section ships as LW-internal (Pattern A) but later needs to be reused in a non-LW host | Decide Pattern A vs D before writing code (see §1 decision tree). New widgets default to Pattern D unless they genuinely depend on LW-internal context. The 5 original sections are Pattern A because they predate Pattern D — they're not the model for new widgets. |
+| `sortOrder` collision | Layout appears in unexpected dropdown position | All existing `sortOrder` values (the 5 Dataverse-system layouts use 0..5) — pick the next free integer |
+| Two layouts marked `isDefault: true` | Only one appears as default; the other behaves as non-default | Only ONE Dataverse-system layout can be the global default |
+| Section needs auth-bearing BFF fetch | Uses `webApi` instead — works in MDA, fails in a future non-Xrm host | Use `authenticatedFetch` from `@spaarke/auth`; pass `bffBaseUrl` from `SectionFactoryContext` |
+| Forgot to seed the layout | Workspaces dropdown doesn't show the new entry | Run `Deploy-SystemWorkspaceLayouts.ps1`; verify with the API query in §2.5 of the model doc |
+| Section behaves differently in embedded vs. standalone | Section uses LW-internal context (`FeedTodoSyncContext`) that doesn't exist if its provider isn't mounted | Only depend on `SectionFactoryContext`; if you need more context, prefer Pattern D (shared-lib widget) which sidesteps the trap entirely |
+| **Timezone-asymmetric date keys** (Calendar task 120 fix) | Event-day highlight doesn't appear on the expected calendar cell for users in positive UTC offsets | Any component that derives date-only keys from a `Date` must use LOCAL components (`getFullYear/Month/Date`) — never `date.toISOString().split('T')[0]`. The PRODUCING side and the CONSUMING side must use the same key derivation. |
+| **Filter-state conflicts with passive indicators** (Calendar task 122 fix) | Passive visual indicators (event-day highlight, today, in-range) get clobbered by active filter-state indicators | Be explicit about which states are mutually exclusive vs. which can coexist. Passive indicators should remain visible whenever possible; user-action states win. |
+| **Field-priority chain for date derivation** (Calendar task 121 fix) | Date used for highlighting / sorting doesn't match operator expectation | Use the SAME field-priority chain the user expects from the UI. For Events: `sprk_duedate → createdon` (Calendar operator decision — skipped `sprk_startdate` because events without a due date should anchor to creation date). Document the rationale. |
+| **localStorage key drift between sessions** (Calendar task 116 fix) | Per-component collapse state doesn't persist | Use the `spaarke:<surface>:<feature>` pattern, matching existing keys (`spaarke:workspace:pinned-list`, `spaarke:panes:collapsed`). See `SPAARKEAI-WORKSPACE-ARCHITECTURE.md` §7. |
+| **Pattern A vs. Pattern D not justified upfront** | Section ships as LW-internal (Pattern A) but later needs reuse in a non-LW host | Decide via §1 decision tree before writing code. New widgets default to Pattern D unless they genuinely depend on LW-internal context. The 5 original sections are Pattern A because they predate Pattern D — not because they're the model for new work. |
 
 ---
 
-## 8. Related docs
+## 10. Verification walk-through (validate the decision tree)
 
-- [`../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — pipeline reference
-- [`../architecture/SPAARKEAI-COMPONENT-MODEL.md`](../architecture/SPAARKEAI-COMPONENT-MODEL.md) — component inventory
-- [`../architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md`](../architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md) — coupling + reuse gaps
-- [`SHARED-UI-COMPONENTS-GUIDE.md`](./SHARED-UI-COMPONENTS-GUIDE.md) — `@spaarke/ui-components` consumption
-- [`PCF-DEPLOYMENT-GUIDE.md`](./PCF-DEPLOYMENT-GUIDE.md) — Code Page deploy reference (the section about `Deploy-SpaarkeAi.ps1` + `Deploy-LegalWorkspace.ps1`)
+Three hypothetical widgets, each walked through §1 to confirm the tree reaches the right archetype.
+
+### 10.1 Hypothetical "Risk Dashboard" (composable, multi-section)
+
+- **Q1**: Yes — combines Quick Summary + Latest Updates + To Do filtered to risk-tagged items. Multiple sections, user-customizable, layout is a `sprk_workspacelayout` row.
+- **Q2**: Yes — reuses existing LW-internal sections (Quick Summary, Latest Updates, To Do).
+- **Archetype**: **1 (Pattern A)** — composable section in a Dashboard wrapper layout. Add a system-layout entry to `system-layouts.json` pointing at the existing section IDs; configure section-config JSON with the risk filter criteria. No new widget code.
+- ✅ Tree reaches the right answer.
+
+### 10.2 Hypothetical "PDF Viewer" (single-purpose, AI-launched)
+
+- **Q1**: No — single sophisticated viewer component, owns the whole tab, NOT composable.
+- **Q3**: Sophisticated single-purpose React component (owns its data via the dispatching surface, owns its chrome).
+- **Archetype**: **2 (Direct widget, Pattern C — AI output style)** — register `'pdf-viewer'` in `WorkspaceWidgetRegistry`, build `PdfViewerWidget`, dispatch `widget_load { widgetType: 'pdf-viewer', widgetData: { ... } }` from `ConversationPane.tsx`. This is the R4 W-4 (FR-02) demo scenario candidate.
+- ✅ Tree reaches the right answer.
+
+### 10.3 Hypothetical "Create Matter Wizard Result Card" (Context-pane → Workspace)
+
+- **Surface**: Wizard body lives in the Context pane; on final step, mounts a result widget in the Workspace pane.
+- **Q1**: For the Context wizard itself, N/A — it's not in the Workspace pane. For the result widget, no (single matter-summary card, not composable).
+- **Q3**: Widget originates in the Context pane and dispatches a separate `widget_load` to the Workspace pane on completion.
+- **Archetype**: **4 (Context-pane widget)** — wizard body in `src/solutions/SpaarkeAi/src/components/context/`; on completion, dispatch `bus.publish('workspace', { type: 'widget_load', widgetType: 'matter-summary', widgetData: { matterId } })`. The result widget itself is an Archetype 2 Direct widget.
+- ✅ Tree reaches the right answer.
+
+---
+
+## 11. Related docs
+
+- [`../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md) — **the canonical model this guide implements** (three surfaces, two wrappers, four mount sources, dual-use pattern, LegalWorkspace-as-dashboard-engine).
+- [`../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](../architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — cold-load → widget render pipeline.
+- [`../architecture/SPAARKEAI-COMPONENT-MODEL.md`](../architecture/SPAARKEAI-COMPONENT-MODEL.md) — `@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/events-components`, `@spaarke/legal-workspace`, `@spaarke/auth` inventory + PaneEventBus contract.
+- [`../architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md`](../architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md) — honest reuse assessment. §2A is the canonical Calendar Pattern D reference.
+- [`SHARED-UI-COMPONENTS-GUIDE.md`](./SHARED-UI-COMPONENTS-GUIDE.md) — `@spaarke/ui-components` consumption guide.
+- [`PCF-DEPLOYMENT-GUIDE.md`](./PCF-DEPLOYMENT-GUIDE.md) — Code Page deploy reference (`Deploy-SpaarkeAi.ps1`, `Deploy-LegalWorkspace.ps1` retirement context per W-6).
+- [`../../CLAUDE.md`](../../CLAUDE.md) §10 — BFF Hygiene; binding before any BFF additions.
+- [`../../.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) — BFF additions pre-merge checklist.
+- ADR-012 (shared component libraries), ADR-021 (Fluent v9 tokens), ADR-022 (React 19 Code Pages), ADR-025 (PaneEventBus — NEW in R4), ADR-026 (stage lifecycle — NEW in R4), ADR-028 (Spaarke Auth v2).

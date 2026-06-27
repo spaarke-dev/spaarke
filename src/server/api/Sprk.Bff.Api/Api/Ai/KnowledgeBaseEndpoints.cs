@@ -1,10 +1,5 @@
-using Azure.Search.Documents;
-using Azure.Search.Documents.Indexes;
-using Azure.Search.Documents.Models;
-using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -111,8 +106,6 @@ public static class KnowledgeBaseEndpoints
     private static async Task<IResult> GetIndexHealth(
         HttpContext httpContext,
         IRagService ragService,
-        IOptions<AiSearchOptions> aiSearchOptions,
-        SearchIndexClient searchIndexClient,
         ILogger<RagIndexingPipeline> logger,
         CancellationToken cancellationToken)
     {
@@ -130,32 +123,30 @@ public static class KnowledgeBaseEndpoints
 
         try
         {
-            var options = aiSearchOptions.Value;
-            var knowledgeFilter = $"tenantId eq '{EscapeOData(tenantId)}'";
-
-            // Query both indexes in parallel for document counts
-            var knowledgeClient = searchIndexClient.GetSearchClient(options.KnowledgeIndexName);
-            var discoveryClient = searchIndexClient.GetSearchClient(options.DiscoveryIndexName);
-
-            var knowledgeCountTask = GetTenantDocumentCountAsync(knowledgeClient, knowledgeFilter, cancellationToken);
-            var discoveryCountTask = GetTenantDocumentCountAsync(discoveryClient, knowledgeFilter, cancellationToken);
-
-            await Task.WhenAll(knowledgeCountTask, discoveryCountTask);
+            // B8 refactor (task 011 Phase 1b Tier 3, D-09 §2 B8): delegate to IRagService.
+            // Previously this handler injected SearchIndexClient + IOptions<AiSearchOptions> directly;
+            // those concerns now live inside RagService.GetIndexHealthAsync. The Null-Object impl
+            // (NullRagService) surfaces a FeatureDisabledException caught below.
+            var health = await ragService.GetIndexHealthAsync(tenantId, cancellationToken);
 
             var result = new KnowledgeIndexHealthResult
             {
-                KnowledgeDocCount = knowledgeCountTask.Result,
-                DiscoveryDocCount = discoveryCountTask.Result,
-                LastUpdated = DateTimeOffset.UtcNow,
-                KnowledgeIndexName = options.KnowledgeIndexName,
-                DiscoveryIndexName = options.DiscoveryIndexName
+                KnowledgeDocCount = health.KnowledgeDocCount,
+                DiscoveryDocCount = health.DiscoveryDocCount,
+                LastUpdated = health.LastUpdated,
+                KnowledgeIndexName = health.KnowledgeIndexName,
+                DiscoveryIndexName = health.DiscoveryIndexName
             };
 
-            logger.LogInformation(
-                "Knowledge base health: tenant={TenantId} knowledgeDocs={KnowledgeCount} discoveryDocs={DiscoveryCount}",
-                tenantId, result.KnowledgeDocCount, result.DiscoveryDocCount);
-
             return Results.Ok(result);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B8): NullRagService surfaced.
+            logger.LogDebug(
+                "Knowledge base health called while AI feature disabled. ErrorCode={ErrorCode}, TenantId={TenantId}",
+                ex.ErrorCode, tenantId);
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {
@@ -175,8 +166,7 @@ public static class KnowledgeBaseEndpoints
     private static async Task<IResult> GetIndexedDocuments(
         string indexName,
         HttpContext httpContext,
-        IOptions<AiSearchOptions> aiSearchOptions,
-        SearchIndexClient searchIndexClient,
+        IRagService ragService,
         ILogger<RagIndexingPipeline> logger,
         CancellationToken cancellationToken,
         [Microsoft.AspNetCore.Mvc.FromQuery] int page = 1,
@@ -192,22 +182,6 @@ public static class KnowledgeBaseEndpoints
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
-        var options = aiSearchOptions.Value;
-        var validIndexNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            options.KnowledgeIndexName,
-            options.DiscoveryIndexName
-        };
-
-        if (!validIndexNames.Contains(indexName))
-        {
-            return Results.Problem(
-                statusCode: 404,
-                title: "Not Found",
-                detail: $"Index '{indexName}' not found. Valid indexes: {string.Join(", ", validIndexNames)}",
-                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
-        }
-
         if (page < 1) page = 1;
         if (pageSize < 1 || pageSize > 200) pageSize = 50;
 
@@ -217,47 +191,46 @@ public static class KnowledgeBaseEndpoints
 
         try
         {
-            var searchClient = searchIndexClient.GetSearchClient(indexName);
-            var filter = $"tenantId eq '{EscapeOData(tenantId)}'";
-            var skip = (page - 1) * pageSize;
-
-            var searchOptions = new SearchOptions
-            {
-                Filter = filter,
-                Size = pageSize,
-                Skip = skip,
-                Select = { "id", "documentId", "fileName", "createdAt", "updatedAt" },
-                IncludeTotalCount = true
-            };
-
-            var response = await searchClient.SearchAsync<KnowledgeDocument>("*", searchOptions, cancellationToken);
-            var results = new List<KnowledgeDocumentSummary>();
-
-            await foreach (var item in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
-            {
-                if (item.Document != null)
-                {
-                    results.Add(new KnowledgeDocumentSummary
-                    {
-                        ChunkId = item.Document.Id,
-                        DocumentId = item.Document.DocumentId,
-                        FileName = item.Document.FileName,
-                        CreatedAt = item.Document.CreatedAt,
-                        UpdatedAt = item.Document.UpdatedAt
-                    });
-                }
-            }
+            // B8 refactor (task 011 Phase 1b Tier 3, D-09 §2 B8): delegate to IRagService.
+            // Unknown-index validation now happens inside RagService.GetIndexedDocumentsAsync,
+            // which throws ArgumentException — caught below and surfaced as 404 ProblemDetails
+            // to preserve the prior endpoint behavior.
+            var pageResult = await ragService.GetIndexedDocumentsAsync(
+                indexName, tenantId, page, pageSize, cancellationToken);
 
             var result = new KnowledgeIndexedDocumentsResult
             {
-                IndexName = indexName,
-                Documents = results,
-                Page = page,
-                PageSize = pageSize,
-                TotalCount = response.Value.TotalCount ?? 0
+                IndexName = pageResult.IndexName,
+                Documents = pageResult.Documents.Select(d => new KnowledgeDocumentSummary
+                {
+                    ChunkId = d.ChunkId,
+                    DocumentId = d.DocumentId,
+                    FileName = d.FileName,
+                    CreatedAt = d.CreatedAt,
+                    UpdatedAt = d.UpdatedAt
+                }).ToList(),
+                Page = pageResult.Page,
+                PageSize = pageResult.PageSize,
+                TotalCount = pageResult.TotalCount
             };
 
             return Results.Ok(result);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B8): NullRagService surfaced.
+            logger.LogDebug(
+                "Knowledge base list called while AI feature disabled. ErrorCode={ErrorCode}, IndexName={IndexName}",
+                ex.ErrorCode, indexName);
+            return ex.AsFeatureDisabled503();
+        }
+        catch (ArgumentException ex) when (ex.ParamName == "indexName")
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: ex.Message,
+                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
         }
         catch (Exception ex)
         {
@@ -280,8 +253,6 @@ public static class KnowledgeBaseEndpoints
         string indexName,
         string documentId,
         HttpContext httpContext,
-        IOptions<AiSearchOptions> aiSearchOptions,
-        SearchIndexClient searchIndexClient,
         IRagService ragService,
         ILogger<RagIndexingPipeline> logger,
         CancellationToken cancellationToken)
@@ -305,43 +276,17 @@ public static class KnowledgeBaseEndpoints
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
-        var options = aiSearchOptions.Value;
-        var validIndexNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            options.KnowledgeIndexName,
-            options.DiscoveryIndexName
-        };
-
-        if (!validIndexNames.Contains(indexName))
-        {
-            return Results.Problem(
-                statusCode: 404,
-                title: "Not Found",
-                detail: $"Index '{indexName}' not found. Valid indexes: {string.Join(", ", validIndexNames)}",
-                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
-        }
-
         logger.LogInformation(
             "Deleting document {DocumentId} from index {IndexName} for tenant {TenantId}",
             documentId, indexName, tenantId);
 
         try
         {
-            int chunksDeleted;
-
-            // Route to appropriate deletion method based on index
-            if (indexName.Equals(options.KnowledgeIndexName, StringComparison.OrdinalIgnoreCase))
-            {
-                // Use IRagService for knowledge index — it manages the primary index
-                chunksDeleted = await ragService.DeleteBySourceDocumentAsync(documentId, tenantId, cancellationToken);
-            }
-            else
-            {
-                // Delete directly from the discovery index using SearchClient
-                var searchClient = searchIndexClient.GetSearchClient(indexName);
-                chunksDeleted = await DeleteChunksFromIndexAsync(
-                    searchClient, documentId, tenantId, cancellationToken);
-            }
+            // B8 refactor (task 011 Phase 1b Tier 3, D-09 §2 B8): delegate to IRagService.
+            // The service routes knowledge-vs-discovery internally and returns the chunk count
+            // (0 → 404, >0 → 200). Unknown-index → ArgumentException caught below as 404.
+            var chunksDeleted = await ragService.DeleteIndexedDocumentAsync(
+                indexName, documentId, tenantId, cancellationToken);
 
             if (chunksDeleted == 0)
             {
@@ -365,6 +310,22 @@ public static class KnowledgeBaseEndpoints
                 ChunksDeleted = chunksDeleted,
                 Message = $"Deleted {chunksDeleted} chunk(s) for document '{documentId}'."
             });
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B8): NullRagService surfaced.
+            logger.LogDebug(
+                "Knowledge base delete called while AI feature disabled. ErrorCode={ErrorCode}, DocumentId={DocumentId}",
+                ex.ErrorCode, documentId);
+            return ex.AsFeatureDisabled503();
+        }
+        catch (ArgumentException ex) when (ex.ParamName == "indexName")
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: ex.Message,
+                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
         }
         catch (Exception ex)
         {
@@ -523,7 +484,7 @@ public static class KnowledgeBaseEndpoints
             var result = new KnowledgeTestSearchResult
             {
                 Query = request.Query,
-                IndexName = request.IndexName ?? "spaarke-knowledge-index-v2",
+                IndexName = request.IndexName ?? "spaarke-files-index",
                 TenantId = tenantId,
                 ResultCount = response.Results.Count,
                 SearchDurationMs = response.SearchDurationMs,
@@ -543,6 +504,14 @@ public static class KnowledgeBaseEndpoints
             };
 
             return Results.Ok(result);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            logger.LogDebug(
+                "Knowledge base test-search called while AI feature disabled. ErrorCode={ErrorCode}, Query={Query}",
+                ex.ErrorCode, request.Query);
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {
@@ -579,68 +548,6 @@ public static class KnowledgeBaseEndpoints
         return tenantId;
     }
 
-    /// <summary>
-    /// Gets the count of documents in an index that match the given OData filter.
-    /// </summary>
-    private static async Task<long> GetTenantDocumentCountAsync(
-        SearchClient searchClient,
-        string filter,
-        CancellationToken cancellationToken)
-    {
-        var options = new SearchOptions
-        {
-            Filter = filter,
-            Size = 0,
-            IncludeTotalCount = true
-        };
-
-        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", options, cancellationToken);
-        return response.Value.TotalCount ?? 0;
-    }
-
-    /// <summary>
-    /// Deletes all chunks for <paramref name="documentId"/> from the specified search client,
-    /// scoped to <paramref name="tenantId"/>. Returns count of deleted chunks.
-    /// </summary>
-    private static async Task<int> DeleteChunksFromIndexAsync(
-        SearchClient searchClient,
-        string documentId,
-        string tenantId,
-        CancellationToken cancellationToken)
-    {
-        var filter = $"documentId eq '{EscapeOData(documentId)}' and tenantId eq '{EscapeOData(tenantId)}'";
-        var options = new SearchOptions
-        {
-            Filter = filter,
-            Size = 1000,
-            Select = { "id" }
-        };
-
-        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", options, cancellationToken);
-        var idsToDelete = new List<string>();
-
-        await foreach (var result in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
-        {
-            if (!string.IsNullOrEmpty(result.Document?.Id))
-            {
-                idsToDelete.Add(result.Document.Id);
-            }
-        }
-
-        if (idsToDelete.Count == 0)
-        {
-            return 0;
-        }
-
-        var deleteResponse = await searchClient.DeleteDocumentsAsync(
-            "id", idsToDelete, cancellationToken: cancellationToken);
-        return deleteResponse.Value.Results.Count(r => r.Succeeded);
-    }
-
-    /// <summary>
-    /// Escapes single quotes in OData filter values (single-quote doubling per OData spec).
-    /// </summary>
-    private static string EscapeOData(string value) => value.Replace("'", "''");
 }
 
 // -------------------------------------------------------------------------

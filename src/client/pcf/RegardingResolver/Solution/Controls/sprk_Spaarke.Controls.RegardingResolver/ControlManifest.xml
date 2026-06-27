@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="RegardingResolver" version="1.2.0" display-name-key="Regarding Resolver" description-key="Virtual PCF: 11-entity regarding picker bound to sprk_regardingrecordtype; wraps applyResolverFields (ADR-024) — HOST-only (sprk_todo, sprk_communication per FR-22); do NOT bind to target entities like sprk_matter/sprk_event" control-type="virtual" api-version="1.3.18">
+    <external-service-usage enabled="false"/>
+    <property name="regardingRecordType" display-name-key="Regarding Record Type" description-key="Lookup to sprk_recordtype_ref — the resolver discriminator. Bind to the host entity sprk_regardingrecordtype hidden lookup field." of-type="Lookup.Simple" usage="bound" required="true"/>
+    <property name="entity" display-name-key="Host Entity" description-key="Dataverse logical name of the host entity (sprk_todo or sprk_communication). FR-22 reusability lever — set once per form, no entity-specific code branches in the PCF." of-type="SingleLine.Text" usage="input" required="true"/>
+    <property name="regardingTargets" display-name-key="Regarding Targets" description-key="Optional comma-separated list of allowed parent entity logical names. Defaults to: sprk_matter,sprk_project,sprk_event,sprk_communication,sprk_workassignment,sprk_invoice,sprk_budget,sprk_analysis,sprk_organization,contact,sprk_document" of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="readOnly" display-name-key="Read Only" description-key="When true, renders selected target as read-only link without edit affordances (FR-24). Auto-detected from form-disabled state when omitted." of-type="TwoOptions" usage="input" required="false"/>
+    <resources>
+      <code path="bundle.js" order="1"/>
+      <css path="styles.css" order="1"/>
+      <platform-library name="React" version="16.14.0"/>
+      <platform-library name="Fluent" version="9.46.2"/>
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true"/>
+      <uses-feature name="Utility" required="true"/>
+    </feature-usage>
+    <built-by name="pac" version="1.51.1"/>
+  </control>
+</manifest>

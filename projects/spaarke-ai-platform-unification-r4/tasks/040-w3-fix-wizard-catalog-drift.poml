@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>W-3 (FR-01): Fix WorkspaceLayoutWizard catalog drift — read SECTION_REGISTRY (dynamic) instead of hardcoded SECTION_CATALOG</title>
+    <phase>4: Workspace builder + mount-source wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>042</blocks>
+    <tags>frontend, react, fluent-ui, refactoring, e2e-test, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `frontend`, `react`, `fluent-ui`; modifies a `.tsx` source file (`App.tsx`); 8+ steps; load-bearing ADRs (012, 021, 022) apply. FULL rigor required.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Fix the WorkspaceLayoutWizard catalog drift bug: replace the hardcoded `SECTION_CATALOG`
+    constant in `src/solutions/WorkspaceLayoutWizard/src/App.tsx` with a dynamic read from
+    `SECTION_REGISTRY` (the canonical single-source-of-truth in
+    `src/solutions/LegalWorkspace/src/sectionRegistry.ts`). After the fix, the wizard's
+    section picker MUST show all 7 registered sections — including Calendar and Daily
+    Briefing — and any future section addition to `SECTION_REGISTRY` MUST surface
+    automatically with no wizard edit. Build, deploy via `code-page-deploy`, and verify in
+    the dev environment.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer expert in Vite + React 19 + Fluent UI v9 Code Pages, the
+    SpaarkeAi dashboard architecture, and the SECTION_REGISTRY single-source-of-truth
+    pattern. Bias toward minimal, surgical edits to `App.tsx` — don't rewrite the wizard.
+    The existing `SECTION_CATALOG` shape (`SectionCatalogItem[]`) must be derivable from
+    `SECTION_REGISTRY` entries (transform-on-read, not re-shape the registry).
+  </role>
+
+  <goal>
+    `WorkspaceLayoutWizard/src/App.tsx` no longer defines `SECTION_CATALOG` as a hardcoded
+    constant; instead it derives the catalog from `SECTION_REGISTRY` at module load (or
+    inside the component). Wizard renders the full set of 7 sections (Get Started, Quick
+    Summary, Latest Updates, To Do, Documents, Daily Briefing, Calendar) in the picker.
+    Build green; deployed to `sprk_*` web resource via `code-page-deploy`; manual UI
+    verification confirms picker shows 7 sections; dark mode parity per ADR-021. FR-01
+    acceptance criteria satisfied (build a custom dashboard combining Calendar + My
+    Documents; persists and renders correctly).
+  </goal>
+
+  <context>
+    <background>
+      During R3 scoping it was discovered that `WorkspaceLayoutWizard/src/App.tsx`
+      hardcodes a 5-entry `SECTION_CATALOG` constant. A TODO comment in the same file
+      reads "In a production build this would be fetched from GET /api/workspace/sections"
+      — but that endpoint was never built. Meanwhile, the canonical `SECTION_REGISTRY` in
+      `src/solutions/LegalWorkspace/src/sectionRegistry.ts` has grown to 7 sections
+      (Calendar added in R3 task 115, Daily Briefing earlier). The dashboard renders all 7
+      correctly via `LegalWorkspaceApp`, but users cannot PICK Calendar or Daily Briefing
+      in the wizard. FR-01 (W-3) fixes this drift by making the wizard read directly from
+      `SECTION_REGISTRY`. Cross-Vite-app import is acceptable here (LegalWorkspace +
+      WorkspaceLayoutWizard share the same monorepo; ESM relative import or workspace
+      package alias is the carrier). Also note: R4 plan §4 W-3 acceptance is "open wizard,
+      see 7 sections in picker, build a custom dashboard with Calendar + My Documents
+      combined; persists and renders correctly".
+    </background>
+    <relevant-files>
+      <file>src/solutions/WorkspaceLayoutWizard/src/App.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/sectionRegistry.ts</file>
+      <file>src/solutions/WorkspaceLayoutWizard/src/steps/index.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/calendar.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared components live in `@spaarke/*` lib family; if cross-Vite-app import is awkward, prefer hoisting `SECTION_REGISTRY` to a shared lib over duplicating the catalog.</constraint>
+    <constraint source="ADR-021">Use Fluent v9 tokens only. NO hex, NO `rgba()`, NO Fluent v8. Icons from existing registration entries (don't re-pick).</constraint>
+    <constraint source="ADR-022">React 19 only for Code Pages. NO React 16 fallbacks.</constraint>
+    <constraint source="project">MUST NOT regenerate hardcoded section catalogs anywhere in wizard code paths (spec §MUST NOT). `SECTION_REGISTRY` is the single source of truth — this fix establishes that.</constraint>
+    <constraint source="project">Preserve existing wizard behavior for the 5 currently-registered sections — this fix is additive (picker shows 2 more), not a behavioral break.</constraint>
+    <constraint source="project">If `SECTION_REGISTRY` import path is not directly available across Vite solutions, decide pragmatically: (a) relative ESM import across `src/solutions/`, (b) hoist registry to shared lib (preferred long-term), or (c) keep the local transform but make it a derived view. Document the choice in &lt;notes&gt;.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/guides/DEPLOYMENT-VERIFICATION-GUIDE.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-react-19-code-pages.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="webresource/full-page-custom-page" location=".claude/patterns/webresource/full-page-custom-page.md">
+        Vite + React 19 Code Page deploy pattern for wizard dialogs; deploy via code-page-deploy skill.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Load context">
+      Read `App.tsx` (full), `sectionRegistry.ts` (full), and the 7 registration files referenced by SECTION_REGISTRY. Understand the shape conversion needed: `SectionRegistration` → `SectionCatalogItem` (id, label, description, category, icon, defaultHeight).
+    </step>
+    <step order="2" name="Decide import strategy">
+      Evaluate (a) ESM relative import `../../LegalWorkspace/src/sectionRegistry` (works across Vite solutions in the same monorepo), (b) workspace-package hoist (cleaner; potentially out of scope), or (c) re-export from `@spaarke/ui-components`. Choose the smallest-blast-radius option that doesn't break either Vite build. Record the choice in &lt;notes&gt;.
+    </step>
+    <step order="3" name="Implement derivation">
+      Replace the inline `SECTION_CATALOG` constant in `App.tsx` with a derived value built from `SECTION_REGISTRY`. Preserve the `SectionCatalogItem` shape exactly. Keep the existing `DEFAULT_SECTION_IDS` derivation working against the new dynamic source.
+    </step>
+    <step order="4" name="Verify build">
+      Run `npm install --legacy-peer-deps --no-audit --no-fund` (if needed) then `npm run build` in `src/solutions/WorkspaceLayoutWizard/`. Verify both the wizard's own build AND that the `LegalWorkspace` build is not regressed by any cross-import.
+    </step>
+    <step order="5" name="Run unit tests">
+      Run any wizard-side tests that touch SECTION_CATALOG. If none exist, add a focused test asserting the derived catalog length is `SECTION_REGISTRY.length` AND that Calendar + Daily Briefing IDs appear in the derived catalog.
+    </step>
+    <step order="6" name="Deploy">
+      Invoke `code-page-deploy` skill to deploy the rebuilt wizard web resource to the dev environment. Verify deployment success via the skill's verification step.
+    </step>
+    <step order="7" name="UI test">
+      Per &lt;ui-tests&gt; below: open the wizard in a live SpaarkeAi session; verify picker shows 7 entries including Calendar + Daily Briefing; verify dark-mode rendering compliance.
+    </step>
+    <step order="8" name="Bundle-size check">
+      Measure SpaarkeAi gzip bundle delta (NFR-08 budget: ≤+50 KB vs 918 KB baseline). If WorkspaceLayoutWizard bundle changes materially, record in &lt;notes&gt;. Pure cross-import should be near-zero delta.
+    </step>
+    <step order="9" name="Update TASK-INDEX">
+      Edit `projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md`: flip task 040 from 🔲 → ✅ completed.
+    </step>
+    <step order="10" name="Document deviations">
+      If anything deviated from the plan (e.g., chose workspace-package hoist instead of ESM relative; SECTION_CATALOG had downstream shape consumers needing updates), record in `projects/spaarke-ai-platform-unification-r4/notes/` for R4 lessons-learned harvest.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Vite build + tests for the wizard package</tool>
+    <tool name="terminal">Shell commands for build / install / git status</tool>
+    <tool name="Skill">code-page-deploy for wizard web resource deployment; ui-test for browser-based verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/WorkspaceLayoutWizard/src/App.tsx</output>
+    <output type="code">src/solutions/WorkspaceLayoutWizard/src/steps/ (if shape needs updates)</output>
+    <output type="test">src/solutions/WorkspaceLayoutWizard/src/__tests__/sectionCatalog.test.ts (new — optional)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/tasks/TASK-INDEX.md (status flip)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Wizard shows 7 sections (FR-01 acceptance)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Open SpaarkeAi page in a model-driven app</step>
+        <step>Open the Workspace pane menu and click "Create new layout" (or equivalent wizard entry)</step>
+        <step>Advance to Step 2: Configure Sections</step>
+        <step>Inspect the section picker UI</step>
+        <step>Verify all 7 sections are listed: Get Started, Quick Summary, Latest Updates, To Do, Documents, Daily Briefing, Calendar</step>
+        <step>Select Calendar AND My Documents; advance to Step 3; complete the wizard</step>
+        <step>Verify the resulting layout renders both sections correctly</step>
+      </steps>
+      <expected>Picker shows exactly 7 sections; Calendar + Daily Briefing are pickable; saved layout combining Calendar + Documents persists and renders.</expected>
+    </test>
+
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Reopen the wizard</step>
+        <step>Verify section picker background/text colors adapt (no hardcoded white/black)</step>
+        <step>Verify section icons use semantic Fluent v9 tokens (currentColor) and adapt</step>
+        <step>Verify no console errors related to color tokens</step>
+      </steps>
+      <expected>All UI uses Fluent UI v9 semantic tokens per ADR-021; no hex/rgba; dark mode renders correctly across the picker.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `SECTION_REGISTRY` contains 7 entries (Get Started, Quick Summary, Latest Updates, To Do, Documents, Daily Briefing, Calendar), When the wizard opens to Step 2, Then the section picker lists all 7 entries.</criterion>
+    <criterion testable="true">Given a user picks Calendar + My Documents in the wizard and finishes, When the resulting layout is loaded into the dashboard, Then both sections render correctly and persist across reload.</criterion>
+    <criterion testable="true">Given `SECTION_CATALOG` was previously hardcoded, When the fix is applied, Then no hardcoded section list remains in `App.tsx` — picker entries derive from `SECTION_REGISTRY`.</criterion>
+    <criterion testable="true">Given ADR-021 requires Fluent v9 tokens, When the wizard renders in dark mode, Then the picker UI adapts cleanly (no hardcoded hex/rgba; no v8 components).</criterion>
+    <criterion testable="true">Given the wizard is rebuilt and redeployed, When `npm run build` runs for both the wizard AND LegalWorkspace, Then both succeed with 0 errors.</criterion>
+    <criterion testable="true">Given task 040 is executing, When this task completes, Then TASK-INDEX.md shows task 040 as ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Anticipated import strategy: ESM relative import from the wizard solution to `LegalWorkspace/src/sectionRegistry.ts`. If TS path resolution complains, an alternative is to re-export `SECTION_REGISTRY` from `@spaarke/ui-components` (cleaner long-term but adds shared-lib churn). Prefer the smallest change that compiles cleanly. The `SectionRegistration` type already lives in `@spaarke/ui-components` per the existing import in `sectionRegistry.ts`, so type alignment should be near-free.
+
+    DO NOT delete the old SECTION_CATALOG comment block — instead, replace it with a brief comment explaining the new dynamic source and why (so future authors understand the architecture choice).
+
+    `DEFAULT_SECTION_IDS` currently derives from `SECTION_CATALOG.map(s =&gt; s.id)`. After this fix it must derive from the dynamic source — verify default selection behavior in the wizard does NOT change for the original 5 sections.
+
+    This task BLOCKS task 042 (W-4 Assistant → Workspace mount source demo) because some demo scenarios may build on the wizard surface — but more importantly, both tasks touch SpaarkeAi flows and 042 expects W-3 fixed before its dashboard regression test.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Apply FULL rigor protocol — Step 9.5 quality gates (code-review + adr-check) MANDATORY before deploy. Checkpoint every 3 steps via context-handoff.</protocol>
+  </execution>
+</task>

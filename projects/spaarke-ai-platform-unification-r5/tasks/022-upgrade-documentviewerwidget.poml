@@ -1,0 +1,484 @@
+<task id="022" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-08 Upgrade `DocumentViewerWidget` (R4 stub) to use extracted `RichFilePreview` renderer</title>
+    <status>code-authoring-complete</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <actual-effort>~1h (sub-agent code-authoring scope; build/test/quality-gates deferred to main session)</actual-effort>
+    <assigned>AI Agent (parallel wave sub-agent)</assigned>
+    <started>2026-06-04</started>
+    <completed></completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G5 (parallel-safe; depends on 013; siblings 019, 020, 021)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>013 (RichFilePreview renderer extracted from RichFilePreviewDialog into `@spaarke/ui-components`)</dependencies>
+    <tags>frontend, widget, refactor, workspace, fluent-ui, react-19</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Upgrade the R4 stub implementation of `DocumentViewerWidget` (the Workspace widget
+    introduced in R4 task 042 / W-4 as the receiving widget for Assistant → Workspace
+    `widget_load` dispatch per FR-02 / OC-R4-07) so it consumes the extracted
+    `RichFilePreview` renderer from `@spaarke/ui-components` (extraction landed in task
+    013) INSTEAD OF the current monospace-text-preview shim. This is the second half of
+    D2-08 — task 013 extracted the renderer; this task wires the Workspace destination
+    to it.
+
+    Scope discipline (R5 CLAUDE.md §3.1 — reuse mandate):
+    - MUST consume the extracted `RichFilePreview` primitive — do NOT inline preview
+      logic, do NOT rebuild iframe / metadata pane / 3-dot menu chrome.
+    - MUST preserve the existing Workspace registration (`DOCUMENT_VIEWER_WIDGET_TYPE =
+      'document-viewer'`, displayName, category, icon, allowMultiple, defaultOrder) so
+      every existing Workspace dispatch (R4 `useChatFileAttachment` → ConversationPane
+      → `workspace.widget_load`) continues to resolve to this widget unchanged.
+    - The widget's typed `widgetData` payload (`DocumentViewerWidgetData`) MUST remain
+      back-compat — at minimum the existing R4 fields (`filename`, `contentType`,
+      `sizeBytes?`, `textContent`) are still accepted; any new optional fields needed to
+      drive the renderer (e.g. `documentId`, `documentType?`, `createdBy?`, `createdAt?`,
+      `previewUrl?` or `fetchPreviewUrl?`) MUST be ADDITIVE and OPTIONAL so existing R4
+      dispatch sites keep compiling without modification.
+
+    Backward-compatibility surface: existing R4 dispatch sites pass in-memory text-only
+    payloads (no SharePoint Embedded `driveId`/`itemId`). When the payload carries no
+    preview URL source, the widget MUST gracefully degrade by passing a
+    `fetchPreviewUrl` that resolves to `null` (which the extracted renderer already
+    handles via its error/retry path per task 013 acceptance criteria). When future
+    dispatch sites (e.g. R5 task 020 chat-pane orchestration, R5 task 021 per-file
+    affordance) supply a preview URL source, the renderer renders the full rich preview
+    via iframe.
+
+    This task touches frontend TypeScript only — zero BFF code changes; zero new
+    Dataverse data; zero PCF deployment. BFF publish-size delta = 0 MB.
+  </prompt>
+
+  <role>
+    Senior frontend engineer with Fluent UI v9 + React 19 expertise and deep familiarity
+    with `@spaarke/ai-widgets` Workspace widget composition (registry + dispatch via
+    `workspace.widget_load` per ADR-030), and the `@spaarke/ui-components`
+    `RichFilePreview` renderer (extracted in task 013). Comfortable reading the R4 stub
+    end-to-end before re-wiring it, preserving the widget's `WorkspaceWidgetProps&lt;T&gt;`
+    contract, and keeping back-compat for existing dispatch payloads.
+  </role>
+
+  <goal>
+    `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx`
+    is upgraded from the R4 monospace-text-preview shim to a thin Workspace wrapper that
+    mounts `&lt;RichFilePreview /&gt;` (imported from `@spaarke/ui-components`) inside
+    its existing `WorkspaceWidgetProps&lt;DocumentViewerWidgetData&gt;` envelope. The
+    widget registration in `register-document-viewer-widget.ts` is UNCHANGED. The
+    `DocumentViewerWidgetData` payload shape is back-compat: existing required fields
+    (`filename`, `contentType`, `sizeBytes?`, `textContent`) remain accepted; new
+    optional fields needed to power the renderer are ADDITIVE. Dispatch sites currently
+    in R4 (text-only payload) continue to mount the widget and the renderer degrades
+    gracefully to its error/retry state when no preview URL source is supplied.
+    Dispatch sites that DO supply a preview URL source render the full rich preview
+    (iframe + metadata pane + Prev/Next + 3-dot `DocumentRowMenu`). Existing
+    `DocumentViewerWidget.test.tsx` is updated to reflect the new composition; new
+    tests cover the renderer-consumption path + back-compat path. Dark-mode parity
+    verified. `code-review` + `adr-check` quality gates pass at Step 9.5.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="r4-stub-to-upgrade">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx</file>
+    <file purpose="r4-stub-registration">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-document-viewer-widget.ts</file>
+    <file purpose="extracted-renderer-task-013">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx</file>
+    <file purpose="dialog-wrapper-reference">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+    <file purpose="file-preview-barrel">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/index.ts</file>
+    <file purpose="widget-types">src/client/shared/Spaarke.AI.Widgets/src/types/widget-types.ts</file>
+    <file purpose="r4-stub-tests">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/DocumentViewerWidget.test.tsx</file>
+    <file purpose="task-013-poml">projects/spaarke-ai-platform-unification-r5/tasks/013-extract-richfilepreview-renderer.poml</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §3.1 (CRITICAL)">MUST consume the extracted `RichFilePreview` renderer from `@spaarke/ui-components` — do NOT rebuild iframe / metadata pane / 3-dot menu chrome inside the widget. R5 reuse mandate explicitly prohibits "parallel file-preview component to `RichFilePreviewDialog` (extract renderer, don't rebuild)"; this task is the consumption half of that mandate.</constraint>
+    <constraint source="project (backward compatibility)">Existing Workspace dispatch sites (R4 `useChatFileAttachment` → ConversationPane → `workspace.widget_load`) MUST continue to resolve to `DocumentViewerWidget` with NO change to dispatch payload. The widget registration (`DOCUMENT_VIEWER_WIDGET_TYPE = 'document-viewer'`, displayName, category, icon, allowMultiple=true, defaultOrder=150) MUST remain UNCHANGED.</constraint>
+    <constraint source="project (typed payload back-compat)">`DocumentViewerWidgetData` shape MUST remain back-compat. Existing R4 fields (`filename`, `contentType`, `sizeBytes?`, `textContent`) MUST still be accepted. Any new fields needed by the renderer (e.g. `documentId`, `documentType?`, `createdBy?`, `createdAt?`, optionally `previewUrl?` or `fetchPreviewUrl?`) MUST be OPTIONAL + ADDITIVE — existing R4 dispatch sites compile without modification.</constraint>
+    <constraint source="project (graceful degrade)">When the payload carries no preview URL source (R4-style text-only payload), the widget MUST mount the renderer with a `fetchPreviewUrl` that resolves to `null`. The renderer's existing loading/error/retry behavior handles that case (per task 013 acceptance criteria). The widget MUST NOT throw, MUST NOT crash, and MUST NOT regress R4 dispatch behavior to a broken state.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 + dark-mode parity. The upgraded widget MUST use Fluent v9 semantic tokens — NO hard-coded color literals. Dark-mode rendering MUST match light-mode visual hierarchy. The renderer already enforces this for its own subtree; the widget wrapper MUST NOT introduce new hard-coded colors.</constraint>
+    <constraint source="ADR-022">React 19 — upgraded widget remains a function component; uses `React.FC`/hooks; no React 18-only APIs introduced.</constraint>
+    <constraint source="ADR-012">Renderer lives in `@spaarke/ui-components`; widget lives in `@spaarke/ai-widgets`. The widget imports `RichFilePreview` via the shared-lib package boundary (NOT via a relative cross-package path). Confirm the barrel re-export (task 013 Step 6) is in place before depending on it.</constraint>
+    <constraint source="ADR-030">No new PaneEventBus channels; no new event types added by this task (task 016 owns the R5 additive event types). This widget is a CONSUMER of the existing `workspace.widget_load` dispatch — no new event emission required at the widget level.</constraint>
+    <constraint source="ADR-028">No token snapshots. The widget itself does NOT call BFF in v1 (text-only path inherits R4 behavior); when future dispatch sites supply a `fetchPreviewUrl` closure, that closure (owned by the dispatch site, NOT the widget) is responsible for fresh-token retrieval per ADR-028.</constraint>
+    <constraint source="ADR-006">No PCF control change in this task. R5 has NO PCF controls per project CLAUDE.md §4.3.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6 + ADR-029">BFF publish-size — this task is frontend-only (zero BFF code change). Confirm publish-size delta = 0 MB in task notes.</constraint>
+    <constraint source="R5 CLAUDE.md §3.7">Test obligation — this task modifies a `@spaarke/ai-widgets` workspace widget. Update existing `DocumentViewerWidget.test.tsx` to reflect the new composition (renderer mounting). Add coverage for: (a) widget mounts `&lt;RichFilePreview /&gt;`; (b) back-compat — R4-style text-only payload still mounts without crashing and renders graceful empty/error state; (c) typed-payload narrowing — invalid `widgetData` does not crash. Existing R4 test cases preserved or explicitly migrated with rationale.</constraint>
+    <constraint source="R5 task scope">Task 018 (`FilePreviewContextWidget`) is a SIBLING consumer of the same extracted renderer for the Context pane (non-modal). This task is the Workspace consumer. Do NOT modify `FilePreviewContextWidget.tsx` or `RichFilePreview.tsx` in this task. Scope is ONLY `DocumentViewerWidget.tsx` (+ co-located tests).</constraint>
+    <constraint source="project (no scope-creep on payload schema)">Do NOT introduce new BFF endpoints, new Dataverse fields, or new chat-tool dispatch shapes to source preview URLs in this task. Sourcing of `previewUrl` / `fetchPreviewUrl` from dispatch sites is the responsibility of those dispatch sites (task 020 chat-pane orchestration; task 021 per-file affordance; future R6 SharePoint Embedded integration). This task ONLY extends the widget's payload TYPE additively + wires the renderer.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/fluent-ui-v9/widget-composition</topic>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-and-ui.md</file>
+      <file>.claude/adr/ADR-012-component-libraries.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9-dark-mode.md</file>
+      <file>.claude/adr/ADR-022-react-19.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-document-viewer-widget.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreview.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/types/widget-types.ts</file>
+      <file>projects/spaarke-ai-platform-unification-r5/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/design.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Workspace widget composes shared renderer" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx (post-upgrade)">
+        The upgraded widget is a thin `WorkspaceWidgetProps&lt;DocumentViewerWidgetData&gt;`
+        consumer: it (a) defensively narrows `data` via the existing
+        `isDocumentViewerData` type guard (extended to cover the new optional fields),
+        (b) maps the typed payload onto `IRichFilePreviewProps` (documentName,
+        documentId, documentType, createdBy, createdAt, fileSize, fetchPreviewUrl,
+        and minimal action callbacks), (c) mounts `&lt;RichFilePreview /&gt;` inside a
+        light wrapper `&lt;div&gt;` that respects the widget's
+        `className`/`data-widget-type`/`data-testid` envelope, and (d) returns the
+        graceful empty/error state when narrowing fails. The R4 monospace-preview JSX
+        + `previewContainer` + `previewText` + `MAX_INLINE_PREVIEW_CHARS` logic is
+        REMOVED — the renderer owns preview rendering now.
+      </pattern>
+      <pattern name="Graceful fallback for text-only payloads" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx (post-upgrade)">
+        When `data` has no preview URL source (no `previewUrl`, no `fetchPreviewUrl`,
+        no `documentId` resolvable to a URL), the widget MUST pass
+        `fetchPreviewUrl={async () =&gt; null}` to the renderer. The renderer's
+        existing error/retry path (per task 013) handles this case with the
+        documented empty-state UX. This preserves R4 dispatch sites that only provide
+        in-memory text payloads — they show the renderer's "no preview available"
+        state instead of crashing. (R5 dispatch sites in tasks 020 + 021 will pass a
+        real `fetchPreviewUrl` closure when SPE preview integration lands; that is
+        OUT OF SCOPE for this task.)
+      </pattern>
+      <pattern name="Additive optional fields on typed payload" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx (DocumentViewerWidgetData)">
+        Extend `DocumentViewerWidgetData` ADDITIVELY:
+        ```ts
+        export interface DocumentViewerWidgetData {
+          // R4 fields (back-compat, unchanged)
+          filename: string;
+          contentType: string;
+          sizeBytes?: number;
+          textContent: string;
+          // R5 additions (all optional)
+          documentId?: string;
+          documentType?: string;
+          createdBy?: string | null;
+          createdAt?: string | null;
+          previewUrl?: string | null;
+          fetchPreviewUrl?: () =&gt; Promise&lt;string | null&gt;;
+        }
+        ```
+        Existing R4 dispatch sites compile unchanged; new R5 dispatch sites populate
+        the optional fields to power the renderer.
+      </pattern>
+      <pattern name="Defensive payload narrowing at the widget boundary" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx (isDocumentViewerData)">
+        Keep the existing `isDocumentViewerData` type guard but relax it to accept
+        the R4 minimum fields (filename, contentType, textContent) as required. New
+        optional fields are NOT required by the guard. When narrowing fails, render
+        the renderer's empty state via a `fetchPreviewUrl` that resolves to null and
+        a synthesized `documentName = 'Unknown file'`.
+      </pattern>
+      <pattern name="Existing test pattern preservation" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/DocumentViewerWidget.test.tsx">
+        The existing test file uses Vitest + testing-library. Preserve the existing
+        R4 test cases that exercise payload narrowing + empty/loading/error rendering.
+        Update assertions where the R4 stub's monospace preview `&lt;pre&gt;` is
+        replaced by the renderer subtree. Add new cases: (a) widget mounts
+        `&lt;RichFilePreview /&gt;` (assert via `data-testid` from the renderer); (b)
+        text-only payload renders renderer empty state without crashing; (c) typed
+        payload with `previewUrl` passes a `fetchPreviewUrl` closure that resolves
+        to the URL.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R4 task 042 (W-4) shipped `DocumentViewerWidget` as a SHIM Workspace widget —
+      explicitly noted in the file header as a "demo scope" placeholder rendering
+      file metadata + a monospace text preview of already-extracted content. The R4
+      acceptance for that shim was deliberately narrow: validate the
+      Assistant → Workspace `widget_load` dispatch pipeline end-to-end. Broader viewer
+      fidelity (PDF.js page render, image preview, RecordViewer integration) was
+      called out OUT OF SCOPE in the file header itself, with the implicit
+      expectation that a later phase would upgrade the widget to the canonical
+      preview UX.
+
+      R5 task 013 extracted the canonical preview renderer (`RichFilePreview`) from
+      `RichFilePreviewDialog` into `@spaarke/ui-components` so non-modal consumers
+      (Workspace widget — this task; Context-pane widget — task 018) can mount the
+      same renderer without the modal `Dialog` envelope. With task 013 complete, the
+      shim's reason-for-existence is gone — this task replaces the shim with
+      renderer consumption.
+
+      Why this is a separate ticket (not bundled into task 013): per the R5 reuse
+      mandate (CLAUDE.md §3.1) and the task-013 POML acceptance criteria, task 013
+      explicitly EXCLUDES touching `DocumentViewerWidget.tsx` or
+      `FilePreviewContextWidget.tsx` — separating extraction from consumption keeps
+      scope tight, makes the diff reviewable, and lets the two consumers (this task
+      + task 018) parallelize in P2-G5 / P2-G4 respectively without conflicting
+      edits.
+
+      Why we preserve back-compat for R4-style text-only payloads: the R4 dispatch
+      site (`useChatFileAttachment` → ConversationPane → `workspace.widget_load`)
+      currently produces text-only payloads with no SPE `driveId`/`itemId` or
+      preview URL. Phase 2's chat-pane orchestration (task 020) and per-file
+      affordance (task 021) will populate optional preview URL fields when they
+      land. Keeping the widget back-compat means R4 dispatch sites continue to
+      work without modification, the renderer gracefully degrades to its
+      empty/error state when no URL source is provided, and R5 dispatch sites
+      progressively light up rich preview as they wire it.
+    </background>
+    <dependencies>
+      <dependency task="013" status="not-started">
+        D2-08 (first half) — extracts `RichFilePreview` renderer from
+        `RichFilePreviewDialog` into `@spaarke/ui-components`. This task consumes
+        the extracted renderer; task 013 MUST be ✅ before task 022 starts.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>R4 task 042 (W-4) — original `DocumentViewerWidget` SHIM + Workspace
+        widget registration. This task upgrades the shim while preserving the
+        registration.</item>
+      <item>Task 018 (D2-09) `FilePreviewContextWidget` — SIBLING consumer of the
+        extracted renderer for the Context-pane (non-modal) destination.
+        Parallel-safe in P2-G4. Out of scope for this task; same extracted-renderer
+        consumption pattern.</item>
+      <item>Task 020 (D2-11) chat-pane orchestration UX — future R5 dispatch site
+        that will populate the new optional `previewUrl`/`fetchPreviewUrl` fields
+        on `DocumentViewerWidgetData` to drive the renderer's full rich preview.
+        Out of scope for this task; explicitly NOT a dependency.</item>
+      <item>Task 021 (D2-12) per-file "Summarize this only" affordance — additional
+        future R5 dispatch site that may also supply a preview URL source. Out of
+        scope for this task; explicitly NOT a dependency.</item>
+      <item>R5 CLAUDE.md §3.1 reuse mandate — explicit prohibition on a "parallel
+        file-preview component to `RichFilePreviewDialog`". This task is the
+        Workspace consumption half of that mandate (task 013 is the extraction
+        half; task 018 is the Context-pane consumption half).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`
+      before starting. Declare RIGOR LEVEL per R5 CLAUDE.md §4.1:
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend code change + reuse-mandate enforcement (§3.1) +
+         back-compat obligation for existing R4 dispatch sites + tags include
+         `widget` + `refactor` per FULL-rigor decision tree (CLAUDE.md §8).
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0 → 10 per task-execute SKILL.md;
+         quality gates at Step 9.5 (code-review + adr-check).
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 022 status is 🔲, wave is P2-G5,
+      parallel-safe = true, dependency 013 status is ✅ (extraction landed). Read
+      `current-task.md` to confirm no conflicting R5 task is in flight. Confirm
+      task 018 (FilePreviewContextWidget) is NOT in flight against
+      `RichFilePreview.tsx` — if it is, defer to the team channel before touching
+      shared files. (This task does NOT modify `RichFilePreview.tsx`, but
+      confirming sibling state avoids accidental merge conflict noise.)
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; and &lt;knowledge&gt;. SPECIFICALLY:
+      - Read the R4 stub `DocumentViewerWidget.tsx` end-to-end. Note the existing
+        `DocumentViewerWidgetData` interface, the `isDocumentViewerData` type guard,
+        the `MAX_INLINE_PREVIEW_CHARS` constant + truncation logic, the
+        `useStyles` rules, and the existing `WorkspaceWidgetProps&lt;T&gt;`
+        consumption pattern (props: `data`, `widgetType`, `isLoading`, `error`,
+        `className`).
+      - Read the extracted `RichFilePreview.tsx` from task 013 to confirm its
+        public `IRichFilePreviewProps` shape (documentName, documentId,
+        documentType?, createdBy?, createdAt?, fileSize?, fetchPreviewUrl,
+        onOpenFile, onOpenRecord, onEmailDocument, onCopyLink, onToggleWorkspace?,
+        isInWorkspace?, onFindSimilar?, onFetchSummary?, navigationTotal?,
+        currentIndex?, onNavigate?, disabledActions?). Verify the barrel export
+        from `@spaarke/ui-components` re-exports it (task 013 Step 6).
+      - Read the existing `DocumentViewerWidget.test.tsx` to map which test cases
+        carry over vs. need migration vs. need replacement.
+      - Re-read R5 CLAUDE.md §3.1 reuse mandate. Confirm: this task IS the
+        Workspace half of the renderer-consumption mandate; no parallel preview
+        component MUST be authored.
+    </step>
+    <step order="3" name="Plan the Upgrade">
+      Document the upgrade plan in task notes (`notes/task-022-upgrade-plan.md`):
+      - Removed code (R4 shim): `previewContainer` / `previewText` / `emptyState`
+        styles, `MAX_INLINE_PREVIEW_CHARS` + truncation logic, the
+        `&lt;Card&gt;`/`&lt;CardHeader&gt;`/`&lt;pre&gt;` JSX subtree that owns
+        preview rendering.
+      - Retained code: `WorkspaceWidgetProps&lt;DocumentViewerWidgetData&gt;`
+        signature, `isDocumentViewerData` type guard (relaxed to handle new
+        optional fields), light wrapper `&lt;div&gt;` with
+        `className`/`data-widget-type`/`data-testid`, isLoading/error envelope
+        handling delegated to the renderer's loading/error semantics.
+      - Added code: extended `DocumentViewerWidgetData` (additive optional fields),
+        mapping function `mapPayloadToRendererProps(data: DocumentViewerWidgetData):
+        IRichFilePreviewProps`, default `fetchPreviewUrl` closure that resolves to
+        null when no URL source is provided, default no-op action callbacks for
+        actions the widget does not currently surface (open file, open record,
+        email, copy link — wire to a no-op + telemetry warning until R5 dispatch
+        sites land in tasks 020 / 021).
+      - Decision on `disabledActions`: per task 013, `RichFilePreview` accepts
+        an optional `disabledActions` override. For the Workspace destination,
+        hide the same default set the dialog hides (preview, aiSummary,
+        toggleWorkspace, rename) PLUS hide findSimilar when no `onFindSimilar`
+        callback is supplied. Document this default in the widget file's
+        header comment.
+    </step>
+    <step order="4" name="Replace R4 Stub Body with RichFilePreview Consumption">
+      Edit
+      `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx`:
+      - Update the file header comment to reflect the upgrade (cite task 022 + this
+        plan, supersede the R4 demo-scope note, keep ADR compliance summary).
+      - Extend `DocumentViewerWidgetData` with the additive optional fields per
+        the Step 3 pattern.
+      - Relax `isDocumentViewerData` to validate ONLY the R4 minimum required
+        fields; new optional fields pass through unchecked at the guard level.
+      - Replace the JSX body. Outer wrapper `&lt;div&gt;` keeps
+        `className`/`data-widget-type`/`data-testid`. Inside, mount
+        `&lt;RichFilePreview {...mappedProps} /&gt;` imported from
+        `@spaarke/ui-components`. Map payload → renderer props per Step 3.
+      - Remove the R4 shim styles (`previewContainer`, `previewText`, `emptyState`,
+        `truncationNotice`, `metadataRow`, `headerIcon`, `headerTitle`,
+        `headerSubtitle`, `card`). Keep only `root` (wrapper). Trim `useStyles` to
+        match.
+      - Remove `MAX_INLINE_PREVIEW_CHARS` + `formatFileSize` + `isPdf` (no longer
+        needed; the renderer owns these concerns).
+      - Default action callbacks: pass a small set of no-op + telemetry-warning
+        callbacks for `onOpenFile`, `onOpenRecord`, `onEmailDocument`,
+        `onCopyLink`. Surface a `console.warn` in dev builds so future R5 dispatch
+        sites (tasks 020/021) know to supply real callbacks. Do NOT throw.
+      - Keep `displayName` / default export shape unchanged so the registration
+        in `register-document-viewer-widget.ts` continues to resolve.
+    </step>
+    <step order="5" name="Verify Workspace Tab Dispatch is Unchanged">
+      Do NOT modify `register-document-viewer-widget.ts`. Confirm:
+      - `DOCUMENT_VIEWER_WIDGET_TYPE = 'document-viewer'` literal unchanged.
+      - `registerWorkspaceWidget` call signature unchanged: displayName 'Document
+        Viewer', category 'document', icon 'DocumentRegular',
+        `allowMultiple: true`, `defaultOrder: 150`.
+      - The dynamic import `() =&gt; import('./DocumentViewerWidget')` still
+        resolves to the upgraded module (default export shape preserved).
+      - Existing R4 ConversationPane dispatch path (search the repo for
+        `DOCUMENT_VIEWER_WIDGET_TYPE` consumers) continues to compile. Capture
+        the consumer list in task notes for back-compat verification matrix.
+    </step>
+    <step order="6" name="Update Co-Located Tests">
+      Edit
+      `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/DocumentViewerWidget.test.tsx`:
+      - Preserve the R4 test cases that exercise: payload narrowing failure (empty
+        state); `isLoading` propagation; `error` propagation; `widgetType` + class
+        wrapper hooks. Update assertions where the R4 monospace `&lt;pre&gt;`
+        target has been replaced — assert against the renderer subtree via the
+        renderer's `data-testid` (per task 013 acceptance criteria the renderer
+        emits a stable `data-testid`).
+      - Add new test cases (per R5 CLAUDE.md §3.7):
+        1. Widget renders `&lt;RichFilePreview /&gt;` (assert renderer's testid
+           visible in the mounted tree).
+        2. Back-compat — R4-style text-only payload (`filename`, `contentType`,
+           `textContent` only; no `previewUrl` / no `fetchPreviewUrl`) mounts
+           without crashing; renderer's empty/error state is rendered. The widget
+           DOES NOT regress to the R4 monospace `&lt;pre&gt;` element (assert its
+           absence).
+        3. R5 payload — payload with `previewUrl: 'https://example.test/preview'`
+           causes the renderer to receive a `fetchPreviewUrl` closure that
+           resolves to the supplied URL. (Mock the renderer or assert via the
+           passed prop, depending on the test infra.)
+        4. Defensive narrowing — invalid `widgetData` (`{ foo: 'bar' }`) does
+           not crash; renderer mounts with `documentName = 'Unknown file'` and
+           a null-resolving `fetchPreviewUrl`.
+      - Run `npm test` in `src/client/shared/Spaarke.AI.Widgets/` (or the
+        equivalent monorepo test command). All new + existing tests pass.
+    </step>
+    <step order="7" name="Verify Back-Compat for Existing R4 Dispatch Sites">
+      Run `tsc --noEmit` across `@spaarke/ai-widgets` and any downstream consumer
+      package (`Spaarke.UI.Components`, LegalWorkspace, SpaarkeAi shell) that
+      indirectly depends on `DocumentViewerWidget` or
+      `DocumentViewerWidgetData`. Confirm: zero new TypeScript errors. Capture
+      results in task notes.
+      Search the repo for current dispatch sites that build
+      `DocumentViewerWidgetData` payloads (R4 ConversationPane +
+      `useChatFileAttachment`); confirm they compile unchanged. Document the list
+      of dispatch sites in task notes for the back-compat verification matrix.
+    </step>
+    <step order="8" name="Dark-Mode Visual Parity Check">
+      Render the upgraded `DocumentViewerWidget` in light + dark themes via the
+      existing component sandbox / storybook / SpaarkeAi dev page with both:
+      (a) a back-compat text-only payload (renderer's empty-state path), and
+      (b) a synthetic payload with `previewUrl` pointing to a sample file. Verify
+      borders, backgrounds, foreground colors, hover states, focus rings, and the
+      3-dot `DocumentRowMenu`'s open menu all respect Fluent v9 semantic tokens
+      identically in both themes. No hard-coded color literals slipped in during
+      upgrade. Record evidence (screenshots or visual-diff notes) in task notes.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is
+      testable + passing. Record evidence per criterion in task notes. Pay
+      particular attention to: (a) reuse mandate satisfied (renderer consumed,
+      not rebuilt); (b) widget registration UNCHANGED; (c) back-compat with R4
+      dispatch sites verified; (d) typed-payload extension is additive +
+      optional; (e) BFF publish-size delta = 0 MB.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the modified files (`DocumentViewerWidget.tsx`
+      + co-located test file + the task-notes file). Run `adr-check` skill against
+      the same files; verify ADR-006 (PCF/UI — no PCF change), ADR-012
+      (component-library boundary — widget consumes shared lib via package
+      import), ADR-021 (Fluent v9 + semantic tokens + dark-mode parity), ADR-022
+      (React 19), ADR-028 (no token snapshots — confirm widget itself makes no
+      BFF call), ADR-030 (no new event-bus channels — confirm widget is consumer
+      only). Both gates MUST pass before marking the task complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update this task POML status to `complete`. Update `TASK-INDEX.md`: 022 🔲
+      → ✅. Reset `current-task.md` to the next pending P2-G5 task (019 or 020 or
+      021 — whichever is next pending) per CLAUDE.md §7. Confirm BFF publish-size
+      delta = 0 MB (frontend-only task). Confirm consumption (not rebuild) — point
+      to the diff that shows the widget now imports + mounts
+      `&lt;RichFilePreview /&gt;` and no parallel preview component was authored.
+      Confirm R4 dispatch sites continue to resolve to this widget unchanged.
+      Confirm task 018 (Context-pane sibling) is unaffected. Report task
+      completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test `@spaarke/ai-widgets` (`npm run build` / `npm test` from `src/client/shared/Spaarke.AI.Widgets/`)</tool>
+    <tool name="tsc">TypeScript compile check (`tsc --noEmit`) — verify back-compat across the widget package + downstream consumers</tool>
+    <tool name="git">Stage + commit upgrade on the R5 branch (do NOT commit until task complete)</tool>
+    <tool name="code-review">Quality gate at Step 9.5 (FULL rigor)</tool>
+    <tool name="adr-check">Quality gate at Step 9.5 (FULL rigor)</tool>
+    <tool name="context-handoff">Proactive checkpointing per R5 CLAUDE.md §5 (every 3 steps, &gt; 5 files modified, etc.)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx (UPGRADED — R4 stub body replaced with `RichFilePreview` consumption; `DocumentViewerWidgetData` extended additively with optional fields; header comment updated to reflect task 022)</output>
+    <output type="test">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/DocumentViewerWidget.test.tsx (UPDATED — R4 cases migrated; new cases for renderer consumption, back-compat, R5 payload, defensive narrowing)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 022 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-022-upgrade-plan.md (upgrade plan from Step 3; removed-vs-retained-vs-added code map; default-actions decision; default `disabledActions` decision)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-022-back-compat-evidence.md (existing R4 dispatch-site list + tsc clean results; dark-mode parity evidence; renderer-consumption diff reference)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`DocumentViewerWidget.tsx` is upgraded: the R4 monospace-text-preview JSX subtree (`Card` / `CardHeader` / `previewContainer` / `&lt;pre&gt;` / `MAX_INLINE_PREVIEW_CHARS` truncation logic) is REMOVED, replaced by a thin wrapper that mounts `&lt;RichFilePreview /&gt;` imported from `@spaarke/ui-components`. Diff evidence in task notes confirms the renderer is CONSUMED (not rebuilt).</criterion>
+    <criterion testable="true">Widget registration UNCHANGED: `register-document-viewer-widget.ts` is NOT modified by this task. `DOCUMENT_VIEWER_WIDGET_TYPE = 'document-viewer'`, displayName, category, icon, `allowMultiple: true`, `defaultOrder: 150` all preserved. The dynamic import resolves to the upgraded module.</criterion>
+    <criterion testable="true">`DocumentViewerWidgetData` shape is back-compat: existing R4 required fields (`filename`, `contentType`, `textContent`) + optional `sizeBytes?` are unchanged; new R5 fields (`documentId?`, `documentType?`, `createdBy?`, `createdAt?`, `previewUrl?`, `fetchPreviewUrl?`) are ADDITIVE + OPTIONAL.</criterion>
+    <criterion testable="true">Existing R4 dispatch sites (e.g. ConversationPane via `useChatFileAttachment` → `workspace.widget_load`) compile with NO change to dispatch payload. `tsc --noEmit` clean across `@spaarke/ai-widgets` and downstream consumer packages. Back-compat verification matrix recorded in task notes.</criterion>
+    <criterion testable="true">Graceful degrade verified: a back-compat text-only payload (no `previewUrl`, no `fetchPreviewUrl`) mounts `RichFilePreview` with a `fetchPreviewUrl` closure that resolves to `null`; the renderer's existing empty/error state renders without crash. The widget DOES NOT regress to the R4 monospace `&lt;pre&gt;` element.</criterion>
+    <criterion testable="true">R5 dispatch path verified: a synthetic payload with `previewUrl: '...'` causes the renderer to receive a `fetchPreviewUrl` closure that resolves to that URL (asserted via test mock or passed-prop inspection).</criterion>
+    <criterion testable="true">Defensive narrowing verified: invalid `widgetData` (failing `isDocumentViewerData`) does not crash; renderer mounts with `documentName = 'Unknown file'` and a null-resolving `fetchPreviewUrl`.</criterion>
+    <criterion testable="true">Dark-mode parity verified — upgraded widget renders correctly in light + dark themes; no hard-coded color literals introduced; all colors flow through Fluent v9 semantic tokens. Evidence captured in task notes.</criterion>
+    <criterion testable="true">Tests pass: existing R4 test cases preserved or explicitly migrated with rationale; new cases cover renderer consumption + back-compat text-only payload + R5 payload + defensive narrowing. `npm test` clean.</criterion>
+    <criterion testable="true">Scope discipline: `RichFilePreview.tsx` is NOT modified by this task. `FilePreviewContextWidget.tsx` is NOT modified or created by this task. `register-document-viewer-widget.ts` is NOT modified by this task. (Negative criteria — confirms task boundaries.)</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (confirmed in task notes; no BFF code touched by this task per R5 CLAUDE.md §3.6).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5. ADR-006 / ADR-012 / ADR-021 / ADR-022 / ADR-028 / ADR-030 compliance verified.</criterion>
+  </acceptance-criteria>
+</task>

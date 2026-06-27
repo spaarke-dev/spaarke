@@ -170,9 +170,7 @@ function buildCacheKey(
  * });
  * ```
  */
-export function useDynamicSlashCommands(
-  options: UseDynamicSlashCommandsOptions
-): IUseDynamicSlashCommandsResult {
+export function useDynamicSlashCommands(options: UseDynamicSlashCommandsOptions): IUseDynamicSlashCommandsResult {
   const { sessionId, apiBaseUrl, authenticatedFetch, playbookId, hostContext } = options;
 
   // Playbook commands change when playbookId changes; scope commands only change
@@ -223,98 +221,99 @@ export function useDynamicSlashCommands(
    * When bypassCache is false (default), checks the in-memory cache first
    * and returns cached results without a network call on cache hit.
    */
-  const fetchCommands = useCallback(async (bypassCache = false): Promise<void> => {
-    // Skip when sessionId is absent — no session means no commands endpoint to call
-    if (!sessionId) {
-      setPlaybookCommands([]);
-      setScopeCommands([]);
-      setIsLoading(false);
-      return;
-    }
-
-    const currentKey = buildCacheKey(sessionId, playbookId, scopeId);
-
-    // ─── Context change detection: evict stale cache entry ──────────────
-    if (prevCacheKeyRef.current && prevCacheKeyRef.current !== currentKey) {
-      cacheRef.current.delete(prevCacheKeyRef.current);
-    }
-    prevCacheKeyRef.current = currentKey;
-
-    // ─── Cache hit: return cached commands without network call ──────────
-    if (!bypassCache) {
-      const cached = cacheRef.current.get(currentKey);
-      if (cached) {
-        setPlaybookCommands(cached.playbookCommands);
-        setScopeCommands(cached.scopeCommands);
+  const fetchCommands = useCallback(
+    async (bypassCache = false): Promise<void> => {
+      // Skip when sessionId is absent — no session means no commands endpoint to call
+      if (!sessionId) {
+        setPlaybookCommands([]);
+        setScopeCommands([]);
         setIsLoading(false);
         return;
       }
-    } else {
-      // bypassCache: clear current entry so we re-fetch
-      cacheRef.current.delete(currentKey);
-    }
 
-    // ─── Cache miss: fetch from BFF ─────────────────────────────────────
-    setIsLoading(true);
+      const currentKey = buildCacheKey(sessionId, playbookId, scopeId);
 
-    try {
-      const url = `${baseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/commands`;
-
-      const response = await authenticatedFetch(url, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      if (!response.ok) {
-        // On error, fall back to system commands only — don't break the input
-        console.warn(
-          `[useDynamicSlashCommands] Failed to fetch commands (${response.status}). Falling back to system commands.`
-        );
-        setPlaybookCommands([]);
-        // Preserve existing scope commands on playbook-only failures
-        return;
+      // ─── Context change detection: evict stale cache entry ──────────────
+      if (prevCacheKeyRef.current && prevCacheKeyRef.current !== currentKey) {
+        cacheRef.current.delete(prevCacheKeyRef.current);
       }
+      prevCacheKeyRef.current = currentKey;
 
-      const data: ICommandsResponse = await response.json();
-
-      // Convert dynamic commands to SlashCommand[], deduplicating against system defaults
-      const systemIds = new Set(DEFAULT_SLASH_COMMANDS.map(c => c.id));
-      const resolved = data.dynamicCommands
-        .map(toSlashCommand)
-        .filter(cmd => !systemIds.has(cmd.id));
-
-      // Partition into scope commands and playbook commands.
-      // Scope commands (source="scope") are stored separately so they persist
-      // across playbook switches (FR-11).
-      const nextScopeCommands: SlashCommand[] = [];
-      const nextPlaybookCommands: SlashCommand[] = [];
-
-      for (const cmd of resolved) {
-        if (cmd.source === 'scope') {
-          nextScopeCommands.push(cmd);
-        } else {
-          nextPlaybookCommands.push(cmd);
+      // ─── Cache hit: return cached commands without network call ──────────
+      if (!bypassCache) {
+        const cached = cacheRef.current.get(currentKey);
+        if (cached) {
+          setPlaybookCommands(cached.playbookCommands);
+          setScopeCommands(cached.scopeCommands);
+          setIsLoading(false);
+          return;
         }
+      } else {
+        // bypassCache: clear current entry so we re-fetch
+        cacheRef.current.delete(currentKey);
       }
 
-      // ─── Store in cache (R2-038) ────────────────────────────────────
-      cacheRef.current.set(currentKey, {
-        playbookCommands: nextPlaybookCommands,
-        scopeCommands: nextScopeCommands,
-      });
+      // ─── Cache miss: fetch from BFF ─────────────────────────────────────
+      setIsLoading(true);
 
-      setScopeCommands(nextScopeCommands);
-      setPlaybookCommands(nextPlaybookCommands);
-    } catch (err: unknown) {
-      // Swallow errors — slash commands are non-critical; fall back to defaults
-      console.warn('[useDynamicSlashCommands] Error fetching commands:', err);
-      setPlaybookCommands([]);
-      // Preserve existing scope commands on transient failures
-    } finally {
-      setIsLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseUrl, authenticatedFetch, sessionId, playbookId, scopeId, hostContext?.entityType]);
+      try {
+        const url = `${baseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/commands`;
+
+        const response = await authenticatedFetch(url, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        if (!response.ok) {
+          // On error, fall back to system commands only — don't break the input
+          console.warn(
+            `[useDynamicSlashCommands] Failed to fetch commands (${response.status}). Falling back to system commands.`
+          );
+          setPlaybookCommands([]);
+          // Preserve existing scope commands on playbook-only failures
+          return;
+        }
+
+        const data: ICommandsResponse = await response.json();
+
+        // Convert dynamic commands to SlashCommand[], deduplicating against system defaults
+        const systemIds = new Set(DEFAULT_SLASH_COMMANDS.map(c => c.id));
+        const resolved = data.dynamicCommands.map(toSlashCommand).filter(cmd => !systemIds.has(cmd.id));
+
+        // Partition into scope commands and playbook commands.
+        // Scope commands (source="scope") are stored separately so they persist
+        // across playbook switches (FR-11).
+        const nextScopeCommands: SlashCommand[] = [];
+        const nextPlaybookCommands: SlashCommand[] = [];
+
+        for (const cmd of resolved) {
+          if (cmd.source === 'scope') {
+            nextScopeCommands.push(cmd);
+          } else {
+            nextPlaybookCommands.push(cmd);
+          }
+        }
+
+        // ─── Store in cache (R2-038) ────────────────────────────────────
+        cacheRef.current.set(currentKey, {
+          playbookCommands: nextPlaybookCommands,
+          scopeCommands: nextScopeCommands,
+        });
+
+        setScopeCommands(nextScopeCommands);
+        setPlaybookCommands(nextPlaybookCommands);
+      } catch (err: unknown) {
+        // Swallow errors — slash commands are non-critical; fall back to defaults
+        console.warn('[useDynamicSlashCommands] Error fetching commands:', err);
+        setPlaybookCommands([]);
+        // Preserve existing scope commands on transient failures
+      } finally {
+        setIsLoading(false);
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [baseUrl, authenticatedFetch, sessionId, playbookId, scopeId, hostContext?.entityType]
+  );
 
   // Clear scope commands when the host entity context changes — scope commands
   // are tied to the entity, not the playbook (ADR-013: flow ChatHostContext).
@@ -378,10 +377,7 @@ export function useDynamicSlashCommands(
  * @param playbookCmds - Commands from the active playbook (source="playbook")
  * @returns Merged, deduplicated command list
  */
-function deduplicateScopeAndPlaybookCommands(
-  scopeCmds: SlashCommand[],
-  playbookCmds: SlashCommand[]
-): SlashCommand[] {
+function deduplicateScopeAndPlaybookCommands(scopeCmds: SlashCommand[], playbookCmds: SlashCommand[]): SlashCommand[] {
   // Index scope commands by id for O(1) lookup
   const scopeById = new Map<string, SlashCommand>();
   for (const cmd of scopeCmds) {

@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Verify/stand up GET /api/ai/playbooks/by-code/{code} endpoint</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>013,014,015,016,017,018,019</blocks>
+    <tags>bff-api, endpoints, minimal-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; new endpoint surface; ADR-001 + ADR-014 binding</rigor-reason>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify that `GET /api/ai/playbooks/by-code/{code}` is exposed (or stand it up) using the existing `PlaybookLookupService.cs:70-115` alternate-key lookup. Endpoint is 5-min ADR-014 cached, tenant-scoped per ADR-008, returns ProblemDetails 404 (task 011 covers shape). Implements FR-01.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in ASP.NET Core Minimal APIs + Spaarke Auth v2 endpoint filters.</role>
+
+  <goal>
+    Endpoint `GET /api/ai/playbooks/by-code/{code}` live in `Sprk.Bff.Api`. Resolves to a playbook by `sprk_playbookcode` alternate-key lookup; cached 5 min per tenant; 404 ProblemDetails on miss. Integration test passes resolving `summarize-document-chat` to the chat-summarize playbook within 100ms (warm cache) and ≤500ms (cold).
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-01. `PlaybookLookupService` already supports alternate-key `by-code` lookup. The endpoint surface may already exist; this task verifies/adds it. Implements the foundation infrastructure that 9 consumer migrations (tasks 014-020) depend on.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookLookupService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEmbeddingEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Use Minimal API pattern (MapGet); no Controllers.</constraint>
+    <constraint source="ADR-008">Endpoint filter for tenant scoping; tenant context from JWT claim.</constraint>
+    <constraint source="ADR-010">DI minimalism — inject `IPlaybookLookupService` directly; no `IServiceProvider.GetService&lt;T&gt;()`.</constraint>
+    <constraint source="ADR-013">Endpoint MUST go through `Services/Ai/PublicContracts/` facade if any CRUD code consumes; AI-internal direct injection NOT allowed in CRUD code.</constraint>
+    <constraint source="ADR-014">5-minute TTL cache keyed on (tenantId, code); use existing `IMemoryCache` or Redis pattern.</constraint>
+    <constraint source="ADR-019">404 returns ProblemDetails shape — handled by task 011.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement required; report delta vs Phase 0 baseline.</constraint>
+    <constraint source="project">Endpoint placement must satisfy bff-extensions.md placement criteria. Document decision in PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Inspect existing `PlaybookEmbeddingEndpoints.cs` — is `/by-code/` already mapped? Read code carefully.</step>
+    <step order="2">Inspect `PlaybookLookupService.cs:70-115` — confirm alternate-key lookup signature accepts a tenant context.</step>
+    <step order="3">If endpoint already exists: verify caching + tenant scoping + signature match FR-01. Skip to step 8.</step>
+    <step order="4">If endpoint missing: add `GET /api/ai/playbooks/by-code/{code}` MapGet in the appropriate `*Endpoints.cs` file with tenant filter, cache attribute, ProblemDetails 404 fallthrough.</step>
+    <step order="5">Wire `IMemoryCache` (or Redis if appropriate per ADR-009 pattern) with 5-min TTL keyed on `(tenantId, code)`.</step>
+    <step order="6">Write integration test: cold miss resolves correctly under 500ms; warm hit under 100ms.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/integration/...` — must pass.</step>
+    <step order="8">Measure BFF publish size: `dotnet publish -c Release ... -o deploy/api-publish/`; report delta vs Phase 0 baseline.</step>
+    <step order="9">Run code-review + adr-check (FULL rigor quality gates at Step 9.5 of task-execute).</step>
+    <step order="10">Update TASK-INDEX.md: task 010 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookLookupService.cs + endpoint files</tool>
+    <tool name="Grep">Locate existing /by-code/ if present</tool>
+    <tool name="Edit">Add endpoint mapping + integration test</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEmbeddingEndpoints.cs (or similar) — endpoint mapped</output>
+    <output type="test">tests/integration/.../PlaybookByCodeEndpointTests.cs — integration test asserting cold/warm latency</output>
+    <output type="docs">notes/handoffs/010-bff-publish-delta.md — publish size delta vs Phase 0 baseline</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GET /api/ai/playbooks/by-code/summarize-document-chat` returns 200 with the chat-summarize playbook payload.</criterion>
+    <criterion testable="true">`GET /api/ai/playbooks/by-code/nonexistent` returns 404 ProblemDetails (per task 011).</criterion>
+    <criterion testable="true">Warm cache hit measured ≤100ms.</criterion>
+    <criterion testable="true">Cold path measured ≤500ms.</criterion>
+    <criterion testable="true">Endpoint enforces tenant scoping (cross-tenant lookup returns 404).</criterion>
+    <criterion testable="true">BFF publish delta reported; cumulative within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The endpoint may already be partially present — `PlaybookLookupService` already supports the lookup. Verify before authoring duplicate. State placement decision in PR description per bff-extensions.md.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

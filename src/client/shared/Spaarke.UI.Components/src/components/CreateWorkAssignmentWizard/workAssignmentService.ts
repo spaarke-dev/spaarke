@@ -24,10 +24,7 @@ import type { IDataService } from '../../types/serviceInterfaces';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type { IUploadProgress, AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
-import {
-  applyResolverFields,
-  findNavProp,
-} from '../../services/PolymorphicResolverService';
+import { applyResolverFields, findNavProp } from '../../services/PolymorphicResolverService';
 import type { INavPropEntry } from '../../services/PolymorphicResolverService';
 
 // Re-export shared search helpers for use by step components
@@ -71,13 +68,16 @@ async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEnt
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (json as any).value ?? [];
 
-    const entries: INavPropEntry[] = rels.map((r) => ({
+    const entries: INavPropEntry[] = rels.map(r => ({
       columnName: r.ReferencingAttribute,
       navPropName: r.ReferencingEntityNavigationPropertyName,
       referencedEntity: r.ReferencedEntity,
     }));
 
-    console.info(`[WorkAssignmentService] Nav-props for ${entityLogicalName}:`, entries.map(e => `${e.columnName} -> ${e.navPropName} (${e.referencedEntity})`));
+    console.info(
+      `[WorkAssignmentService] Nav-props for ${entityLogicalName}:`,
+      entries.map(e => `${e.columnName} -> ${e.navPropName} (${e.referencedEntity})`)
+    );
     _navPropCache[entityLogicalName] = entries;
     return entries;
   } catch (err) {
@@ -90,11 +90,58 @@ async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEnt
 // are imported from the shared PolymorphicResolverService.
 
 /**
+ * Resolve the current Dataverse user ID from the host Xrm global.
+ *
+ * Walks `window` → `window.parent` → `window.top` to find an `Xrm.Utility.getGlobalContext()`
+ * (Code Page hosted in a Power App iframe) or `Xrm.Utility.getUserId()` (PCF / direct host).
+ * Returns `''` (empty) when no Xrm context is reachable — caller treats that as "skip cascade".
+ *
+ * Kept module-private (not exported) so consumers cannot pass an arbitrary user ID; this
+ * preserves the "current user" semantics of FR-WIZ-04.
+ */
+function _getCurrentUserId(): string {
+  const frames: Window[] = [window];
+  try {
+    if (window.parent !== window) frames.push(window.parent);
+  } catch {
+    /* cross-origin */
+  }
+  try {
+    if (window.top && window.top !== window) frames.push(window.top);
+  } catch {
+    /* cross-origin */
+  }
+
+  for (const frame of frames) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = (frame as any).Xrm;
+      if (xrm?.Utility?.getGlobalContext) {
+        const ctx = xrm.Utility.getGlobalContext();
+        const userId = ctx?.userSettings?.userId;
+        if (typeof userId === 'string' && userId.trim() !== '') {
+          return userId.replace(/^\{|\}$/g, '').toLowerCase();
+        }
+      }
+      if (typeof xrm?.Utility?.getUserId === 'function') {
+        const userId = xrm.Utility.getUserId();
+        if (typeof userId === 'string' && userId.trim() !== '') {
+          return userId.replace(/^\{|\}$/g, '').toLowerCase();
+        }
+      }
+    } catch {
+      /* cross-origin */
+    }
+  }
+  return '';
+}
+
+/**
  * Resolve navigation property name for a document lookup by referenced entity.
  * Used when creating sprk_document records linked to a parent entity.
  */
 function _resolveDocNavProp(entries: INavPropEntry[], referencedEntity: string): string {
-  const match = entries.find((e) => e.referencedEntity === referencedEntity);
+  const match = entries.find(e => e.referencedEntity === referencedEntity);
   if (match) {
     console.info(`[WorkAssignmentService] Resolved doc nav-prop: ${match.navPropName} for ${referencedEntity}`);
     return match.navPropName;
@@ -110,13 +157,20 @@ function _resolveDocNavProp(entries: INavPropEntry[], referencedEntity: string):
 export class WorkAssignmentService {
   private readonly _dataService: IDataService;
   private readonly _entityService: EntityCreationService;
+  private readonly _tenantId: string;
 
   constructor(
     dataService: IDataService,
     authenticatedFetch: AuthenticatedFetchFn,
     bffBaseUrl: string,
-    private readonly _containerId?: string
+    private readonly _containerId?: string,
+    /**
+     * AAD tenant ID for post-upload RAG indexing routing. When omitted,
+     * indexing is skipped (files still upload to SPE successfully).
+     */
+    tenantId?: string
   ) {
+    this._tenantId = tenantId ?? '';
     this._dataService = dataService;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     // Wrap IDataService to adapt createRecord return type.
@@ -194,7 +248,7 @@ export class WorkAssignmentService {
     try {
       // IDataService.retrieveMultipleRecords has no maxPageSize param
       const result = await this._dataService.retrieveMultipleRecords(cfg.entity, query);
-      return result.entities.map((e) => ({
+      return result.entities.map(e => ({
         id: e[cfg.idField] as string,
         name: e[cfg.nameField] as string,
       }));
@@ -214,14 +268,17 @@ export class WorkAssignmentService {
     recordType: 'matter' | 'project' | 'invoice' | 'event',
     recordId: string
   ): Promise<Partial<ICreateWorkAssignmentFormState>> {
-    const fieldMaps: Record<string, {
-      entity: string;
-      nameField: string;
-      descField?: string;
-      matterTypeField?: string;
-      practiceAreaField?: string;
-      priorityField?: string;
-    }> = {
+    const fieldMaps: Record<
+      string,
+      {
+        entity: string;
+        nameField: string;
+        descField?: string;
+        matterTypeField?: string;
+        practiceAreaField?: string;
+        priorityField?: string;
+      }
+    > = {
       matter: {
         entity: 'sprk_matter',
         nameField: 'sprk_mattername',
@@ -277,7 +334,10 @@ export class WorkAssignmentService {
         if (prioVal) result.priority = prioVal;
       }
     } catch (err) {
-      console.warn(`[WorkAssignmentService] readRecordForPrefill basic fields failed for ${recordType}(${recordId}):`, err);
+      console.warn(
+        `[WorkAssignmentService] readRecordForPrefill basic fields failed for ${recordType}(${recordId}):`,
+        err
+      );
       return result;
     }
 
@@ -285,7 +345,9 @@ export class WorkAssignmentService {
     if (mapping.matterTypeField) {
       try {
         const mtQuery = `?$select=${mapping.matterTypeField}`;
-        console.info(`[WorkAssignmentService] readRecordForPrefill matterType: ${mapping.entity}(${recordId})${mtQuery}`);
+        console.info(
+          `[WorkAssignmentService] readRecordForPrefill matterType: ${mapping.entity}(${recordId})${mtQuery}`
+        );
         const mtRecord = await this._dataService.retrieveRecord(mapping.entity, recordId, mtQuery);
         const mtId = mtRecord[mapping.matterTypeField] as string | undefined;
         if (mtId) {
@@ -294,14 +356,19 @@ export class WorkAssignmentService {
           result.matterTypeName = (mtRecord[formattedKey] as string) ?? '';
         }
       } catch (err) {
-        console.warn(`[WorkAssignmentService] readRecordForPrefill matterType failed for ${recordType}(${recordId}):`, err);
+        console.warn(
+          `[WorkAssignmentService] readRecordForPrefill matterType failed for ${recordType}(${recordId}):`,
+          err
+        );
       }
     }
 
     if (mapping.practiceAreaField) {
       try {
         const paQuery = `?$select=${mapping.practiceAreaField}`;
-        console.info(`[WorkAssignmentService] readRecordForPrefill practiceArea: ${mapping.entity}(${recordId})${paQuery}`);
+        console.info(
+          `[WorkAssignmentService] readRecordForPrefill practiceArea: ${mapping.entity}(${recordId})${paQuery}`
+        );
         const paRecord = await this._dataService.retrieveRecord(mapping.entity, recordId, paQuery);
         const paId = paRecord[mapping.practiceAreaField] as string | undefined;
         if (paId) {
@@ -310,7 +377,10 @@ export class WorkAssignmentService {
           result.practiceAreaName = (paRecord[formattedKey] as string) ?? '';
         }
       } catch (err) {
-        console.warn(`[WorkAssignmentService] readRecordForPrefill practiceArea failed for ${recordType}(${recordId}):`, err);
+        console.warn(
+          `[WorkAssignmentService] readRecordForPrefill practiceArea failed for ${recordType}(${recordId}):`,
+          err
+        );
       }
     }
 
@@ -324,10 +394,7 @@ export class WorkAssignmentService {
    * Search contacts filtered by parent organization.
    * Used for "Law Firm Attorney" lookup, filtered by the selected law firm.
    */
-  async searchContactsByOrganization(
-    orgId: string,
-    nameFilter: string
-  ): Promise<ILookupItem[]> {
+  async searchContactsByOrganization(orgId: string, nameFilter: string): Promise<ILookupItem[]> {
     if (!nameFilter || nameFilter.trim().length < 1) return [];
 
     const safeFilter = nameFilter.trim().replace(/'/g, "''");
@@ -340,7 +407,7 @@ export class WorkAssignmentService {
     try {
       // IDataService.retrieveMultipleRecords has no maxPageSize param
       const result = await this._dataService.retrieveMultipleRecords('contact', query);
-      return result.entities.map((e) => ({
+      return result.entities.map(e => ({
         id: e['contactid'] as string,
         name: (e['fullname'] as string) + (e['emailaddress1'] ? ` (${e['emailaddress1']})` : ''),
       }));
@@ -386,25 +453,44 @@ export class WorkAssignmentService {
       entity['sprk_responseduedate'] = form.responseDueDate;
     }
 
-    // Store the SPE container ID on the work assignment record (enables Documents tab)
+    // Store the host-resolved SPE container ID on the work assignment record (enables Documents tab).
+    // Applied FIRST so it acts as an explicit override during the subsequent BU cascade (INV-5).
     if (this._containerId) {
       entity['sprk_containerid'] = this._containerId;
     }
 
     // Helper: bind a lookup if the nav-prop exists on the entity
-    const bindLookup = (
-      referencedEntity: string,
-      entitySet: string,
-      guid: string,
-      columnHint?: string
-    ) => {
+    const bindLookup = (referencedEntity: string, entitySet: string, guid: string, columnHint?: string) => {
       const navProp = findNavProp(navProps, referencedEntity, columnHint);
       if (navProp) {
         entity[`${navProp}@odata.bind`] = `/${entitySet}(${guid})`;
       } else {
-        console.warn(`[WorkAssignmentService] No nav-prop found for ${referencedEntity} (hint: ${columnHint}), skipping binding`);
+        console.warn(
+          `[WorkAssignmentService] No nav-prop found for ${referencedEntity} (hint: ${columnHint}), skipping binding`
+        );
       }
     };
+
+    // FR-WIZ-04: Cascade `sprk_containerid` + `sprk_searchindexname` + Phase G `sprk_ai_search_index`
+    // lookup from the current user's owning Business Unit. INV-5 guards each scalar field
+    // independently. If the user's BU has any field unset, the corresponding payload field is
+    // left untouched and the BFF tenant-default chain takes over server-side.
+    try {
+      const currentUserId = _getCurrentUserId();
+      if (currentUserId) {
+        // IDataService is a structural superset of IWebApiLike (retrieveRecord, retrieveMultipleRecords).
+        const defaults = await EntityCreationService.resolveUserBuDefaults(this._dataService, currentUserId);
+        EntityCreationService.applyUserBuDefaults(entity, defaults);
+        if (defaults.searchIndexId) {
+          bindLookup('sprk_aisearchindex', 'sprk_aisearchindexes', defaults.searchIndexId);
+        }
+      } else {
+        console.warn('[WorkAssignmentService] BU cascade skipped: current user ID could not be resolved.');
+      }
+    } catch (err) {
+      // Non-fatal: log and continue. BFF tenant-default chain handles routing if all fields are unset.
+      console.warn('[WorkAssignmentService] BU cascade failed (non-fatal):', err);
+    }
 
     // Related record (matter, project, invoice, event)
     // Uses the shared Polymorphic Resolver pattern (ADR-024):
@@ -438,14 +524,18 @@ export class WorkAssignmentService {
     }
 
     if (form.matterTypeId) bindLookup('sprk_mattertype_ref', 'sprk_mattertype_refs', form.matterTypeId, 'mattertype');
-    if (form.practiceAreaId) bindLookup('sprk_practicearea_ref', 'sprk_practicearea_refs', form.practiceAreaId, 'practicearea');
+    if (form.practiceAreaId)
+      bindLookup('sprk_practicearea_ref', 'sprk_practicearea_refs', form.practiceAreaId, 'practicearea');
 
     // Assign Work lookups (if provided)
     if (assignWork) {
       if (assignWork.assignedAttorneyId) bindLookup('contact', 'contacts', assignWork.assignedAttorneyId, 'attorney');
-      if (assignWork.assignedParalegalId) bindLookup('contact', 'contacts', assignWork.assignedParalegalId, 'paralegal');
-      if (assignWork.assignedLawFirmId) bindLookup('sprk_organization', 'sprk_organizations', assignWork.assignedLawFirmId, 'lawfirm');
-      if (assignWork.assignedLawFirmAttorneyId) bindLookup('contact', 'contacts', assignWork.assignedLawFirmAttorneyId, 'lawfirmattorney');
+      if (assignWork.assignedParalegalId)
+        bindLookup('contact', 'contacts', assignWork.assignedParalegalId, 'paralegal');
+      if (assignWork.assignedLawFirmId)
+        bindLookup('sprk_organization', 'sprk_organizations', assignWork.assignedLawFirmId, 'lawfirm');
+      if (assignWork.assignedLawFirmAttorneyId)
+        bindLookup('contact', 'contacts', assignWork.assignedLawFirmAttorneyId, 'lawfirmattorney');
     }
 
     try {
@@ -476,7 +566,7 @@ export class WorkAssignmentService {
       if (!uploadResult.success) {
         warnings.push(
           `File upload failed (${uploadResult.failureCount} of ${uploadedFiles.length}). ` +
-          'Files can be added from the work assignment record.'
+            'Files can be added from the work assignment record.'
         );
       } else if (uploadResult.uploadedFiles.length > 0) {
         // Discover nav-prop for sprk_document -> sprk_workassignment lookup
@@ -497,6 +587,22 @@ export class WorkAssignmentService {
           if (createResult.warnings.length > 0) {
             warnings.push(...createResult.warnings);
           }
+
+          // Trigger RAG indexing per file (canonical sync OBO path via
+          // @spaarke/sdap-client.SdapApiClient.indexFile). Non-fatal.
+          const indexingWarnings = await this._entityService.indexUploadedFiles(
+            uploadResult.uploadedFiles,
+            this._tenantId,
+            {
+              entityType: 'sprk_workassignment',
+              entityId: workAssignmentId,
+              entityName: form.name.trim(),
+            },
+            createResult.createdDocumentIds
+          );
+          if (indexingWarnings.length > 0) {
+            warnings.push(...indexingWarnings);
+          }
         } catch (err) {
           console.warn('[WorkAssignmentService] Document record creation failed:', err);
           warnings.push('Uploaded files saved to storage but document records could not be created.');
@@ -506,7 +612,7 @@ export class WorkAssignmentService {
       if (uploadResult.failureCount > 0 && uploadResult.successCount > 0) {
         warnings.push(
           `${uploadResult.failureCount} file(s) failed to upload: ` +
-          uploadResult.errors.map((e) => e.fileName).join(', ')
+            uploadResult.errors.map(e => e.fileName).join(', ')
         );
       }
     } else if (uploadedFiles.length > 0 && !this._containerId) {
@@ -548,9 +654,15 @@ export class WorkAssignmentService {
       if (eventState.eventFinalDueDate) {
         entity['sprk_finalduedate'] = eventState.eventFinalDueDate;
       }
-      if (eventState.addTodo) {
-        entity['sprk_todoflag'] = true;
-      }
+
+      // R3 (smart-todo-decoupling-r3, task 031): The legacy "Add a To Do"
+      // checkbox that wrote `entity['sprk_todoflag'] = true` was removed here
+      // per FR-15 / OS-1. The `sprk_event.sprk_todoflag` column is being
+      // dropped from the schema; To Dos are now first-class `sprk_todo`
+      // records created via the CreateTodoWizard. Consumers who want a
+      // companion To Do for a work assignment's follow-on event should
+      // launch the CreateTodoWizard separately and select the event as
+      // the regarding record.
 
       // Link to work assignment
       const waNavProp = findNavProp(navProps, 'sprk_workassignment', 'workassignment');

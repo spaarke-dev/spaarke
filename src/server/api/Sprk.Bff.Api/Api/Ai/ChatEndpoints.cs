@@ -3,15 +3,16 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
-using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Ai.Safety.CrossMatter;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Telemetry;
-
 // Explicit alias to avoid ChatMessage ambiguity between domain model and AI framework.
 // Sprk.Bff.Api.Models.Ai.Chat.ChatMessage is the Dataverse persistence record.
 // Microsoft.Extensions.AI.ChatMessage is the AI framework conversation message.
@@ -252,6 +253,36 @@ public static class ChatEndpoints
             .ProducesProblem(401)
             .ProducesProblem(404);
 
+        // === FR-50: User-confirmed playbook execution ===
+        // Registered OUTSIDE the /api/ai/chat group because the FE (task 117b
+        // ConversationPane.handleSelectPlaybook) POSTs directly to
+        // /api/ai/playbook-dispatch/execute — distinct route surface that doesn't share
+        // the /chat session path conventions but reuses the same SSE streaming + auth
+        // contracts. The endpoint is mapped UNCONDITIONALLY per ADR-032 symmetric DI.
+        var playbookDispatchGroup = app.MapGroup("/api/ai/playbook-dispatch")
+            .RequireAuthorization()
+            .WithTags("AI Chat");
+
+        playbookDispatchGroup.MapPost("/execute", ExecutePlaybookAsync)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-stream")
+            .WithName("ExecutePlaybookDispatch")
+            .WithSummary("Execute a user-selected playbook from the FR-49 link-button flow")
+            .WithDescription(
+                "Direct playbook execution endpoint called by the FE after the user clicks " +
+                "a candidate from a playbook_options SSE event (FR-49) or selects one from the " +
+                "Library modal (FR-51). Bypasses Stage 1 vector match + Stage 2 LLM refinement — " +
+                "the user click IS the execution authorization (FR-48 invariant). " +
+                "Streams the chosen playbook's output via the standard PlaybookOutputHandler " +
+                "SSE pipeline.")
+            .Produces(200, contentType: "text/event-stream")
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404)
+            .ProducesProblem(429)
+            .ProducesProblem(500);
+
         return app;
     }
 
@@ -486,7 +517,12 @@ public static class ChatEndpoints
                 httpContext,
                 sseWriter,
                 latestUserMessage: effectiveMessage,
-                cancellationToken: cancellationToken);
+                uploadedFiles: session.UploadedFiles,
+                cancellationToken: cancellationToken,
+                // R6 Pillar 8 / task 082 / FR-50: forward the soft-slash hint downstream.
+                // Wire-format field renamed `commandIntent` → `intentHint` per
+                // chat-routing-redesign-r1 FR-07 / task 022 (2026-06-22).
+                intentHint: request.IntentHint);
 
             // Convert session history to AI framework messages for context
             var history = BuildAiHistory(session.Messages);
@@ -563,9 +599,122 @@ public static class ChatEndpoints
             // PlaybookOutputHandler for typed output handling (dialog, navigation, download, insert).
             // Text output falls through to the standard streaming flow below.
             var dispatcher = await agentFactory.CreatePlaybookDispatcherAsync(tenantId, cancellationToken);
-            var dispatchResult = await dispatcher.DispatchAsync(request.Message, session.HostContext, cancellationToken);
 
-            if (dispatchResult is { Matched: true, OutputType: not OutputType.Text })
+            // === FR-49 / FR-50: File-aware playbook OPTIONS flow ===
+            // When the user turn has attachments, run Phase B vector match → top-N candidate
+            // selection (PlaybookCandidateSelector) → optional reranker (IntentRerankerService)
+            // → playbook_options SSE event. This NEVER auto-executes (FR-48 invariant); the user
+            // picks via the FE link buttons (task 117b) which POSTs to
+            // /api/ai/playbook-dispatch/execute (see ExecutePlaybookAsync below).
+            //
+            // When the user turn has NO attachments, fall through to the existing single-match
+            // auto-dispatch flow below (preserves R6 backward compatibility for natural-language
+            // slash + non-attachment paths).
+            if (request.Attachments is { Count: > 0 })
+            {
+                var phaseBResults = await dispatcher
+                    .RunPhaseBVectorMatchAsync(
+                        request.Message,
+                        request.Attachments,
+                        sessionFiles: session.UploadedFiles?
+                            .Select(f => (ChatSessionFile?)f)
+                            .ToList(),
+                        cancellationToken: cancellationToken,
+                        intentHint: request.IntentHint);
+
+                // Map request.Attachments → AttachmentMetadata for the reranker LLM input
+                // (ADR-015 tier-1 — filename + content-type + integer text length only).
+                var rerankerAttachmentMetadata = request.Attachments
+                    .Select(a => new AttachmentMetadata
+                    {
+                        Filename = a.Filename,
+                        ContentType = a.ContentType,
+                        TextLength = a.TextContent?.Length ?? 0,
+                    })
+                    .ToList();
+
+                // Best-effort correlation of attachment → session file ID by index. When the
+                // upload manifest hasn't been wired for a given attachment, the corresponding
+                // ID is omitted (ADR-015 tier-1 — opaque IDs only).
+                var sessionAttachmentIds = new List<string>();
+                if (session.UploadedFiles is { Count: > 0 })
+                {
+                    for (var i = 0; i < request.Attachments.Count && i < session.UploadedFiles.Count; i++)
+                    {
+                        var fileId = session.UploadedFiles[i].FileId;
+                        if (!string.IsNullOrWhiteSpace(fileId))
+                        {
+                            sessionAttachmentIds.Add(fileId);
+                        }
+                    }
+                }
+
+                var builder = httpContext.RequestServices
+                    .GetRequiredService<PlaybookOptionsEventBuilder>();
+                var payload = await builder
+                    .BuildAsync(phaseBResults, request.Message, rerankerAttachmentMetadata,
+                                sessionAttachmentIds, cancellationToken)
+                    .ConfigureAwait(false);
+
+                // Emit the playbook_options SSE event then close the stream.
+                var sseEvent = ChatSseEventFactory.CreatePlaybookOptionsEvent(payload);
+                await WriteChatSSEAsync(response, sseEvent, cancellationToken);
+                await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
+
+                // Persist the user message so the conversation history reflects the turn.
+                var seqBaseForOptions = session.Messages.Count;
+                var optionsUserMessage = new DvChatMessage(
+                    MessageId: Guid.NewGuid().ToString("N"),
+                    SessionId: sessionId,
+                    Role: ChatMessageRole.User,
+                    Content: request.Message,
+                    TokenCount: 0,
+                    CreatedAt: DateTimeOffset.UtcNow,
+                    SequenceNumber: seqBaseForOptions + 1);
+                await historyManager.AddMessageAsync(session, optionsUserMessage, CancellationToken.None);
+
+                // ADR-015 tier-1 telemetry: counts and flags only — no message text, no
+                // attachment names beyond what PlaybookOptionsEventBuilder already logs.
+                logger.LogInformation(
+                    "FR-49 playbook_options emitted — session={SessionId}, candidateCount={CandidateCount}, " +
+                    "rerankInvoked={RerankInvoked}, attachmentCount={AttachmentCount}, sessionFileIdCount={SessionFileIdCount}",
+                    sessionId, payload.Candidates.Count, payload.RerankInvoked,
+                    request.Attachments.Count, sessionAttachmentIds.Count);
+
+                return;
+            }
+            // === End FR-49 / FR-50 ===
+
+            // FR-15 (task 110): forward per-turn attachments to the dispatcher so the Phase 5R
+            // Wave 5-A pipeline (tasks 111R/112/113R/114R) can apply file-aware classification.
+            // For task 110 the dispatcher accepts but does not act on attachments — the parameter
+            // is wired here so downstream-task migrations don't require a second touch of this
+            // call site. Null when the user turn has no attachments (existing message-only path).
+            // FR-20 (task 115): also forward the soft-slash intentHint as a vector-query bias
+            // signal. Phase B uses it to prefix the per-file query; the pre-task-115 path is
+            // preserved when IntentHint is null/empty.
+            var dispatchResult = await dispatcher.DispatchAsync(
+                request.Message,
+                session.HostContext,
+                cancellationToken,
+                attachments: request.Attachments,
+                intentHint: request.IntentHint);
+
+            // Task 048 (FR-14d) — the gate now also fires for non-Chat NodeDestination
+            // values (Workspace / Both / FormPrefill / SideEffect). The destination is
+            // populated by PlaybookDispatcher (task 047) from the matched playbook's
+            // DeliverOutput node's sprk_configjson; Workspace-bound playbooks like
+            // summarize-document-for-workspace have OutputType.Text (their content is
+            // text — only the destination surface differs), so routing solely on
+            // OutputType would never hand the dispatch to the handler. The Chat default
+            // path remains: when NodeDestination == Chat AND OutputType == Text, the
+            // handler is bypassed and standard streaming below runs unchanged.
+            var routesViaHandler =
+                dispatchResult is { Matched: true } &&
+                (dispatchResult.OutputType != OutputType.Text ||
+                 dispatchResult.NodeDestination != NodeDestination.Chat);
+
+            if (routesViaHandler)
             {
                 var outputHandler = agentFactory.CreatePlaybookOutputHandler();
                 var handled = await outputHandler.HandleOutputAsync(
@@ -663,17 +812,46 @@ public static class ChatEndpoints
 
             if (!actionChipsEmitted)
             {
-                // Generate follow-up suggestions via a focused LLM call (~100 tokens).
-                // Runs after the main response completes so it doesn't delay perceived response time.
-                // Bounded by a 2-second timeout — if generation fails or exceeds the timeout,
-                // suggestions are silently skipped (ADR-019: suggestions are optional, no error emitted).
+                // R6 Hotfix Wave B-G10d (2026-06-10) — Skip suggestion generation when the
+                // assistant response is very short (<150 chars). This happens when the FR-24
+                // dedup directive (R6 task 042 + B-G9b/B-G10a) constrains the chat-side LLM to a
+                // single-sentence acknowledgment because a playbook will render the primary result
+                // in the workspace tab. The suggestion-LLM call would have no substantive content
+                // to work with (just the ack phrase) — generated suggestions would be useless or
+                // empty. Better to show nothing than to show generic / meta suggestions.
                 //
-                // FR-07 (task 050): intentionally pass request.Message (NOT effectiveMessage)
-                // here — suggestions are follow-up prompts generated against the user's
-                // conceptual question, not the augmented attachment blob. Including 5 MB of
-                // attachment text would balloon this ~100-token suggestion call.
-                await GenerateAndEmitSuggestionsAsync(
-                    chatClient, response, request.Message, fullResponse.ToString(), logger, sessionId, cancellationToken);
+                // R7 ARCHITECTURAL HOME for proper followups (per user feedback 2026-06-10):
+                //   1. Add `sprk_followups` JSON column on `sprk_analysisaction` declaring the
+                //      action's natural followup affordances. Each entry: {label, playbookId,
+                //      parameterMapping}.
+                //   2. The DeliverOutput node executor emits a `followups` SSE event alongside
+                //      the widget. SprkChat already has the chip-rendering infrastructure.
+                //   3. Followup click → invoke_playbook(playbookId, parameters) via existing
+                //      Pillar 3 dispatch. Click becomes a proper orchestrated playbook execution,
+                //      not a generic LLM chat turn. Aligns with Pillar 8 "card-as-intent".
+                //
+                // Pre-existing chat turns (no playbook fired) still get the LLM-generated
+                // suggestions exactly as before — the threshold only suppresses the dedup-ack case.
+                if (fullResponse.Length >= 150)
+                {
+                    // Generate follow-up suggestions via a focused LLM call (~100 tokens).
+                    // Runs after the main response completes so it doesn't delay perceived response time.
+                    // Bounded by a 2-second timeout — if generation fails or exceeds the timeout,
+                    // suggestions are silently skipped (ADR-019: suggestions are optional, no error emitted).
+                    //
+                    // FR-07 (task 050): intentionally pass request.Message (NOT effectiveMessage)
+                    // here — suggestions are follow-up prompts generated against the user's
+                    // conceptual question, not the augmented attachment blob. Including 5 MB of
+                    // attachment text would balloon this ~100-token suggestion call.
+                    await GenerateAndEmitSuggestionsAsync(
+                        chatClient, response, request.Message, fullResponse.ToString(), logger, sessionId, cancellationToken);
+                }
+                else
+                {
+                    logger.LogDebug(
+                        "B-G10d: skipping suggestion generation — response length {Length} below dedup-ack threshold (likely playbook ack); R7 backlog: playbook-driven followups",
+                        fullResponse.Length);
+                }
             }
 
             // Write done event
@@ -726,6 +904,25 @@ public static class ChatEndpoints
             // The client is already gone so there is no receiver for further frames.
             logger.LogInformation(
                 "Client disconnected during SendMessage: session={SessionId}", sessionId);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B2/B3): NullSprkChatAgentFactory or
+            // NullPendingPlanManager surfaced. Response is already committed as text/event-stream
+            // — emit the error as an SSE 'error' chunk with the stable errorCode so the client
+            // can render kill-switch-specific UX. Mirrors the WorkspaceMatterEndpoints HandleAiSummary
+            // pattern established in Tier 2.
+            logger.LogDebug(
+                "SendMessage called while AI chat feature disabled. ErrorCode={ErrorCode}, Session={SessionId}",
+                ex.ErrorCode, sessionId);
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("error", $"[{ex.ErrorCode}] {ex.Message}"),
+                    CancellationToken.None);
+            }
         }
         catch (Exception ex)
         {
@@ -1088,7 +1285,30 @@ public static class ChatEndpoints
         // Atomic get-and-delete: prevents double-execution (task 070 design doc, Risk 2)
         // First approval: finds the key, deletes it, returns the plan → proceed
         // Second approval: key already gone → returns null → 409 Conflict
-        var pendingPlan = await pendingPlanManager.GetAndDeleteAsync(tenantId, sessionId, cancellationToken);
+        PendingPlan? pendingPlan;
+        try
+        {
+            pendingPlan = await pendingPlanManager.GetAndDeleteAsync(tenantId, sessionId, cancellationToken);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B3): NullPendingPlanManager surfaced. Response
+            // has NOT yet been committed as SSE, so return a 503 ProblemDetails JSON body.
+            logger.LogDebug(
+                "ApprovePlan called while AI compound-intent feature disabled. ErrorCode={ErrorCode}, Session={SessionId}",
+                ex.ErrorCode, sessionId);
+            response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            response.ContentType = "application/problem+json";
+            await response.WriteAsJsonAsync(new
+            {
+                type = FeatureDisabledResults.TypeUri,
+                title = "Feature Disabled",
+                status = 503,
+                detail = ex.Message,
+                errorCode = ex.ErrorCode
+            }, cancellationToken);
+            return;
+        }
 
         if (pendingPlan is null)
         {
@@ -1148,6 +1368,7 @@ public static class ChatEndpoints
                 httpContext,
                 sseWriter,
                 latestUserMessage: lastUserMessage,
+                uploadedFiles: session.UploadedFiles,
                 cancellationToken: cancellationToken);
 
             var history = BuildAiHistory(session.Messages);
@@ -1355,6 +1576,22 @@ public static class ChatEndpoints
                 "Client disconnected during ApprovePlan: session={SessionId}, planId={PlanId}",
                 sessionId, pendingPlan.PlanId);
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B2): NullSprkChatAgentFactory surfaced during
+            // agent construction after SSE headers were already committed. Emit SSE error chunk.
+            logger.LogDebug(
+                "ApprovePlan called while AI chat feature disabled. ErrorCode={ErrorCode}, Session={SessionId}, PlanId={PlanId}",
+                ex.ErrorCode, sessionId, pendingPlan.PlanId);
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("error", $"[{ex.ErrorCode}] {ex.Message}"),
+                    CancellationToken.None);
+            }
+        }
         catch (Exception ex)
         {
             logger.LogError(ex,
@@ -1433,6 +1670,16 @@ public static class ChatEndpoints
                     }
                 }
             }
+            catch (FeatureDisabledException ex)
+            {
+                // Task 011 Phase 1b Tier 2 (D-09 §2 B6): NullPlaybookService surfaced. Fail-fast 503
+                // — returning empty playbook list would silently render "no playbooks available"
+                // and mask the kill-switch state.
+                logger.LogDebug(
+                    "Playbook list called while AI feature disabled. ErrorCode={ErrorCode}, UserId={UserId}",
+                    ex.ErrorCode, userId);
+                return ex.AsFeatureDisabled503();
+            }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Failed to load user playbooks for userId={UserId}; continuing with public only", userId);
@@ -1450,6 +1697,14 @@ public static class ChatEndpoints
                     playbooks.Add(new ChatPlaybookInfo(pb.Id.ToString(), pb.Name, pb.Description, pb.IsPublic));
                 }
             }
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B6): NullPlaybookService surfaced. Fail-fast 503.
+            logger.LogDebug(
+                "Public playbook list called while AI feature disabled. ErrorCode={ErrorCode}",
+                ex.ErrorCode);
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {
@@ -1589,8 +1844,20 @@ public static class ChatEndpoints
             "Resolving commands for session={SessionId}, tenant={TenantId}, entityType={EntityType}",
             sessionId, tenantId, session.HostContext?.EntityType ?? "(none)");
 
-        var resolver = agentFactory.CreateCommandResolver();
-        var commands = await resolver.ResolveCommandsAsync(tenantId, session.HostContext, cancellationToken);
+        IEnumerable<CommandEntry> commands;
+        try
+        {
+            var resolver = agentFactory.CreateCommandResolver();
+            commands = await resolver.ResolveCommandsAsync(tenantId, session.HostContext, cancellationToken);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B2): NullSprkChatAgentFactory surfaced.
+            logger.LogDebug(
+                "GetCommands called while AI chat feature disabled. ErrorCode={ErrorCode}, Session={SessionId}",
+                ex.ErrorCode, sessionId);
+            return ex.AsFeatureDisabled503();
+        }
 
         // Partition into system vs. dynamic and project to CommandResponseItem with
         // explicit source discriminator for frontend SlashCommandMenu grouping (R2-053).
@@ -1910,6 +2177,212 @@ public static class ChatEndpoints
     }
 
     // =========================================================================
+    // FR-50 — User-confirmed playbook execution (POST /api/ai/playbook-dispatch/execute)
+    // =========================================================================
+
+    /// <summary>
+    /// POST /api/ai/playbook-dispatch/execute
+    ///
+    /// Direct playbook execution endpoint called by the FE after the user clicks a candidate
+    /// from a <c>playbook_options</c> SSE event (FR-49) or selects one from the Library modal
+    /// (FR-51). The endpoint:
+    /// <list type="number">
+    ///   <item><description>Validates the session exists for the tenant.</description></item>
+    ///   <item><description>Looks up the playbook by ID via <see cref="IPlaybookLookupService"/>.</description></item>
+    ///   <item><description>Builds a <c>DispatchResult</c> directly (bypassing Stage 1/2 — the user click IS the authorization, FR-48 invariant).</description></item>
+    ///   <item><description>Routes through <see cref="PlaybookOutputHandler"/> to stream the output via SSE.</description></item>
+    ///   <item><description>Persists the user's original message to history.</description></item>
+    /// </list>
+    ///
+    /// <para>
+    /// ADR-015 tier-1 telemetry: only deterministic IDs + counts + outcome flags are logged.
+    /// The <c>originalMessage</c> is forwarded as the dispatch context but never written to logs.
+    /// </para>
+    /// </summary>
+    private static async Task ExecutePlaybookAsync(
+        PlaybookDispatchExecuteRequest request,
+        ChatSessionManager sessionManager,
+        ChatHistoryManager historyManager,
+        SprkChatAgentFactory agentFactory,
+        IPlaybookLookupService playbookLookup,
+        HttpContext httpContext,
+        ILogger<SprkChatAgentFactory> logger)
+    {
+        var cancellationToken = httpContext.RequestAborted;
+        var response = httpContext.Response;
+        var tenantId = ExtractTenantId(httpContext);
+
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            await response.WriteAsJsonAsync(
+                new { error = "Tenant ID not found in token claims or X-Tenant-Id header" },
+                cancellationToken);
+            return;
+        }
+
+        // Payload validation (RFC 7807 ProblemDetails per ADR-019).
+        if (string.IsNullOrWhiteSpace(request.PlaybookId))
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            response.ContentType = "application/problem+json";
+            await response.WriteAsJsonAsync(new
+            {
+                type = "https://spaarke/errors/missing-playbook-id",
+                title = "Bad Request",
+                status = 400,
+                detail = "playbookId is required.",
+            }, cancellationToken);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            response.ContentType = "application/problem+json";
+            await response.WriteAsJsonAsync(new
+            {
+                type = "https://spaarke/errors/missing-session-id",
+                title = "Bad Request",
+                status = 400,
+                detail = "sessionId is required.",
+            }, cancellationToken);
+            return;
+        }
+
+        // Load the session — the user-selected playbook MUST execute against an existing
+        // chat session so per-turn context (host context, uploaded files) is available.
+        var session = await sessionManager.GetSessionAsync(tenantId, request.SessionId!, cancellationToken);
+        if (session is null)
+        {
+            response.StatusCode = StatusCodes.Status404NotFound;
+            await response.WriteAsJsonAsync(
+                new { error = $"Session {request.SessionId} not found" },
+                cancellationToken);
+            return;
+        }
+
+        // Look up the playbook by ID (stable alt-key per IPlaybookLookupService docs).
+        PlaybookResponse? playbook;
+        try
+        {
+            playbook = await playbookLookup.GetByIdAsync(request.PlaybookId!, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "ExecutePlaybookAsync: playbook lookup failed — playbookId={PlaybookId}, session={SessionId}",
+                request.PlaybookId, request.SessionId);
+            response.StatusCode = StatusCodes.Status404NotFound;
+            response.ContentType = "application/problem+json";
+            await response.WriteAsJsonAsync(new
+            {
+                type = "https://spaarke/errors/playbook-not-found",
+                title = "Not Found",
+                status = 404,
+                detail = $"Playbook {request.PlaybookId} not found in this tenant.",
+            }, cancellationToken);
+            return;
+        }
+
+        if (playbook is null)
+        {
+            response.StatusCode = StatusCodes.Status404NotFound;
+            response.ContentType = "application/problem+json";
+            await response.WriteAsJsonAsync(new
+            {
+                type = "https://spaarke/errors/playbook-not-found",
+                title = "Not Found",
+                status = 404,
+                detail = $"Playbook {request.PlaybookId} not found in this tenant.",
+            }, cancellationToken);
+            return;
+        }
+
+        // Set SSE headers — output streams via PlaybookOutputHandler.HandleOutputAsync.
+        response.ContentType = "text/event-stream";
+        response.Headers.CacheControl = "no-cache";
+        response.Headers.Connection = "keep-alive";
+        response.Headers["X-Accel-Buffering"] = "no";
+
+        // ADR-015 tier-1: log only deterministic IDs + counts + flags.
+        logger.LogInformation(
+            "FR-50 playbook-dispatch/execute: session={SessionId}, tenant={TenantId}, " +
+            "playbookId={PlaybookId}, sessionAttachmentCount={SessionAttachmentCount}",
+            request.SessionId, tenantId, request.PlaybookId,
+            request.SessionAttachmentIds?.Count ?? 0);
+
+        // Build the DispatchResult directly — bypasses Stage 1 vector match + Stage 2 LLM
+        // refinement. The user click IS the authorization (FR-48 invariant).
+        var dispatcher = await agentFactory.CreatePlaybookDispatcherAsync(tenantId, cancellationToken);
+
+        DispatchResult dispatchResult;
+        try
+        {
+            dispatchResult = await dispatcher.BuildDispatchResultForPlaybookAsync(
+                request.PlaybookId!,
+                playbook.Name,
+                extractedParameters: null,
+                cancellationToken: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "FR-50 playbook-dispatch/execute: BuildDispatchResultForPlaybookAsync threw — " +
+                "playbookId={PlaybookId}, session={SessionId}",
+                request.PlaybookId, request.SessionId);
+            await WriteChatSSEAsync(
+                response,
+                new ChatSseEvent("error", "Failed to load playbook configuration."),
+                cancellationToken);
+            return;
+        }
+
+        // Route the output through the standard PlaybookOutputHandler SSE pipeline.
+        var outputHandler = agentFactory.CreatePlaybookOutputHandler();
+        var handled = await outputHandler.HandleOutputAsync(
+            dispatchResult,
+            (evt, ct) => WriteChatSSEAsync(response, evt, ct),
+            session.HostContext,
+            cancellationToken);
+
+        if (!handled)
+        {
+            // Handler returned false (e.g. Text destination, which the chat session handler
+            // normally streams via the agent). For the FR-50 path there is no chat agent
+            // context to stream into — emit a short ack and close so the FE knows the
+            // request was acknowledged. ADR-015: ack text is static, not derived from user content.
+            await WriteChatSSEAsync(
+                response,
+                new ChatSseEvent("token", $"Started \"{playbook.Name}\"."),
+                cancellationToken);
+        }
+
+        // Emit done + persist the user's original message to history.
+        await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(request.OriginalMessage))
+        {
+            var seqBaseForExecute = session.Messages.Count;
+            var executeUserMessage = new DvChatMessage(
+                MessageId: Guid.NewGuid().ToString("N"),
+                SessionId: request.SessionId!,
+                Role: ChatMessageRole.User,
+                Content: request.OriginalMessage!,
+                TokenCount: 0,
+                CreatedAt: DateTimeOffset.UtcNow,
+                SequenceNumber: seqBaseForExecute + 1);
+            await historyManager.AddMessageAsync(session, executeUserMessage, CancellationToken.None);
+        }
+
+        logger.LogInformation(
+            "FR-50 playbook-dispatch/execute: handled — session={SessionId}, playbookId={PlaybookId}, " +
+            "outputType={OutputType}, destination={Destination}, handled={Handled}",
+            request.SessionId, request.PlaybookId, dispatchResult.OutputType,
+            dispatchResult.NodeDestination, handled);
+    }
+
+    // =========================================================================
     // Private Helpers
     // =========================================================================
 
@@ -1945,7 +2418,9 @@ public static class ChatEndpoints
     }
 
     // =========================================================================
-    // FR-07 Multi-file attachment validation + composition (task 050)
+    // FR-07 Multi-file attachment validation + composition (R3 task 050)
+    // R4 task 050 (A-4): client-side binary cap raised 10 → 25 MB; server text
+    // caps unchanged (operate on extracted text, not binary — see policy doc).
     // =========================================================================
     //
     // PLACEMENT JUSTIFICATION (per CLAUDE.md §10 BFF Hygiene + ADR-013):
@@ -1956,6 +2431,9 @@ public static class ChatEndpoints
     // - All four BFF decision criteria (ADR-013 §"Decision Criteria") answer "BFF" → stays here.
     // - All four CRUD→AI facade boundary rules satisfied: this is AI-internal code in
     //   Api/Ai/, not CRUD code consuming AI — no IBffAiPublicContracts facade needed.
+    //
+    // See docs/standards/CHAT-ATTACHMENT-POLICY.md for the policy, MIME allow-list,
+    // total-text cap rationale, PDF page cap, and upgrade path.
 
     /// <summary>Maximum attachments per chat message (NFR-04, FR-07).</summary>
     internal const int MaxAttachmentsPerMessage = 5;
@@ -1963,13 +2441,24 @@ public static class ChatEndpoints
     /// <summary>
     /// Maximum extracted text length per attachment, in characters.
     /// ~2.5M chars ≈ 10 MB UTF-16 in memory; bounds LLM prompt growth per attachment.
-    /// Aligned with NFR-04 (10 MB per file at the binary/extraction layer).
+    ///
+    /// R4 task 050 (A-4) raised the CLIENT-side binary cap from 10 MB → 25 MB to
+    /// align with DocumentUploadWizard + OfficeService. This char-cap is NOT scaled
+    /// proportionally because it operates on EXTRACTED TEXT, not raw binary. A 25 MB
+    /// PDF typically extracts to &lt;1M chars (image-heavy PDFs even less); a 25 MB
+    /// DOCX often extracts to &lt;500K chars. Keeping this cap at 2.5M chars preserves
+    /// the LLM-prompt envelope without artificially limiting binary file size.
+    ///
+    /// See <c>docs/standards/CHAT-ATTACHMENT-POLICY.md</c> for the full policy + rationale.
     /// </summary>
     internal const int MaxAttachmentTextCharsPerFile = 2_500_000;
 
     /// <summary>
     /// Maximum sum of all attachment <c>TextContent</c> lengths in a single message.
     /// Bounds the LLM prompt size so 5 × 2.5M = 12.5M does not balloon context.
+    ///
+    /// R4 task 050 (A-4): NOT scaled with the 25 MB binary cap — char-cap is the
+    /// LLM-prompt envelope, independent of binary file size. See policy doc.
     /// </summary>
     internal const int MaxAttachmentTextCharsTotal = 5_000_000;
 
@@ -2032,7 +2521,8 @@ public static class ChatEndpoints
                     status: 400));
             }
 
-            // Rule 3: per-file size cap (NFR-04: ≤ 10 MB extracted text)
+            // Rule 3: per-file textContent cap (LLM prompt envelope; independent of
+            // the 25 MB client-side binary cap raised in R4 A-4 — see policy doc).
             if (att.TextContent.Length > MaxAttachmentTextCharsPerFile)
             {
                 return (400, BuildProblemDetails(
@@ -2486,10 +2976,22 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// in-memory only). Default null preserves backwards compatibility for clients that omit
 /// the field. See <see cref="ValidateAttachments"/> for validation rules (NFR-04).
 /// </param>
+/// <param name="IntentHint">
+/// Optional closed-vocabulary soft-slash hint emitted by the frontend
+/// `SoftSlashRouter.decorateBody()` (`summarize` / `draft` / `extract-entities`
+/// / `analyze`). The hint biases the PlaybookDispatcher Phase B per-file vector query (task 115)
+/// so slash + natural-language flows converge on the SAME path. Default null
+/// preserves backwards compatibility.
+/// ADR-015 audit: this is a closed-vocabulary identifier, NEVER raw user message text.
+///
+/// Wire-format field: <c>intentHint</c> (renamed from <c>commandIntent</c> per
+/// chat-routing-redesign-r1 FR-07 / task 022).
+/// </param>
 public record ChatSendMessageRequest(
     string Message,
     string? DocumentId = null,
-    IReadOnlyList<ChatMessageAttachment>? Attachments = null);
+    IReadOnlyList<ChatMessageAttachment>? Attachments = null,
+    string? IntentHint = null);
 
 /// <summary>
 /// In-memory chat-message attachment with client-extracted text content (FR-07).
@@ -2545,6 +3047,36 @@ public record ActionConfirmRequest(string ActionId, Dictionary<string, string>? 
 /// <param name="Message">Human-readable result message.</param>
 /// <param name="ActionId">The action identifier that was confirmed.</param>
 public record ActionConfirmResult(bool Success, string Message, string ActionId);
+
+/// <summary>
+/// Request body for POST /api/ai/playbook-dispatch/execute (FR-50).
+///
+/// Sent by the chat FE (ConversationPane.handleSelectPlaybook) after the user clicks a
+/// candidate from a <c>playbook_options</c> SSE event (FR-49) or selects one from the
+/// Library modal (FR-51). Direct execution endpoint — bypasses vector match + LLM
+/// refinement (FR-48 invariant: user click is the authorization).
+/// </summary>
+/// <param name="PlaybookId">
+/// Opaque immutable Dataverse PK of the user-selected playbook (sprk_aiplaybook GUID,
+/// string form). Required.
+/// </param>
+/// <param name="SessionAttachmentIds">
+/// Deterministic session attachment IDs the FE wants the dispatcher to consider as
+/// per-turn context. Surfaced verbatim — may be empty. ADR-015 tier-1 safe.
+/// </param>
+/// <param name="OriginalMessage">
+/// Verbatim user message that triggered the playbook_options event (FR-49). Persisted to
+/// session history when non-null. ADR-015: NEVER logged.
+/// </param>
+/// <param name="SessionId">
+/// Chat session ID against which the playbook executes. Required — the session carries
+/// host context + uploaded files manifest needed by the playbook orchestrator.
+/// </param>
+public record PlaybookDispatchExecuteRequest(
+    string? PlaybookId,
+    IReadOnlyList<string>? SessionAttachmentIds,
+    string? OriginalMessage,
+    string? SessionId);
 
 /// <summary>
 /// Data payload for the <c>matter_context_change</c> SSE event (AIPU2-028, FR-408).

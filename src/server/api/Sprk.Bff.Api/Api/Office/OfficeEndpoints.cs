@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Office;
 
 namespace Sprk.Bff.Api.Api.Office;
@@ -1136,10 +1137,20 @@ public static class OfficeEndpoints
     /// Quick Create endpoint handler.
     /// Creates a new entity with minimal required fields for inline creation from the Office add-in.
     /// </summary>
+    /// <remarks>
+    /// R3 task 081 (2026-06-22): On successful Matter creation, fires a
+    /// <see cref="MembershipChangedEvent"/> via
+    /// <see cref="IMembershipEventPublisher"/> for the implicit
+    /// <c>ownerid</c> Lookup (matter cluster — only BFF-side mutation site
+    /// for sprk_matter per event-source-inventory §3A). Fire-and-forget
+    /// per FR-2P2.6 + Q2: publisher never throws; mutation succeeds even
+    /// if publish fails (nightly recon job task 085 is the backstop).
+    /// </remarks>
     private static async Task<IResult> QuickCreateAsync(
         string entityType,
         QuickCreateRequest request,
         IOfficeService officeService,
+        IMembershipEventPublisher membershipEventPublisher,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -1236,6 +1247,45 @@ public static class OfficeEndpoints
                 response.Id,
                 response.Name,
                 traceId);
+
+            // R3 task 081 — FR-2P2.6 + Q2 fire-and-forget membership event.
+            // Per event-source-inventory.md §3A + §6.3, the QuickCreate
+            // matter endpoint is the ONLY BFF-side write path for sprk_matter.
+            // The implicit ownerid Lookup is defaulted by Dataverse to the
+            // OBO caller; publish an Added event for that implicit mutation
+            // so the junction-updater (task 084) + nightly recon (task 085)
+            // observe the new association in real time when the topic is
+            // provisioned and the publisher flag is on. When disabled
+            // (default Membership:EventPublisher:Enabled=false), the
+            // NullMembershipEventPublisher peer logs + returns immediately
+            // (ADR-032 P2). Publisher contract guarantees no exceptions
+            // propagate to this site — but discard the Task explicitly to
+            // signal the fire-and-forget semantics + avoid blocking the
+            // 201 Created response on Service Bus latency.
+            if (parsedEntityType == QuickCreateEntityType.Matter
+                && Guid.TryParse(userId, out var callerOid))
+            {
+                var membershipEvent = new MembershipChangedEvent
+                {
+                    // PersonId here is the AAD oid (object id) of the OBO
+                    // caller — Dataverse exposes this as
+                    // `systemuser.azureactivedirectoryobjectid`. Downstream
+                    // consumers (task 084 MembershipJunctionUpdater)
+                    // resolve oid → systemuserid via Dataverse lookup. The
+                    // PersonIdType is User to flag that resolution path.
+                    PersonId = callerOid,
+                    PersonIdType = PersonIdentityType.User,
+                    EntityLogicalName = "sprk_matter",
+                    EntityRecordId = response.Id,
+                    SourceField = "ownerid",
+                    Role = "owner",
+                    MutationType = MembershipMutationType.Added,
+                    CorrelationId = traceId,
+                    OccurredOnUtc = DateTime.UtcNow,
+                };
+
+                _ = membershipEventPublisher.PublishAsync(membershipEvent, cancellationToken);
+            }
 
             // Return 201 Created with location header
             return Results.Created(response.Url ?? $"/office/quickcreate/{entityType}/{response.Id}", response);

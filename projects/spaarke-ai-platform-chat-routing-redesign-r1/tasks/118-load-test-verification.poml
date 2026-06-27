@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="118" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Load test verification: p95 ≤1.5s for 1-3 files; ≤2s worst case 5 files</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>116</dependencies>
+    <blocks>119</blocks>
+    <tags>testing, performance, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tags include 'testing' + 'performance'; load test scaffolding; STANDARD per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author a load test verifying spec FR-19 dispatch budget: p95 ≤1.5s for 1-3 file case; ≤2s worst case 5 files. Use the deployed BFF (`bff-dev` post-task 104) or a local instance with mocked Azure Search + OpenAI. Validate the Phase A/B/C/decider pipeline holds under realistic load (e.g., 10 concurrent users × 50 turns).
+  </prompt>
+
+  <role>SPAARKE platform performance engineer. Familiar with k6 / NBomber / similar load-test tools.</role>
+
+  <goal>
+    Load test artifacts (k6 script OR NBomber project) committed at `tests/load/dispatcher-phase5-load.js` (or .cs). Test report shows p95 ≤1.5s for 1-3 files; ≤2s for 5 files; 0% dispatch timeouts. Telemetry from task 117 surfaces `decidersInvoked` distribution.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-19 + design §1.2 budget table. Phase A (50ms) + Phase B (~200ms 1-3 files; ~300ms 5 files) + Phase C reconciliation (50ms for cases (a)-(d); +500ms decider for case (e)) + existing Stage 2 (500ms). Worst-case 5-file true-disagreement: ~1225ms. Under load with concurrent calls and real Azure latency, must stay under 2s p95 worst case; 1.5s p95 for the common 1-3 file case.
+    </background>
+    <relevant-files>
+      <file>tests/load/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-19">P95 ≤1.5s for 1-3 files; ≤2s worst case 5 files; 0% dispatch timeouts.</constraint>
+    <constraint source="ADR-029">Load test does not push BFF publish size over 60 MB.</constraint>
+    <constraint source="ADR-015">Load test fixtures use synthetic / sanitized content — no real PII.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Choose tooling: k6 (HTTP load with JS scripts) is recommended for ease of distribution; NBomber is fine if existing pattern.</step>
+    <step order="2">Author 3 test scenarios:
+      (a) 1-file dispatch with attachment + commandIntent
+      (b) 3-file dispatch (homogeneous — all-agree case from FR-18)
+      (c) 5-file dispatch (heterogeneous — true-disagreement case forcing decider).</step>
+    <step order="3">Configure load profile: 10 concurrent VUs ramping over 1 minute to steady state for 5 minutes.</step>
+    <step order="4">Use synthetic test PDFs (sample NDAs, sample invoices, sample patents) — no real client data. Place fixtures under `tests/load/fixtures/`.</step>
+    <step order="5">Configure assertions:
+      - p95 (1-3 file) ≤1.5s
+      - p95 (5 files) ≤2s
+      - 0% timeouts</step>
+    <step order="6">Run load test against `bff-dev` (post-104 deploy). Capture metrics + telemetry from task 117.</step>
+    <step order="7">Cross-check telemetry: verify `decidersInvoked` distribution roughly matches expected (most 3-file scenarios should be `decidersInvoked = 0` per FR-18; 5-file forced-disagreement should be `decidersInvoked = 1`).</step>
+    <step order="8">Write load test report at `notes/handoffs/118-phase5-load-test.md` — p50, p95, p99 per scenario; timeout rate; cost projection.</step>
+    <step order="9">If any threshold breached, escalate per CLAUDE.md §6 — do NOT mark complete.</step>
+    <step order="10">Update TASK-INDEX.md: task 118 → ✅; current-task.md → update.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Author load test script + fixtures</tool>
+    <tool name="Bash">Run k6 / NBomber; capture metrics; query App Insights for `decidersInvoked` distribution</tool>
+    <tool name="Read">Spec budgets; existing load test patterns</tool>
+    <tool name="Write">Load test report at notes/handoffs/</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/load/dispatcher-phase5-load.js (or .cs) — 3 scenarios</output>
+    <output type="test">tests/load/fixtures/ — synthetic PDFs</output>
+    <output type="docs">notes/handoffs/118-phase5-load-test.md — p50/p95/p99 per scenario + telemetry cross-check</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Load test scripts committed; reproducible.</criterion>
+    <criterion testable="true">P95 ≤1.5s for 1-3 file scenarios.</criterion>
+    <criterion testable="true">P95 ≤2s for 5-file scenarios.</criterion>
+    <criterion testable="true">0% dispatch timeouts.</criterion>
+    <criterion testable="true">`decidersInvoked` distribution matches FR-18 expectations.</criterion>
+    <criterion testable="true">Test report committed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Synthetic fixtures only — never use real client documents in load tests. The `decidersInvoked` cross-check is a strong sanity gate: if 3-file all-agree scenarios show high decider counts, something is broken in Phase C reconciliation.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — Step 9.5 quality gates skipped (test-only).</protocol>
+  </execution>
+</task>

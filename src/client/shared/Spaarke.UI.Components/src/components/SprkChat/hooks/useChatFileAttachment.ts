@@ -26,8 +26,10 @@
  *   - NFR-12: `pdfjs-dist` and `mammoth` MUST be dynamic `import()`'d inside
  *     `addFiles`, NEVER at module top-level. Each lib is loaded at most once
  *     per hook lifetime and memoized in a ref.
- *   - NFR-04 / FR-07 validation: max 5 files, max 10 MB per file, allowlist of
- *     4 MIME types, PDF max 200 pages.
+ *   - NFR-04 / FR-07 validation: max 5 files, max 25 MB per file, allowlist of
+ *     4 MIME types, PDF max 200 pages. (R4 task 050 / A-4: raised 10 → 25 MB
+ *     to align with DocumentUploadWizard + OfficeService standards. See
+ *     `docs/standards/CHAT-ATTACHMENT-POLICY.md` for rationale and upgrade path.)
  *   - FR-24 / OC-09: extraction failures emit an `Attachment.ExtractionFailure`
  *     error event with `mimeType`, `sizeBytes`, and `errorMessage`. No
  *     happy-path events.
@@ -53,6 +55,17 @@ export interface ChatAttachment {
   filename: string;
   contentType: string;
   textContent: string;
+  /**
+   * Original File reference, retained for binary-upload paths (R5 task 036 —
+   * POST /documents requires multipart binary, not extracted text).
+   *
+   * OPTIONAL + ADDITIVE: existing consumers that only read filename /
+   * contentType / textContent are unaffected. Hosts implementing binary
+   * promotion (e.g. ConversationPane's `executeSummarizeIntent`) should
+   * prefer this field over reconstructing a synthetic File from textContent
+   * because PDF/DOCX bytes do NOT round-trip through extracted text.
+   */
+  file?: File;
 }
 
 /**
@@ -68,6 +81,16 @@ export interface AttachmentChip {
   status: AttachmentChipStatus;
   textContent?: string;
   error?: string;
+  /**
+   * Original File reference, retained for binary-upload paths (R5 task 036 —
+   * POST /documents requires multipart binary, not extracted text).
+   *
+   * Populated during `addFiles` when the chip is created. The File reference
+   * remains readable even after `pdfjs` / `mammoth` consume the
+   * `arrayBuffer()` — browser File objects are reference-counted Blobs and
+   * the underlying bytes stay available for re-reads (e.g. multipart upload).
+   */
+  file?: File;
 }
 
 export type AttachmentChipStatus = 'extracting' | 'ready' | 'error';
@@ -135,8 +158,21 @@ export interface IUseChatFileAttachmentResult {
 /** FR-07: max 5 files per chat message. */
 export const MAX_ATTACHMENTS = 5;
 
-/** NFR-04: max 10 MB per file. */
-export const MAX_FILE_BYTES = 10 * 1024 * 1024;
+/**
+ * NFR-04: max 25 MB per file.
+ *
+ * Raised from 10 MB to 25 MB in R4 task 050 (A-4) to align with
+ * `DocumentUploadWizard` and `OfficeService` (also 25 MB) — 25 MB is the
+ * established Spaarke binary-attachment standard. See
+ * `docs/standards/CHAT-ATTACHMENT-POLICY.md` for rationale, MIME allow-list,
+ * total-text cap policy, PDF page cap, and upgrade path.
+ *
+ * Note: server-side `MaxAttachmentTextCharsPerFile` (2.5M chars) and
+ * `MaxAttachmentTextCharsTotal` (5M chars) operate on EXTRACTED TEXT, not the
+ * raw binary — a 25 MB PDF typically extracts to <1M chars. They are not
+ * scaled with this change; see the policy doc for the rationale.
+ */
+export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 /** NFR-04: PDF page cap (additional constraint beyond size). */
 export const MAX_PDF_PAGES = 200;
@@ -207,9 +243,7 @@ function createIdFactory(): () => string {
 // load the libs across multiple addFiles invocations.
 // ---------------------------------------------------------------------------
 
-async function extractText(
-  file: File
-): Promise<string> {
+async function extractText(file: File): Promise<string> {
   // Browser File.text() is React 19 / modern-browser safe and avoids the
   // older FileReader event-based API.
   return file.text();
@@ -231,9 +265,7 @@ async function extractPdf(
     // Surface the cap as a structured exception so the caller can map it to
     // the `pdf-too-many-pages` reason rather than the generic
     // `extraction-failed` bucket.
-    const error = new Error(
-      `PDF has ${pdf.numPages} pages; max is ${MAX_PDF_PAGES}`
-    );
+    const error = new Error(`PDF has ${pdf.numPages} pages; max is ${MAX_PDF_PAGES}`);
     (error as Error & { code?: string }).code = 'pdf-too-many-pages';
     throw error;
   }
@@ -242,18 +274,13 @@ async function extractPdf(
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
     const page = await pdf.getPage(pageNumber);
     const content = await page.getTextContent();
-    const pageText = content.items
-      .map((item) => ((item as PdfTextItem).str ?? ''))
-      .join(' ');
+    const pageText = content.items.map(item => (item as PdfTextItem).str ?? '').join(' ');
     pageTexts.push(pageText);
   }
   return { text: pageTexts.join('\n\n'), numPages: pdf.numPages };
 }
 
-async function extractDocx(
-  file: File,
-  ensureMammoth: () => Promise<MammothModule>
-): Promise<string> {
+async function extractDocx(file: File, ensureMammoth: () => Promise<MammothModule>): Promise<string> {
   const mammoth = await ensureMammoth();
   const buffer = await file.arrayBuffer();
   const result = await mammoth.extractRawText({ arrayBuffer: buffer });
@@ -285,9 +312,7 @@ async function extractDocx(
  * } = useChatFileAttachment({ onExtractionError });
  * ```
  */
-export function useChatFileAttachment(
-  options: UseChatFileAttachmentOptions = {}
-): IUseChatFileAttachmentResult {
+export function useChatFileAttachment(options: UseChatFileAttachmentOptions = {}): IUseChatFileAttachmentResult {
   const { onExtractionError } = options;
 
   const [files, setFiles] = useState<AttachmentChip[]>([]);
@@ -308,13 +333,29 @@ export function useChatFileAttachment(
       // static `import` at the top of the file. Webpack/Vite emit a separate
       // chunk for `pdfjs-dist`, which is what task 061 / the bundle audit
       // verifies.
-      pdfJsRef.current = import('pdfjs-dist').then((mod) => {
-        // pdfjs-dist exports a `GlobalWorkerOptions` object in modern
-        // versions; if absent the worker is best-effort and may fall back to
-        // a same-thread mode in test environments. We leave the workerSrc
-        // unset here — consumers that need real worker isolation should set
-        // it during their bootstrap rather than coupling the hook to a
-        // particular bundler.
+      pdfJsRef.current = import('pdfjs-dist').then(mod => {
+        // pdfjs-dist v4+ REQUIRES `GlobalWorkerOptions.workerSrc` to be set
+        // or `getDocument` throws "No GlobalWorkerOptions.workerSrc specified".
+        // The previous "leave unset, let consumers configure" approach worked
+        // up to v3 but breaks v4/v5 (observed in R5 SC-18 walkthrough cycle 6,
+        // 2026-06-05 — pdfjs-dist 5.7.x installed via npm).
+        //
+        // Default behavior: if a consumer-supplied workerSrc isn't already
+        // populated (consumers CAN set it before this code runs by importing
+        // pdfjs-dist eagerly and writing GlobalWorkerOptions), point at a
+        // versioned jsdelivr CDN URL matching the installed major.minor.
+        // This works in browser contexts allowing external CDN (most Power
+        // Apps environments allow jsdelivr per default CSP). Consumers in
+        // CSP-restricted contexts should pre-set workerSrc to a same-origin
+        // bundled worker URL.
+        const modAny = mod as unknown as {
+          GlobalWorkerOptions?: { workerSrc?: string };
+          version?: string;
+        };
+        if (modAny.GlobalWorkerOptions && !modAny.GlobalWorkerOptions.workerSrc) {
+          const version = modAny.version ?? '5.7.76';
+          modAny.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;
+        }
         return mod as unknown as PdfJsModule;
       });
     }
@@ -324,7 +365,7 @@ export function useChatFileAttachment(
   const ensureMammoth = useCallback((): Promise<MammothModule> => {
     if (!mammothRef.current) {
       // Lazy import — same NFR-12 rationale as pdfjs above.
-      mammothRef.current = import('mammoth').then((mod) => {
+      mammothRef.current = import('mammoth').then(mod => {
         // mammoth browser build exports default + extractRawText. Both shapes
         // are observable in practice depending on the bundler interop mode.
         const cast = mod as unknown as MammothModule & { default?: MammothModule };
@@ -366,7 +407,7 @@ export function useChatFileAttachment(
           continue;
         }
 
-        // (b) too-large — 10 MB per file
+        // (b) too-large — 25 MB per file (raised from 10 MB in R4 A-4)
         if (file.size > MAX_FILE_BYTES) {
           newErrors.push({
             id: idFactoryRef.current(),
@@ -390,12 +431,20 @@ export function useChatFileAttachment(
         }
 
         // Accept — create chip in `extracting` state.
+        //
+        // R5 task 036: retain the original File on the chip so downstream
+        // binary-upload paths (e.g. ConversationPane `executeSummarizeIntent`
+        // → POST /documents) can re-read the bytes. Extraction below also
+        // reads `file.arrayBuffer()` / `file.text()` but those calls do NOT
+        // invalidate the File — browser File objects are reference-counted
+        // Blobs and remain readable across calls.
         const chip: AttachmentChip = {
           id: idFactoryRef.current(),
           filename: file.name,
           sizeBytes: file.size,
           mimeType,
           status: 'extracting',
+          file,
         };
         newChips.push(chip);
         acceptedForExtraction.push(chip);
@@ -406,10 +455,10 @@ export function useChatFileAttachment(
       // toolbar strip can render `extracting` chips. Extraction results will
       // patch them in the next setFiles below.
       if (newChips.length > 0) {
-        setFiles((prev) => [...prev, ...newChips]);
+        setFiles(prev => [...prev, ...newChips]);
       }
       if (newErrors.length > 0) {
-        setErrors((prev) => [...prev, ...newErrors]);
+        setErrors(prev => [...prev, ...newErrors]);
       }
 
       // ---- Gate B: extraction ----
@@ -472,10 +521,7 @@ export function useChatFileAttachment(
           const codedReason = (error as Error & { code?: string }).code;
           const reason: AttachmentErrorReason =
             codedReason === 'pdf-too-many-pages' ? 'pdf-too-many-pages' : 'extraction-failed';
-          const message =
-            reason === 'pdf-too-many-pages'
-              ? error.message
-              : `Failed to extract text: ${error.message}`;
+          const message = reason === 'pdf-too-many-pages' ? error.message : `Failed to extract text: ${error.message}`;
 
           patches.push({
             id: chip.id,
@@ -501,22 +547,22 @@ export function useChatFileAttachment(
 
       // Apply all extraction patches in a single state update.
       if (patches.length > 0) {
-        setFiles((prev) =>
-          prev.map((chip) => {
-            const patch = patches.find((p) => p.id === chip.id);
+        setFiles(prev =>
+          prev.map(chip => {
+            const patch = patches.find(p => p.id === chip.id);
             return patch ? { ...chip, ...patch.patch } : chip;
           })
         );
       }
       if (extractionErrors.length > 0) {
-        setErrors((prev) => [...prev, ...extractionErrors]);
+        setErrors(prev => [...prev, ...extractionErrors]);
       }
     },
     [files.length, ensurePdfJs, ensureMammoth, onExtractionError]
   );
 
   const removeFile = useCallback((index: number): void => {
-    setFiles((prev) => {
+    setFiles(prev => {
       if (index < 0 || index >= prev.length) {
         return prev;
       }
@@ -533,12 +579,18 @@ export function useChatFileAttachment(
 
   // Derive `attachments` from chips with `status === 'ready'`. Cheap O(n)
   // filter; the alternative (separate state) would invite drift.
+  //
+  // R5 task 036: forward the retained File reference so downstream binary-
+  // upload paths (e.g. `executeSummarizeIntent` → POST /documents) can post
+  // the original bytes rather than a synthetic File reconstructed from
+  // extracted text (which fails for PDF/DOCX BFF Document Intelligence).
   const attachments: ChatAttachment[] = files
-    .filter((chip) => chip.status === 'ready' && chip.textContent !== undefined)
-    .map((chip) => ({
+    .filter(chip => chip.status === 'ready' && chip.textContent !== undefined)
+    .map(chip => ({
       filename: chip.filename,
       contentType: chip.mimeType,
       textContent: chip.textContent ?? '',
+      file: chip.file,
     }));
 
   return {

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Consolidate `runtimeConfig` → `@spaarke/auth` singleton; delete 3 local copies (FR-21)</title>
+    <phase>DD: De-Duplication</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>054</dependencies>
+    <blocks>061</blocks>
+    <tags>auth, frontend, refactoring, config</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag auth+config; modifies main.tsx across 3 solutions; runtime config resolution invariant</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 054 (same main.tsx files)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per FR-21: consolidate `runtimeConfig.ts` into `@spaarke/auth` (or a tightly-scoped shared module) as a singleton `resolveRuntimeConfig` export. Delete the 3 solution-local copies in `DailyBriefing/src/runtimeConfig.ts`, `LegalWorkspace/src/runtimeConfig.ts`, `SpaarkeAi/src/runtimeConfig.ts`. Each solution imports from the shared module.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in code page runtime config + `@spaarke/auth` shared module patterns.</role>
+
+  <goal>Single canonical `resolveRuntimeConfig` in `@spaarke/auth`; 3 solution-local `runtimeConfig.ts` files deleted; runtime config resolution behaviorally unchanged.</goal>
+
+  <context>
+    <background>
+      Per FR-21 acceptance: zero `runtimeConfig.ts` files under `src/solutions/`; each solution imports `resolveRuntimeConfig` from the shared module; runtime config resolution unchanged.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Auth/src/runtimeConfig.ts</file>
+      <file>src/solutions/DailyBriefing/src/runtimeConfig.ts</file>
+      <file>src/solutions/LegalWorkspace/src/runtimeConfig.ts</file>
+      <file>src/solutions/SpaarkeAi/src/runtimeConfig.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Use `@spaarke/auth` for shared auth-adjacent modules.</constraint>
+    <constraint source="project">FR-21 acceptance: find returns zero; resolution unchanged.</constraint>
+    <constraint source="project">Spec assumption FR-21: 3 copies are byte-identical (verify; reconcile divergence in `notes/` if found).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Diff the 3 solution-local `runtimeConfig.ts` files; identify the canonical version (or reconcile divergence in `notes/`).</step>
+    <step order="2">Add `resolveRuntimeConfig` to `@spaarke/auth` (or new `@spaarke/runtime-config` if owner prefers — spec defers).</step>
+    <step order="3">Export from `@spaarke/auth` main barrel.</step>
+    <step order="4">Update each solution's import sites to use the shared module.</step>
+    <step order="5">Delete the 3 solution-local copies.</step>
+    <step order="6">Build all 3 solutions; verify green.</step>
+    <step order="7">Smoke test: each solution resolves runtime config correctly (env-dependent endpoints, feature flags, etc.).</step>
+    <step order="8">Verify `find src/solutions -name "runtimeConfig.ts"` returns zero.</step>
+    <step order="9">Update TASK-INDEX.md: change task 055 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + dev server.</tool>
+    <tool name="terminal">Diff + find + grep.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Auth/src/runtimeConfig.ts</output>
+    <output type="code">src/solutions/DailyBriefing/src/main.tsx</output>
+    <output type="code">src/solutions/LegalWorkspace/src/main.tsx</output>
+    <output type="code">src/solutions/SpaarkeAi/src/main.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`find src/solutions -name "runtimeConfig.ts"` returns zero.</criterion>
+    <criterion testable="true">All 3 solutions build green; runtime config resolution unchanged.</criterion>
+    <criterion testable="true">Shared `resolveRuntimeConfig` exported from `@spaarke/auth`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Owner deferred the location decision (FR-21 assumption): default to `@spaarke/auth`; flag if a new `@spaarke/runtime-config` module is preferred.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

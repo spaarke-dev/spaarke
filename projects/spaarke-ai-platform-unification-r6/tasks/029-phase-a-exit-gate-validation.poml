@@ -1,0 +1,150 @@
+<task id="029" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-18 Phase A Exit-Gate Validation (4 Exit Criteria from spec)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>028</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, docs, integration-test</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation + validation rollup; no `.cs`; no schema; reads existing test evidence + spec exit criteria; per CLAUDE.md §8 MINIMAL rigor for docs/inventory.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final Phase A task; sequential after 028.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Validate Phase A's 4 exit criteria are met (per spec §Success Criteria / plan.md §7
+    Acceptance Criteria). Produce the Phase A exit-gate document recording green/red per
+    criterion + evidence file references. After this task, request user sign-off before
+    Phase B can begin (per project CLAUDE.md §Confirmation Triggers — "Any phase exit gate
+    requires user sign-off").
+
+    The 4 exit criteria:
+    1. Chat-agent tool list driven by `sprk_analysistool` rows with
+       `AvailableInContexts ∋ "Chat"` (validated by Pillar 2 tasks 006-013).
+    2. Persona is a Dataverse-driven scope (`sprk_aipersona`); tenant override changes
+       chat agent voice without code deploy (validated by Pillar 1 tasks 001-005).
+    3. One generic `invoke_playbook` chat tool exists; `InvokeSummarizePlaybookTool` +
+       `InvokeInsightsQueryTool` removed (validated by Pillar 3 tasks 020-023).
+    4. `SessionSummarizeOrchestrator` routes through `PlaybookExecutionEngine` (no
+       alternate-key lookup) (validated by Pillar 4 tasks 024-025).
+
+    Cross-cutting checks per spec §7:
+    - BFF publish size ≤+5 MB total across R6 to date (sum of Phase A task deltas).
+    - No new ADRs introduced (NFR-03).
+    - Pre-fill flow signatures + 45s timeout + `useAiPrefill` UNCHANGED (NFR-07; Phase A
+      should NOT touch pre-fill but verify zero impact).
+    - All 11 node executors UNMODIFIED (NFR-08).
+    - ZERO Microsoft Agent Framework references (NFR-04; grep evidence).
+    - 4-channel PaneEventBus + 4-stage shell preserved (NFR-05, NFR-06).
+    - Safety pipeline preserved (NFR-13).
+    - All HIGH-severity CVEs resolved (per `dotnet list package --vulnerable --include-transitive`).
+    - All FULL-rigor tasks passed `code-review` + `adr-check` at Step 9.5.
+  </prompt>
+
+  <role>
+    AI program manager + senior BFF engineer with R6 spec familiarity. Comfortable
+    aggregating test/validation evidence across multiple task notes.
+  </role>
+
+  <goal>
+    Phase A exit-gate document published at
+    `projects/spaarke-ai-platform-unification-r6/notes/phase-a-exit-gate.md` with
+    green/red verdict per criterion + evidence-file references. User sign-off requested.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="task-005-evidence">projects/spaarke-ai-platform-unification-r6/notes/task-005-cutover-evidence.md</file>
+    <file purpose="task-013-evidence">projects/spaarke-ai-platform-unification-r6/notes/task-013-gate-evidence.md</file>
+    <file purpose="task-023-evidence">projects/spaarke-ai-platform-unification-r6/notes/task-023-evidence.md</file>
+    <file purpose="task-025-evidence">projects/spaarke-ai-platform-unification-r6/notes/task-025-evidence.md</file>
+    <file purpose="task-028-evidence">projects/spaarke-ai-platform-unification-r6/notes/task-028-vertical-slice-evidence.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-029">Aggregate Phase A publish-size deltas; confirm total ≤+5 MB R6 budget per NFR-02.</constraint>
+    <constraint source="spec NFR-03">No new ADRs introduced in Phase A — verify.</constraint>
+    <constraint source="spec NFR-04">ZERO Microsoft Agent Framework references — grep all Phase A `.cs` files; confirm 0 matches.</constraint>
+    <constraint source="spec NFR-07">Pre-fill flow signatures + 45s timeout + `useAiPrefill` UNCHANGED.</constraint>
+    <constraint source="spec NFR-08">All 11 node executors UNMODIFIED.</constraint>
+    <constraint source="Confirmation Trigger">Phase A exit gate requires user sign-off per project CLAUDE.md §Confirmation Triggers.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project/exit-gate</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: MINIMAL — exit-gate documentation rollup; no `.cs`".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 028 ✅. Update `current-task.md` to task 029.
+    </step>
+    <step order="2" name="Collect Evidence">
+      Gather task notes for 005 (Pillar 1 cutover), 013 (Pillar 2 batch validation), 023 (Pillar 3 closeout), 025 (Pillar 4 orchestrator refactor), 028 (Phase A vertical slice).
+    </step>
+    <step order="3" name="Verify Exit Criterion 1 — Data-Driven Tool List">
+      Confirm task 013 evidence shows chat-agent tool list resolves from `sprk_analysistool` rows with `AvailableInContexts ∋ Chat`. Reference evidence file paths.
+    </step>
+    <step order="4" name="Verify Exit Criterion 2 — Data-Driven Persona">
+      Confirm task 005 evidence shows persona resolves from `sprk_aipersona`; tenant override changes voice without code deploy.
+    </step>
+    <step order="5" name="Verify Exit Criterion 3 — Generic invoke_playbook + Bridge Removal">
+      Confirm task 021 + 022 + 023 evidence: generic tool exists; specialized bridges deleted.
+    </step>
+    <step order="6" name="Verify Exit Criterion 4 — PlaybookExecutionEngine Routing">
+      Confirm task 025 evidence: orchestrator invokes engine; no alternate-key lookup in chat /summarize path.
+    </step>
+    <step order="7" name="Run Cross-Cutting Audits">
+      (a) Aggregate Phase A publish-size deltas: sum + verify ≤+5 MB R6 budget. (b) Grep `Microsoft.Agents` across all Phase A modified files: 0 results expected. (c) Verify NFR-07 pre-fill flow untouched. (d) Verify NFR-08 11 node executors untouched. (e) Run `dotnet list package --vulnerable --include-transitive`: 0 HIGH-severity CVEs.
+    </step>
+    <step order="8" name="Author Exit-Gate Document">
+      Write `notes/phase-a-exit-gate.md` with: green/red verdict per criterion + evidence references; cross-cutting check results; final recommendation (READY for Phase B / NOT READY).
+    </step>
+    <step order="9" name="🛑 Confirmation Gate — Phase A Sign-Off">
+      PAUSE per project CLAUDE.md §Confirmation Triggers (phase exit). Present exit-gate document; request user sign-off before Phase B can begin.
+    </step>
+    <step order="10" name="Document + Complete">
+      After sign-off: update task POML status complete. TASK-INDEX 029 ✅. Phase A complete. Reset `current-task.md` to next phase's first task. Report Phase A closeout.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">vulnerable package listing</tool>
+    <tool name="git">stage + commit exit-gate document</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/notes/phase-a-exit-gate.md (NEW; the exit gate)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (029 🔲 → ✅; Phase A complete)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset to Phase B first task)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Exit-gate document published at `notes/phase-a-exit-gate.md`.</criterion>
+    <criterion testable="true">Criterion 1 (data-driven tool list): GREEN with evidence file reference.</criterion>
+    <criterion testable="true">Criterion 2 (data-driven persona): GREEN with evidence file reference.</criterion>
+    <criterion testable="true">Criterion 3 (generic invoke_playbook + bridge removal): GREEN with evidence file reference.</criterion>
+    <criterion testable="true">Criterion 4 (engine routing; no alternate-key lookup): GREEN with evidence file reference.</criterion>
+    <criterion testable="true">Total Phase A BFF publish-size delta ≤+5 MB (R6 budget per NFR-02).</criterion>
+    <criterion testable="true">ZERO Microsoft Agent Framework references in any Phase A code (NFR-04).</criterion>
+    <criterion testable="true">Pre-fill flow signatures + 45s timeout + `useAiPrefill` UNCHANGED (NFR-07).</criterion>
+    <criterion testable="true">11 production node executors UNMODIFIED (NFR-08).</criterion>
+    <criterion testable="true">No new ADRs introduced (NFR-03).</criterion>
+    <criterion testable="true">No HIGH-severity CVEs from `dotnet list package --vulnerable`.</criterion>
+    <criterion testable="true">User sign-off recorded; Phase B unblocked.</criterion>
+  </acceptance-criteria>
+</task>

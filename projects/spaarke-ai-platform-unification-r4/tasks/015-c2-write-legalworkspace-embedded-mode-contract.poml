@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>C-2: Write LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md (host requirements)</title>
+    <phase>Phase 1 — Documentation round</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, architecture</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New architecture document creation with explicit project constraints (DR-07). Captures a contract; downstream tasks consume it for any future host that wants to embed LegalWorkspace. STANDARD per Step 3.5.5 — creates a new file with constraints, no code modification.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>depends on 010 (W-1 model) — needs the LegalWorkspace-as-engine framing from W-1 to write the host-side contract</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Publish a new architecture document `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md`
+    formalizing what a host page MUST provide to embed `LegalWorkspaceApp`: runtime config initialization,
+    theme ownership, sessionStorage sentinels, `webApi` shim, mount semantics, lifecycle hooks. Note the
+    LW retirement context (per OC-R4-05, SpaarkeAi is the only host today; this doc captures what other
+    hosts would need to provide if a future embed surfaces). Cross-link from W-1 (010).
+  </prompt>
+
+  <role>
+    Architecture documentation author with hands-on experience embedding `LegalWorkspaceApp` inside
+    SpaarkeAi. The contract is testable — write it so a future host author can verify each requirement
+    independently.
+  </role>
+
+  <goal>
+    `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` exists with: (1) opening note about LW
+    retirement context (SpaarkeAi is sole host today); (2) host requirements broken into sections — Config
+    Init, Theme Ownership, SessionStorage Sentinels, `webApi` Shim, Mount Semantics, Lifecycle Hooks;
+    (3) each requirement stated as a testable MUST with rationale; (4) reference implementation pointer
+    (where SpaarkeAi satisfies each requirement today); (5) cross-link from W-1 (010) and to W-1.
+  </goal>
+
+  <context>
+    <background>
+      Per spec DR-07 + plan §4 Phase 1 C-2: `LegalWorkspaceApp` is embedded inside SpaarkeAi via the
+      Dashboard wrapper (per W-1's two-wrapper model). The embed surface has implicit host requirements
+      that have accumulated organically (config bootstrap, theme provider scope, sessionStorage keys, a
+      `webApi` shim that mimics Xrm.WebApi, mount lifecycle order). With LW standalone retired
+      (OC-R4-05), there is no second host today — but the contract is still worth capturing so future
+      hosts (and the SpaarkeAi maintainers) know what's load-bearing vs incidental.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>src/solutions/LegalWorkspace/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Doc MUST cover all six host requirement categories from DR-07: config init, theme ownership, sessionStorage sentinels, `webApi` shim, mount semantics, lifecycle hooks.</constraint>
+    <constraint source="project">Each requirement MUST be stated as a testable MUST with a clear verification step. Avoid vague guidance.</constraint>
+    <constraint source="project">Doc MUST acknowledge the LW retirement context explicitly (per OC-R4-05): SpaarkeAi is the sole host today; the contract documents what other hosts would need if added.</constraint>
+    <constraint source="project">For each requirement, doc MUST point to the SpaarkeAi reference implementation (file path + line range where applicable).</constraint>
+    <constraint source="project">Doc MUST cross-link to W-1 (010) `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` and W-1 MUST reciprocally link to this contract.</constraint>
+    <constraint source="ADR-028">Auth-related host requirements (e.g., `webApi` shim, authenticatedFetch availability) MUST reference ADR-028.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read W-1 + survey embed code">Read W-1 (010 output). Survey the SpaarkeAi codebase for every host-side concern: where config is initialized, where theme is provided, sessionStorage keys, webApi shim implementation, mount order.</step>
+    <step order="2" name="Catalog requirements">For each of the six categories (DR-07), enumerate the specific host obligations. Cite the SpaarkeAi reference implementation for each.</step>
+    <step order="3" name="Draft sections">Write the doc with one section per requirement category. Each requirement is stated as a testable MUST + rationale + reference impl pointer.</step>
+    <step order="4" name="LW retirement context">Add the opening note about OC-R4-05 (LW standalone retired; SpaarkeAi sole host today; contract is forward-looking for any future host).</step>
+    <step order="5" name="Cross-links">Add cross-link to W-1 (010). Update W-1 to add reciprocal link to this contract.</step>
+    <step order="6" name="Verify">Walk through each MUST and confirm a future host could implement it independently by reading this doc + the SpaarkeAi reference impl pointer. No implicit / undocumented requirements.</step>
+    <step order="7" name="Update TASK-INDEX">Change task 015 status to ✅ completed in `tasks/TASK-INDEX.md`.</step>
+    <step order="8" name="Document deviations">If any deviation from spec DR-07 or plan §4, write to `projects/spaarke-ai-platform-unification-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read W-1 output + SpaarkeAi embed code</tool>
+    <tool name="Grep">Find host-side concerns (sessionStorage keys, theme provider scope, webApi shim usage)</tool>
+    <tool name="Write">Create the new architecture doc</tool>
+    <tool name="Edit">Cross-link addition in W-1</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md (new)</output>
+    <output type="docs">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md (reciprocal cross-link added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` exists with all six DR-07 categories: config init, theme ownership, sessionStorage sentinels, webApi shim, mount semantics, lifecycle hooks.</criterion>
+    <criterion testable="true">Each host requirement is stated as a testable MUST with a verification step.</criterion>
+    <criterion testable="true">LW retirement context (OC-R4-05) acknowledged in opening note.</criterion>
+    <criterion testable="true">Each requirement includes a SpaarkeAi reference implementation pointer (file path).</criterion>
+    <criterion testable="true">Cross-link to W-1 (010) present; reciprocal link added to W-1.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    STANDARD rigor — new architecture document. Quality gates SKIPPED per Step 0.5.
+  </execution>
+</task>

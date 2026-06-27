@@ -1,0 +1,135 @@
+<task id="050" project="email-communication-solution-r3">
+  <metadata>
+    <title>Integrate SendEmailDialog canonical wrapper into production-shipped consumers</title>
+    <phase>Wave 3 — SendEmailDialog + FilePreview</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>029, 022</dependencies>
+    <blocks>051, 053</blocks>
+    <tags>react, frontend, communication, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.tsx` files in `@spaarke/ui-components` production export surface; consumer-impacting rewrite (canonical `<SendEmailDialog />` wrapper supersedes legacy `onSend` callback contract); must respect ADR-021 (Fluent UI v9) + ADR-019 (ProblemDetails error contract) + ADR-033 (canonical Communication architecture).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential gate: must complete BEFORE 051 (FilePreviewDialog migration) and 053 (consumer audit) which both rely on the canonical wrapper being authoritative. Touches the same `SendEmailDialog/SendEmailDialog.tsx` file that Wave 1 task 022 produced.</parallel-reason>
+    <fr-refs>FR-03, FR-14</fr-refs>
+  </metadata>
+
+  <prompt>
+    Verify and integrate the canonical `<SendEmailDialog />` wrapper produced by Wave 1 task 022 into the production-shipped path of `@spaarke/ui-components`. The existing component directory at `src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/` MUST either BE the canonical wrapper (re-implemented atop `<EmailComposer mount='dialog' />`) OR cleanly re-export the wrapper from `EmailComposer/wrappers/SendEmailDialog.tsx`. Either path is acceptable; pick whichever leaves the smallest surface for downstream consumers to migrate.
+
+    Empirical state (CLAUDE.md row + spec FR-03): `SendEmailDialog/SendEmailDialog.tsx` exists pre-R3 as a single-purpose component with a legacy `onSend` callback shape. Wave 1 task 022 rewrites it atop the engine. THIS task confirms that rewrite is shipped on the production export path — exported from the top-level `src/index.ts` barrel — and that the canonical `ISendEmailDialogProps` signature `{ open, onClose, initialTo?, initialSubject?, associations?, attachmentSources?, onSent?, onError? }` is the public surface.
+
+    Also: produce a complete consumer audit (passed to task 053 for migration). Grep `src/` for every `import.*SendEmailDialog|<SendEmailDialog`. The known consumer is `src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx` (handled by task 051). List any others in task notes for 053 to pick up.
+  </prompt>
+
+  <role>
+    Frontend developer authoritative on the `@spaarke/ui-components` public-export contract. Familiar with `<EmailComposer mount='dialog' />` engine semantics, the canonical wrapper shape per spec FR-03, and the Wave 1 → Wave 3 transition where the canonical wrapper graduates from engine-internal to consumer-facing.
+  </role>
+
+  <goal>
+    `src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/SendEmailDialog.tsx` is the production-shipped canonical wrapper (either implemented inline or re-exported from `EmailComposer/wrappers/SendEmailDialog.tsx`). `src/client/shared/Spaarke.UI.Components/src/index.ts` exports `SendEmailDialog` and the canonical `ISendEmailDialogProps` interface. `npm run build` + `npm run lint` are clean. A complete consumer audit list is appended to `current-task.md` (and copied into task 053's notes) for downstream migration.
+  </goal>
+
+  <context>
+    <background>
+      The pre-R3 `SendEmailDialog` shipped a legacy callback shape: parent passed an `onSend` callback that the dialog invoked when the user clicked Send. The legacy dialog also held its own send-button state and never called `sendCommunication()` — the parent was responsible for the network call. This made every consumer reinvent the request shape.
+
+      The R3 canonical wrapper inverts this: the wrapper OWNS the send (delegated to `<EmailComposer />` engine's `send()` imperative method), and notifies the parent via `onSent` (success) and `onError` (failure with typed `SendCommunicationError`). Parents no longer touch `sendCommunication()` directly from this surface.
+
+      Wave 1 task 022 produces the wrapper at `EmailComposer/wrappers/SendEmailDialog.tsx`. THIS task confirms it is the canonical export from `SendEmailDialog/SendEmailDialog.tsx` (the historical import path used by consumers). The cleanest path is for `SendEmailDialog/SendEmailDialog.tsx` to be a single-line re-export: `export { SendEmailDialog } from '../EmailComposer/wrappers/SendEmailDialog';` — preserves consumer import paths while collapsing all logic into the canonical location.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/SendEmailDialog.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx (produced by Wave 1 task 022)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (engine)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (top-level barrel)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (provides `sendCommunication()` + `SendCommunicationError`)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Wrapper styling MUST use Fluent UI v9 only; engine-driven; dialog chrome per NFR-03 mount='dialog' variant (compact, ~600px width).</constraint>
+    <constraint source="ADR-019">Wrapper surfaces send-path errors via `onError(error: SendCommunicationError)` — typed ProblemDetails class, no string-only errors.</constraint>
+    <constraint source="ADR-033">Canonical wrapper pattern (3 wrappers + 1 engine) — no NEW client-side send-email implementation; this task only confirms the wrapper is on the production export path.</constraint>
+    <constraint source="spec FR-03">Canonical signature: `{ open, onClose, initialTo?, initialSubject?, associations?, attachmentSources?, onSent?, onError? }`. Legacy `onSend` callback REMOVED (consumers will migrate in task 051 + 053).</constraint>
+    <constraint source="NFR-02">No direct `@spaarke/auth` import in this file; `authenticatedFetch` flows through `<EmailComposer />` props per existing shared-lib decoupling rule.</constraint>
+    <constraint source="repo">`npm run build` + `npm run lint` in `@spaarke/ui-components` MUST remain green.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical wrapper around engine" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx">
+        Wave 1 task 022 produces this. Wrapper locks `mount='dialog'`, exposes semantic prop API, delegates `send()` to engine via `useImperativeHandle`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the canonical wrapper produced by Wave 1 task 022: `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx`. Confirm its prop signature matches FR-03 spec.</step>
+    <step order="2">Read the current `src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/SendEmailDialog.tsx`. Determine if Wave 1 task 022 already rewrote it inline OR if it still holds the legacy implementation.</step>
+    <step order="3">Decide the integration path: (A) `SendEmailDialog/SendEmailDialog.tsx` is REWRITTEN inline to mount `<EmailComposer mount='dialog' />`, OR (B) `SendEmailDialog/SendEmailDialog.tsx` becomes a one-line re-export of `EmailComposer/wrappers/SendEmailDialog.tsx`. Prefer (B) for collapse to a single source of truth; record the choice in task notes.</step>
+    <step order="4">Apply the chosen integration. If (B): replace `SendEmailDialog.tsx` body with `export { SendEmailDialog, type ISendEmailDialogProps } from '../EmailComposer/wrappers/SendEmailDialog';` and confirm `SendEmailDialog/index.ts` re-exports.</step>
+    <step order="5">Confirm `src/client/shared/Spaarke.UI.Components/src/index.ts` top-level barrel exports `SendEmailDialog` and `ISendEmailDialogProps` from this path (do not introduce a second export source).</step>
+    <step order="6">Grep audit: `src/` for `import.*SendEmailDialog|<SendEmailDialog`. Build a consumer list. Known: `src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx`. Record any others in `current-task.md` + append a TODO list snippet for task 053 to pick up.</step>
+    <step order="7">Run `npm run build` in `src/client/shared/Spaarke.UI.Components/` — verify clean.</step>
+    <step order="8">Run `npm run lint` — verify clean.</step>
+    <step order="9">Quality gate (Step 9.5 per FULL rigor): invoke `/code-review` on the modified file(s). Invoke `/adr-check` to verify no ADR-021 / ADR-019 / ADR-033 violations.</step>
+    <step order="10">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 050 ✅ completed.</step>
+    <step order="11">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task (051 or 052).</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Consumer audit for `SendEmailDialog` import usage</tool>
+    <tool name="read">Inspect current state of `SendEmailDialog.tsx` + wrapper produced by task 022</tool>
+    <tool name="edit">Apply re-export OR inline-rewrite integration path</tool>
+    <tool name="bash">Run `npm run build` + `npm run lint`</tool>
+    <tool name="code-review">Quality gate</tool>
+    <tool name="adr-check">Quality gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/SendEmailDialog.tsx (UPDATED — canonical wrapper or re-export)</output>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/index.ts (CONFIRMED — re-exports canonical)</output>
+    <output type="file">src/client/shared/Spaarke.UI.Components/src/index.ts (CONFIRMED — top-level barrel exports `SendEmailDialog` + `ISendEmailDialogProps`)</output>
+    <output type="notes">current-task.md (UPDATED — consumer audit list for task 053)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SendEmailDialog/SendEmailDialog.tsx` either implements canonical wrapper inline OR re-exports `EmailComposer/wrappers/SendEmailDialog.tsx` — single source of truth.</criterion>
+    <criterion testable="true">Canonical `ISendEmailDialogProps` exported from `@spaarke/ui-components` matches FR-03 signature: `{ open, onClose, initialTo?, initialSubject?, associations?, attachmentSources?, onSent?, onError? }`.</criterion>
+    <criterion testable="true">Top-level barrel `src/index.ts` exports both `SendEmailDialog` and `ISendEmailDialogProps`.</criterion>
+    <criterion testable="true">`npm run build` exits 0 in `@spaarke/ui-components`.</criterion>
+    <criterion testable="true">`npm run lint` exits 0.</criterion>
+    <criterion testable="true">Consumer audit list (full grep result) recorded in `current-task.md` for task 053.</criterion>
+    <criterion testable="true">`/adr-check` returns no violations against ADR-021 / ADR-019 / ADR-033.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 050 ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Integration path (A) vs (B) choice rationale: Path (B) — re-export from `EmailComposer/wrappers/SendEmailDialog.tsx` — collapses to single source of truth and matches the wrapper-as-canonical pattern from spec FR-03. Path (A) — inline rewrite — would duplicate the wrapper logic across two files, violating DRY. Default to (B) unless Wave 1 task 022 produced something incompatible (in which case document the divergence in task notes and pick (A) as fallback).
+
+    This task is a FULL-rigor checkpoint because it determines the public-export contract that every R3 consumer migration (tasks 051, 053, downstream LegalWorkspace integration) will depend on. Get the export shape wrong here and every Wave 3+ migration breaks.
+
+    The consumer audit produced here feeds directly into task 053. Do not skip the grep step — task 053 reuses the list verbatim.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply FULL rigor per `<rigor-hint>`. Quality gates at Step 9.5 (code-review + adr-check) ARE REQUIRED for FULL rigor.
+    </protocol>
+  </execution>
+</task>

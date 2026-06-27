@@ -1,0 +1,44 @@
+{
+  "_comment_top": "R6 Wave 8 — seed row for the CodeInterpreterHandler 'GenerateChart' method. Replaces one of the two legacy hardcoded LLM functions previously registered on CodeInterpreterTools (removed from SprkChatAgentFactory.ResolveTools lines ~1066-1105).",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'CodeInterpreterHandler'. The handler reads sprk_configuration.method = 'GenerateChart' to dispatch to the matplotlib chart-generation pipeline.",
+  "_comment_method_dispatch": "Two rows (CODE-ANALYZE / CODE-CHART) share one handler class — same pattern as KnowledgeRetrievalHandler (Wave 7c) and TextRefinementHandler (Wave 7 Q9). Each row's sprk_configuration.method discriminator selects the internal method.",
+  "_comment_security": "sprk_requiredcapability = 'code_interpreter' (= PlaybookCapabilities.CodeInterpreter) gates this tool to playbooks whose capability set includes 'code_interpreter'. Standalone chat (no playbook, capabilities = CoreCapabilities) does NOT include 'code_interpreter', so this handler is unreachable from standalone chat — preserving the pre-Wave-8 security boundary.",
+  "_comment_widget": "This method emits an output_pane ChartViewer widget via ToolResult.Metadata.widget (R6 Wave 7b adapter post-processing). The widget envelope carries the chart-type + base-64 PNG image + output length so frontends can render the chart in the output pane. The chat-visible text ALSO embeds the chart inline as a markdown image data URI — preserves the pre-Wave-8 user-visible rendering AND adds the structured widget for richer pane rendering.",
+  "_comment_attribution": "Spec MUST rule: AI-generated charts MUST be labelled '[AI-generated chart]'. The handler's FormatChartResult prefixes every chart with this label so users are aware the image was produced by an AI model.",
+  "_comment_adr018": "ADR-018 kill switch (CodeInterpreterOptions.Enabled) is enforced inside the handler before every sandbox call. When disabled, the handler returns a successful ToolResult with a user-readable unavailability string in data.message.",
+  "_comment_adr016": "ADR-016 rate limiting via static SemaphoreSlim bounded by CodeInterpreterOptions.MaxConcurrency is enforced inside the handler.",
+  "_comment_adr015": "ADR-015 data governance: only caller-supplied 'dataSeries' is forwarded to the sandbox. The handler does NOT auto-fetch external resources. Telemetry logs lengths + chart type + hasChart flag only — never the data series content.",
+  "_comment_description_loadbearing": "sprk_description is LOAD-BEARING per NFR-12: the LLM uses the description text to decide WHEN to invoke this tool. The exact phrasing below is preserved verbatim from the legacy hardcoded registration so the LLM's tool-selection behavior is unchanged after migration.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_toolcode + sprk_name 'SYS-%' filter; UPSERTs.",
+  "sprk_name": "SYS-Code Generate Chart",
+  "sprk_toolcode": "CODE-CHART",
+  "sprk_description": "Generate a chart image (bar, line, or pie) from a JSON data series. Use this when the user wants a visual chart from structured data. dataSeries must be a JSON array of objects with 'label' and 'value' fields.",
+  "sprk_handlerclass": "CodeInterpreterHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only. The legacy CodeInterpreterTools was registered exclusively for chat; the 11 production node executors (NFR-08) do not include a Code Interpreter executor.",
+  "sprk_requiredcapability": "code_interpreter",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "CodeInterpreterHandler.GenerateChart Request",
+    "description": "Argument shape for chat-driven invocation of the GenerateChart method. The 'dataSeries' is a JSON-array string of {label, value} objects; 'chartType' selects bar, line, or pie. Both fields are required.",
+    "type": "object",
+    "required": ["dataSeries", "chartType"],
+    "properties": {
+      "dataSeries": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Data series as a JSON array string (e.g., '[{\"label\":\"Q1\",\"value\":120},{\"label\":\"Q2\",\"value\":135}]'). Each item should be an object with 'label' and 'value' fields. MUST NOT include PII or data beyond what is needed for the chart (ADR-015 data governance)."
+      },
+      "chartType": {
+        "type": "string",
+        "enum": ["bar", "line", "pie"],
+        "description": "Chart type: bar, line, or pie. Unsupported values fall back to 'bar' (handler-side forgiveness)."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "method = 'GenerateChart' is the dispatch discriminator. This row exposes only the chart-generation method.",
+    "method": "GenerateChart"
+  }
+}

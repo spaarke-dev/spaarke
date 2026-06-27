@@ -1,0 +1,102 @@
+<task id="R3-093" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Edge perf hint (non-referencing edge advisory)</title>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      Added 'edge-no-data-dependency' rule (warning severity) to canvasValidation.ts.
+      Per-edge iteration loop added as a SIBLING to the per-NODE-type loop and 091's
+      collision-check call, with a clear "Per-edge advisory rules (task 093)" comment
+      marking the boundary for future maintainers. Sibling 091 had pre-coordinated by
+      leaving a placeholder comment at the exact insertion point.
+
+      Reused existing scanners: parseDownstreamNode for templateRef enumeration (covers
+      configJson.fieldMappings, legacy fields dict, template/body/subject/description,
+      and node.data template/emailBody/emailSubject) — no new regex, no new scanner.
+      Skips when source has no outputVariable or target can't be parsed (graceful).
+      Warning attaches to the source nodeId so the existing NodeValidationBadge
+      surface (consumed by NodePropertiesForm) picks it up via the badge's existing
+      `warnings` prop.
+
+      Extended PlaybookNodeData with optional `warnings?: string[]` field (paired with
+      existing `validationErrors?: string[]`) and updated NodePropertiesForm to pass
+      `warnings={node.data.warnings ?? []}` to NodeValidationBadge. NO new badge
+      component, NO new validation framework, NO new warning category — extension only.
+
+      Save-not-blocked verification: confirmed playbookNodeSync.ts:294 uses
+      hasValidationErrors(...) which filters severity === 'error'; warnings flow
+      through to the result without blocking sync. My rule emits severity: 'warning'
+      so save is never blocked. (Per FR-3H2.3 binding constraint.)
+
+      §5 bridge gap (canvasStore → node.data.warnings) is a shared follow-up across
+      091/092/093 per task 090 research §5 recommendation (a) — not addressed in 093
+      to keep change scoped. Once the bridge lands (canvasStore subscribes to
+      validatePromptSchemaNodes + groupValidationsByNode and patches node.data),
+      this rule's warnings will surface in the badge popover automatically.
+
+      Coordination with sibling 091: 091 added 'outputvar-collision' rule in the
+      per-NODE-type-loop region; 093 added 'edge-no-data-dependency' in a sibling
+      per-EDGE loop immediately after. Header comment + rule-union comment block
+      identify both regions clearly. No conflicts; no overlapping edits.
+
+      No tests added — PlaybookBuilder lacks test infrastructure (no test script in
+      package.json, no jest/vitest deps). Future test infra would cover: (a) Node A
+      (OutputVariable="foo") → Node B referencing {{foo.output.x}} → NO warning;
+      (b) Node A → Node C without reference → warning fires on source nodeId;
+      (c) snapshot of NodeValidationBadge showing the warning; (d) save allowed when
+      only this warning is present.
+
+      Files modified:
+        - src/client/code-pages/PlaybookBuilder/src/services/canvasValidation.ts
+          (rule union extension, per-edge loop call, validateEdgePerfHint function,
+          header docstring update)
+        - src/client/code-pages/PlaybookBuilder/src/types/canvas.ts
+          (added warnings?: string[] to PlaybookNodeData)
+        - src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesForm.tsx
+          (wire warnings prop through to NodeValidationBadge)
+
+      Build verify: tsc --noEmit on PlaybookBuilder produces ZERO errors in my edited
+      files (5 webpack errors exist but are pre-existing module-resolution issues in
+      Spaarke.UI.Components for @hello-pangea/dnd, pdfjs-dist, mammoth,
+      @microsoft/applicationinsights-web, @spaarke/sdap-client — unrelated to 093).
+    </completion-notes>
+    <phase>P9</phase>
+    <parallel-group>T (with 091, 092)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>frontend,playbook-builder,h2,validation</tags>
+    <relevant-files>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/NodeValidationBadge.tsx</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/canvasValidation.ts</file>
+    </relevant-files>
+    <dependencies>090</dependencies>
+  </metadata>
+  <prompt>Per FR-3H2.3: when edge connects two nodes whose configs don't reference each other's OutputVariable, show non-blocking warning "This edge forces sequential execution. Confirm or remove?" Advisory only.</prompt>
+  <goal>Authors aware of unnecessary edges that kill parallelism. Advisory does NOT block save.</goal>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9</constraint>
+    <constraint source="spec Q5">Extend existing NodeValidationBadge</constraint>
+    <constraint source="spec FR-3H2.3">Advisory only — does NOT block save</constraint>
+  </constraints>
+  <knowledge>
+    <topic>playbook-builder-validation</topic>
+    <files>
+      <file>projects/spaarke-platform-foundations-r3/notes/playbookbuilder-pattern-research.md</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/services/canvasValidation.ts</file>
+      <file>src/client/code-pages/PlaybookBuilder/src/components/properties/NodeValidationBadge.tsx</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-3H2.3</step>
+    <step order="1">Add validation rule: scan edge target config for {{<source.outputVariable>...}}</step>
+    <step order="2">If no reference → emit advisory warning (not error)</step>
+    <step order="3">Render via NodeValidationBadge</step>
+    <step order="4">Component tests + snapshots</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">AC-H2.3 — perf hint advisory fires on non-referencing edges</criterion>
+    <criterion testable="true">Save NOT blocked</criterion>
+  </acceptance-criteria>
+</task>

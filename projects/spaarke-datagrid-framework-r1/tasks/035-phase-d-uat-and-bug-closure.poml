@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Phase D UAT: EventsPage all 4 modes + record-link bug closure verification</title>
+    <phase>4: Phase D — EventsPage Migration</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>034</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, e2e-test, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>UAT; e2e-test; bug closure verification (graduation criteria 2 + 3)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final Phase D acceptance gate</parallel-reason>
+  </metadata>
+
+  <prompt>
+    UAT EventsPage in all 4 modes: system, dialog, embedded, standalone. Verify no UX regression. Critically: verify the record-link-not-opening bug is closed by opening EventsPage as VisualHost drill-through dialog → click any row → record opens correctly via `Xrm.Navigation.navigateTo({pageType:"webresource"})`.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer / UAT tester. Familiar with EventsPage's 4 display modes and the historical record-link bug.
+  </role>
+
+  <goal>
+    All 4 EventsPage modes verified working; record-link bug closed; Calendar pane mutual exclusivity preserved; dark mode parity confirmed; SpaarkeAi Calendar widget UAT passes.
+  </goal>
+
+  <context>
+    <background>
+      Per graduation criteria 2 + 3 + FR-MIG-04. The record-link bug is the highest-impact issue this project closes. UAT verifies the fix in the exact failure scenario (dialog mode side pane open).
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-datagrid-framework-r1/notes/phase-d-uat-report.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All 4 modes must pass (system, dialog, embedded, standalone).</constraint>
+    <constraint source="project">Record-link bug closure verified in DIALOG mode specifically.</constraint>
+    <constraint source="project">Calendar pane mutual exclusivity verified.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">UAT Mode 1 (System): open EventsPage as system Custom Page; verify all CRUD + Calendar pane work.</step>
+    <step order="2">UAT Mode 2 (Dialog): open EventsPage from VisualHost CardChrome expand; verify rows render + Calendar pane behaves; CLICK A ROW → verify record opens (bug closure check); test create/delete from dialog mode.</step>
+    <step order="3">UAT Mode 3 (Embedded): open EventsPage in iframe on a parent record form; verify rows render with parent context.</step>
+    <step order="4">UAT Mode 4 (Standalone): open EventsPage directly via URL; verify renders without parent context.</step>
+    <step order="5">UAT Calendar pane mutual exclusivity: open Event detail pane → verify Calendar collapses; open Calendar → verify Event detail collapses.</step>
+    <step order="6">UAT dark mode: re-run all 4 modes in dark; verify no visual regression.</step>
+    <step order="7">UAT SpaarkeAi Calendar widget: open SpaarkeAi workspace → Calendar widget → verify renders identically to pre-migration screenshot (task 033).</step>
+    <step order="8">UAT BulkUpdateEventStatus (Mark Complete / Cancel / Reassign / Archive): select 5 events, run each operation; verify Promise.all behavior + completion notification.</step>
+    <step order="9">Document findings in `notes/phase-d-uat-report.md`. Include screenshots for record-link bug closure (before bug repro impossible — record DOES open).</step>
+    <step order="10">Update TASK-INDEX (035 ✅); mark Phase D complete.</step>
+  </steps>
+
+  <tools>
+    <tool name="ui-test">Skill if Chrome integration available</tool>
+    <tool name="browser">Manual UAT</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/phase-d-uat-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given EventsPage in dialog mode + row click, when triggered, then record opens correctly (bug closed).</criterion>
+    <criterion testable="true">Given all 4 modes, when UAT, then each passes without UX regression.</criterion>
+    <criterion testable="true">Given Calendar pane open + Event detail click, when triggered, then mutual exclusivity preserved (one collapses).</criterion>
+    <criterion testable="true">Given BulkUpdateEventStatus 4 operations, when each tested, then bulk Promise.all + notification works.</criterion>
+    <criterion testable="true">Given SpaarkeAi Calendar widget pre/post screenshots, when compared, then zero regression.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Record-link bug closure (Dialog Mode)">
+      <url>VisualHost drill-through to EventsPage in dialog mode</url>
+      <steps>
+        <step>Open Matter detail page</step>
+        <step>Find a VisualHost card that drills through to EventsPage</step>
+        <step>Click expand → dialog opens with EventsPage</step>
+        <step>Click any row in the grid</step>
+        <step>Verify record opens correctly (was previously broken)</step>
+      </steps>
+      <expected>Record opens via Xrm.Navigation.navigateTo webresource navigation</expected>
+    </test>
+    <test name="Calendar pane mutual exclusivity">
+      <steps>
+        <step>Open EventsPage system mode</step>
+        <step>Verify Calendar pane visible</step>
+        <step>Click row to open Event detail pane</step>
+        <step>Verify Calendar pane auto-collapses</step>
+        <step>Reopen Calendar pane</step>
+        <step>Verify Event detail pane auto-collapses</step>
+      </steps>
+      <expected>Mutual exclusivity preserved</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Validation gate for graduation criteria 2 + 3. The record-link bug closure is the highest-impact verification — if it doesn't close, regression to spec. Phase D closes here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>UAT all 4 modes + dark mode + bug closure scenario. Document with screenshots.</protocol>
+  </execution>
+</task>

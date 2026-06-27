@@ -20,9 +20,9 @@
  * Fluent UI v9 design tokens used exclusively (ADR-021, no hard-coded colors).
  */
 
-import * as React from "react";
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import * as React from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   makeStyles,
   tokens,
@@ -46,7 +46,7 @@ import {
   PopoverSurface,
   PopoverTrigger,
   Tooltip,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   FolderRegular,
   CalendarRegular,
@@ -55,13 +55,13 @@ import {
   CheckmarkCircleRegular,
   InfoRegular,
   AlertBadgeRegular,
-} from "@fluentui/react-icons";
+} from '@fluentui/react-icons';
 
-import { useExternalContext } from "../hooks/useExternalContext";
-import { getProjects, getEvents, getDocuments } from "../api/web-api-client";
-import type { ODataEvent, ODataProject, ODataDocument } from "../api/web-api-client";
-import { PageContainer } from "../components/PageContainer";
-import { SectionCard } from "../components/SectionCard";
+import { useExternalContext } from '../hooks/useExternalContext';
+import { getProjects, getEvents, getDocuments } from '../api/web-api-client';
+import type { ODataEvent, ODataProject, ODataDocument } from '../api/web-api-client';
+import { PageContainer } from '../components/PageContainer';
+import { SectionCard } from '../components/SectionCard';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -69,19 +69,19 @@ import { SectionCard } from "../components/SectionCard";
 
 const useStyles = makeStyles({
   pageHeaderRow: {
-    display: "flex",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     marginBottom: tokens.spacingVerticalM,
   },
   pageHeaderLeft: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
   pageHeaderIcons: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     paddingTop: tokens.spacingVerticalXS,
   },
@@ -89,11 +89,11 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
   },
   twoColGrid: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
     gap: tokens.spacingHorizontalL,
-    "@media (max-width: 768px)": {
-      gridTemplateColumns: "1fr",
+    '@media (max-width: 768px)': {
+      gridTemplateColumns: '1fr',
     },
   },
   // Access level badge colors
@@ -110,50 +110,50 @@ const useStyles = makeStyles({
     color: tokens.colorStatusSuccessForeground1,
   },
   projectNameCell: {
-    cursor: "pointer",
+    cursor: 'pointer',
     color: tokens.colorBrandForeground1,
-    ":hover": { textDecorationLine: "underline" },
+    ':hover': { textDecorationLine: 'underline' },
   },
   // Activity / Upcoming list items
   itemList: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     paddingTop: tokens.spacingVerticalS,
   },
   itemRow: {
-    display: "flex",
-    alignItems: "flex-start",
+    display: 'flex',
+    alignItems: 'flex-start',
     gap: tokens.spacingHorizontalS,
     paddingBottom: tokens.spacingVerticalS,
     borderBottomColor: tokens.colorNeutralStroke2,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    ":last-child": { borderBottomStyle: "none" },
-    cursor: "pointer",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    ':last-child': { borderBottomStyle: 'none' },
+    cursor: 'pointer',
     borderRadius: tokens.borderRadiusMedium,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
   itemIcon: {
     color: tokens.colorNeutralForeground3,
-    marginTop: "2px",
+    marginTop: '2px',
     flexShrink: 0,
   },
   itemIconBrand: {
     color: tokens.colorBrandForeground1,
-    marginTop: "2px",
+    marginTop: '2px',
     flexShrink: 0,
   },
   itemIconDanger: {
     color: tokens.colorStatusDangerForeground1,
-    marginTop: "2px",
+    marginTop: '2px',
     flexShrink: 0,
   },
   itemContent: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
     minWidth: 0,
   },
@@ -161,18 +161,18 @@ const useStyles = makeStyles({
   dueDateOverdue: { color: tokens.colorStatusDangerForeground1 },
   // Document list
   docRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     borderBottomColor: tokens.colorNeutralStroke2,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    ":last-child": { borderBottomStyle: "none" },
-    cursor: "pointer",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    ':last-child': { borderBottomStyle: 'none' },
+    cursor: 'pointer',
     borderRadius: tokens.borderRadiusMedium,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
   },
@@ -181,53 +181,53 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
   docInfo: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "2px",
-    flex: "1",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    flex: '1',
     minWidth: 0,
   },
   docMeta: { color: tokens.colorNeutralForeground3 },
   // Notifications popover
   notifPopover: {
-    minWidth: "300px",
-    maxWidth: "400px",
+    minWidth: '300px',
+    maxWidth: '400px',
   },
   notifEmpty: {
     padding: tokens.spacingVerticalM,
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
   },
   notifItem: {
-    display: "flex",
-    alignItems: "flex-start",
+    display: 'flex',
+    alignItems: 'flex-start',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     borderBottomColor: tokens.colorNeutralStroke2,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    ":last-child": { borderBottomStyle: "none" },
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    ':last-child': { borderBottomStyle: 'none' },
   },
   // Misc
   emptyState: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalXL,
     gap: tokens.spacingVerticalS,
-    textAlign: "center",
+    textAlign: 'center',
   },
   emptyStateText: { color: tokens.colorNeutralForeground3 },
   spinnerContainer: {
-    display: "flex",
-    justifyContent: "center",
+    display: 'flex',
+    justifyContent: 'center',
     padding: tokens.spacingVerticalL,
   },
   sectionTitleRow: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
 });
@@ -276,39 +276,43 @@ interface NotificationItem {
 
 function formatAccessLevel(raw: string): string {
   switch (raw) {
-    case "ViewOnly": return "View Only";
-    case "Collaborate": return "Collaborate";
-    case "FullAccess": return "Full Access";
-    default: return raw;
+    case 'ViewOnly':
+      return 'View Only';
+    case 'Collaborate':
+      return 'Collaborate';
+    case 'FullAccess':
+      return 'Full Access';
+    default:
+      return raw;
   }
 }
 
 function formatRelativeDate(isoDate: string | null | undefined): string {
-  if (!isoDate) return "—";
+  if (!isoDate) return '—';
   const date = new Date(isoDate);
-  if (isNaN(date.getTime())) return "—";
+  if (isNaN(date.getTime())) return '—';
   const now = new Date();
   const diffDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Yesterday";
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
   if (diffDays < 7) return `${diffDays} days ago`;
-  return date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 function formatDueDate(isoDate: string | null | undefined): { label: string; isOverdue: boolean } {
-  if (!isoDate) return { label: "No due date", isOverdue: false };
+  if (!isoDate) return { label: 'No due date', isOverdue: false };
   const date = new Date(isoDate);
-  if (isNaN(date.getTime())) return { label: "Invalid date", isOverdue: false };
+  if (isNaN(date.getTime())) return { label: 'Invalid date', isOverdue: false };
   const isOverdue = date < new Date();
-  const formatted = date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  const formatted = date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   return { label: isOverdue ? `Overdue — ${formatted}` : formatted, isOverdue };
 }
 
 function formatDocDate(isoDate: string | null | undefined): string {
-  if (!isoDate) return "";
+  if (!isoDate) return '';
   const d = new Date(isoDate);
-  if (isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 // ---------------------------------------------------------------------------
@@ -321,10 +325,10 @@ function buildProjectColumns(
 ): TableColumnDefinition<ProjectRow>[] {
   return [
     createTableColumn<ProjectRow>({
-      columnId: "name",
+      columnId: 'name',
       compare: (a, b) => a.name.localeCompare(b.name),
-      renderHeaderCell: () => "Project Name",
-      renderCell: (item) => (
+      renderHeaderCell: () => 'Project Name',
+      renderCell: item => (
         <TableCellLayout>
           <Text className={styles.projectNameCell} onClick={() => onProjectClick(item.projectId)}>
             {item.name}
@@ -333,23 +337,25 @@ function buildProjectColumns(
       ),
     }),
     createTableColumn<ProjectRow>({
-      columnId: "reference",
+      columnId: 'reference',
       compare: (a, b) => a.reference.localeCompare(b.reference),
-      renderHeaderCell: () => "Reference",
-      renderCell: (item) => (
+      renderHeaderCell: () => 'Reference',
+      renderCell: item => (
         <TableCellLayout>
-          <Text size={200} style={{ fontFamily: tokens.fontFamilyMonospace }}>{item.reference}</Text>
+          <Text size={200} style={{ fontFamily: tokens.fontFamilyMonospace }}>
+            {item.reference}
+          </Text>
         </TableCellLayout>
       ),
     }),
     createTableColumn<ProjectRow>({
-      columnId: "accessLevel",
+      columnId: 'accessLevel',
       compare: (a, b) => a.accessLevel.localeCompare(b.accessLevel),
-      renderHeaderCell: () => "Access Level",
-      renderCell: (item) => {
+      renderHeaderCell: () => 'Access Level',
+      renderCell: item => {
         let cls = styles.accessBadgeViewOnly;
-        if (item.accessLevel === "Collaborate") cls = styles.accessBadgeCollaborate;
-        if (item.accessLevel === "Full Access") cls = styles.accessBadgeFullAccess;
+        if (item.accessLevel === 'Collaborate') cls = styles.accessBadgeCollaborate;
+        if (item.accessLevel === 'Full Access') cls = styles.accessBadgeFullAccess;
         return (
           <TableCellLayout>
             <Badge className={cls} appearance="filled" size="medium" shape="rounded">
@@ -360,12 +366,14 @@ function buildProjectColumns(
       },
     }),
     createTableColumn<ProjectRow>({
-      columnId: "lastActivity",
+      columnId: 'lastActivity',
       compare: (a, b) => a.lastActivity.localeCompare(b.lastActivity),
-      renderHeaderCell: () => "Last Activity",
-      renderCell: (item) => (
+      renderHeaderCell: () => 'Last Activity',
+      renderCell: item => (
         <TableCellLayout>
-          <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>{item.lastActivity}</Text>
+          <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+            {item.lastActivity}
+          </Text>
         </TableCellLayout>
       ),
     }),
@@ -389,8 +397,10 @@ const EmptyState: React.FC<{ message: string; icon?: React.ReactElement }> = ({ 
   const styles = useStyles();
   return (
     <div className={styles.emptyState}>
-      {icon && <span style={{ color: tokens.colorNeutralForeground4, fontSize: "32px" }}>{icon}</span>}
-      <Text size={300} className={styles.emptyStateText}>{message}</Text>
+      {icon && <span style={{ color: tokens.colorNeutralForeground4, fontSize: '32px' }}>{icon}</span>}
+      <Text size={300} className={styles.emptyStateText}>
+        {message}
+      </Text>
     </div>
   );
 };
@@ -411,12 +421,12 @@ const NotificationsPopover: React.FC<{ items: NotificationItem[] }> = ({ items }
             appearance="subtle"
             size="small"
             icon={<AlertRegular />}
-            aria-label={`Notifications${items.length > 0 ? ` (${items.length})` : ""}`}
+            aria-label={`Notifications${items.length > 0 ? ` (${items.length})` : ''}`}
           />
         </Tooltip>
       </PopoverTrigger>
       <PopoverSurface className={styles.notifPopover}>
-        <Text size={400} weight="semibold" as="h2" style={{ display: "block", marginBottom: tokens.spacingVerticalS }}>
+        <Text size={400} weight="semibold" as="h2" style={{ display: 'block', marginBottom: tokens.spacingVerticalS }}>
           Notifications
         </Text>
         {items.length === 0 ? (
@@ -424,13 +434,22 @@ const NotificationsPopover: React.FC<{ items: NotificationItem[] }> = ({ items }
             <Text size={300}>No notifications at this time.</Text>
           </div>
         ) : (
-          items.map((item) => (
+          items.map(item => (
             <div key={item.id} className={styles.notifItem}>
-              <InfoRegular fontSize={16} style={{ color: tokens.colorBrandForeground1, marginTop: "2px", flexShrink: 0 }} />
+              <InfoRegular
+                fontSize={16}
+                style={{ color: tokens.colorBrandForeground1, marginTop: '2px', flexShrink: 0 }}
+              />
               <div>
-                <Text size={300} weight="medium" style={{ display: "block" }}>{item.message}</Text>
-                <Text size={200} style={{ display: "block" }}>{item.detail}</Text>
-                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>{item.date}</Text>
+                <Text size={300} weight="medium" style={{ display: 'block' }}>
+                  {item.message}
+                </Text>
+                <Text size={200} style={{ display: 'block' }}>
+                  {item.detail}
+                </Text>
+                <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                  {item.date}
+                </Text>
               </div>
             </div>
           ))
@@ -458,18 +477,18 @@ const RecentActivitySection: React.FC<{
         <EmptyState message="No recent activity found across your projects." icon={<CalendarRegular />} />
       ) : (
         <div className={styles.itemList}>
-          {items.map((item) => (
+          {items.map(item => (
             <div
               key={item.id}
               className={styles.itemRow}
               onClick={() => onItemClick(item.projectId)}
               role="button"
               tabIndex={0}
-              onKeyDown={(e) => e.key === "Enter" && onItemClick(item.projectId)}
+              onKeyDown={e => e.key === 'Enter' && onItemClick(item.projectId)}
             >
               <CalendarRegular className={styles.itemIcon} fontSize={16} />
               <div className={styles.itemContent}>
-                <Text size={300} weight="medium" truncate wrap={false} style={{ display: "block" }}>
+                <Text size={300} weight="medium" truncate wrap={false} style={{ display: 'block' }}>
                   {item.name}
                 </Text>
                 <Text size={200} className={styles.itemMeta}>
@@ -488,10 +507,7 @@ const RecentActivitySection: React.FC<{
 // Upcoming Events & Tasks section
 // ---------------------------------------------------------------------------
 
-const UpcomingSection: React.FC<{ items: UpcomingItem[]; isLoading: boolean }> = ({
-  items,
-  isLoading,
-}) => {
+const UpcomingSection: React.FC<{ items: UpcomingItem[]; isLoading: boolean }> = ({ items, isLoading }) => {
   const styles = useStyles();
   return (
     <SectionCard title="Upcoming Events & Tasks">
@@ -501,16 +517,13 @@ const UpcomingSection: React.FC<{ items: UpcomingItem[]; isLoading: boolean }> =
         <EmptyState message="No upcoming events or tasks in the next 30 days." icon={<CheckmarkCircleRegular />} />
       ) : (
         <div className={styles.itemList}>
-          {items.map((item) => {
+          {items.map(item => {
             const { label, isOverdue } = formatDueDate(item.dueDate);
             return (
               <div key={item.id} className={styles.itemRow}>
-                <CalendarRegular
-                  className={isOverdue ? styles.itemIconDanger : styles.itemIconBrand}
-                  fontSize={16}
-                />
+                <CalendarRegular className={isOverdue ? styles.itemIconDanger : styles.itemIconBrand} fontSize={16} />
                 <div className={styles.itemContent}>
-                  <Text size={300} weight="medium" truncate wrap={false} style={{ display: "block" }}>
+                  <Text size={300} weight="medium" truncate wrap={false} style={{ display: 'block' }}>
                     {item.name}
                   </Text>
                   <Text size={200} className={isOverdue ? styles.dueDateOverdue : styles.itemMeta}>
@@ -542,7 +555,7 @@ const MyProjectsSection: React.FC<{
   const columns = buildProjectColumns(onProjectClick, styles);
 
   return (
-    <SectionCard title={`My Projects${rows.length > 0 ? ` (${rows.length})` : ""}`}>
+    <SectionCard title={`My Projects${rows.length > 0 ? ` (${rows.length})` : ''}`}>
       {isLoading ? (
         <SectionSpinner label="Loading projects..." />
       ) : rows.length === 0 ? (
@@ -555,15 +568,13 @@ const MyProjectsSection: React.FC<{
           items={rows}
           columns={columns}
           sortable
-          getRowId={(item) => item.projectId}
-          style={{ width: "100%" }}
+          getRowId={item => item.projectId}
+          style={{ width: '100%' }}
           size="small"
         >
           <DataGridHeader>
             <DataGridRow>
-              {({ renderHeaderCell }) => (
-                <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
-              )}
+              {({ renderHeaderCell }) => <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>}
             </DataGridRow>
           </DataGridHeader>
           <DataGridBody<ProjectRow>>
@@ -603,28 +614,25 @@ const MyDocumentsSection: React.FC<{
   const styles = useStyles();
 
   return (
-    <SectionCard title={`My Documents${docs.length > 0 ? ` (${docs.length})` : ""}`}>
+    <SectionCard title={`My Documents${docs.length > 0 ? ` (${docs.length})` : ''}`}>
       {isLoading ? (
         <SectionSpinner label="Loading documents..." />
       ) : docs.length === 0 ? (
-        <EmptyState
-          message="No documents found across your projects."
-          icon={<FolderRegular />}
-        />
+        <EmptyState message="No documents found across your projects." icon={<FolderRegular />} />
       ) : (
         <div>
-          {docs.slice(0, 10).map((doc) => (
+          {docs.slice(0, 10).map(doc => (
             <div
               key={doc.sprk_documentid}
               className={styles.docRow}
               onClick={() => onItemClick(doc._resolvedProjectId)}
               role="button"
               tabIndex={0}
-              onKeyDown={(e) => e.key === "Enter" && onItemClick(doc._resolvedProjectId)}
+              onKeyDown={e => e.key === 'Enter' && onItemClick(doc._resolvedProjectId)}
             >
               <FolderRegular className={styles.docIcon} fontSize={20} />
               <div className={styles.docInfo}>
-                <Text size={300} weight="medium" truncate wrap={false} style={{ display: "block" }}>
+                <Text size={300} weight="medium" truncate wrap={false} style={{ display: 'block' }}>
                   {doc.sprk_name}
                 </Text>
                 <Text size={200} className={styles.docMeta}>
@@ -641,7 +649,7 @@ const MyDocumentsSection: React.FC<{
           {docs.length > 10 && (
             <Text
               size={200}
-              style={{ color: tokens.colorNeutralForeground3, paddingTop: tokens.spacingVerticalS, display: "block" }}
+              style={{ color: tokens.colorNeutralForeground3, paddingTop: tokens.spacingVerticalS, display: 'block' }}
             >
               Showing 10 of {docs.length} documents
             </Text>
@@ -676,26 +684,37 @@ export const WorkspaceHomePage: React.FC = () => {
 
   // Fetch project detail records
   useEffect(() => {
-    if (!context || context.projects.length === 0) { setProjectDetails([]); return; }
+    if (!context || context.projects.length === 0) {
+      setProjectDetails([]);
+      return;
+    }
     let cancelled = false;
     setProjectsLoading(true);
-    getProjects({ $select: "sprk_projectid,sprk_name,sprk_referencenumber,modifiedon", $orderby: "sprk_name asc" })
-      .then((projects) => { if (!cancelled) setProjectDetails(projects); })
-      .catch(() => { if (!cancelled) setProjectDetails([]); })
-      .finally(() => { if (!cancelled) setProjectsLoading(false); });
-    return () => { cancelled = true; };
+    getProjects({ $select: 'sprk_projectid,sprk_name,sprk_referencenumber,modifiedon', $orderby: 'sprk_name asc' })
+      .then(projects => {
+        if (!cancelled) setProjectDetails(projects);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectDetails([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProjectsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [context]);
 
   // Derived project rows
   const projectRows: ProjectRow[] = React.useMemo(() => {
     if (!context) return [];
-    const detailMap = new Map(projectDetails.map((p) => [p.sprk_projectid, p]));
-    return context.projects.map((p) => {
+    const detailMap = new Map(projectDetails.map(p => [p.sprk_projectid, p]));
+    return context.projects.map(p => {
       const detail = detailMap.get(p.projectId);
       return {
         projectId: p.projectId,
         name: detail?.sprk_name ?? p.projectId,
-        reference: detail?.sprk_referencenumber ?? "—",
+        reference: detail?.sprk_referencenumber ?? '—',
         accessLevel: formatAccessLevel(p.accessLevel),
         lastActivity: formatRelativeDate(detail?.modifiedon),
       };
@@ -712,26 +731,28 @@ export const WorkspaceHomePage: React.FC = () => {
     const fetchAll = async () => {
       try {
         const nested = await Promise.all(
-          context.projects.map((p) =>
+          context.projects.map(p =>
+            // Events only — the legacy event-as-todo toggle was removed in R3 task 007.
+            // To-dos are queried separately via `getProjectTodos` per task 008.
             getEvents(p.projectId, {
-              $select: "sprk_eventid,sprk_name,sprk_duedate,sprk_todoflag,_sprk_projectid_value,createdon",
-              $orderby: "createdon desc",
+              $select: 'sprk_eventid,sprk_name,sprk_duedate,_sprk_projectid_value,createdon',
+              $orderby: 'createdon desc',
               $top: 20,
-            }).then((evts) => evts.map((e) => ({ ...e, _resolvedProjectId: p.projectId })))
+            }).then(evts => evts.map(e => ({ ...e, _resolvedProjectId: p.projectId })))
           )
         );
         if (cancelled) return;
         const all = nested.flat();
 
-        const sorted = [...all].sort((a, b) =>
-          (b.createdon ? new Date(b.createdon).getTime() : 0) -
-          (a.createdon ? new Date(a.createdon).getTime() : 0)
+        const sorted = [...all].sort(
+          (a, b) =>
+            (b.createdon ? new Date(b.createdon).getTime() : 0) - (a.createdon ? new Date(a.createdon).getTime() : 0)
         );
         setRecentActivity(
-          sorted.slice(0, 10).map((e) => ({
+          sorted.slice(0, 10).map(e => ({
             id: e.sprk_eventid,
             name: e.sprk_name,
-            projectName: e._sprk_projectid_value ?? "Unknown Project",
+            projectName: e._sprk_projectid_value ?? 'Unknown Project',
             projectId: e._resolvedProjectId,
             relativeDate: formatRelativeDate(e.createdon),
           }))
@@ -740,16 +761,14 @@ export const WorkspaceHomePage: React.FC = () => {
         const now = new Date();
         setUpcomingItems(
           all
-            .filter((e) => e.sprk_duedate && !isNaN(new Date(e.sprk_duedate).getTime()))
-            .sort((a, b) =>
-              new Date(a.sprk_duedate!).getTime() - new Date(b.sprk_duedate!).getTime()
-            )
-            .filter((e) => (new Date(e.sprk_duedate!).getTime() - now.getTime()) / (1000 * 60 * 60 * 24) < 30)
+            .filter(e => e.sprk_duedate && !isNaN(new Date(e.sprk_duedate).getTime()))
+            .sort((a, b) => new Date(a.sprk_duedate!).getTime() - new Date(b.sprk_duedate!).getTime())
+            .filter(e => (new Date(e.sprk_duedate!).getTime() - now.getTime()) / (1000 * 60 * 60 * 24) < 30)
             .slice(0, 5)
-            .map((e) => ({
+            .map(e => ({
               id: e.sprk_eventid,
               name: e.sprk_name,
-              projectName: e._sprk_projectid_value ?? "Unknown Project",
+              projectName: e._sprk_projectid_value ?? 'Unknown Project',
               dueDate: e.sprk_duedate,
             }))
         );
@@ -757,41 +776,58 @@ export const WorkspaceHomePage: React.FC = () => {
         setRecentActivity([]);
         setUpcomingItems([]);
       } finally {
-        if (!cancelled) { setActivityLoading(false); setUpcomingLoading(false); }
+        if (!cancelled) {
+          setActivityLoading(false);
+          setUpcomingLoading(false);
+        }
       }
     };
     void fetchAll();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [context]);
 
   // Fetch documents across all accessible projects
   useEffect(() => {
-    if (!context || context.projects.length === 0) { setAllDocs([]); return; }
+    if (!context || context.projects.length === 0) {
+      setAllDocs([]);
+      return;
+    }
     let cancelled = false;
     setDocsLoading(true);
 
     Promise.all(
-      context.projects.map((p) =>
+      context.projects.map(p =>
         getDocuments(p.projectId, {
-          $select: "sprk_documentid,sprk_name,sprk_documenttype,createdon,modifiedon",
-          $orderby: "createdon desc",
+          $select: 'sprk_documentid,sprk_name,sprk_documenttype,createdon,modifiedon',
+          $orderby: 'createdon desc',
           $top: 20,
-        }).then((docs) => docs.map((d) => ({ ...d, _resolvedProjectId: p.projectId })))
+        }).then(docs => docs.map(d => ({ ...d, _resolvedProjectId: p.projectId })))
       )
     )
-      .then((nested) => {
+      .then(nested => {
         if (!cancelled) {
-          const flat = nested.flat().sort((a, b) =>
-            (b.createdon ? new Date(b.createdon).getTime() : 0) -
-            (a.createdon ? new Date(a.createdon).getTime() : 0)
-          );
+          const flat = nested
+            .flat()
+            .sort(
+              (a, b) =>
+                (b.createdon ? new Date(b.createdon).getTime() : 0) -
+                (a.createdon ? new Date(a.createdon).getTime() : 0)
+            );
           setAllDocs(flat);
         }
       })
-      .catch(() => { if (!cancelled) setAllDocs([]); })
-      .finally(() => { if (!cancelled) setDocsLoading(false); });
+      .catch(() => {
+        if (!cancelled) setAllDocs([]);
+      })
+      .finally(() => {
+        if (!cancelled) setDocsLoading(false);
+      });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [context]);
 
   const handleProjectClick = (projectId: string) => navigate(`/project/${projectId}`);
@@ -811,7 +847,7 @@ export const WorkspaceHomePage: React.FC = () => {
     );
   }
 
-  const displayName = context?.email ?? "";
+  const displayName = context?.email ?? '';
 
   return (
     <PageContainer>
@@ -830,12 +866,7 @@ export const WorkspaceHomePage: React.FC = () => {
 
         <div className={styles.pageHeaderIcons}>
           <Tooltip content="Tasks" relationship="label">
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<CheckmarkCircleRegular />}
-              aria-label="Tasks"
-            />
+            <Button appearance="subtle" size="small" icon={<CheckmarkCircleRegular />} aria-label="Tasks" />
           </Tooltip>
           <NotificationsPopover items={notifications} />
         </div>

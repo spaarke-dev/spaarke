@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>R7 backlog (S1-S4 deferred items)</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, devops</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Backlog doc</rigor-reason>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create `notes/r7-backlog.md` capturing S1 (Entra ID auth via MI + Redis Data Owner role assignment), S2 (Pub/Sub separation in prod), S3 (multi-region geo-replication), S4 (other secrets migration — partially in sister project, more remain).</prompt>
+  <role>Spaarke product/PM.</role>
+  <goal>R7 backlog file with one section per stretch goal + entry-point notes for future projects.</goal>
+  <context><background>FR-22 fifth bullet — R7 backlog captures the deferred items for future planning rounds.</background><relevant-files><file>projects/spaarke-redis-cache-remediation-r1/notes/r7-backlog.md (NEW)</file></relevant-files></context>
+  <constraints><constraint source="spec">FR-22.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Write `notes/r7-backlog.md` with sections per S1-S4 + estimated effort + entry-point.</step>
+    <step order="2">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Write">backlog</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/r7-backlog.md (NEW)</output></outputs>
+  <acceptance-criteria><criterion testable="true">File contains S1-S4 sections.</criterion></acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>MINIMAL rigor.</protocol></execution>
+</task>

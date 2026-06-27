@@ -1,0 +1,123 @@
+<task id="061" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.I2 — Sprk.Bff.Api.Tests/Integration/ batch 2 (~13 files)</title>
+    <status>completed</status>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, integration-tier, p23-i, bff-api, testing</tags>
+    <parallel-group>23-I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Named integration test files (2nd half of ~25) are disjoint from sibling batch 060 (1st half) and from Spe.Integration.Tests work (tasks 062/063)</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Repair the BFF Integration tier tests — batch 2 of 2 (remaining ~13 files in
+    `tests/unit/Sprk.Bff.Api.Tests/Integration/`, alphabetically after batch 060).
+
+    For each failing test:
+    1. Identify failure (WireMock fixture drift, response shape change, middleware-pipeline change)
+    2. Determine: `test-stale` vs `production-bug`
+    3. Apply §6.2 trait
+    4. Verify Pass
+
+    NOTE: WireMock JSON fixture updates ARE permitted (test-only changes per NFR-01).
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY file's diff
+    would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-061-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). Per §6.2, every touched test ends in `repaired`,
+    `real-bug-pending-fix`, `flaky-quarantined`, or archived. `Failed` is FORBIDDEN at close.
+  </prompt>
+
+  <role>Senior .NET integration-test repair specialist with WireMock + WebApplicationFactory expertise.</role>
+
+  <goal>
+    ~13 BFF Integration test files (2nd half) end in §6.2 final end-state. Zero Failed.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/test-baseline-2026-MM-DD.trx</file>
+    <file purpose="real-bug-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code in `src/`, `power-platform/`, `infra/`, `scripts/`</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="§6.2">Every touched test gets a §6.2 final end-state trait</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+    <constraint source="FR-18">All INTEGRATION-tier tests must end in §6.2 final end-state</constraint>
+    <constraint source="batch-partition">Batch 2 covers remaining ~13 Integration files; respect partition</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Second half of the BFF Integration batch. After this task, the `Sprk.Bff.Api.Tests/Integration/`
+      folder is closed out.
+    </background>
+    <dependencies>
+      <dependency task="014" status="not-started">Compile health verified</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Integration/&lt;remaining ~13 files alphabetically&gt;</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">List `tests/unit/Sprk.Bff.Api.Tests/Integration/*.cs`. Sort alphabetically. Take files after batch 060 → this is batch 2.</step>
+    <step order="2">From Phase 0 baseline TRX, identify failing tests within this batch.</step>
+    <step order="3">For each file: compute pre-edit line count; read failing tests + related WireMock fixtures.</step>
+    <step order="4">If any planned file edit would exceed 50% of file lines → HALT, file `escalations/rewrite-request-T-061-{FileName}.md`, await owner approval.</step>
+    <step order="5">Classify each failure: `test-stale` vs `production-bug`.</step>
+    <step order="6">Apply traits per §6.2; file ledger entries as needed. Update WireMock fixtures as needed (test-only).</step>
+    <step order="7">After each file: `dotnet test --filter "FullyQualifiedName~Integration"` (intersected with batch file list) verify outcome.</step>
+    <step order="8">Update `current-task.md` with disposition.</step>
+    <step order="9">Verify `git status` shows NO modifications under `src/`, `power-platform/`, `infra/`, `scripts/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">~13 BFF Integration test files (2nd half, repaired)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (entries if bugs found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All batch-2 Integration tests Pass or Skip-with-reason; zero Failed</criterion>
+    <criterion testable="true">Per-file diff &lt;50% line replacement (NFR-02)</criterion>
+    <criterion testable="true">Every touched test has a §6.2 final end-state trait</criterion>
+    <criterion testable="true">No overlap with batch 1 (task 060) files</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">`CustomWebAppFactory.cs` is NOT modified</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <scope-extension date="2026-05-31">
+      Wave 1 baseline reconciliation (task 008) confirmed Integration tier (2nd half) failures:
+      SseStreamingIntegrationTests (8 failures, 44% rate), PlaybookExecutionTests (1, 6% rate).
+      Total: 9 failures. Falls within existing relevant-files glob — annotation only.
+      See `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
+    </scope-extension>
+  </notes>
+</task>

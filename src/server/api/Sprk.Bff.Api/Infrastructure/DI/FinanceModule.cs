@@ -60,12 +60,20 @@ public static class FinanceModule
         // Scoped: performs semantic search across invoices using Azure AI Search
         // Generates embeddings via IOpenAiClient (text-embedding-3-large)
         // Hybrid search: vector + semantic reranking for best results
-        // Uses SearchIndexClient for accessing spaarke-invoices-dev index
+        // Uses SearchIndexClient for accessing spaarke-invoices-index
         //
         // Depends on IOpenAiClient + SearchIndexClient — both gated on DocumentIntelligence:Enabled.
         if (documentIntelligenceEnabled)
         {
             services.AddScoped<IInvoiceSearchService, InvoiceSearchService>();
+        }
+        else
+        {
+            // L2 — NullInvoiceSearchService (P3 Fail-Fast). Task 011 Phase 1b Tier 2, D-09 §2 L2.
+            // FinanceEndpoints.SearchInvoices consumes IInvoiceSearchService unconditionally;
+            // registering Null-Object here keeps DI param-inference green when
+            // DocumentIntelligence:Enabled=false. Endpoint catch converts to 503 ProblemDetails.
+            services.AddScoped<IInvoiceSearchService, NullInvoiceSearchService>();
         }
 
         // ============================================================================
@@ -98,39 +106,13 @@ public static class FinanceModule
         // ============================================================================
         // Playbook Lookup Service (cached alternate key lookups for SaaS portability)
         // ============================================================================
-        // Scoped: retrieves playbooks by portable code (e.g., "PB-013") instead of environment-specific GUIDs
-        // Enables multi-environment deployments (DEV/QA/PROD) without hardcoded GUIDs or config changes
+        // Scoped: retrieves playbooks by the stable-ID alt-key sprk_playbookid per Q&A 2026-06-22 Q1.
+        // Stable-ID alt-key value mirrors the row's sprk_analysisplaybookid PK and is immutable across
+        // environments — enables multi-environment deployments (DEV/QA/PROD) without env-specific config.
         // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries (critical for high-volume scenarios)
-        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_playbookcode alternate key
-        // Example: GetByCodeAsync("PB-013") returns same playbook across all environments (different GUIDs)
+        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_playbookid alternate key.
+        // Example: GetByIdAsync("<row's sprk_analysisplaybookid PK GUID>") returns the same playbook across environments.
         services.AddScoped<IPlaybookLookupService, PlaybookLookupService>();
-
-        // ============================================================================
-        // Action Lookup Service (cached alternate key lookups for SaaS portability)
-        // ============================================================================
-        // Scoped: retrieves AI actions by portable code (e.g., "ACT-001") instead of environment-specific GUIDs
-        // Enables multi-environment deployments (DEV/QA/PROD) without hardcoded action GUIDs
-        // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries
-        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_actioncode alternate key
-        services.AddScoped<IActionLookupService, ActionLookupService>();
-
-        // ============================================================================
-        // Skill Lookup Service (cached alternate key lookups for SaaS portability)
-        // ============================================================================
-        // Scoped: retrieves AI skills by portable code (e.g., "SKILL-001") instead of environment-specific GUIDs
-        // Enables multi-environment deployments (DEV/QA/PROD) without hardcoded skill GUIDs
-        // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries
-        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_skillcode alternate key
-        services.AddScoped<ISkillLookupService, SkillLookupService>();
-
-        // ============================================================================
-        // Tool Lookup Service (cached alternate key lookups for SaaS portability)
-        // ============================================================================
-        // Scoped: retrieves AI tools by portable code (e.g., "TL-001") instead of environment-specific GUIDs
-        // Enables multi-environment deployments (DEV/QA/PROD) without hardcoded tool GUIDs
-        // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries
-        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_toolcode alternate key
-        services.AddScoped<IToolLookupService, ToolLookupService>();
 
         // ============================================================================
         // Dataverse Update Handler (low-level update operations with concurrency control)
@@ -162,16 +144,6 @@ public static class FinanceModule
         services.AddScoped<FinancialCalculationToolHandler>();
         services.AddScoped<IAiToolHandler>(sp => sp.GetRequiredService<FinancialCalculationToolHandler>());
 
-        // DataverseUpdateToolHandler - generic entity record update from playbook context
-        // Allows playbooks to update arbitrary entity fields without custom handlers
-        // Handles type conversion for Money, EntityReference, and other Dataverse types
-        services.AddScoped<IAiToolHandler, DataverseUpdateToolHandler>();
-
-        // InvoiceExtractionToolHandler - wraps InvoiceAnalysisService for playbook workflows
-        // Extracts invoice facts, generates AI summary, serializes to JSON for storage
-        // Returns: aiSummary (5000 char limit), extractedJson (20000 char limit), facts object
-        services.AddScoped<IAiToolHandler, InvoiceExtractionToolHandler>();
-
         // ============================================================================
         // Attachment Classification Job Handler (ADR-013: AI via BFF, ADR-015: no content logging)
         // ============================================================================
@@ -202,7 +174,7 @@ public static class FinanceModule
         // ============================================================================
         // Scoped: generates embeddings and indexes invoice documents for semantic search
         // IdempotencyKey: invoice-index-{invoiceId}
-        // Index: spaarke-invoices-dev (per-tenant in production: spaarke-invoices-{tenantId})
+        // Index: spaarke-invoices-index (MVP single index; per-tenant fan-out is a future extension)
         // Embeddings: text-embedding-3-large (3072 dimensions)
         //
         // Depends on IOpenAiClient + SearchIndexClient — both gated on DocumentIntelligence:Enabled.

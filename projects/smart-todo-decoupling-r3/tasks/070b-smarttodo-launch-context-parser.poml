@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070b" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>SmartTodo Code Page: parse Outlook launch-context URL params + auto-open CreateTodo wizard pre-filled (task 070 dependency gap)</title>
+    <phase>Phase 3: SmartTodo Code Page (audit-surfaced follow-up)</phase>
+    <status>not-started</status>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <dependencies>020, 031, 032, 070</dependencies>
+    <blocks>none</blocks>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New behavior on Code Page mount; affects user UX for Outlook ribbon launch flow. FULL rigor.</rigor-reason>
+    <parallel-group>P8-W3b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    SmartTodo Code Page must parse Outlook-launch-context query params on mount and auto-open the CreateTodo wizard with `initialRegarding` pre-filled. Currently the Outlook ribbon (task 070) builds a URL like `?action=createTodo&regardingType=sprk_communication&regardingId=<commId>&regardingName=<subject>` and `window.open`s the SmartTodo Code Page — but the Code Page has no parser, so the wizard opens at its default state (no regarding pre-fill).
+
+    Add a parser in `src/solutions/SmartTodo/src/main.tsx` (or appropriate entry point) that:
+    1. On mount, reads `window.location.search`
+    2. If `action=createTodo` query param is present:
+       - Construct `initialRegarding = { entityType, recordId, recordName }` from `regardingType`, `regardingId`, `regardingName` params
+       - Auto-open the CreateTodo wizard with this prop on first render
+       - Remove the query params from the URL (history.replaceState) so refresh doesn't re-trigger
+    3. If params absent → normal Code Page render (no behavioral change)
+  </prompt>
+
+  <role>Spaarke Code Page developer with React + URL routing experience.</role>
+
+  <goal>Outlook ribbon "Create To Do" launches the SmartTodo Code Page, which auto-opens the CreateTodo wizard with regarding pre-filled to the email's communication. End-to-end Outlook flow works.</goal>
+
+  <context>
+    <background>Task 032 added the `initialRegarding` prop to the CreateTodoWizard. Task 070 (Outlook ribbon) uses `window.open` to launch the SmartTodo Code Page with that param embedded in URL query string. The missing piece is the SmartTodo side that reads the URL and passes the prop. Identified in post-deploy tech-debt review 2026-06-08.</background>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/main.tsx</file>
+      <file>src/solutions/SmartTodo/src/App.tsx (or similar root component)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/TodoWizardDialog.tsx (consumer of initialRegarding)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-16">Outlook entry: regarding pre-filled to sprk_regardingcommunication.</constraint>
+    <constraint source="NFR-01">Fluent v9.</constraint>
+    <constraint source="Product portability">No hardcoded URLs. Use `window.location` standard browser API.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/smart-todo-decoupling-r3/notes/createtodo-launch-contract.md (task 032 contract doc)</file>
+      <file>src/client/office-addins/shared/taskpane/services/createTodoLauncher.ts (task 070 — the URL builder side)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Inspect SmartTodo Code Page entry point and CreateTodo wizard mount sequence.</step>
+    <step order="2">Add URL-param parser hook (e.g., `useLaunchContext()`) that returns `{ action, initialRegarding }` from query string.</step>
+    <step order="3">In SmartTodo root component, on mount: if `action === 'createTodo'`, open wizard with `initialRegarding`. Call `history.replaceState(null, '', window.location.pathname)` to clear params so refresh doesn't re-trigger.</step>
+    <step order="4">Add unit tests:
+- No query params → wizard NOT auto-opened
+- `action=createTodo` with valid regarding → wizard opens with correct initialRegarding
+- Missing required params (e.g., regardingType but no regardingId) → defensive: don't auto-open, log warning</step>
+    <step order="5">Run `npm run build` in SmartTodo — clean.</step>
+    <step order="6">Fluent v9 lint pass.</step>
+    <step order="7">**MAIN SESSION will redeploy SmartTodo Code Page after task completes**.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/solutions/SmartTodo/src/main.tsx` (or hooks/useLaunchContext.ts)</output>
+    <output type="code">SmartTodo root component updated to consume launch context</output>
+    <output type="test">Unit tests covering all 3 scenarios</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">URL with `?action=createTodo&regardingType=…&regardingId=…&regardingName=…` triggers wizard auto-open with initialRegarding populated.</criterion>
+    <criterion testable="true">URL without action param → no wizard auto-open (regression check).</criterion>
+    <criterion testable="true">After auto-open, URL params are cleared (refresh-safe).</criterion>
+    <criterion testable="true">SmartTodo build clean.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor.</protocol>
+  </execution>
+</task>

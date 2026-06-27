@@ -1,0 +1,487 @@
+<task id="015" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-05 Register `InvokeSummarizePlaybookTool` on `SprkChatAgent`</title>
+    <status>complete</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort>~2.5 hours (sub-agent code-authoring scope)</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G3 (parallel-safe; deps 012; siblings 014, 016)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>012 (SessionSummarizeOrchestrator); implicitly 005 (FieldDelta), 006 (Structured Outputs)</dependencies>
+    <tags>bff, chat-agent, tool-registration, ai</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Register a new `InvokeSummarizePlaybookTool` chat-agent tool function on the existing
+    `SprkChatAgent` via the established tool-registration mechanism (the
+    `SprkChatAgentFactory.ResolveTools` site that already wires `AnalysisExecutionTools`,
+    `DocumentSearchTools`, `WorkingDocumentTools`, etc. through `AIFunctionFactory.Create`
+    and the AIPU2-061 `CapabilityRouter` per-turn tool-injection contract). The tool exposes
+    a single function (`InvokeSummarizePlaybookAsync`) with parameters
+    `{ fileIds: string[]?, style?: string }` — when the LLM tool-calls this function in
+    response to a natural-language Summarize prompt, the tool MUST delegate to the
+    `SessionSummarizeOrchestrator` from task 012 (a concrete class hosting the shared
+    internal Summarize method). The direct endpoint (task 014) and this tool MUST both
+    converge on the same orchestrator method — there are TWO invocation paths but ONE
+    internal Summarize implementation. The tool description text is load-bearing for
+    correct LLM routing (NFR-12) and MUST distinguish session-uploaded-file Summarize from
+    the `insights.query` tool registered later in task 024.
+
+    R5 is configuration-first and reuse-first: this task adds ZERO new top-level
+    `Program.cs` lines, ZERO new feature flags, and ZERO new chat-agent / tool frameworks.
+    Tool registration goes inside `AnalysisServicesModule.cs` (or the existing
+    `SprkChatAgentFactory.ResolveTools` capability-gated block) per ADR-010 feature-module
+    pattern + ADR-013 agent-via-factory pattern; the tool inherits the existing middleware
+    stack (cost, content safety, telemetry, service routing) and the existing
+    kill-switch coverage via `NullSprkChatAgentFactory` when Chat capability is disabled.
+  </prompt>
+
+  <role>
+    Senior .NET developer with deep familiarity of the Spaarke chat-agent + AI-tool
+    framework: `SprkChatAgentFactory.ResolveTools`, the `AIFunctionFactory.Create` tool
+    registration pattern, the `AIPU2-061` CapabilityRouter-driven per-turn tool injection,
+    `CapabilityValidator`, `AnalysisServicesModule` DI conventions, and the middleware
+    stack (`AgentCostControlMiddleware`, `AgentContentSafetyMiddleware`,
+    `AgentTelemetryMiddleware`, `AgentServiceRoutingMiddleware`). Understands ADR-013
+    (BFF-only AI; agents via factory) and ADR-010 (feature-module DI minimalism).
+  </role>
+
+  <goal>
+    `InvokeSummarizePlaybookTool` is registered as an `AIFunction` on every
+    `SprkChatAgent` session via the existing `SprkChatAgentFactory.ResolveTools` mechanism
+    (capability-gated alongside `AnalysisExecutionTools` / `WorkingDocumentTools`).
+    The tool's function (`InvokeSummarizePlaybookAsync`) accepts parameters
+    `{ fileIds: string[]?, style?: string }` and DELEGATES — does not duplicate — to the
+    `SessionSummarizeOrchestrator` shared internal method from task 012. Default behavior:
+    `fileIds == null` → summarize ALL session-uploaded files from
+    `ChatSession.UploadedFiles[]`; `style == null` → default playbook style.
+
+    The LLM correctly tool-calls this function for natural-language Summarize prompts
+    ("summarize the attached document", "give me a TL;DR of the files I uploaded",
+    "summarize these documents in bullet style") routed via the existing
+    AIPU2-061 keyword + LLM capability router. The tool description text is curated
+    specifically to scope routing to uploaded-files / chat-session Summarize and does NOT
+    overlap semantically with `insights.query` (registered in task 024 with description
+    scoped to matter/project/invoice entity Q&amp;A).
+
+    Both the direct endpoint path (task 014) and the chat-agent tool-call path converge
+    on the same `SessionSummarizeOrchestrator` internal method — verified by a unit test
+    asserting both paths produce identical `FieldDelta` SSE streams for an identical input.
+    The middleware stack (cost, safety, telemetry, routing) wraps the tool execution
+    inherited from `SprkChatAgentFactory.CreateAgent`; ZERO new `Program.cs` lines; ZERO
+    new feature flags; BFF publish-size delta is measured + reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="dependency-task-012">projects/spaarke-ai-platform-unification-r5/tasks/012-session-summarize-orchestrator.poml</file>
+    <file purpose="canonical-tool-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</file>
+    <file purpose="canonical-tool-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisQueryTools.cs</file>
+    <file purpose="tool-resolution-site">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="capability-router-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+    <file purpose="capability-router-di">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiCapabilitiesModule.cs</file>
+    <file purpose="bff-extensions-binding">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §3.1 / reuse mandate">MUST register on the EXISTING `SprkChatAgent` via the EXISTING `SprkChatAgentFactory.ResolveTools` mechanism (the same site that wires `AnalysisExecutionTools`, `DocumentSearchTools`, `WorkingDocumentTools` through `AIFunctionFactory.Create`). MUST NOT introduce a parallel chat agent, a parallel tool registration framework, a parallel `IChatAgent` interface, or a parallel `AIFunction`-emitting abstraction.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 prohibited list">MUST NOT introduce a parallel chat agent to `SprkChatAgent` or a parallel orchestrator to `SessionSummarizeOrchestrator` (task 012). Tool delegates; does NOT re-implement Summarize logic.</constraint>
+    <constraint source="ADR-013">All AI orchestration in BFF; agents are created exclusively via `SprkChatAgentFactory`; the middleware stack (cost control, content safety, telemetry, service routing) MUST wrap tool execution by virtue of using the existing factory. R5 is Zone A here (BFF service surface).</constraint>
+    <constraint source="ADR-010">DI minimalism — registration goes inside the EXISTING `AnalysisServicesModule.cs` feature module (or extends the in-factory tool-resolution block, which requires no DI registration at all — preferred pattern per AIPL-053 / AnalysisExecutionTools precedent). ZERO new top-level `services.AddXxx()` lines in `Program.cs`.</constraint>
+    <constraint source="ADR-018 (R5 §3.2)">R5 introduces NO new feature flags. Tool registers unconditionally inside the existing capability-gated tool block. Kill-switch coverage inherits via `NullSprkChatAgentFactory` when Chat capability is disabled.</constraint>
+    <constraint source="ADR-029 / R5 CLAUDE.md §3.6">BFF publish-size verification — run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, measure compressed output, report absolute size + delta vs prior baseline in task notes. Ceiling ≤60 MB compressed; R5 budget ≤ +1 MB cumulative (target +0.5 MB).</constraint>
+    <constraint source="spec NFR-12 (tool routing discipline)">Tool description text is load-bearing for correct LLM tool-routing. The description MUST scope routing to "summarize files uploaded to the current chat session" / "produce a Summarize playbook output over session-attached documents" and MUST NOT overlap semantically with the `insights.query` tool (registered in task 024 with description scoped to matter/project/invoice analytical questions). Description is curated explicitly to prevent ambiguous routing.</constraint>
+    <constraint source="spec FR-08 (UI path) / FR-03 (prompt-first path)">The tool MUST support both invocation modes the orchestrator supports: `fileIds: string[]?` defaults to ALL `ChatSession.UploadedFiles[]` entries when null/empty; `style: string?` defaults to the playbook's default style. No new parameters beyond the two specified.</constraint>
+    <constraint source="ADR-014">Tool inherits tenant isolation via the existing `ChatHostContext` / `tenantId` flow into `SprkChatAgentFactory`. The orchestrator delegate enforces tenant scoping per task 012 — this tool MUST NOT bypass.</constraint>
+    <constraint source="spec FR-05 (convergence)">Direct endpoint (task 014) and this tool MUST converge on the same `SessionSummarizeOrchestrator` internal method — TWO invocation paths, ONE shared Summarize implementation. Add a unit test asserting equivalence of the produced `FieldDelta` SSE stream for both paths given identical input.</constraint>
+    <constraint source="CLAUDE.md §10 / bff-extensions §F test obligation">PRs modifying `src/server/api/Sprk.Bff.Api/Services/` MUST add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`. Tool wrapper class + tool-registration site changes require accompanying tests.</constraint>
+    <constraint source="ADR-028 (R5 CLAUDE.md §9)">No token snapshots — the tool runs inside the existing agent session whose host context already carries a fresh OBO token per `SprkChatAgentFactory`. Do NOT snapshot or pass tokens into the tool class constructor; orchestrator delegate resolves them from the active scope.</constraint>
+    <constraint source="project">AIPU2-061 routing — the tool name registered via `AIFunctionFactory.Create` MUST be discoverable by `CapabilityRouter` (i.e., either matches an existing capability's `ToolNames` list or is added to the appropriate playbook capability's tool-name allow-list). Verify routing through both the keyword (Layer 1) and LLM (Layer 2) layers selects this tool for natural-language Summarize prompts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/chat-agent-tool-registration</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisQueryTools.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/WorkingDocumentTools.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/ICapabilityRouter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiCapabilitiesModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/NullSprkChatAgentFactory.cs</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-018-feature-flag-scope-discipline.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="AIFunctionFactory.Create tool wiring (canonical reference)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs">
+        Tool class is a `public sealed class` constructed inside
+        `SprkChatAgentFactory.ResolveTools` (NOT registered in DI per ADR-010 + AIPL-053).
+        Exposes a `public IEnumerable&lt;AIFunction&gt; GetTools()` method that yields
+        `AIFunctionFactory.Create(methodReference, name: "ToolName", description: "...")`
+        per tool method. The `[Description("...")]` attribute on the method + parameters is
+        load-bearing for LLM tool-schema generation. Mirror this exactly for
+        `InvokeSummarizePlaybookTool`.
+      </pattern>
+      <pattern name="Capability-gated tool resolution block" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (lines 807–834 for AnalysisExecutionTools)">
+        Tool instantiation lives inside `ResolveTools` wrapped in `try/catch` with
+        `attempted++ / resolved++ / failedTools.Add(...)` bookkeeping per AIPU2-063
+        per-tool error isolation. Gate behind a playbook capability (e.g.,
+        `capabilities.Contains(PlaybookCapabilities.SummarizeSession)` or reuse the
+        appropriate existing capability). The factory resolves required services
+        (orchestrator, chat client, citation context) from `scopedProvider`. SessionId +
+        tenant + ChatSession.UploadedFiles flow in via constructor args from the factory's
+        existing `ChatHostContext` / scoped state.
+      </pattern>
+      <pattern name="Orchestrator delegate (avoids handler→orchestrator cycle)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Insights/AssistantToolCallHandler.cs lines 132–222">
+        The tool can either (a) take a direct `SessionSummarizeOrchestrator` constructor
+        dependency, OR (b) take a `Func&lt;...&gt;` delegate over the orchestrator's shared
+        internal method to avoid constructor cycles. Use direct dependency since the
+        orchestrator from task 012 is a concrete class with no circular dependency on the
+        tool. Mirror the AssistantToolCallHandler delegate pattern only if a cycle
+        emerges during implementation.
+      </pattern>
+      <pattern name="AIPU2-061 CapabilityRouter per-turn tool-injection" location="src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs">
+        The Layer 1 keyword classifier + Layer 2 LLM classifier select a subset of
+        tools per turn based on the user's message and the playbook capabilities. The
+        capability manifest entries' `ToolNames` lists determine which tools are
+        discoverable by the router. Register the new tool's name in the appropriate
+        playbook capability's `ToolNames` allow-list (or under a new capability key
+        if the existing taxonomy lacks a fit — preferred to reuse an existing capability).
+        Verify the router selects the new tool for natural-language Summarize prompts
+        via the existing `ICapabilityRouter.RouteAsync` integration test.
+      </pattern>
+      <pattern name="Two-path convergence (endpoint + tool → same orchestrator method)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsOrchestrator.cs">
+        The Insights `/ask` endpoint and the `insights.query` chat-agent tool both call
+        into the same orchestrator method. R5 mirrors this discipline: task 014
+        (`POST /api/ai/chat/sessions/{id}/summarize`) and task 015 (this tool) both call
+        `SessionSummarizeOrchestrator.SummarizeAsync(...)`. Add an equivalence unit test
+        per the FR-05 convergence requirement.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships a chat-driven "Summarize a Document" vertical slice. Users upload up to 20
+      files to a chat session; both a direct endpoint (task 014) and a chat-agent
+      tool-call (this task) trigger Summarize. The LLM tool-calls this function when the
+      user types a natural-language Summarize request ("summarize the attached docs",
+      "TL;DR these files in bullet style") — this is the FR-03 prompt-first path
+      counterpart to the FR-08 UI-driven "Summarize this only" button (task 021).
+
+      Tool-routing disambiguation between this tool and the upcoming `insights.query`
+      tool (task 024) is a known UR-01 risk; the mitigation is tool-description-quality
+      discipline (spec NFR-12 + plan.md High-Risk Items table). The description must
+      semantically scope routing — "summarize files uploaded to the chat session" vs
+      "answer analytical questions about a matter/project/invoice entity" — so the LLM
+      Layer 2 classifier picks the right tool for each natural-language prompt.
+
+      This task adds NO new top-level `Program.cs` lines (registers inside
+      `SprkChatAgentFactory.ResolveTools` per the AIPL-053 / AnalysisExecutionTools
+      precedent), NO new feature flags (kill-switch inherits via
+      `NullSprkChatAgentFactory`), and NO new chat-agent or tool framework.
+    </background>
+    <dependencies>
+      <dependency task="012" status="required">
+        D2-03 — `SessionSummarizeOrchestrator` concrete class. The tool DELEGATES to this
+        orchestrator's shared internal Summarize method; does not re-implement Summarize
+        logic. Task 012 MUST be ✅ before task 015 begins.
+      </dependency>
+      <dependency task="005" status="required-implicitly">
+        D1-05 — `FieldDelta` SSE event variant on `AnalysisChunk`. The orchestrator emits
+        these progressive events; this tool inherits emission via delegation.
+      </dependency>
+      <dependency task="006" status="required-implicitly">
+        D1-06 — Azure OpenAI Structured Outputs + incremental JSON parser. Underpins the
+        orchestrator's streaming output; this tool inherits via delegation.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 014 (D2-04) — direct endpoint `POST /api/ai/chat/sessions/{id}/summarize`.
+        Parallel-safe sibling in P2-G3. Both task 014 and task 015 converge on the SAME
+        internal orchestrator method per FR-05.</item>
+      <item>Task 016 (D2-06) — adds 5 additive PaneEventBus event types
+        (`workspace.streaming_started`, `workspace.field_delta`, etc.). Parallel-safe
+        sibling in P2-G3. The Workspace widget (task 017) consumes these to render
+        progressive output triggered by this tool's invocation path.</item>
+      <item>Task 024 (D2-14) — `InsightsQueryToolHandler` registers `insights.query` on
+        the same `SprkChatAgent`. Tool-routing disambiguation between these two tools is
+        the UR-01 risk; this task's tool description discipline is the primary
+        mitigation.</item>
+      <item>Task 020 (D2-11) — chat-pane orchestration UX (file chips, indicator,
+        multi-file combined-summary interjection). Front-end counterpart that
+        UI-renders the streaming `FieldDelta` events emitted when this tool is invoked.</item>
+      <item>R2 task 060 / 061 — Direct OpenAI agent + agent-factory extension that
+        established the `SprkChatAgentFactory` middleware stack pattern referenced
+        throughout this task.</item>
+      <item>R2 task 063 — Per-tool error isolation (AIPU2-063). The tool's
+        registration block follows the same `try/catch + failedTools.Add(...)` pattern.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request `/compact`.
+      Declare RIGOR LEVEL explicitly per CLAUDE.md §8:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: BFF code change in chat-agent tool registration site + new tool class
+                 + AI infrastructure + AIPU2-061 capability router coupling. Tags:
+                 bff + chat-agent + tool-registration + ai. Qualifies for FULL per
+                 task-execute decision tree.
+      📖 PROTOCOL STEPS TO EXECUTE: Steps 0–10 with Step 9.5 quality gates.
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`. Confirm task 015 status is 🔲, dependency 012 is ✅,
+      parallel-safe = true (P2-G3). Read `current-task.md` to verify no R5 task is in
+      flight conflicting with this site. Confirm tasks 005, 006 are ✅ (orchestrator's
+      streaming infrastructure dependencies). Confirm task 014 is in flight or queued
+      (sibling — convergence target).
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+      (a) Read `SprkChatAgentFactory.ResolveTools` (lines 540–1040) to internalize the
+          tool-registration block pattern + AIPU2-063 error-isolation discipline.
+      (b) Read `AnalysisExecutionTools.cs` (canonical tool-class shape) and
+          `AnalysisQueryTools.cs` (canonical pattern when constructor takes a service).
+      (c) Read task 012's POML to confirm the exact `SessionSummarizeOrchestrator`
+          signature + the shared internal method name + return type.
+      (d) Read ADR-013, ADR-010, ADR-018 in full.
+      (e) Read `bff-extensions.md` §F (test obligation) + §F.1 (asymmetric-registration
+          anti-pattern) — verify unconditional registration discipline.
+      (f) Read `CapabilityRouter.cs` lines 1–200 to understand the keyword + LLM
+          classification flow and how `ToolNames` allow-lists drive per-turn selection.
+    </step>
+    <step order="3" name="Plan Implementation + Tool Description Authoring (NFR-12)">
+      Author the tool-class skeleton + the tool description text. The description text
+      is the single most load-bearing artifact of this task per NFR-12. Draft two
+      candidate descriptions and pick one explicitly:
+
+      Candidate A (concise):
+      "Summarize one or more files uploaded to the current chat session using the
+      Summarize playbook. Use when the user asks to summarize attached documents,
+      session files, or 'these files'. Do NOT use for analytical questions about a
+      matter/project/invoice entity (use insights.query for that)."
+
+      Candidate B (parameter-aware):
+      "Produce a Summarize playbook output over files uploaded to this chat session.
+      Accepts an optional list of fileIds (defaults to ALL session-uploaded files) and
+      an optional style ('bullet', 'paragraph', 'tldr'; defaults to the playbook
+      default). Returns a streamed structured summary with TL;DR + per-file highlights.
+      Use for chat-session file summarization only — not for matter/project/invoice
+      entity Q&amp;A."
+
+      Pick ONE explicitly + record the decision in task notes. The description MUST
+      explicitly differentiate from `insights.query` (NFR-12 mitigation of UR-01 risk).
+      Author parameter-level `[Description(...)]` attributes for both `fileIds` and
+      `style` so the LLM tool-schema is unambiguous.
+
+      Also: identify the playbook capability under which to gate the tool (read
+      `PlaybookCapabilities` constants in the existing factory; reuse if a fit exists,
+      otherwise add a new constant + capability manifest row — prefer reuse). Decide
+      whether to wire via direct `SessionSummarizeOrchestrator` constructor argument or
+      via a `Func&lt;...&gt;` delegate (default: direct — no cycle expected).
+    </step>
+    <step order="4" name="Create `InvokeSummarizePlaybookTool` class">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/InvokeSummarizePlaybookTool.cs`
+      following the canonical `AnalysisExecutionTools` shape:
+      - `public sealed class InvokeSummarizePlaybookTool`
+      - Constructor: takes `SessionSummarizeOrchestrator` (from task 012),
+        `ChatSession` / sessionId / tenantId (from factory's existing scoped state),
+        `Func&lt;ChatSseEvent, CancellationToken, Task&gt;? sseWriter`, optional `HttpContext`
+        for OBO context propagation per ADR-028 (no token snapshot — pass through).
+      - Method: `public async Task&lt;string&gt; InvokeSummarizePlaybookAsync(string[]? fileIds, string? style, CancellationToken ct)`
+        decorated with `[Description("...")]` from Step 3.
+      - Parameter attributes: `[Description("...")]` on each parameter.
+      - Implementation: validates fileIds against the active `ChatSession.UploadedFiles[]`
+        manifest (task 004); defaults to all files when null/empty; defaults style to
+        the playbook default when null/whitespace; calls
+        `_orchestrator.SummarizeAsync(sessionId, tenantId, fileIds, style, sseWriter, ct)`
+        (exact signature per task 012 — adjust if it differs); returns the orchestrator's
+        return string (e.g., final TL;DR text for the agent's conversation context).
+      - `public IEnumerable&lt;AIFunction&gt; GetTools()` yielding `AIFunctionFactory.Create(
+        InvokeSummarizePlaybookAsync, name: "InvokeSummarizePlaybook", description: "...")`.
+      Mirror the XML doc-comment density of `AnalysisExecutionTools.cs`.
+    </step>
+    <step order="5" name="Wire tool into `SprkChatAgentFactory.ResolveTools`">
+      Extend `SprkChatAgentFactory.ResolveTools` with a new capability-gated block,
+      placed alongside the existing AnalysisExecutionTools block (around lines 807–834).
+      Pattern (mirror existing tool-resolution blocks exactly):
+
+      ```csharp
+      // --- InvokeSummarizePlaybookTool (R5 D2-05) ---
+      // Gated behind the [chosen capability] capability.
+      // Requires SessionSummarizeOrchestrator (task 012) + active ChatSession.
+      if (capabilities.Contains(PlaybookCapabilities.SummarizeSession) && /* orchestrator available */)
+      {
+          attempted++;
+          try
+          {
+              var orchestrator = scopedProvider.GetRequiredService&lt;SessionSummarizeOrchestrator&gt;();
+              var invokeSummarize = new InvokeSummarizePlaybookTool(
+                  orchestrator,
+                  sessionId, tenantId,
+                  sseWriter,
+                  httpContext);
+              tools.AddRange(invokeSummarize.GetTools());
+              resolved++;
+          }
+          catch (Exception ex)
+          {
+              _logger.LogWarning(ex, "Failed to resolve InvokeSummarizePlaybookTool — skipping");
+              failedTools.Add(nameof(InvokeSummarizePlaybookTool));
+          }
+      }
+      ```
+
+      No new DI registration required if the orchestrator is already registered by task
+      012 inside `AnalysisServicesModule.cs`. Confirm. If a new capability constant is
+      needed, add it inside `PlaybookCapabilities` static class (existing file in the
+      Chat namespace). ZERO new `Program.cs` lines per ADR-010.
+    </step>
+    <step order="6" name="Update capability manifest + `ToolNames` allow-list (AIPU2-061)">
+      Update the appropriate capability manifest entry (or capability constants file) so
+      `InvokeSummarizePlaybook` appears in `ToolNames` for the chosen capability. This
+      makes the tool discoverable by `CapabilityRouter.RouteAsync` and selectable for
+      per-turn injection when the user's prompt classifies as Summarize intent. Verify
+      via the `CapabilityValidator` flow (per AIPU2-061 line 1088+ in SprkChatAgentFactory).
+    </step>
+    <step order="7" name="Authored convergence test (FR-05)">
+      Add a unit test in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/` named
+      `InvokeSummarizePlaybookToolTests.cs`:
+      - Test 1 (delegation): `InvokeSummarizePlaybookAsync(null, null, ct)` calls
+        `SessionSummarizeOrchestrator.SummarizeAsync(...)` exactly once with all
+        session-file IDs + default style; asserts via mocked orchestrator + Moq/NSubstitute.
+      - Test 2 (fileIds defaulting): pass `fileIds: new[] { "abc", "xyz" }`; orchestrator
+        is called with that explicit list (no defaulting). Pass `fileIds: []`;
+        orchestrator is called with the full session manifest.
+      - Test 3 (style defaulting): `style: null` → orchestrator called with default
+        playbook style; `style: "bullet"` → orchestrator called with "bullet".
+      - Test 4 (convergence/FR-05): record SSE events emitted via the `sseWriter`
+        delegate for an identical input. Run the same input through the direct
+        endpoint's call path (from task 014 — invoke the same orchestrator method
+        directly) and assert the produced `FieldDelta` SSE event stream is IDENTICAL
+        in content + ordering. This is the load-bearing FR-05 convergence proof.
+      - Test 5 (validation): unknown `fileIds` (not in `ChatSession.UploadedFiles[]`)
+        produces a clear error or skips invalid entries — confirm with task 012's
+        orchestrator contract.
+
+      Add a routing test in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryTests.cs`
+      (or a new file) asserting: when `capabilities` contains the gating capability,
+      `InvokeSummarizePlaybook` appears in the resolved `IReadOnlyList&lt;AIFunction&gt;`;
+      when absent, it does NOT appear; when `routingResult` filters tools to a different
+      capability, this tool is excluded per AIPU2-061.
+    </step>
+    <step order="8" name="LLM tool-call routing smoke test">
+      With a running BFF (locally or on Spaarke Dev), exercise the chat-agent with a set
+      of natural-language Summarize prompts and verify the LLM tool-calls
+      `InvokeSummarizePlaybook` (not e.g. `SearchDocuments` or `RefineText`):
+      - "summarize the attached document"
+      - "give me a TL;DR of the files I uploaded"
+      - "summarize these documents in bullet style"
+      - "what's the gist of the attached PDFs?"
+      Also negative tests (must NOT select `InvokeSummarizePlaybook`):
+      - "what's the total spend on matter X?" → should select `insights.query` once
+        task 024 lands; for this task's verification stage `insights.query` may not yet
+        be registered — verify the prompt does NOT spuriously trigger
+        `InvokeSummarizePlaybook` when no session files are uploaded.
+
+      Capture the tool-call traces (Activity span or log lines) and record them in task
+      notes. If routing is incorrect, refine the description text (Step 3) and re-run.
+      Repeat until at least 3 of 4 positive prompts route correctly + the negative
+      prompts do NOT trigger this tool.
+    </step>
+    <step order="9" name="Verify acceptance criteria">
+      Walk every &lt;acceptance-criterion&gt; below; record evidence per criterion in task
+      notes (`notes/task-015-evidence.md`): tool visible in agent's resolved tool
+      catalog (factory log line + AIFunction list assertion); LLM correctly tool-calls
+      for ≥3 of 4 natural-language test prompts; convergence test passes (identical
+      `FieldDelta` SSE streams); middleware stack inherited (telemetry events present,
+      cost-control middleware engaged); tool description scopes routing per NFR-12
+      (negative prompts do NOT trigger this tool); publish-size measurement recorded.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new tool class + the
+      `SprkChatAgentFactory.ResolveTools` extension + the test file. Run `adr-check`
+      skill against the same; verify ADR-013 (BFF-only AI; agent via factory; middleware
+      inherited), ADR-010 (DI minimalism — zero new top-level lines), ADR-018 (no new
+      feature flag — kill-switch inherits via NullSprkChatAgentFactory), ADR-014 (tenant
+      isolation flows via orchestrator delegate), ADR-028 (no token snapshot — OBO
+      passes through). Both gates MUST pass before marking task complete.
+
+      Run BFF publish + size check:
+      `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`
+      Measure compressed output; record absolute size + delta vs prior baseline (per R5
+      CLAUDE.md §3.6). Expected delta is small (one new class + one tool-resolution
+      block) — target +0.0–0.1 MB.
+
+      Verify no new HIGH-severity CVE: `dotnet list package --vulnerable --include-transitive`.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 015 🔲 → ✅. Reset
+      `current-task.md` to the next pending P2-G3 task per CLAUDE.md §7 (or to next
+      pending P2-Gn task if all of P2-G3 is in flight). Record in task notes
+      (`notes/task-015-evidence.md`): chosen tool description text (final wording),
+      chosen gating capability (existing constant reused vs new constant added), routing
+      smoke-test traces, convergence test result, publish-size delta, CVE scan result.
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF, run tests, run `dotnet publish` for size measurement, run `dotnet list package --vulnerable`</tool>
+    <tool name="git">Stage + commit on the R5 branch (one logical commit for tool class + factory wiring + tests)</tool>
+    <tool name="code-review">Quality gate at Step 9.5 (FULL rigor)</tool>
+    <tool name="adr-check">Quality gate at Step 9.5 (FULL rigor) — verify ADR-013, ADR-010, ADR-018, ADR-014, ADR-028</tool>
+    <tool name="context-handoff">Checkpointing per R5 CLAUDE.md §5 (after Step 3, Step 5, Step 7; verbose at &gt;60%)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/InvokeSummarizePlaybookTool.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (EXTEND — add capability-gated resolution block in ResolveTools alongside AnalysisExecutionTools)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookCapabilities.cs (EXTEND only if a new capability constant is needed — preferred path is reuse)</output>
+    <output type="code">Capability manifest entry / `ToolNames` allow-list update for AIPU2-061 routing (exact file per existing capability manifest convention)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/Tools/InvokeSummarizePlaybookToolTests.cs (NEW — 5 tests including FR-05 convergence)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryTests.cs (EXTEND — add routing-selection test for InvokeSummarizePlaybook)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 015 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next pending P2-G3 task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-015-evidence.md (chosen description text, capability decision, routing smoke-test traces, convergence test result, publish-size delta, CVE scan result)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`InvokeSummarizePlaybookTool` is registered via the EXISTING `SprkChatAgentFactory.ResolveTools` mechanism (no new chat agent, no new tool framework, no new DI top-level lines). Confirmed by `SprkChatAgentFactoryTests` assertion that the tool appears in the resolved `IReadOnlyList&lt;AIFunction&gt;` when the gating capability is present.</criterion>
+    <criterion testable="true">Tool function `InvokeSummarizePlaybookAsync` accepts EXACTLY two parameters: `fileIds: string[]?` (defaults to all session-uploaded files when null/empty) and `style: string?` (defaults to the playbook default when null/whitespace). Confirmed by unit tests covering each defaulting case.</criterion>
+    <criterion testable="true">Tool DELEGATES to `SessionSummarizeOrchestrator.SummarizeAsync(...)` from task 012 — does NOT duplicate Summarize logic. Confirmed by mocked-orchestrator unit test asserting the orchestrator is called exactly once per tool invocation.</criterion>
+    <criterion testable="true">FR-05 convergence: the direct endpoint path (task 014) and this tool path produce IDENTICAL `FieldDelta` SSE event streams for identical input. Confirmed by the convergence test asserting equivalence in event content + ordering.</criterion>
+    <criterion testable="true">Tool is visible in the agent's tool catalog (factory log line emits `resolved++` count including this tool; `ResolveTools` returns it). Confirmed by integration log inspection on Spaarke Dev.</criterion>
+    <criterion testable="true">LLM correctly tool-calls `InvokeSummarizePlaybook` for at least 3 of 4 natural-language Summarize test prompts ("summarize the attached document", "give me a TL;DR of the files I uploaded", "summarize these documents in bullet style", "what's the gist of the attached PDFs?"). Negative prompts do NOT spuriously trigger this tool.</criterion>
+    <criterion testable="true">Tool description text explicitly scopes routing to chat-session uploaded-files Summarize and explicitly differentiates from `insights.query` (per NFR-12). Final description text recorded in task notes.</criterion>
+    <criterion testable="true">Middleware stack (cost control, content safety, telemetry, service routing) wraps tool execution by virtue of using the existing `SprkChatAgentFactory`. Confirmed by telemetry event presence in App Insights / log output during the smoke test.</criterion>
+    <criterion testable="true">AIPU2-061 routing: tool name appears in the appropriate capability manifest's `ToolNames` allow-list; `CapabilityRouter.RouteAsync` selects this tool for Summarize-intent prompts; `SprkChatAgentFactory.ResolveTools` respects the per-turn filter. Confirmed by routing-selection unit test.</criterion>
+    <criterion testable="true">ZERO new top-level `Program.cs` lines (ADR-010); ZERO new feature flags (ADR-018); tool registers unconditionally inside the existing capability-gated block; kill-switch coverage inherits via `NullSprkChatAgentFactory`. Confirmed by `git diff Program.cs` showing no changes + `adr-check` pass at Step 9.5.</criterion>
+    <criterion testable="true">BFF publish-size delta is measured + reported (per R5 CLAUDE.md §3.6); target ≤ +0.1 MB; absolute publish size stays well under the 60 MB ceiling. Recorded in `notes/task-015-evidence.md`.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE introduced (`dotnet list package --vulnerable --include-transitive` clean).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5 (ADR-013, ADR-010, ADR-018, ADR-014, ADR-028 confirmed).</criterion>
+  </acceptance-criteria>
+</task>

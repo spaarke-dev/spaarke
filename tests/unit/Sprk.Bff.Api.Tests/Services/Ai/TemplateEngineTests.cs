@@ -422,6 +422,249 @@ public class TemplateEngineTests
 
     #endregion
 
+    #region Default Helper (FR-3H1.1)
+
+    // Covers acceptance criteria for R3 task 001 / FR-3H1.1 / AC-H1.1:
+    // {{default X "Y"}} returns X if non-empty, else "Y".
+    // Replaces broken `{{X ?? 'Y'}}` usage in playbook configs.
+
+    [Fact]
+    public void Render_DefaultHelper_NonEmptyValue_ReturnsValue()
+    {
+        // Arrange — AC: {{default "X" "Y"}} renders "X"
+        var template = "{{default name 'fallback'}}";
+        var context = new Dictionary<string, object?> { ["name"] = "X" };
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert
+        result.Should().Be("X");
+    }
+
+    [Fact]
+    public void Render_DefaultHelper_EmptyString_ReturnsFallback()
+    {
+        // Arrange — AC: {{default "" "Y"}} renders "Y"
+        var template = "{{default name 'Y'}}";
+        var context = new Dictionary<string, object?> { ["name"] = "" };
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert
+        result.Should().Be("Y");
+    }
+
+    [Fact]
+    public void Render_DefaultHelper_NullValue_ReturnsFallback()
+    {
+        // Arrange — AC: {{default null "Y"}} renders "Y"
+        var template = "{{default name 'Y'}}";
+        var context = new Dictionary<string, object?> { ["name"] = null };
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert
+        result.Should().Be("Y");
+    }
+
+    [Fact]
+    public void Render_DefaultHelper_MissingVariable_ReturnsFallback()
+    {
+        // Arrange — AC: {{default undefinedVar "Y"}} renders "Y"
+        var template = "{{default undefinedVar 'Y'}}";
+        var context = new Dictionary<string, object?>(); // undefinedVar not in context
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert
+        result.Should().Be("Y");
+    }
+
+    [Fact]
+    public void Render_DefaultHelper_InsideLargerTemplate_SubstitutesCorrectly()
+    {
+        // Arrange — realistic playbook-style usage (motivation for FR-3H1.1)
+        var template = "Hello {{default name 'friend'}}, your role is {{default role 'guest'}}.";
+        var context = new Dictionary<string, object?>
+        {
+            ["name"] = "Alice",
+            ["role"] = null
+        };
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert
+        result.Should().Be("Hello Alice, your role is guest.");
+    }
+
+    #endregion
+
+    #region JoinIds Helper (FR-1B.2 + FR-3H1.2)
+
+    // Covers acceptance criteria for R3 task 002 / FR-1B.2 / FR-3H1.2 / AC-1B.2 / AC-H1.1:
+    // {{joinIds arr}} produces comma-separated list suitable for FetchXML `operator='in'` clauses.
+    // Single implementation shared between FR-1B.2 (LookupUserMembership consumers)
+    // and FR-3H1.2 (Workstream H1 template helpers).
+
+    [Fact]
+    public void Render_JoinIdsHelper_ArrayOfStrings_RendersCommaSeparated()
+    {
+        // Arrange — AC: {{joinIds ['a','b','c']}} → "a,b,c"
+        var template = "{{joinIds ids}}";
+        var context = new Dictionary<string, object?>
+        {
+            ["ids"] = new List<string> { "a", "b", "c" }
+        };
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert
+        result.Should().Be("a,b,c");
+    }
+
+    [Fact]
+    public void Render_JoinIdsHelper_ArrayOfGuids_RendersCommaSeparated()
+    {
+        // Arrange — realistic LookupUserMembership output: List<Guid>
+        var g1 = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var g2 = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var template = "{{joinIds ids}}";
+        var context = new Dictionary<string, object?>
+        {
+            ["ids"] = new List<Guid> { g1, g2 }
+        };
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert — Guid.ToString() default is "D" format (lowercase hex w/ hyphens, no braces)
+        result.Should().Be($"{g1},{g2}");
+    }
+
+    [Fact]
+    public void Render_JoinIdsHelper_EmptyArray_RendersEmpty()
+    {
+        // Arrange — AC: {{joinIds []}} → ""
+        var template = "{{joinIds ids}}";
+        var context = new Dictionary<string, object?>
+        {
+            ["ids"] = new List<string>()
+        };
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Render_JoinIdsHelper_NullArray_RendersEmpty()
+    {
+        // Arrange — AC: {{joinIds null}} → ""
+        var template = "{{joinIds ids}}";
+        var context = new Dictionary<string, object?>
+        {
+            ["ids"] = null
+        };
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Render_JoinIdsHelper_UnresolvedBinding_RendersEmpty()
+    {
+        // Arrange — Handlebars.NET passes UndefinedBindingResult (NOT null) for unresolved
+        // variables (per task 001 empirical finding). Helper must treat that as empty.
+        var template = "{{joinIds undefinedIds}}";
+        var context = new Dictionary<string, object?>(); // undefinedIds not in context
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Render_JoinIdsHelper_FetchXmlConditionSnippet_ProducesValidXml()
+    {
+        // Arrange — FR-1B.2 / AC-H1.1 realistic FetchXML usage from migrated playbook.
+        // Output should be valid XML parseable by System.Xml.Linq.XDocument.
+        var template = "<condition attribute=\"sprk_matter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/>";
+        var context = new Dictionary<string, object?>
+        {
+            ["myMatters"] = new
+            {
+                ids = new List<Guid>
+                {
+                    Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+                    Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+                }
+            }
+        };
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert — rendered output is valid XML
+        var act = () => System.Xml.Linq.XDocument.Parse(result);
+        act.Should().NotThrow("rendered FetchXML condition must be valid XML");
+
+        // Verify the `value` attribute contains the comma-separated GUIDs
+        var element = System.Xml.Linq.XDocument.Parse(result).Root!;
+        var valueAttr = element.Attribute("value")!.Value;
+        valueAttr.Should().Be("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    }
+
+    [Fact]
+    public void Render_JoinIdsHelper_StringValue_RendersEmpty()
+    {
+        // Arrange — defensive: caller passed a scalar string, not an enumerable.
+        // String is technically IEnumerable<char>, but we exclude it (FetchXML IN
+        // expects discrete IDs, not characters of an ID).
+        var template = "{{joinIds ids}}";
+        var context = new Dictionary<string, object?>
+        {
+            ["ids"] = "abc"
+        };
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert
+        result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Render_JoinIdsHelper_MixedArray_PreservesOrderAndStringification()
+    {
+        // Arrange — heterogeneous List<object> (e.g., from JSON-deserialized array)
+        var template = "{{joinIds ids}}";
+        var context = new Dictionary<string, object?>
+        {
+            ["ids"] = new List<object?> { "alpha", 42, Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc") }
+        };
+
+        // Act
+        var result = _engine.Render(template, context);
+
+        // Assert
+        result.Should().Be("alpha,42,cccccccc-cccc-cccc-cccc-cccccccccccc");
+    }
+
+    #endregion
+
     #region Real-World Playbook Scenarios
 
     [Fact]

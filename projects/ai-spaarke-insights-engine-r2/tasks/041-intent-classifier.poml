@@ -1,0 +1,63 @@
+<task id="041" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>E2 — Intent classifier (LLM-based; routes playbook vs RAG; forceMode override)</title>
+    <status>completed</status>
+    <wave>E</wave>
+    <estimated-effort>2d</estimated-effort>
+    <tags>intent-classification, llm, routing, hybrid-consumption, zone-a, bff-api</tags>
+    <dependencies>040</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <wave-item>E2</wave-item>
+  </metadata>
+
+  <prompt>
+    Implement the intent classifier that examines a natural-language query and routes to either /api/insights/ask (playbook path) or /api/insights/search (RAG path). Phase 1.5 ships LLM-based classifier (cheap, easy to iterate); embedding-based routing deferred to Phase 2. Supports forceMode override ("playbook" or "rag") for caller-level control.
+  </prompt>
+
+  <role>Senior .NET developer + LLM routing specialist (Zone A).</role>
+
+  <goal>
+    InsightsIntentClassifier (Zone A) returns { path: "playbook" | "rag", playbookId?, confidence }. Confidence below tunable threshold falls back to RAG. Caller can override via "forceMode" parameter on /ask or /search. Cheap model (gpt-4o-mini) used for classification. Latency budget &lt; 500ms p95.
+  </prompt>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r2/spec.md (FR-05, SC-05, Q-E2-1)</file>
+    <file purpose="design">projects/ai-spaarke-insights-engine-r2/design.md (D-P15-06)</file>
+    <file purpose="r1-facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInsightsAi.cs</file>
+    <file purpose="knowledge">knowledge/agent-framework/ (intent classification patterns)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013-refined">Classifier is Zone A; consumed via facade by Assistant + endpoints</constraint>
+    <constraint source="spec.md Risk-5">Mis-routing mitigated by confidence threshold + forceMode override</constraint>
+    <constraint source="ADR-010">Stay within DI ≤15 non-framework target</constraint>
+    <constraint source="ADR-030 + bff-extensions F.1">InsightsIntentClassifier is a query-like service (returns routing decision). If registered behind `if (flag)` AND consumed by an unconditionally-mapped endpoint, apply ADR-030 **P3 Fail-fast Null-Object** (NOT P2 Quiet — query services that return empty results mislead consumers about kill-switch state). Throw `FeatureDisabledException("ai.intent-classification.disabled", "Insights intent classification requires Insights feature enabled.")`. Endpoint catches and returns 503 via AsFeatureDisabled503().</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Design classifier prompt">Few-shot examples per route choice; outputs {path, playbookId?, confidence} JSON</step>
+    <step order="2" name="Implement InsightsIntentClassifier">Zone A — wraps IOpenAiClient (or AgentService) with the classification prompt</step>
+    <step order="3" name="Caching">Cache by query (light TTL) per ADR-009 to avoid re-classification cost</step>
+    <step order="4" name="Threshold tunability">Config (InsightsOptions.IntentClassifierConfidenceThreshold, default 0.7)</step>
+    <step order="5" name="forceMode plumbing">Both /ask and /search accept forceMode; classifier skipped if forceMode set</step>
+    <step order="6" name="Integration tests">(a) Clear playbook intent routes to playbook; (b) Open-ended question routes to RAG; (c) Low confidence falls back to RAG; (d) forceMode override works</step>
+    <step order="7" name="Latency measurement">Sample 100 queries; verify &lt; 500ms p95</step>
+    <step order="8" name="Quality gates">code-review + adr-check</step>
+  </steps>
+
+  <outputs>
+    <output type="code">Services/Ai/Insights/InsightsIntentClassifier.cs (Zone A)</output>
+    <output type="code">InsightsOptions extension (IntentClassifierConfidenceThreshold, etc.)</output>
+    <output type="code">forceMode parameter plumbing on /ask + /search</output>
+    <output type="test">tests/integration/Services/Ai/Insights/IntentClassifierTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Classifier returns valid {path, playbookId?, confidence}</criterion>
+    <criterion testable="true">Below-threshold queries fall back to RAG</criterion>
+    <criterion testable="true">forceMode override bypasses classifier</criterion>
+    <criterion testable="true">Latency &lt; 500ms p95 on sample queries</criterion>
+    <criterion testable="true">spec.md FR-05 partially met (full FR-05 needs E3 Assistant integration)</criterion>
+  </acceptance-criteria>
+</task>

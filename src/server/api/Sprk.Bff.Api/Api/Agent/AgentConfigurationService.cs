@@ -3,10 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System.Text.Json;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Api.Agent;
 
@@ -17,18 +16,21 @@ namespace Sprk.Bff.Api.Api.Agent;
 /// </summary>
 public sealed class AgentConfigurationService
 {
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ILogger<AgentConfigurationService> _logger;
     private readonly AgentConfigurationOptions _options;
 
-    private const string CacheKeyPrefix = "agent:config:";
-    private static readonly DistributedCacheEntryOptions CacheOptions = new()
-    {
-        AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15)
-    };
+    // Resource identifiers for ITenantCache (FR-05: tenant-scoped key format
+    // tenant:{tenantId}:{resource}:{id}:v{version}).
+    private const string AgentConfigResource = "agent-config";
+    private const string ExposedPlaybooksId = "exposed-playbooks";
+    private const string CapabilitiesId = "capabilities";
+    private const int CacheVersion = 1;
+
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(15);
 
     public AgentConfigurationService(
-        IDistributedCache cache,
+        ITenantCache cache,
         ILogger<AgentConfigurationService> logger,
         IOptions<AgentConfigurationOptions> options)
     {
@@ -45,12 +47,20 @@ public sealed class AgentConfigurationService
         string tenantId,
         CancellationToken cancellationToken = default)
     {
-        var cacheKey = $"{CacheKeyPrefix}{tenantId}:exposed-playbooks";
-        var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+        // RB-T034-01 (LOW; repaired 2026-06-01): honor CancellationToken before cache lookup.
+        // MemoryDistributedCache (unit-test seam) and Redis fast-path do not raise
+        // OperationCanceledException synchronously on pre-cancelled tokens; without this
+        // ThrowIfCancellationRequested call, the documented `CancellationToken` contract is
+        // unobserved. Canonical .NET defensive-cancellation pattern for async public APIs.
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var cached = await _cache.GetAsync<List<Guid>>(
+            tenantId, AgentConfigResource, ExposedPlaybooksId, CacheVersion,
+            ct: cancellationToken);
 
         if (cached is not null)
         {
-            return JsonSerializer.Deserialize<List<Guid>>(cached) ?? new List<Guid>();
+            return cached;
         }
 
         // TODO: Query Dataverse for sprk_agentconfiguration entity
@@ -58,8 +68,10 @@ public sealed class AgentConfigurationService
         // For now, return configured defaults from options.
         var defaults = _options.DefaultExposedPlaybookIds ?? new List<Guid>();
 
-        await _cache.SetStringAsync(cacheKey,
-            JsonSerializer.Serialize(defaults), CacheOptions, cancellationToken);
+        await _cache.SetAsync(
+            tenantId, AgentConfigResource, ExposedPlaybooksId, CacheVersion,
+            defaults, CacheTtl,
+            ct: cancellationToken);
 
         return defaults;
     }
@@ -72,14 +84,16 @@ public sealed class AgentConfigurationService
         AgentCapability capability,
         CancellationToken cancellationToken = default)
     {
-        var cacheKey = $"{CacheKeyPrefix}{tenantId}:capabilities";
-        var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+        // RB-T034-01 (LOW; repaired 2026-06-01): defensive CancellationToken honor — same gap as sibling.
+        cancellationToken.ThrowIfCancellationRequested();
 
-        if (cached is not null)
+        var caps = await _cache.GetAsync<Dictionary<string, bool>>(
+            tenantId, AgentConfigResource, CapabilitiesId, CacheVersion,
+            ct: cancellationToken);
+
+        if (caps is not null && caps.TryGetValue(capability.ToString(), out var enabled))
         {
-            var caps = JsonSerializer.Deserialize<Dictionary<string, bool>>(cached);
-            if (caps is not null && caps.TryGetValue(capability.ToString(), out var enabled))
-                return enabled;
+            return enabled;
         }
 
         // Default capabilities from options
@@ -102,6 +116,9 @@ public sealed class AgentConfigurationService
         string userRole,
         CancellationToken cancellationToken = default)
     {
+        // RB-T034-01 (LOW; repaired 2026-06-01): defensive CancellationToken honor — same gap as sibling.
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (_options.AllowedRoles is null || _options.AllowedRoles.Count == 0)
             return true; // No role restrictions configured
 
@@ -115,8 +132,15 @@ public sealed class AgentConfigurationService
         string tenantId,
         CancellationToken cancellationToken = default)
     {
-        await _cache.RemoveAsync($"{CacheKeyPrefix}{tenantId}:exposed-playbooks", cancellationToken);
-        await _cache.RemoveAsync($"{CacheKeyPrefix}{tenantId}:capabilities", cancellationToken);
+        // RB-T034-01 (LOW; repaired 2026-06-01): defensive CancellationToken honor — same gap as sibling.
+        cancellationToken.ThrowIfCancellationRequested();
+
+        await _cache.RemoveAsync(
+            tenantId, AgentConfigResource, ExposedPlaybooksId, CacheVersion,
+            ct: cancellationToken);
+        await _cache.RemoveAsync(
+            tenantId, AgentConfigResource, CapabilitiesId, CacheVersion,
+            ct: cancellationToken);
 
         _logger.LogInformation(
             "Invalidated agent configuration cache for tenant {TenantId}", tenantId);

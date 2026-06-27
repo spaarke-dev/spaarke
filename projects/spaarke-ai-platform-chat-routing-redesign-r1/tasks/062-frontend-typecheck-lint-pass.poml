@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Frontend type-check + lint pass for ADR-030 v2 extension</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4a)</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks>064</blocks>
+    <tags>frontend, verification</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Pure verification / type-check / lint pass; no code modification</rigor-reason>
+    <parallel-group>4-A2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Run TypeScript type-check + ESLint across all packages that import from `@spaarke/ai-widgets` PaneEventBus types. Confirms task 060's `MemoryPaneEvent` extension does not break any existing consumer (additive-only invariant).
+  </prompt>
+
+  <role>SPAARKE platform frontend developer running quality gates.</role>
+
+  <goal>
+    Type-check + lint exit 0 across `Spaarke.AI.Widgets`, `SpaarkeAi` code page, and any other shared lib / code page that imports `PaneChannel`, `PaneChannelEventMap`, or `*PaneEvent` types.
+  </goal>
+
+  <context>
+    <background>
+      ADR-030 v2 amendment is additive: `MemoryPaneEvent` adds new channel + new union; existing 4 channels untouched. This task is the empirical confirmation that nothing downstream broke. Wave 4-A2 runs this alongside 061 (bus verification), 063 (verification commands), 064 (build) in parallel.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/</file>
+      <file>src/solutions/SpaarkeAi/</file>
+      <file>src/client/shared/Spaarke.UI.Components/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">No code modification — pure verification. If type-check fails, file finding to notes/debug/.</constraint>
+    <constraint source="CLAUDE.md">Do NOT use `npm ci` for Vite solutions; use `npm install --legacy-peer-deps --no-audit --no-fund`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">`cd src/client/shared/Spaarke.AI.Widgets/` → `npm install --legacy-peer-deps --no-audit --no-fund` (if not current) → `npx tsc --noEmit` → `npm run lint`.</step>
+    <step order="2">`cd src/solutions/SpaarkeAi/` → `npm install --legacy-peer-deps --no-audit --no-fund` → `npx tsc --noEmit`.</step>
+    <step order="3">Grep for imports of `PaneChannel`, `PaneChannelEventMap`, `WorkspacePaneEvent`, `ContextPaneEvent`, `ConversationPaneEvent`, `SafetyPaneEvent` across `src/` to identify any other consumer packages.</step>
+    <step order="4">For each other consumer package found, run `npx tsc --noEmit`.</step>
+    <step order="5">If any type-check or lint failure surfaces, file in notes/debug/062-typecheck-failures.md with file:line and diagnostic; do NOT modify code (defer to follow-up task via main session).</step>
+    <step order="6">Update TASK-INDEX.md: task 062 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">npm install / npx tsc --noEmit / npm run lint</tool>
+    <tool name="Grep">Find PaneChannel / *PaneEvent imports across repo</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/062-typecheck-result.md — clean OR failure list</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`npx tsc --noEmit` exits 0 in Spaarke.AI.Widgets.</criterion>
+    <criterion testable="true">`npm run lint` exits 0 in Spaarke.AI.Widgets.</criterion>
+    <criterion testable="true">`npx tsc --noEmit` exits 0 in SpaarkeAi solution.</criterion>
+    <criterion testable="true">All other consumers of `PaneChannel`/`*PaneEvent` types type-check 0.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test scope="type-check">Confirm additive ADR-030 v2 extension is non-breaking across consumer surface.</test>
+    <test scope="lint">No new lint errors introduced.</test>
+  </ui-tests>
+
+  <notes>
+    Pure verification task; parallel-safe with 061, 063, 064.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor protocol.</protocol>
+  </execution>
+</task>

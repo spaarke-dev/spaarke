@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
@@ -12,21 +14,36 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Nodes;
 /// Unit tests for CreateTaskNodeExecutor.
 /// Tests validation, template substitution, and task creation.
 /// </summary>
+/// <remarks>
+/// 2026-06-23 (daily-briefing R2.3 refactor): production was refactored to use the canonical
+/// <see cref="IGenericEntityService"/> shared library instead of the orphan-named
+/// <c>IHttpClientFactory.CreateClient("DataverseApi")</c> (which was never registered in DI).
+/// Tests updated to mock <see cref="IGenericEntityService"/>; the prior MockHttpMessageHandler
+/// scaffolding is no longer required. Trait kept as `repaired` to preserve the audit trail.
+/// </remarks>
+[Trait("status", "repaired")]
 public class CreateTaskNodeExecutorTests
 {
     private readonly Mock<ITemplateEngine> _templateEngineMock;
-    private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
+    private readonly Mock<IGenericEntityService> _entityServiceMock;
     private readonly Mock<ILogger<CreateTaskNodeExecutor>> _loggerMock;
     private readonly CreateTaskNodeExecutor _executor;
 
     public CreateTaskNodeExecutorTests()
     {
         _templateEngineMock = new Mock<ITemplateEngine>();
-        _httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        _entityServiceMock = new Mock<IGenericEntityService>();
         _loggerMock = new Mock<ILogger<CreateTaskNodeExecutor>>();
+
+        // Default: CreateAsync returns a fresh GUID so executors that exercise the create
+        // path get a parseable result. Specific tests can override via _entityServiceMock.Reset().
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Guid.NewGuid());
+
         _executor = new CreateTaskNodeExecutor(
             _templateEngineMock.Object,
-            _httpClientFactoryMock.Object,
+            _entityServiceMock.Object,
             _loggerMock.Object);
     }
 

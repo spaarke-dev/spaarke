@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="124" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Bind Persona in Path 3 via IScopeResolverService.ResolvePersonaForChatAsync</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>123</dependencies>
+    <blocks>132</blocks>
+    <tags>bff-api, services, ai, ADR-033</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies hot-path chat-summarize engine (.cs); persona binding affects every Path 3 turn; FULL per task-execute Step 0.5</rigor-reason>
+    <parallel-group>6-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec FR-44: extend Path 3 (`PlaybookExecutionEngine.ExecuteChatSummarizeAsync`) to bind a default Persona via `IScopeResolverService.ResolvePersonaForChatAsync`. The resolved persona content prepends the system prompt so chat-Summarize responses carry the same persona contract as Path 1. Lookup happens at prompt assembly (before LLM call) — does NOT touch streaming. Caching per ADR-014 5-min TTL via the resolver service.
+  </prompt>
+
+  <role>SPAARKE BFF AI engineer. Knows the Path 1/3 persona binding pattern.</role>
+
+  <goal>
+    `ExecuteChatSummarizeAsync` calls `_scopeResolverService.ResolvePersonaForChatAsync(tenantId, cancellationToken)` BEFORE the LLM call and prepends the resolved persona content to the assembled system prompt. Trace log shows persona lookup hit. Unit test asserts the call. Integration test confirms chat-Summarize prompt contains persona content. Streaming unchanged.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-44 + architecture §6.2 (Per-turn prompt assembly): the Path 1 persona binding lives in `PlaybookChatContextProvider.ProvideAsync` calling `ResolvePersonaForChatAsync`. Path 3 currently bypasses persona resolution — specialized playbooks (NDA, Patent, Invoice) thus lack persona context. Adding this binding makes Path 3 consistent with Path 1's contract.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Scopes/IScopeResolverService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Stay within `Services/Ai/` boundary; do not leak resolver into CRUD code.</constraint>
+    <constraint source="ADR-014">Persona lookup hits 5-min cache via resolver; verify cache key is tenant-scoped.</constraint>
+    <constraint source="ADR-033">Streaming behavior unchanged — persona binding happens at prompt-assembly time only.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="spec">FR-44 acceptance — chat-Summarize prompt includes persona content; trace shows persona lookup hit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookChatContextProvider.ProvideAsync` (around line 130-154 per architecture §6.2) to capture the Path 1 persona lookup pattern.</step>
+    <step order="2">Read `IScopeResolverService.ResolvePersonaForChatAsync` signature + return contract.</step>
+    <step order="3">Read `ExecuteChatSummarizeAsync` (post-task-122 state) to find the prompt-assembly site after `JpsRefResolver`.</step>
+    <step order="4">Add persona resolution: call `_scopeResolverService.ResolvePersonaForChatAsync(tenantId, cancellationToken)`; prepend resolved content to the assembled system prompt.</step>
+    <step order="5">Confirm `IScopeResolverService` is already injected (likely YES — used by task 122 indirectly via `JpsRefResolver`). If not, add constructor injection.</step>
+    <step order="6">Add structured-log entry "persona.resolved" at debug level (deterministic ID only, no content) per ADR-015.</step>
+    <step order="7">Add unit test: mock the resolver to return a known persona; assert it appears in the assembled prompt.</step>
+    <step order="8">Run `dotnet build` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Must pass.</step>
+    <step order="9">Measure BFF publish size; report delta.</step>
+    <step order="10">Run code-review + adr-check (Step 9.5 FULL gates).</step>
+    <step order="11">Update TASK-INDEX.md: task 124 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookExecutionEngine.cs, PlaybookChatContextProvider.cs, IScopeResolverService.cs</tool>
+    <tool name="Edit">Apply persona binding + unit test</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs — persona binding added</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookExecutionEnginePersonaTests.cs — new test</output>
+    <output type="docs">notes/handoffs/124-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "ResolvePersonaForChatAsync" src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs` returns at least one hit.</criterion>
+    <criterion testable="true">Unit test "PersonaBoundInPath3" passes.</criterion>
+    <criterion testable="true">Trace log emits "persona.resolved" at debug level with no content payload.</criterion>
+    <criterion testable="true">No edits to streaming code path (ADR-033 compliance).</criterion>
+    <criterion testable="true">BFF publish delta reported.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Persona binding parallels task 122's `$ref` resolution pattern — both happen at prompt-assembly time, before streaming. Keep them in the same code block for readability.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

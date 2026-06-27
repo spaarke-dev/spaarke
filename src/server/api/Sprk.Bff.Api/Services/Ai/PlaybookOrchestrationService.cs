@@ -1,10 +1,13 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
+using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.Schemas;
 
@@ -42,7 +45,16 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     private readonly INodeExecutorRegistry _executorRegistry;
     private readonly IScopeResolverService _scopeResolver;
     private readonly IAnalysisOrchestrationService _legacyOrchestrator;
+    private readonly IInsightsActionRouter _insightsRouter;
     private readonly ILogger<PlaybookOrchestrationService> _logger;
+
+    /// <summary>
+    /// R6 Pillar 6c (FR-37 / task 063) — optional context.* event emitter for
+    /// <c>context.playbook_node_executing</c> / <c>context.playbook_node_completed</c>
+    /// emission at the orchestration WRAPPER level (NFR-08 BINDING: NOT inside any of the
+    /// 11 production node executors). Optional so existing test fixtures construct cleanly.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? _contextEventEmitter;
 
     // In-memory run tracking (Phase 1) - replaced with Dataverse in Phase 2
     private readonly ConcurrentDictionary<Guid, PlaybookRunContext> _activeRuns = new();
@@ -52,13 +64,17 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         INodeExecutorRegistry executorRegistry,
         IScopeResolverService scopeResolver,
         IAnalysisOrchestrationService legacyOrchestrator,
-        ILogger<PlaybookOrchestrationService> logger)
+        IInsightsActionRouter insightsRouter,
+        ILogger<PlaybookOrchestrationService> logger,
+        Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? contextEventEmitter = null)
     {
         _nodeService = nodeService;
         _executorRegistry = executorRegistry;
         _scopeResolver = scopeResolver;
         _legacyOrchestrator = legacyOrchestrator;
+        _insightsRouter = insightsRouter ?? throw new ArgumentNullException(nameof(insightsRouter));
         _logger = logger;
+        _contextEventEmitter = contextEventEmitter;
     }
 
     /// <inheritdoc />
@@ -121,6 +137,19 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             "Starting app-only playbook execution - RunId: {RunId}, PlaybookId: {PlaybookId}, Documents: {DocumentCount}",
             runId, request.PlaybookId, request.DocumentIds.Length);
 
+        // Extract userId from parameters (set by PlaybookSchedulerJob when fanning out per-user).
+        // Without this, QueryDataverseNodeExecutor.ResolveUserId() returns null and the
+        // FetchXml 'eq-userid' substitution is skipped — Dataverse then evaluates as the
+        // BFF service principal (MI), returning 0 records. R3's PlaybookSchedulerJob passes
+        // userId via Parameters["userId"] but did not wire it into context.UserId here.
+        Guid? userId = null;
+        if (request.Parameters is not null
+            && request.Parameters.TryGetValue("userId", out var userIdStr)
+            && Guid.TryParse(userIdStr, out var parsedUserId))
+        {
+            userId = parsedUserId;
+        }
+
         // Create run context without HttpContext (app-only mode)
         var context = new PlaybookRunContext(
             runId,
@@ -129,7 +158,10 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             tenantId,
             cancellationToken,
             request.UserContext,
-            request.Parameters);
+            request.Parameters)
+        {
+            UserId = userId
+        };
 
         if (request.Document != null)
         {
@@ -790,6 +822,237 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
+    /// Wave C1 task 020 — Gap #2 helper per design-a5 §7.2. Extracts the <c>selectedBranch</c>
+    /// from a branching gate's <see cref="NodeOutput"/> structured data. Returns the downstream
+    /// node name on the selected branch, or null when the upstream is not a branching gate
+    /// (no <c>selectedBranch</c> property in its structured data).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Branching gates today:
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Nodes.EvidenceSufficiencyResult.SelectedBranch"/> and
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Nodes.ConditionResult.SelectedBranch"/>. Both expose
+    /// the property under the JSON name <c>"selectedBranch"</c> via default record serialization.
+    /// </para>
+    /// <para>
+    /// Reads from <see cref="NodeOutput.StructuredData"/> via case-insensitive property lookup
+    /// (the JSON serializer uses PascalCase or camelCase depending on options; we accept both).
+    /// </para>
+    /// </remarks>
+    private static string? TryExtractSelectedBranch(NodeOutput depOutput)
+    {
+        if (depOutput.StructuredData is null) return null;
+        var data = depOutput.StructuredData.Value;
+        if (data.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+
+        // Try common casings: "selectedBranch" (camelCase JSON output) and "SelectedBranch" (record name).
+        if (data.TryGetProperty("selectedBranch", out var camelCase) &&
+            camelCase.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            return camelCase.GetString();
+        }
+        if (data.TryGetProperty("SelectedBranch", out var pascalCase) &&
+            pascalCase.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            return pascalCase.GetString();
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Detects whether a Control node is a deployed-Start node — the canvas
+    /// entry-point anchor that the dispatching wrapper binds the payload into.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// R4 (2026-06-25, daily-update-service-r4): Deploy-Playbook.ps1 writes the Start
+    /// row's <c>sprk_configjson</c> as the playbook JSON's <c>nodes[].configJson</c>
+    /// object verbatim — it does NOT inject <c>__actionType=33</c> the way the
+    /// canvas-sync path (<c>NodeService.BuildConfigJson</c>) does. Without an explicit
+    /// <c>__actionType</c>, the orchestrator's structural fallback used to default
+    /// <c>NodeType.Control</c> to <c>ActionType.Condition</c>, which then failed
+    /// <c>ConditionNodeExecutor</c> validation ("Condition expression is required").
+    /// </para>
+    /// <para>
+    /// Detection signals (any one is sufficient — kept lenient because the deploy
+    /// shape varies across the 5 R4 playbooks):
+    /// </para>
+    /// <list type="number">
+    /// <item><description>Empty / null ConfigJson — auto-placed anchor.</description></item>
+    /// <item><description>Node name equals "Start" (case-insensitive).</description></item>
+    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
+    ///   property with value "start".</description></item>
+    /// <item><description>ConfigJson contains an <c>inputContract</c> object (entry-point
+    ///   marker per the R4 playbook authoring convention).</description></item>
+    /// </list>
+    /// </remarks>
+    private static bool IsDeployedStartNode(PlaybookNodeDto node)
+    {
+        if (node.NodeType != NodeType.Control)
+            return false;
+
+        if (string.IsNullOrWhiteSpace(node.ConfigJson))
+            return true;
+
+        if (string.Equals(node.Name, "Start", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
+                return false;
+
+            if (root.TryGetProperty("canvasType", out var canvas)
+                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(canvas.GetString(), "start", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("__canvasType", out var underscored)
+                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(underscored.GetString(), "start", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("inputContract", out _))
+                return true;
+        }
+        catch
+        {
+            // Malformed JSON — not Start; the executor lookup will surface the error.
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Detects whether a Control node is a deployed-LoadKnowledge node — the canvas-only
+    /// pass-through placeholder for the R5 AI Search knowledge-source binding.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// R4 (2026-06-26, daily-update-service-r4 follow-on after StartNodeExecutor):
+    /// same failure class as Start — Deploy-Playbook.ps1 does NOT inject
+    /// <c>__actionType=142</c> for the LoadKnowledge row, so without this detection
+    /// the structural fallback would route Control → ActionType.Condition →
+    /// ConditionNodeExecutor → "Condition expression is required" validation failure.
+    /// </para>
+    /// <para>
+    /// Detection signals (any one is sufficient):
+    /// </para>
+    /// <list type="number">
+    /// <item><description>Node name equals "LoadKnowledge" (case-insensitive).</description></item>
+    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
+    ///   property with value "loadKnowledge".</description></item>
+    /// <item><description>ConfigJson contains a <c>passthroughBinding</c> object
+    ///   (R4 placeholder marker) OR an <c>r5BindingPlan</c> object (forward-compat
+    ///   marker).</description></item>
+    /// </list>
+    /// </remarks>
+    private static bool IsDeployedLoadKnowledgeNode(PlaybookNodeDto node)
+    {
+        if (node.NodeType != NodeType.Control)
+            return false;
+
+        if (string.Equals(node.Name, "LoadKnowledge", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (string.IsNullOrWhiteSpace(node.ConfigJson))
+            return false;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
+                return false;
+
+            if (root.TryGetProperty("canvasType", out var canvas)
+                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(canvas.GetString(), "loadKnowledge", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("__canvasType", out var underscored)
+                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(underscored.GetString(), "loadKnowledge", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("passthroughBinding", out _))
+                return true;
+
+            if (root.TryGetProperty("r5BindingPlan", out _))
+                return true;
+        }
+        catch
+        {
+            // Malformed JSON — not LoadKnowledge; executor lookup will surface the error.
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Detects whether a Control node is a deployed-ReturnResponse node — the canvas-only
+    /// terminal node that binds upstream node outputs into the playbook run's return value.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// R4 (2026-06-26, daily-update-service-r4 follow-on after StartNodeExecutor):
+    /// same failure class as Start + LoadKnowledge — Deploy-Playbook.ps1 does NOT inject
+    /// <c>__actionType=143</c> for the ReturnResponse row.
+    /// </para>
+    /// <para>
+    /// Detection signals (any one is sufficient):
+    /// </para>
+    /// <list type="number">
+    /// <item><description>Node name equals "ReturnResponse" (case-insensitive).</description></item>
+    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
+    ///   property with value "returnResponse".</description></item>
+    /// <item><description>ConfigJson contains a <c>responseBinding</c> object
+    ///   (terminal-node marker per the R4 playbook authoring convention).</description></item>
+    /// </list>
+    /// </remarks>
+    private static bool IsDeployedReturnResponseNode(PlaybookNodeDto node)
+    {
+        if (node.NodeType != NodeType.Control)
+            return false;
+
+        if (string.Equals(node.Name, "ReturnResponse", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (string.IsNullOrWhiteSpace(node.ConfigJson))
+            return false;
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
+                return false;
+
+            if (root.TryGetProperty("canvasType", out var canvas)
+                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(canvas.GetString(), "returnResponse", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("__canvasType", out var underscored)
+                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(underscored.GetString(), "returnResponse", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (root.TryGetProperty("responseBinding", out _))
+                return true;
+        }
+        catch
+        {
+            // Malformed JSON — not ReturnResponse; executor lookup will surface the error.
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Extracts the __actionType value from a node's ConfigJson.
     /// Returns null if ConfigJson is missing or doesn't contain the field.
     /// </summary>
@@ -832,8 +1095,97 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         await writer.WriteAsync(PlaybookStreamEvent.NodeStarted(
             runContext.RunId, runContext.PlaybookId, node.Id, node.Name), cancellationToken);
 
+        // R6 Pillar 6c (FR-37 / task 063) — context.playbook_node_executing emission.
+        // ADR-015 audit: playbookId / nodeId are deterministic GUIDs; nodeType is enum-like.
+        // NFR-08 BINDING: this emission is AT THE WRAPPER LEVEL — the 11 production node
+        // executors are NOT touched. Per-node wrapper timer started here for the matching
+        // completed event below.
+        var nodeStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        _contextEventEmitter?.PlaybookNodeExecuting(
+            playbookId: runContext.PlaybookId,
+            nodeId: node.Id,
+            nodeType: node.NodeType.ToString(),
+            sessionId: null,
+            tenantId: null);
+
+        // R6 Pillar 6c — local helper for context.playbook_node_completed emission.
+        // Called below at each return site (the inner try-catch has multiple return paths;
+        // a finally block on a freshly-opened try would force restructuring the entire
+        // existing try/catch — calling this helper inline keeps the change surgical).
+        // ADR-015 audit: decision is enum-like; durationMs is numeric; no payload.
+        void EmitNodeCompleted(string decision)
+        {
+            nodeStopwatch.Stop();
+            _contextEventEmitter?.PlaybookNodeCompleted(
+                playbookId: runContext.PlaybookId,
+                nodeId: node.Id,
+                decision: decision,
+                durationMs: nodeStopwatch.ElapsedMilliseconds,
+                sessionId: null,
+                tenantId: null);
+        }
+
         try
         {
+            // Wave C1 task 020 — Gap #2 patch: branch-aware dependency resolution per design-a5 §7.2.
+            // When an upstream EvidenceSufficiencyNode (or ConditionNode) emits a selectedBranch,
+            // downstream nodes NOT on the selected branch are skipped — even if all their upstream
+            // dependencies succeeded. Without this patch, a "gated-off" node (e.g., layer2Extract
+            // in universal-ingest@v1 when checkLayer2Gate=insufficient) would execute because
+            // the existing AND-only dependency check treats EvidenceSufficiencyNode's "success-with-
+            // insufficient-verdict" as a successful upstream.
+            //
+            // Semantics: an upstream's selectedBranch is the NAME of the downstream node on the
+            // selected branch (see EvidenceSufficiencyNode line 158-160:
+            //   selectedBranch = sufficient ? config.SufficientBranch : config.InsufficientBranch
+            //   where SufficientBranch / InsufficientBranch hold downstream node names).
+            // We skip the current node when ALL of:
+            //   1) The upstream returned a selectedBranch (i.e., upstream is a branching gate);
+            //   2) The current node's name != selectedBranch.
+            // If a node has MULTIPLE upstreams and at least ONE branching gate selected it, run it
+            // (handles emitObservations which has groundingVerify [sufficient path] + checkLayer2Gate
+            // [insufficient path] as upstreams). Implementation: track whether at least one branching
+            // upstream selected this node; only skip if every branching upstream rejected it.
+            //
+            // Backward compatibility: nodes whose upstreams have no selectedBranch (most existing
+            // playbooks) behave unchanged — branchingDepCount stays 0 and the skip branch is bypassed.
+            int branchingDepCount = 0;
+            int branchingDepsSelectingThisNode = 0;
+            foreach (var depId in node.DependsOn)
+            {
+                var depNode = graph.GetNode(depId);
+                if (depNode == null) continue;
+
+                var depOutput = runContext.GetOutput(depNode.OutputVariable);
+                if (depOutput == null || !depOutput.Success) continue;  // existing failure path handles below
+
+                var selectedBranch = TryExtractSelectedBranch(depOutput);
+                if (selectedBranch is null) continue;
+
+                branchingDepCount++;
+                if (string.Equals(selectedBranch, node.Name, StringComparison.OrdinalIgnoreCase))
+                    branchingDepsSelectingThisNode++;
+            }
+
+            if (branchingDepCount > 0 && branchingDepsSelectingThisNode == 0)
+            {
+                var skipReason = $"Branch not selected: {branchingDepCount} upstream branching gate(s) routed to a different branch";
+                runContext.RecordNodeSkipped();
+
+                _logger.LogDebug(
+                    "Skipping node {NodeName}: {Reason}",
+                    node.Name, skipReason);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
+
+                EmitNodeCompleted("skipped"); // R6 Pillar 6c (FR-37 / task 063)
+
+                // Return a skip output (treated as success for flow control — matches existing
+                // dependency-failure-skip semantics; downstream nodes see this as "Ok(null)").
+                return NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
+            }
+
             // Check if dependencies failed
             foreach (var depId in node.DependsOn)
             {
@@ -853,33 +1205,27 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                         await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
                             runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
 
+                        EmitNodeCompleted("skipped"); // R6 Pillar 6c (FR-37 / task 063)
+
                         // Return a skip output (treated as success for flow control)
                         return NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
                     }
                 }
             }
 
-            // Skip Start nodes — they are canvas anchors with no execution logic.
-            // Detect via:
-            //   1. Explicit __actionType == Start (33) in ConfigJson
-            //   2. Control node with null/empty ConfigJson (auto-placed, no properties)
-            //   3. Control node named "Start" with __actionType == Condition (30) — legacy
-            //      canvas sync writes Condition instead of Start for the auto-placed node
+            // R4 spaarke-daily-update-service-r4 (2026-06-25): Start nodes are now
+            // first-class executable nodes routed to StartNodeExecutor (ActionType.Start
+            // = 33). The previous inline "passthrough" handler did not bind the dispatch
+            // payload into the scope variable, which made {{start.channels}} references
+            // in downstream nodes resolve to null. The executor reads the wrapper's
+            // payload from runContext.Parameters and binds it as a JsonElement into
+            // node.OutputVariable.
+            //
+            // Detection is centralised in IsDeployedStartNode (below) and applied by
+            // the structural fallback at the NodeType→ActionType switch — Control nodes
+            // matching the Start shape get ActionType.Start regardless of whether
+            // ConfigJson carries __actionType.
             var configActionType = ExtractActionTypeFromConfig(node.ConfigJson);
-            var isStartNode = configActionType == ActionType.Start
-                || (node.NodeType == NodeType.Control && string.IsNullOrWhiteSpace(node.ConfigJson))
-                || (node.NodeType == NodeType.Control && configActionType == ActionType.Condition
-                    && string.Equals(node.Name, "Start", StringComparison.OrdinalIgnoreCase));
-            if (isStartNode)
-            {
-                var skipOutput = NodeOutput.Ok(node.Id, node.OutputVariable, null, "Start node (passthrough)");
-                runContext.StoreNodeOutput(skipOutput);
-
-                await writer.WriteAsync(PlaybookStreamEvent.NodeCompleted(
-                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipOutput), cancellationToken);
-
-                return skipOutput;
-            }
 
             // Note: ConditionJson on nodes is for conditional execution guards (Phase 5).
             // The Condition ActionType is handled by ConditionNodeExecutor (Phase 4) which
@@ -892,23 +1238,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             ActionType actionType;
             ResolvedScopes scopes;
 
-            if (node.NodeType == NodeType.AIAnalysis)
+            // Per Insights Engine r2 Wave B (2026-06-02): when sprk_actionid is set,
+            // the action's ActionType is the canonical dispatch source REGARDLESS of
+            // nodeType. Insights nodes like checkSufficiency (Control), groundCitations
+            // (Control), ReturnInsightArtifactNode (Output), and declineInsufficient
+            // (Output) all need their specific executor (EvidenceSufficiency, GroundingVerify,
+            // ReturnInsightArtifact, DeclineToFind) — not the nodeType-based default
+            // (Condition / DeliverOutput) that the original logic fell back to.
+            //
+            // The legacy structural-node path is preserved for backward compat: when no
+            // action FK is set, fall back to ConfigJson __actionType (canvas-Designer
+            // convention) or nodeType-based default.
+            if (node.ActionId != Guid.Empty)
             {
-                // AI nodes: resolve scopes and load action from Dataverse
-                scopes = await _scopeResolver.ResolveNodeScopesAsync(
-                    node.Id, runContext.CancellationToken);
-
-                if (node.ActionId == Guid.Empty)
-                {
-                    var errorMsg = $"AI node '{node.Name}' requires an Action but has no ActionId";
-                    var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
-                    runContext.StoreNodeOutput(errorOutput);
-
-                    await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
-                        runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
-
-                    return errorOutput;
-                }
+                // Resolve scopes only for AI nodes (Control/Output/Workflow have none)
+                scopes = node.NodeType == NodeType.AIAnalysis
+                    ? await _scopeResolver.ResolveNodeScopesAsync(node.Id, runContext.CancellationToken)
+                    : new ResolvedScopes([], [], []);
 
                 var resolved = await _scopeResolver.GetActionAsync(
                     node.ActionId, runContext.CancellationToken);
@@ -922,26 +1268,67 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                         runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
 
+                    EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
+
                     return errorOutput;
                 }
 
                 action = resolved;
                 actionType = action.ActionType;
             }
+            else if (node.NodeType == NodeType.AIAnalysis)
+            {
+                var errorMsg = $"AI node '{node.Name}' requires an Action but has no ActionId";
+                var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
+                runContext.StoreNodeOutput(errorOutput);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
+
+                return errorOutput;
+            }
             else
             {
-                // Structural nodes (Output, Control, Workflow): no Action record, no scopes
+                // Structural nodes (Output, Control, Workflow) WITHOUT an action FK:
+                // legacy path — uses ConfigJson __actionType, the deployed-Start
+                // detection helper, or nodeType-based default (in that order).
                 scopes = new ResolvedScopes([], [], []);
 
-                // Read specific ActionType from ConfigJson (written during canvas sync)
-                // Falls back to NodeType-based default if not present
-                actionType = ExtractActionTypeFromConfig(node.ConfigJson) ?? node.NodeType switch
-                {
-                    NodeType.Output => ActionType.DeliverOutput,
-                    NodeType.Control => ActionType.Condition,
-                    NodeType.Workflow => ActionType.CreateTask,
-                    _ => ActionType.DeliverOutput
-                };
+                // R4 (2026-06-25, daily-update-service-r4): when the structural fallback
+                // resolves a Control node that matches the deployed-Start shape AND
+                // ConfigJson did not carry an explicit __actionType, route to
+                // ActionType.Start so StartNodeExecutor handles it instead of the
+                // legacy Condition default. Deploy-Playbook.ps1 does not inject
+                // __actionType=33 (only the canvas-sync path does that), so without
+                // this branch the deployed Start row falls into ConditionNodeExecutor
+                // and fails validation. Detection logic is centralised in
+                // IsDeployedStartNode for reuse + clarity.
+                // R4 (2026-06-26, daily-update-service-r4 follow-on): extended deployed-Start
+                // detection to cover all three canvas-only Control nodes that the R4
+                // DAILY-BRIEFING-NARRATE playbook deploys without __actionType injection.
+                // Each helper centralises the per-shape detection (see IsDeployedStartNode /
+                // IsDeployedLoadKnowledgeNode / IsDeployedReturnResponseNode). Without these
+                // branches the Condition default fires and rejects the node with "Condition
+                // expression is required" — the same UAT class that StartNodeExecutor closed
+                // on 2026-06-25.
+                actionType = configActionType
+                    ?? (IsDeployedStartNode(node) ? ActionType.Start : (ActionType?)null)
+                    ?? (IsDeployedLoadKnowledgeNode(node) ? ActionType.LoadKnowledge : (ActionType?)null)
+                    ?? (IsDeployedReturnResponseNode(node) ? ActionType.ReturnResponse : (ActionType?)null)
+                    ?? node.NodeType switch
+                    {
+                        NodeType.Output => ActionType.DeliverOutput,
+                        NodeType.Control => ActionType.Condition,
+                        NodeType.Workflow => ActionType.CreateTask,
+                        // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery node maps to a
+                        // SEPARATE ActionType so the legacy Output → DeliverOutput dispatch is
+                        // UNCHANGED (backward-compat invariant). The DeliverCompositeNodeExecutor
+                        // is the only executor for DeliverComposite.
+                        NodeType.DeliverComposite => ActionType.DeliverComposite,
+                        _ => ActionType.DeliverOutput
+                    };
                 action = new AnalysisAction
                 {
                     Id = Guid.Empty,
@@ -965,6 +1352,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
 
+                EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
+
                 return errorOutput;
             }
 
@@ -973,8 +1362,61 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // and collect UpdateRecord-type nodes with their ConfigJson (which contains fieldMappings).
             var downstreamNodes = CollectDownstreamNodeInfo(node, graph);
 
+            // Insights Engine r2 Wave D4 (task 033) — per-(area, type) routing for universal-ingest@v1.
+            // Layer 1 (layer1Classify): if parameters.practiceAreaHint is set AND a per-area action row
+            // INS-L1C-<AREA>@v1 exists, swap the resolved action for the per-area variant. Fall back to
+            // the generic action row otherwise — preserves the "every matter classifies" invariant per
+            // design-a3 §2.5.
+            //
+            // Layer 2 (layer2Extract): consult the sprk_practicearea_documenttype matrix for
+            // (practiceAreaHint, layer1.documentTypeCode). Outcomes:
+            //   - per-pair action: swap action, run executor against per-pair prompt
+            //   - NULL sprk_layer2actioncode (gate-fail by design, e.g., CTRNS × NDA): skip the node,
+            //     emit Layer-1-only Observation (handled by setting branchSkipped flag below)
+            //   - no matrix row (unmapped pair): fall back to generic INS-L2X@v1
+            //   - missing inputs: PassThrough (no change)
+            //
+            // Routing decisions are cached in-process (15-min sliding TTL) per InsightsActionRouter.
+            // The routing happens BEFORE template substitution so the substituted prompt + parameters
+            // reach the executor as a single coherent payload.
+            (action, var insightsL2GateFail) = await ApplyInsightsRoutingAsync(
+                node, action, runContext, cancellationToken).ConfigureAwait(false);
+
+            if (insightsL2GateFail)
+            {
+                // Structured Layer 2 gate-fail per design-a3 §2.5 step 4 (CTRNS × NDA pattern).
+                // Surface as a successful skip so emitObservations downstream still runs with
+                // Layer-1-only output. Mirrors the dependency-failure-skip semantics already
+                // used by the branch-aware skip path.
+                var skipReason = "Insights Layer 2 routing: matrix row carries NULL sprk_layer2actioncode (intentional per-pair gate-fail)";
+                _logger.LogInformation(
+                    "Insights Layer 2 gate-fail for node '{NodeName}' (runId={RunId}, playbookId={PlaybookId}) — {SkipReason}. Universal-ingest will emit Layer-1-only Observation downstream.",
+                    node.Name, runContext.RunId, runContext.PlaybookId, skipReason);
+
+                var skipOutput = NodeOutput.Ok(node.Id, node.OutputVariable, null, skipReason);
+                runContext.RecordNodeSkipped();
+                runContext.StoreNodeOutput(skipOutput);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeSkipped(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, skipReason), cancellationToken);
+
+                EmitNodeCompleted("skipped"); // R6 Pillar 6c (FR-37 / task 063) — Insights L2 gate-fail
+
+                return skipOutput;
+            }
+
+            // Apply {{paramName}} template substitution to ConfigJson before the executor
+            // runs. Variables come from runContext.Parameters (populated by the caller +
+            // enriched by InsightsOrchestrator with matterId/projectId/invoiceId derived from
+            // Subject). Per Insights Engine r2 Wave B (2026-06-02 smoke trace): without this
+            // substitution, playbook nodes like resolveLiveFacts received the literal
+            // "matter:{{matterId}}" and failed at LiveFactResolver. Centralizing the fix here
+            // applies it to every node executor uniformly (LiveFact / IndexRetrieve /
+            // ReturnInsightArtifact all use {{matterId}} in synthesis playbooks).
+            var substitutedNode = ApplyConfigJsonTemplates(node, runContext.Parameters);
+
             // Create node execution context with streaming callback for per-token SSE events
-            var nodeContext = runContext.CreateNodeContext(node, action, scopes, actionType) with
+            var nodeContext = runContext.CreateNodeContext(substitutedNode, action, scopes, actionType) with
             {
                 DownstreamNodes = downstreamNodes,
                 OnTokenReceived = async text =>
@@ -994,6 +1436,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
                 await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, $"Validation failed: {errors}"), cancellationToken);
+
+                EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
 
                 return errorOutput;
             }
@@ -1017,6 +1461,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
                 await writer.WriteAsync(PlaybookStreamEvent.NodeCompleted(
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, output), cancellationToken);
+
+                // FR-53 / chat-routing-redesign-r1 task 114a — per-section SSE streaming.
+                // When the completed node is a DeliverComposite node, re-iterate the composed
+                // section list and emit `section_started` → `section_data` → `section_completed`
+                // for each section, keyed by section name (NOT schema position). The emission
+                // is APPENDED to (not REPLACING) the standard `NodeCompleted` event — so all
+                // existing consumers see unchanged behavior.
+                //
+                // Backward-compat invariant: emits ONLY for actionType == DeliverComposite.
+                // Existing NodeType.Output → DeliverOutput path emits ZERO section events; its
+                // `FieldDelta` stream (via PlaybookExecutionEngine.ExecuteChatSummarizeAsync)
+                // continues UNCHANGED until migrated by FR-58 (task 118R).
+                if (actionType == ActionType.DeliverComposite)
+                {
+                    await EmitDeliverCompositeSectionEventsAsync(
+                        runContext, node, output, writer, cancellationToken).ConfigureAwait(false);
+                }
             }
             else
             {
@@ -1029,11 +1490,24 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     output.ErrorMessage ?? "Unknown error"), cancellationToken);
             }
 
+            // R3 FR-3H1.4 / AC-H1.2 — scan NodeOutput for literal `{{` substrings
+            // (unrendered Handlebars templates). Non-fatal: logs warning + emits a
+            // PlaybookStreamEvent of type UnrenderedTemplateDetected so the UI / SSE
+            // consumers surface the leak. Output already stored + emitted above; this
+            // is observation only and does NOT mutate or block the stream.
+            await ScanForUnrenderedTemplatesAsync(runContext, node, output, writer, cancellationToken)
+                .ConfigureAwait(false);
+
+            // R6 Pillar 6c (FR-37 / task 063) — wrapper-level completion emission.
+            // NFR-08 BINDING: this is at the WRAPPER, not inside the executor.
+            EmitNodeCompleted(output.Success ? "success" : "failed");
+
             return output;
         }
         catch (OperationCanceledException)
         {
             _logger.LogDebug("Node {NodeName} was cancelled", node.Name);
+            EmitNodeCompleted("cancelled"); // R6 Pillar 6c (FR-37 / task 063)
             throw;
         }
         catch (Exception ex)
@@ -1051,6 +1525,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
 
             await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
                 runContext.RunId, runContext.PlaybookId, node.Id, node.Name, ex.Message), cancellationToken);
+
+            EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063) — exception path
 
             return errorOutput;
         }
@@ -1099,6 +1575,258 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// R3 FR-3H1.4 / AC-H1.2 — scans a completed node's <see cref="NodeOutput"/>
+    /// for literal <c>{{</c> substrings, indicating a Handlebars template that
+    /// leaked into the output unrendered. When detected, logs a structured warning
+    /// AND emits a <see cref="PlaybookEventType.UnrenderedTemplateDetected"/> stream
+    /// event with sample text + correlation IDs. Non-fatal — does NOT throw;
+    /// downstream nodes still see the output.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Scanned string fields (in order):
+    /// <see cref="NodeOutput.TextContent"/>, <see cref="NodeOutput.ErrorMessage"/>,
+    /// every entry in <see cref="NodeOutput.Warnings"/>, and the serialized
+    /// <see cref="NodeOutput.StructuredData"/>.
+    /// </para>
+    /// <para>
+    /// One warning + one stream event per node — the warning identifies every
+    /// field that contained <c>{{</c>; the stream event sample is taken from the
+    /// first such field, capped at 200 chars. Sample text is logged so operators
+    /// can identify which template token leaked.
+    /// </para>
+    /// <para>
+    /// CorrelationId: <see cref="PlaybookRunContext.RunId"/> per NFR-08 (matches
+    /// the run-scoped trace identifier surfaced on every PlaybookStreamEvent).
+    /// HttpContext.TraceIdentifier is also logged when present.
+    /// </para>
+    /// </remarks>
+    /// <summary>
+    /// Emits per-section SSE stream events for a completed
+    /// <see cref="NodeType.DeliverComposite"/> node (FR-53 /
+    /// chat-routing-redesign-r1 task 114a). For each
+    /// <see cref="CompositeSectionResult"/> in the composite payload (in completion
+    /// order), emits three events: <c>section_started</c> → <c>section_data</c> →
+    /// <c>section_completed</c>, all keyed by the section's name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Approach A (orchestrator-emits)</b>: keeps the executor
+    /// (<see cref="DeliverCompositeNodeExecutor"/>) pure (returns structured data) and
+    /// localizes streaming concern to the orchestrator (ADR-013 separation of concerns).
+    /// </para>
+    /// <para>
+    /// <b>Phase A emission</b>: composite sections today are non-streaming (the upstream
+    /// executor produces consolidated content). One emission per section per lifecycle
+    /// stage — total of 3*N events for an N-section composite payload. A future
+    /// incremental-streaming phase (when individual composite-feeding nodes start
+    /// emitting partial outputs) emits multiple <c>section_data</c> events per section,
+    /// all sharing the same <c>SectionName</c>.
+    /// </para>
+    /// <para>
+    /// <b>Empty-sections safety</b>: when the composite produces zero sections (per
+    /// FR-52 "a partial composite is still a valid composite"), no <c>section_*</c>
+    /// events are emitted — the <c>NodeCompleted</c> event already in the stream is
+    /// sufficient. The frontend handles a composite payload with zero sections.
+    /// </para>
+    /// <para>
+    /// <b>ADR-015 tier-1 telemetry</b>: logs <c>(sectionCount, sectionNames=[...],
+    /// totalLatencyMs)</c> — section names are deterministic configuration identifiers
+    /// (safe). Section <i>content</i> is NEVER logged — it flows on the SSE wire which
+    /// is the canonical record.
+    /// </para>
+    /// <para>
+    /// <b>Malformed-payload safety</b>: if <see cref="NodeOutput.StructuredData"/>
+    /// cannot be deserialized to a <see cref="CompositeOutputPayload"/>, logs a warning
+    /// and returns (no events emitted). Emission is best-effort; downstream consumers
+    /// rely on the <c>NodeCompleted</c> event for canonical success signaling.
+    /// </para>
+    /// </remarks>
+    private async Task EmitDeliverCompositeSectionEventsAsync(
+        PlaybookRunContext runContext,
+        PlaybookNodeDto node,
+        NodeOutput output,
+        ChannelWriter<PlaybookStreamEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        // Deserialize the composite payload from NodeOutput.StructuredData.
+        // The executor (DeliverCompositeNodeExecutor) places a CompositeOutputPayload here.
+        CompositeOutputPayload? payload;
+        try
+        {
+            payload = output.GetData<CompositeOutputPayload>();
+        }
+        catch (JsonException ex)
+        {
+            // Defensive: if a future change produces malformed StructuredData, surface a
+            // warning + skip emission rather than aborting the run. The NodeCompleted
+            // event is already on the stream — consumers can still proceed.
+            _logger.LogWarning(ex,
+                "DeliverComposite node {NodeId} ({NodeName}): failed to deserialize CompositeOutputPayload " +
+                "from NodeOutput.StructuredData — skipping per-section SSE emission. RunId={RunId}",
+                node.Id, node.Name, runContext.RunId);
+            return;
+        }
+
+        if (payload is null || payload.Sections is null || payload.Sections.Count == 0)
+        {
+            // Empty composite per FR-52 is valid — no section events to emit. NodeCompleted
+            // already signals overall success.
+            _logger.LogDebug(
+                "DeliverComposite node {NodeId} ({NodeName}): composite payload has zero sections — " +
+                "no per-section SSE events to emit. RunId={RunId}",
+                node.Id, node.Name, runContext.RunId);
+            return;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var totalSections = payload.Sections.Count;
+        var sectionNames = new List<string>(totalSections);
+
+        for (var i = 0; i < totalSections; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var section = payload.Sections[i];
+            sectionNames.Add(section.SectionName);
+
+            // section_started — announce the section's start with position metadata.
+            var startedData = new SectionStartedSseEventData(
+                SectionName: section.SectionName,
+                DisplayLabel: section.DisplayLabel,
+                SectionIndex: i,
+                TotalSections: totalSections);
+
+            await writer.WriteAsync(PlaybookStreamEvent.SectionStarted(
+                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, startedData),
+                cancellationToken).ConfigureAwait(false);
+
+            // section_data — emit one consolidated content event for Phase A. Future
+            // incremental phases emit multiple deltas per section, all sharing the same
+            // SectionName.
+            var dataData = new SectionDataSseEventData(
+                SectionName: section.SectionName,
+                TextDelta: section.TextContent,
+                StructuredData: section.StructuredData);
+
+            await writer.WriteAsync(PlaybookStreamEvent.SectionData(
+                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, dataData),
+                cancellationToken).ConfigureAwait(false);
+
+            // section_completed — finalize with idempotent re-emission of the section's
+            // final state so frontends that drop the intermediate section_data event still
+            // render correctly.
+            var completedData = new SectionCompletedSseEventData(
+                SectionName: section.SectionName,
+                FinalText: section.TextContent,
+                FinalStructuredData: section.StructuredData,
+                SourceNodeId: section.SourceNodeId == Guid.Empty ? null : section.SourceNodeId);
+
+            await writer.WriteAsync(PlaybookStreamEvent.SectionCompleted(
+                runContext.RunId, runContext.PlaybookId, node.Id, node.Name, completedData),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        stopwatch.Stop();
+
+        // ADR-015 tier-1 telemetry: section names are deterministic configuration identifiers
+        // (safe to log); section content is NOT duplicated into logs (SSE wire is canonical).
+        _logger.LogInformation(
+            "DeliverComposite node {NodeId} ({NodeName}) per-section SSE emission completed: " +
+            "sectionCount={SectionCount}, sectionNames=[{SectionNames}], totalLatencyMs={LatencyMs}, " +
+            "RunId={RunId}",
+            node.Id, node.Name, totalSections, string.Join(",", sectionNames),
+            stopwatch.ElapsedMilliseconds, runContext.RunId);
+    }
+
+    private async Task ScanForUnrenderedTemplatesAsync(
+        PlaybookRunContext runContext,
+        PlaybookNodeDto node,
+        NodeOutput output,
+        ChannelWriter<PlaybookStreamEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        // Lazy: build a list of (fieldName, value) pairs we will scan.
+        // Keep allocation minimal — most outputs have only TextContent populated.
+        List<(string Field, string Value)>? offenders = null;
+
+        void Check(string fieldName, string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return;
+            if (value.IndexOf("{{", StringComparison.Ordinal) < 0)
+                return;
+            offenders ??= new List<(string, string)>(capacity: 2);
+            offenders.Add((fieldName, value));
+        }
+
+        Check(nameof(NodeOutput.TextContent), output.TextContent);
+        Check(nameof(NodeOutput.ErrorMessage), output.ErrorMessage);
+
+        // Warnings list — index in the message so operators can locate the entry.
+        if (output.Warnings.Count > 0)
+        {
+            for (var i = 0; i < output.Warnings.Count; i++)
+            {
+                Check($"{nameof(NodeOutput.Warnings)}[{i}]", output.Warnings[i]);
+            }
+        }
+
+        // StructuredData — serialize once to scan; cheaper than walking JSON tokens
+        // for the common path (no leaks) since the call is bounded by NodeOutput size
+        // which is already capped by upstream contracts (CHAT-ATTACHMENT-POLICY etc.).
+        if (output.StructuredData is JsonElement structured && structured.ValueKind != JsonValueKind.Undefined && structured.ValueKind != JsonValueKind.Null)
+        {
+            // GetRawText avoids re-serializing; quotes around JSON strings won't
+            // produce false-positive "{{" because the literal is a 2-char sequence
+            // (JSON cannot embed it as escape — `{` is not escapable inside strings).
+            string raw;
+            try
+            {
+                raw = structured.GetRawText();
+            }
+            catch (InvalidOperationException)
+            {
+                // Disposed JsonDocument or otherwise unreadable — skip silently.
+                raw = string.Empty;
+            }
+            Check(nameof(NodeOutput.StructuredData), raw);
+        }
+
+        if (offenders is null)
+            return;
+
+        // Build sample from first offender, capped at 200 chars per task spec.
+        var firstField = offenders[0].Field;
+        var firstValue = offenders[0].Value;
+        var sample = firstValue.Length <= 200 ? firstValue : firstValue[..200];
+        var fieldList = string.Join(", ", offenders.Select(o => o.Field));
+
+        var httpTraceId = runContext.HttpContext?.TraceIdentifier;
+
+        _logger.LogWarning(
+            "Unrendered template detected in node {NodeName} (NodeId={NodeId}, RunId={RunId}, CorrelationId={CorrelationId}, HttpTraceId={HttpTraceId}). " +
+            "Field(s) containing '{{{{': {Fields}. Sample (first 200 chars of {SampleField}): {TemplateSample}",
+            node.Name,
+            node.Id,
+            runContext.RunId,
+            runContext.RunId,
+            httpTraceId,
+            fieldList,
+            firstField,
+            sample);
+
+        await writer.WriteAsync(
+            PlaybookStreamEvent.UnrenderedTemplateDetected(
+                runContext.RunId,
+                runContext.PlaybookId,
+                node.Id,
+                node.Name,
+                sample),
+            cancellationToken).ConfigureAwait(false);
     }
 
     #endregion
@@ -1236,6 +1964,199 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Universal-ingest@v1 Layer 1 node name (per <c>universal-ingest.playbook.json</c>).
+    /// Detection point for per-area Layer 1 routing.
+    /// </summary>
+    private const string UniversalIngestLayer1NodeName = "layer1Classify";
+
+    /// <summary>
+    /// Universal-ingest@v1 Layer 2 node name (per <c>universal-ingest.playbook.json</c>).
+    /// Detection point for per-(area, type) Layer 2 routing.
+    /// </summary>
+    private const string UniversalIngestLayer2NodeName = "layer2Extract";
+
+    /// <summary>
+    /// Universal-ingest@v1 Layer 1 output variable name (consumed by Layer 2 routing
+    /// to read the <c>document_type_code</c> classification result).
+    /// </summary>
+    private const string UniversalIngestLayer1OutputVariable = "layer1";
+
+    /// <summary>
+    /// Apply Insights Engine r2 Wave D4 (task 033) per-(area, type) routing to the
+    /// universal-ingest@v1 playbook's Layer 1 and Layer 2 nodes. Returns the (possibly
+    /// swapped) action plus a flag indicating whether the node should be skipped
+    /// with a structured Layer 2 gate-fail.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Routing is identified by <see cref="PlaybookNodeDto.Name"/> matching the canonical
+    /// universal-ingest node names. Other playbooks (including future Insights variants
+    /// that don't follow this naming) flow through unchanged — routing is OPT-IN by
+    /// node name, never silently applied.
+    /// </para>
+    /// <para>
+    /// <b>Layer 1 routing</b>: reads <c>parameters.practiceAreaHint</c>, asks the router
+    /// for the per-area action; on miss, returns the orchestrator's default action.
+    /// </para>
+    /// <para>
+    /// <b>Layer 2 routing</b>: reads <c>parameters.practiceAreaHint</c> + extracts the
+    /// <c>document_type_code</c> from the upstream <c>layer1</c> node output, asks the
+    /// router for the matrix lookup. Returns one of:
+    /// <list type="bullet">
+    ///   <item>PassThrough — inputs missing, action unchanged</item>
+    ///   <item>UsePerPairAction — swap action to per-pair variant</item>
+    ///   <item>GateFailNullActionCode — gate-fail flag set; caller emits Skip output</item>
+    ///   <item>FallbackToGeneric — unmapped pair, action unchanged</item>
+    /// </list>
+    /// </para>
+    /// </remarks>
+    private async Task<(AnalysisAction Action, bool GateFailLayer2)> ApplyInsightsRoutingAsync(
+        PlaybookNodeDto node,
+        AnalysisAction action,
+        PlaybookRunContext runContext,
+        CancellationToken cancellationToken)
+    {
+        // Identify the universal-ingest L1/L2 nodes by name. Other playbooks (and
+        // synthesis playbooks like predict-matter-cost@v1) pass through unchanged.
+        if (string.IsNullOrEmpty(node.Name))
+        {
+            return (action, false);
+        }
+
+        var practiceAreaHint = TryGetParameter(runContext.Parameters, "practiceAreaHint");
+
+        if (string.Equals(node.Name, UniversalIngestLayer1NodeName, StringComparison.Ordinal))
+        {
+            var routed = await _insightsRouter.ResolveLayer1ActionAsync(
+                practiceAreaHint, action, cancellationToken).ConfigureAwait(false);
+            return (routed, false);
+        }
+
+        if (string.Equals(node.Name, UniversalIngestLayer2NodeName, StringComparison.Ordinal))
+        {
+            // Read the Layer 1 output to extract the document_type_code. When unavailable
+            // (sanitize short-circuited OR a prior node failed before Layer 1 ran), fall
+            // through to the default action — the orchestrator's branch-aware skip handles
+            // the rest.
+            var documentTypeHint = TryGetParameter(runContext.Parameters, "documentTypeHint")
+                ?? ExtractDocumentTypeFromLayer1Output(runContext);
+
+            var routing = await _insightsRouter.ResolveLayer2ActionAsync(
+                practiceAreaHint, documentTypeHint, action, cancellationToken).ConfigureAwait(false);
+
+            return routing.Decision switch
+            {
+                InsightsLayer2RoutingDecision.GateFailNullActionCode => (action, true),
+                InsightsLayer2RoutingDecision.UsePerPairAction => (routing.Action, false),
+                _ => (action, false)
+            };
+        }
+
+        return (action, false);
+    }
+
+    /// <summary>
+    /// Safe lookup of a string parameter from the run context's parameter dictionary.
+    /// Returns null when missing or empty; never throws.
+    /// </summary>
+    private static string? TryGetParameter(IReadOnlyDictionary<string, string>? parameters, string key)
+    {
+        if (parameters is null) return null;
+        return parameters.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : null;
+    }
+
+    /// <summary>
+    /// Extract <c>document_type_code</c> from the upstream <c>layer1</c> node's structured
+    /// output. The Layer 1 prompt emits a JSON object shape
+    /// <c>{ document_type_code, signals { ... }, confidence, rationale }</c> per
+    /// design-a3 §5.1. Returns null when the layer1 output is absent or malformed —
+    /// caller falls back to the default action.
+    /// </summary>
+    private string? ExtractDocumentTypeFromLayer1Output(PlaybookRunContext runContext)
+    {
+        var layer1Output = runContext.GetOutput(UniversalIngestLayer1OutputVariable);
+        if (layer1Output is null || !layer1Output.Success || layer1Output.StructuredData is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var root = layer1Output.StructuredData.Value;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            // Try canonical key first (design-a3 §5.1), then a couple of common
+            // case variants in case prompt authors emit camelCase.
+            if (TryReadStringProperty(root, "document_type_code", out var v1)) return v1;
+            if (TryReadStringProperty(root, "documentTypeCode", out var v2)) return v2;
+            if (TryReadStringProperty(root, "classification", out var v3)) return v3;
+
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex,
+                "PlaybookOrchestrationService.ExtractDocumentTypeFromLayer1Output: malformed layer1 output; falling back to default Layer 2 action.");
+            return null;
+        }
+    }
+
+    private static bool TryReadStringProperty(JsonElement root, string propertyName, out string? value)
+    {
+        if (root.TryGetProperty(propertyName, out var element)
+            && element.ValueKind == JsonValueKind.String)
+        {
+            value = element.GetString();
+            return !string.IsNullOrWhiteSpace(value);
+        }
+        value = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Substitute <c>{{paramName}}</c> placeholders in the node's ConfigJson with values
+    /// from the run parameters. Returns a NEW PlaybookNodeDto record with the substituted
+    /// ConfigJson; never mutates the input. Idempotent — placeholders without matching
+    /// parameters are left intact (the executor surfaces the original string for clear
+    /// authoring feedback).
+    /// </summary>
+    /// <remarks>
+    /// Per Insights Engine r2 Wave B (2026-06-02): adds centralized template substitution
+    /// previously missing from the orchestration pipeline. Without it, playbook nodes like
+    /// <c>resolveLiveFacts</c> received literal <c>"matter:{{matterId}}"</c> from ConfigJson
+    /// and failed at <c>LiveFactResolver.ParseMatterSubject</c> with
+    /// <c>LiveFactNotSupportedException</c>, returning a scaffold "no-artifact-produced"
+    /// decline to the caller. Centralized fix applies uniformly to all executor types.
+    /// </remarks>
+    private static PlaybookNodeDto ApplyConfigJsonTemplates(
+        PlaybookNodeDto node,
+        IReadOnlyDictionary<string, string>? parameters)
+    {
+        if (parameters is null || parameters.Count == 0)
+            return node;
+        if (string.IsNullOrEmpty(node.ConfigJson) || !node.ConfigJson.Contains("{{", StringComparison.Ordinal))
+            return node;
+
+        var rendered = node.ConfigJson;
+        foreach (var kvp in parameters)
+        {
+            if (string.IsNullOrEmpty(kvp.Key)) continue;
+            var placeholder = "{{" + kvp.Key + "}}";
+            if (rendered.Contains(placeholder, StringComparison.Ordinal))
+            {
+                rendered = rendered.Replace(placeholder, kvp.Value ?? string.Empty, StringComparison.Ordinal);
+            }
+        }
+
+        return node with { ConfigJson = rendered };
     }
 
     #endregion

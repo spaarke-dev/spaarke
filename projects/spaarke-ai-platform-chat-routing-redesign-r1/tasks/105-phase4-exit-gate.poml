@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="105" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Phase 4 exit gate — all WP5 FRs satisfied; architecture §8 tool surface verified</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4f)</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>104</dependencies>
+    <blocks>110</blocks>
+    <tags>verification, architecture-binding</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Verification/exit-gate task; no code change; MINIMAL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>4-S</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Phase 4 exit gate. Produce a written verification report confirming all 25+ WP5 FRs (FR-25 through FR-37 + NFR-A1 through NFR-A7) are satisfied and architecture §8 tool surface (12 tools total: 8 new memory tools + 4 existing Pillar 6b workspace tools) is verified live in the deployed environment. Gate transitions the project from Phase 4 → Phase 5 (WP2 file-aware classification).
+  </prompt>
+
+  <role>SPAARKE platform program lead. Verification-only role; no implementation.</role>
+
+  <goal>
+    Phase 4 exit-gate report at `notes/handoffs/105-phase4-exit-gate.md` confirms: (a) all WP5 FRs satisfied per spec.md, (b) architecture §8 tool surface live, (c) NFR-A1–A7 architectural principles upheld, (d) FR-45 invariant at `PlaybookChatContextProvider.cs:627` preserved, (e) binding-NEGATIVE rules respected (no `spaarke-insights-index`/`MultiIndexComposer`/etc reads), (f) BFF publish-size cumulative within NFR-01. Pass-or-fail outcome triggers Phase 5 dispatch or human escalation.
+  </goal>
+
+  <context>
+    <background>
+      Phase 4 was the largest phase (42 tasks across 21 waves). The exit gate is the architectural-binding checkpoint before Phase 5 (WP2 file-aware classification — depends on FR-17 upload-manifest enrichment from Phase 4b). Per CLAUDE.md, exit gates are MINIMAL rigor — verification only — but the verification surface is broad. Reference architecture §8 for the canonical tool surface; spec.md FR-26 through FR-37 for WP5 functional acceptance; spec.md NFR-A1 through NFR-A7 for the architectural principles.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/TASK-INDEX.md</file>
+      <file>notes/handoffs/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-25–FR-37">All WP5 functional requirements satisfied per spec.md acceptance criteria.</constraint>
+    <constraint source="spec NFR-A1–A7">All architectural principles upheld per architecture §2.</constraint>
+    <constraint source="architecture §8">Tool surface = 12 tools live (8 new + 4 existing Pillar 6b).</constraint>
+    <constraint source="architecture §11.1">FR-45 invariant at `PlaybookChatContextProvider.cs:627` preserved (regression test from task 080 still green).</constraint>
+    <constraint source="ADR-029">Cumulative BFF publish-size ≤60 MB; Phase 4 delta within NFR-01.</constraint>
+    <constraint source="project">If ANY FR/NFR fails verification, escalate per CLAUDE.md §6 — do not silently mark task complete.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Enumerate WP5 FRs from spec.md: FR-25 through FR-37 (13 FRs). For each, locate the acceptance criterion + verification evidence (test output, deploy artifact, prior task completion).</step>
+    <step order="2">Enumerate NFR-A1 through NFR-A7 (architectural principles per architecture §2). For each, verify the principle is upheld:
+      NFR-A1 (six tiers separated; no implicit cross-tier writes)
+      NFR-A2 (JIT retrieval; no file-text stuffing)
+      NFR-A3 (citation-bearing trust; requireCitations=true default)
+      NFR-A4 (layered context cards ~150-250 tok)
+      NFR-A5 (wire-not-build R6 components)
+      NFR-A6 (privacy default; T6 audit append-only)
+      NFR-A7 (ADR-015 tier-1 logging hygiene)</step>
+    <step order="3">Verify architecture §8 tool surface in deployed environment — 8 new tools (`list_session_files`, `get_file_manifest`, `recall_session_file`, `write_session_memory`, `retrieve_matter_memory`, `promote_to_matter_memory`, `get_user_preferences`, `get_org_templates`) + 4 existing (`get_workspace_tab_state`, `update_workspace_tab`, `send_workspace_artifact`, `close_workspace_tab`). Confirm seed (task 092) registered all 8 as `sprk_analysistool` rows.</step>
+    <step order="4">Confirm FR-45 regression test (task 080) still green — `PlaybookChatContextProvider.cs:627` invocation continues to fire.</step>
+    <step order="5">Verify binding-NEGATIVE rules: grep for `spaarke-insights-index`, `MultiIndexComposer`, `InsightsOrchestrator`, `EvidenceSufficiencyNode`, `GroundingVerifyNode`, `sprk_performancesummary` across `src/server/api/Sprk.Bff.Api/Services/Ai/` — chat-memory paths must show ZERO hits.</step>
+    <step order="6">Verify BFF publish-size cumulative ≤60 MB; report current size + Phase 4 cumulative delta.</step>
+    <step order="7">Compile exit-gate report at `notes/handoffs/105-phase4-exit-gate.md`. Format: per-FR/NFR table with PASS / FAIL / N/A + evidence link.</step>
+    <step order="8">If ANY FAIL, escalate per CLAUDE.md §6 — do NOT mark task ✅. Otherwise update TASK-INDEX.md: task 105 → ✅; current-task.md → ready for 110 (Phase 5 start).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Spec FRs/NFRs + architecture sections + prior task evidence in notes/handoffs/</tool>
+    <tool name="Grep">Confirm binding-NEGATIVE rules; confirm tool registrations</tool>
+    <tool name="Write">Exit-gate report at notes/handoffs/105-phase4-exit-gate.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/105-phase4-exit-gate.md — per-FR/NFR pass/fail table with evidence</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All WP5 FRs (FR-25 through FR-37) report PASS with linked evidence.</criterion>
+    <criterion testable="true">All architectural principles (NFR-A1 through NFR-A7) report PASS.</criterion>
+    <criterion testable="true">12 tools live in architecture §8 surface verified.</criterion>
+    <criterion testable="true">FR-45 invariant regression test still green.</criterion>
+    <criterion testable="true">Binding-NEGATIVE grep shows zero violations.</criterion>
+    <criterion testable="true">BFF publish-size cumulative ≤60 MB.</criterion>
+    <criterion testable="true">Report committed; TASK-INDEX updated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Exit gates are the architectural-binding checkpoint — if anything fails, escalate; do not gloss. Phase 5 depends on Phase 4 upload-manifest enrichment (FR-17 Hybrid C primary path). The exit gate is the contract that Phase 5 can rely on FR-26 (`ChatSession.UploadedFiles` extension with `classifiedDocType` + `sections` etc.) being live.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor protocol — verification-only.</protocol>
+  </execution>
+</task>

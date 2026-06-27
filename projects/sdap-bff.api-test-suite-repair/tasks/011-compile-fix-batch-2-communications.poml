@@ -1,0 +1,141 @@
+<task id="011" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.A2 — Repair Communications compile-broken files (Archival, Association, Attachment, Communication, Dataverse)</title>
+    <status>completed</status>
+    <estimated-effort>2-2.5 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-1, compile-fix, bff-api, testing, p1-a, communications, sibling-coordination</tags>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>5 disjoint files all under Services/Communication/; no overlap with batches 010, 012, 013, 015, 017, 020, 021, 022, 024</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Repair 5 compile-broken test files in `Services/Communication/` from the design.md §3.2 list.
+    These files have the HIGHEST sibling-coordination risk per design.md §2.3 — the
+    `x-email-communication-solution-r2` project owner is the source authority for any signature
+    changes in Communications production code.
+
+    COORDINATION (binding): Before editing, verify owner of `x-email-communication-solution-r2`
+    has not changed the underlying production signatures since the 2026-05-30 baseline. If
+    Communications production code shipped a NEW signature change after baseline, surface in
+    `projects/sdap-bff.api-test-suite-repair/current-task.md` and pause for owner confirmation.
+
+    Per NFR-02: repair only; &gt;50% replacement requires §4.8 escalation. Per NFR-01: NO
+    production code changes.
+  </prompt>
+
+  <role>Senior .NET test repair specialist coordinated with `x-email-communication-solution-r2` owner.</role>
+
+  <goal>
+    The 5 Communications test files compile cleanly under `dotnet build -warnaserror`. Coordination
+    note recorded in `current-task.md` confirming alignment with Communications project owner.
+    Every touched test has `[Trait("status", "repaired")]`. Build error count drops by ~30-40.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="baseline">projects/sdap-bff.api-test-suite-repair/baseline/compile-errors-2026-MM-DD.txt</file>
+    <file purpose="target-1">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/ArchivalFlowTests.cs</file>
+    <file purpose="target-2">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/AssociationMappingTests.cs</file>
+    <file purpose="target-3">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/AttachmentValidationTests.cs</file>
+    <file purpose="target-4">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceTests.cs</file>
+    <file purpose="target-5">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/DataverseRecordCreationTests.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code in `src/Services/Communication/`</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation</constraint>
+    <constraint source="NFR-11">All files compile under `-warnaserror` after repair</constraint>
+    <constraint source="§6.2">Every touched test gets `[Trait("status", "repaired")]`</constraint>
+    <constraint source="§4.7 + §2.3">Coordinate with `x-email-communication-solution-r2` owner BEFORE editing</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §2.3 the Communications-related test files are the HIGHEST sibling-coordination
+      risk in the compile-broken set. The sibling project `x-email-communication-solution-r2` is
+      actively iterating on Communications production code; signature drift in this batch is
+      likely driven by their work. Aligning with their owner BEFORE editing prevents this batch
+      from being re-broken by their next merge.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Baseline TRX + compile-errors log produced</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/ArchivalFlowTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/AssociationMappingTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/AttachmentValidationTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/DataverseRecordCreationTests.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Coordinate with `x-email-communication-solution-r2` owner: confirm no in-flight production signature changes will land in `Services/Communication/` within the next 24h. Record outcome in `current-task.md` Decisions section.</step>
+    <step order="2">Read the 5 target files. For each, identify SUT and inspect current `src/server/api/Sprk.Bff.Api/Services/Communication/` constructor signatures.</step>
+    <step order="3">Classify each compile error: CS7036 (add missing arg with fake/mock), CS1503 (cast to expected type), CS1061 (rename in production → update call site).</step>
+    <step order="4">Compute pre-edit line counts. If any planned edit exceeds 50% → HALT and file `escalations/rewrite-request-T-011-{FileName}.md`.</step>
+    <step order="5">Apply edits one file at a time; run `dotnet build` after each and confirm error drop.</step>
+    <step order="6">Add `[Trait("status", "repaired")]` to every touched test class.</step>
+    <step order="7">Final compile gate: `dotnet build tests/unit/Sprk.Bff.Api.Tests/ -c Release -warnaserror` returns 0 on the 5 target files.</step>
+    <step order="8">Update `current-task.md` with coordination outcome + per-file LOC delta + new error total.</step>
+    <step order="9">Verify `git status` shows NO modifications under `src/`, `power-platform/`, `infra/`, `scripts/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build</tool>
+    <tool name="git">status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/ArchivalFlowTests.cs (repaired)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/AssociationMappingTests.cs (repaired)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/AttachmentValidationTests.cs (repaired)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceTests.cs (repaired)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/DataverseRecordCreationTests.cs (repaired)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/current-task.md (coordination note)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 files compile under `dotnet build -c Release -warnaserror`</criterion>
+    <criterion testable="true">Coordination note with `x-email-communication-solution-r2` owner recorded in `current-task.md`</criterion>
+    <criterion testable="true">Build error count drops by ~30-40 vs Phase 0 baseline</criterion>
+    <criterion testable="true">Per-file diff &lt;50% line replacement; if exceeded, escalation file exists</criterion>
+    <criterion testable="true">Every touched test has `[Trait("status", "repaired")]`</criterion>
+    <criterion testable="true">No modifications to `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">`CustomWebAppFactory.cs` NOT modified</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <scope-revision date="2026-05-31" source="Wave 1 baseline + owner directive (absorb deviations)">
+      Phase 0 Wave 1 task 001 measured 0 compile errors in the unit-test project (down from
+      design.md §3.2's expected 17 files / 138 errors). The 5 Communications files in this
+      batch appear to compile clean at execution time.
+
+      EXECUTION GUIDANCE: do NOT spend time hunting for compile errors that no longer exist.
+      Confirm the build is clean with `dotnet build` filtered to this batch, then proceed
+      directly to test-level repair + trait-tagging (originally Phase 2+3 scope for these
+      files). Any tests that fail at runtime get §6.2 trait tags.
+
+      Communications sibling-coordination with `x-email-communication-solution-r2` owner is
+      still required before merging — that constraint is unchanged. If the build is NOT
+      clean (regression since 2026-05-31), fall back to original POML steps.
+      Cross-reference: `baseline/README.md`, `notes/handoffs/phase23-scope-delta-2026-05-31.md`.
+    </scope-revision>
+  </notes>
+</task>

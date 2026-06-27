@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>RecordService + GET /api/dataverse/record/{entityLogicalName}/{id} (no cache, $select support)</title>
+    <phase>2: Phase B — BFF Passthrough</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>015,016,017</blocks>
+    <tags>bff-api, api, auth, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>BFF endpoint + service + auth filter; ADR-008 + ADR-019 + ADR-028; simplest endpoint in Phase B but still requires all binding constraints</rigor-reason>
+    <parallel-group>B1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `RecordService` + `GET /api/dataverse/record/{entityLogicalName}/{id}?$select=field1,field2` endpoint returning a single record's projected fields. NO caching. ADR-008 authorization filter (Read privilege on `entityLogicalName`). 404 on missing record.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse `ServiceClient.RetrieveAsync` with `ColumnSet`, query string `$select` parsing.
+  </role>
+
+  <goal>
+    Endpoint returns single record, supports `$select=field1,field2` projection, 403 on read-deny, 404 on missing, ProblemDetails on errors, `dotnet build` passes.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-BFF-05. Simpler than `/fetch` (no cross-entity concerns since one entity only). Used by chip "current value" lookups and host extension code that needs to fetch one record's fields. `$select` parsed as comma-separated logical names; if absent, fetch only primary id + primary name.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Dataverse/DataverseEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">`DataverseAuthorizationFilter` on `entityLogicalName` — 403 on Read deny.</constraint>
+    <constraint source="ADR-019">ProblemDetails: 404 on missing record; 400 on invalid `$select` (e.g., field doesn't exist on entity); 403 on privilege deny.</constraint>
+    <constraint source="ADR-028">JWT on incoming.</constraint>
+    <constraint source="bff-extensions.md">Placement Justification + test obligation.</constraint>
+    <constraint source="project">NO caching — record reads are real-time.</constraint>
+    <constraint source="project">`$select` parsing: comma-separated; whitespace tolerated; empty = primary id + primary name only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/drafts/010-authorization-filter-shape.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="$select parsing" location=".claude/patterns/api/endpoint-definition.md">Parse query string `$select` to `ColumnSet`; trim entries; validate against metadata if available.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load task 010 outputs.</step>
+    <step order="2">Author `Services/Dataverse/RecordService.cs`: `GetRecordAsync(string entityLogicalName, Guid id, string[]? selectFields)` → `ServiceClient.RetrieveAsync(entityLogicalName, id, new ColumnSet(...))`; catch `FaultException` for not-found (404) and other errors (500 with ProblemDetails).</step>
+    <step order="3">Wire `GET /api/dataverse/record/{entityLogicalName}/{id}` with `[FromQuery] string? $select` parameter; parse to `string[]`.</step>
+    <step order="4">Apply `DataverseAuthorizationFilter` (entity-only check; no cross-entity concern).</step>
+    <step order="5">Register `RecordService` in `Program.cs` DI.</step>
+    <step order="6">Build + verify zero errors.</step>
+    <step order="7">Manual smoke test: call with valid GUID, missing GUID, missing entity (404 cases).</step>
+    <step order="8">Vuln scan + publish size verification.</step>
+    <step order="9">Update TASK-INDEX (014 ✅).</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + publish + vuln scan</tool>
+    <tool name="Edit">Author code files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Dataverse/DataverseEndpoints.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given valid `entityLogicalName + id`, when called, then 200 + record returned with only requested `$select` fields.</criterion>
+    <criterion testable="true">Given missing record ID, when called, then 404 ProblemDetails.</criterion>
+    <criterion testable="true">Given user without Read privilege, when called, then 403 ProblemDetails.</criterion>
+    <criterion testable="true">Given `dotnet build`, when run, then zero errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Simplest Phase B endpoint task. Parallels 011, 012, 013 (Wave B1). After this completes, all 5 BFF endpoints exist; task 015 builds the client and 016 adds integration tests.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load task 010. Verify build + vuln scan before marking complete.</protocol>
+  </execution>
+</task>

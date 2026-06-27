@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Backfill — `Audit-MultiContainerMultiIndex-Drift.ps1` (FR-BF-03)</title>
+    <phase>F: PowerShell Backfill</phase>
+    <status>not-started</status>
+    <estimated-hours>3-4</estimated-hours>
+    <dependencies>029, 044</dependencies>
+    <blocks>053</blocks>
+    <tags>backfill, powershell, dataverse, mcp, operations, audit</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Creates a new script that READS production data and produces operator-facing reports. No writes by contract — but mis-classifying drift vs override can cause operators to take wrong action. Rigor needed to validate the classification logic.</rigor-reason>
+    <parallel-group>F1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>File-disjoint with tasks 050 and 051. Read-only operation; safe to run concurrently.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Create `scripts/backfill-multi-container-multi-index/Audit-MultiContainerMultiIndex-Drift.ps1` per spec.md FR-BF-03 and design.md §5.4. The script is **informational only** — NO record mutations. For each parent record (Matter/Project/Invoice/WorkAssignment/Event) and each Document, compare the stored value with the chain-derived value, classify each row as **override** / **drift** / **anomaly**, and emit a CSV + Markdown report with columns: entity, recordId, currentValue, derivedValue, classification, recommendation.
+  </prompt>
+
+  <role>
+    Spaarke operations developer producing operator-facing audit reports. Emphasizes "no writes" as a binding contract; the script header comment must state this explicitly so future maintainers cannot accidentally promote it to a write path.
+  </role>
+
+  <goal>
+    New read-only PowerShell script exists at `scripts/backfill-multi-container-multi-index/Audit-MultiContainerMultiIndex-Drift.ps1`. Running it produces a CSV file + a Markdown file with the required columns. Verification: a record query before + after the run shows zero mutations.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §5.4, drift audit is the informational complement to backfill: where backfill fills empty fields, the audit surfaces records whose stored value DIFFERS from the chain-derived value. Three classifications:
+      - **override** — record's value intentionally differs from BU's (Protected Matter, pre-migration record). Normal — no action.
+      - **drift** — BU's value changed post-create; record kept old value. Per INV-3, this is CORRECT. Normal — no action.
+      - **anomaly** — unmapped containers, parent-Document mismatches. Requires operator investigation.
+
+      The script has NO authority to mutate records. The script header must say so loudly.
+    </background>
+    <relevant-files>
+      <file>scripts/backfill-multi-container-multi-index/Audit-MultiContainerMultiIndex-Drift.ps1 (new)</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-BF-03">Read-only script. Produces CSV/Markdown report. Columns: entity, recordId, currentValue, derivedValue, classification (override/drift/anomaly), recommendation.</constraint>
+    <constraint source="design.md §5.4">Distinguish intentional overrides vs. data drift vs. anomalies. Most rows are normal (override or drift) — only anomalies require action.</constraint>
+    <constraint source="project">Script header MUST state: "NO WRITES — informational only. Do not promote to a write path; use the backfill scripts (FR-BF-01/02) for mutations." This is the contract.</constraint>
+    <constraint source="design.md INV-3">BU changes do NOT propagate — a record's stored value differing from current BU is CORRECT (classified as `drift`, recommendation: no-action).</constraint>
+    <constraint source="design.md INV-5">A record's value differing from chain-derived because the record was explicitly set is CORRECT (classified as `override`, recommendation: no-action).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Classification heuristics" location="design.md §5.4">
+        override = record value != BU value AND record predates BU change OR record has explicit-override flag (e.g., Protected Matter marker).
+        drift = record value != BU value AND record was last modified BEFORE the BU's modifiedon for `sprk_containerid` (BU changed after record created).
+        anomaly = container not in §5.1 map, OR parent's `sprk_containerid` != mode of child Documents' `sprk_graphdriveid`.
+      </pattern>
+      <pattern name="Dual-format output" location="spec.md FR-BF-03">
+        CSV for spreadsheet ingest + Markdown table for human review. Write both to `./audit-drift-{timestamp}.csv` + `./audit-drift-{timestamp}.md`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create script `scripts/backfill-multi-container-multi-index/Audit-MultiContainerMultiIndex-Drift.ps1`. Header comment block declares "READ-ONLY — NO RECORD MUTATIONS — informational audit only. Use Backfill-*.ps1 for writes." Reference FR-BF-03 + design.md §5.4.</step>
+    <step order="2">Declare parameters: `-EnvironmentUrl`, `-BatchSize 500`, `-OutputCsvPath`, `-OutputMarkdownPath` (both with timestamp defaults). Embed the §5.1 `$ContainerIndexMap`.</step>
+    <step order="3">For each parent entity (Matter / Project / Invoice / WorkAssignment / Event): page through records; for each, query owner BU's current `sprk_containerid` + `sprk_searchindexname`; compute mode of child Documents' `sprk_graphdriveid`; compare stored vs derived; classify per heuristics in `&lt;knowledge&gt;`.</step>
+    <step order="4">For each Document: read `sprk_graphdriveid`; check if `sprk_searchindexname` matches the §5.1 map; if not, classify as `anomaly`. Compare stored Document index vs parent record's index (mismatch = `anomaly`).</step>
+    <step order="5">For each classified row, emit a recommendation: `override` =&gt; "no action — intentional"; `drift` =&gt; "no action — BU changed post-create (INV-3)"; `anomaly` =&gt; specific actionable text (e.g., "operator must extend §5.1 map" or "investigate parent-Document mismatch").</step>
+    <step order="6">Write the rows to BOTH the CSV file AND the Markdown file (Markdown should group by classification with headers). Summary stats at the top of the Markdown report (count by classification).</step>
+    <step order="7">Verify the no-writes contract by capturing pre-run + post-run record snapshots (sample 10 random records via MCP); confirm identical. Capture audit output to `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/052-drift-audit-test.md`. Update TASK-INDEX + current-task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Create the new PowerShell script</tool>
+    <tool name="Read">Read design.md §5.4 + spec.md FR-BF-03</tool>
+    <tool name="Bash">Run the script + verify no writes via record snapshot</tool>
+    <tool name="mcp__dataverse__read_query">Pre/post snapshots for no-writes verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/backfill-multi-container-multi-index/Audit-MultiContainerMultiIndex-Drift.ps1</output>
+    <output type="report">audit-drift-{timestamp}.csv + audit-drift-{timestamp}.md (generated)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/052-drift-audit-test.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-BF-03: report file generated; required columns present (entity, recordId, currentValue, derivedValue, classification, recommendation).</criterion>
+    <criterion testable="true">No record mutations during execution — verified by query of sample records before + after.</criterion>
+    <criterion testable="true">Classification correctness — at least one row of each (override, drift, anomaly) in synthetic test data is classified correctly.</criterion>
+    <criterion testable="true">Dual-format output: CSV + Markdown both produced.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with tasks 050 and 051. Read-only by design — runs concurrently without interference.
+
+    Be conservative on `override` vs `drift` heuristics: when in doubt, classify as `anomaly` and let operator decide. False positives in `anomaly` are recoverable; false negatives (mis-classifying as `override` when it's actually `anomaly`) hide problems.
+
+    The CSV is the operator's pivot-table input; the Markdown is the human-readable scan. Both must reflect the same row set.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load design.md §5.4 + INV-3 + INV-5 + spec.md FR-BF-03 before starting. Follow task-execute Step 0 (FULL rigor) before writing any code. Step 9.5 quality gates mandatory.
+    </protocol>
+  </execution>
+</task>

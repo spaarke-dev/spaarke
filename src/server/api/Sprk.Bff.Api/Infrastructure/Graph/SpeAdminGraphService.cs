@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Net;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
@@ -1311,6 +1311,361 @@ public sealed class SpeAdminGraphService
     }
 
     // =========================================================================
+    // "ForConfig" facade methods (CICD-088b — ADR-007 endpoint-IL isolation)
+    //
+    // Each method takes a ContainerTypeConfig + business args, resolves the
+    // GraphServiceClient internally, calls the corresponding GraphServiceClient
+    // overload, and translates ODataError to SpaarkeStorageException.
+    //
+    // Why these exist: NetArchTest's `HaveDependencyOn("Microsoft.Graph")`
+    // inspects IL for ALL referenced types — including delegate parameter types
+    // emitted by closures. Endpoints calling `RunForConfig(..., (client, t) =>
+    // graphService.X(client, ...))` still leak GraphServiceClient into the
+    // endpoint's IL via the closure's Func<GraphServiceClient, CT, Task<T>>
+    // field. These facades let endpoints call graphService.XForConfigAsync(...)
+    // with NO GraphServiceClient anywhere in their IL.
+    //
+    // Added 2026-06-26 by ci-cd-unit-test-remediation-r1 task CICD-088b
+    // per ADR-007 §1.
+    // =========================================================================
+
+    public async Task<IReadOnlyList<SpeContainerItemSummary>> ListContainerItemsForConfigAsync(
+        ContainerTypeConfig config, string containerId, string? folderId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await ListContainerItemsAsync(client, containerId, folderId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListContainerItems({containerId})"); }
+    }
+
+    public async Task<SpeContainerItemSummary> CreateFolderForConfigAsync(
+        ContainerTypeConfig config, string containerId, string folderName, string? parentFolderId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await CreateFolderAsync(client, containerId, folderName, parentFolderId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateFolder({containerId})"); }
+    }
+
+    public async Task<ContainerPage> ListContainersPageForConfigAsync(
+        ContainerTypeConfig config, string containerTypeId, int? top, string? skipToken, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await ListContainersPageAsync(client, containerTypeId, top, skipToken, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListContainersPage({containerTypeId})"); }
+    }
+
+    public async Task<SpeContainerSummary> CreateContainerForConfigAsync(
+        ContainerTypeConfig config, string containerTypeId, string displayName, string? description, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await CreateContainerAsync(client, containerTypeId, displayName, description, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainer({containerTypeId})"); }
+    }
+
+    public async Task<SpeContainerSummary?> GetContainerForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await GetContainerAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainer({containerId})"); }
+    }
+
+    public async Task<bool> UpdateContainerForConfigAsync(
+        ContainerTypeConfig config, string containerId, string? displayName, string? description, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await UpdateContainerAsync(client, containerId, displayName, description, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateContainer({containerId})"); }
+    }
+
+    public async Task<bool> ActivateContainerForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await ActivateContainerAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ActivateContainer({containerId})"); }
+    }
+
+    public async Task<bool> LockContainerForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await LockContainerAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"LockContainer({containerId})"); }
+    }
+
+    public async Task<bool> UnlockContainerForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await UnlockContainerAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UnlockContainer({containerId})"); }
+    }
+
+    public async Task<IReadOnlyList<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto>?> GetCustomPropertiesForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await GetCustomPropertiesAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetCustomProperties({containerId})"); }
+    }
+
+    public async Task<IReadOnlyList<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto>?> UpdateCustomPropertiesForConfigAsync(
+        ContainerTypeConfig config, string containerId, IReadOnlyList<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto> properties, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await UpdateCustomPropertiesAsync(client, containerId, properties, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateCustomProperties({containerId})"); }
+    }
+
+    public async Task<IReadOnlyList<SpeFileVersionSummary>> GetFileVersionsForConfigAsync(
+        ContainerTypeConfig config, string containerId, string itemId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await GetFileVersionsAsync(client, containerId, itemId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetFileVersions({containerId},{itemId})"); }
+    }
+
+    public async Task<IReadOnlyList<SpeThumbnailSet>> GetFileThumbnailsForConfigAsync(
+        ContainerTypeConfig config, string containerId, string itemId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await GetFileThumbnailsAsync(client, containerId, itemId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetFileThumbnails({containerId},{itemId})"); }
+    }
+
+    public async Task<SpeSharingLink> CreateSharingLinkForConfigAsync(
+        ContainerTypeConfig config, string containerId, string itemId, string linkType, string scope, DateTimeOffset? expirationDateTime, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await CreateSharingLinkAsync(client, containerId, itemId, linkType, scope, expirationDateTime, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateSharingLink({containerId},{itemId})"); }
+    }
+
+    public async Task<(Stream Content, string MimeType, string FileName)?> DownloadDriveItemForConfigAsync(
+        ContainerTypeConfig config, string containerId, string itemId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await DownloadDriveItemAsync(client, containerId, itemId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"DownloadDriveItem({containerId},{itemId})"); }
+    }
+
+    public async Task<string?> GetPreviewUrlForConfigAsync(
+        ContainerTypeConfig config, string containerId, string itemId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await GetPreviewUrlAsync(client, containerId, itemId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetPreviewUrl({containerId},{itemId})"); }
+    }
+
+    public async Task<bool> DeleteDriveItemForConfigAsync(
+        ContainerTypeConfig config, string containerId, string itemId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await DeleteDriveItemAsync(client, containerId, itemId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"DeleteDriveItem({containerId},{itemId})"); }
+    }
+
+    public async Task<IReadOnlyList<SpeContainerPermission>> ListContainerPermissionsForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await ListContainerPermissionsAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListContainerPermissions({containerId})"); }
+    }
+
+    public async Task<SpeContainerPermission> GrantContainerPermissionForConfigAsync(
+        ContainerTypeConfig config, string containerId, string? userId, string? groupId, string role, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await GrantContainerPermissionAsync(client, containerId, userId, groupId, role, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GrantContainerPermission({containerId})"); }
+    }
+
+    public async Task<SpeContainerPermission?> UpdateContainerPermissionForConfigAsync(
+        ContainerTypeConfig config, string containerId, string permissionId, string newRole, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await UpdateContainerPermissionAsync(client, containerId, permissionId, newRole, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateContainerPermission({containerId},{permissionId})"); }
+    }
+
+    public async Task<bool> RevokeContainerPermissionForConfigAsync(
+        ContainerTypeConfig config, string containerId, string permissionId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await RevokeContainerPermissionAsync(client, containerId, permissionId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"RevokeContainerPermission({containerId},{permissionId})"); }
+    }
+
+    public async Task<IReadOnlyList<SpeContainerColumn>> ListColumnsForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await ListColumnsAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListColumns({containerId})"); }
+    }
+
+    public async Task<SpeContainerColumn> CreateColumnForConfigAsync(
+        ContainerTypeConfig config, string containerId, string name, string? displayName, string? description, string columnType, bool required, bool indexed, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await CreateColumnAsync(client, containerId, name, displayName, description, columnType, required, indexed, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateColumn({containerId})"); }
+    }
+
+    public async Task<SpeContainerColumn?> UpdateColumnForConfigAsync(
+        ContainerTypeConfig config, string containerId, string columnId, string? displayName, string? description, bool? required, bool? indexed, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await UpdateColumnAsync(client, containerId, columnId, displayName, description, required, indexed, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateColumn({containerId},{columnId})"); }
+    }
+
+    public async Task<bool> DeleteColumnForConfigAsync(
+        ContainerTypeConfig config, string containerId, string columnId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await DeleteColumnAsync(client, containerId, columnId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"DeleteColumn({containerId},{columnId})"); }
+    }
+
+    public async Task<SpeContainerItemSummary> UploadFileToContainerForConfigAsync(
+        ContainerTypeConfig config, string containerId, string fileName, Stream fileStream, long fileSize, string? folderId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await UploadFileToContainerAsync(client, containerId, fileName, fileStream, fileSize, folderId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UploadFileToContainer({containerId},{fileName})"); }
+    }
+
+    public async Task<ContainerSearchPage> SearchContainersForConfigAsync(
+        ContainerTypeConfig config, string query, int? pageSize, string? skipToken, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await SearchContainersAsync(client, query, pageSize, skipToken, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"SearchContainers({query})"); }
+    }
+
+    public async Task<IReadOnlyList<SpeContainerTypeSummary>> ListContainerTypesForConfigAsync(
+        ContainerTypeConfig config, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await ListContainerTypesAsync(client, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException("ListContainerTypes"); }
+    }
+
+    public async Task<SpeContainerTypeSummary?> GetContainerTypeForConfigAsync(
+        ContainerTypeConfig config, string containerTypeId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await GetContainerTypeAsync(client, containerTypeId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainerType({containerTypeId})"); }
+    }
+
+    public async Task<SpeContainerTypeSummary> CreateContainerTypeForConfigAsync(
+        ContainerTypeConfig config, string displayName, string? billingClassification, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainerType({displayName})"); }
+    }
+
+    public async Task<IReadOnlyList<SpeConsumingTenant>?> ListConsumingTenantsForConfigAsync(
+        ContainerTypeConfig config, string containerTypeId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await ListConsumingTenantsAsync(client, containerTypeId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListConsumingTenants({containerTypeId})"); }
+    }
+
+    public async Task<SpeConsumingTenant?> RegisterConsumingTenantForConfigAsync(
+        ContainerTypeConfig config, string containerTypeId, string appId, string? tenantId, IReadOnlyList<string> delegatedPermissions, IReadOnlyList<string> applicationPermissions, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await RegisterConsumingTenantAsync(client, containerTypeId, appId, tenantId, delegatedPermissions, applicationPermissions, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"RegisterConsumingTenant({containerTypeId},{appId})"); }
+    }
+
+    public async Task<SpeConsumingTenant?> UpdateConsumingTenantForConfigAsync(
+        ContainerTypeConfig config, string containerTypeId, string appId, IReadOnlyList<string> delegatedPermissions, IReadOnlyList<string> applicationPermissions, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await UpdateConsumingTenantAsync(client, containerTypeId, appId, delegatedPermissions, applicationPermissions, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateConsumingTenant({containerTypeId},{appId})"); }
+    }
+
+    public async Task<bool> RemoveConsumingTenantForConfigAsync(
+        ContainerTypeConfig config, string containerTypeId, string appId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await RemoveConsumingTenantAsync(client, containerTypeId, appId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"RemoveConsumingTenant({containerTypeId},{appId})"); }
+    }
+
+    public async Task<IReadOnlyList<SpeContainerTypePermission>?> GetContainerTypePermissionsForConfigAsync(
+        ContainerTypeConfig config, string containerTypeId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await GetContainerTypePermissionsAsync(client, containerTypeId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainerTypePermissions({containerTypeId})"); }
+    }
+
+    public async Task<ContainerTypeSettingsResult?> UpdateContainerTypeSettingsForConfigAsync(
+        ContainerTypeConfig config, string containerTypeId, string? sharingCapability, bool? isVersioningEnabled, int? majorVersionLimit, long? storageUsedInBytes, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await UpdateContainerTypeSettingsAsync(client, containerTypeId, sharingCapability, isVersioningEnabled, majorVersionLimit, storageUsedInBytes, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateContainerTypeSettings({containerTypeId})"); }
+    }
+
+    public async Task<IReadOnlyList<DeletedContainerSummary>> ListDeletedContainersForConfigAsync(
+        ContainerTypeConfig config, string containerTypeId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await ListDeletedContainersAsync(client, containerTypeId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListDeletedContainers({containerTypeId})"); }
+    }
+
+    public async Task<bool> RestoreContainerForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await RestoreContainerAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"RestoreContainer({containerId})"); }
+    }
+
+    public async Task<bool> PermanentDeleteContainerForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await PermanentDeleteContainerAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"PermanentDeleteContainer({containerId})"); }
+    }
+
+    public async Task<IReadOnlyList<SecurityAlertResult>> GetSecurityAlertsForConfigAsync(
+        ContainerTypeConfig config, int maxAlerts = 50, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await GetSecurityAlertsAsync(client, maxAlerts, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetSecurityAlerts(maxAlerts={maxAlerts})"); }
+    }
+
+    public async Task<SecureScoreResult?> GetSecureScoreForConfigAsync(
+        ContainerTypeConfig config, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await GetSecureScoreAsync(client, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException("GetSecureScore"); }
+    }
+
+    public async Task<SearchItemPage> SearchItemsForConfigAsync(
+        ContainerTypeConfig config, string query, string? containerId, string? fileType, int? pageSize, string? skipToken, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await SearchItemsAsync(client, query, containerId, fileType, pageSize, skipToken, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"SearchItems({query})"); }
+    }
+
+    // =========================================================================
     // Container custom properties (SPE-056)
     // =========================================================================
 
@@ -2216,8 +2571,8 @@ public sealed class SpeAdminGraphService
         var patch = new Microsoft.Graph.Models.ColumnDefinition();
         if (displayName is not null) patch.DisplayName = displayName;
         if (description is not null) patch.Description = description;
-        if (required.HasValue)  patch.Required = required.Value;
-        if (indexed.HasValue)   patch.Indexed  = indexed.Value;
+        if (required.HasValue) patch.Required = required.Value;
+        if (indexed.HasValue) patch.Indexed = indexed.Value;
 
         try
         {
@@ -2297,11 +2652,11 @@ public sealed class SpeAdminGraphService
     {
         var col = new Microsoft.Graph.Models.ColumnDefinition
         {
-            Name        = name,
+            Name = name,
             DisplayName = displayName ?? name,
             Description = description,
-            Required    = required,
-            Indexed     = indexed
+            Required = required,
+            Indexed = indexed
         };
 
         switch (columnType.ToLowerInvariant())
@@ -2345,25 +2700,25 @@ public sealed class SpeAdminGraphService
     {
         var columnType = col switch
         {
-            { Boolean: not null }            => "boolean",
-            { DateTime: not null }           => "dateTime",
-            { Currency: not null }           => "currency",
-            { Choice: not null }             => "choice",
-            { Number: not null }             => "number",
-            { PersonOrGroup: not null }      => "personOrGroup",
+            { Boolean: not null } => "boolean",
+            { DateTime: not null } => "dateTime",
+            { Currency: not null } => "currency",
+            { Choice: not null } => "choice",
+            { Number: not null } => "number",
+            { PersonOrGroup: not null } => "personOrGroup",
             { HyperlinkOrPicture: not null } => "hyperlinkOrPicture",
-            _                                => "text"
+            _ => "text"
         };
 
         return new SpeContainerColumn(
-            Id:          col.Id ?? string.Empty,
-            Name:        col.Name ?? string.Empty,
+            Id: col.Id ?? string.Empty,
+            Name: col.Name ?? string.Empty,
             DisplayName: col.DisplayName,
             Description: col.Description,
-            ColumnType:  columnType,
-            Required:    col.Required ?? false,
-            Indexed:     col.Indexed  ?? false,
-            ReadOnly:    col.ReadOnly ?? false);
+            ColumnType: columnType,
+            Required: col.Required ?? false,
+            Indexed: col.Indexed ?? false,
+            ReadOnly: col.ReadOnly ?? false);
     }
 
     /// <summary>

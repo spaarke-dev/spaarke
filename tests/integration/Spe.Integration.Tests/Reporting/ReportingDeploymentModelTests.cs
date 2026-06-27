@@ -59,11 +59,11 @@ public class ReportingDeploymentModelTests
         // - Capacity is shared (F2+ F-SKU) across all customers.
         var settings = new Dictionary<string, string?>
         {
-            ["PowerBi:TenantId"]     = "spaarke-shared-tenant-id",
-            ["PowerBi:ClientId"]     = "spaarke-shared-sp-client-id",
+            ["PowerBi:TenantId"] = "spaarke-shared-tenant-id",
+            ["PowerBi:ClientId"] = "spaarke-shared-sp-client-id",
             ["PowerBi:ClientSecret"] = "spaarke-shared-sp-client-secret",
-            ["PowerBi:ApiUrl"]       = "https://api.powerbi.com",
-            ["PowerBi:Scope"]        = "https://analysis.windows.net/.default",
+            ["PowerBi:ApiUrl"] = "https://api.powerbi.com",
+            ["PowerBi:Scope"] = "https://analysis.windows.net/.default",
 
             // NOTE: No PowerBi:WorkspaceId — workspace selection is dynamic per SP profile.
             // The profile ID is resolved at embed-token request time via ReportingProfileManager.
@@ -84,11 +84,11 @@ public class ReportingDeploymentModelTests
         // SP profile is NOT used (single-tenant, no isolation needed at SP level).
         var settings = new Dictionary<string, string?>
         {
-            ["PowerBi:TenantId"]     = "customer-dedicated-tenant-id",
-            ["PowerBi:ClientId"]     = "customer-dedicated-sp-client-id",
+            ["PowerBi:TenantId"] = "customer-dedicated-tenant-id",
+            ["PowerBi:ClientId"] = "customer-dedicated-sp-client-id",
             ["PowerBi:ClientSecret"] = "customer-dedicated-sp-client-secret",
-            ["PowerBi:ApiUrl"]       = "https://api.powerbi.com",
-            ["PowerBi:Scope"]        = "https://analysis.windows.net/.default",
+            ["PowerBi:ApiUrl"] = "https://api.powerbi.com",
+            ["PowerBi:Scope"] = "https://analysis.windows.net/.default",
 
             // In the dedicated model, all reports live in a single known workspace.
             // The workspace ID is supplied at runtime (env var, not hardcoded here).
@@ -113,11 +113,11 @@ public class ReportingDeploymentModelTests
         // Spaarke uses these credentials — it does NOT have a shared SP in this model.
         var settings = new Dictionary<string, string?>
         {
-            ["PowerBi:TenantId"]     = "customer-own-tenant-id",
-            ["PowerBi:ClientId"]     = "customer-own-app-client-id",
+            ["PowerBi:TenantId"] = "customer-own-tenant-id",
+            ["PowerBi:ClientId"] = "customer-own-app-client-id",
             ["PowerBi:ClientSecret"] = "customer-own-app-client-secret",
-            ["PowerBi:ApiUrl"]       = "https://api.powerbi.com",
-            ["PowerBi:Scope"]        = "https://analysis.windows.net/.default",
+            ["PowerBi:ApiUrl"] = "https://api.powerbi.com",
+            ["PowerBi:Scope"] = "https://analysis.windows.net/.default",
 
             // AuthorityUrl points to the CUSTOMER'S tenant (not Spaarke's shared tenant).
             ["PowerBi:AuthorityUrl"] = "https://login.microsoftonline.com/customer-own-tenant-id",
@@ -359,7 +359,7 @@ public class ReportingDeploymentModelTests
 
     [Theory]
     [InlineData("Multi-Customer", "spaarke-shared-tenant-id", "spaarke-shared-sp-client-id", null)]
-    [InlineData("Dedicated",      "customer-dedicated-tenant-id", "customer-dedicated-sp-client-id", null)]
+    [InlineData("Dedicated", "customer-dedicated-tenant-id", "customer-dedicated-sp-client-id", null)]
     [InlineData("CustomerTenant", "customer-own-tenant-id", "customer-own-app-client-id", "https://login.microsoftonline.com/customer-own-tenant-id")]
     public void AllModels_SwitchableViaEnvironmentVariablesOnly(
         string modelName,
@@ -370,8 +370,8 @@ public class ReportingDeploymentModelTests
         // Arrange — each deployment model is uniquely identified by its env var values.
         var settings = new Dictionary<string, string?>
         {
-            ["PowerBi:TenantId"]     = expectedTenantId,
-            ["PowerBi:ClientId"]     = expectedClientId,
+            ["PowerBi:TenantId"] = expectedTenantId,
+            ["PowerBi:ClientId"] = expectedClientId,
             ["PowerBi:ClientSecret"] = "test-secret",
             ["PowerBi:AuthorityUrl"] = expectedAuthorityUrl,
         };
@@ -412,9 +412,9 @@ public class ReportingDeploymentModelTests
         // Verify that all three models use the same Power BI REST API base URL.
         // The API endpoint is stable — only authentication credentials differ per model.
 
-        var multiCustomerOptions   = BuildMultiCustomerConfig().GetSection(PowerBiOptions.SectionName).Get<PowerBiOptions>()!;
-        var dedicatedOptions       = BuildDedicatedConfig().GetSection(PowerBiOptions.SectionName).Get<PowerBiOptions>()!;
-        var customerTenantOptions  = BuildCustomerTenantConfig().GetSection(PowerBiOptions.SectionName).Get<PowerBiOptions>()!;
+        var multiCustomerOptions = BuildMultiCustomerConfig().GetSection(PowerBiOptions.SectionName).Get<PowerBiOptions>()!;
+        var dedicatedOptions = BuildDedicatedConfig().GetSection(PowerBiOptions.SectionName).Get<PowerBiOptions>()!;
+        var customerTenantOptions = BuildCustomerTenantConfig().GetSection(PowerBiOptions.SectionName).Get<PowerBiOptions>()!;
 
         multiCustomerOptions.ApiUrl.Should().Be("https://api.powerbi.com");
         dedicatedOptions.ApiUrl.Should().Be("https://api.powerbi.com");
@@ -435,7 +435,7 @@ public class ReportingDeploymentModelTests
         var settings = new Dictionary<string, string?>
         {
             // TenantId intentionally omitted.
-            ["PowerBi:ClientId"]     = "some-client-id",
+            ["PowerBi:ClientId"] = "some-client-id",
             ["PowerBi:ClientSecret"] = "some-secret",
         };
 

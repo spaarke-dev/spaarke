@@ -1,12 +1,13 @@
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
-import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components";
+import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components/utils/themeStorage";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmUploadService } from "@spaarke/ui-components/utils/adapters/xrmUploadServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
 import { CreateMatterWizard } from "@spaarke/ui-components/components/CreateMatterWizard";
+import { EntityCreationService, type IUserBuCascadeDefaults } from "@spaarke/ui-components/services/EntityCreationService";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
   const params = React.useMemo(() => parseDataParams(), []);
   const [isAuthReady, setIsAuthReady] = React.useState(false);
   const [resolvedBffBaseUrl, setResolvedBffBaseUrl] = React.useState<string>(params.bffBaseUrl || "");
+  const [resolvedTenantId, setResolvedTenantId] = React.useState<string>("");
 
   React.useEffect(() => {
     return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
@@ -33,6 +35,7 @@ function App() {
         });
         if (!cancelled) {
           setResolvedBffBaseUrl(config.bffBaseUrl);
+          setResolvedTenantId(config.tenantId ?? "");
           setIsAuthReady(true);
         }
       } catch (err) {
@@ -64,6 +67,20 @@ function App() {
     return (bu["sprk_containerid"] as string) || "";
   }, []);
 
+  // FR-WIZ-01 (spaarke-multi-container-multi-index-r1): resolve BU cascade defaults
+  // (sprk_containerid + sprk_searchindexname) from the current user's owning BU.
+  // Matches CreateProjectWizard / CreateEventWizard / CreateWorkAssignmentWizard
+  // solution wiring exactly — Xrm.Utility.getGlobalContext().userSettings.userId is
+  // the correct documented API in the Code Page host (Xrm.Utility.getUserId does NOT
+  // exist; the previous inline matterService implementation silently returned null).
+  const resolveUserBuDefaults = React.useCallback(async (): Promise<IUserBuCascadeDefaults> => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+    if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
+    const userId = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
+    return await EntityCreationService.resolveUserBuDefaults(xrm.WebApi, userId);
+  }, []);
+
   if (!isAuthReady) {
     return (
       <FluentProvider theme={theme} style={{ height: "100%" }}>
@@ -86,6 +103,8 @@ function App() {
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}
         resolveSpeContainerId={resolveSpeContainerId}
+        resolveUserBuDefaults={resolveUserBuDefaults}
+        tenantId={resolvedTenantId}
       />
     </FluentProvider>
   );

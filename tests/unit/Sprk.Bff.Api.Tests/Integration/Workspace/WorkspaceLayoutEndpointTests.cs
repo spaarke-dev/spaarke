@@ -32,6 +32,7 @@ namespace Sprk.Bff.Api.Tests.Integration.Workspace;
 ///   GET    /api/workspace/sections         — Static section registry
 ///   GET    /api/workspace/templates        — Static layout templates
 /// </summary>
+[Trait("status", "repaired")]
 public class WorkspaceLayoutEndpointTests : IClassFixture<WorkspaceLayoutTestFixture>
 {
     private readonly WorkspaceLayoutTestFixture _fixture;
@@ -163,16 +164,18 @@ public class WorkspaceLayoutEndpointTests : IClassFixture<WorkspaceLayoutTestFix
         var layouts = await response.Content.ReadFromJsonAsync<WorkspaceLayoutDto[]>(JsonOptions);
         layouts.Should().NotBeNull();
 
-        // Should include at least the system layout (Corporate Workspace) + 2 user layouts
-        layouts!.Length.Should().Be(3, "1 system + 2 user layouts");
+        // Wave 2b (task 109) added Dataverse-system layouts as a second group:
+        //   group 1 — hard-coded SystemWorkspaceLayouts.All (Corporate Workspace = 1)
+        //   group 2 — Dataverse-system layouts via QueryDataverseSystemLayoutsAsync
+        //   group 3 — user-owned layouts
+        // The WithUserLayouts(2) fixture mocks RetrieveMultipleAsync with the SAME
+        // 2 entities for BOTH the Dataverse-system query AND the user query, so the
+        // service returns 1 + 2 + 2 = 5 layouts. The first is the hard-coded system.
+        layouts!.Length.Should().Be(5, "1 hard-coded system + 2 Dataverse-system + 2 user layouts (shared mock)");
 
-        // System layouts appear first
-        layouts[0].IsSystem.Should().BeTrue("first layout should be system");
+        // First layout is hard-coded system (Corporate Workspace)
+        layouts[0].IsSystem.Should().BeTrue("first layout should be hard-coded system");
         layouts[0].Name.Should().Be("Corporate Workspace");
-
-        // User layouts follow
-        layouts[1].IsSystem.Should().BeFalse();
-        layouts[2].IsSystem.Should().BeFalse();
     }
 
     [Fact]
@@ -212,9 +215,10 @@ public class WorkspaceLayoutEndpointTests : IClassFixture<WorkspaceLayoutTestFix
     // =========================================================================
 
     [Fact]
-    public async Task GetDefaultLayout_NoUserDefault_ReturnsCorporateWorkspaceFallback()
+    public async Task GetDefaultLayout_NoUserDefault_ReturnsNullBody()
     {
-        // Arrange — empty entity collection means no user default found
+        // Arrange — empty entity collection means no user default AND no
+        // Dataverse-system default found.
         using var fixture = WorkspaceLayoutTestFixture.WithEmptyDefaults();
         using var client = fixture.CreateAuthenticatedClient();
 
@@ -222,13 +226,22 @@ public class WorkspaceLayoutEndpointTests : IClassFixture<WorkspaceLayoutTestFix
         var response = await client.GetAsync("/api/workspace/layouts/default");
 
         // Assert
+        // Wave 2b (task 109) cascade: when steps 1, 2, and 3 all yield nothing
+        // (SystemWorkspaceLayouts.All today has Corporate Workspace with
+        // IsDefault=false, so step 3 yields nothing), the endpoint returns
+        // 200 OK with an explicit null body. Frontend distinguishes "no default"
+        // from a 5xx fetch failure. This replaces the prior Corporate Workspace
+        // hard-coded fallback assertion.
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var layout = await response.Content.ReadFromJsonAsync<WorkspaceLayoutDto>(JsonOptions);
-        layout.Should().NotBeNull();
-        layout!.Id.Should().Be(SystemWorkspaceLayouts.CorporateWorkspaceId);
-        layout.IsSystem.Should().BeTrue();
-        layout.Name.Should().Be("Corporate Workspace");
+        var body = await response.Content.ReadAsStringAsync();
+        // TypedResults.Ok<WorkspaceLayoutDto?>(null) emits an empty body (or "null")
+        // when System.Text.Json serializes null. Accept either form so the test is
+        // resilient to System.Text.Json output formatting changes; what matters is
+        // that the body is non-content (frontend deserializes to null).
+        var trimmed = body.Trim();
+        (trimmed == string.Empty || trimmed == "null")
+            .Should().BeTrue("endpoint returns 200 with empty or 'null' body per Wave 2b contract; actual body was: '" + body + "'");
     }
 
     [Fact]

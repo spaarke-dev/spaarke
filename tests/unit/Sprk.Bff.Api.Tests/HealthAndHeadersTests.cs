@@ -4,6 +4,7 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests;
 
+[Trait("status", "repaired")]
 public class HealthAndHeadersTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;
@@ -34,7 +35,7 @@ public class HealthAndHeadersTests : IClassFixture<CustomWebAppFactory>
         res.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
         var json = await res.Content.ReadAsStringAsync();
         json.Should().Contain("Sprk.Bff.Api");
-        json.Should().Contain("1.0.1");
+        json.Should().Contain("1.0.2");
         res.Content.Headers.ContentType!.MediaType.Should().Be("application/json");
     }
 

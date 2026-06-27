@@ -1,0 +1,452 @@
+<task id="017" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-07 Build `StructuredOutputStreamWidget` (Workspace; schema-driven; dual-purpose Summarize streaming + Insights static rendering)</title>
+    <status>code-authoring-complete</status>
+    <estimated-effort>1 day</estimated-effort>
+    <actual-effort>~1h (sub-agent, code-authoring scope only — main session owns build + quality gates + commit)</actual-effort>
+    <assigned>AI Agent (parallel sub-agent in P2-G4 wave)</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04 (code authoring; main session to mark ✅ after build + gates pass)</completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G4 (parallel; runs alongside 018 once 013 + 016 are ✅)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>016</dependencies>
+    <tags>frontend, widget, streaming, fluent-ui, react-19, workspace</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Build the new `StructuredOutputStreamWidget` — a Workspace-pane widget that
+    renders structured AI output progressively via `FieldDelta` SSE events. This
+    widget is on the R5 critical path (per TASK-INDEX.md §Critical Path) and is
+    BOTH the destination for Summarize streaming output (FR-02) AND the
+    destination for Insights playbook + RAG static-response rendering (FR-13 /
+    D2-16). The same widget renders both via different schemas — that
+    "schema-driven" design is the load-bearing reuse claim of R5's platform
+    extensibility story and is explicitly flagged as risk UR-02.
+
+    The widget is React 19, lives in `@spaarke/ai-widgets`, follows the Fluent
+    UI v9 semantic-token + dark-mode discipline of ADR-021, registers via the
+    existing `WorkspaceWidgetRegistry` pattern (see `register-document-viewer-widget.ts`),
+    and subscribes to the three additive PaneEventBus event types added by task
+    016 (`workspace.streaming_started`, `workspace.field_delta`,
+    `workspace.streaming_complete`) per ADR-030 additive discipline.
+
+    Per R5 CLAUDE.md §3.1 reuse mandate: use existing Fluent UI v9 primitives
+    (`Card`, `Text`, `Badge`, `MessageBar`, `Skeleton`) — do NOT build a parallel
+    UI primitive library. Per UR-02 mitigation: handle the Summarize + Insights
+    playbook schemas first; document edge cases for follow-up rather than
+    over-generalize. Apply 80/20 to display hints.
+  </prompt>
+
+  <role>
+    Senior React 19 + Fluent UI v9 widget developer with experience building
+    streaming AI output components (token-progressive rendering, SSE
+    subscription, JSON-path-keyed deltas). Familiar with Spaarke's
+    `@spaarke/ai-widgets` package, `WorkspaceWidgetRegistry` pattern, and the
+    PaneEventBus additive event-type discipline (ADR-030).
+  </role>
+
+  <goal>
+    `StructuredOutputStreamWidget.tsx` and `register-structured-output-stream-widget.ts`
+    are committed to `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/`.
+    The widget: (1) accepts a render schema (top-level field list + per-field
+    display hints) via `widgetData`; (2) subscribes to PaneEventBus
+    `workspace.field_delta` events keyed by JSON path and appends content as
+    deltas arrive (ChatGPT/Claude-style cursor animation — NOT plop); (3)
+    transitions cleanly between four distinct render states (streaming /
+    streaming-complete / decline / empty-result); (4) is registered under
+    `'structured-output-stream'` widget type via `registerWorkspaceWidget()`;
+    (5) passes dark-mode visual check (Fluent v9 semantic tokens only); (6)
+    passes the FULL-rigor quality gates (`code-review` + `adr-check`).
+
+    Reusability acceptance: a follow-up Insights task (D2-16 / task 026) MUST
+    be able to render an Insights playbook envelope by passing only a different
+    schema config — no widget code change required for the second consumer.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="dependency-task">projects/spaarke-ai-platform-unification-r5/tasks/016-paneeventbus-additive-event-types.poml</file>
+    <file purpose="widget-registration-canonical">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-document-viewer-widget.ts</file>
+    <file purpose="widget-canonical-shim">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx</file>
+    <file purpose="event-types">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+    <file purpose="event-bus-runtime">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts</file>
+    <file purpose="subscription-hook">src/client/shared/Spaarke.AI.Widgets/src/events/usePaneEvent.ts</file>
+    <file purpose="widget-registry">src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+    <file purpose="widget-types">src/client/shared/Spaarke.AI.Widgets/src/types/widget-types.ts</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 semantic tokens ONLY — no hex/rgba/Fluent v8 imports. Dark mode MUST be tested and pass; the four render states MUST all be legible against both `webLightTheme` and `webDarkTheme`.</constraint>
+    <constraint source="ADR-022">React 19 only — functional component + hooks; no class components; no legacy React idioms (`React.FC` typing acceptable but `React.JSX.Element` return preferred over `JSX.Element`).</constraint>
+    <constraint source="ADR-012">Lives in `@spaarke/ai-widgets` shared library. Context-agnostic — no `Xrm` references, no PCF-specific imports, no SpaarkeAi-shell-specific imports.</constraint>
+    <constraint source="ADR-030">PaneEventBus is closed at 4 channels. R5 adds event types WITHIN the existing `workspace` channel (`streaming_started`, `field_delta`, `streaming_complete`). MUST NOT add a 5th channel. Existing subscribers ignore unknown discriminants — preserve this by emitting only the documented event-type discriminants.</constraint>
+    <constraint source="ADR-028">No token snapshots. This widget does NOT call BFF directly — it consumes streamed events delivered via PaneEventBus from upstream dispatchers (the chat-pane SSE consumer in SpaarkeAi). If a future evolution requires BFF calls, use `authenticatedFetch` from `@spaarke/auth`.</constraint>
+    <constraint source="ADR-010">DI minimalism — N/A for frontend widget. Confirm in task notes.</constraint>
+    <constraint source="ADR-029">BFF publish-size — N/A; this task adds frontend code only. Confirm publish-size delta = 0 MB in task notes.</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 reuse mandate">MUST use existing Fluent UI v9 primitives (`Card`, `CardHeader`, `Text`, `Badge`, `MessageBar`, `Skeleton`, `Divider`). MUST NOT build a parallel UI primitive library. Cite the primitive used in code comments.</constraint>
+    <constraint source="R5 CLAUDE.md §3.4">Subscribes to event types added by task 016 (`workspace.streaming_started`, `workspace.field_delta`, `workspace.streaming_complete`). Import the additive types from `PaneEventTypes.ts` — do NOT redefine.</constraint>
+    <constraint source="spec UR-02">Schema-driven complexity is flagged risk. Apply 80/20: handle Summarize schema + Insights playbook schema concretely first; document edge cases for follow-up. Do NOT over-generalize to a fully arbitrary JSON renderer.</constraint>
+    <constraint source="spec FR-02">Acceptance: `AnalysisChunk.Type = "delta"` events arrive as `FieldDelta { path, content, sequence }`; widget renders each field progressively (cursor animation, NOT plop); existing wizard consumers unaffected.</constraint>
+    <constraint source="project">Widget MUST handle out-of-order `FieldDelta` events safely (use `sequence` to detect, log if drop required). Append-only semantics for `content` per `path`.</constraint>
+    <constraint source="project">Decline-state and empty-result-state rendering MUST be visually distinct from streaming-complete success. Decline uses `MessageBar` with `intent="warning"`; empty-result uses muted `Text` with hint copy. No raw stack traces.</constraint>
+    <constraint source="project">No `any` types in public exports. Schema, widget data, and event payloads are fully typed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>spaarke-ai-widgets/workspace-widget-registration</topic>
+    <topic>fluent-ui-v9/semantic-tokens-dark-mode</topic>
+    <topic>paneeventbus/additive-event-types</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9-semantic-tokens-dark-mode.md</file>
+      <file>.claude/adr/ADR-022-react-19.md</file>
+      <file>.claude/adr/ADR-030-paneeventbus-closed-channels.md</file>
+      <file>.claude/adr/ADR-012-component-libraries.md</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-document-viewer-widget.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/usePaneEvent.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/types/widget-types.ts</file>
+    </files>
+    <patterns>
+      <pattern name="Workspace widget registration (canonical)" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-document-viewer-widget.ts">
+        Exports a string constant for the widget type key, calls
+        `registerWorkspaceWidget(KEY, { displayName, category, icon, allowMultiple, defaultOrder }, () => import('./Widget'))`,
+        and exports a sentinel function so callers can import as a named side
+        effect. Copy this shape verbatim for `register-structured-output-stream-widget.ts`.
+        New widget key: `'structured-output-stream'`. `allowMultiple: true`
+        (Summarize produces a new tab per invocation per FR-06). `defaultOrder`
+        160 (one past DocumentViewerWidget's 150).
+      </pattern>
+      <pattern name="Fluent v9 semantic-token styling" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx">
+        `makeStyles` + `tokens.*` references only. NO hex / rgba / `#fff`.
+        Dark-mode parity is automatic when semantic tokens are used correctly.
+        Patterns to mirror: typography via `tokens.fontSizeBase300` /
+        `tokens.fontWeightSemibold`; spacing via `tokens.spacingHorizontal*` /
+        `tokens.spacingVerticalM`; borders via `tokens.colorNeutralStroke1`;
+        backgrounds via `tokens.colorNeutralBackground1` /
+        `tokens.colorNeutralBackground2`.
+      </pattern>
+      <pattern name="PaneEventBus subscription via usePaneEvent" location="src/client/shared/Spaarke.AI.Widgets/src/events/usePaneEvent.ts">
+        Use `usePaneEvent('workspace', (event) =&gt; { ... })` to subscribe.
+        Narrow on `event.type` discriminant (`'streaming_started'` /
+        `'field_delta'` / `'streaming_complete'`). Unknown event types MUST be
+        ignored — return early to preserve back-compat per ADR-030.
+      </pattern>
+      <pattern name="Append-only progressive rendering by JSON path" location="N/A — new pattern; document inline">
+        Maintain a `Map&lt;string, string&gt;` keyed by `FieldDelta.path` and
+        append `content` per delta. Use `useRef` + `useState` carefully: deltas
+        arrive faster than React render cycles; batch into a single state
+        update via `useReducer` or microtask flushing. Apply visible cursor
+        animation (`▋` or Fluent `tokens.colorBrandForeground1` blinking caret
+        via CSS keyframes) at the END of the most-recently-updated field while
+        streaming is active; remove cursor on `streaming_complete`.
+      </pattern>
+      <pattern name="Schema-driven render contract" location="N/A — new pattern; document in widget JSDoc">
+        Widget data shape:
+        ```typescript
+        interface StructuredOutputStreamWidgetData {
+          mode: 'streaming' | 'static';     // streaming = subscribe to deltas; static = render from prefilled fields
+          schema: StructuredOutputSchema;   // array of field definitions
+          prefilledFields?: Record&lt;string, string&gt;;  // for static mode (Insights playbook destination)
+          declineState?: { reason: string; suggestedActions?: string[] };  // renders decline UI
+          emptyResultState?: boolean;       // renders empty-result hint
+          correlationId?: string;           // for matching streaming_started event to this widget instance
+        }
+        interface StructuredOutputSchema {
+          fields: Array&lt;{
+            path: string;                   // JSON path key matching FieldDelta.path
+            label: string;
+            displayHint: 'heading' | 'paragraph' | 'list' | 'badge' | 'callout';
+            order: number;
+          }&gt;;
+        }
+        ```
+        Concrete schemas for Summarize and Insights playbook MUST be declared
+        in module-level `const` exports so consumers (chat-pane dispatcher, D2-16
+        renderer) reuse them — not re-declare. Document edge cases (nested
+        paths, dynamic field counts e.g. `fileHighlights[N]`) as TODO comments
+        for follow-up; v1 may handle `fileHighlights[]` via a single list
+        renderer if simpler.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5's vertical slice produces structured Summarize output (TL;DR, summary,
+      per-file highlights, mentioned parties, call-to-action) that streams via
+      SSE `FieldDelta` events. The R5 platform-extensibility claim hinges on the
+      SAME widget rendering Insights playbook output (different schema:
+      structured envelope from PlaybookExecutionEngine) and Insights RAG
+      decline-to-find responses. Reusability across two consumers is the proof
+      point for SC-19 (configuration-only follow-on) — `/analyze` in Phase 3
+      will be the third consumer, requiring zero widget code change.
+
+      ChatGPT/Claude-style progressive rendering is a deliberate UX choice — users
+      see the model "think" rather than wait for a plop. This is the most-visible
+      surface in R5; the polish bar is high. Cursor animation at the active
+      field tail + smooth append (no layout jitter) are required.
+
+      Risk UR-02 is the schema-driven complexity. The 80/20 mitigation: only the
+      Summarize schema and the Insights playbook schema are required for R5
+      Phase 2. Insights RAG path uses citation-grounded prose (D2-16 paragraph
+      renderer + clickable `[n]` citation tokens) and may use a SIMPLER variant
+      of this widget OR a sibling. Decline + empty-result states are first-class
+      render states baked into THIS widget for both consumers.
+    </background>
+    <dependencies>
+      <dependency task="016" status="not-started">
+        Task 016 (D2-06) adds five additive PaneEventBus event types per ADR-030,
+        including the three this widget subscribes to: `workspace.streaming_started`,
+        `workspace.field_delta`, `workspace.streaming_complete`. This widget
+        imports those types from `PaneEventTypes.ts`. Task 016 MUST be ✅ before
+        task 017 starts implementation; the dependency is hard.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>R4 task 042 (W-4) created `DocumentViewerWidget` + its registration
+        file as the canonical workspace widget pattern. Task 017 mirrors that
+        pattern exactly — registration file shape, FluentLayout, registry key
+        naming, lazy-import dynamic loading.</item>
+      <item>Insights Engine R2 contract v1.1 (Wave F) produces `answer` SSE
+        deltas for RAG-path responses; R5's `FieldDelta` and Insights v1.1 SSE
+        protocols are aligned by negotiation (per UR-03). When Wave F deploys,
+        the Insights renderer (D2-16 / task 026) will consume this widget in
+        STREAMING mode for playbook outputs, STATIC mode for RAG prose path.</item>
+      <item>Task 026 (D2-16 — Two-path response renderer) is the
+        DOWNSTREAM consumer. It MUST be unblocked by this widget's reusable
+        contract. If the contract is brittle, UR-02 materializes — escalate per
+        CLAUDE.md §6.</item>
+      <item>Task 018 (D2-09 — `FilePreviewContextWidget`) is the parallel sibling
+        in P2-G4. Independent widget; no shared code; runs in parallel.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context usage. If &gt; 70%, create handoff summary and request `/compact`.
+      Declare RIGOR LEVEL: FULL per CLAUDE.md §8 (frontend widget on critical
+      path; risk UR-02; downstream consumer task 026 depends on contract; 6+
+      steps; tags include `widget` + `streaming` + `react-19`).
+
+      Required output (non-negotiable):
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend widget on R5 critical path, schema-driven design flagged as risk UR-02, downstream consumer (D2-16) depends on stable contract, dark-mode test required, quality gates at Step 9.5.
+      📖 PROTOCOL STEPS TO EXECUTE: Step 0 → 1 → 2 → 3 (schema design) → 4 (progressive rendering) → 5 (FieldDelta subscription) → 6 (4 render states) → 7 (dark mode test) → 8 (registration + verification) → 9 (acceptance criteria walk-through) → 9.5 (code-review + adr-check) → 10 (document + complete).
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 017 status is 🔲, dependency
+      016 is ✅, parallel-safe = true (sibling 018 may be in flight). Read
+      `current-task.md` to verify no conflicting R5 task is in flight. Confirm
+      task 026 (D2-16) is downstream-pending. If task 016 is not ✅, STOP and
+      report blocker.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically:
+      (a) read `PaneEventTypes.ts` to find the additive event types added by
+      task 016 (`WorkspaceStreamingStartedEvent`, `WorkspaceFieldDeltaEvent`,
+      `WorkspaceStreamingCompleteEvent`); (b) read `DocumentViewerWidget.tsx`
+      and its registration file to mirror the structure exactly; (c) read
+      `usePaneEvent.ts` to understand the subscription hook signature; (d) read
+      ADR-021 + ADR-022 + ADR-030 in full; (e) read spec.md FR-02, FR-06, NFR-09,
+      NFR-10, UR-02 in full; (f) skim `BUILD-A-NEW-WORKSPACE-WIDGET.md` for any
+      additional conventions (Pattern D vs composable section).
+    </step>
+    <step order="3" name="Design Schema-Driven Render Contract">
+      Define the `StructuredOutputStreamWidgetData` interface + `StructuredOutputSchema`
+      shape in module-level exports per the pattern documented in &lt;knowledge&gt;.
+      Author two CONCRETE schemas as module-level `const` exports:
+      `SUMMARIZE_SCHEMA` (TL;DR, summary, per-file highlights, mentioned parties,
+      call-to-action) and `INSIGHTS_PLAYBOOK_SCHEMA` (envelope fields per Insights
+      contract v1.1). Each schema entry specifies `path`, `label`, `displayHint`,
+      `order`. Display hints supported in v1: `'heading'`, `'paragraph'`, `'list'`,
+      `'badge'`, `'callout'`. Document edge cases (dynamic-cardinality fields
+      like `fileHighlights[N]`) as JSDoc TODOs for follow-up; v1 may render
+      `fileHighlights[]` via a single list renderer keyed by a synthetic path
+      pattern (`fileHighlights.*`) — decision: render as a Fluent v9 `Card` per
+      element with the heading + paragraph hint pair. Apply 80/20 per UR-02.
+    </step>
+    <step order="4" name="Implement Progressive Rendering Core">
+      Build the widget's core rendering engine:
+      (a) State: `useReducer` with `Map&lt;string, { content: string; lastSequence: number }&gt;`
+      keyed by JSON path; action types `{ type: 'streaming_started', correlationId }`,
+      `{ type: 'field_delta', path, content, sequence }`, `{ type: 'streaming_complete' }`,
+      `{ type: 'reset' }`.
+      (b) Out-of-order handling: compare `sequence` against `lastSequence` per
+      path; ignore stale deltas (log via `console.debug` for telemetry).
+      (c) Append semantics: new content appended to existing per `path`.
+      (d) Cursor animation: render `tokens.colorBrandForeground1` blinking caret
+      via CSS keyframes (`@keyframes pulse-cursor { 0%, 100% { opacity: 1 } 50% { opacity: 0 } }`)
+      at the END of the most-recently-updated field; track `mostRecentPath` in
+      reducer state. Remove cursor on `streaming_complete` action.
+      (e) Render order: iterate `schema.fields` by `order` ascending; for each
+      field, look up `state.get(field.path)?.content` and render via the
+      appropriate Fluent v9 primitive matching `field.displayHint`.
+      (f) Smooth append: avoid layout shift by reserving vertical space via
+      `min-height` on field containers; use `Skeleton` placeholder for fields
+      that have no content yet during streaming.
+    </step>
+    <step order="5" name="Wire FieldDelta Subscription">
+      Subscribe to the `workspace` channel via `usePaneEvent('workspace', handler)`.
+      In the handler, narrow on `event.type`:
+      (a) `'streaming_started'` — dispatch `{ type: 'reset' }` to clear prior
+      state if `correlationId` matches this widget instance's
+      `widgetData.correlationId`. Otherwise ignore (other widget instance).
+      (b) `'field_delta'` — dispatch `{ type: 'field_delta', path, content, sequence }`
+      after correlation-id match check.
+      (c) `'streaming_complete'` — dispatch `{ type: 'streaming_complete' }`
+      after correlation-id match.
+      (d) Any other `event.type` — return early (preserve ADR-030 unknown-type
+      tolerance).
+
+      Correlation: in `mode: 'streaming'`, the dispatcher (chat-pane SSE
+      consumer) emits `streaming_started` with the correlation-id that was
+      passed into the widget's `widgetData.correlationId` at mount time.
+    </step>
+    <step order="6" name="Implement Four Render States">
+      Render-state matrix MUST be visually distinct:
+      (a) **Streaming** — schema fields render progressively; visible cursor on
+      most-recent-field tail; `Skeleton` placeholders for not-yet-streamed
+      fields; subtle `Badge` (e.g. "Streaming…") in header.
+      (b) **Streaming complete** — final formatted output with no cursor;
+      header `Badge` removed or replaced with "Complete" indicator (semantic
+      `tokens.colorPaletteGreenBackground2`); fully formatted Fluent v9 typography.
+      (c) **Decline** (Insights decline-to-find) — when
+      `widgetData.declineState` is set, render Fluent v9 `MessageBar` with
+      `intent="warning"`, the `reason` text, and `suggestedActions` as a Fluent
+      `Button` list below. Hide schema-field rendering entirely.
+      (d) **Empty-result** — when `widgetData.emptyResultState === true`,
+      render muted `Text` with copy "I couldn't find anything for that. Try
+      rephrasing or attaching files." (per spec FR-13 / D2-16 acceptance) +
+      `tokens.colorNeutralForeground3` styling. Hide schema-field rendering.
+
+      The four states are mutually exclusive in render output; widget validates
+      via TypeScript discriminated union OR runtime guard. Default state:
+      streaming (mode: 'streaming') OR static rendering of `prefilledFields`
+      (mode: 'static') — these are sub-modes of "streaming complete" UX-wise.
+    </step>
+    <step order="7" name="Dark Mode + Visual Verification">
+      Verify all four render states render legibly against both `webLightTheme`
+      and `webDarkTheme`. Use the existing test harness in
+      `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/` if
+      it has dark-mode coverage; otherwise run the widget in the SpaarkeAi shell
+      (or a Storybook story if available) with dark-mode active and capture
+      visual evidence for task notes. Confirm: no hex/rgba in styles; semantic
+      tokens only; cursor color uses brand foreground token; decline `MessageBar`
+      uses `intent="warning"` semantic styling; empty-result hint uses
+      `colorNeutralForeground3`. Document evidence in task notes.
+    </step>
+    <step order="8" name="Register Widget + Verify Build">
+      Create `register-structured-output-stream-widget.ts` mirroring
+      `register-document-viewer-widget.ts`:
+      - `STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE = 'structured-output-stream'`
+      - `allowMultiple: true` (FR-06 — each Summarize invocation = new tab)
+      - `defaultOrder: 160` (one past DocumentViewerWidget's 150)
+      - `displayName: 'Structured AI Output'`
+      - `category: 'analysis'` (or matching existing category — verify in registry)
+      - `icon: 'TextBulletListSquareSparkleRegular'` or similar Fluent icon
+      - Lazy import via `() =&gt; import('./StructuredOutputStreamWidget')`
+
+      Add a sentinel `registerStructuredOutputStreamWidget()` named-export
+      function per the canonical pattern. Add the side-effect import in the
+      package barrel (or shell entry-point per existing pattern).
+
+      Build: `npm run build` in `src/client/shared/Spaarke.AI.Widgets/`. Verify
+      no TypeScript errors, no new lint warnings. Verify the widget appears in
+      `WorkspaceWidgetRegistry` enumeration (smoke check via test or console).
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is
+      testable + passing. Record evidence per criterion in task notes.
+      Specifically verify the reusability claim: stub a hypothetical D2-16
+      consumer call (Insights playbook static rendering) with
+      `mode: 'static'` + `INSIGHTS_PLAYBOOK_SCHEMA` + `prefilledFields` and
+      confirm the widget renders correctly WITHOUT any widget code change.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new files
+      (`StructuredOutputStreamWidget.tsx` + `register-structured-output-stream-widget.ts`).
+      Run `adr-check` skill against the same files; verify:
+      - ADR-021 (Fluent v9 semantic tokens + dark mode) PASS
+      - ADR-022 (React 19) PASS
+      - ADR-012 (component lib placement) PASS
+      - ADR-030 (additive PaneEventBus types; no new channel) PASS
+      - ADR-010 (DI minimalism — N/A confirmed)
+      - ADR-029 (BFF publish hygiene — N/A confirmed; frontend-only)
+
+      Both gates MUST pass before marking the task complete. If either fails,
+      fix and re-run.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`: 017 🔲 → ✅.
+      Reset `current-task.md` to the next pending task per CLAUDE.md §7. Record
+      in task notes:
+      - The two concrete schemas authored (Summarize + Insights playbook) + the
+        edge-case TODOs documented for follow-up (UR-02 mitigation evidence)
+      - Dark-mode evidence (screenshots or harness output reference)
+      - Confirmation that downstream consumer task 026 (D2-16) contract is
+        satisfied — stub a one-paragraph "reusability handshake" note for the
+        task-026 implementer
+      - BFF publish-size delta = 0 MB (frontend-only task)
+      - DI registrations delta = 0 (no DI changes)
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + lint the `@spaarke/ai-widgets` package; run any widget tests</tool>
+    <tool name="git">Stage + commit the new widget + registration file on the R5 branch</tool>
+    <tool name="code-review">FULL-rigor quality gate at Step 9.5</tool>
+    <tool name="adr-check">FULL-rigor quality gate at Step 9.5</tool>
+    <tool name="context-handoff">Checkpoint per CLAUDE.md §5 (after every 3 steps; verbose at 60%+ context)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-structured-output-stream-widget.ts (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts (extend — add side-effect import OR sentinel call if that's the barrel-pattern used)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 017 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-017-widget-evidence.md (dark-mode evidence, schema authoring decisions, UR-02 80/20 follow-up TODO list, reusability handshake for D2-16, build output)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <examples>
+    <example name="Workspace widget registration shape" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-document-viewer-widget.ts">
+      Verbatim shape to mirror: string-const widget type key, `registerWorkspaceWidget(KEY, options, lazyImport)`, sentinel named-export function for side-effect import semantics. Reproduces R4 task 042's canonical pattern.
+    </example>
+    <example name="Fluent v9 semantic-token widget" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx">
+      Demonstrates `makeStyles` + `tokens.*` discipline; `Card` / `CardHeader` / `Text` / `Badge` Fluent primitives; React 19 hooks pattern; typed `widgetData` shape with no `any` casts. Mirror styling discipline + JSDoc rigor.
+    </example>
+  </examples>
+
+  <acceptance-criteria>
+    <criterion testable="true">`StructuredOutputStreamWidget.tsx` exists at `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx` and is a React 19 functional component using Fluent v9 semantic tokens only (no hex / rgba / Fluent v8 imports).</criterion>
+    <criterion testable="true">`register-structured-output-stream-widget.ts` registers the widget under key `'structured-output-stream'` via `registerWorkspaceWidget()` with `allowMultiple: true`, `defaultOrder: 160`, and a lazy dynamic import.</criterion>
+    <criterion testable="true">Widget accepts a `StructuredOutputSchema` config (typed; module-level exports for `SUMMARIZE_SCHEMA` + `INSIGHTS_PLAYBOOK_SCHEMA`) and renders fields keyed by `path` in `order` ascending.</criterion>
+    <criterion testable="true">Widget subscribes to PaneEventBus `workspace` channel via `usePaneEvent` and handles three event types: `streaming_started`, `field_delta`, `streaming_complete`. Unknown event types are ignored (ADR-030 back-compat).</criterion>
+    <criterion testable="true">Progressive rendering is observable: when `field_delta` events arrive, the matching field appears AS SOON AS the first delta arrives and APPENDS on subsequent deltas. Cursor animation visible at the most-recently-updated field tail during streaming; cursor removed on `streaming_complete`. NOT a final-result plop.</criterion>
+    <criterion testable="true">Out-of-order `field_delta` events are handled safely via `sequence` comparison; stale deltas are dropped + logged via `console.debug`. Append semantics preserved.</criterion>
+    <criterion testable="true">Four render states are visually distinct: (a) streaming (cursor + Skeleton placeholders + Streaming badge); (b) streaming complete (no cursor + Complete indicator); (c) decline (MessageBar intent="warning" + reason + suggestedActions list); (d) empty-result (muted hint copy).</criterion>
+    <criterion testable="true">Dark mode (`webDarkTheme`) passes visual check for all four render states; evidence captured in task notes. No hex/rgba/Fluent v8 leaked into styles.</criterion>
+    <criterion testable="true">Reusability validated: stubbing a hypothetical D2-16 (Insights playbook static rendering) consumer with `mode: 'static'` + `INSIGHTS_PLAYBOOK_SCHEMA` + `prefilledFields` renders correctly with ZERO widget code change. Reusability handshake note authored for task 026 implementer.</criterion>
+    <criterion testable="true">UR-02 mitigation evidence: edge-case TODOs documented as JSDoc comments + task-notes TODO list (dynamic-cardinality fields, nested paths, schema versioning) — 80/20 applied rather than over-generalized.</criterion>
+    <criterion testable="true">Build passes: `npm run build` in `Spaarke.AI.Widgets` succeeds with no TypeScript errors and no new lint warnings.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (frontend-only task; confirmed in task notes).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+</task>

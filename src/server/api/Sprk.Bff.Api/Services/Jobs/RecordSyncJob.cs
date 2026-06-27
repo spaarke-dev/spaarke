@@ -81,6 +81,12 @@ public sealed class RecordSearchDocument
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Azure AD tenant ID (the user's home tenant) — enforces tenant isolation at the index level (FR-12).
+    /// </summary>
+    [JsonPropertyName("tenantId")]
+    public string TenantId { get; set; } = string.Empty;
+
     [JsonPropertyName("recordType")]
     public string RecordType { get; set; } = string.Empty;
 
@@ -213,12 +219,12 @@ public class RecordSyncJob : BackgroundService
         TokenCredential credential,
         ILogger<RecordSyncJob> logger)
     {
-        _cache             = cache             ?? throw new ArgumentNullException(nameof(cache));
+        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
-        _configuration     = configuration     ?? throw new ArgumentNullException(nameof(configuration));
-        _options           = options?.Value    ?? throw new ArgumentNullException(nameof(options));
-        _credential        = credential        ?? throw new ArgumentNullException(nameof(credential));
-        _logger            = logger            ?? throw new ArgumentNullException(nameof(logger));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _credential = credential ?? throw new ArgumentNullException(nameof(credential));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>
@@ -381,9 +387,15 @@ public class RecordSyncJob : BackgroundService
             .Select(r => r.GetProperty("modifiedon").GetDateTimeOffset())
             .Max();
 
+        // FR-12: resolve tenantId once per entity batch from Azure AD tenant context.
+        // The BFF runs against a single Azure AD tenant; AzureAd:TenantId is the canonical
+        // source for background services with no user context (matches the pattern used by
+        // Email, Workers/Office, Communication services).
+        var tenantId = _configuration["AzureAd:TenantId"] ?? string.Empty;
+
         // Transform all records to search documents.
         var documents = records
-            .Select(r => MapToSearchDocument(r, entity))
+            .Select(r => MapToSearchDocument(r, entity, tenantId))
             .ToList();
 
         // Push in batches of AiSearchBatchSize, respecting cancellation between batches.
@@ -430,9 +442,9 @@ public class RecordSyncJob : BackgroundService
         // ISO 8601 OData-compatible datetime literal (no timezone suffix — Dataverse expects UTC Z)
         var watermarkStr = watermark.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
 
-        var odataFilter   = Uri.EscapeDataString($"modifiedon gt {watermarkStr}");
-        var odataSelect   = Uri.EscapeDataString(entity.SelectFields);
-        var odataOrderBy  = Uri.EscapeDataString("modifiedon asc");
+        var odataFilter = Uri.EscapeDataString($"modifiedon gt {watermarkStr}");
+        var odataSelect = Uri.EscapeDataString(entity.SelectFields);
+        var odataOrderBy = Uri.EscapeDataString("modifiedon asc");
 
         var url = $"{baseUrl.TrimEnd('/')}/api/data/v9.2/{entity.EntitySetName}" +
                   $"?$filter={odataFilter}" +
@@ -493,12 +505,12 @@ public class RecordSyncJob : BackgroundService
     // Field mapping — Dataverse record → AI Search document
     // ─────────────────────────────────────────────────────────────────────────
 
-    public static RecordSearchDocument MapToSearchDocument(JsonElement record, EntityConfig entity)
+    public static RecordSearchDocument MapToSearchDocument(JsonElement record, EntityConfig entity, string tenantId = "")
     {
-        var recordId   = GetString(record, entity.IdField);
+        var recordId = GetString(record, entity.IdField);
         var recordName = GetString(record, entity.NameField);
-        var desc       = entity.DescriptionField is not null ? GetString(record, entity.DescriptionField) : string.Empty;
-        var reference  = entity.ReferenceField   is not null ? GetString(record, entity.ReferenceField)  : string.Empty;
+        var desc = entity.DescriptionField is not null ? GetString(record, entity.DescriptionField) : string.Empty;
+        var reference = entity.ReferenceField is not null ? GetString(record, entity.ReferenceField) : string.Empty;
 
         DateTimeOffset lastModified = DateTimeOffset.UtcNow;
         if (record.TryGetProperty("modifiedon", out var modifiedProp) &&
@@ -510,7 +522,7 @@ public class RecordSyncJob : BackgroundService
         // keywords: name + reference for keyword search (mirrors the PS1 script logic)
         var keywordParts = new List<string>();
         if (!string.IsNullOrEmpty(recordName)) keywordParts.Add(recordName);
-        if (!string.IsNullOrEmpty(reference))  keywordParts.Add(reference);
+        if (!string.IsNullOrEmpty(reference)) keywordParts.Add(reference);
         var keywords = string.Join(" ", keywordParts);
 
         var refNumbers = new List<string>();
@@ -518,18 +530,19 @@ public class RecordSyncJob : BackgroundService
 
         return new RecordSearchDocument
         {
-            Id                  = $"{entity.EntityLogicalName}_{recordId}",
-            RecordType          = entity.EntityLogicalName,
-            RecordName          = recordName,
-            RecordDescription   = desc,
-            Organizations       = new List<string>(),  // TODO: expand lookup joins
-            People              = new List<string>(),
-            ReferenceNumbers    = refNumbers,
-            Keywords            = keywords,
-            LastModified        = lastModified,
-            DataverseRecordId   = recordId,
+            Id = $"{entity.EntityLogicalName}_{recordId}",
+            TenantId = tenantId,  // FR-12: populated from Azure AD tenant context
+            RecordType = entity.EntityLogicalName,
+            RecordName = recordName,
+            RecordDescription = desc,
+            Organizations = new List<string>(),  // TODO: expand lookup joins
+            People = new List<string>(),
+            ReferenceNumbers = refNumbers,
+            Keywords = keywords,
+            LastModified = lastModified,
+            DataverseRecordId = recordId,
             DataverseEntityName = entity.EntityLogicalName,
-            PrivilegeGroupIds   = new List<string>(),
+            PrivilegeGroupIds = new List<string>(),
         };
     }
 
@@ -634,7 +647,8 @@ public class RecordSyncJob : BackgroundService
 
     public virtual async Task<DateTimeOffset> ReadWatermarkAsync(string entityType, CancellationToken ct)
     {
-        var key  = $"{WatermarkKeyPrefix}{entityType}";
+        var key = $"{WatermarkKeyPrefix}{entityType}";
+        // SYSTEM-LEVEL EXCEPTION (NFR-08): watermark is a durable system-wide bookmark for cross-tenant Dataverse sync per entity type; tenant-scoping would fragment the bookmark.
         var data = await _cache.GetStringAsync(key, ct);
 
         if (string.IsNullOrEmpty(data) || !DateTimeOffset.TryParse(data, out var watermark))
@@ -655,6 +669,7 @@ public class RecordSyncJob : BackgroundService
         var key = $"{WatermarkKeyPrefix}{entityType}";
 
         // Persist watermark indefinitely (no sliding expiry — this is a durable bookmark).
+        // SYSTEM-LEVEL EXCEPTION (NFR-08): watermark is a durable system-wide bookmark for cross-tenant Dataverse sync per entity type; tenant-scoping would fragment the bookmark.
         await _cache.SetStringAsync(key, watermark.ToString("O"), new DistributedCacheEntryOptions(), ct);
 
         _logger.LogDebug(
@@ -668,7 +683,7 @@ public class RecordSyncJob : BackgroundService
 
     private SearchClient BuildSearchClient()
     {
-        var endpoint   = new Uri(_options.AiSearchEndpoint);
+        var endpoint = new Uri(_options.AiSearchEndpoint);
         var credential = new AzureKeyCredential(_options.AiSearchApiKey);
         return new SearchClient(endpoint, IndexName, credential);
     }

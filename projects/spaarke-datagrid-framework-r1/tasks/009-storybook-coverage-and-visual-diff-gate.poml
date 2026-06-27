@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Storybook coverage gate (Fluent v9 native features, empty/error/loading states) + MDA pixel-parity screenshot diff</title>
+    <phase>1: Phase A — Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002,003,004,005,006,007,008</dependencies>
+    <blocks>030,033</blocks>
+    <tags>fluent-ui, frontend, testing, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tests + Storybook stories; e2e-test tag; screenshot visual diff; final Phase A acceptance gate</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final Phase A gate — depends on completion of all primitives. Aggregates and verifies the whole phase.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Close Phase A by adding Storybook stories for every Fluent v9 native feature demonstrating it works in the wrapper (selection / sort / resize / keyboard nav / density / sticky header), plus stories for empty / error / loading / lazy-load states. Run axe-core across all stories. Run the MDA pixel-parity screenshot diff vs. native MDA Events sub-grid for light + dark + 75/100/125/150% zoom (NFR-01 acceptance gate).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Storybook coverage strategy, axe-core CI, visual diff tooling (Chromatic / Playwright snapshot / manual).
+  </role>
+
+  <goal>
+    Storybook has comprehensive coverage of native Fluent v9 features + edge states; axe-core scan reports zero serious/critical violations across all stories; MDA pixel-parity screenshot diff gate passes per NFR-01 (light + dark + 4 zoom levels).
+  </goal>
+
+  <context>
+    <background>
+      Per NFR-07 (Storybook coverage), NFR-01 (MDA visual parity gates), G8-G12 (Fluent v9 exploitation gates). This task is the formal Phase A acceptance gate. Without it, downstream consumers (Phase C/D/E) start integrating with unverified framework behavior. Visual diff comparison target: native MDA Events sub-grid (the canonical reference per design.md §11.5.2).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/storybook/DataGrid.stories.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/storybook/FluentV9NativeFeatures.stories.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/storybook/EdgeStates.stories.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/.storybook/main.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-07">Storybook coverage: per Fluent v9 native feature — selection (single, multi, select-all), sort, column resize, keyboard nav, density (3 sizes), sticky header; plus empty / error / loading / lazy-load-in-progress states.</constraint>
+    <constraint source="NFR-01">MDA pixel-parity screenshot diff vs. native MDA Events sub-grid: PASS for light + dark + 75/100/125/150% zoom.</constraint>
+    <constraint source="NFR-04">axe-core: zero serious/critical violations per story.</constraint>
+    <constraint source="G8-G12">No hand-rolled checkbox columns / sort arrows / resize handles / keyboard nav / density toggles — all Fluent v9 native. Code review gate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Storybook coverage strategy" location=".claude/patterns/ui/fluent-v9-component-authoring.md">One story per state; addon-a11y for axe; addon-viewport for zoom.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author `FluentV9NativeFeatures.stories.tsx` with one story per native feature: Selection (single/multi/select-all), Sort, Resize, KeyboardNav, Density (3 sizes), StickyHeader. Each story shows the DataGrid using Fluent v9 native prop, not a custom impl.</step>
+    <step order="2">Author `EdgeStates.stories.tsx`: Empty (no records), Loading (initial fetch), Error (network failure), LazyLoadInProgress (page 2 loading).</step>
+    <step order="3">Configure Storybook a11y addon; ensure axe runs on every story.</step>
+    <step order="4">Set up zoom-level testing in Storybook viewport addon: 75/100/125/150%.</step>
+    <step order="5">Capture screenshots of native MDA Events sub-grid (light + dark + 4 zooms) — manual capture against live tenant. Place reference images in `storybook/__visual-diff-reference__/`.</step>
+    <step order="6">Capture matching screenshots of `<DataGrid />` story rendering `sprk_event` config in the same conditions.</step>
+    <step order="7">Run visual diff comparison (manual review acceptable in R1; tooling like Chromatic/Playwright snapshot is optional). Document any pixel-level discrepancies.</step>
+    <step order="8">Code-review gate: grep framework code for forbidden patterns — custom `<input type="checkbox"` in DataGrid (would indicate hand-rolled selection), custom sort arrow components, custom drag handles, custom `onKeyDown` for arrow nav. Zero matches required.</step>
+    <step order="9">axe-core CI run: zero serious/critical violations across all stories.</step>
+    <step order="10">Document MDA parity report in `notes/phase-a-acceptance-gate.md` with: 6 Fluent v9 feature stories ✅, 4 edge state stories ✅, axe results, visual diff results.</step>
+    <step order="11">Update TASK-INDEX (009 ✅); mark Phase A complete.</step>
+    <step order="12">Run `/code-review` and `/adr-check` on all Phase A code.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Storybook + axe + visual diff (manual review)</tool>
+    <tool name="grep">Code-review gate verification</tool>
+    <tool name="Edit">Author stories + report</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/storybook/FluentV9NativeFeatures.stories.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/storybook/EdgeStates.stories.tsx</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/phase-a-acceptance-gate.md</output>
+    <output type="docs">src/client/shared/Spaarke.UI.Components/storybook/__visual-diff-reference__/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given Storybook, when run, then 10+ stories exist covering all 6 Fluent v9 native features + 4 edge states.</criterion>
+    <criterion testable="true">Given axe-core CI run, when complete, then zero serious/critical violations across all stories.</criterion>
+    <criterion testable="true">Given screenshot diff vs. native MDA Events sub-grid for light + dark + 4 zoom levels, when reviewed, then no pixel-level regressions found.</criterion>
+    <criterion testable="true">Given `grep -E 'type="checkbox"|customDragHandle|onKeyDown.*Arrow' src/components/DataGrid/`, when run, then zero matches.</criterion>
+    <criterion testable="true">Given `/code-review` and `/adr-check` on Phase A code, when run, then no FULL-severity findings remain unresolved.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="All native feature stories render">
+      <url>http://localhost:6006/?path=/story/fluentv9nativefeatures--all</url>
+      <steps>
+        <step>Visit each native feature story</step>
+        <step>Verify each renders correctly with no console errors</step>
+        <step>Toggle dark mode on each; verify parity</step>
+      </steps>
+      <expected>10+ stories, all axe-clean, all dark-mode-correct</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Final Phase A gate. The visual diff is the trickiest part — in R1 we accept manual review (Ralph eyeballs side-by-side screenshots) since installing Chromatic adds CI complexity. If pixel regressions found, route back to task 001 (tokens.ts) to adjust. Code-review gate is the safety net catching hand-rolled implementations that slipped through individual primitive tasks. Run `/code-review` + `/adr-check` at the end — this is mandatory per task-execute Step 9.5 for FULL/STANDARD rigor.
+
+    **Completion (2026-06-01)** — sub-agent scope complete; human-loop + main-session items routed:
+      - `storybook/FluentV9NativeFeatures.stories.tsx` (10 stories, 497 LOC) covers all 6 native features (selection × 3, sort, resize, keyboard nav, density × 3, sticky header).
+      - `storybook/EdgeStates.stories.tsx` (4 stories, 308 LOC) covers empty, loading, error, lazy-load-in-progress.
+      - `.storybook/main.ts` + `.storybook/preview.ts` author the Storybook config (a11y addon, viewport zoom presets 75/100/125/150%) — Storybook itself is not yet installed; the configs are a drop-in spec for the install task.
+      - Code-review grep gate: all 6 checks pass (zero raw hex, zero hand-rolled checkbox, zero arrow-key onKeyDown, zero React-18-only APIs in real code, zero window.confirm in real code, zero @fluentui/react v8 imports).
+      - `npm run build` exits 0; `npx jest src/components/DataGrid/` 30/30 PASS.
+      - Parity report: `projects/spaarke-datagrid-framework-r1/notes/phase-a-acceptance-gate.md`.
+      - Deviations: `projects/spaarke-datagrid-framework-r1/notes/drafts/009-deviations.md` (D-1 Storybook install deferred to follow-up task; D-2 density extra-small wrapper note; D-3 MDA screenshots deferred to human; D-4 `/code-review` + `/adr-check` deferred to main session).
+      - Acceptance criteria: 2 PASS (story coverage + grep gate), 3 PARTIAL pending human-loop / main-session (axe-core CI, MDA screenshots, skill invocations).
+      - Cross-task convergence decision: Pattern B (FluentProvider context inheritance with `applyStylesToPortals`) is canonical for new primitives. Pattern A primitives keep their optional `theme?` prop for back-compat.
+      - Task 007 D-1 HTML5 date input flagged for human review during MDA visual capture.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory `/fluent-v9-component` Step 0.5 + `/code-review` + `/adr-check` at end. Verify all acceptance criteria before marking Phase A complete.</protocol>
+  </execution>
+</task>

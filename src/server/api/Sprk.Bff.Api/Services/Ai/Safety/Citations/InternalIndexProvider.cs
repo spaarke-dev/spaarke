@@ -21,7 +21,12 @@ namespace Sprk.Bff.Api.Services.Ai.Safety.Citations;
 /// </summary>
 public sealed class InternalIndexProvider : IVerificationProvider
 {
-    private readonly SearchClient _searchClient;
+    // R6 Wave B-G11 (2026-06-10) — Lazy<SearchClient> so DI startup doesn't crash
+    // when AiSearch:ReferencesEndpoint/ApiKey aren't configured (matches the
+    // BingGroundingOptions B-G8 + AgentServiceOptions B-G11 hardening pattern).
+    // Config validation happens on first VerifyAsync/SearchAsync call.
+    private readonly Lazy<SearchClient> _searchClientLazy;
+    private SearchClient _searchClient => _searchClientLazy.Value;
     private readonly ILogger<InternalIndexProvider> _logger;
 
     /// <summary>Name of the semantic configuration defined in spaarke-rag-references.json.</summary>
@@ -51,7 +56,8 @@ public sealed class InternalIndexProvider : IVerificationProvider
     /// </summary>
     public InternalIndexProvider(SearchClient searchClient, ILogger<InternalIndexProvider> logger)
     {
-        _searchClient = searchClient ?? throw new ArgumentNullException(nameof(searchClient));
+        if (searchClient is null) throw new ArgumentNullException(nameof(searchClient));
+        _searchClientLazy = new Lazy<SearchClient>(() => searchClient, isThreadSafe: true);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -59,22 +65,28 @@ public sealed class InternalIndexProvider : IVerificationProvider
     /// Production constructor: builds the <see cref="SearchClient"/> from configuration keys
     /// <c>AiSearch:ReferencesEndpoint</c>, <c>AiSearch:ReferencesApiKey</c>, and
     /// <c>AiSearch:ReferencesIndexName</c> (default: <c>spaarke-rag-references</c>).
+    ///
+    /// R6 Wave B-G11 (2026-06-10) — SearchClient creation is deferred to first use via
+    /// <see cref="Lazy{T}"/> so DI startup doesn't crash when these config keys are
+    /// missing (matches the BingGroundingOptions B-G8 + AgentServiceOptions B-G11 pattern).
     /// </summary>
     public InternalIndexProvider(IConfiguration configuration, ILogger<InternalIndexProvider> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _searchClientLazy = new Lazy<SearchClient>(() =>
+        {
+            var endpoint = configuration["AiSearch:ReferencesEndpoint"]
+                ?? throw new InvalidOperationException("AiSearch:ReferencesEndpoint is not configured.");
+            var apiKey = configuration["AiSearch:ReferencesApiKey"]
+                ?? throw new InvalidOperationException("AiSearch:ReferencesApiKey is not configured.");
+            var indexName = configuration["AiSearch:ReferencesIndexName"]
+                ?? "spaarke-rag-references";
 
-        var endpoint  = configuration["AiSearch:ReferencesEndpoint"]
-            ?? throw new InvalidOperationException("AiSearch:ReferencesEndpoint is not configured.");
-        var apiKey    = configuration["AiSearch:ReferencesApiKey"]
-            ?? throw new InvalidOperationException("AiSearch:ReferencesApiKey is not configured.");
-        var indexName = configuration["AiSearch:ReferencesIndexName"]
-            ?? "spaarke-rag-references";
-
-        _searchClient = new SearchClient(
-            new Uri(endpoint),
-            indexName,
-            new AzureKeyCredential(apiKey));
+            return new SearchClient(
+                new Uri(endpoint),
+                indexName,
+                new AzureKeyCredential(apiKey));
+        }, isThreadSafe: true);
     }
 
     // =========================================================================
@@ -96,8 +108,8 @@ public sealed class InternalIndexProvider : IVerificationProvider
         {
             var opts = new SearchOptions
             {
-                Size          = 3,
-                QueryType     = SearchQueryType.Semantic,
+                Size = 3,
+                QueryType = SearchQueryType.Semantic,
                 SemanticSearch = new SemanticSearchOptions
                 {
                     SemanticConfigurationName = SemanticConfigName,
@@ -123,7 +135,7 @@ public sealed class InternalIndexProvider : IVerificationProvider
                 if (topResult is null || score > topScore)
                 {
                     topResult = result;
-                    topScore  = score;
+                    topScore = score;
                 }
             }
 
@@ -137,10 +149,10 @@ public sealed class InternalIndexProvider : IVerificationProvider
                 return Unverified(citation);
             }
 
-            var content           = topResult.Document.TryGetValue("content", out var c) ? c as string : null;
-            var knowledgeSource   = topResult.Document.TryGetValue("knowledgeSourceName", out var ks) ? ks as string : null;
-            var domain            = topResult.Document.TryGetValue("domain", out var d) ? d as string : null;
-            var docId             = topResult.Document.TryGetValue("id", out var id) ? id as string : null;
+            var content = topResult.Document.TryGetValue("content", out var c) ? c as string : null;
+            var knowledgeSource = topResult.Document.TryGetValue("knowledgeSourceName", out var ks) ? ks as string : null;
+            var domain = topResult.Document.TryGetValue("domain", out var d) ? d as string : null;
+            var docId = topResult.Document.TryGetValue("id", out var id) ? id as string : null;
 
             // Build a best-effort source URL from the document ID (no dedicated URL field in index).
             var sourceUrl = BuildSourceUrl(docId, domain);
@@ -154,13 +166,13 @@ public sealed class InternalIndexProvider : IVerificationProvider
                 citation.CitationType, topScore, confidence);
 
             return new CitationVerificationResult(
-                Citation:             citation,
-                IsVerified:           true,
-                ConfidenceScore:      confidence,
-                SourceUrl:            sourceUrl,
-                VerifiedText:         Truncate(content, 500),
+                Citation: citation,
+                IsVerified: true,
+                ConfidenceScore: confidence,
+                SourceUrl: sourceUrl,
+                VerifiedText: Truncate(content, 500),
                 VerificationProvider: ProviderName,
-                LatencyMs:            0.0);   // latency tracked by CitationVerificationService
+                LatencyMs: 0.0);   // latency tracked by CitationVerificationService
         }
         catch (RequestFailedException ex)
         {
@@ -185,7 +197,7 @@ public sealed class InternalIndexProvider : IVerificationProvider
         {
             var opts = new SearchOptions
             {
-                Size      = SearchTop,
+                Size = SearchTop,
                 QueryType = SearchQueryType.Semantic,
                 SemanticSearch = new SemanticSearchOptions
                 {
@@ -205,15 +217,15 @@ public sealed class InternalIndexProvider : IVerificationProvider
             await foreach (var result in response.Value.GetResultsAsync().WithCancellation(ct))
             {
                 var content = result.Document.TryGetValue("content", out var c) ? c as string : null;
-                var domain  = result.Document.TryGetValue("domain",  out var d) ? d as string : null;
-                var docId   = result.Document.TryGetValue("id",      out var id) ? id as string : null;
+                var domain = result.Document.TryGetValue("domain", out var d) ? d as string : null;
+                var docId = result.Document.TryGetValue("id", out var id) ? id as string : null;
 
                 // Derive a normalised key and citation type from whatever the index returns.
                 var (citationType, normalizedKey) = InferCitationMeta(domain, content, docId);
 
                 results.Add(new Citation(
-                    RawText:       content is not null ? Truncate(content, 200)! : query,
-                    CitationType:  citationType,
+                    RawText: content is not null ? Truncate(content, 200)! : query,
+                    CitationType: citationType,
                     NormalizedKey: normalizedKey));
             }
 
@@ -249,7 +261,7 @@ public sealed class InternalIndexProvider : IVerificationProvider
             opts.Select.Add("id");
             opts.Select.Add("content");
 
-            var phrase   = $"\"{citation.NormalizedKey}\"";
+            var phrase = $"\"{citation.NormalizedKey}\"";
             var response = await _searchClient
                 .SearchAsync<SearchDocument>(phrase, opts, ct)
                 .ConfigureAwait(false);
@@ -279,13 +291,13 @@ public sealed class InternalIndexProvider : IVerificationProvider
 
     private static CitationVerificationResult Unverified(Citation citation) =>
         new(
-            Citation:             citation,
-            IsVerified:           false,
-            ConfidenceScore:      0f,
-            SourceUrl:            null,
-            VerifiedText:         null,
+            Citation: citation,
+            IsVerified: false,
+            ConfidenceScore: 0f,
+            SourceUrl: null,
+            VerifiedText: null,
             VerificationProvider: "InternalIndex",
-            LatencyMs:            0.0);
+            LatencyMs: 0.0);
 
     /// <summary>
     /// Constructs a best-effort source URL from available index fields.
@@ -313,10 +325,10 @@ public sealed class InternalIndexProvider : IVerificationProvider
         // Use domain tag as a coarse type hint when present.
         var type = domain?.ToLowerInvariant() switch
         {
-            "caselaw"    or "case-law"    => CitationType.CaseLaw,
-            "statute"    or "statutes"    => CitationType.Statute,
+            "caselaw" or "case-law" => CitationType.CaseLaw,
+            "statute" or "statutes" => CitationType.Statute,
             "regulation" or "regulations" => CitationType.Regulation,
-            _                             => CitationType.Unknown,
+            _ => CitationType.Unknown,
         };
 
         // Prefer a key derived from content (first 120 chars), fall back to doc ID.

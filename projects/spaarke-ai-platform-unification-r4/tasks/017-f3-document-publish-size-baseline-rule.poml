@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>F-3: Document publish-size baseline + per-task verification rule (NFR-01)</title>
+    <phase>Phase 1 — Documentation round</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, governance, bff-api, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Updates `.claude/constraints/` and root CLAUDE.md §10 with a binding workflow rule (NFR-01). Touches multiple governance files — every future BFF-touching task will inherit the new rule. STANDARD per Step 3.5.5 — modifies governance docs with explicit constraints, no code modification.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/constraints/ and CLAUDE.md root — main-session-only (permission boundary per CLAUDE.md §3 Sub-Agent Write Boundary)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Codify the BFF publish-size baseline + per-task verification rule in three places: (1)
+    `.claude/constraints/azure-deployment.md` (add the explicit "every BFF-touching task MUST run
+    `dotnet publish` + diff vs ~60 MB compressed baseline" rule); (2) root `CLAUDE.md` §10 (update with
+    the publish-size verification step + diff-reporting requirement); (3) `.claude/CHANGELOG.md` (new
+    entry documenting the rule addition). This task makes NFR-01 binding and operational.
+  </prompt>
+
+  <role>
+    Governance documentation author with awareness of CLAUDE.md §10's existing BFF Hygiene rule. The
+    publish-size rule is an extension of §10's existing constraints — write the additions consistent in
+    tone and bindingness with the existing rules.
+  </role>
+
+  <goal>
+    Three artifacts updated consistently: (1) `.claude/constraints/azure-deployment.md` — explicit
+    baseline (~60 MB compressed) + per-task verification rule (`dotnet publish` on every BFF-touching task,
+    diff vs baseline, report in task notes); (2) CLAUDE.md §10 — updated to reference the new rule and
+    require diff reporting; (3) `.claude/CHANGELOG.md` — new entry documenting the rule addition + the
+    project (R4) + the spec ID (NFR-01) that drove it.
+  </goal>
+
+  <context>
+    <background>
+      Per spec NFR-01 + plan §4 Phase 1 F-3: the 2026-05-19 BFF publish-size jump (65 → 75+ MB) revealed
+      that without an explicit per-task verification rule, BFF-touching tasks added packages and growth
+      went unnoticed until it accumulated. ADR-029 (BFF publish hygiene) codifies the baseline; this task
+      operationalizes it as a workflow rule that every BFF-touching task in R4 (A-4, B-4, B-5, F-1, F-2)
+      and beyond must follow.
+    </background>
+    <relevant-files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/CHANGELOG.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029">The rule operationalizes ADR-029 (BFF publish hygiene). Reference ADR-029 in the constraint addition.</constraint>
+    <constraint source="project">Rule MUST be binding (not advisory). Use "MUST" language. Mirror the tone of CLAUDE.md §10's existing BFF Hygiene rules.</constraint>
+    <constraint source="project">Per-task verification = run `dotnet publish` for the BFF on every BFF-touching task; diff compressed size against the ~60 MB baseline; report the diff in task notes / PR description.</constraint>
+    <constraint source="project">CLAUDE.md §10 update MUST be additive — do not delete or weaken existing §10 rules. The publish-size rule slots in as an additional step in the existing §10 checklist.</constraint>
+    <constraint source="project">Cross-references MUST be consistent: `azure-deployment.md` references §10 + ADR-029; §10 references `azure-deployment.md`; CHANGELOG entry references both.</constraint>
+    <constraint source="project">CHANGELOG entry MUST cite: date (today, 2026-05-26+), driver (NFR-01 from R4 spec), summary of the rule, where the rule lives (file paths).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/plan.original.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/CHANGELOG.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing constraints + §10">Read `.claude/constraints/azure-deployment.md`, `.claude/constraints/bff-extensions.md`, and root CLAUDE.md §10. Catalog existing rules so the new addition is consistent.</step>
+    <step order="2" name="Draft constraint addition">Update `.claude/constraints/azure-deployment.md` with the explicit per-task verification rule: baseline (~60 MB compressed), required command (`dotnet publish` for BFF), diff reporting, threshold for escalation.</step>
+    <step order="3" name="Update CLAUDE.md §10">Add the publish-size verification rule to CLAUDE.md §10's existing checklist (item 4 already mentions verifying publish-size impact; strengthen this with the explicit per-task verification step + diff reporting + cross-link to the constraint).</step>
+    <step order="4" name="Update CHANGELOG">Add an entry to `.claude/CHANGELOG.md` documenting the rule addition: date, driver (R4 NFR-01), summary, file paths.</step>
+    <step order="5" name="Verify cross-references">Confirm all three artifacts cross-reference consistently. Run a final read of each to verify no contradictions and no broken pointers.</step>
+    <step order="6" name="Update TASK-INDEX">Change task 017 status to ✅ completed in `tasks/TASK-INDEX.md`.</step>
+    <step order="7" name="Document deviations">If any deviation from spec NFR-01 or plan §4, write to `projects/spaarke-ai-platform-unification-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing constraints + §10</tool>
+    <tool name="Edit">Update azure-deployment.md, CLAUDE.md §10, and CHANGELOG.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/constraints/azure-deployment.md (modified — publish-size baseline + per-task rule)</output>
+    <output type="docs">CLAUDE.md (modified — §10 publish-size verification rule strengthened)</output>
+    <output type="docs">.claude/CHANGELOG.md (new entry)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.claude/constraints/azure-deployment.md` contains an explicit binding rule: every BFF-touching task MUST run `dotnet publish` and report diff vs ~60 MB compressed baseline.</criterion>
+    <criterion testable="true">CLAUDE.md §10 updated with the per-task publish-size verification step + diff reporting requirement; existing §10 rules unchanged.</criterion>
+    <criterion testable="true">`.claude/CHANGELOG.md` has a new entry citing date, NFR-01 driver, summary, and file paths.</criterion>
+    <criterion testable="true">Cross-references consistent: azure-deployment.md ↔ CLAUDE.md §10 ↔ ADR-029.</criterion>
+    <criterion testable="true">Rule uses MUST language (binding, not advisory) consistent with existing §10 tone.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    This task MUST be executed via the `task-execute` skill from `.claude/skills/task-execute/SKILL.md`.
+    STANDARD rigor — governance documentation update. Main-session-only per `.claude/` + CLAUDE.md root
+    write boundary. Quality gates SKIPPED per Step 0.5.
+  </execution>
+</task>

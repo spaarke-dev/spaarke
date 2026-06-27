@@ -1,0 +1,74 @@
+<task id="001" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>B1 — Investigate playbook-architecture + scope-model-index (resolve D-01 open questions Q1+Q2+Q3 authoritatively)</title>
+    <status>completed</status>
+    <completed>2026-06-02</completed>
+    <wave>B</wave>
+    <estimated-effort>2h</estimated-effort>
+    <tags>investigation, jps-playbook, architecture-doc, decision-record-d-01, unblock-synthesis</tags>
+    <dependencies>—</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>B1 (re-scoped 2026-06-02 per D-01 + owner direction)</wave-item>
+  </metadata>
+
+  <prompt>
+    **Re-scoped 2026-06-02 per decision record D-01 + owner direction** (which adopted path-b and added the binding constraint that JPS authoring follow `/jps-action-create` + `/jps-playbook-design` skill conventions). The empirical investigation during the previous task-execute attempt surfaced 3 open questions; this task resolves them by reading the authoritative documents that those skills load — `docs/architecture/playbook-architecture.md` + `.claude/catalogs/scope-model-index.json`. These should answer Q1 (sprk_actiontype field shape), Q2 (sprk_actiontypeid lookup target), and Q3 (canvas Designer clobber prevention) without further empirical investigation.
+  </prompt>
+
+  <role>Architectural-doc investigator + JPS conventions specialist.</role>
+
+  <goal>
+    Three open questions from D-01 §3 resolved with citations to the authoritative docs. Findings recorded in D-01 §3 ("Resolved per playbook-architecture.md") or in a follow-up D-01 update. With Q1+Q2+Q3 answered, downstream tasks 002–008 can proceed cleanly without further architectural ambiguity.
+  </goal>
+
+  <inputs>
+    <file purpose="decision-record">projects/ai-spaarke-insights-engine-r2/decisions/D-01-wave-b-root-cause-corrected.md (the questions to resolve)</file>
+    <file purpose="authoritative-arch">docs/architecture/playbook-architecture.md (loaded by jps-playbook-design Step 2)</file>
+    <file purpose="catalog">.claude/catalogs/scope-model-index.json (loaded by jps-playbook-design Step 2)</file>
+    <file purpose="jps-authoring-guide">docs/guides/JPS-AUTHORING-GUIDE.md (loaded by both jps-action-create + jps-playbook-design)</file>
+    <file purpose="jps-skill-conventions">.claude/skills/jps-action-create/SKILL.md + .claude/skills/jps-playbook-design/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="owner-direction-2026-06-02">JPS authoring MUST follow jps-action-create + jps-playbook-design conventions; no inline JPS authoring by task-execute</constraint>
+    <constraint source="D-01 §3 Q1">Determine: is sprk_actiontype (int) directly writeable, or is the value derived from sprk_actiontypeid lookup?</constraint>
+    <constraint source="D-01 §3 Q2">Determine: what is the lookup target entity for sprk_actiontypeid? What is its row schema (logical name, fields, how the ActionType integer is encoded)?</constraint>
+    <constraint source="D-01 §3 Q3">Determine: what prevents the Make Playbook Designer UI from clobbering sprk_configjson when an Insights playbook is opened post-deploy?</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>playbook-architecture, ActionType dispatch, canvas Designer behavior, JPS conventions</topic>
+    <files>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>.claude/catalogs/scope-model-index.json</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-playbook-design/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read playbook-architecture.md">Focus on: data model (sprk_analysisaction + sprk_actiontype shape), ActionType dispatch mechanism, canvas design (Designer-vs-deploy interaction)</step>
+    <step order="2" name="Read scope-model-index.json">Focus on: actions[] section (existing JPS-backed actions), models[] section (for understanding completion model selection), modelSelectionRules[]</step>
+    <step order="3" name="Read JPS-AUTHORING-GUIDE.md">Focus on: schema reference, $ref / $choices patterns, sprk_actiontype field semantics</step>
+    <step order="4" name="Read jps-action-create + jps-playbook-design skill bodies">Note their conventions (frontmatter, exemplars, workflow steps) to ensure Wave B tasks 002+ invoke them correctly</step>
+    <step order="5" name="Synthesize findings vs D-01 Q1+Q2+Q3">Record under D-01 §3 — replace each question with "Resolved per [doc citation]: [finding]"</step>
+    <step order="6" name="Validate that the re-scoped Wave B remains viable">If findings significantly contradict path-b assumptions (e.g., canvas Designer cannot be prevented from clobbering), update D-01 §4 with the corrected sequence + re-present to owner</step>
+  </steps>
+
+  <outputs>
+    <output type="decision-record">projects/ai-spaarke-insights-engine-r2/decisions/D-01-wave-b-root-cause-corrected.md (Q1+Q2+Q3 marked Resolved with citations)</output>
+    <output type="notes" ephemeral="true">projects/ai-spaarke-insights-engine-r2/notes/handoffs/wave-b1-investigation-notes.md (raw findings if useful for downstream tasks)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of D-01 Q1, Q2, Q3 marked "Resolved per [doc citation]" with a one-sentence finding</criterion>
+    <criterion testable="true">Wave B tasks 002-008 confirmed still viable (or D-01 §4 updated if not)</criterion>
+    <criterion testable="true">No further empirical investigation needed before task 002 starts</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Original task 001 framing ("Create 6 sprk_analysisaction rows in Spaarke Dev") was superseded by D-01 (filed 2026-06-02). Investigation during the original attempt revealed the failure mode is broader than the design.md framing — see D-01 §2.4 (configjson wipe) + §2.5 (full causal chain). Owner approved path-b re-scope on 2026-06-02 with binding constraint that JPS authoring goes through jps-action-create + jps-playbook-design skills. This task is the prerequisite read-only step before task 002 (which authors the 6 rows via jps-action-create).
+  </notes>
+</task>

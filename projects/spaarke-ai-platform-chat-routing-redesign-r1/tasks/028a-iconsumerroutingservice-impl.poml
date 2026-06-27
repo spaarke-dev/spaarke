@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028a" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>IConsumerRoutingService — Dataverse-backed consumer→playbook routing</title>
+    <phase>1R: sprk_playbookconsumer Routing Table</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <dependencies>028</dependencies>
+    <blocks>028b</blocks>
+    <tags>bff-api, services, ai, routing, ADR-010, ADR-014</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api` + `ai`; new service + DI + cache + change-tracking invalidation; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>1-K</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the BFF `IConsumerRoutingService` per FR-1R-02, FR-1R-03, FR-1R-04. The service queries `sprk_playbookconsumer` records via the existing `IDataverseService`, applies the resolution algorithm (consumerType + consumerCode + environment + matchConditions JSON predicate), orders by priority + specificity tiebreaks, and returns the `sprk_analysisplaybook` system PK GUID for downstream `PlaybookDispatcher` use. 5-min TTL per-tenant cache per ADR-014; cache invalidates on `sprk_playbookconsumer` change-tracking event. Schema document for `sprk_matchconditions` JSON landed at `architecture/playbookconsumer-matchconditions.schema.json`. Unit tests cover all tiebreak paths + null/empty/string/array match conditions + cache hit/invalidation.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in `Services/Ai/` boundary, ADR-010 DI minimalism, ADR-013 facade contracts, ADR-014 caching.</role>
+
+  <goal>
+    `IConsumerRoutingService.ResolveAsync(consumerType, consumerCode?, IRoutingContext?, ct)` returns the matching `sprk_analysisplaybookid` system PK GUID. Resolution algorithm matches FR-1R-03 exactly (priority asc, then consumerCode-specific over `default`, then env-specific over `*`). Match-conditions JSON parsed and applied per FR-1R-04 schema. 5-min TTL per-tenant cache hits >70% in steady state; change-tracking subscriber invalidates affected cache entries within 30s. DI registered Scoped via `AiModule.cs`. All ADR-015 tier-1 logging invariants preserved (no message/file content; consumerType/Code/env/cacheHit/durationMs only).
+  </goal>
+
+  <context>
+    <background>
+      Per spec §"Phase 1R" FR-1R-02/03/04. The §1.7 Stable-ID migration shipped consumers that resolve playbooks BY ID; this task replaces env-var-based ID lookup (`Workspace__*PlaybookId`) with a Dataverse-backed routing table. Downstream tasks 028c (Pattern A — 4 consumers) and 028d (Pattern B — 2 consumers) inject this service. Cache + change-tracking integration follows the existing R6 change-tracking subscriber pattern (grep `ChangeTrackingSubscriber` to find existing example). ADR-013 facade boundary: service lives in `Services/Ai/Routing/`; expose via `Services/Ai/PublicContracts/` only if CRUD code needs to consume it (check call-site list first; current 6 consumers are CRUD-adjacent — verify whether facade re-export is required).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AiModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Dataverse/IDataverseService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>Today, all 6 BFF consumers (`MatterPreFillService`, `ProjectPreFillService`, `WorkspaceAiService`, `WorkspaceFileEndpoints`, `SessionSummarizeOrchestrator`, `AppOnlyAnalysisService`) resolve their target playbook by reading a `WorkspaceOptions.*PlaybookId` typed-option that maps to a `Workspace__*PlaybookId` environment variable on the App Service. Grep `Workspace__.*PlaybookId` in `src/server/api/Sprk.Bff.Api/Services/` returns 6 hits across the 6 consumer files. There is no existing component that performs Dataverse-backed consumer→playbook routing.</existing>
+    <extension>No — the env-var pattern cannot be extended to support: (1) admin-editable routing without redeploys, (2) sub-discriminator codes (`summarize-file/patent` vs `summarize-file/nda`), (3) compositional match conditions (JSON predicate against per-request context), (4) per-environment overrides, (5) auditability via Dataverse audit trail. Each of these is a binding FR-1R-02..04 requirement that env vars cannot satisfy without re-implementing a routing engine outside `IOptions`.</extension>
+    <cost-of-doing-nothing>The 2026-06-24 UAT-2 failure (Matter pre-fill silently broken because `Workspace__MatterPreFillPlaybookId` was set under the legacy `Workspace__PreFillPlaybookId` key on bff-dev) is the concrete failure mode that recurs every time the BFF app-settings drift from the consumer code's typed-options key. Without `IConsumerRoutingService`, every consumer migration in Phase 1 (already shipped) is one renamed env-var key away from a silent prod outage. Concrete behaviors that fail without this: (a) FR-1R-05 6-consumer migration cannot proceed (no service to inject), (b) FR-1R-06 env-var deprecation telemetry has nothing to fall back to, (c) FR-1R-08 grep-zero-`Workspace__*PlaybookId` exit gate is unachievable.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — no `IServiceProvider.GetService&lt;T&gt;()` in endpoint signatures; concrete-class registration via AiModule.cs.</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/Routing/` boundary; expose via `Services/Ai/PublicContracts/` only if CRUD code needs to consume it.</constraint>
+    <constraint source="ADR-014">5-min TTL per-tenant cache; cache invalidation on change-tracking event.</constraint>
+    <constraint source="ADR-015">No user message content, no file content in routing logs; log tier-1 fields only (consumerType, consumerCode, env, cacheHit, durationMs).</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs current baseline (~45.65 MB).</constraint>
+    <constraint source="spec FR-1R-02">Returns `sprk_analysisplaybook` system PK GUID (the `_sprk_playbookid_value` lookup target), NOT the legacy `sprk_playbookid` custom field.</constraint>
+    <constraint source="spec FR-1R-03">Resolution algorithm: WHERE enabled=true AND consumerType=@type AND consumerCode IN (@code, 'default') AND environment IN (@env, '*'); apply matchconditions; order by priority asc, then consumerCode-specific over 'default', then environment-specific over '*'.</constraint>
+    <constraint source="spec FR-1R-04">Match-conditions JSON schema: flat key-value map; ALL keys must match; string = equality, array = in-list (OR); null/{} = always match.</constraint>
+    <constraint source="project">Test update obligation (CLAUDE.md §10) — unit tests for every tiebreak + every match-condition case + cache hit/invalidation; PRs modifying `Services/Ai/` MUST add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `IDataverseService` (`src/server/api/Sprk.Bff.Api/Services/Dataverse/IDataverseService.cs`) to confirm the query API shape — choose between LINQ-style, FetchXML, or OData query path that best supports the WHERE clause in FR-1R-03. Document the pattern for the impl.</step>
+    <step order="2">Grep `ChangeTrackingSubscriber` (and adjacent terms like `ChangeTracking`, `Subscriber`, `OnChangeNotification`) under `src/server/api/Sprk.Bff.Api/` to find the existing R6 change-tracking subscriber example. Read the chosen example top-to-bottom; record the registration + invalidation pattern.</step>
+    <step order="3">Design `IRoutingContext` as a record type with extensible match keys; initial keys: `string? MimeType`, `string? DocumentType`. Add the record under `Services/Ai/Routing/`.</step>
+    <step order="4">Design `IConsumerRoutingService` interface in `Services/Ai/Routing/IConsumerRoutingService.cs` — single method `Task&lt;Guid?&gt; ResolveAsync(string consumerType, string? consumerCode = "default", IRoutingContext? context = null, CancellationToken ct = default)`. Comment-document return value (`sprk_analysisplaybook` system PK, NOT `sprk_playbookid` custom field).</step>
+    <step order="5">Implement `ConsumerRoutingService` in `Services/Ai/Routing/ConsumerRoutingService.cs`. Query `sprk_playbookconsumer` records via `IDataverseService`. Resolution algorithm per FR-1R-03 (filter → predicate → order → first). Match-conditions JSON parser per FR-1R-04 (flat map; ALL keys; string equality or array OR; null/empty = always-match). Return `_sprk_playbookid_value` of first match.</step>
+    <step order="6">Add 5-min TTL per-tenant cache (ADR-014). Cache key format: `consumer-routing:{tenantId}:{consumerType}:{consumerCode ?? "default"}:{env}:{matchKeyHash}` where `matchKeyHash` is a stable hash of the `IRoutingContext` non-null fields. Use the existing AI-caching infrastructure (grep `IMemoryCache` / `IDistributedCache` registrations in `AiModule.cs` to match existing pattern).</step>
+    <step order="7">Wire change-tracking subscriber for `sprk_playbookconsumer` change events; on change event, invalidate cache entries for the affected tenant (broad invalidation acceptable — small key space). Verify invalidation completes within 30s of Dataverse update per FR-1R-02 acceptance.</step>
+    <step order="8">Author JSON schema document at `projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/playbookconsumer-matchconditions.schema.json` per FR-1R-04 (Draft 2020-12; flat key-value object; initial match keys: `mimeType`, `documentType`; value type = string or array of strings).</step>
+    <step order="9">Register in `AiModule.cs` as Scoped per ADR-010 (concrete-class registration; no service-locator). Check `Services/Ai/PublicContracts/` — if downstream consumers (verify call-site list with grep — Pattern A consumers `MatterPreFillService`, `ProjectPreFillService`, `WorkspaceAiService`, `WorkspaceFileEndpoints` and Pattern B `SessionSummarizeOrchestrator`, `AppOnlyAnalysisService`) are CRUD-side, add a public-contract re-export per ADR-013; otherwise inject `IConsumerRoutingService` directly.</step>
+    <step order="10">Write unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Routing/ConsumerRoutingServiceTests.cs` — every tiebreak path (consumerCode-specific vs `default`; environment-specific vs `*`; priority ordering when ties remain); null/empty/string/array match conditions; multi-key match-conditions (ALL must match); cache hit on second call within TTL; cache invalidation on change-tracking event.</step>
+    <step order="11">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. All tests must pass.</step>
+    <step order="12">Measure BFF publish size via `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report delta vs current baseline (~45.65 MB) in `notes/handoffs/028a-bff-publish-delta.md`. Hard-stop if cumulative ≥60 MB.</step>
+    <step order="13">code-review + adr-check (Step 9.5 quality gates).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">IDataverseService.cs, AiModule.cs, existing ChangeTrackingSubscriber example</tool>
+    <tool name="Grep">ChangeTrackingSubscriber + IMemoryCache / IDistributedCache call-site enumeration</tool>
+    <tool name="Write">IConsumerRoutingService.cs, ConsumerRoutingService.cs, IRoutingContext.cs, ConsumerRoutingServiceTests.cs, playbookconsumer-matchconditions.schema.json</tool>
+    <tool name="Edit">AiModule.cs DI registration; optional `Services/Ai/PublicContracts/` re-export</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Routing/IConsumerRoutingService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Routing/IRoutingContext.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Routing/ConsumerRoutingService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AiModule.cs (DI registration)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (re-export if needed per ADR-013 check)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Routing/ConsumerRoutingServiceTests.cs</output>
+    <output type="docs">projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/playbookconsumer-matchconditions.schema.json</output>
+    <output type="docs">notes/handoffs/028a-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IConsumerRoutingService.ResolveAsync` returns matching `sprk_analysisplaybook` system PK GUID per FR-1R-02.</criterion>
+    <criterion testable="true">Resolution algorithm matches FR-1R-03 — unit test covers each tiebreak path (consumerCode-specific over `default`; env-specific over `*`; priority asc).</criterion>
+    <criterion testable="true">Match-conditions JSON parsed per FR-1R-04 — unit tests cover null, empty `{}`, string equality, array in-list, multi-key ALL-match.</criterion>
+    <criterion testable="true">5-min TTL per-tenant cache implemented; cache key includes tenantId + consumerType + consumerCode + env + matchKeyHash; unit test confirms cache hit on second call within TTL.</criterion>
+    <criterion testable="true">Change-tracking subscriber registered for `sprk_playbookconsumer`; cache invalidates within 30s of Dataverse update (unit test confirms invalidation; manual smoke verifies 30s budget post-deploy).</criterion>
+    <criterion testable="true">DI registration in `AiModule.cs` is Scoped per ADR-010; no `IServiceProvider.GetService&lt;T&gt;()` in endpoint signatures.</criterion>
+    <criterion testable="true">JSON schema at `architecture/playbookconsumer-matchconditions.schema.json` (Draft 2020-12) matches FR-1R-04.</criterion>
+    <criterion testable="true">ADR-015 tier-1 logging preserved — no message/file content in routing logs; consumerType/Code/env/cacheHit/durationMs only.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative within NFR-01 (≤60 MB ceiling).</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 1-K terminal sequential task — blocks 028b seed script + 028c/028d consumer migrations. Verify call-site list with grep before deciding whether `Services/Ai/PublicContracts/` re-export is needed; the consumers are CRUD-adjacent but the routing call is the cleanest point of injection. Use record-type for `IRoutingContext` to keep extension lean — Phase 4 may add `documentType` from classification metadata; design today for tomorrow's additions without breaking the contract.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

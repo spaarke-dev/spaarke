@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Add NodeDestination.Both enum value at NodeRoutingConfig.cs:31-64 + JSON converter</title>
+    <phase>3: WP3 Destination Metadata Wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>027</dependencies>
+    <blocks>046,047,048,049</blocks>
+    <tags>bff-api, models, ADR-013, ADR-029</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; modifies `.cs` model file + JSON converter; touches dispatch contract — FULL per Step 0.5</rigor-reason>
+    <parallel-group>3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add the missing `NodeDestination.Both` enum value to `NodeRoutingConfig.cs:31-64` and extend the JSON converter at `NodeRoutingConfig.cs:247-272` to handle the new value (serialize as `"both"`, deserialize `"both"` → `NodeDestination.Both`). Existing 4 destination values (`Chat`, `Workspace`, `FormPrefill`, `SideEffect`) must remain bit-for-bit unchanged. Implements spec FR-14a.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in C# enums + `System.Text.Json` converters + dispatch-contract evolution.</role>
+
+  <goal>
+    `NodeDestination.Both` exists. JSON converter roundtrips `"both"` correctly. Existing 4 values unaffected (unit test verifies). `dotnet build` of `Sprk.Bff.Api` passes. Spec FR-14a acceptance: deserialize-then-serialize roundtrip preserves enum.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-14a + design §1.3 (WP3). The Q5 re-shape design promised `chat / workspace / both / side-effect`; code today has Chat/Workspace/FormPrefill/SideEffect. This adds the missing `Both` (used by playbooks that emit BOTH a Workspace tab AND a chat acknowledgment — task 049 wires the handler).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/NodeRoutingConfig.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Models/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Model lives in `Models/Ai/`; consumed via `Services/Ai/PublicContracts/` facade by CRUD callers.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="spec">FR-14a: existing 4 destination values unaffected. Roundtrip preserves "both".</constraint>
+    <constraint source="spec">FR-14f: `NodeRoutingConfig.Parse(null)` MUST still return `{Destination = Chat}` (backward compat structural).</constraint>
+    <constraint source="project">CLAUDE.md §10 test obligation — add unit tests for enum + converter roundtrip.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `NodeRoutingConfig.cs:31-64` to capture current enum definition.</step>
+    <step order="2">Read `NodeRoutingConfig.cs:247-272` to capture current JSON converter.</step>
+    <step order="3">Add `Both` enum value (alphabetical order if existing values are alphabetized; otherwise after `SideEffect`).</step>
+    <step order="4">Extend converter Read method: case-insensitive match on `"both"` → `NodeDestination.Both`.</step>
+    <step order="5">Extend converter Write method: `NodeDestination.Both` → `"both"`.</step>
+    <step order="6">Add unit tests:
+      (a) roundtrip "both" preserves enum;
+      (b) roundtrip "chat", "workspace", "form-prefill", "side-effect" preserve (regression);
+      (c) `NodeRoutingConfig.Parse(null)` returns Chat default (FR-14f);
+      (d) unknown enum value falls back gracefully (per current behavior).</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`.</step>
+    <step order="8">Measure publish-size delta vs Phase 2 baseline.</step>
+    <step order="9">Quality gates at Step 9.5 (FULL rigor).</step>
+    <step order="10">Update TASK-INDEX.md: task 045 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">NodeRoutingConfig.cs</tool>
+    <tool name="Edit">Apply enum + converter changes + tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/NodeRoutingConfig.cs — extended enum + converter</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Models/Ai/NodeRoutingConfigEnumTests.cs</output>
+    <output type="docs">notes/handoffs/045-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`NodeDestination.Both` enum value exists.</criterion>
+    <criterion testable="true">JSON converter roundtrips `"both"` ↔ `NodeDestination.Both`.</criterion>
+    <criterion testable="true">Existing 4 destination value roundtrips unchanged (regression).</criterion>
+    <criterion testable="true">`NodeRoutingConfig.Parse(null)` returns `Chat` default (FR-14f).</criterion>
+    <criterion testable="true">`dotnet build` + `dotnet test` exit 0.</criterion>
+    <criterion testable="true">BFF publish delta within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 3-A is parallel-safe — three separate files (045 NodeRoutingConfig.cs, 046 DispatchResult.cs, 047 PlaybookDispatcher.cs). Phase 3 may begin during Phase 2 since 3-A's prereq is 1-J (not 2-E).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

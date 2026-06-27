@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="088" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>PromoteToMatterMemoryHandler (T2 → T3) — queue for pending-approval (no auto-write)</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4d)</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>091</blocks>
+    <tags>bff-api, services, handlers, tool-handler, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; creates new `.cs` handler file; T2 → T3 boundary; ADR-013/ADR-015/ADR-033 binding</rigor-reason>
+    <parallel-group>4-H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `PromoteToMatterMemoryHandler` (NEW) at `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/PromoteToMatterMemoryHandler.cs` implementing the T2 → T3 `promote_to_matter_memory({fact, source, approvalRequired})` tool per architecture §6.4 + §8.1. CRITICAL: this handler does NOT auto-write to T3 — it QUEUES a pending-approval record (Cosmos `memory` container, doc-type `matter-memory-promotion`) via `MatterMemoryPromotionService` (task 093) and returns `{ factId, status: "pending_approval" | "written" | "rejected" }`. When `approvalRequired: true` the status is always `pending_approval` and the actual T3 write happens later via the `/api/memory/promotions/{id}/approve` endpoint (task 094). Implements FR-30 + FR-32 (promotion workflow surface).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat tool-handler authoring + T2 → T3 promotion boundaries.</role>
+
+  <goal>
+    `PromoteToMatterMemoryHandler` lives at `Services/Ai/Handlers/PromoteToMatterMemoryHandler.cs` implementing `IToolHandler`. Delegates to `IMatterMemoryPromotionService.QueueForApprovalAsync` (task 093) — does NOT call `MatterMemoryService.AppendFactAsync` directly. Validates: matter context present (else `{ status: "rejected", reason: "no_matter_context" }`); `fact ≤500 chars`; `source` non-empty. Returns `{ factId, status }` per §8.1. Single `ToolResult`. Tier-1-safe telemetry (no fact text). Unit tests cover pending_approval happy path, no_matter_context rejection, validation failures.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §3.2 rule 2 (T2 → T3 promotion is EXPLICIT) + §6.4 (promote-to-matter flow diagram) + §8.1 (promote_to_matter_memory schema). The handler is a thin queueing surface — the actual T3 durable write happens only after user accept at the approval endpoint (task 094). This is a load-bearing privacy invariant per architecture §2 P6 (privacy by default — T2 never auto-promotes to T3).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ManagePinnedContextHandler.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">No new endpoint here (task 094 + 095 add endpoints).</constraint>
+    <constraint source="ADR-010">Auto-discovered; the `IMatterMemoryPromotionService` dependency is registered by task 091.</constraint>
+    <constraint source="ADR-013">Injects `IMatterMemoryPromotionService` directly (BFF-internal memory plumbing).</constraint>
+    <constraint source="ADR-015">Telemetry payload: handlerName + sessionId + matterId (boolean present/absent) + status discriminator (`pending_approval` | `rejected`) + promotionId (deterministic GUID) + durationMs ONLY. NEVER fact text, source text.</constraint>
+    <constraint source="ADR-029">≤+0.1 MB publish-size delta.</constraint>
+    <constraint source="ADR-033">SINGLE `ToolResult` return.</constraint>
+    <constraint source="architecture">§3.2 rule 2 — T2 → T3 promotion MUST be explicit; no silent auto-promotion. This handler MUST NOT call `MatterMemoryService.AppendFactAsync` directly.</constraint>
+    <constraint source="architecture">§6.4 — flow goes through `MatterMemoryPromotionService.QueueForApprovalAsync` which writes the pending record to Cosmos `memory` with doc-type `matter-memory-promotion` and emits `memory.promotion_pending` (task 096).</constraint>
+    <constraint source="architecture">§2 P6 — privacy by default; cross-tier write is user-mediated.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §3.2 rule 2, §6.4 (flow), §8.1 (schema), §2 P6 (privacy invariant).</step>
+    <step order="2">Confirm `IMatterMemoryPromotionService` exists (task 093 provides the contract — at task 088 author time it may not yet exist; if not, author a minimal interface stub at `Services/Ai/Memory/IMatterMemoryPromotionService.cs` with the `QueueForApprovalAsync(tenantId, matterId, sessionId, fact, source, confidence, ct)` signature so the handler compiles; task 093 will then provide the concrete implementation).</step>
+    <step order="3">Author `Services/Ai/Handlers/PromoteToMatterMemoryHandler.cs` implementing `IToolHandler`. Parameters per §8.1: `fact` (required), `source` (required), `approvalRequired` (optional default true).</step>
+    <step order="4">Implement `ExecuteAsync`: validate matter context present (else return `{ status: "rejected", reason: "no_matter_context" }`); validate `fact ≤500 chars` + `source` non-empty (else `{ status: "rejected", reason: "validation_failed" }`); call `IMatterMemoryPromotionService.QueueForApprovalAsync(tenantId, matterId, sessionId, fact, source, confidence, ct)`; return `{ factId: <promotionId>, status: "pending_approval" }`.</step>
+    <step order="5">CRITICAL: do NOT call `IMatterMemoryService.AppendFactAsync` directly. Verify via grep before commit.</step>
+    <step order="6">Add Dataverse seed-row JSON at `infra/dataverse/sprk_analysistool-promote-to-matter-memory-row.json`.</step>
+    <step order="7">Author unit tests: happy path (pending_approval), no_matter_context rejection, fact >500 chars rejection, empty source rejection, ADR-015 telemetry safety. Mock `IMatterMemoryPromotionService`.</step>
+    <step order="8">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="9">Measure BFF publish-size delta; write `notes/handoffs/088-bff-publish-delta.md`.</step>
+    <step order="10">Run code-review + adr-check (Step 9.5).</step>
+    <step order="11">Update TASK-INDEX.md: 088 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">MatterMemoryService + exemplar handler + architecture</tool>
+    <tool name="Write">Handler + (possibly) interface stub + tests + seed-row JSON</tool>
+    <tool name="Grep">Verify no AppendFactAsync call in this handler</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/PromoteToMatterMemoryHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IMatterMemoryPromotionService.cs (interface stub if not yet present)</output>
+    <output type="code">infra/dataverse/sprk_analysistool-promote-to-matter-memory-row.json</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/PromoteToMatterMemoryHandlerTests.cs</output>
+    <output type="docs">notes/handoffs/088-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler exists at the specified path and implements `IToolHandler`.</criterion>
+    <criterion testable="true">Single `ToolResult` return.</criterion>
+    <criterion testable="true">`grep "AppendFactAsync" src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/PromoteToMatterMemoryHandler.cs` returns ZERO matches (architecture §3.2 enforcement).</criterion>
+    <criterion testable="true">`approvalRequired: true` (default) → status is `pending_approval`; no T3 write occurs.</criterion>
+    <criterion testable="true">no_matter_context returns `{ status: "rejected", reason: "no_matter_context" }`.</criterion>
+    <criterion testable="true">Validation failures return structured rejection (NOT exception).</criterion>
+    <criterion testable="true">Telemetry payload contains no fact/source text.</criterion>
+    <criterion testable="true">BFF publish delta ≤+0.1 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Load-bearing privacy invariant: T2 → T3 promotion is user-mediated. The handler is the QUEUE side; task 094 (approve endpoint) is the WRITE side. Coordinate with task 093 author to confirm the interface signature.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

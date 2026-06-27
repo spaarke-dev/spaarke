@@ -102,8 +102,11 @@ public sealed class NotificationService
                 entity["data"] = JsonSerializer.Serialize(actionData, JsonOptions);
             }
 
-            // TTL in seconds (default: 7 days)
-            entity["ttlindays"] = 7;
+            // TTL in seconds (default: 7 days = 7 * 86400 = 604800).
+            // Canonical writable field per Microsoft Learn `appnotification` table reference;
+            // matches CreateNotificationNodeExecutor.cs (R3 task 010 — `ttlindays` was non-existent,
+            // causing silent fallback to tenant-default 14d TTL).
+            entity["ttlinseconds"] = 604800;
 
             var notificationId = await _entityService.CreateAsync(entity, cancellationToken);
 
@@ -137,11 +140,11 @@ public sealed class NotificationService
         return category.ToLowerInvariant() switch
         {
             "documents" or "upload" => 100000001,   // Success
-            "analysis" or "ai"     => 100000000,    // Info
+            "analysis" or "ai" => 100000000,    // Info
             "email" or "communication" => 100000004, // Mention
             "tasks" or "assignment" => 100000003,    // Warning (attention needed)
-            "error" or "failure"   => 100000002,     // Failure
-            _                      => 100000000      // Info (default)
+            "error" or "failure" => 100000002,     // Failure
+            _ => 100000000      // Info (default)
         };
     }
 

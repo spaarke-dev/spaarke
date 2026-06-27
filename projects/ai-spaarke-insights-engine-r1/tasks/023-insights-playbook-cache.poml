@@ -1,0 +1,72 @@
+<task id="023" project="ai-spaarke-insights-engine-r1">
+  <metadata>
+    <title>D-P13 — Insights playbook execution cache (Redis wrap of PlaybookExecutionEngine)</title>
+    <status>not-started</status>
+    <wave>3</wave>
+    <estimated-effort>6 hours</estimated-effort>
+    <tags>bff-api, redis, caching, playbook, zone-a, dotnet, adr-009</tags>
+    <dependencies></dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <d-p>D-P13</d-p>
+  </metadata>
+
+  <prompt>
+    Implement Redis-backed cache wrapping `PlaybookExecutionEngine` invocations for Insights-mode playbooks only. Cache key: `(playbookId, subject, parameters, accessibleScopeHash)`. Per-playbook TTL (from playbook metadata). ADR-009 compliance (Redis-first caching). Side-quest opportunity per Q5: extract generic `IDistributedCacheExtensions.GetOrCreateAsync&lt;T&gt;` helper (task 024).
+  </prompt>
+
+  <role>Senior .NET developer with Redis/IDistributedCache experience, ADR-009 compliance familiarity, and playbook execution context.</role>
+
+  <goal>
+    `InsightsPlaybookExecutionCache` wraps `IInsightsAi.AnswerQuestionAsync` so identical `(playbookId, subject, parameters, accessibleScopeHash)` calls within TTL return cached `InsightArtifact` without re-invoking `PlaybookExecutionEngine`. Cache hit/miss telemetry to App Insights. Eviction on access-scope change verified.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-r1/SPEC.md (§3.1 D-P13)</file>
+    <file purpose="existing-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs (Redis-backed bespoke cache; key + TTL + serialization patterns)</file>
+    <file purpose="existing-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (JSON serialization + write-through)</file>
+    <file purpose="claude">projects/ai-spaarke-insights-engine-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-009">Redis-first caching pattern; use IDistributedCache abstraction</constraint>
+    <constraint source="§3.5">Zone A placement under Services/Ai/Insights/</constraint>
+    <constraint source="DEP-3">Cache key includes accessibleScopeHash so within-tenant access changes invalidate</constraint>
+    <constraint source="D-P13">Per-playbook TTL from Insights-mode playbook metadata (default 5 min)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>redis-caching, playbook-execution, distributed-cache</topic>
+    <files>
+      <file>docs/adr/ADR-009-redis-first-caching.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read existing Redis patterns">EmbeddingCache + ChatSessionManager — note no generic GetOrCreateAsync helper exists (per Q5 audit)</step>
+    <step order="2" name="Author cache key composer">Stable hash of (playbookId, subject, parametersJson, accessibleScopeHash) → string key with "insights:playbook:" prefix</step>
+    <step order="3" name="Author InsightsPlaybookExecutionCache">Wraps PlaybookExecutionEngine.ExecuteBatchAsync (which returns IAsyncEnumerable); collects stream, finds ReturnInsightArtifactNode output, serializes to JSON, caches with TTL from playbook metadata</step>
+    <step order="4" name="Telemetry">App Insights custom events: insights_cache_hit, insights_cache_miss, insights_cache_eviction with tags (playbookId, tenantId, ttlSeconds)</step>
+    <step order="5" name="Integration with IInsightsAi.AnswerQuestionAsync">Cache wraps the call; cache hit returns immediately; cache miss invokes engine then caches</step>
+    <step order="6" name="Unit tests">Cache hit returns cached; cache miss invokes engine; access-scope change evicts; different playbookId is separate cache entry</step>
+    <step order="7" name="Quality gates">code-review + adr-check</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsPlaybookExecutionCache.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/InsightsPlaybookCacheKey.cs</output>
+    <output type="test">tests/unit/Services/Ai/Insights/InsightsPlaybookExecutionCacheTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Identical (playbookId, subject, parameters, accessibleScopeHash) → cache hit (PlaybookExecutionEngine not invoked second time)</criterion>
+    <criterion testable="true">Different accessibleScopeHash → cache miss (engine invoked)</criterion>
+    <criterion testable="true">TTL respected (default 5 min; configurable per playbook metadata)</criterion>
+    <criterion testable="true">App Insights custom events emit for hit / miss / eviction</criterion>
+    <criterion testable="true">ADR-009 compliance: uses IDistributedCache abstraction (not direct Redis client)</criterion>
+  </acceptance-criteria>
+</task>

@@ -25,6 +25,8 @@ export type PlaybookNodeType =
   | 'createTask'
   | 'sendEmail'
   | 'createNotification'
+  | 'lookupUserMembership'
+  | 'entityNameValidator'
   | 'wait';
 
 /**
@@ -53,6 +55,8 @@ export interface PlaybookNodeData {
   isConfigured?: boolean;
   /** Validation error messages (empty = valid) */
   validationErrors?: string[];
+  /** Validation warning messages — advisory only, do NOT block save (R3 task 093 / FR-3H2.3). */
+  warnings?: string[];
   /** Arbitrary config bag for node-specific settings */
   config?: Record<string, unknown>;
   /** Timeout in seconds (for wait nodes, AI nodes) */

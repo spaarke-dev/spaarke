@@ -1,12 +1,16 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Telemetry;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -63,6 +67,19 @@ public static class ChatDocumentEndpoints
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
+
+    // ITenantCache resources (FR-05 redis remediation r1). Final on-wire keys:
+    //   spaarke:tenant:{tenantId}:doc-upload-text:{sessionId}:{documentId}:v1
+    //   spaarke:tenant:{tenantId}:doc-upload-binary:{sessionId}:{documentId}:v1
+    //   spaarke:tenant:{tenantId}:doc-upload-meta:{sessionId}:{documentId}:v1
+    //   spaarke:tenant:{tenantId}:doc-upload-persist:{sessionId}:{documentId}:v1
+    private const string DocTextResource = "doc-upload-text";
+    private const string DocBinaryResource = "doc-upload-binary";
+    private const string DocMetaResource = "doc-upload-meta";
+    private const string DocPersistResource = "doc-upload-persist";
+    private const int CacheVersion = 1;
+
+    private static string DocCacheId(string sessionId, string documentId) => $"{sessionId}:{documentId}";
 
     /// <summary>
     /// Registers chat document upload endpoints on the provided route builder.
@@ -135,14 +152,27 @@ public static class ChatDocumentEndpoints
         string sessionId,
         HttpContext httpContext,
         ITextExtractor textExtractor,
-        IDistributedCache cache,
+        ITenantCache cache,
         ChatSessionManager sessionManager,
+        IContextEventEmitter contextEventEmitter,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
 
-        // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys)
+        // chat-routing-redesign-r1 task 074 — total-pipeline stopwatch for context.upload_completed.
+        // Started AFTER validation passes (after tenantId + session checks) so durationMs reflects
+        // actual pipeline work, not request entry. ADR-015 binding: numeric metric only.
+        var pipelineStopwatch = Stopwatch.StartNew();
+        var sessionGuidForEmit = Guid.TryParse(sessionId, out var parsedSessionGuid) ? parsedSessionGuid : (Guid?)null;
+
+        // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys).
+        // Microsoft.Identity.Web's JwtBearer middleware may rename `tid` to the schema URL
+        // form depending on Microsoft.IdentityModel.Tokens.DefaultInboundClaimTypeMap state.
+        // Check both forms to match the pattern used by ChatEndpoints.cs and
+        // SummarizeSessionEndpoint.cs (R5). Fallback to X-Tenant-Id header for
+        // server-to-server scenarios that bypass JWT.
         var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
             ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
 
         if (string.IsNullOrEmpty(tenantId))
@@ -161,6 +191,28 @@ public static class ChatDocumentEndpoints
                 statusCode: 404,
                 title: "Not Found",
                 detail: $"Chat session '{sessionId}' not found or has expired");
+        }
+
+        // 2a. R5 task 032 — defense-in-depth NFR-02 per-session cap (20 files).
+        // Frontend enforces too (chat composer + slash command); this mirrors
+        // SummarizeSessionEndpoint's pattern (ADR-019: stable errorCode `summarize.too-many-files`).
+        // Reject BEFORE reading the multipart form, extracting text, or writing any Redis state
+        // so the session manifest is NOT mutated when the 21st upload arrives.
+        var existingFileCount = session.UploadedFiles?.Count ?? 0;
+        if (existingFileCount >= ChatSession.MaxUploadedFiles)
+        {
+            logger.LogWarning(
+                "Document upload rejected: session {SessionId} already has {ExistingFileCount} files (cap={MaxFiles}) — NFR-02 defense-in-depth",
+                sessionId, existingFileCount, ChatSession.MaxUploadedFiles);
+
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: $"This chat session already has {existingFileCount} uploaded files. The per-session cap is {ChatSession.MaxUploadedFiles}.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "summarize.too-many-files"
+                });
         }
 
         // 3. Read multipart form data
@@ -224,6 +276,25 @@ public static class ChatDocumentEndpoints
             "Size={SizeBytes} bytes, Extension={Extension}, SessionId={SessionId}",
             documentId, filename, file.Length, extension, sessionId);
 
+        // chat-routing-redesign-r1 task 074 — emit context.upload_started.
+        // ADR-015 Tier 1 SAFE: deterministic IDs + contentType + numeric size only.
+        // Resolve contentType from extension (mirrors the switch later in step 10a) so the
+        // started-event carries the same MIME enum string as downstream events.
+        var startedContentType = extension switch
+        {
+            ".pdf" => "application/pdf",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".txt" => "text/plain",
+            ".md" => "text/markdown",
+            _ => file.ContentType ?? "application/octet-stream"
+        };
+        contextEventEmitter.UploadStarted(
+            sessionId: sessionGuidForEmit,
+            fileId: documentId,
+            contentType: startedContentType,
+            fileSizeBytes: file.Length,
+            tenantId: tenantId);
+
         // 8. Read original binary into memory for both extraction and optional SPE persistence (R2-014)
         byte[] originalBinary;
         using (var memoryStream = new MemoryStream())
@@ -245,6 +316,14 @@ public static class ChatDocumentEndpoints
             using var extractionStream = new MemoryStream(originalBinary);
             extractionResult = await textExtractor.ExtractAsync(
                 extractionStream, filename, linkedCts.Token);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 L4): NullTextExtractor surfaced.
+            logger.LogDebug(
+                "Document upload text extraction called while AI feature disabled. ErrorCode={ErrorCode}, DocumentId={DocumentId}",
+                ex.ErrorCode, documentId);
+            return ex.AsFeatureDisabled503();
         }
         catch (OperationCanceledException) when (!httpContext.RequestAborted.IsCancellationRequested)
         {
@@ -284,35 +363,28 @@ public static class ChatDocumentEndpoints
                     ?? "No text could be extracted from the uploaded document");
         }
 
-        // 9. Store extracted text in Redis with session-scoped TTL (ADR-009, NFR-06)
-        // Key pattern: doc-upload:{sessionId}:{documentId}
+        // 9. Store extracted text in Redis with session-scoped TTL (ADR-009, NFR-06 + FR-05)
         // ADR-015: Do NOT log extracted text content — only metadata
-        var cacheKey = $"doc-upload:{sessionId}:{documentId}";
+        var docCacheId = DocCacheId(sessionId, documentId);
         var tokenEstimate = extractionResult.EstimatedTokenCount;
         var wasTruncated = tokenEstimate > DocumentContextService.MaxTokenBudget;
 
         try
         {
-            var textBytes = Encoding.UTF8.GetBytes(extractionResult.Text);
             await cache.SetAsync(
-                cacheKey,
-                textBytes,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = UploadDocumentTtl
-                },
-                httpContext.RequestAborted);
+                tenantId, DocTextResource, docCacheId, CacheVersion,
+                extractionResult.Text, UploadDocumentTtl, ct: httpContext.RequestAborted);
 
             logger.LogInformation(
-                "Stored uploaded document in Redis: Key={CacheKey}, TokenEstimate={TokenEstimate}, " +
+                "Stored uploaded document in Redis: CacheId={CacheId}, TokenEstimate={TokenEstimate}, " +
                 "CharCount={CharCount}, TTL={TtlHours}h",
-                cacheKey, tokenEstimate, extractionResult.Text.Length, UploadDocumentTtl.TotalHours);
+                docCacheId, tokenEstimate, extractionResult.Text.Length, UploadDocumentTtl.TotalHours);
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
-                "Failed to store uploaded document in Redis: Key={CacheKey}, DocumentId={DocumentId}",
-                cacheKey, documentId);
+                "Failed to store uploaded document in Redis: CacheId={CacheId}, DocumentId={DocumentId}",
+                docCacheId, documentId);
 
             return Results.Problem(
                 statusCode: 500,
@@ -321,53 +393,179 @@ public static class ChatDocumentEndpoints
         }
 
         // 9b. Store original binary in Redis for optional SPE persistence (R2-014)
-        // Key pattern: doc-binary:{sessionId}:{documentId}
         // ADR-015: Do NOT log binary content — only metadata
-        var binaryCacheKey = $"doc-binary:{sessionId}:{documentId}";
         try
         {
             await cache.SetAsync(
-                binaryCacheKey,
-                originalBinary,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = UploadDocumentTtl
-                },
-                httpContext.RequestAborted);
+                tenantId, DocBinaryResource, docCacheId, CacheVersion,
+                originalBinary, UploadDocumentTtl, ct: httpContext.RequestAborted);
 
             logger.LogInformation(
-                "Stored original binary in Redis: Key={BinaryCacheKey}, SizeBytes={SizeBytes}, TTL={TtlHours}h",
-                binaryCacheKey, originalBinary.Length, UploadDocumentTtl.TotalHours);
+                "Stored original binary in Redis: CacheId={CacheId}, SizeBytes={SizeBytes}, TTL={TtlHours}h",
+                docCacheId, originalBinary.Length, UploadDocumentTtl.TotalHours);
         }
         catch (Exception ex)
         {
             // Non-fatal: binary cache miss means SPE persist won't work, but AI context is still available
             logger.LogWarning(ex,
-                "Failed to store original binary in Redis: Key={BinaryCacheKey}, DocumentId={DocumentId}",
-                binaryCacheKey, documentId);
+                "Failed to store original binary in Redis: CacheId={CacheId}, DocumentId={DocumentId}",
+                docCacheId, documentId);
         }
 
         // 10. Also store document metadata for retrieval (filename, etc.)
-        var metadataCacheKey = $"doc-upload-meta:{sessionId}:{documentId}";
         var metadata = new UploadedDocumentMetadata(documentId, filename, tokenEstimate, wasTruncated);
         try
         {
-            var metadataJson = JsonSerializer.SerializeToUtf8Bytes(metadata, JsonOptions);
             await cache.SetAsync(
-                metadataCacheKey,
-                metadataJson,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = UploadDocumentTtl
-                },
-                httpContext.RequestAborted);
+                tenantId, DocMetaResource, docCacheId, CacheVersion,
+                metadata, UploadDocumentTtl, ct: httpContext.RequestAborted);
         }
         catch (Exception ex)
         {
             // Non-fatal: metadata cache miss is recoverable, text is already stored
             logger.LogWarning(ex,
-                "Failed to cache document metadata: Key={MetadataCacheKey}, DocumentId={DocumentId}",
-                metadataCacheKey, documentId);
+                "Failed to cache document metadata: CacheId={CacheId}, DocumentId={DocumentId}",
+                docCacheId, documentId);
+        }
+
+        // 10a. R5 task 032 — wire upload into the session-files RAG index + ChatSession manifest.
+        // This is the integration that ties the legacy R3 upload endpoint (Redis-only storage above)
+        // into R5's chat-driven Summarize vertical:
+        //   - IndexSessionFileAsync writes chunks into the `spaarke-session-files` AI Search index
+        //     (carries tenantId + sessionId per ADR-014 / R5 FR-09).
+        //   - ChatSession.UploadedFiles gains a new ChatSessionFile entry so
+        //     SessionSummarizeOrchestrator (task 012) sees the file via
+        //     session.UploadedFiles instead of declining.
+        //   - UpdateSessionCacheAsync persists the manifest through Redis hot tier
+        //     + fire-and-forget Cosmos warm tier (decision D-06).
+        //
+        // RagIndexingPipeline is conditionally registered (DocumentIntelligence:Enabled gate);
+        // resolve defensively so the endpoint preserves its existing AI-off behavior:
+        // ITextExtractor above already throws FeatureDisabledException when AI is off (step 8a),
+        // so this code is unreachable in practice when AI is off. The defensive GetService
+        // call protects against the unlikely case where ITextExtractor is real (DocIntel on)
+        // but RagIndexingPipeline failed to register for an unrelated reason — we still want
+        // the Redis writes to succeed and the file to be discoverable via the legacy path.
+        var ragIndexingPipeline = httpContext.RequestServices.GetService<RagIndexingPipeline>();
+        if (ragIndexingPipeline is null)
+        {
+            // AI off (or RagIndexingPipeline missing) — log and continue. The endpoint
+            // returned 503 earlier via the ITextExtractor catch path if AI is truly off;
+            // reaching here without a pipeline indicates a configuration anomaly.
+            logger.LogWarning(
+                "RagIndexingPipeline unavailable — skipping session-files indexing for DocumentId={DocumentId}, SessionId={SessionId}. " +
+                "Legacy Redis storage succeeded; SessionSummarizeOrchestrator will not see this file.",
+                documentId, sessionId);
+        }
+        else
+        {
+            try
+            {
+                // Build ParsedDocument from the extracted text. The pipeline does not need
+                // page count or tables for session-files indexing (single-granularity chunking
+                // per knowledge profile; per RagIndexingPipeline docstring lines 233-237).
+                var parsedDocument = new ParsedDocument
+                {
+                    Text = extractionResult.Text!,
+                    Pages = 0,
+                    ExtractedAt = DateTimeOffset.UtcNow,
+                    // ParserUsed defaults to DocumentIntelligence; ITextExtractor produced the
+                    // text via either DocIntel or native parsing — telemetry-only field.
+                };
+
+                // ADR-014: tenantId + sessionId BOTH set so the session-files index entries
+                // carry both partition keys. Pass documentId as both documentId and speFileId
+                // (the latter is a "best effort" link for future SPE persistence; for
+                // session-uploads we use the chat-document GUID as both per task POML §3.1).
+                //
+                // chat-routing-redesign-r1 task 074 — indexing stopwatch for context.upload_indexed.
+                var indexingStopwatch = Stopwatch.StartNew();
+                var indexingResult = await ragIndexingPipeline.IndexSessionFileAsync(
+                    document: parsedDocument,
+                    documentId: documentId,
+                    tenantId: tenantId,
+                    sessionId: sessionId,
+                    fileName: filename,
+                    speFileId: documentId,
+                    cancellationToken: httpContext.RequestAborted);
+                indexingStopwatch.Stop();
+
+                // chat-routing-redesign-r1 task 074 — emit context.upload_indexed.
+                // ADR-015 Tier 1 SAFE: chunkCount + durationMs only.
+                contextEventEmitter.UploadIndexed(
+                    sessionId: sessionGuidForEmit,
+                    fileId: documentId,
+                    chunkCount: indexingResult.KnowledgeChunksIndexed,
+                    durationMs: indexingStopwatch.ElapsedMilliseconds,
+                    tenantId: tenantId);
+
+                // Reconstruct chunk IDs from the deterministic pattern used by
+                // BuildKnowledgeDocuments (chunkIdSuffix "s" for session-files, per
+                // RagIndexingPipeline.cs line 332 + line 448): "{documentId}_s_{index}".
+                // SearchDocumentIdsCsv is consumed by the session-files cleanup job (task 007)
+                // to enumerate index documents for deletion on session end.
+                var chunkCount = indexingResult.KnowledgeChunksIndexed;
+                var chunkIds = Enumerable.Range(0, chunkCount)
+                    .Select(i => $"{documentId}_s_{i}")
+                    .ToArray();
+                var searchDocumentIdsCsv = string.Join(",", chunkIds);
+
+                // Determine content type from filename extension (mirrors PersistDocumentAsync §5).
+                var sessionFileContentType = extension switch
+                {
+                    ".pdf" => "application/pdf",
+                    ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    ".txt" => "text/plain",
+                    ".md" => "text/markdown",
+                    _ => file.ContentType ?? "application/octet-stream"
+                };
+
+                // Build the ChatSessionFile manifest entry (six fields per ChatSession.cs §134).
+                var newFile = new ChatSessionFile(
+                    FileId: documentId,
+                    FileName: filename,
+                    ContentType: sessionFileContentType,
+                    SizeBytes: file.Length,
+                    SearchDocumentIdsCsv: searchDocumentIdsCsv,
+                    UploadedAt: DateTimeOffset.UtcNow);
+
+                // Append to UploadedFiles (immutable record — use `with` expression).
+                var updatedFiles = (session.UploadedFiles ?? Array.Empty<ChatSessionFile>())
+                    .Append(newFile)
+                    .ToList();
+                var updatedSession = session with { UploadedFiles = updatedFiles };
+
+                // Persist via UpdateSessionCacheAsync (decision D-06: Redis hot tier +
+                // fire-and-forget Cosmos write-through). Internal virtual; same-assembly access.
+                await sessionManager.UpdateSessionCacheAsync(updatedSession, httpContext.RequestAborted);
+
+                logger.LogInformation(
+                    "R5 session-files indexing + manifest update complete: DocumentId={DocumentId}, " +
+                    "ChunkCount={ChunkCount}, DurationMs={DurationMs}, SessionId={SessionId}, " +
+                    "ManifestSize={ManifestSize}",
+                    documentId, chunkCount, indexingResult.DurationMs, sessionId, updatedFiles.Count);
+            }
+            catch (FeatureDisabledException ex)
+            {
+                // RagIndexingPipeline downstream surfaced a kill-switch (e.g., NullRagService
+                // via the AI-Search-keys-missing sub-gate). Mirror the ITextExtractor catch
+                // pattern at step 8a — return 503 ProblemDetails.
+                logger.LogDebug(
+                    "Session-files indexing called while RAG feature disabled. ErrorCode={ErrorCode}, DocumentId={DocumentId}",
+                    ex.ErrorCode, documentId);
+                return ex.AsFeatureDisabled503();
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal: legacy Redis writes already succeeded. Log the failure and let
+                // the 202 response proceed — the file is at least discoverable via the
+                // R3 doc-upload Redis path, even if Summarize can't find it. This preserves
+                // back-compat for any consumer still on the legacy path.
+                logger.LogError(ex,
+                    "R5 session-files indexing OR manifest update failed for DocumentId={DocumentId}, SessionId={SessionId}. " +
+                    "Legacy Redis writes succeeded; SessionSummarizeOrchestrator will not see this file in UploadedFiles.",
+                    documentId, sessionId);
+            }
         }
 
         // 11. Return 202 Accepted with document metadata
@@ -384,6 +582,15 @@ public static class ChatDocumentEndpoints
             "Document upload complete: DocumentId={DocumentId}, Filename={Filename}, " +
             "Status=ready, TokenEstimate={TokenEstimate}, WasTruncated={WasTruncated}, SessionId={SessionId}",
             documentId, filename, tokenEstimate, wasTruncated, sessionId);
+
+        // chat-routing-redesign-r1 task 074 — emit context.upload_completed (end-of-pipeline).
+        // ADR-015 Tier 1 SAFE: totalDurationMs (numeric) + IDs only — never filename, content, token text.
+        pipelineStopwatch.Stop();
+        contextEventEmitter.UploadCompleted(
+            sessionId: sessionGuidForEmit,
+            fileId: documentId,
+            totalDurationMs: pipelineStopwatch.ElapsedMilliseconds,
+            tenantId: tenantId);
 
         return Results.Accepted(
             uri: $"/api/ai/chat/sessions/{sessionId}/documents/{documentId}",
@@ -411,7 +618,7 @@ public static class ChatDocumentEndpoints
         string documentId,
         SpeFilePersistRequest? request,
         HttpContext httpContext,
-        IDistributedCache cache,
+        ITenantCache cache,
         ChatSessionManager sessionManager,
         SpeFileStore speFileStore,
         IConfiguration configuration,
@@ -419,8 +626,14 @@ public static class ChatDocumentEndpoints
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
 
-        // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys)
+        // 1. Extract tenant ID from JWT claims (ADR-014: tenant-scoped keys).
+        // Microsoft.Identity.Web's JwtBearer middleware may rename `tid` to the schema URL
+        // form depending on Microsoft.IdentityModel.Tokens.DefaultInboundClaimTypeMap state.
+        // Check both forms to match the pattern used by ChatEndpoints.cs and
+        // SummarizeSessionEndpoint.cs (R5). Fallback to X-Tenant-Id header for
+        // server-to-server scenarios that bypass JWT.
         var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
             ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
 
         if (string.IsNullOrEmpty(tenantId))
@@ -442,39 +655,36 @@ public static class ChatDocumentEndpoints
         }
 
         // 3. Check idempotency: if already persisted, return existing metadata (200 OK)
-        var persistKey = $"doc-persist:{sessionId}:{documentId}";
+        var docCacheId = DocCacheId(sessionId, documentId);
         try
         {
-            var existingBytes = await cache.GetAsync(persistKey, httpContext.RequestAborted);
-            if (existingBytes != null)
+            var existingResponse = await cache.GetAsync<SpeFilePersistResponse>(
+                tenantId, DocPersistResource, docCacheId, CacheVersion, ct: httpContext.RequestAborted);
+            if (existingResponse != null)
             {
-                var existingResponse = JsonSerializer.Deserialize<SpeFilePersistResponse>(existingBytes, JsonOptions);
-                if (existingResponse != null)
-                {
-                    logger.LogInformation(
-                        "Document already persisted (idempotent): DocumentId={DocumentId}, SpeFileId={SpeFileId}, SessionId={SessionId}",
-                        documentId, existingResponse.SpeFileId, sessionId);
+                logger.LogInformation(
+                    "Document already persisted (idempotent): DocumentId={DocumentId}, SpeFileId={SpeFileId}, SessionId={SessionId}",
+                    documentId, existingResponse.SpeFileId, sessionId);
 
-                    return Results.Ok(existingResponse);
-                }
+                return Results.Ok(existingResponse);
             }
         }
         catch (Exception ex)
         {
             // Non-fatal: if idempotency check fails, proceed with upload
             logger.LogWarning(ex,
-                "Idempotency check failed for doc-persist:{SessionId}:{DocumentId} — proceeding with upload",
+                "Idempotency check failed for doc-persist {SessionId}:{DocumentId} — proceeding with upload",
                 sessionId, documentId);
         }
 
         // 4. Retrieve original binary from Redis
-        var binaryCacheKey = $"doc-binary:{sessionId}:{documentId}";
-        var binaryContent = await cache.GetAsync(binaryCacheKey, httpContext.RequestAborted);
+        var binaryContent = await cache.GetAsync<byte[]>(
+            tenantId, DocBinaryResource, docCacheId, CacheVersion, ct: httpContext.RequestAborted);
         if (binaryContent == null || binaryContent.Length == 0)
         {
             logger.LogWarning(
-                "Document binary not found in Redis: Key={BinaryCacheKey}, DocumentId={DocumentId}, SessionId={SessionId}",
-                binaryCacheKey, documentId, sessionId);
+                "Document binary not found in Redis: CacheId={CacheId}, DocumentId={DocumentId}, SessionId={SessionId}",
+                docCacheId, documentId, sessionId);
 
             return Results.Problem(
                 statusCode: 404,
@@ -483,21 +693,13 @@ public static class ChatDocumentEndpoints
         }
 
         // 5. Retrieve document metadata for filename resolution
-        var metadataCacheKey = $"doc-upload-meta:{sessionId}:{documentId}";
         string filename;
         string contentType;
         try
         {
-            var metadataBytes = await cache.GetAsync(metadataCacheKey, httpContext.RequestAborted);
-            if (metadataBytes != null)
-            {
-                var metadata = JsonSerializer.Deserialize<UploadedDocumentMetadata>(metadataBytes, JsonOptions);
-                filename = request?.Filename ?? metadata?.Filename ?? "document";
-            }
-            else
-            {
-                filename = request?.Filename ?? "document";
-            }
+            var metadata = await cache.GetAsync<UploadedDocumentMetadata>(
+                tenantId, DocMetaResource, docCacheId, CacheVersion, ct: httpContext.RequestAborted);
+            filename = request?.Filename ?? metadata?.Filename ?? "document";
         }
         catch
         {
@@ -561,6 +763,11 @@ public static class ChatDocumentEndpoints
                     detail: "Failed to upload document to SharePoint Embedded storage.");
             }
 
+            // Post-upload RAG indexing for chat-persisted documents is triggered client-side
+            // via `@spaarke/sdap-client.SdapApiClient.indexFile()` — see project
+            // `sdap-client-shared-library-fix-r1`. Re-wiring inline indexing here is tracked
+            // as future work once the SprkChat surface adopts `@spaarke/sdap-client`.
+
             // 8. Build response and store idempotency marker
             var speResponse = new SpeFilePersistResponse(
                 SpeFileId: uploadResult.Id,
@@ -572,22 +779,16 @@ public static class ChatDocumentEndpoints
             // Store idempotency marker with same TTL as session (4 hours)
             try
             {
-                var responseJson = JsonSerializer.SerializeToUtf8Bytes(speResponse, JsonOptions);
                 await cache.SetAsync(
-                    persistKey,
-                    responseJson,
-                    new DistributedCacheEntryOptions
-                    {
-                        AbsoluteExpirationRelativeToNow = UploadDocumentTtl
-                    },
-                    httpContext.RequestAborted);
+                    tenantId, DocPersistResource, docCacheId, CacheVersion,
+                    speResponse, UploadDocumentTtl, ct: httpContext.RequestAborted);
             }
             catch (Exception ex)
             {
                 // Non-fatal: upload succeeded but idempotency marker failed — next call may re-upload
                 logger.LogWarning(ex,
-                    "Failed to store idempotency marker: Key={PersistKey}, DocumentId={DocumentId}",
-                    persistKey, documentId);
+                    "Failed to store idempotency marker: CacheId={CacheId}, DocumentId={DocumentId}",
+                    docCacheId, documentId);
             }
 
             logger.LogInformation(

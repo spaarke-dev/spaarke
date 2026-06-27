@@ -1,0 +1,198 @@
+<task id="044" project="email-communication-solution-r3">
+  <metadata>
+    <title>UI tests — EmailComposer `mode=forward` (attachments carried + deselect) + `mode=draft` (resume + Save Draft + Send transitions)</title>
+    <phase>Wave 2 — EmailComposer Code Page + Entry Surfaces</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>099</blocks>
+    <tags>ui-test, e2e-test, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Two related UI tests in one task; deterministic scenarios; testing FR-12 + FR-13 modes</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Parallel-safe with 041, 042, 043, 045 — independent record-level mutations per test</parallel-reason>
+    <fr-refs>FR-12, FR-13, FR-18</fr-refs>
+  </metadata>
+
+  <prompt>
+    Execute end-to-end UI tests for TWO modes:
+    1. **Forward mode** (`mode=forward&id={existing-record-guid}`) per FR-12: carries attachments by default with deselect capability; `subject` prefixed `Fwd:`; `sprk_inreplyto` stamped on new record
+    2. **Draft mode** (`mode=draft&id={existing-draft-guid}`) per FR-13: loads saved draft values; Save Draft persists; Send transitions `statuscode` to Sent and triggers Graph SendMail
+
+    Use the `ui-test` skill. Verify zero console errors per test. Verify dark mode smoke per ADR-021.
+  </prompt>
+
+  <role>
+    Spaarke UI test engineer. Familiar with FR-12 (forward semantics), FR-13 (draft semantics), `statuscode` lifecycle on `sprk_communication`, and attachment carry/deselect logic.
+  </role>
+
+  <goal>
+    Two UI test passes (forward + draft) documented in `projects/email-communication-solution-r3/notes/research/044-ui-test-forward-draft.md` with pass/fail per assertion, console-error inventory, Dataverse-side stamp/statuscode verification, and dark mode smoke observations.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-12: forward pre-fills new compose; to/cc blank; subject = `Fwd: ${original.subject}`; body wraps original; attachments carried by default (user can deselect); associations carried; `sprk_inreplyto` stamped.
+
+      Per FR-13: draft mode loads from `sprk_communication` where `statuscode = Draft`. Both Send and Save Draft actions functional. Save Draft updates same record; Send transitions `statuscode` to `Sent` and triggers Graph SendMail.
+
+      Test data: requires (a) an existing sent record with attachments for forward test, (b) an existing draft record for draft test. Create them via task 041 (compose) if not present.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r3/notes/research/044-ui-test-forward-draft.md (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-12">Forward carries attachments by default; deselect removes from send; `sprk_inreplyto` stamped</constraint>
+    <constraint source="spec FR-13">Draft loads saved values; Save Draft persists; Send transitions statuscode</constraint>
+    <constraint source="ADR-021">Dark mode compliance smoke per test</constraint>
+    <constraint source="project">Use `{org}`, `{existing-record-guid}`, `{existing-draft-guid}` placeholders</constraint>
+    <constraint source="project">Dev environment only</constraint>
+    <constraint source="project">No `.claude/` writes in this Wave 2 task</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="UI test for mode with side effects" location=".claude/skills/ui-test/SKILL.md">
+        Post-Send: query Dataverse to verify field stamps and statuscode transitions.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <ui-tests>
+    <test name="Forward mode — attachments carried + deselect + sprk_inreplyto stamp">
+      <navigation>
+        <url>https://{org}/WebResources/sprk_emailcomposer?data=%7B%22mode%22%3A%22forward%22%2C%22id%22%3A%22{existing-record-guid}%22%7D</url>
+        <description>Forward mode on an existing record that HAS at least 2 attachments</description>
+      </navigation>
+      <steps>
+        <step order="1">Navigate to URL; wait for app mount + record load</step>
+        <step order="2">Verify zero console errors on cold load</step>
+        <step order="3">Verify To field is empty (forward does NOT auto-fill to original sender)</step>
+        <step order="4">Verify Cc field is empty</step>
+        <step order="5">Verify Subject field prefilled with `Fwd: ${original.subject}` (no double-prefix if already `Fwd:`)</step>
+        <step order="6">Verify Body field prefilled with empty user area + divider + quoted original body</step>
+        <step order="7">Verify Attachments list shows BOTH original attachments with checkbox/selected state (carried by default)</step>
+        <step order="8">Verify Associations carried from original</step>
+        <step order="9">Deselect ONE attachment (uncheck its select control)</step>
+        <step order="10">Fill To: `forward-test@example.com`</step>
+        <step order="11">Click Send; wait for response</step>
+        <step order="12">Verify success state</step>
+        <step order="13">Verify Dataverse-side: new record has `sprk_inreplyto` pointing to original; attached driveItem IDs = 1 (the deselected one was removed)</step>
+        <step order="14">Verify zero console errors throughout</step>
+      </steps>
+      <expected-outcomes>
+        <outcome>Forward mode prefills Subject (Fwd:) + Body (wrapped); To/Cc empty</outcome>
+        <outcome>Attachments carried by default with deselect capability</outcome>
+        <outcome>Deselected attachments NOT included in send</outcome>
+        <outcome>New record has `sprk_inreplyto` stamp</outcome>
+        <outcome>Zero console errors</outcome>
+      </expected-outcomes>
+      <dark-mode-check>
+        <step>Toggle dark mode; verify forward UI adapts including attachment list</step>
+      </dark-mode-check>
+      <console-error-check>
+        <target>0 errors</target>
+      </console-error-check>
+    </test>
+
+    <test name="Draft mode — load saved values + Save Draft + Send transitions statuscode">
+      <navigation>
+        <url>https://{org}/WebResources/sprk_emailcomposer?data=%7B%22mode%22%3A%22draft%22%2C%22id%22%3A%22{existing-draft-guid}%22%7D</url>
+        <description>Draft mode on an existing `sprk_communication` record with `statuscode = Draft`</description>
+      </navigation>
+      <steps>
+        <step order="1">Navigate to URL; wait for app mount + record load</step>
+        <step order="2">Verify zero console errors on cold load</step>
+        <step order="3">Verify To field loaded with previously-saved values</step>
+        <step order="4">Verify Subject field loaded with previously-saved value</step>
+        <step order="5">Verify Body field loaded with previously-saved content</step>
+        <step order="6">Verify both `Save Draft` AND `Send` action buttons are present</step>
+        <step order="7">Modify Subject to add ` [updated]` suffix</step>
+        <step order="8">Click `Save Draft`; wait for response</step>
+        <step order="9">Verify success state for Save Draft</step>
+        <step order="10">Verify Dataverse-side: same record's Subject has the ` [updated]` suffix; `statuscode` STILL = Draft</step>
+        <step order="11">Now click `Send`; wait for response</step>
+        <step order="12">Verify success state for Send</step>
+        <step order="13">Verify Dataverse-side: same record's `statuscode` = Sent (transitioned); `sprk_internetmessageid` populated post-send (per task 003)</step>
+        <step order="14">Verify zero console errors throughout</step>
+      </steps>
+      <expected-outcomes>
+        <outcome>Draft mode loads saved values</outcome>
+        <outcome>Save Draft updates same record; statuscode stays Draft</outcome>
+        <outcome>Send transitions statuscode to Sent</outcome>
+        <outcome>`sprk_internetmessageid` populated post-send (best-effort)</outcome>
+        <outcome>Zero console errors</outcome>
+      </expected-outcomes>
+      <dark-mode-check>
+        <step>Toggle dark mode; verify draft UI + dual action buttons adapt</step>
+      </dark-mode-check>
+      <console-error-check>
+        <target>0 errors</target>
+      </console-error-check>
+    </test>
+  </ui-tests>
+
+  <steps>
+    <step order="1">Verify task 036 (Code Page deploy) successful.</step>
+    <step order="2">Identify test data:
+      - Forward test: existing `sprk_communication` record with 2+ attachments (create via task 041 if missing)
+      - Draft test: existing `sprk_communication` record with `statuscode = Draft` (create via task 041 by clicking Save Draft if missing)
+    </step>
+    <step order="3">Invoke `ui-test` skill — Chrome session, logged in.</step>
+    <step order="4">Execute forward-mode test scenario; capture results.</step>
+    <step order="5">Execute draft-mode test scenario; capture results.</step>
+    <step order="6">Post-Send: query Dataverse to verify field stamps + statuscode transitions for each test.</step>
+    <step order="7">Toggle dark mode; smoke-verify both forward + draft UIs.</step>
+    <step order="8">Document results in `projects/email-communication-solution-r3/notes/research/044-ui-test-forward-draft.md` with two test sections.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 044 ✅ completed.</step>
+    <step order="10">Update `current-task.md` per task-execute protocol: status → completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="ui-test">Skill — Chrome browser automation</tool>
+    <tool name="dataverse-mcp-usage">Verify Dataverse-side field stamps + statuscode transitions</tool>
+    <tool name="write">Test results note</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r3/notes/research/044-ui-test-forward-draft.md (NEW — two test sections)</output>
+    <output type="test-result">Forward mode test + Draft mode test pass/fail logged</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Forward mode prefills Subject (Fwd:) + Body; carries attachments; deselect removes from send.</criterion>
+    <criterion testable="true">Forward Send stamps `sprk_inreplyto` on new record.</criterion>
+    <criterion testable="true">Draft mode loads saved values; both Save Draft and Send actions present.</criterion>
+    <criterion testable="true">Save Draft updates same record; statuscode stays Draft.</criterion>
+    <criterion testable="true">Send transitions statuscode to Sent; `sprk_internetmessageid` populated.</criterion>
+    <criterion testable="true">Zero console errors in both tests.</criterion>
+    <criterion testable="true">Dark mode smoke checks pass.</criterion>
+    <criterion testable="true">Test results documented for both modes.</criterion>
+    <criterion testable="true">No `.claude/` files modified in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-group I: safe to run alongside 041, 042, 043, 045.
+
+    Test data setup may require running task 041 (compose) FIRST to create the forward source record (with attachments) and the draft source record (with `statuscode = Draft`). If running in true parallel, ensure either (a) test data is pre-provisioned, or (b) this task's pre-step creates the records.
+
+    `statuscode` values: in Dataverse, `sprk_communication.statuscode` has typed values. Per R2 spec, Draft = 1 (Active state), Sent = a different value. Use `Xrm.WebApi` or skill helper to verify the transition.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Invoke `ui-test` skill for browser automation. Two separate test scenarios — document each independently.
+    </protocol>
+  </execution>
+</task>

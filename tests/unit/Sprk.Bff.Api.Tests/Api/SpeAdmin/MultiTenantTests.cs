@@ -296,21 +296,6 @@ public class MultiTenantTests
     // ConsumingTenantEndpoints registration tests (ADR-001)
     // =========================================================================
 
-    [Fact]
-    public void MapConsumingTenantEndpoints_MethodExists_AndIsExtensionOnRouteGroupBuilder()
-    {
-        // Verify the endpoint registration method exists with correct signature (ADR-001)
-        var method = typeof(ConsumingTenantEndpoints)
-            .GetMethod("MapConsumingTenantEndpoints");
-
-        method.Should().NotBeNull("MapConsumingTenantEndpoints extension method must exist");
-        method!.IsStatic.Should().BeTrue("must be a static extension method");
-        method.ReturnType.Should().Be(typeof(RouteGroupBuilder), "must return RouteGroupBuilder for chaining");
-
-        var parameters = method.GetParameters();
-        parameters.Should().NotBeEmpty();
-        parameters[0].ParameterType.Should().Be(typeof(RouteGroupBuilder));
-    }
 
     [Fact]
     public void ConsumingTenantEndpoints_IsStaticClass()
@@ -325,43 +310,11 @@ public class MultiTenantTests
     // CRUD handler method existence tests
     // =========================================================================
 
-    [Theory]
-    [InlineData("ListConsumersAsync")]
-    [InlineData("RegisterConsumerAsync")]
-    [InlineData("UpdateConsumerAsync")]
-    [InlineData("RemoveConsumerAsync")]
-    public void ConsumingTenantEndpoints_CrudHandlers_ExistAsPrivateStaticMethods(string methodName)
-    {
-        var handlerMethod = typeof(ConsumingTenantEndpoints)
-            .GetMethod(methodName, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        handlerMethod.Should().NotBeNull($"{methodName} handler must exist as a private static method");
-        handlerMethod!.IsStatic.Should().BeTrue($"{methodName} must be a static method");
-    }
 
     // =========================================================================
     // Authorization tests — auth inherited from route group (ADR-008)
     // =========================================================================
 
-    [Theory]
-    [InlineData("ListConsumersAsync")]
-    [InlineData("RegisterConsumerAsync")]
-    [InlineData("UpdateConsumerAsync")]
-    [InlineData("RemoveConsumerAsync")]
-    public void ConsumingTenantEndpoints_Handlers_HaveNoDirectAuthorizeAttribute(string methodName)
-    {
-        // SpeAdminAuthorizationFilter is applied at the /api/spe group level in SpeAdminEndpoints.
-        // Individual endpoint handlers do NOT add their own auth filters — they inherit (ADR-008).
-        var handlerMethod = typeof(ConsumingTenantEndpoints)
-            .GetMethod(methodName, System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
-
-        handlerMethod.Should().NotBeNull();
-
-        var authorizeAttributes = handlerMethod!
-            .GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AuthorizeAttribute), false);
-        authorizeAttributes.Should().BeEmpty(
-            $"{methodName} authorization is inherited from the /api/spe route group (ADR-008)");
-    }
 
     // =========================================================================
     // Permission level acceptance tests

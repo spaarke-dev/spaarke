@@ -33,6 +33,17 @@ public interface IChatContextProvider
     /// Propagated into <see cref="ChatKnowledgeScope.AdditionalDocumentIds"/> so the
     /// agent can include their content in the AI context window.
     /// </param>
+    /// <param name="uploadedFiles">
+    /// Optional manifest of files the end user uploaded into the current chat session
+    /// (verbatim from <see cref="ChatSession.UploadedFiles"/>). Forwarded onto the returned
+    /// <see cref="ChatContext.UploadedFiles"/> so downstream agent construction
+    /// (<see cref="SprkChatAgentFactory"/>) can surface a session-files awareness suffix
+    /// in the system prompt. Manifest only — never carries extracted text content
+    /// (ADR-015 no-leakage + R5 task 033 acceptance criteria).
+    /// Default <c>null</c> for backward compatibility — pre-R5 sessions / call sites that
+    /// omit the parameter behave exactly as before. Treat <c>null</c> and empty list
+    /// identically ("no manifest").
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A fully composed <see cref="ChatContext"/>.</returns>
     Task<ChatContext> GetContextAsync(
@@ -41,5 +52,6 @@ public interface IChatContextProvider
         Guid? playbookId,
         ChatHostContext? hostContext = null,
         IReadOnlyList<string>? additionalDocumentIds = null,
+        IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
         CancellationToken cancellationToken = default);
 }

@@ -37,10 +37,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  DEFAULT_INLINE_ACTIONS,
-  type InlineAiAction,
-} from '../components/InlineAiToolbar/inlineAiToolbar.types';
+import { DEFAULT_INLINE_ACTIONS, type InlineAiAction } from '../components/InlineAiToolbar/inlineAiToolbar.types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants

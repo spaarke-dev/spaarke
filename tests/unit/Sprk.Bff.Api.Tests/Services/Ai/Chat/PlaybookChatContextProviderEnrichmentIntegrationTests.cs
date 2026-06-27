@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -25,6 +26,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 /// clauses, these tests exercise the complete pipeline with realistic
 /// multi-section system prompts and verify enrichment coexists correctly.
 /// </summary>
+[Trait("status", "repaired")]
 public class PlaybookChatContextProviderEnrichmentIntegrationTests
 {
     private static readonly Guid TestPlaybookId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
@@ -178,9 +180,11 @@ public class PlaybookChatContextProviderEnrichmentIntegrationTests
             TestDocumentId, TestTenantId, playbookId: null, hostContext,
             cancellationToken: CancellationToken.None);
 
-        // Assert — default prompt present (generic mode uses BuildDefaultSystemPrompt)
-        context.SystemPrompt.Should().Contain("You are an AI assistant",
-            "generic mode should use the default system prompt");
+        // Assert — default prompt present (generic mode uses BuildDefaultSystemPrompt).
+        // The default prompt was updated from "You are an AI assistant" to "You are Spaarke AI"
+        // when the assistant identity block was tightened to the Spaarke legal-workspace persona.
+        context.SystemPrompt.Should().Contain("You are Spaarke AI",
+            "generic mode should use the default Spaarke AI system prompt");
 
         // Assert — enrichment block still appended
         context.SystemPrompt.Should().Contain(
@@ -414,7 +418,11 @@ public class PlaybookChatContextProviderEnrichmentIntegrationTests
             _scopeResolverMock.Object,
             _playbookServiceMock.Object,
             _dataverseServiceMock.Object,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            // R6 task 069 follow-up housekeeping: task 068 made IMatterMemoryService a
+            // required ctor param without migrating this fixture. Pass a default mock so
+            // the matter-memory append path is a no-op for these tests.
+            new Mock<IMatterMemoryService>().Object);
 
     private void SetupPlaybook(Guid[]? actionIds = null)
     {

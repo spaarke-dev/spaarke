@@ -81,6 +81,86 @@ public interface IScopeResolverService
         ScopeListOptions options,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// List all available analysis personas (sprk_aipersona rows) visible to the calling tenant
+    /// with pagination/filtering/sorting per the same contract as the 4 sibling scope entities.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// R6 Pillar 1 (D-A-02). Persona resolution (most-specific-wins: global SYS- &lt; tenant CUST- &lt;
+    /// playbook-attached) is OWNED by task 003 (Resolve*Persona methods). This method is the
+    /// CRUD-side LIST surface only — it returns the raw catalog without applying resolution
+    /// precedence, mirroring <see cref="ListActionsAsync(ScopeListOptions, CancellationToken)"/>.
+    /// </para>
+    /// <para>
+    /// Per refined ADR-013, this is a Zone B (CRUD-side) facade method — does NOT route through
+    /// Services/Ai/PublicContracts/ because the LIST surface has no AI internals; it is a thin
+    /// Dataverse query.
+    /// </para>
+    /// </remarks>
+    Task<ScopeListResult<AnalysisPersona>> ListPersonasAsync(
+        ScopeListOptions options,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Resolve the effective persona for the chat agent using Q1 most-specific-wins precedence:
+    /// global SYS- &lt; tenant CUST- &lt; playbook-attached.
+    /// </summary>
+    /// <param name="tenantId">Calling tenant identifier (Dataverse tenant scope; used for both
+    /// tenant-isolation filtering and Redis cache-key scoping per ADR-014).</param>
+    /// <param name="playbookId">Optional bound playbook ID. When supplied, a playbook-attached
+    /// persona is checked first; if present, it wins.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The most-specific persona for the (tenant, playbook?) context. When no override exists,
+    /// returns the seeded global SYS- default (task 004) — preserving identical behavior to today's
+    /// <c>BuildDefaultSystemPrompt()</c> per FR-04. Throws <see cref="InvalidOperationException"/>
+    /// if no SYS- default is found (catastrophic seed-data failure).
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// R6 Pillar 1 (D-A-03). This resolver is wired by task 005 into
+    /// <c>SprkChatAgentFactory.CreateAgentAsync</c> to replace the hardcoded
+    /// <c>BuildDefaultSystemPrompt()</c> call. Resolution semantics per FR-03 + Q1: walk from
+    /// most-specific (playbook-attached) to least-specific (global SYS-); first non-null match wins.
+    /// </para>
+    /// <para>
+    /// NFR-01 binding: the returned persona supplies a <c>SystemPrompt</c> that augments the
+    /// conversational system prompt but never replaces conversational ability. Caller (task 005)
+    /// is responsible for composing the persona text alongside the conversational scaffold.
+    /// </para>
+    /// <para>
+    /// Per refined ADR-013, this is an AI-internal resolver method — NOT exposed via
+    /// Services/Ai/PublicContracts/. CRUD callers route through facades.
+    /// </para>
+    /// </remarks>
+    Task<AnalysisPersona> ResolvePersonaForChatAsync(
+        string tenantId,
+        Guid? playbookId,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Get the effective persona for the (tenant, playbook?) context, or null when neither a
+    /// tenant CUST- override nor a playbook-attached persona nor a SYS- default is found.
+    /// </summary>
+    /// <param name="tenantId">Calling tenant identifier.</param>
+    /// <param name="playbookId">Optional bound playbook ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The most-specific persona, or <c>null</c> if no candidate at any layer matches. Use this
+    /// when callers need to handle the "no persona configured at all" case explicitly; otherwise
+    /// prefer <see cref="ResolvePersonaForChatAsync"/> which throws on missing seed.
+    /// </returns>
+    /// <remarks>
+    /// Mirrors the existing <c>GetXyzByNameAsync</c> + <c>GetXyzAsync</c> Optional shapes on the
+    /// 4 sibling scope entities. Tenant isolation enforced per NFR-14: a tenant cannot see another
+    /// tenant's CUST- persona.
+    /// </remarks>
+    Task<AnalysisPersona?> GetEffectivePersonaAsync(
+        string tenantId,
+        Guid? playbookId,
+        CancellationToken cancellationToken);
+
     #region Action CRUD Operations
 
     /// <summary>
@@ -542,6 +622,34 @@ public record AnalysisAction
     /// Original scope ID when created via "Save As".
     /// </summary>
     public Guid? BasedOnId { get; init; }
+
+    /// <summary>
+    /// Per-action temperature override for AI model calls.
+    /// Maps to sprk_analysisaction.sprk_temperature (Decimal, 0.0–2.0).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added in Wave B-G9c1 (Hotfix B6) — see
+    /// <c>projects/spaarke-ai-platform-unification-r6/notes/wave-b-g9c-medium-bugs.md</c>
+    /// section B6 for root-cause analysis. Resolves non-determinism where
+    /// <see cref="IOpenAiClient.GetStructuredCompletionRawAsync"/> was using
+    /// the global <c>DocumentIntelligenceOptions.Temperature</c> (default 0.3)
+    /// while its sibling structured methods pin Temperature=0.
+    /// </para>
+    /// <para>
+    /// <strong>Null semantics</strong>: when null (column missing or NULL on the row),
+    /// downstream handlers MUST use a deterministic default of <c>0.0</c>.
+    /// This matches the sibling structured methods'
+    /// (<c>GetStructuredCompletionAsync&lt;T&gt;</c>, <c>StreamStructuredCompletionAsync</c>)
+    /// hardcoded Temperature=0 behavior.
+    /// </para>
+    /// <para>
+    /// <strong>Range</strong>: 0.0 (fully deterministic) to 2.0 (Azure OpenAI valid range
+    /// — though values &gt; 1.0 are rarely useful for structured output).
+    /// Schema enforces RequiredLevel=None (nullable) with Precision=1.
+    /// </para>
+    /// </remarks>
+    public decimal? Temperature { get; init; }
 }
 
 /// <summary>
@@ -659,6 +767,205 @@ public record AnalysisTool
     /// Original scope ID when created via "Save As".
     /// </summary>
     public Guid? BasedOnId { get; init; }
+
+    /// <summary>
+    /// Indicates which invocation contexts this tool is available in:
+    /// <see cref="ToolAvailabilityContext.Playbook"/> (default for existing rows; classic playbook orchestration),
+    /// <see cref="ToolAvailabilityContext.Chat"/> (exposed to SprkChatAgentFactory.ResolveTools() in R6 Pillar 2),
+    /// or <see cref="ToolAvailabilityContext.Both"/> (dual-context tool).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added in R6 Pillar 2 (task D-A-07, FR-07) as the discriminator that the chat agent's
+    /// data-driven tool registry filters on. Backed by the
+    /// <c>sprk_availableincontexts</c> option-set on the <c>sprk_analysistool</c> Dataverse
+    /// entity (100000000=Playbook, 100000001=Chat, 100000002=Both).
+    /// </para>
+    /// <para>
+    /// Nullable for migration safety: rows queried before the column is populated
+    /// fall back to <see cref="ToolAvailabilityContext.Playbook"/> at resolve time
+    /// (backward-compat per FR-07 — every pre-R6 analysistool row is a playbook tool).
+    /// </para>
+    /// </remarks>
+    public ToolAvailabilityContext? AvailableInContexts { get; init; }
+
+    /// <summary>
+    /// JSON Schema document (Draft 2020-12 family) describing the tool's parameter shape
+    /// for LLM function-calling. Consumed by <c>ToolHandlerToAIFunctionAdapter</c>
+    /// (R6 Pillar 2, task D-A-10) to wrap an <see cref="IToolHandler"/> as a
+    /// <c>Microsoft.Extensions.AI.AIFunction</c>: the LLM sees this schema as the
+    /// function's parameter declaration.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added in R6 Pillar 2 (task D-A-08, FR-08). Backed by the
+    /// <c>sprk_jsonschema</c> Memo (multi-line text, ~100 KB max) attribute on the
+    /// <c>sprk_analysistool</c> Dataverse entity.
+    /// </para>
+    /// <para>
+    /// <b>Nullability contract (FR-08)</b>: nullable on the DTO for backward-compat
+    /// with pre-R6 playbook-only tool rows whose column is unpopulated. REQUIRED for
+    /// chat-available tools (rows with <see cref="AvailableInContexts"/> ∋
+    /// <see cref="ToolAvailabilityContext.Chat"/> or <see cref="ToolAvailabilityContext.Both"/>).
+    /// The "required-for-chat" rule is enforced by the chat-side resolver
+    /// (task 011) — not by this DTO contract — because the DTO must remain assignable
+    /// from playbook-only Dataverse rows. Migrating chat tools (task 012) populates this
+    /// field for the 10 migrated tools.
+    /// </para>
+    /// <para>
+    /// <b>Validation contract (FR-08)</b>: when non-null, the string MUST parse as
+    /// valid JSON. The DTO does NOT validate JSON Schema semantics (e.g., required
+    /// keywords, type correctness) — that's the adapter's responsibility (task 010).
+    /// The mapper logs malformed JSON and stores null rather than passing garbage
+    /// to the LLM (see <c>AnalysisToolService.MapJsonSchema</c>).
+    /// </para>
+    /// </remarks>
+    public string? JsonSchema { get; init; }
+
+    /// <summary>
+    /// Canonical playbook capability constant (e.g., <c>"verify_citations"</c>,
+    /// <c>"write_back"</c>, <c>"web_search"</c>, <c>"code_interpreter"</c>,
+    /// <c>"legal_research"</c>, <c>"reanalyze"</c>) that the current playbook's
+    /// capability set MUST contain for this tool to be registered with the chat
+    /// agent at session start. Null = always available (existing behavior pre-Wave-7b).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added in R6 Pillar 2 (Wave 7b). Backed by the <c>sprk_requiredcapability</c>
+    /// single-line text (NVARCHAR(100)) attribute on the <c>sprk_analysistool</c>
+    /// Dataverse entity. Matches the canonical string constants in
+    /// <see cref="Sprk.Bff.Api.Models.Ai.Chat.PlaybookCapabilities"/>.
+    /// </para>
+    /// <para>
+    /// <b>Filter enforcement</b>: Applied at chat-session start in the data-driven
+    /// block of <c>SprkChatAgentFactory.ResolveTools()</c>. When non-null, the tool
+    /// is skipped unless the effective capability set (playbook-resolved or
+    /// <c>CoreCapabilities</c> for standalone chat) contains a case-insensitive match
+    /// for this value. Null skips the gate (the tool always registers). This
+    /// REPLACES the hardcoded <c>if (capabilities.Contains(X))</c> blocks for the
+    /// 6 capability-gated tools (VerifyCitations, LegalResearch, WebSearch,
+    /// CodeInterpreter, WriteBack, Reanalyze) as they migrate in Waves 7c / 8 / 9.
+    /// </para>
+    /// <para>
+    /// <b>NOT a feature flag (ADR-018)</b>: this is a per-tool authorization filter
+    /// on existing tools, analogous to ACL entries — not a kill-switch. Feature flags
+    /// are config-driven and binary on/off across an entire feature surface; this
+    /// field is data-driven per-row authorization, with the canonical capability
+    /// list defined in code (<c>PlaybookCapabilities</c>) and the per-playbook
+    /// allow-list stored in Dataverse on <c>sprk_analysisplaybook</c>.
+    /// </para>
+    /// <para>
+    /// <b>Case-insensitive matching</b>: the chat resolver uses
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/> when comparing this value
+    /// against the playbook's capability set, because canonical capability names
+    /// are lowercase snake_case but admins editing the column may type variants.
+    /// </para>
+    /// </remarks>
+    public string? RequiredCapability { get; init; }
+}
+
+/// <summary>
+/// Discriminator for which invocation contexts a tool is exposed in.
+/// Backs <see cref="AnalysisTool.AvailableInContexts"/>. R6 Pillar 2 (FR-07).
+/// </summary>
+/// <remarks>
+/// Option-set values match the canonical Spaarke Dataverse convention
+/// (<c>100000000+</c>) used by <c>sprk_availableincontexts</c> on
+/// <c>sprk_analysistool</c>. The single-select discriminator is deliberately
+/// plain-enum (NOT <c>[Flags]</c>) — Dataverse single-select picklist semantics
+/// require an explicit <see cref="Both"/> value rather than bit composition.
+/// </remarks>
+public enum ToolAvailabilityContext
+{
+    /// <summary>Tool is available only inside playbook orchestration (default; matches all pre-R6 tool rows).</summary>
+    Playbook = 100000000,
+
+    /// <summary>Tool is exposed only to the chat agent via SprkChatAgentFactory.ResolveTools().</summary>
+    Chat = 100000001,
+
+    /// <summary>Tool is available in both playbook orchestration and chat-agent invocation.</summary>
+    Both = 100000002
+}
+
+/// <summary>
+/// Analysis persona definition from sprk_aipersona entity.
+/// </summary>
+/// <remarks>
+/// <para>
+/// R6 Pillar 1 (D-A-02). Persona is a standalone Dataverse entity that supplies the system
+/// prompt + persona metadata to <c>SprkChatAgentFactory.CreateAgentAsync</c> (wired in task 005).
+/// Resolution semantics: most-specific-wins — global SYS- &lt; tenant CUST- &lt; playbook-attached.
+/// Resolution methods (Resolve*Persona) are owned by task 003; this DTO is the thin record
+/// returned by the LIST surface only.
+/// </para>
+/// <para>
+/// SYS-/CUST- prefix enforcement is API-side (not Dataverse-side) — matches the 4 canonical
+/// scope entities' pattern. See <see cref="DataverseHttpServiceBase.EnsureCustomerPrefix"/>
+/// + <see cref="DataverseHttpServiceBase.ValidateOwnership"/>.
+/// </para>
+/// </remarks>
+public record AnalysisPersona
+{
+    public Guid Id { get; init; }
+    public string Name { get; init; } = string.Empty;
+    public string? Description { get; init; }
+
+    /// <summary>
+    /// The system prompt text used to seed the chat agent (replaces hardcoded
+    /// <c>BuildDefaultSystemPrompt()</c> after task 005 lands).
+    /// </summary>
+    public string SystemPrompt { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Persona scope type controlling resolution precedence. Maps to <c>sprk_scopetype</c>
+    /// CHOICE (Global = 100000000, Tenant = 100000001, PlaybookAttached = 100000002).
+    /// </summary>
+    public PersonaScopeType ScopeType { get; init; } = PersonaScopeType.Global;
+
+    /// <summary>
+    /// Tags for filtering / discovery (multi-line CSV in <c>sprk_tags</c>).
+    /// </summary>
+    public string? Tags { get; init; }
+
+    /// <summary>
+    /// Whether the persona may be invoked ad-hoc from the chat surface (separate from playbook attach).
+    /// </summary>
+    public bool AvailableAdHoc { get; init; }
+
+    // Ownership properties — mirror the 4-scope pattern.
+
+    /// <summary>
+    /// Owner type: System (SYS-) or Customer (CUST-). API-side prefix enforcement matches
+    /// the 4-scope pattern; Dataverse has no enforcement.
+    /// </summary>
+    public ScopeOwnerType OwnerType { get; init; } = ScopeOwnerType.Customer;
+
+    /// <summary>
+    /// Whether this persona is immutable (system-owned personas are immutable).
+    /// </summary>
+    public bool IsImmutable { get; init; }
+
+    /// <summary>
+    /// Parent persona ID for extended personas. Maps to <c>sprk_parentpersonaid</c>
+    /// (self-lookup). Drives the most-specific-wins resolution implemented in task 003.
+    /// </summary>
+    public Guid? ParentScopeId { get; init; }
+}
+
+/// <summary>
+/// Persona scope type for resolution precedence. Mirrors the <c>sprk_aipersona.sprk_scopetype</c>
+/// Dataverse CHOICE values.
+/// </summary>
+public enum PersonaScopeType
+{
+    /// <summary>Global SYS- persona (lowest precedence, e.g., the default system prompt).</summary>
+    Global = 100000000,
+
+    /// <summary>Tenant-level CUST- persona (overrides global).</summary>
+    Tenant = 100000001,
+
+    /// <summary>Playbook-attached persona (highest precedence, overrides tenant + global).</summary>
+    PlaybookAttached = 100000002
 }
 
 /// <summary>

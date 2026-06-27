@@ -1,5 +1,7 @@
-using System.Net;
 using System.Text.Json;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
@@ -30,6 +32,12 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// Priority values follow Dataverse appnotification convention:
 ///   100000000 = Informational, 200000000 = Important (default), 300000000 = Urgent
 /// </para>
+/// <para>
+/// Uses the canonical <see cref="IGenericEntityService"/> shared library
+/// (which forwards to <c>DataverseServiceClientImpl</c>) rather than an
+/// app-private named HttpClient. This gives correct BaseAddress + token
+/// acquisition + lifecycle management for app-only execution paths.
+/// </para>
 /// </remarks>
 public sealed class CreateNotificationNodeExecutor : INodeExecutor
 {
@@ -40,17 +48,30 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     /// </summary>
     private const int DefaultPriority = 200_000_000;
 
+    /// <summary>
+    /// Dataverse <c>toasttype</c> option-set value for "Hidden" — the notification produces no visible toast.
+    /// Per FR-18, hidden-toast notifications skip <c>data.actions[]</c> population because the MDA native bell
+    /// surface that would render the action is not shown.
+    /// </summary>
+    private const int ToastTypeHidden = 100_000_000;
+
+    /// <summary>
+    /// Dataverse <c>toasttype</c> option-set default value ("Timed") — visible toast that auto-dismisses.
+    /// Used when no explicit ToastType is supplied in config.
+    /// </summary>
+    private const int DefaultToastType = 200_000_000;
+
     private readonly ITemplateEngine _templateEngine;
-    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IGenericEntityService _entityService;
     private readonly ILogger<CreateNotificationNodeExecutor> _logger;
 
     public CreateNotificationNodeExecutor(
         ITemplateEngine templateEngine,
-        IHttpClientFactory httpClientFactory,
+        IGenericEntityService entityService,
         ILogger<CreateNotificationNodeExecutor> logger)
     {
         _templateEngine = templateEngine;
-        _httpClientFactory = httpClientFactory;
+        _entityService = entityService;
         _logger = logger;
     }
 
@@ -144,6 +165,41 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             var actionUrl = config.ActionUrl is not null
                 ? _templateEngine.Render(config.ActionUrl, templateContext)
                 : null;
+            var dueDate = config.DueDate is not null
+                ? _templateEngine.Render(config.DueDate, templateContext)
+                : null;
+
+            // FR-6 (R4 task 020): render enrichment template strings before passing to entity builder.
+            // Each is null-safe — playbooks that don't supply the field skip the entire rendering pass.
+            var regardingName = config.RegardingName is not null
+                ? _templateEngine.Render(config.RegardingName, templateContext)
+                : null;
+            var sourceEntityType = config.SourceEntityType is not null
+                ? _templateEngine.Render(config.SourceEntityType, templateContext)
+                : null;
+            var sourceId = config.SourceId is not null
+                ? _templateEngine.Render(config.SourceId, templateContext)
+                : null;
+            var sourceModifiedOn = config.SourceModifiedOn is not null
+                ? _templateEngine.Render(config.SourceModifiedOn, templateContext)
+                : null;
+            var sourceOwningUser = config.SourceOwningUser is not null
+                ? _templateEngine.Render(config.SourceOwningUser, templateContext)
+                : null;
+            var viaMatterId = config.ViaMatterId is not null
+                ? _templateEngine.Render(config.ViaMatterId, templateContext)
+                : null;
+            var viaMatterName = config.ViaMatterName is not null
+                ? _templateEngine.Render(config.ViaMatterName, templateContext)
+                : null;
+            // viaMatter.memberships[] is sourced from an upstream LookupUserMembership node
+            // output via `viaMatterMembershipsVariable` (the OutputVariable name; default
+            // "myMatters" matches the canonical playbook pattern in PB-016). Memberships
+            // are projected from `byRole` for the resolved matter ID per FR-6.
+            var viaMatterMemberships = ResolveViaMatterMemberships(
+                context,
+                config.ViaMatterMembershipsVariable,
+                viaMatterId);
 
             // Resolve recipient
             var recipientId = ResolveRecipientId(config, templateContext);
@@ -211,14 +267,18 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 }
             }
 
-            // Build appnotification payload
-            var notificationPayload = BuildNotificationPayload(
+            // Build appnotification entity
+            var entity = BuildNotificationEntity(
                 title, body, category, config.Priority ?? DefaultPriority,
+                config.ToastType ?? DefaultToastType,
                 actionUrl, recipientId.Value, regardingId, regardingType,
+                dueDate,
+                regardingName, sourceEntityType, sourceId, sourceModifiedOn, sourceOwningUser,
+                viaMatterId, viaMatterName, viaMatterMemberships,
                 context);
 
-            // Create the notification via Dataverse Web API
-            var notificationId = await CreateAppNotificationAsync(notificationPayload, cancellationToken);
+            // Create the notification via shared Dataverse client
+            var notificationId = await _entityService.CreateAsync(entity, cancellationToken);
 
             _logger.LogInformation(
                 "CreateNotification node {NodeId} completed — notification {NotificationId} created for user {UserId}: {Title}",
@@ -259,9 +319,6 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
         }
     }
 
-    /// <summary>
-    /// Resolves the recipient systemuserid from config template or run context.
-    /// </summary>
     /// <summary>
     /// Executes the iterate-items path: loops over items from upstream query output,
     /// creates one notification per item using the itemNotification template.
@@ -320,6 +377,20 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             var body = _templateEngine.Render(itemConfig.Body!, itemContext);
             var category = itemConfig.Category is not null ? _templateEngine.Render(itemConfig.Category, itemContext) : null;
             var actionUrl = itemConfig.ActionUrl is not null ? _templateEngine.Render(itemConfig.ActionUrl, itemContext) : null;
+            var dueDate = itemConfig.DueDate is not null ? _templateEngine.Render(itemConfig.DueDate, itemContext) : null;
+
+            // FR-6 enrichment (R4 task 020) — iterate-items path mirrors standard path.
+            var regardingName = itemConfig.RegardingName is not null ? _templateEngine.Render(itemConfig.RegardingName, itemContext) : null;
+            var sourceEntityType = itemConfig.SourceEntityType is not null ? _templateEngine.Render(itemConfig.SourceEntityType, itemContext) : null;
+            var sourceId = itemConfig.SourceId is not null ? _templateEngine.Render(itemConfig.SourceId, itemContext) : null;
+            var sourceModifiedOn = itemConfig.SourceModifiedOn is not null ? _templateEngine.Render(itemConfig.SourceModifiedOn, itemContext) : null;
+            var sourceOwningUser = itemConfig.SourceOwningUser is not null ? _templateEngine.Render(itemConfig.SourceOwningUser, itemContext) : null;
+            var viaMatterId = itemConfig.ViaMatterId is not null ? _templateEngine.Render(itemConfig.ViaMatterId, itemContext) : null;
+            var viaMatterName = itemConfig.ViaMatterName is not null ? _templateEngine.Render(itemConfig.ViaMatterName, itemContext) : null;
+            var viaMatterMemberships = ResolveViaMatterMemberships(
+                context,
+                itemConfig.ViaMatterMembershipsVariable,
+                viaMatterId);
 
             var recipientId = ResolveRecipientId(itemConfig, itemContext);
             if (recipientId is null)
@@ -347,8 +418,15 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 if (isDuplicate) { skipped++; continue; }
             }
 
-            var payload = BuildNotificationPayload(title, body, category, itemConfig.Priority ?? 200_000_000, actionUrl, recipientId.Value, regardingId, regardingType, context);
-            await CreateAppNotificationAsync(payload, cancellationToken);
+            var entity = BuildNotificationEntity(
+                title, body, category, itemConfig.Priority ?? DefaultPriority,
+                itemConfig.ToastType ?? DefaultToastType,
+                actionUrl, recipientId.Value, regardingId, regardingType,
+                dueDate,
+                regardingName, sourceEntityType, sourceId, sourceModifiedOn, sourceOwningUser,
+                viaMatterId, viaMatterName, viaMatterMemberships,
+                context);
+            await _entityService.CreateAsync(entity, cancellationToken);
             created++;
         }
 
@@ -364,6 +442,9 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
             metrics: NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
     }
 
+    /// <summary>
+    /// Resolves the recipient systemuserid from config template or run context.
+    /// </summary>
     private Guid? ResolveRecipientId(NotificationNodeConfig config, Dictionary<string, object?> templateContext)
     {
         if (!string.IsNullOrWhiteSpace(config.RecipientId))
@@ -400,32 +481,19 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     {
         try
         {
-            var client = _httpClientFactory.CreateClient("DataverseApi");
-
-            // Query for unread notifications matching user + regarding + category
-            // appnotification: statecode 0 = Active (unread)
-            var filter = $"_ownerid_value eq '{recipientId}' " +
-                         $"and sprk_category eq '{category}' " +
-                         $"and _regardingobjectid_value eq '{regardingId}' " +
-                         $"and statecode eq 0";
-
-            var requestUrl = $"appnotifications?$filter={Uri.EscapeDataString(filter)}&$top=1&$select=activityid";
-
-            var response = await client.GetAsync(requestUrl, cancellationToken);
-
-            if (!response.IsSuccessStatusCode)
+            var query = new QueryExpression("appnotification")
             {
-                _logger.LogWarning(
-                    "Idempotency check failed with status {StatusCode} — proceeding with creation",
-                    response.StatusCode);
-                return false;
-            }
+                ColumnSet = new ColumnSet("activityid"),
+                TopCount = 1,
+                Criteria = new FilterExpression(LogicalOperator.And)
+            };
+            query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, recipientId);
+            query.Criteria.AddCondition("sprk_category", ConditionOperator.Equal, category);
+            query.Criteria.AddCondition("sprk_regardingid", ConditionOperator.Equal, regardingId.ToString());
+            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
 
-            var content = await response.Content.ReadAsStringAsync(cancellationToken);
-            using var doc = JsonDocument.Parse(content);
-
-            var values = doc.RootElement.GetProperty("value");
-            return values.GetArrayLength() > 0;
+            var result = await _entityService.RetrieveMultipleAsync(query, cancellationToken);
+            return result.Entities.Count > 0;
         }
         catch (Exception ex)
         {
@@ -439,93 +507,236 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     }
 
     /// <summary>
-    /// Builds the appnotification OData payload for Dataverse Web API.
+    /// Builds an SDK <see cref="Entity"/> representing the appnotification to create.
     /// </summary>
-    private static Dictionary<string, object?> BuildNotificationPayload(
+    /// <remarks>
+    /// Per FR-18 (P3): when <paramref name="actionUrl"/> is present, <c>data</c> is serialized as
+    /// <c>{ actions, customData }</c>. <c>customData.actionUrl</c> is populated regardless of
+    /// <paramref name="toastType"/> (consumed by the Daily Briefing UI). The <c>actions</c> array
+    /// (<c>[{ title: "Open", data: { url: actionUrl } }]</c>) is populated ONLY when the toast is
+    /// visible (<paramref name="toastType"/> != <see cref="ToastTypeHidden"/>) so the MDA native bell
+    /// icon shows a clickable "Open" button. Hidden-toast notifications skip <c>data.actions</c>
+    /// because no visible surface renders them.
+    /// </remarks>
+    private static Entity BuildNotificationEntity(
         string title,
         string body,
         string? category,
         int priority,
+        int toastType,
         string? actionUrl,
         Guid recipientId,
         Guid? regardingId,
         string? regardingType,
+        string? dueDate,
+        // FR-6 (R4 task 020): enrichment scalars + viaMatter projection.
+        // All inputs are optional — playbooks not yet migrated to enriched shape produce the
+        // legacy customData payload unchanged (AC-6b backward compat).
+        string? regardingName,
+        string? sourceEntityType,
+        string? sourceId,
+        string? sourceModifiedOn,
+        string? sourceOwningUser,
+        string? viaMatterId,
+        string? viaMatterName,
+        IReadOnlyList<object>? viaMatterMemberships,
         NodeExecutionContext context)
     {
-        var payload = new Dictionary<string, object?>
-        {
-            ["title"] = title,
-            ["body"] = body,
-            ["priority"] = priority,
-            ["ownerid@odata.bind"] = $"/systemusers({recipientId})",
-            ["ttlinseconds"] = 259200  // 3 days default TTL
-        };
+        var entity = new Entity("appnotification");
+        entity["title"] = title;
+        entity["body"] = body;
+        entity["priority"] = new OptionSetValue(priority);
+        entity["toasttype"] = new OptionSetValue(toastType);
+        entity["ownerid"] = new EntityReference("systemuser", recipientId);
+        entity["ttlinseconds"] = 604800; // 7 days default TTL (increased from 3d on 2026-06-22 after UAT showed 36 notifications TTL-purged before user could review them)
 
         // Add category (custom field for idempotency grouping)
         if (!string.IsNullOrWhiteSpace(category))
         {
-            payload["sprk_category"] = category;
+            entity["sprk_category"] = category;
         }
 
-        // Add action URL if specified
-        if (!string.IsNullOrWhiteSpace(actionUrl))
+        // FR-18 (P3) + FR-6 (R4 task 020): build appnotification.data payload.
+        // - customData.actionUrl is populated regardless of toasttype (Daily Briefing UI consumer).
+        // - customData.dueDate is populated when provided (R2.2 — Daily Briefing per-item due-date UX).
+        // - data.actions[] is populated ONLY when actionUrl is present AND toasttype != Hidden
+        //   (so MDA native bell icon shows a clickable "Open" button).
+        // - FR-6 enriched fields (regardingName, regardingEntityType, regardingId, viaMatter, source)
+        //   are added conditionally so old-shape playbooks remain backward compatible (AC-6b).
+        // - viaMatter is OMITTED entirely when no matter linkage (AC-6 / FR-6 requirement: omit, not null).
+        // - Payload typical <2KB, hard ceiling <10KB (AC-6c). Memberships array is the only field
+        //   that can grow; we don't truncate here — upstream LookupUserMembership already caps via
+        //   MembershipResolveOptions.DefaultLimit.
+        // R2.2: data is built whenever actionUrl OR dueDate is present (was: only actionUrl).
+        // R4 task 020: also build data when ANY FR-6 enrichment scalar is present (e.g., notifications
+        // with regarding info but no URL).
+        var hasActionUrl = !string.IsNullOrWhiteSpace(actionUrl);
+        var hasDueDate = !string.IsNullOrWhiteSpace(dueDate);
+        var hasRegardingName = !string.IsNullOrWhiteSpace(regardingName);
+        var hasRegardingId = regardingId.HasValue && regardingId.Value != Guid.Empty;
+        var hasRegardingType = !string.IsNullOrWhiteSpace(regardingType);
+        var hasSourceEntity = !string.IsNullOrWhiteSpace(sourceEntityType) || !string.IsNullOrWhiteSpace(sourceId)
+                             || !string.IsNullOrWhiteSpace(sourceModifiedOn) || !string.IsNullOrWhiteSpace(sourceOwningUser);
+        var hasViaMatter = !string.IsNullOrWhiteSpace(viaMatterId)
+                           && (!string.IsNullOrWhiteSpace(viaMatterName) || viaMatterMemberships is { Count: > 0 });
+
+        if (hasActionUrl || hasDueDate || hasRegardingName || hasRegardingId || hasSourceEntity || hasViaMatter)
         {
-            payload["data"] = JsonSerializer.Serialize(new
+            var customData = new Dictionary<string, object?>();
+            if (hasActionUrl) customData["actionUrl"] = actionUrl;
+            if (hasDueDate) customData["dueDate"] = dueDate;
+
+            // FR-6: regardingName + regardingEntityType + regardingId — flat fields used by widget
+            // grounding + EntityNameValidator allow-list (FR-14).
+            if (hasRegardingName) customData["regardingName"] = regardingName;
+            if (hasRegardingType) customData["regardingEntityType"] = regardingType;
+            if (hasRegardingId) customData["regardingId"] = regardingId!.Value.ToString();
+
+            // FR-6: viaMatter object — present ONLY when matter linkage exists. Per FR-6 + AC-6b,
+            // omit field entirely (not null) when source-record has no matter linkage.
+            if (hasViaMatter)
             {
-                type = "link",
-                url = actionUrl
-            });
+                var viaMatter = new Dictionary<string, object?>
+                {
+                    ["id"] = viaMatterId
+                };
+                if (!string.IsNullOrWhiteSpace(viaMatterName))
+                {
+                    viaMatter["name"] = viaMatterName;
+                }
+                // memberships[] — one entry per role per FR-6 + AC-6 spec.
+                viaMatter["memberships"] = viaMatterMemberships ?? (IReadOnlyList<object>)Array.Empty<object>();
+                customData["viaMatter"] = viaMatter;
+            }
+
+            // FR-6: source object — captures originating record identity for widget grounding +
+            // narration. Built when ANY source-* scalar is present (AC-6a).
+            if (hasSourceEntity)
+            {
+                var source = new Dictionary<string, object?>();
+                if (!string.IsNullOrWhiteSpace(sourceEntityType)) source["entityType"] = sourceEntityType;
+                if (!string.IsNullOrWhiteSpace(sourceId)) source["id"] = sourceId;
+                if (!string.IsNullOrWhiteSpace(sourceModifiedOn)) source["modifiedOn"] = sourceModifiedOn;
+                if (!string.IsNullOrWhiteSpace(sourceOwningUser)) source["owningUser"] = sourceOwningUser;
+                customData["source"] = source;
+            }
+
+            var isVisibleToast = hasActionUrl && toastType != ToastTypeHidden;
+            object dataObject = isVisibleToast
+                ? new
+                {
+                    actions = new[]
+                    {
+                        new
+                        {
+                            title = "Open",
+                            data = new { url = actionUrl }
+                        }
+                    },
+                    customData
+                }
+                : (object)new { customData };
+
+            entity["data"] = JsonSerializer.Serialize(dataObject);
         }
 
-        // Add regarding object if specified
+        // Add regarding info if specified. appnotification is NOT an activity entity
+        // (no polymorphic regardingobjectid lookup), so we store regarding as two text
+        // fields: sprk_regardingid (GUID string) + sprk_regardingtype (entity logical name).
+        // These are also used in CheckForDuplicateNotificationAsync for idempotency.
         if (regardingId.HasValue && !string.IsNullOrWhiteSpace(regardingType))
         {
-            var entitySetName = GetEntitySetName(regardingType);
-            payload[$"regardingobjectid_{regardingType}@odata.bind"] = $"/{entitySetName}({regardingId.Value})";
+            entity["sprk_regardingid"] = regardingId.Value.ToString();
+            entity["sprk_regardingtype"] = regardingType;
         }
 
         // Add AI metadata (playbook run info)
-        payload["sprk_source"] = "playbook";
-        payload["sprk_playbookrunid"] = context.RunId.ToString();
+        entity["sprk_source"] = "playbook";
+        entity["sprk_playbookrunid"] = context.RunId.ToString();
 
-        return payload;
+        return entity;
     }
 
     /// <summary>
-    /// Creates an appnotification record via Dataverse Web API.
+    /// FR-6 (R4 task 020): Projects the viaMatter.memberships[] array for the resolved
+    /// matter ID by reading the upstream LookupUserMembership node's StructuredData output
+    /// (bound to <paramref name="membershipVariable"/>, default "myMatters").
     /// </summary>
-    private async Task<Guid> CreateAppNotificationAsync(
-        Dictionary<string, object?> payload,
-        CancellationToken cancellationToken)
+    /// <remarks>
+    /// <para>
+    /// The LookupUserMembership executor produces:
+    /// <code>
+    /// {
+    ///   "byRole": { "owner": ["matterId1", ...], "assignedAttorney": ["matterId1", ...] }
+    /// }
+    /// </code>
+    /// We project by iterating <c>byRole</c> keys and emitting a one-entry-per-role list
+    /// for the matter IDs that match the resolved <paramref name="viaMatterId"/>. When the
+    /// upstream node is absent, the matter is not in the bucket, or the membership variable
+    /// is not configured, returns null — the caller then omits <c>viaMatter</c> entirely
+    /// (per FR-6 omission rule).
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<object>? ResolveViaMatterMemberships(
+        NodeExecutionContext context,
+        string? membershipVariable,
+        string? viaMatterId)
     {
-        var client = _httpClientFactory.CreateClient("DataverseApi");
-
-        var jsonContent = JsonSerializer.Serialize(payload, JsonOptions);
-        var content = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
-
-        var response = await client.PostAsync("appnotifications", content, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        // Extract the created record ID from the OData-EntityId header
-        if (response.Headers.TryGetValues("OData-EntityId", out var entityIdValues))
+        if (string.IsNullOrWhiteSpace(viaMatterId))
         {
-            var entityIdUrl = entityIdValues.FirstOrDefault();
-            if (entityIdUrl is not null)
-            {
-                // Format: https://{org}.crm.dynamics.com/api/data/v9.2/appnotifications({guid})
-                var guidStart = entityIdUrl.LastIndexOf('(') + 1;
-                var guidEnd = entityIdUrl.LastIndexOf(')');
-                if (guidStart > 0 && guidEnd > guidStart)
-                {
-                    var guidStr = entityIdUrl[guidStart..guidEnd];
-                    if (Guid.TryParse(guidStr, out var createdId))
-                        return createdId;
-                }
-            }
+            return null;
         }
 
-        // Fallback: return a new GUID if we can't extract the ID
-        return Guid.NewGuid();
+        // Default variable name matches canonical PB-016 playbook pattern.
+        var variableName = string.IsNullOrWhiteSpace(membershipVariable)
+            ? "myMatters"
+            : membershipVariable.Trim();
+
+        if (!context.PreviousOutputs.TryGetValue(variableName, out var output)
+            || !output.StructuredData.HasValue)
+        {
+            return null;
+        }
+
+        try
+        {
+            var data = output.StructuredData.Value;
+            if (!data.TryGetProperty("byRole", out var byRoleProp)
+                || byRoleProp.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var memberships = new List<object>();
+            foreach (var roleEntry in byRoleProp.EnumerateObject())
+            {
+                if (roleEntry.Value.ValueKind != JsonValueKind.Array)
+                {
+                    continue;
+                }
+                // Match the matter ID inside this role's array (case-insensitive Guid string compare).
+                foreach (var idElement in roleEntry.Value.EnumerateArray())
+                {
+                    if (idElement.ValueKind != JsonValueKind.String) continue;
+                    var idStr = idElement.GetString();
+                    if (string.Equals(idStr, viaMatterId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        memberships.Add(new Dictionary<string, object?>
+                        {
+                            ["role"] = roleEntry.Name
+                        });
+                        break; // one entry per role; don't duplicate if list contains duplicates
+                    }
+                }
+            }
+
+            return memberships.Count > 0 ? memberships : null;
+        }
+        catch
+        {
+            // Defensive — malformed upstream output is not fatal; viaMatter is omitted gracefully.
+            return null;
+        }
     }
 
     /// <summary>
@@ -537,10 +748,13 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
 
         foreach (var (varName, output) in context.PreviousOutputs)
         {
+            // 2026-06-24 (bug #10 fix): use TemplateEngine.ConvertJsonElement so Handlebars
+            // can navigate nested paths like {{varName.output.count}}. See full rationale on
+            // the matching change in ConditionNodeExecutor.BuildTemplateContext.
             templateContext[varName] = new
             {
                 output = output.StructuredData.HasValue
-                    ? JsonSerializer.Deserialize<object>(output.StructuredData.Value.GetRawText())
+                    ? TemplateEngine.ConvertJsonElement(output.StructuredData.Value)
                     : null,
                 text = output.TextContent,
                 success = output.Success
@@ -567,23 +781,6 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
 
         return templateContext;
     }
-
-    /// <summary>
-    /// Gets the OData entity set name (plural) for a Dataverse entity.
-    /// </summary>
-    private static string GetEntitySetName(string entityLogicalName)
-    {
-        return entityLogicalName switch
-        {
-            "sprk_document" => "sprk_documents",
-            "sprk_matter" => "sprk_matters",
-            "sprk_project" => "sprk_projects",
-            "account" => "accounts",
-            "contact" => "contacts",
-            "task" => "tasks",
-            _ => entityLogicalName.EndsWith("s") ? entityLogicalName : entityLogicalName + "s"
-        };
-    }
 }
 
 /// <summary>
@@ -606,6 +803,14 @@ internal sealed record NotificationNodeConfig
     /// </summary>
     public int? Priority { get; init; }
 
+    /// <summary>
+    /// Dataverse appnotification <c>toasttype</c> option-set value: 100000000=Hidden (no toast),
+    /// 200000000=Timed (auto-dismiss; default), 300000000=Standard (persistent).
+    /// Per FR-18 (P3): when this value is Hidden, <c>data.actions[]</c> is NOT populated
+    /// because the MDA native bell surface that would render the "Open" action is not shown.
+    /// </summary>
+    public int? ToastType { get; init; }
+
     /// <summary>Action URL to navigate when notification is clicked (supports template variables).</summary>
     public string? ActionUrl { get; init; }
 
@@ -622,4 +827,71 @@ internal sealed record NotificationNodeConfig
 
     /// <summary>Notification template for each item when IterateItems is true. Supports {{item.fieldName}} variables.</summary>
     public NotificationNodeConfig? ItemNotification { get; init; }
+
+    /// <summary>
+    /// Optional ISO-8601 due-date string written into <c>appnotification.data.customData.dueDate</c>
+    /// when present. Used by Daily Briefing consumers to render per-item due dates (R2.2).
+    /// Supports template variables (e.g. <c>"{{item.scheduledend}}"</c>). Playbooks that don't
+    /// emit a due date can omit this field — consumers render no due-date row when missing.
+    /// </summary>
+    public string? DueDate { get; init; }
+
+    // -- FR-6 enrichment (R4 task 020) -----------------------------------------------------
+    // All fields below are OPTIONAL — playbooks not yet migrated to enriched shape skip them
+    // entirely. Backward-compatible per AC-6b. Each supports template variables.
+
+    /// <summary>
+    /// Display name of the regarding entity (e.g., matter name). Written to
+    /// <c>customData.regardingName</c>. Used by widget grounding + FR-14 EntityNameValidator
+    /// allow-list. Supports template variables (e.g. <c>"{{item.matterName}}"</c>).
+    /// </summary>
+    public string? RegardingName { get; init; }
+
+    /// <summary>
+    /// Source record entity logical name (e.g., <c>sprk_document</c>, <c>sprk_event</c>).
+    /// Written to <c>customData.source.entityType</c>. Captures originating record identity
+    /// for FR-6 widget grounding. Supports template variables.
+    /// </summary>
+    public string? SourceEntityType { get; init; }
+
+    /// <summary>
+    /// Source record ID (Guid string). Written to <c>customData.source.id</c>. Supports
+    /// template variables (e.g. <c>"{{item.id}}"</c>).
+    /// </summary>
+    public string? SourceId { get; init; }
+
+    /// <summary>
+    /// Source record <c>modifiedon</c> timestamp (ISO-8601). Written to
+    /// <c>customData.source.modifiedOn</c>. Supports template variables.
+    /// </summary>
+    public string? SourceModifiedOn { get; init; }
+
+    /// <summary>
+    /// Source record owning user GUID. Written to <c>customData.source.owningUser</c>.
+    /// Supports template variables.
+    /// </summary>
+    public string? SourceOwningUser { get; init; }
+
+    /// <summary>
+    /// Matter ID the source record is regarding. When present + matter linkage exists,
+    /// written to <c>customData.viaMatter.id</c>. When absent, the entire <c>viaMatter</c>
+    /// field is OMITTED from customData (per FR-6 / AC-6 omission rule — not null).
+    /// Supports template variables (e.g. <c>"{{item.regardingMatterId}}"</c>).
+    /// </summary>
+    public string? ViaMatterId { get; init; }
+
+    /// <summary>
+    /// Display name of the matter. Written to <c>customData.viaMatter.name</c> when
+    /// <see cref="ViaMatterId"/> is present. Supports template variables.
+    /// </summary>
+    public string? ViaMatterName { get; init; }
+
+    /// <summary>
+    /// Name of the upstream <c>LookupUserMembership</c> node's OutputVariable
+    /// (default "myMatters" matches canonical PB-016 pattern). The executor reads this
+    /// variable's StructuredData.byRole bucket, finds entries matching <see cref="ViaMatterId"/>,
+    /// and emits one membership-array entry per role to <c>customData.viaMatter.memberships[]</c>.
+    /// Per FR-6: multi-role case (owner + assignedAttorney) produces multiple array entries.
+    /// </summary>
+    public string? ViaMatterMembershipsVariable { get; init; }
 }

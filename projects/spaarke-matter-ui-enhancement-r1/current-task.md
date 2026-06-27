@@ -13,11 +13,12 @@
 
 | Field | Value |
 |---|---|
-| **Wave** | All code work complete (28/34 tasks). Awaiting decision on Phase 6-8 (form XML + deploys + wrap-up — touch live SPAARKE DEV 1 environment). |
-| **Code phases** | Phase 0 ✅ Phase 1 ✅ Phase 2 ✅ Phase 3 ✅ Phase 4 ✅ Phase 5 ✅ |
-| **Live phases** | Phase 6 🔲 (form XML edit + import) · Phase 7 🔲 (pcf-deploy x2 + bff-deploy + solution import + UAT) · Phase 8 🔲 (wrap-up) |
-| **Status** | 82% complete; awaiting user direction |
-| **Next Action** | User decision: (a) authorize main-session to run Phase 6 form XML edit + Phase 7 deploys on SPAARKE DEV 1, or (b) hand off to manual deployment workflow. PAC CLI + Azure CLI are both installed and authenticated. |
+| **State** | All matter-ui-r1 work (v1.1.50..v1.1.71 + FilePreview promotion + BFF fileSize projection) MERGED to master via PRs #308, #309, #310. SemanticSearchControl PCF at **v1.1.71**. BFF dev environment already running v1.1.71's required `fileSize` projection (deployed 2026-05-30). |
+| **Branch** | master = `e1c43f2f` (after #308 + #310 + #309 merges). Working branch state safe — all 3 PR branches' content now in master. |
+| **Active artifact** | `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.71.zip` (208 KB) — has FilePreview shared-lib promotion + fileSize passthrough for 25 MB email warning |
+| **Pending user actions** | (1) UAT v1.1.71 (validates FilePreview rich preview in PCF + fileSize email-wizard warning); (2) Optional: deploy LegalWorkspace + DRV to UAT rich preview in those surfaces (independent of PCF UAT); (3) Phase 6 form XML; (4) Phase 7 task 074 UAT; (5) Phase 8 task 090 wrap |
+| **Next Action** | Awaiting UAT feedback on v1.1.71. Most likely path: new UAT polish round (v1.1.72+) based on whatever the user finds. |
+| **Compaction handoff** | [`notes/handoffs/handoff-2026-05-29-pre-compact.md`](notes/handoffs/handoff-2026-05-29-pre-compact.md) — v1.1.50→v1.1.69 session. [`handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) — v1.1.45→v1.1.50 |
 
 ### Files Modified This Session
 <!-- Only files touched in CURRENT session, not all time -->
@@ -32,7 +33,7 @@
 
 ### Critical Context
 <!-- 1-3 sentences of essential context for continuation -->
-Pipeline completed Steps 1-4 + auto-started task 001 (✅ done). Task 001 produced the NFR-05 regression baseline (15 active chart defs). Key findings: ZERO Donut chart defs in production (FR-VH-01 has no regression risk to in-prod defs); 3 HIGH-risk defs (Matter KPI Scorecard, Matter Financial Metrics Scorecard, Matter Financial Metrics Stacked Bar) need careful Phase 2 regression smoke; spec.md drift recorded — actual schema is `sprk_entitylogicalname` (not `sprk_entityname`) and `sprk_drillthroughtarget` (not `sprk_drillthroughentity`). Next: task 002 (FULL rigor, substantial — package.json + new service + 2 PCF manifest updates + build verification).
+**Project core complete; in UAT polish loop on SemanticSearchControl PCF.** 31 of 34 tasks merged to master (v1.1.45..v1.1.49 ALL in master via merge commit `b451bbe1`; v1.1.50..v1.1.69 pushed to origin but not yet merged). This session ran 19 polish rounds (v1.1.51 → v1.1.69) addressing iterative UAT feedback across email modal/wizard unification, column width Fluent v9 quirks, header/body alignment, and responsive width caps. Latest pending action: user UAT on v1.1.69 (ZIP at `src/client/pcf/SemanticSearchControl/Solution/bin/SpaarkeSemanticSearch_v1.1.69.zip`). **Session 2 pre-compaction handoff: [`notes/handoffs/handoff-2026-05-29-pre-compact.md`](notes/handoffs/handoff-2026-05-29-pre-compact.md) is the source of truth — READ FIRST.** Prior [`handoff-2026-05-28-pre-compact.md`](notes/handoffs/handoff-2026-05-28-pre-compact.md) covers v1.1.45–v1.1.50 archaeology.
 
 ---
 

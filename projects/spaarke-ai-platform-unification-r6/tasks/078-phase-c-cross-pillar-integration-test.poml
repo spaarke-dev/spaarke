@@ -1,0 +1,99 @@
+<task id="078" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>Phase C cross-pillar integration test (workspace state in prompt + trace + memory + conflict + pinned + Q7 UI)</title>
+    <status>pending</status>
+    <estimated-effort>1 day</estimated-effort>
+    <phase>Phase C — Integration</phase>
+    <wave>C-G4 (sequential after all Phase C deliverable tasks)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>057, 058, 062, 063, 070, 074</dependencies>
+    <tags>frontend, bff-api, integration-test, e2e-test</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration test only; quality gates skipped per task-create §3.5.5 (tests don't require code-review + adr-check at Step 9.5).</rigor-reason>
+    <parallel-group>C-G4</parallel-group>
+  </metadata>
+
+  <prompt>
+    Cross-pillar Phase C integration test exercising all six exit criteria + Q7
+    expansion criterion in a single end-to-end flow. Test scenarios:
+    1. **Workspace state in prompt**: open 3 tabs (2 visible, 1 not); ask "what's on the
+       workspace?"; verify agent answers correctly referencing only visible tabs.
+    2. **Trace widget event ordering**: invoke `/summarize` flow; verify Context pane
+       trace widget shows ordered timeline of tool calls + knowledge retrievals + node
+       executions + decisions.
+    3. **Memory composition**: prior-session matter analysis is retrievable in current
+       session via embedding similarity (task 066).
+    4. **Conflict resolution**: simulate user edit → agent update attempt with stale
+       expected timestamp → verify handler refuses + agent re-reads + re-attempts.
+    5. **Pinned memory persistence**: "remember X" via chat → reload session → verify X
+       appears in pinned memory list widget (task 070) + agent prompt composition (task
+       067).
+    6. **Q7 UI**: create pinned item via UI (task 070); verify it appears in chat memory
+       composition; delete via UI; verify removal.
+  </prompt>
+
+  <role>
+    Senior QA engineer / integration test author with familiarity across Phase C
+    deliverables.
+  </role>
+
+  <goal>
+    All 6 scenarios pass end-to-end. Failures pinpoint specific Phase C task for
+    remediation before exit gate (079).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec Phase C Exit Criteria">All 6 criteria + Q7 (task 070) exercised.</constraint>
+    <constraint source="ADR-015">Test verifies no user content in trace widget events.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>integration-testing</topic>
+    <files>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: STANDARD — Integration test."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 057/058/062/063/070/074 all complete.</step>
+    <step order="2" name="Author Test Harness">Set up BFF + frontend test harness with mock LLM + Cosmos test container + Redis test instance.</step>
+    <step order="3" name="Scenario 1">Workspace state in prompt — privacy filter validated.</step>
+    <step order="4" name="Scenario 2">Trace widget event ordering.</step>
+    <step order="5" name="Scenario 3">Cross-conversation memory recall.</step>
+    <step order="6" name="Scenario 4">Conflict resolution end-to-end.</step>
+    <step order="7" name="Scenario 5">Pinned memory persistence.</step>
+    <step order="8" name="Scenario 6">Q7 UI ↔ chat composition bidirectional sync.</step>
+    <step order="9" name="ADR-015 Audit">Verify trace events contain no user content during full flow.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 078 ✅. Test results recorded in `notes/phase-c-integration-results.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Test runner</tool>
+    <tool name="npm">Frontend test runner</tool>
+    <tool name="ui-test">Browser-based verification</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="tests">tests/integration/PhaseC.CrossPillarTests/ (NEW test suite)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/phase-c-integration-results.md</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 scenarios pass end-to-end.</criterion>
+    <criterion testable="true">ADR-015 audit confirms no user content leakage in trace events during full flow.</criterion>
+    <criterion testable="true">Q7 scenario validates UI ↔ chat composition sync.</criterion>
+    <criterion testable="true">Test results documented for exit gate (079).</criterion>
+  </acceptance-criteria>
+</task>

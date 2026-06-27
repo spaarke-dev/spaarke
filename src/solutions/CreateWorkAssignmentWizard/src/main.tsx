@@ -1,7 +1,7 @@
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
-import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components";
+import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components/utils/themeStorage";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
@@ -13,6 +13,7 @@ function App() {
   const params = React.useMemo(() => parseDataParams(), []);
   const [isAuthReady, setIsAuthReady] = React.useState(false);
   const [resolvedBffBaseUrl, setResolvedBffBaseUrl] = React.useState<string>(params.bffBaseUrl || "");
+  const [resolvedTenantId, setResolvedTenantId] = React.useState<string>("");
 
   React.useEffect(() => {
     return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
@@ -32,6 +33,7 @@ function App() {
         });
         if (!cancelled) {
           setResolvedBffBaseUrl(config.bffBaseUrl);
+          setResolvedTenantId(config.tenantId ?? "");
           setIsAuthReady(true);
         }
       } catch (err) {
@@ -86,6 +88,7 @@ function App() {
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}
         resolveSpeContainerId={resolveSpeContainerId}
+        tenantId={resolvedTenantId}
       />
     </FluentProvider>
   );

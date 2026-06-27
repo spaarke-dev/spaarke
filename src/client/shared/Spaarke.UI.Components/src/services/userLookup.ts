@@ -59,10 +59,7 @@ function formatName(fullName: string, email: string | null | undefined): string 
  * @param query - Search fragment (case-insensitive `contains` on `fullname`).
  * @returns Up to 10 results; empty array when `query` is too short.
  */
-export async function searchUsersAsLookup(
-  dataService: IDataService,
-  query: string
-): Promise<ILookupItem[]> {
+export async function searchUsersAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
   if (!query || query.trim().length < MIN_QUERY_LENGTH) {
     return [];
   }
@@ -91,10 +88,7 @@ export async function searchUsersAsLookup(
  * @param query - Search fragment (case-insensitive `contains` on `fullname`).
  * @returns Up to 10 results; empty array when `query` is too short.
  */
-export async function searchContactsAsLookup(
-  dataService: IDataService,
-  query: string
-): Promise<ILookupItem[]> {
+export async function searchContactsAsLookup(dataService: IDataService, query: string): Promise<ILookupItem[]> {
   if (!query || query.trim().length < MIN_QUERY_LENGTH) {
     return [];
   }
@@ -129,10 +123,7 @@ export async function searchContactsAsLookup(
  * @param query - Search fragment.
  * @returns Up to ~20 merged results (capped per-table).
  */
-export async function searchUsersAndContacts(
-  dataService: IDataService,
-  query: string
-): Promise<ILookupItem[]> {
+export async function searchUsersAndContacts(dataService: IDataService, query: string): Promise<ILookupItem[]> {
   if (!query || query.trim().length < MIN_QUERY_LENGTH) {
     return [];
   }

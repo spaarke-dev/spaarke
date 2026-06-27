@@ -25,6 +25,7 @@ public class IdempotencyService : IIdempotencyService
         try
         {
             var key = GetProcessedKey(eventId);
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): idempotency event IDs are cross-tenant system identifiers (Service Bus message IDs); tenant-scoping would break the exactly-once invariant.
             var value = await _cache.GetAsync(key, cancellationToken);
             var processed = value != null;
 
@@ -53,6 +54,7 @@ public class IdempotencyService : IIdempotencyService
                 AbsoluteExpirationRelativeToNow = expiration ?? DefaultExpiration
             };
 
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): idempotency event IDs are cross-tenant system identifiers (Service Bus message IDs); tenant-scoping would break the exactly-once invariant.
             await _cache.SetAsync(key, Encoding.UTF8.GetBytes("processed"), options, cancellationToken);
             _logger.LogDebug("Marked event {EventId} as processed", eventId);
         }
@@ -68,6 +70,7 @@ public class IdempotencyService : IIdempotencyService
         try
         {
             var key = GetLockKey(eventId);
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): job-processing lock key is system-level (Service Bus message ID); cross-instance lock semantics must be tenant-agnostic.
             var existingValue = await _cache.GetAsync(key, cancellationToken);
 
             if (existingValue != null)
@@ -81,6 +84,7 @@ public class IdempotencyService : IIdempotencyService
                 AbsoluteExpirationRelativeToNow = lockDuration ?? DefaultLockDuration
             };
 
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): job-processing lock key is system-level (Service Bus message ID); cross-instance lock semantics must be tenant-agnostic.
             await _cache.SetAsync(key, Encoding.UTF8.GetBytes("locked"), options, cancellationToken);
             _logger.LogDebug("Acquired processing lock for event {EventId}", eventId);
             return true;
@@ -98,6 +102,7 @@ public class IdempotencyService : IIdempotencyService
         try
         {
             var key = GetLockKey(eventId);
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): job-processing lock key is system-level (Service Bus message ID); release path mirrors acquire path.
             await _cache.RemoveAsync(key, cancellationToken);
             _logger.LogDebug("Released processing lock for event {EventId}", eventId);
         }

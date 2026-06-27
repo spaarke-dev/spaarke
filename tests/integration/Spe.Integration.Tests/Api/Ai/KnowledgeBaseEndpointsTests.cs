@@ -67,6 +67,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     /// The mock SearchIndexClient returns deterministic counts for each index.
     /// </summary>
     [Fact]
+    [Trait("status", "repaired")]
     public async Task GetIndexHealth_ReturnsDocCounts_WhenAuthenticated()
     {
         // Arrange
@@ -88,6 +89,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     }
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task GetIndexHealth_Returns401_WhenUnauthenticated()
     {
         // Arrange — no bearer token
@@ -105,6 +107,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     // -------------------------------------------------------------------------
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task GetIndexedDocuments_ReturnsOk_WhenAuthenticatedWithValidIndex()
     {
         // Arrange
@@ -125,6 +128,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     }
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task GetIndexedDocuments_Returns404_WhenIndexNameUnknown()
     {
         // Arrange
@@ -138,6 +142,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     }
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task GetIndexedDocuments_Returns401_WhenUnauthenticated()
     {
         // Arrange
@@ -159,6 +164,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     /// The mock IRagService.DeleteBySourceDocumentAsync returns a known chunk count (3).
     /// </summary>
     [Fact]
+    [Trait("status", "repaired")]
     public async Task DeleteIndexedDocument_ReturnsOk_WhenDocumentExists()
     {
         // Arrange — the mock returns 3 chunks deleted for any document
@@ -180,6 +186,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     }
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task DeleteIndexedDocument_Returns404_WhenNoChunksFound()
     {
         // Arrange — use "empty-doc-id" which the mock maps to 0 chunks
@@ -195,6 +202,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     }
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task DeleteIndexedDocument_Returns401_WhenUnauthenticated()
     {
         // Arrange
@@ -213,6 +221,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     // -------------------------------------------------------------------------
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task ReindexDocument_Returns202Accepted_WhenAuthenticated()
     {
         // Arrange
@@ -235,6 +244,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     }
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task ReindexDocument_Returns401_WhenUnauthenticated()
     {
         // Arrange
@@ -258,6 +268,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     /// The mock IRagService.SearchAsync returns predictable results.
     /// </summary>
     [Fact]
+    [Trait("status", "repaired")]
     public async Task TestSearch_ReturnsResults_WhenAuthenticated()
     {
         // Arrange
@@ -285,6 +296,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     }
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task TestSearch_Returns400_WhenQueryMissing()
     {
         // Arrange — send an empty query body
@@ -299,6 +311,7 @@ public class KnowledgeBaseEndpointsTests : IClassFixture<KnowledgeBaseTestFixtur
     }
 
     [Fact]
+    [Trait("status", "repaired")]
     public async Task TestSearch_Returns401_WhenUnauthenticated()
     {
         // Arrange
@@ -377,6 +390,16 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
         builder.UseSetting("DocumentIntelligence:RecordMatchingEnabled", "false");
         builder.UseSetting("Analysis:Enabled", "false");
 
+        // SpeAdmin — required by SpeAdminModule (KeyVault SecretClient).
+        // Per sdap-bff.api-test-suite-repair task 027 (sibling-fixture absorption).
+        // Mirrors IntegrationTestFixture.cs line 74 (canonical fix in task 062).
+        builder.UseSetting("SpeAdmin:KeyVaultUri", "https://test-keyvault.vault.azure.net/");
+
+        // CosmosPersistence — required by AiPersistenceModule (raw config read).
+        // Per sdap-bff.api-test-suite-repair task 027 (sibling-fixture absorption).
+        // Mirrors IntegrationTestFixture.cs line 81 (canonical fix in task 062).
+        builder.UseSetting("CosmosPersistence:Endpoint", "https://test.documents.azure.com:443/");
+
         builder.ConfigureTestServices(services =>
         {
             // Replace IRagService with a controllable mock
@@ -420,9 +443,7 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IScopeManagementService>(Moq.MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(Moq.MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IModelSelector>(Moq.MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IIntentClassificationService>(Moq.MockBehavior.Loose).Object);
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IEntityResolutionService>(Moq.MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IClarificationService>(Moq.MockBehavior.Loose).Object);
 
             // Semantic Search & Record Search - endpoints are always mapped but services
             // only register when Analysis:Enabled=true && DocumentIntelligence:Enabled=true
@@ -490,7 +511,7 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
             });
             services.AddScoped(sp =>
             {
-                var cache = sp.GetRequiredService<IDistributedCache>();
+                var cache = sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
                 var repo = sp.GetRequiredService<IChatDataverseRepository>();
                 var logger = NullLogger<ChatSessionManager>.Instance;
                 return new ChatSessionManager(cache, repo, logger);
@@ -585,6 +606,84 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
 
         MockRagService
             .Setup(r => r.DeleteBySourceDocumentAsync(
+                EmptyDocumentId,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+
+        // ---------------------------------------------------------------
+        // Mock setups added 2026-06-01 (RB-T028-03/04/05/06 repair):
+        // Tier 3 B8 refactor (task 011 Phase 1b) promoted SearchIndexClient direct usage in
+        // KnowledgeBaseEndpoints into 3 new IRagService methods. Tests must set these up
+        // since the fixture replaces IRagService with a mock — without setups, Moq returns
+        // the default value (null for KnowledgeIndexHealth/IndexedDocumentsPage), causing
+        // NullReferenceException → 500 in the endpoint handlers.
+        // ---------------------------------------------------------------
+
+        // GetIndexHealthAsync — returns a non-null KnowledgeIndexHealth with deterministic counts.
+        // Shape mirrors production RagService.GetIndexHealthAsync return at line 752 of RagService.cs.
+        MockRagService
+            .Setup(r => r.GetIndexHealthAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new KnowledgeIndexHealth(
+                KnowledgeDocCount: 42,
+                DiscoveryDocCount: 17,
+                LastUpdated: DateTimeOffset.UtcNow,
+                KnowledgeIndexName: "spaarke-knowledge-index-v2",
+                DiscoveryIndexName: "discovery-index"));
+
+        // GetIndexedDocumentsAsync — for the "nonexistent-index" path, throw ArgumentException
+        // with ParamName="indexName" to preserve the 404 mapping the endpoint catches.
+        // Setup ordering matters in Moq: specific match must come BEFORE the catch-all.
+        MockRagService
+            .Setup(r => r.GetIndexedDocumentsAsync(
+                "nonexistent-index",
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("Unknown index 'nonexistent-index'.", "indexName"));
+
+        // GetIndexedDocumentsAsync — for known indices, return a non-null IndexedDocumentsPage.
+        // Shape mirrors production RagService.GetIndexedDocumentsAsync at lines 811-816.
+        MockRagService
+            .Setup(r => r.GetIndexedDocumentsAsync(
+                It.Is<string>(name => name != "nonexistent-index"),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string indexName, string tenantId, int page, int pageSize, CancellationToken _) =>
+                new IndexedDocumentsPage(
+                    IndexName: indexName,
+                    Documents: new List<IndexedDocumentSummary>
+                    {
+                        new IndexedDocumentSummary(
+                            ChunkId: "chunk-001",
+                            DocumentId: "doc-00000000-0000-0001",
+                            FileName: "Employment Contract.pdf",
+                            CreatedAt: DateTimeOffset.UtcNow.AddDays(-2),
+                            UpdatedAt: DateTimeOffset.UtcNow.AddDays(-1))
+                    },
+                    Page: page,
+                    PageSize: pageSize,
+                    TotalCount: 1));
+
+        // DeleteIndexedDocumentAsync — returns >0 chunks for any document except EmptyDocumentId
+        // (preserves the 404 path for that sentinel). Mirrors the DeleteBySourceDocumentAsync
+        // mock convention above.
+        MockRagService
+            .Setup(r => r.DeleteIndexedDocumentAsync(
+                It.IsAny<string>(),
+                It.Is<string>(id => id != EmptyDocumentId),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(3);
+
+        MockRagService
+            .Setup(r => r.DeleteIndexedDocumentAsync(
+                It.IsAny<string>(),
                 EmptyDocumentId,
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))

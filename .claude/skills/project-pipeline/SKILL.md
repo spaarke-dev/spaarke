@@ -328,6 +328,16 @@ Recommendations:
 
 **Purpose:** Load ALL implementation context (ADRs, skills, patterns, knowledge docs, pattern file pointers) for task creation.
 
+> **Pre-step (added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-061 per spec FR-C04)**: Before resource discovery, read **`projects/INDEX.md`** (the active-project registry maintained by this skill + task-execute). For the new project being initialized:
+>
+> 1. Parse the new project's spec.md / design.md to detect hot-path touches (BFF / SpaarkeAi / ci-workflows / skill-directives / root-CLAUDE).
+> 2. For each detected hot-path, query INDEX.md for OTHER active projects with the same hot-path declared (YES column for the same surface).
+> 3. **If overlap detected**: emit a HARD WARNING in Step 2's output naming the overlapping projects + coordination recommendation. Do NOT block the pipeline — the user decides how to sequence.
+> 4. **If no overlap**: silent log `✅ Hot-path surfaces unique among active worktrees`.
+> 5. After the new project is initialized, append its row to `projects/INDEX.md` (project name, branch, worktree path, hot-path declaration, last-touched date).
+>
+> The hot-path overlap warning is informational, not blocking. Its purpose: prevent silent collisions on shared files when 5+ worktrees touch the same surface (per CICD-030 finding: 13 of 17 worktrees touch BFF).
+
 **Action Part 1: Comprehensive Resource Discovery**
 ```
 LOAD context:
@@ -470,6 +480,7 @@ REQUIREMENTS (from task-create):
   - Each task MUST include <knowledge><files> and it MUST NOT be empty
   - PCF tasks MUST include docs/guides/PCF-DEPLOYMENT-GUIDE.md and src/client/pcf/CLAUDE.md
   - Applicable ADRs MUST be included via docs/adr/*.md (see task-create Step 3.5)
+  - **(Added 2026-06-26 by ci-cd-unit-test-remediation-r1 task CICD-061 per spec FR-C04)** — IF the project's spec.md or design.md indicates BFF (`src/server/api/Sprk.Bff.Api/**`) or SpaarkeAi (`src/solutions/SpaarkeAi/**`) touch, design.md MUST contain a `<hot-path-declaration>` XML block enumerating: BFF Y/N, SpaarkeAi Y/N, ci-workflows Y/N, skill-directives Y/N, root-CLAUDE.md Y/N. The pipeline EMITS A HARD WARNING and flags the project for design-doc update if this block is absent. The warning is informational (does not block task generation) but is escalated in the pipeline's Step 2 output so the operator sees it before Phase 1 begins. Reference: `projects/INDEX.md` entries dogfood this rule.
 
 CREATE directory:
   - projects/{project-name}/tasks/
@@ -968,3 +979,18 @@ Pipeline successful when:
 ---
 
 *For Claude Code: This is the recommended entry point for new projects with existing spec.md. Provides streamlined UX with human-in-loop confirmation.*
+
+---
+
+## Portfolio Hook (added 2026-06-23 by spaarke-devops-project-tracking-r1 task 031 · FR-17)
+
+**At start of skill** (after Step 1 spec validation, before resource discovery): check `projects/{name}/README.md` for `> **Portfolio**:` pointer block.
+
+- **If pointer block ABSENT**: prompt "Register this project on the portfolio? [Y/n]" → on Y, invoke `/devops-project-register` (will prompt for `--epic`).
+- **If pointer block PRESENT**: silently invoke `/devops-project-sync`.
+
+Hook is silent on success (single ✅ line). Failures degrade to ⚠️ warn; do NOT block pipeline progression (NFR-03).
+
+Register prompt fires at most ONCE per project — subsequent runs always sync silently.
+
+See: [`.claude/skills/devops-project-register/SKILL.md`](../devops-project-register/SKILL.md), [`.claude/skills/devops-project-sync/SKILL.md`](../devops-project-sync/SKILL.md).

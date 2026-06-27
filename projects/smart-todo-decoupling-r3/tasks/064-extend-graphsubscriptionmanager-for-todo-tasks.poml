@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Extend `GraphSubscriptionManager` for `/me/todo/lists/{id}/tasks` resource + nightly renewal job</title>
+    <phase>Phase 7: Graph Sync Engine</phase>
+    <status>not-started</status>
+    <estimated-effort>4-5 hours</estimated-effort>
+    <dependencies>063</dependencies>
+    <blocks>066</blocks>
+    <tags>bff-api, api, backend, worker, integration-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies critical Graph subscription infrastructure + new scheduled job. FULL rigor.</rigor-reason>
+    <parallel-group>P7-W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the same `GraphSubscriptionManager` as inbound work; sequential within Phase 7.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `GraphSubscriptionManager` to create and maintain change-notification subscriptions on `/me/todo/lists/{spaarkeListId}/tasks` for each opted-in user. Replace the Null-Object impl from task 018 with a real `TodoSubscriptionManager` that calls `EnsureSubscriptionAsync(userId, listId)`. Implement a nightly scheduled job that renews subscriptions whose `expiresUtc` is within the next 24 hours. Renewal failures are alarmed.
+  </prompt>
+
+  <role>Spaarke BFF API developer with Microsoft Graph change notifications + background jobs expertise.</role>
+
+  <goal>Per-user subscription on `/me/todo/lists/{id}/tasks` provisioned at opt-in. Nightly job renews subscriptions within 24h of expiry. Failures alarmed. Tests cover create + renew + failure paths.</goal>
+
+  <constraints>
+    <constraint source="FR-22">Per-user subscription on `/me/todo/lists/{spaarkeListId}/tasks`; webhook validates `clientState` + responds to validation token within 10s.</constraint>
+    <constraint source="NFR-07">Nightly renewal within 24h of expiry; failure alarmed.</constraint>
+    <constraint source="ADR-028">OBO token flow.</constraint>
+    <constraint source="bff-extensions.md §F">Test obligation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphSubscriptionManager.cs</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/jobs.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing `GraphSubscriptionManager` to understand pattern for adding a new resource type (mail subscriptions are precedent).</step>
+    <step order="2">Add support for `/me/todo/lists/{listId}/tasks` resource: subscription create + delete + list-by-user.</step>
+    <step order="3">Implement `TodoSubscriptionManager` (replaces Null-Object); calls into extended `GraphSubscriptionManager`; persists `subscriptionId` + `expiresUtc` to `sprk_userpreference` row.</step>
+    <step order="4">Implement nightly scheduled job (`SubscriptionRenewalJob` or extend existing renewal infrastructure): query user-pref rows where `expiresUtc &lt; now + 24h`; renew each (delete + recreate); on failure, log + emit alert.</step>
+    <step order="5">Unit + integration tests: create new subscription, renew before expiry, handle renewal failure (alert emitted), handle expired subscription auto-replaced.</step>
+    <step order="6">DI registration: replace Null-Object binding for `ITodoSubscriptionManager`; register the nightly job.</step>
+    <step order="7">Run `dotnet build` + `dotnet test`. BFF publish-size + CVE checks.</step>
+    <step order="8">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphSubscriptionManager.cs` (extended)</output>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Services/Todo/TodoSubscriptionManager.cs`</output>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Services/Jobs/SubscriptionRenewalJob.cs` (or extension)</output>
+    <output type="test">`tests/unit/Sprk.Bff.Api.Tests/Services/Todo/TodoSubscriptionManagerTests.cs`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per-user subscription created on opt-in.</criterion>
+    <criterion testable="true">Nightly job renews within 24h of expiry.</criterion>
+    <criterion testable="true">Renewal failure emits an alert.</criterion>
+    <criterion testable="true">Expired subscription auto-replaced on next renewal cycle.</criterion>
+    <criterion testable="true">Unit + integration tests pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

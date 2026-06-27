@@ -1,0 +1,50 @@
+{
+  "_version": "1.0",
+  "source": {
+    "type": "savedquery",
+    "savedQueryId": "a3f6d045-9a5e-f111-ab0c-7c1e521545d7"
+  },
+  "display": {
+    "title": "KPI Assessments",
+    "densityDefault": "compact",
+    "emptyStateMessage": "No KPI assessments for this matter."
+  },
+  "filterChips": {
+    "mode": "auto"
+  },
+  "commandBar": {
+    "showDefaultCommands": {
+      "newRecord": true,
+      "refresh": true,
+      "exportExcel": true,
+      "delete": false,
+      "editColumns": false,
+      "editFilters": false
+    }
+  },
+  "rowOpen": {
+    "type": "navigateToForm"
+  },
+  "secondaryActions": [
+    {
+      "id": "ask-sprkchat-kpi",
+      "label": "Ask Sprkchat",
+      "icon": "Chat20Regular",
+      "kind": "ai-assistant",
+      "requiresSelection": "single",
+      "aiAssistantId": "default"
+    }
+  ],
+  "behavior": {
+    "selectionMode": "multi",
+    "pageSize": 100,
+    "enableSorting": true,
+    "enableColumnResize": true,
+    "enableKeyboardNavigation": true,
+    "parentContextFilter": {
+      "attribute": "sprk_matter",
+      "parentContextKey": "matterId",
+      "operator": "eq"
+    }
+  }
+}

@@ -1,8 +1,8 @@
-using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -31,8 +31,21 @@ public class AnalysisChatContextResolver
     /// <summary>Absolute TTL for analysis context cache entries (ADR-009).</summary>
     internal static readonly TimeSpan ContextCacheTtl = TimeSpan.FromMinutes(30);
 
-    /// <summary>Cache key prefix. Must match the pattern expected by any eviction logic.</summary>
-    internal const string CacheKeyPrefix = "chat-context:";
+    /// <summary>Tenant-cache resource name for analysis-context payloads (FR-05).</summary>
+    internal const string CacheResource = "analysis-chat-context";
+
+    /// <summary>Tenant-cache schema version for analysis-context payloads.</summary>
+    internal const int CacheVersion = 1;
+
+    /// <summary>Legacy alias retained for tests that referenced the pre-FR-05 prefix constant.</summary>
+    internal const string CacheKeyPrefix = "tenant:";
+
+    /// <summary>
+    /// Reproduces the on-wire cache key produced by <see cref="ITenantCache"/> for legacy
+    /// test consumers. Format: <c>tenant:{tenantId}:analysis-chat-context:{analysisId}:v1</c>.
+    /// </summary>
+    internal static string BuildCacheKey(string tenantId, string analysisId)
+        => $"tenant:{tenantId}:{CacheResource}:{analysisId}:v{CacheVersion}";
 
     /// <summary>
     /// Static mapping from <c>sprk_playbookcapabilities</c> Dataverse option set integer values
@@ -91,25 +104,47 @@ public class AnalysisChatContextResolver
                 "Summarize content"),
         };
 
-    private readonly IGenericEntityService _entityService;
-    private readonly IDistributedCache _cache;
-    private readonly ILogger<AnalysisChatContextResolver> _logger;
-
     /// <summary>
-    /// Builds the Redis cache key for an analysis context lookup.
-    /// Key format: <c>chat-context:{tenantId}:{analysisId}</c> (ADR-014 — tenant-scoped).
+    /// Configuration key that activates the unit-test seam.
+    /// When this key is <c>"true"</c> in <see cref="IConfiguration"/> AND the incoming
+    /// <c>analysisId</c> is NOT a parseable GUID, the resolver returns a canned
+    /// <see cref="AnalysisChatContextResponse"/> instead of attempting Dataverse resolution.
+    ///
+    /// This restores the unit-testable seam used by 7 endpoint tests in
+    /// <c>AnalysisChatContextEndpointsTests</c> (RB-T070-03) without altering production
+    /// behavior: in production this key is never set, so the seam is dormant.
+    ///
+    /// Distinction from a kill switch (ADR-018):
+    ///   * ADR-018 kill switches DISABLE a feature and return <c>503</c> when off.
+    ///   * This is a TEST SEAM — it does not disable the resolver in production; it provides
+    ///     an alternate response only for non-GUID IDs in the in-process test factory.
+    ///   * Production GUIDs always traverse the Dataverse path unchanged.
     /// </summary>
-    internal static string BuildCacheKey(string tenantId, string analysisId)
-        => $"{CacheKeyPrefix}{tenantId}:{analysisId}";
+    internal const string TestStubConfigKey = "Analysis:UseStubResolver";
+
+    private readonly IGenericEntityService _entityService;
+    private readonly ITenantCache _cache;
+    private readonly ILogger<AnalysisChatContextResolver> _logger;
+    private readonly bool _testStubEnabled;
 
     public AnalysisChatContextResolver(
         IGenericEntityService entityService,
-        IDistributedCache cache,
-        ILogger<AnalysisChatContextResolver> logger)
+        ITenantCache cache,
+        ILogger<AnalysisChatContextResolver> logger,
+        IConfiguration? configuration = null)
     {
         _entityService = entityService;
         _cache = cache;
         _logger = logger;
+        // ADR-010 compliance: IConfiguration is a framework-provided service already in DI.
+        // No new DI registration is added for the test seam (RB-T070-03 Path 1).
+        // configuration is optional (null-default) so pre-existing direct-construction unit
+        // tests (e.g., ContextResolverIntegrationTests, AnalysisChatContextResolverTests) need
+        // no per-test changes — they get _testStubEnabled=false, preserving the production
+        // Dataverse path they already exercise. The runtime DI container always supplies a
+        // non-null IConfiguration.
+        _testStubEnabled = configuration is not null
+            && configuration.GetValue<bool>(TestStubConfigKey, defaultValue: false);
     }
 
     /// <summary>
@@ -130,23 +165,40 @@ public class AnalysisChatContextResolver
         ChatHostContext? hostContext = null,
         CancellationToken ct = default)
     {
-        var cacheKey = BuildCacheKey(tenantId, analysisId);
+        // ====================================================================
+        // Unit-test seam (RB-T070-03 Path 1, owner-approved 2026-06-01)
+        // --------------------------------------------------------------------
+        // When the test-seam config key Analysis:UseStubResolver is "true" AND
+        // the supplied analysisId is NOT a parseable GUID, return a canned
+        // response so the in-process CustomWebAppFactory tests can spot-check
+        // the endpoint mapping and response shape without a real Dataverse
+        // back end. Production never sets this key, so the path is dormant
+        // in real traffic. Production GUID-based requests ALWAYS traverse the
+        // Dataverse pipeline below — the seam never intercepts them.
+        //
+        // NOT a kill switch (ADR-018): does not disable the feature; does not
+        // return 503; only provides an alternate response for the dev/test
+        // path. Distinct from Analysis:Enabled which IS an ADR-018 kill switch.
+        // ====================================================================
+        if (_testStubEnabled && !Guid.TryParse(analysisId, out _))
+        {
+            _logger.LogDebug(
+                "Test seam active — returning canned analysis context for non-GUID id {AnalysisId}",
+                analysisId);
+            return BuildCannedTestStubResponse(analysisId);
+        }
 
-        // Hot path: Redis cache (ADR-009 — Redis first)
+        // Hot path: Redis cache (ADR-009 — Redis first). Tenant-scoped via ITenantCache (FR-05).
         try
         {
-            var cachedBytes = await _cache.GetAsync(cacheKey, ct);
-            if (cachedBytes is not null)
+            var cached = await _cache.GetAsync<AnalysisChatContextResponse>(
+                tenantId, CacheResource, analysisId, CacheVersion, ct: ct);
+            if (cached is not null)
             {
                 _logger.LogDebug(
                     "Cache HIT for analysis context (tenant={TenantId}, analysis={AnalysisId})",
                     tenantId, analysisId);
-
-                var cached = JsonSerializer.Deserialize<AnalysisChatContextResponse>(cachedBytes);
-                if (cached is not null)
-                {
-                    return cached;
-                }
+                return cached;
             }
         }
         catch (Exception ex)
@@ -169,7 +221,7 @@ public class AnalysisChatContextResolver
         }
 
         // Cache the result with a 30-minute absolute TTL (ADR-009)
-        await CacheContextAsync(cacheKey, response, ct);
+        await CacheContextAsync(tenantId, analysisId, response, ct);
 
         return response;
     }
@@ -585,30 +637,66 @@ public class AnalysisChatContextResolver
     // Private: Caching
     // =========================================================================
 
+    // =========================================================================
+    // Private: Test Seam (RB-T070-03 Path 1)
+    // =========================================================================
+
+    /// <summary>
+    /// Builds a canned <see cref="AnalysisChatContextResponse"/> for the unit-test seam.
+    /// Returned only when <see cref="TestStubConfigKey"/> is <c>true</c> AND <paramref name="analysisId"/>
+    /// is not a parseable GUID — production path is unaffected.
+    ///
+    /// Shape matches what the 7 RB-T070-03 tests assert:
+    ///  * Non-empty <c>DefaultPlaybookName</c>.
+    ///  * All 7 inline actions from <see cref="CapabilityToActionMap"/> including
+    ///    <c>selection_revise</c> with <c>ActionType="diff"</c>.
+    ///  * <c>AnalysisContext.AnalysisId</c> echoes the route parameter.
+    /// </summary>
+    private static AnalysisChatContextResponse BuildCannedTestStubResponse(string analysisId)
+    {
+        return new AnalysisChatContextResponse(
+            DefaultPlaybookId: string.Empty,
+            DefaultPlaybookName: "Default Analysis Playbook",
+            AvailablePlaybooks: [],
+            InlineActions: CapabilityToActionMap.Values.ToList(),
+            KnowledgeSources: [],
+            AnalysisContext: new AnalysisContextInfo(
+                AnalysisId: analysisId,
+                AnalysisType: null,
+                MatterType: null,
+                PracticeArea: null,
+                SourceFileId: null,
+                SourceContainerId: null));
+    }
+
     /// <summary>
     /// Serialises the context response to JSON and stores it in Redis with a 30-minute
     /// absolute TTL (ADR-009 — no sliding expiration to prevent stale data accumulation).
+    /// Tenant-scoped via <see cref="ITenantCache"/> per FR-05.
     /// </summary>
     private async Task CacheContextAsync(
-        string cacheKey,
+        string tenantId,
+        string analysisId,
         AnalysisChatContextResponse response,
         CancellationToken ct)
     {
         try
         {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(response);
-            var options = new DistributedCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = ContextCacheTtl
-            };
-            await _cache.SetAsync(cacheKey, bytes, options, ct);
+            await _cache.SetAsync(
+                tenantId,
+                CacheResource,
+                analysisId,
+                CacheVersion,
+                response,
+                ContextCacheTtl,
+                ct: ct);
         }
         catch (Exception ex)
         {
             // Redis failure should not block context resolution — degrade gracefully
             _logger.LogWarning(ex,
-                "Redis cache write failed for analysis context (key={CacheKey}); result will not be cached",
-                cacheKey);
+                "Redis cache write failed for analysis context (tenant={TenantId}, analysis={AnalysisId}); result will not be cached",
+                tenantId, analysisId);
         }
     }
 }

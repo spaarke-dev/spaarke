@@ -1,0 +1,228 @@
+<task id="028" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>Triage + §6.2 re-classification of 51 residual Failed tests for Phase 2+3 close</title>
+    <status>completed</status>
+    <completion-date>2026-05-31</completion-date>
+    <completion-notes>
+      All 51 residual `Failed` tests classified to §6.2 final end-states (100% `real-bug-pending-fix`).
+      8 new RB-T028-NN ledger entries appended (RB-T028-01..08, severities: HIGH x4, MEDIUM x3, LOW x1).
+      Created `flaky-ledger.md` with zero-entries canonical schema doc.
+      Post-028 TRX measurements confirm `Failed: 0` in both suites:
+        - Unit: 6030 total / 5893 pass / 0 fail / 137 skip
+        - Integration: 421 total / 323 pass / 0 fail / 98 skip
+      Authoritative report: `baseline/post-028-classification-2026-05-31.md`.
+      §4.3 / NFR-10 binding rule satisfied; Phase 2+3 exit gate REVISED from PARTIAL → FULL CLOSURE.
+      NFR proof: NFR-01 ✅ (0 src/power-platform/infra/scripts mods), NFR-02 ✅ (<5% per file), NFR-04 ✅ (0 archives), NFR-09 ✅, NFR-11 ✅ (0 build errors).
+      Quality Gates: code-review PASS (attribute-only diffs), adr-check PASS (no architectural impact), build PASS (0 errors both projects).
+    </completion-notes>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3-close, residual-classification, triage, real-bug-pending-fix, flaky-quarantined</tags>
+    <parallel-group>2-3-exit</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches both unit + integration test projects; needs coherent disposition view across all 51 residuals; runs sequentially to avoid muddying full-suite measurements.</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Task 074 (Phase 2+3 verification gate) measured 51 residual `Failed` tests across the
+    two test projects after Wave 2.5 closed. These tests CANNOT remain in `Failed` state at
+    project close per §4.3 and NFR-10. Apply the §6.2 final-end-state taxonomy:
+
+    - `repaired` — if the test can be quickly fixed within this task (line-level edits)
+    - `real-bug-pending-fix` — if a production bug surfaces (Skip + ledger entry)
+    - `flaky-quarantined` — if non-deterministic with environmental cause (Skip + flaky-ledger entry)
+    - archived (via `*.cs.archived-YYYY-MM-DD` rename) — if test is dead-target / obsolete
+
+    NEVER leave `Failed`. Apply Skip + appropriate Trait + ledger entry where Skip is the outcome.
+
+    The 51 residuals fall into 2 groups:
+    - **Unit (4)**: 3 × Layer2OutcomeExtractionTests (HOLD per task 008 Insights sibling sign-off)
+      + 1 × AnalysisContextBuilderTests.BuildContinuationPrompt_ExceedsMaxHistory_TruncatesToLimit
+      (NEW emergent — investigate; not in post-018 inventory)
+    - **Integration (47)**: KnowledgeBase 13 + Chat 11 + Upload 9 + ReAnalysis 8 + Auth 5
+      + PrecedentAdmin 1. Per task 027's discovery, all are "Failure to infer one or more
+      parameters" — endpoint DI/binding gaps unmasked by clean host boot. Likely production
+      missed registering bindings → real-bug-pending-fix.
+  </prompt>
+
+  <role>AI agent investigating + classifying residual failures to satisfy §4.3 / NFR-10 (no `Failed` end-state).</role>
+
+  <goal>
+    All 51 residual tests have a §6.2 final end-state (NOT `Failed`). Real-bug ledger and
+    flaky-ledger updated with severity + fix-by + recommended production-side fix for each
+    entry. Project is structurally ready for Phase 4 task 086's final verification gate.
+  </goal>
+
+  <inputs>
+    <file purpose="authoritative-baseline">projects/sdap-bff.api-test-suite-repair/baseline/post-phase23-authoritative-2026-05-31.md</file>
+    <file purpose="unit-trx">projects/sdap-bff.api-test-suite-repair/baseline/post-phase23-2026-05-31.trx</file>
+    <file purpose="integration-trx">projects/sdap-bff.api-test-suite-repair/baseline/post-phase23-integration-2026-05-31.trx</file>
+    <file purpose="real-bug-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file purpose="task-027-discovery">projects/sdap-bff.api-test-suite-repair/notes/handoffs/integration-fixture-sibling-discovery-2026-05-31.md</file>
+    <file purpose="task-027-delta">projects/sdap-bff.api-test-suite-repair/baseline/post-027-delta-2026-05-31.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No `src/`, `power-platform/`, `infra/`, `scripts/` changes — production-side fixes filed in ledger, not applied</constraint>
+    <constraint source="NFR-02">>50% rewrite ESCALATES via `escalations/rewrite-request-T-028-{FileName}.md`</constraint>
+    <constraint source="NFR-09">`repair-not-rewrite: true` declared in metadata</constraint>
+    <constraint source="§4.3 / NFR-10">No `Failed` end-state at project close — Skip + Trait + ledger is the resolution</constraint>
+    <constraint source="§6.2">Final end-states: `repaired` / `real-bug-pending-fix` / `flaky-quarantined` / archived</constraint>
+    <constraint source="NFR-04">Archive count cumulative ≤10 across phases — Wave 2.5 was 0, this task may add a few but must not exceed</constraint>
+    <constraint source="owner-2026-05-31">Mid-project discoveries absorb into this project; deferral not permitted</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/baseline/post-phase23-authoritative-2026-05-31.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/handoffs/integration-fixture-sibling-discovery-2026-05-31.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The 4 unit-test residuals split into 2 sub-groups:
+      - 3 Layer2OutcomeExtractionTests: HOLD per task 008. Disposition: `real-bug-pending-fix`
+        if any look like production bugs; otherwise `flaky-quarantined` or Skip with note
+        "awaiting ai-spaarke-insights-engine-r1 owner sign-off". Either way, get them out of
+        Failed state.
+      - 1 AnalysisContextBuilderTests.BuildContinuationPrompt: NEW; not in post-018 inventory.
+        Investigate. Could be: (a) Wave 2.x edit accidentally broke it (regression — should
+        fix), (b) production drift after post-018 baseline (test-stale — fix), (c) genuine
+        production bug (real-bug). Read the test + production code.
+
+      The 47 integration residuals all fall under the "param-inference" pattern surfaced by
+      task 027: after the fixture config keys were added, the host-build succeeded and tests
+      ran, but endpoint binding/DI failed at request time. This is almost certainly a
+      production-side issue (production registers endpoints that depend on services not
+      registered in the test environment, OR the binding contracts have signature drift).
+      Most likely disposition: `real-bug-pending-fix` with one consolidated ledger entry
+      per cluster (RB-T028-01 through RB-T028-06 — one per residual cluster).
+
+      Recommended procedure: for each cluster, pick 2-3 representative failing tests, read
+      their assertions + the production code path they exercise, identify whether it's
+      mock-setup drift (fixable in test) or genuine binding gap (production fix needed),
+      then apply Skip + Trait + ledger to the WHOLE cluster (~10 entries at most).
+
+      Goal is satisfying §4.3, not deep-diving each of 47 individually. Cluster-level
+      classification is acceptable per §6.5 (archive batching).
+    </background>
+    <dependencies>
+      <dependency task="074" status="completed">Authoritative Phase 2+3 close measurement; 51 residual Failed identified</dependency>
+      <dependency task="027" status="completed">Surfaced the integration param-inference pattern; documented in discovery handoff</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+    <file>projects/sdap-bff.api-test-suite-repair/ledgers/flaky-ledger.md</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Layer2OutcomeExtractionTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisContextBuilderTests.cs</file>
+    <file>tests/integration/Spe.Integration.Tests/Api/Ai/KnowledgeBaseEndpointsTests.cs</file>
+    <file>tests/integration/Spe.Integration.Tests/Api/Ai/ChatEndpointsTests.cs</file>
+    <file>tests/integration/Spe.Integration.Tests/Api/Ai/ReAnalysisFlowTests.cs</file>
+    <file>tests/integration/Spe.Integration.Tests/Upload*.cs</file>
+    <file>tests/integration/Spe.Integration.Tests/AuthorizationIntegrationTests.cs</file>
+    <file>tests/integration/Spe.Integration.Tests/PrecedentAdmin*.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Parse both post-phase23 TRXs (use PowerShell XPath; do NOT Read 12 MB TRXs into context). Extract each Failed `testName` and `outcome`/`message`. Build a flat list of all 51.</step>
+
+    <step order="2">Group failures by class + namespace. Confirm the breakdown:
+      - Unit: 3 Layer2 + 1 AnalysisContextBuilder (= 4)
+      - Integration: 13 KB + 11 Chat + 9 Upload + 8 ReAnalysis + 5 Auth + 1 Precedent (= 47)
+    </step>
+
+    <step order="3">**Unit residual #1 — Layer2OutcomeExtraction (3 tests)**:
+      - Read `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Insights/Layer2OutcomeExtractionTests.cs` (or the actual path; Glob if needed)
+      - For each of the 3 failing tests, capture the assertion + failure message from TRX
+      - Disposition: `real-bug-pending-fix` IF the failure suggests a production bug; otherwise document as "Skip pending sibling-project sign-off"
+      - Apply `[Fact(Skip = "RB-T028-XX: ...")]` + per-test `[Trait("status", "real-bug-pending-fix")]`
+      - File RB-T028-01 (or appropriate IDs) in real-bug-ledger.md
+    </step>
+
+    <step order="4">**Unit residual #2 — AnalysisContextBuilderTests.BuildContinuationPrompt (1 test)**:
+      - Read the test + the production `AnalysisContextBuilder.cs` or equivalent
+      - Determine why it fails: assertion-level drift (test-stale → `repaired`)? Or genuine bug (`real-bug-pending-fix`)?
+      - Apply the appropriate fix or Skip+ledger
+    </step>
+
+    <step order="5">**Integration residuals — bulk cluster classification (47 tests)**:
+      - For each of 6 clusters (KB / Chat / Upload / ReAnalysis / Auth / Precedent), pick 2-3 representative failing tests
+      - Read the test + the production endpoint code path
+      - Identify common root cause per cluster (e.g., "all 13 KB tests fail because production endpoint binding for IKbService is not registered in test env")
+      - Apply cluster-level Skip + `[Trait("status", "real-bug-pending-fix")]` to ALL failing tests in that cluster
+      - File ONE ledger entry per cluster (RB-T028-02 through RB-T028-07, one per cluster)
+      - Severity guidance: HIGH if it's a real production binding gap visible at runtime; MED if it's only test-environment misalignment; LOW if mock-setup drift
+    </step>
+
+    <step order="6">Update `projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md` with the new RB-T028-NN entries.
+      Schema: ID, severity, title, owner-TBD, fix-by date (2026-07-31 or 2026-09-30 depending on severity), test class(es), recommended production-side fix.
+    </step>
+
+    <step order="7">Create `projects/sdap-bff.api-test-suite-repair/ledgers/flaky-ledger.md` if it doesn't exist (with table header). Add entries for any tests classified `flaky-quarantined` (likely 0 in this task; the 51 residuals are all assertion-level, not non-deterministic).</step>
+
+    <step order="8">Re-run targeted tests to confirm:
+      - `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Insights.Layer2|FullyQualifiedName~AnalysisContextBuilder"` → expect 0 Failed (some Skipped)
+      - `dotnet test tests/integration/Spe.Integration.Tests/` → expect 0 Failed, increased Skipped
+    </step>
+
+    <step order="9">Write `projects/sdap-bff.api-test-suite-repair/baseline/post-028-classification-2026-05-31.md` documenting:
+      - Per-cluster disposition table
+      - Per-test final end-state distribution
+      - Ledger entries created
+      - Post-classification suite counts (Failed: 0 expected)
+    </step>
+
+    <step order="10">Step 9.5 Quality Gates (FULL rigor): code-review on the test edits (Skip + Trait additions only; should be trivial); adr-check (no architectural changes); ledger schema validation.</step>
+
+    <step order="11">Update `current-task.md` + flip task 028 POML `&lt;status&gt;` → `completed` with `&lt;completion-notes&gt;`. Do NOT update TASK-INDEX (main session aggregates).</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">PowerShell XPath on TRXs; targeted dotnet test runs</tool>
+    <tool name="Read">test files + production code for triage</tool>
+    <tool name="Edit">apply Skip + Trait to failing tests; append to ledgers</tool>
+    <tool name="Write">classification report + new flaky-ledger if needed</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/baseline/post-028-classification-2026-05-31.md</output>
+    <output type="ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (extended with RB-T028-NN)</output>
+    <output type="ledger">projects/sdap-bff.api-test-suite-repair/ledgers/flaky-ledger.md (created if needed)</output>
+    <output type="test-edits">~10 test files (Skip + Trait additions only)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Targeted re-run shows `Failed: 0` for both test projects' previously-failing tests (Skipped increased, but Failed cleared)</criterion>
+    <criterion testable="true">Real-bug ledger has new RB-T028-NN entries (one per cluster, ~6-7 total) with severity + fix-by + owner-TBD</criterion>
+    <criterion testable="true">Flaky ledger exists (created if needed) — empty or populated as appropriate</criterion>
+    <criterion testable="true">No `Failed` end-state on any of the 51 residual tests post-task</criterion>
+    <criterion testable="true">No modifications to `src/`, `power-platform/`, `infra/`, `scripts/` (NFR-01)</criterion>
+    <criterion testable="true">Per-file diff <50% (NFR-02; trivially satisfied as edits are Skip + Trait additions only)</criterion>
+    <criterion testable="true">Archive count from this task ≤10 (NFR-04; likely 0 since all dispositions are Skip-based, not archive)</criterion>
+    <criterion testable="true">`post-028-classification-2026-05-31.md` exists with per-cluster disposition table</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <origin date="2026-05-31" source="Task 074 Phase 2+3 close measurement + owner directive">
+      51 residual `Failed` tests identified by task 074. Per §4.3 / NFR-10, no `Failed`
+      state is allowed at project close. This task applies §6.2 final-end-state taxonomy
+      (mostly via Skip + Trait + ledger) to all 51 so Phase 4 task 086's final verification
+      gate can succeed.
+
+      Per owner directive 2026-05-31 ("absorb deviations, do not defer"), this work happens
+      in THIS project, not a follow-on. The ledger entries created here will be visible to
+      the production-side teams (Insights, Action Engine, etc.) for follow-up fixes per
+      their respective fix-by dates.
+
+      Sequenced as the bridge between Phase 2+3 close (task 074) and Phase 4 (080-086).
+    </origin>
+  </notes>
+</task>

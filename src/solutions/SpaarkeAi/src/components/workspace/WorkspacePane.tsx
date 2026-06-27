@@ -39,6 +39,13 @@ import {
   useAiSession,
 } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widgets";
+// R6 Hotfix Wave B-G9c2 (2026-06-10): the previously-eager Summary tab
+// auto-install (R5 task 038) was removed. Each summarize invocation now
+// dispatches its own `workspace.widget_load` carrying the structured-
+// output-stream widget type + SUMMARIZE_SCHEMA + a per-run correlationId.
+// Those symbols are no longer needed at this site; consumers
+// (executeSummarizeIntent.ts + FilePreviewContextWidget.dispatchSummarizeOnly)
+// own them now.
 import { buildBffApiUrl } from "@spaarke/auth";
 import { usePaneCollapseContext } from "../shell/ThreePaneShell";
 import { WorkspaceTabManager } from "./WorkspaceTabManager";
@@ -54,7 +61,10 @@ import {
   TELEMETRY_TAB_RESTORE_LOAD_FAILURE,
   TELEMETRY_TAB_RESTORE_SAVE_FAILURE,
 } from "../../telemetry/errorTelemetry";
-import { getPinnedWorkspaces } from "../../services/pinnedWorkspaces";
+import {
+  getPinnedWorkspaces,
+  prunePinnedToKnown,
+} from "../../services/pinnedWorkspaces";
 // Wave 2b (task 109): the cold-load default tab is now driven by
 // useWorkspaceLayouts().activeLayout (the BFF's discovered default — Daily
 // Briefing in dev) instead of a hard-coded Home tab. See the auto-install
@@ -374,7 +384,7 @@ export function WorkspacePane(): React.JSX.Element {
   // default tab is the correct UX when the system has no default to offer.
   // ---------------------------------------------------------------------------
 
-  const { activeLayout } = useWorkspaceLayouts({
+  const { activeLayout, layouts } = useWorkspaceLayouts({
     bffBaseUrl,
     authenticatedFetch,
     isAuthenticated,
@@ -480,10 +490,17 @@ export function WorkspacePane(): React.JSX.Element {
   const autoOpenedPinsRef = React.useRef<boolean>(false);
   React.useEffect(() => {
     if (!isAuthenticated) return;
+    if (layouts.length === 0) return; // wait for layouts to load before pruning
     if (autoOpenedPinsRef.current) return; // run once per mount
     autoOpenedPinsRef.current = true;
 
-    const pinned = getPinnedWorkspaces();
+    // Stale-pin cleanup: drop pinned entries whose layoutId is no longer in
+    // the server-side layouts list (e.g. another device or the Manage
+    // Workspaces drawer deleted the layout). Persists the cleaned list back
+    // to localStorage in the same call. Returns the live (cleaned) list so we
+    // do not dispatch widget_load for non-existent layouts.
+    const knownLayoutIds = new Set(layouts.map((l) => l.id));
+    const pinned = prunePinnedToKnown(knownLayoutIds);
     if (pinned.length === 0) return;
 
     const manager = managerRef.current;
@@ -529,11 +546,80 @@ export function WorkspacePane(): React.JSX.Element {
       window.clearTimeout(timerId);
     };
     // Auto-open is a one-shot per mount. `isAuthenticated` flipping false→true
-    // is the trigger; subsequent state changes (re-auth on token refresh)
-    // MUST NOT re-trigger or we'd re-stack tabs. The ref guard above enforces
-    // this.
+    // is the trigger; subsequent state changes (re-auth on token refresh, or
+    // layouts refetch) MUST NOT re-trigger or we'd re-stack tabs. The ref
+    // guard above enforces this. `layouts` is in deps so the effect re-runs
+    // once after the initial empty array is replaced with the loaded list
+    // (the early-return guard at top blocks the first empty-array invocation).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
+  }, [isAuthenticated, layouts]);
+
+  // ---------------------------------------------------------------------------
+  // R6 Hotfix Wave B-G9c2 (B7 + B8) — DEFERRED Summary-tab install + per-run
+  // tab (2026-06-10).
+  //
+  // Previously (R5 task 038): a single "Summary" tab was eagerly prepended on
+  // WorkspacePane mount as a persistent event sink for `workspace.streaming_*`
+  // events tagged with `streamId === chatSessionId`. This caused two bugs
+  // surfaced during the Phase B walkthrough:
+  //
+  //   B7: An empty Summary tab appeared (and was default-active) BEFORE any
+  //       summarize had run — confusing the user.
+  //
+  //   B8: Every subsequent `/summarize` run REPLACED the prior tab's content
+  //       because all runs shared `streamId = chatSessionId`. File A's summary
+  //       was lost when file B was summarized.
+  //
+  // The fix shifts BOTH responsibilities to `executeSummarizeIntent` (in
+  // ConversationPane's summarize-intent dispatcher):
+  //
+  //   - Each run generates a UNIQUE `streamId` (no reuse of `chatSessionId`).
+  //   - The run synchronously emits `workspace.widget_load` with the structured-
+  //     output-stream widget + `correlationId = streamId` + tab title
+  //     `Summary: <fileName>` BEFORE the SSE stream opens. The existing
+  //     `widget_load` handler below (~line 720+) installs a NEW tab via
+  //     `addTab`, which honors `MAX_WORKSPACE_TABS` FIFO eviction.
+  //   - The subsequent `streaming_started` event flows to the same tab via
+  //     the widget's `correlationId === streamId` gate.
+  //
+  // Race handling: PaneEventBus dispatch is SYNCHRONOUS, so the `widget_load`
+  // event installs the tab BEFORE any `streaming_started` event from the
+  // same call site. The widget itself mounts asynchronously
+  // (resolveWorkspaceWidget()), but the tab carries the `widgetData` payload
+  // including correlationId from the moment it's installed; the widget's
+  // initial effect picks up the early events via its own subscription.
+  // ---------------------------------------------------------------------------
+
+  // Retained as a no-op ref so `handleTabChange` (manual override semantics)
+  // can continue to compare against the current Summary tab id when one is
+  // present. With the deferred-install model, this is `null` until a
+  // summarize run dispatches a `widget_load` AND we narrow the dispatched
+  // tab into this ref. For the current B-G9c2 implementation we no longer
+  // need the manual-override behavior to be Summary-specific (each run gets
+  // its own tab; the user can freely click between tabs without affecting
+  // future runs), so this ref stays `null` permanently. Removing the ref
+  // entirely would force a wider refactor of `handleTabChange` — keeping
+  // the variable as a benign null sentinel keeps the diff small.
+  const summaryTabIdRef = React.useRef<string | null>(null);
+
+  // ---------------------------------------------------------------------------
+  // R6 Hotfix Wave B-G9c2 — auto-focus is now NATURAL via `addTab`
+  //
+  // The R5 task 038 streaming-started auto-focus block (removed here) is
+  // unnecessary in the deferred-install model: each summarize run dispatches
+  // a `workspace.widget_load`, the existing `widget_load` handler below
+  // calls `manager.addTab(...)` which AUTO-ACTIVATES the new tab (see
+  // WorkspaceTabManager.addTab line 378), so the new Summary tab is focused
+  // as soon as the run starts — no separate `streaming_started` focus
+  // handler required.
+  //
+  // The `streamFocusOverrideRef` is retained as a no-op sentinel so the
+  // existing manual-override checks in `handleTabChange` don't have to
+  // change. With each run owning its own tab, the override semantic is now
+  // mostly vestigial — kept for compatibility with downstream consumers.
+  // ---------------------------------------------------------------------------
+
+  const streamFocusOverrideRef = React.useRef<boolean>(false);
 
   // ---------------------------------------------------------------------------
   // PaneEventBus subscription — 'workspace' channel
@@ -671,6 +757,24 @@ export function WorkspacePane(): React.JSX.Element {
       const manager = managerRef.current;
       manager.setActiveTab(tabId);
       syncState();
+
+      // R5 task 038 — Manual override for the Summary tab auto-focus.
+      //
+      // When the user manually clicks a tab OTHER THAN Summary, set the
+      // override flag so subsequent `field_delta` / `streaming_complete`
+      // events in the current stream cycle do NOT pull focus back to
+      // Summary. The override is reset on the NEXT `streaming_started`
+      // event (so the next stream can again auto-focus) AND on
+      // `streaming_complete` (defensive double-reset — see the auto-focus
+      // subscription above).
+      const summaryTabId = summaryTabIdRef.current;
+      if (summaryTabId && tabId !== summaryTabId) {
+        streamFocusOverrideRef.current = true;
+      } else if (tabId === summaryTabId) {
+        // User clicked back to Summary themselves — clear the override
+        // (no longer in "I want to be elsewhere" mode).
+        streamFocusOverrideRef.current = false;
+      }
 
       // Find the newly active tab to include widget info in the event.
       const activeTab = manager.getActiveTab();

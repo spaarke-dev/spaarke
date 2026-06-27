@@ -87,207 +87,212 @@ const DEFAULT_MAX_CHAR_COUNT = 2000;
  * />
  * ```
  */
-export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInputProps>(({
-  onSend,
-  disabled = false,
-  maxCharCount = DEFAULT_MAX_CHAR_COUNT,
-  placeholder = 'Type a message...',
-  dynamicSlashCommands,
-  hideSlashButton = false,
-}, ref) => {
-  const styles = useStyles();
-  const [value, setValue] = React.useState<string>('');
-
-  // Ref to the underlying <textarea> element — required by useSlashCommands to
-  // write the selected command trigger back into the input after selection.
-  const inputRef = React.useRef<HTMLTextAreaElement>(null);
-
-  // Ref for the input wrapper div; passed to SlashCommandMenu as the anchor so
-  // the popover knows where to position itself (above the input row).
-  const anchorRef = React.useRef<HTMLDivElement>(null);
-
-  // ── Slash command hook ────────────────────────────────────────────────────
-
-  const {
-    menuVisible,
-    filterText,
-    filteredCommands,
-    handleInputChange: hookHandleInputChange,
-    handleCommandSelect,
-    dismissMenu,
-  } = useSlashCommands({
-    inputRef,
-    staticCommands: DEFAULT_SLASH_COMMANDS,
-    dynamicCommands: dynamicSlashCommands ?? [],
-    onCommandSelected: (command: SlashCommand) => {
-      // After the hook writes the trigger to the DOM element, sync React state
-      // so that the controlled Textarea reflects the value.
-      setValue(`${command.trigger} `);
+export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInputProps>(
+  (
+    {
+      onSend,
+      disabled = false,
+      maxCharCount = DEFAULT_MAX_CHAR_COUNT,
+      placeholder = 'Type a message...',
+      dynamicSlashCommands,
+      hideSlashButton = false,
     },
-  });
+    ref
+  ) => {
+    const styles = useStyles();
+    const [value, setValue] = React.useState<string>('');
 
-  // ── Derived state ─────────────────────────────────────────────────────────
+    // Ref to the underlying <textarea> element — required by useSlashCommands to
+    // write the selected command trigger back into the input after selection.
+    const inputRef = React.useRef<HTMLTextAreaElement>(null);
 
-  const charCount = value.length;
-  const isOverLimit = charCount > maxCharCount;
-  const canSend = value.trim().length > 0 && !disabled && !isOverLimit;
+    // Ref for the input wrapper div; passed to SlashCommandMenu as the anchor so
+    // the popover knows where to position itself (above the input row).
+    const anchorRef = React.useRef<HTMLDivElement>(null);
 
-  // ── Handlers ─────────────────────────────────────────────────────────────
+    // ── Slash command hook ────────────────────────────────────────────────────
 
-  const handleSend = React.useCallback(() => {
-    const trimmed = value.trim();
-    if (trimmed && !disabled && !isOverLimit) {
-      onSend(trimmed);
-      setValue('');
-    }
-  }, [value, disabled, isOverLimit, onSend]);
+    const {
+      menuVisible,
+      filterText,
+      filteredCommands,
+      handleInputChange: hookHandleInputChange,
+      handleCommandSelect,
+      dismissMenu,
+    } = useSlashCommands({
+      inputRef,
+      staticCommands: DEFAULT_SLASH_COMMANDS,
+      dynamicCommands: dynamicSlashCommands ?? [],
+      onCommandSelected: (command: SlashCommand) => {
+        // After the hook writes the trigger to the DOM element, sync React state
+        // so that the controlled Textarea reflects the value.
+        setValue(`${command.trigger} `);
+      },
+    });
 
-  const handleKeyDown = React.useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Escape') {
-        // Dismiss the slash command menu on Esc; also clear input when menu was open
-        if (menuVisible) {
-          e.preventDefault();
-          dismissMenu();
-          setValue('');
+    // ── Derived state ─────────────────────────────────────────────────────────
+
+    const charCount = value.length;
+    const isOverLimit = charCount > maxCharCount;
+    const canSend = value.trim().length > 0 && !disabled && !isOverLimit;
+
+    // ── Handlers ─────────────────────────────────────────────────────────────
+
+    const handleSend = React.useCallback(() => {
+      const trimmed = value.trim();
+      if (trimmed && !disabled && !isOverLimit) {
+        onSend(trimmed);
+        setValue('');
+      }
+    }, [value, disabled, isOverLimit, onSend]);
+
+    const handleKeyDown = React.useCallback(
+      (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Escape') {
+          // Dismiss the slash command menu on Esc; also clear input when menu was open
+          if (menuVisible) {
+            e.preventDefault();
+            dismissMenu();
+            setValue('');
+          }
+          return;
         }
-        return;
+
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          handleSend();
+        }
+      },
+      [handleSend, menuVisible, dismissMenu]
+    );
+
+    const handleChange = React.useCallback(
+      (_event: React.ChangeEvent<HTMLTextAreaElement>, data: { value: string }) => {
+        setValue(data.value);
+        // Notify the slash command hook so it can update filter state and menu visibility
+        hookHandleInputChange(data.value);
+      },
+      [hookHandleInputChange]
+    );
+
+    // ── [/] button handler ────────────────────────────────────────────────────
+
+    const handleSlashButtonClick = React.useCallback(() => {
+      // Open the menu by writing '/' into the input — this triggers slash mode in the hook
+      setValue('/');
+      hookHandleInputChange('/');
+      // Focus the textarea so the user can continue typing to filter commands
+      inputRef.current?.focus();
+    }, [hookHandleInputChange]);
+
+    // ── Imperative handle (FR-09, task 025) ──────────────────────────────────
+    // Expose `triggerSlashMode()` so a parent toolbar (SprkChat's strip above the
+    // input) can open the slash menu without re-implementing the wiring.
+    React.useImperativeHandle(
+      ref,
+      () => ({
+        triggerSlashMode: () => handleSlashButtonClick(),
+      }),
+      [handleSlashButtonClick]
+    );
+
+    // ── Cursor focus restoration after streaming (task 082, UX fix #1) ────────
+    // When the response stream completes the parent flips `disabled` from true
+    // back to false. At that moment, return focus to the textarea so the user
+    // can immediately type the next message without clicking back into the box.
+    // Tracking the prior disabled value via a ref ensures we only refocus on the
+    // true→false transition (not on mount or on every render while disabled is
+    // already false).
+    const prevDisabledRef = React.useRef<boolean>(disabled);
+    React.useEffect(() => {
+      const wasDisabled = prevDisabledRef.current;
+      prevDisabledRef.current = disabled;
+
+      if (wasDisabled && !disabled) {
+        // Streaming just completed — restore focus to the input.
+        // Wait one frame so any layout/aria changes from the disabled flip
+        // settle before focusing (avoids losing focus to an intermediate
+        // re-render in Fluent Textarea).
+        const handle = requestAnimationFrame(() => {
+          inputRef.current?.focus();
+        });
+        return () => cancelAnimationFrame(handle);
       }
+      return undefined;
+    }, [disabled]);
 
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        handleSend();
-      }
-    },
-    [handleSend, menuVisible, dismissMenu],
-  );
+    // ── Render ────────────────────────────────────────────────────────────────
 
-  const handleChange = React.useCallback(
-    (_event: React.ChangeEvent<HTMLTextAreaElement>, data: { value: string }) => {
-      setValue(data.value);
-      // Notify the slash command hook so it can update filter state and menu visibility
-      hookHandleInputChange(data.value);
-    },
-    [hookHandleInputChange],
-  );
+    return (
+      <div className={styles.root} role="form" aria-label="Chat input">
+        {/* inputWrapper provides `position: relative` as stacking context for SlashCommandMenu */}
+        <div className={styles.inputWrapper} ref={anchorRef}>
+          {/* SlashCommandMenu renders as `position: absolute; bottom: 100%` inside this wrapper */}
+          <SlashCommandMenu
+            visible={menuVisible}
+            commands={filteredCommands}
+            filterText={filterText}
+            onSelect={handleCommandSelect}
+            onDismiss={dismissMenu}
+            anchorRef={anchorRef}
+          />
 
-  // ── [/] button handler ────────────────────────────────────────────────────
-
-  const handleSlashButtonClick = React.useCallback(() => {
-    // Open the menu by writing '/' into the input — this triggers slash mode in the hook
-    setValue('/');
-    hookHandleInputChange('/');
-    // Focus the textarea so the user can continue typing to filter commands
-    inputRef.current?.focus();
-  }, [hookHandleInputChange]);
-
-  // ── Imperative handle (FR-09, task 025) ──────────────────────────────────
-  // Expose `triggerSlashMode()` so a parent toolbar (SprkChat's strip above the
-  // input) can open the slash menu without re-implementing the wiring.
-  React.useImperativeHandle(
-    ref,
-    () => ({
-      triggerSlashMode: () => handleSlashButtonClick(),
-    }),
-    [handleSlashButtonClick],
-  );
-
-  // ── Cursor focus restoration after streaming (task 082, UX fix #1) ────────
-  // When the response stream completes the parent flips `disabled` from true
-  // back to false. At that moment, return focus to the textarea so the user
-  // can immediately type the next message without clicking back into the box.
-  // Tracking the prior disabled value via a ref ensures we only refocus on the
-  // true→false transition (not on mount or on every render while disabled is
-  // already false).
-  const prevDisabledRef = React.useRef<boolean>(disabled);
-  React.useEffect(() => {
-    const wasDisabled = prevDisabledRef.current;
-    prevDisabledRef.current = disabled;
-
-    if (wasDisabled && !disabled) {
-      // Streaming just completed — restore focus to the input.
-      // Wait one frame so any layout/aria changes from the disabled flip
-      // settle before focusing (avoids losing focus to an intermediate
-      // re-render in Fluent Textarea).
-      const handle = requestAnimationFrame(() => {
-        inputRef.current?.focus();
-      });
-      return () => cancelAnimationFrame(handle);
-    }
-    return undefined;
-  }, [disabled]);
-
-  // ── Render ────────────────────────────────────────────────────────────────
-
-  return (
-    <div className={styles.root} role="form" aria-label="Chat input">
-      {/* inputWrapper provides `position: relative` as stacking context for SlashCommandMenu */}
-      <div className={styles.inputWrapper} ref={anchorRef}>
-        {/* SlashCommandMenu renders as `position: absolute; bottom: 100%` inside this wrapper */}
-        <SlashCommandMenu
-          visible={menuVisible}
-          commands={filteredCommands}
-          filterText={filterText}
-          onSelect={handleCommandSelect}
-          onDismiss={dismissMenu}
-          anchorRef={anchorRef}
-        />
-
-        <div className={styles.inputRow}>
-          {/* [/] button — opens slash command menu; appearance="subtle" per spec-FR-09.
+          <div className={styles.inputRow}>
+            {/* [/] button — opens slash command menu; appearance="subtle" per spec-FR-09.
               FR-09 (task 025): when SprkChat hosts its own prompt-menu button in a
               strip above the input, it passes `hideSlashButton` to avoid the
               duplicate affordance. The slash menu remains reachable by typing `/`
               or via the `triggerSlashMode()` imperative handle. */}
-          {!hideSlashButton && (
-            <Button
-              appearance="subtle"
-              icon={<PromptRegular />}
-              onClick={handleSlashButtonClick}
+            {!hideSlashButton && (
+              <Button
+                appearance="subtle"
+                icon={<PromptRegular />}
+                onClick={handleSlashButtonClick}
+                disabled={disabled}
+                aria-label="Open slash commands"
+                title="Open slash commands (/)"
+                data-testid="slash-command-button"
+              />
+            )}
+
+            <Textarea
+              className={styles.textarea}
+              value={value}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              placeholder={placeholder}
               disabled={disabled}
-              aria-label="Open slash commands"
-              title="Open slash commands (/)"
-              data-testid="slash-command-button"
+              resize="vertical"
+              aria-label="Message input"
+              aria-expanded={menuVisible}
+              aria-haspopup="listbox"
+              data-testid="chat-input-textarea"
+              // Fluent Textarea forwards the ref to the underlying <textarea> element
+              // (primary slot — confirmed by TextareaSlots.textarea JSDoc)
+              ref={inputRef}
             />
-          )}
 
-          <Textarea
-            className={styles.textarea}
-            value={value}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            placeholder={placeholder}
-            disabled={disabled}
-            resize="vertical"
-            aria-label="Message input"
-            aria-expanded={menuVisible}
-            aria-haspopup="listbox"
-            data-testid="chat-input-textarea"
-            // Fluent Textarea forwards the ref to the underlying <textarea> element
-            // (primary slot — confirmed by TextareaSlots.textarea JSDoc)
-            ref={inputRef}
-          />
+            <Button
+              appearance="primary"
+              icon={<SendRegular />}
+              onClick={handleSend}
+              disabled={!canSend}
+              aria-label="Send message"
+              data-testid="chat-send-button"
+            />
+          </div>
+        </div>
 
-          <Button
-            appearance="primary"
-            icon={<SendRegular />}
-            onClick={handleSend}
-            disabled={!canSend}
-            aria-label="Send message"
-            data-testid="chat-send-button"
-          />
+        <div className={styles.footer}>
+          <Text className={styles.hint}>Ctrl+Enter to send · / for commands</Text>
+          <Text className={isOverLimit ? styles.charCountWarning : styles.charCount}>
+            {charCount}/{maxCharCount}
+          </Text>
         </div>
       </div>
-
-      <div className={styles.footer}>
-        <Text className={styles.hint}>Ctrl+Enter to send · / for commands</Text>
-        <Text className={isOverLimit ? styles.charCountWarning : styles.charCount}>
-          {charCount}/{maxCharCount}
-        </Text>
-      </div>
-    </div>
-  );
-});
+    );
+  }
+);
 
 SprkChatInput.displayName = 'SprkChatInput';
 

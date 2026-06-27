@@ -254,7 +254,12 @@ public class AuditLogServiceTests
 
         // Act
         await service.LogInteractionAsync(entry);
-        await Task.Delay(200); // Allow background task to complete
+        // R6 PR #395 hotfix 2026-06-18: extended timing buffer from 200ms → 1000ms.
+        // The 200ms wait was insufficient on heavily-contended CI VMs (observed in
+        // PR #395 Build & Test runs), causing the test to assert before the
+        // background CreateItemAsync invocation had fired. 1000ms is conservative
+        // for sub-second background-task completion + keeps the test fast.
+        await Task.Delay(1000); // Allow background task to complete (CI-VM-safe buffer)
 
         // Assert: CreateItemAsync called; forbidden operations never called
         containerMock.Verify(
@@ -340,7 +345,7 @@ public class AuditLogServiceTests
         containerMock
             .Setup(c => c.CreateItemAsync(
                 It.IsAny<AuditEntry>(),
-                It.IsAny<PartitionKey>(),
+                It.IsAny<PartitionKey?>(),
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<AuditEntry, PartitionKey?, ItemRequestOptions, CancellationToken>(

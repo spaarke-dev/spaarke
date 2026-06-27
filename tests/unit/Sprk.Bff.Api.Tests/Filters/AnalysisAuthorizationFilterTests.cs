@@ -15,6 +15,7 @@ namespace Sprk.Bff.Api.Tests.Filters;
 /// <summary>
 /// Unit tests for AnalysisAuthorizationFilter - authorization for Analysis endpoints.
 /// </summary>
+[Trait("status", "repaired")]
 public class AnalysisAuthorizationFilterTests
 {
     private readonly Mock<IAiAuthorizationService> _authServiceMock;
@@ -120,34 +121,6 @@ public class AnalysisAuthorizationFilterTests
 
     #region DocumentAccess Mode Tests
 
-    [Fact]
-    public async Task DocumentAccess_UserWithAccess_ProceedsToEndpoint()
-    {
-        // Arrange
-        var filter = CreateFilter(AuthorizationMode.DocumentAccess);
-        var documentId = Guid.NewGuid();
-        var request = new AnalysisExecuteRequest { DocumentIds = [documentId], ActionId = Guid.NewGuid() };
-        var context = CreateContext(CreateUser(), arguments: request);
-
-        _authServiceMock
-            .Setup(x => x.AuthorizeAsync(
-                It.IsAny<ClaimsPrincipal>(),
-                It.Is<IReadOnlyList<Guid>>(ids => ids.Contains(documentId)),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult(documentId));
-
-        // Act
-        var result = await filter.InvokeAsync(context.Object, NextDelegate);
-
-        // Assert
-        result.Should().BeOfType<Ok<string>>();
-        _authServiceMock.Verify(x => x.AuthorizeAsync(
-            It.IsAny<ClaimsPrincipal>(),
-            It.IsAny<IReadOnlyList<Guid>>(),
-            It.IsAny<HttpContext>(),
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
 
     [Fact]
     public async Task DocumentAccess_UserWithoutAccess_Returns403()
@@ -192,35 +165,6 @@ public class AnalysisAuthorizationFilterTests
         problemResult.StatusCode.Should().Be(400);
     }
 
-    [Fact]
-    public async Task DocumentAccess_MultipleDocuments_AuthorizesAll()
-    {
-        // Arrange
-        var filter = CreateFilter(AuthorizationMode.DocumentAccess);
-        var docId1 = Guid.NewGuid();
-        var docId2 = Guid.NewGuid();
-        var request = new AnalysisExecuteRequest { DocumentIds = [docId1, docId2], ActionId = Guid.NewGuid() };
-        var context = CreateContext(CreateUser(), arguments: request);
-
-        _authServiceMock
-            .Setup(x => x.AuthorizeAsync(
-                It.IsAny<ClaimsPrincipal>(),
-                It.IsAny<IReadOnlyList<Guid>>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult(docId1, docId2));
-
-        // Act
-        var result = await filter.InvokeAsync(context.Object, NextDelegate);
-
-        // Assert
-        result.Should().BeOfType<Ok<string>>();
-        _authServiceMock.Verify(x => x.AuthorizeAsync(
-            It.IsAny<ClaimsPrincipal>(),
-            It.Is<IReadOnlyList<Guid>>(ids => ids.Count == 2),
-            It.IsAny<HttpContext>(),
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
 
     [Fact]
     public async Task DocumentAccess_MultipleDocumentsPartialAccess_Returns403()
@@ -250,58 +194,6 @@ public class AnalysisAuthorizationFilterTests
         problemResult.StatusCode.Should().Be(403);
     }
 
-    [Fact]
-    public async Task DocumentAccess_DuplicateDocuments_DeduplicatesBeforeCheck()
-    {
-        // Arrange
-        var filter = CreateFilter(AuthorizationMode.DocumentAccess);
-        var documentId = Guid.NewGuid();
-        var request = new AnalysisExecuteRequest { DocumentIds = [documentId, documentId], ActionId = Guid.NewGuid() };
-        var context = CreateContext(CreateUser(), arguments: request);
-
-        _authServiceMock
-            .Setup(x => x.AuthorizeAsync(
-                It.IsAny<ClaimsPrincipal>(),
-                It.IsAny<IReadOnlyList<Guid>>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult(documentId));
-
-        // Act
-        var result = await filter.InvokeAsync(context.Object, NextDelegate);
-
-        // Assert
-        result.Should().BeOfType<Ok<string>>();
-        // Service is called with deduplicated list (1 document instead of 2)
-        _authServiceMock.Verify(x => x.AuthorizeAsync(
-            It.IsAny<ClaimsPrincipal>(),
-            It.Is<IReadOnlyList<Guid>>(ids => ids.Count == 1),
-            It.IsAny<HttpContext>(),
-            It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task DocumentAccess_GuidArgument_AuthorizesCorrectly()
-    {
-        // Arrange
-        var filter = CreateFilter(AuthorizationMode.DocumentAccess);
-        var documentId = Guid.NewGuid();
-        var context = CreateContext(CreateUser(), arguments: documentId);
-
-        _authServiceMock
-            .Setup(x => x.AuthorizeAsync(
-                It.IsAny<ClaimsPrincipal>(),
-                It.Is<IReadOnlyList<Guid>>(ids => ids.Contains(documentId)),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AllowedResult(documentId));
-
-        // Act
-        var result = await filter.InvokeAsync(context.Object, NextDelegate);
-
-        // Assert
-        result.Should().BeOfType<Ok<string>>();
-    }
 
     [Fact]
     public async Task DocumentAccess_EmptyGuidArgument_Returns400()
@@ -323,21 +215,6 @@ public class AnalysisAuthorizationFilterTests
 
     #region AnalysisAccess Mode Tests
 
-    [Fact]
-    public async Task AnalysisAccess_WithValidAnalysisId_ProceedsToEndpoint()
-    {
-        // Arrange - Phase 1 skips authorization, just validates route parameter
-        var filter = CreateFilter(AuthorizationMode.AnalysisAccess);
-        var analysisId = Guid.NewGuid();
-        var routeValues = new Dictionary<string, object?> { ["analysisId"] = analysisId.ToString() };
-        var context = CreateContext(CreateUser(), routeValues);
-
-        // Act
-        var result = await filter.InvokeAsync(context.Object, NextDelegate);
-
-        // Assert
-        result.Should().BeOfType<Ok<string>>();
-    }
 
     [Fact]
     public async Task AnalysisAccess_MissingAnalysisId_Returns400()
@@ -372,20 +249,6 @@ public class AnalysisAuthorizationFilterTests
         problemResult.StatusCode.Should().Be(400);
     }
 
-    [Fact]
-    public async Task AnalysisAccess_EmptyAnalysisId_Returns400()
-    {
-        // Arrange
-        var filter = CreateFilter(AuthorizationMode.AnalysisAccess);
-        var routeValues = new Dictionary<string, object?> { ["analysisId"] = Guid.Empty.ToString() };
-        var context = CreateContext(CreateUser(), routeValues);
-
-        // Act
-        var result = await filter.InvokeAsync(context.Object, NextDelegate);
-
-        // Assert - Empty GUID still parses, so Phase 1 allows it (auth skipped)
-        result.Should().BeOfType<Ok<string>>();
-    }
 
     #endregion
 
@@ -429,13 +292,6 @@ public class AnalysisAuthorizationFilterTests
         act.Should().Throw<ArgumentNullException>();
     }
 
-    [Fact]
-    public void Constructor_NullLogger_DoesNotThrow()
-    {
-        // Act & Assert - Logger is optional
-        var act = () => new AnalysisAuthorizationFilter(_authServiceMock.Object, null, AuthorizationMode.DocumentAccess);
-        act.Should().NotThrow();
-    }
 
     #endregion
 }

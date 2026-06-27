@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>3 alert definitions (hit rate, P95, memory)</title>
+    <phase>4: Observability</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>none</blocks>
+    <tags>azure, monitoring, infrastructure, docs</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Author + (optionally) deploy alert definitions</rigor-reason>
+    <parallel-group>Phase4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Document 3 alert definitions per FR-17: (a) hit rate &lt;80% for 15 min — "cache key/version drift; investigate"; (b) Redis P95 &gt;100 ms for 5 min — "network issue or SKU undersize"; (c) memory &gt;80% of SKU limit — "scale to next SKU". Document in `notes/alert-definitions-draft.md` AND in `redis-cache-azure-setup.md` Troubleshooting section (task 051). Optionally deploy via Bicep `alerts.bicep` or App Insights workbook (if straightforward).</prompt>
+  <role>Spaarke developer + operator.</role>
+  <goal>3 alert definitions documented with KQL or metric-alert-rule expressions. If deployed, deployment recorded.</goal>
+  <context><background>Alerts close the observability loop. Definitions live in operational guide; deployment is best-effort.</background><relevant-files><file>infrastructure/bicep/modules/alerts.bicep (if exists; check)</file></relevant-files></context>
+  <constraints><constraint source="spec">FR-17.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Draft 3 alert definitions with KQL expressions in `notes/alert-definitions-draft.md`.</step>
+    <step order="2">Check if `infrastructure/bicep/modules/alerts.bicep` exists. If yes, extend with new rules; if no, deployment is documentation-only.</step>
+    <step order="3">Hand off content to task 051 for inclusion in operational guide.</step>
+    <step order="4">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">existing alerts.bicep if any</tool><tool name="Write">draft</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/alert-definitions-draft.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">3 alert definitions documented with KQL/metric expressions + thresholds + remediation hints.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

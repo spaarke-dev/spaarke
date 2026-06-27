@@ -4,7 +4,7 @@
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0" xsi:type="MailApp">
   <Id>5e4d66d0-2603-44ea-acbc-400d3b881c90</Id>
-  <Version>1.0.15.0</Version>
+  <Version>1.0.19.0</Version>
   <ProviderName>Spaarke</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Spaarke Outlook Add-in"/>
@@ -71,6 +71,23 @@
                     <SourceLocation resid="Taskpane.Url"/>
                   </Action>
                 </Control>
+                <!-- smart-todo-decoupling-r3 FR-27 / task 070: Create To Do action.
+                     Opens the taskpane with ?action=createTodo so App routes to CreateTodoView. -->
+                <Control xsi:type="Button" id="msgReadCreateTodo">
+                  <Label resid="CreateTodoButton.Label"/>
+                  <Supertip>
+                    <Title resid="CreateTodoButton.SupertipTitle"/>
+                    <Description resid="CreateTodoButton.SupertipText"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <SourceLocation resid="CreateTodoTaskpane.Url"/>
+                  </Action>
+                </Control>
               </Group>
             </OfficeTab>
           </ExtensionPoint>
@@ -109,14 +126,20 @@
       </bt:Images>
       <bt:Urls>
         <bt:Url id="Taskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html"/>
+        <!-- smart-todo-decoupling-r3 FR-27 / task 070: same taskpane HTML, ?action=createTodo routes
+             the App.tsx to render CreateTodoView. -->
+        <bt:Url id="CreateTodoTaskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html?action=createTodo"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="CommandsGroup.Label" DefaultValue="Spaarke"/>
         <bt:String id="TaskpaneButton.Label" DefaultValue="Save to Spaarke"/>
         <bt:String id="TaskpaneButton.SupertipTitle" DefaultValue="Save to Spaarke"/>
+        <bt:String id="CreateTodoButton.Label" DefaultValue="Create To Do"/>
+        <bt:String id="CreateTodoButton.SupertipTitle" DefaultValue="Create Spaarke To Do"/>
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="TaskpaneButton.SupertipText" DefaultValue="Open Spaarke task pane to save emails"/>
+        <bt:String id="CreateTodoButton.SupertipText" DefaultValue="Create a Spaarke To Do linked to this email"/>
       </bt:LongStrings>
     </Resources>
 
@@ -148,6 +171,23 @@
                     </Icon>
                     <Action xsi:type="ShowTaskpane">
                       <SourceLocation resid="Taskpane.Url"/>
+                      <SupportsPinning>true</SupportsPinning>
+                    </Action>
+                  </Control>
+                  <!-- smart-todo-decoupling-r3 FR-27 / task 070: Create To Do action (V1.1 pinning variant). -->
+                  <Control xsi:type="Button" id="msgReadCreateTodoV11">
+                    <Label resid="CreateTodoButton.Label"/>
+                    <Supertip>
+                      <Title resid="CreateTodoButton.SupertipTitle"/>
+                      <Description resid="CreateTodoButton.SupertipText"/>
+                    </Supertip>
+                    <Icon>
+                      <bt:Image size="16" resid="Icon.16x16"/>
+                      <bt:Image size="32" resid="Icon.32x32"/>
+                      <bt:Image size="80" resid="Icon.80x80"/>
+                    </Icon>
+                    <Action xsi:type="ShowTaskpane">
+                      <SourceLocation resid="CreateTodoTaskpane.Url"/>
                       <SupportsPinning>true</SupportsPinning>
                     </Action>
                   </Control>
@@ -190,14 +230,19 @@
         </bt:Images>
         <bt:Urls>
           <bt:Url id="Taskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html"/>
+          <!-- smart-todo-decoupling-r3 FR-27 / task 070 (V1.1 pinning variant). -->
+          <bt:Url id="CreateTodoTaskpane.Url" DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/taskpane.html?action=createTodo"/>
         </bt:Urls>
         <bt:ShortStrings>
           <bt:String id="CommandsGroup.Label" DefaultValue="Spaarke"/>
           <bt:String id="TaskpaneButton.Label" DefaultValue="Save to Spaarke"/>
           <bt:String id="TaskpaneButton.SupertipTitle" DefaultValue="Save to Spaarke"/>
+          <bt:String id="CreateTodoButton.Label" DefaultValue="Create To Do"/>
+          <bt:String id="CreateTodoButton.SupertipTitle" DefaultValue="Create Spaarke To Do"/>
         </bt:ShortStrings>
         <bt:LongStrings>
           <bt:String id="TaskpaneButton.SupertipText" DefaultValue="Open Spaarke task pane to save emails"/>
+          <bt:String id="CreateTodoButton.SupertipText" DefaultValue="Create a Spaarke To Do linked to this email"/>
         </bt:LongStrings>
       </Resources>
     </VersionOverrides>

@@ -1,0 +1,170 @@
+<task id="014" project="email-communication-solution-r3">
+  <metadata>
+    <title>AttachmentList sub-component framework + client-side cap enforcement</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>015, 016, 017, 018, 020, 028</blocks>
+    <tags>react, frontend, fluent-ui, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Cap enforcement (NFR-04: 150 attachments / 35 MB / warn at 25 MB) is a load-bearing client-side gate; ADR-021 (Fluent v9) styling; impacts every email sent. FULL guards against regressions across all 4 sources (015-018).</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-07</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build the `<AttachmentList />` framework component at `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.tsx` — this task handles the UNIFIED list + cap enforcement. Source-specific pickers (`LocalAttachmentSource`, `SpeAttachmentSource`, `RelatedRecordAttachmentSource`, `WizardAttachmentSource`) ship in parallel tasks 015-018.
+
+    Framework requirements (FR-07):
+    - Renders attachments in a single unified list (DESPITE coming from 4 different sources)
+    - Each row: filename / size / source badge (`local` / `spe` / `related` / `wizard`) / remove-X button
+    - Cap enforcement (NFR-04):
+      * Hard block at 150 attachments — disable Add buttons, surface validation error
+      * Hard block at 35 MB total size — same
+      * Soft warning at 25 MB — show inline warning banner ("Attachments approaching cap")
+    - Renders source-picker buttons in order from `attachmentSources` prop:
+      `attachmentSources: IComposerAttachmentSource[]` — engine passes through what the wrapper/host configures (e.g., a SendEmailStep in a Matter wizard might enable `['local', 'spe', 'related']`)
+    - Each picker button on click opens the relevant source component (built in 015-018; this task wires the buttons but the source components are stubs)
+    - Component is CONTROLLED: receives `attachments: IAttachment[]`, `onChange(IAttachment[])` from engine reducer
+
+    `IAttachment` shape (define in `AttachmentList.types.ts`):
+    ```
+    {
+      id: string;             // local UUID for list operations
+      name: string;
+      sizeBytes: number;
+      mimeType: string;
+      source: 'local' | 'spe' | 'related' | 'wizard';
+      driveItemId?: string;   // canonical for non-local sources (FR-21)
+      localFile?: File;       // for 'local' source only — uploaded at send time
+    }
+    ```
+
+    Files:
+    - `subcomponents/AttachmentList.tsx` (NEW)
+    - `subcomponents/AttachmentList.types.ts` (NEW)
+    - `subcomponents/sources/` dir scaffolded (NEW) — pickers added in 015-018
+    - Update `EmailComposer.types.ts` — re-export `IAttachment`
+    - Update `EmailComposer/index.ts` — export `AttachmentList`, `IAttachment`
+    - Wire into engine `AttachmentsRegion` slot in `EmailComposer.tsx`
+  </prompt>
+
+  <role>
+    React + Fluent UI v9 developer comfortable with controlled list components + size formatting + Fluent `Toolbar` / `Card` / `MessageBar` primitives.
+  </role>
+
+  <goal>
+    `<AttachmentList />` compiles + lint-clean; renders a unified list with source badges + remove buttons; enforces 150-count + 35-MB-total hard caps with disabled Add buttons; shows 25 MB warning banner. Source-picker button slots present for each `attachmentSources` entry (clicking does nothing yet — pickers ship in 015-018). Bundle clean.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-07: 4 sources, unified list, source badge, server-enforced caps (existing in `CommunicationService.cs`). Client warns at 25 MB / blocks at 35 MB / 150 — these are duplicated client-side to surface UX before the user hits send.
+
+      `driveItemId` is the canonical attachment reference per FR-21 (Wave 0). Non-local sources resolve to a driveItemId; local source uploads at send time and the server captures the resulting driveItem. This component just carries the structured data; the `send()` flow in the engine uses these IDs.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.types.ts (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/sources/ (NEW DIR — picker stubs go here in 015-018)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (UPDATE — AttachmentsRegion slot)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts (UPDATE — re-export IAttachment)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (UPDATE)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 only — `Card`, `Button`, `MessageBar`, `Toolbar`, `Tag`</constraint>
+    <constraint source="ADR-033">Single canonical attachment list — DO NOT clone per-source UIs</constraint>
+    <constraint source="NFR-04">Hard caps: 150 count, 35 MB total; soft warning at 25 MB total</constraint>
+    <constraint source="NFR-09">Each attachment row has descriptive `aria-label` (e.g., "Remove attachment Contract.pdf, 2.4 MB, from SPE")</constraint>
+    <constraint source="project">Controlled component — engine reducer owns `attachments` state</constraint>
+    <constraint source="project">Source-picker button slots rendered in order from `attachmentSources` prop; each is a stub button labeled per source kind</constraint>
+    <constraint source="project">Cap enforcement triggers validation error via `onValidationError` callback — codes `ATTACHMENTS_TOO_MANY` / `ATTACHMENT_TOO_LARGE` per FR-08</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 list + MessageBar" location=".claude/skills/fluent-v9-component/SKILL.md">
+        Reference for list-with-remove-actions + warning banner patterns.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create `subcomponents/sources/` directory (empty — 015-018 fill in).</step>
+    <step order="2">Author `AttachmentList.types.ts` with `IAttachment` shape per prompt.</step>
+    <step order="3">Author `AttachmentList.tsx`:
+      - Props: `{ attachments: IAttachment[]; onChange: (next: IAttachment[]) =&gt; void; attachmentSources: IComposerAttachmentSource[]; onValidationError?: (field: 'attachments', code: string, message: string) =&gt; void; wizardContext?: unknown; relatedRecord?: { entityName: string; recordId: string } }`
+      - Compute `totalBytes = attachments.reduce((s, a) =&gt; s + a.sizeBytes, 0)`
+      - Compute caps: `atCountCap = attachments.length &gt;= 150`, `atSizeCap = totalBytes &gt;= 35 * 1024 * 1024`, `atWarning = totalBytes &gt;= 25 * 1024 * 1024`
+      - On cap breach, dispatch validation error via `onValidationError`
+      - Render:
+        * Toolbar with one button per `attachmentSources` entry — `Add from {source}` — disabled when `atCountCap` or `atSizeCap`; onClick stub (sources fill in 015-018 via a registry/dispatch mechanism)
+        * `&lt;MessageBar intent="warning"&gt;` shown when `atWarning &amp;&amp; !atSizeCap` — text "Attachments approaching 35 MB cap"
+        * `&lt;MessageBar intent="error"&gt;` shown when `atSizeCap` — text "Attachment size cap reached"
+        * Each attachment row: filename, formatted size (`formatBytes(n)`), source badge `&lt;Tag&gt;`, remove button</step>
+    <step order="4">Inline `formatBytes(n: number): string` util — handles B/KB/MB/GB.</step>
+    <step order="5">Wire into engine's `AttachmentsRegion` slot — engine passes attachmentSources + wizardContext + relatedRecord through.</step>
+    <step order="6">Update `EmailComposer.types.ts` re-export + `EmailComposer/index.ts` barrel.</step>
+    <step order="7">Smoke test in dev: add stub attachments at various sizes; verify count cap at 150, size cap at 35 MB, warning at 25 MB.</step>
+    <step order="8">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="8.5">Step 9.5 quality gates — code-review + adr-check.</step>
+    <step order="9">Update `TASK-INDEX.md`: 014 ✅.</step>
+    <step order="10">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="write">AttachmentList.tsx + types</tool>
+    <tool name="edit">EmailComposer.tsx slot, types re-export, index barrel</tool>
+    <tool name="bash">npm run build + lint</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/subcomponents/AttachmentList.tsx (NEW)</output>
+    <output type="file">EmailComposer/subcomponents/AttachmentList.types.ts (NEW)</output>
+    <output type="directory">EmailComposer/subcomponents/sources/ (NEW, empty — pickers in 015-018)</output>
+    <output type="file">EmailComposer/EmailComposer.tsx (UPDATED — AttachmentsRegion slot)</output>
+    <output type="file">EmailComposer/EmailComposer.types.ts (UPDATED — re-export IAttachment)</output>
+    <output type="file">EmailComposer/index.ts (UPDATED)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`AttachmentList.tsx` compiles + lint-clean.</criterion>
+    <criterion testable="true">Unified list renders all sources with source badges.</criterion>
+    <criterion testable="true">Hard block at 150 count — Add buttons disabled, `ATTACHMENTS_TOO_MANY` dispatched.</criterion>
+    <criterion testable="true">Hard block at 35 MB total — Add buttons disabled, `ATTACHMENT_TOO_LARGE` dispatched.</criterion>
+    <criterion testable="true">Soft warning at 25 MB — warning MessageBar visible (NFR-04).</criterion>
+    <criterion testable="true">Each row has descriptive `aria-label` (NFR-09).</criterion>
+    <criterion testable="true">Source-picker buttons rendered in order from `attachmentSources` prop.</criterion>
+    <criterion testable="true">Component fully controlled.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Pickers (015-018) register themselves into a dispatch registry by source kind. AttachmentList's Add buttons fire dispatch to open the relevant picker. The wiring contract is: `onOpenPicker(sourceKind: 'local' | 'spe' | 'related' | 'wizard')` callback — 015-018 implement source-specific UIs that, on selection, call `onChange([...attachments, newAttachment])`.
+
+    For this task, the dispatch is stub-only — clicking Add does nothing or shows a temporary "Picker coming soon" toast. 015-018 wire real behavior.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 9.5 mandatory.
+    </protocol>
+  </execution>
+</task>

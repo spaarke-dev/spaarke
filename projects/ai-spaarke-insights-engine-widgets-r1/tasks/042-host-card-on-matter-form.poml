@@ -1,0 +1,91 @@
+<task id="042" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Host InsightSummaryCard on Matter Health card</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <phase>4</phase>
+    <tags>form, ui-integration</tags>
+    <dependencies>030, 041</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Host the `InsightSummaryCard` component on the existing Matter Health card on the Matter form. Pass current Matter Guid as subject (`matter:{Guid}`). Wire stored envelope (from Task 041 OnLoad read) into card via initial-state prop so card renders existing content immediately (FR-19).
+  </prompt>
+
+  <role>Form integration developer.</role>
+
+  <goal>
+    `InsightSummaryCard` renders on Matter form; subject is dynamic per record; existing envelope passed for FR-19 immediate render.
+  </goal>
+
+  <inputs>
+    <file purpose="component">Phase 3 InsightSummaryCard</file>
+    <file purpose="handler">Task 041 output</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-19">Existing envelope renders immediately; background invocation does NOT block UI</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>react in dataverse form, matter health card</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Add web resource for React mount">JS bundle hosting InsightSummaryCard</step>
+    <step order="2" name="Read Matter Guid from formContext">Pass as subject prop</step>
+    <step order="3" name="Pass existing envelope from OnLoad read">Initial state</step>
+    <step order="4" name="Mount on Matter Health card section">FormXml section update</step>
+    <step order="5" name="Wire onCitationClick">In-product nav to assessment row</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/dataverse/forms/sprk_matter/insightCardMount.ts</output>
+    <output type="code">FormXml patch hosting the mount</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Card renders on Matter form load</criterion>
+    <criterion testable="true">Subject prop = matter:{Guid} for current record</criterion>
+    <criterion testable="true">Existing envelope renders immediately (no spinner if data exists)</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Card visible on Matter form">
+      <steps>
+        <step>Open a Matter with existing envelope</step>
+        <step>Verify card renders content immediately</step>
+        <step>Verify subject prop = correct Matter Guid</step>
+      </steps>
+      <expected>Card visible; no blocking spinner</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Completed 2026-06-11. Wire-shape gap resolved via Option (b) — client sends `{ question: "matter-health-single", subject: "matter:{guid}", parameters: {} }`. No BFF change needed: `InsightEndpoints.Ask` (lines 176-198) already accepts `question` as either a Guid OR a canonical playbook name via `InsightsPlaybookNameMapOptions.ResolveOrDefault`; the `matter-health-single` → Guid map is registered per `notes/handoffs/playbook-deploy.md`.
+
+    Deliverables:
+      - `src/dataverse/forms/sprk_matter/insightCardMount.ts` (NEW; namespace `Spaarke.MatterInsightCard`; coexists with `Spaarke.MatterInsight.onLoad` and `Spaarke.MatterKpi.onLoad`)
+      - `src/dataverse/forms/sprk_matter/insightCardMount.js` (compiled output)
+      - `src/dataverse/forms/sprk_matter/insightCardMount.FormXml.patch.xml` (NEW; patch fragments for library + handler + section control)
+      - `src/dataverse/forms/sprk_matter/tsconfig.json` (extended `files` to include new TS)
+
+    Mount glue contract:
+      - Reads `sprk_performancesummary` via `Xrm.WebApi.retrieveRecord` (mirrors Task 040 pattern)
+      - Parses JSON envelope; passes via `initialEnvelope` prop → FR-19 immediate render
+      - `onFetchInsight` adapter POSTs to `/api/insights/ask` with correct wire shape; propagates `force` param per FR-20
+      - `onCitationClick` opens `Xrm.Navigation.openForm` for assessment + document citations; uses SPE href when present (FR-07)
+      - `_renderPlaceholder` fallback when `@spaarke/ai-widgets` bundle (Task 043) is not yet loaded — shows topic/subject/mode/envelope status + narrative preview so operators can verify mount wiring during Phase 4 staging
+
+    Smoke verification: tsc clean (TypeScript 5.9.2; strict mode; noEmitOnError). Live Dataverse mount NOT verified by sub-agent (no auth context); Task 043 packages + deploys the solution; Task 044 runs end-to-end form test (TTI NFR-03 + FR-19 immediate-render).
+
+    Task 041 follow-up flagged (P1, not blocking 042): Task 041's `_firePrewarm` POSTs `{ topic, mode, subject, parameters }` — the BFF returns 400 ProblemDetails for that shape. Per Task 041's silent-swallow design, this does NOT surface to the user, but the pre-warm benefit is lost. Recommended fix: update Task 041's `_firePrewarm` body to mirror `insightCardMount._invokeInsight` (use `{ question: "matter-health-single", subject, parameters }`). Filed as P1 follow-up in `current-task.md`.
+
+    Constraints honoured: spec FR-19 (immediate render via `initialEnvelope`), ADR-021 (themeId propagation; semantic tokens deferred to bundle), ADR-012 (host-agnostic card; all Xrm glue in mount), Q-U3 (no feedback prop wired), Q-U1 (no `@v` vernacular), NFR-03 (single requestAnimationFrame defer; fire-and-forget Promise chain).
+  </notes>
+</task>

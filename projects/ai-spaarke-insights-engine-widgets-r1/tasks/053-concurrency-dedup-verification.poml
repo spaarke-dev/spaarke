@@ -1,0 +1,54 @@
+<task id="053" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Concurrency dedup verification (FR-22)</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>5</phase>
+    <tags>bff, concurrency, idempotency</tags>
+    <dependencies>052</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Verify FR-22: simultaneous invocations for same (subject, topic, mode) deduplicate via idempotency key. If existing implementation lacks dedup, add it via existing cache layer (no new abstraction per Task 052 constraint).
+  </prompt>
+
+  <role>BFF concurrency engineer.</role>
+
+  <goal>
+    Concurrent invocations for same key serialize to one playbook execution; second observer sees cached result. Verified via BFF log inspection.
+  </goal>
+
+  <inputs>
+    <file purpose="cache">Task 052 output</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-22)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="audit-DR-002">Do NOT add new cache abstraction</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>idempotency, semaphore-per-key, distributed lock</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Inspect existing cache GetOrCreateAsync">Already serializes per key in many implementations</step>
+    <step order="2" name="Test concurrent invocation">Two parallel POSTs same subject; verify single playbook execution in logs</step>
+    <step order="3" name="If dedup missing">Add lightweight per-key semaphore</step>
+    <step order="4" name="Document">notes/handoffs/concurrency-dedup-verified.md</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/handoffs/concurrency-dedup-verified.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Two parallel POSTs result in one playbook execution</criterion>
+    <criterion testable="true">Second observer receives same envelope as first</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,148 @@
+<task id="CICD-088" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Fix ADR-007 violation — isolate Microsoft.Graph SDK out of 18 endpoint classes (wrap Graph exceptions in SpeFileStore facade) — BLOCKS 071 cutover</title>
+    <status>not-started</status>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <phase>2.5 - Pre-cutover BFF ADR remediation</phase>
+    <stream>A - CI tiering remediation</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>false</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies></dependencies>
+    <blocks>071</blocks>
+    <tags>bff-api, adr-007, spe, graph-sdk, hot-path, FR-A06</tags>
+    <execution-note>Modifies src/server/api/Sprk.Bff.Api/** — hot-path. Overrides project's `<hot-path-declaration><bff-api>NO</bff-api>` per owner direction 2026-06-26. Coordinate via INDEX.md before editing. Larger blast radius than 087 (18 endpoint files); execute carefully + test each surface.</execution-note>
+  </metadata>
+
+  <prompt>
+    Per spec FR-A06 (CI Router stability gate). The new CI Router exposes a pre-existing ADR-007 violation: 18 endpoint classes import `Microsoft.Graph` or `Microsoft.Graph.Models.ODataErrors` directly. NetArchTest `ADR-007: Endpoints must not reference Graph SDK` fails because `Endpoints`-suffixed types have a dependency on `Microsoft.Graph`. Per BFF CLAUDE.md ADR-007 guidance, endpoints should use the `SpeFileStore` facade and NOT reference Graph SDK types directly.
+
+    Analysis (CICD-086 follow-up): the coupling is mostly shallow — `catch (ODataError ex)` blocks for Graph SDK exception handling. The proper fix is for `SpeFileStore` to wrap Graph exceptions as a Spaarke-domain exception type (`SpaarkeStorageException`); endpoints catch the wrapped type. Some endpoints may also use Graph DTOs (e.g., `DriveItem`) directly — those need their own domain DTOs.
+
+    Discovered as fallout from CICD-086 bisect — when CI Router stopped failing with `startup_failure`, the underlying test failures surfaced. ADR-007 is one of two arch test violations; ADR-009 is the other (task 087).
+  </prompt>
+
+  <role>BFF engineer applying a focused facade-isolation refactor across 18 endpoint files.</role>
+
+  <goal>NetArchTest `ADR-007: Endpoints must not reference Graph SDK` PASSES on master. Build succeeds. Existing behavioural tests for the 18 endpoints continue to pass.</goal>
+
+  <inputs>
+    <file purpose="failing-test">tests/Spaarke.ArchTests/ADR007_GraphIsolationTests.cs (line 96-117 — `EndpointsShouldNotReferenceGraphSdk`)</file>
+    <file purpose="adr">.claude/adr/ADR-007*.md OR docs/adr/ADR-007*.md (SPE storage seam minimalism — SpeFileStore facade)</file>
+    <file purpose="facade">src/server/api/Sprk.Bff.Api/Services/SpeFileStore.cs (existing facade to extend)</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md (binding module-level rules; ADR-007 guidance with code examples)</file>
+  </inputs>
+
+  <files-to-modify>
+    <file>src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/ContainerTypeEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/ContainerTypeSettingsEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Endpoints/SpeAdmin/ContainerPermissionEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/SpeAdmin/SecurityEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/SpeAdmin/SearchContainersEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/SpeAdmin/SearchItemsEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/SpeAdmin/RecycleBinEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerCustomPropertyEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerTypePermissionEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ConsumingTenantEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerColumnEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/DocumentsEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs</file>
+    <file>src/server/api/Sprk.Bff.Api/Api/ContainerItemEndpoints.cs</file>
+  </files-to-modify>
+
+  <constraints>
+    <constraint source="spec FR-A06">CI Router MUST achieve ≥2 consecutive successful master pushes before cutover; ADR-007 fail blocks this.</constraint>
+    <constraint source="ADR-007">Microsoft.Graph types stay isolated to Infrastructure.Graph + SpeFileStore namespaces. Endpoints + Controllers MUST NOT reference Microsoft.Graph.</constraint>
+    <constraint source="root CLAUDE.md §10">BFF Hygiene: load .claude/constraints/bff-extensions.md first; publish-size delta tracked.</constraint>
+    <constraint source="hot-path">Coordinate via projects/INDEX.md before editing.</constraint>
+    <constraint source="testing">Update tests where Graph SDK exception types are explicitly mocked / asserted; substitute Spaarke exception type.</constraint>
+    <constraint source="practical">Per-file scope: focus ONLY on removing Graph SDK references. Do NOT refactor unrelated code. Do NOT change endpoint signatures/contracts.</constraint>
+  </constraints>
+
+  <design>
+    **Step 0 — Inventory Graph SDK usage per file**: classify each of 18 files as:
+    - **Exception-only** (most common): `using Microsoft.Graph.Models.ODataErrors;` + `catch (ODataError ex)` blocks. Fix: SpeFileStore wraps; endpoint catches wrapped type.
+    - **DTO-only**: uses `DriveItem`, `Container`, etc. Fix: SpeFileStore returns domain DTOs.
+    - **Mixed**: both. Apply both patterns.
+    - **Deep coupling** (hopefully rare): endpoint reaches into Graph SDK behavior directly. Fix: extract to SpeFileStore method.
+
+    **Add to SpeFileStore.cs**:
+    ```csharp
+    public sealed class SpaarkeStorageException : Exception
+    {
+        public int? StatusCode { get; }
+        public string? ErrorCode { get; }
+        public SpaarkeStorageException(string message, int? statusCode = null, string? errorCode = null, Exception? inner = null)
+            : base(message, inner) { StatusCode = statusCode; ErrorCode = errorCode; }
+    }
+    ```
+
+    **Wrap Graph exceptions** at SpeFileStore method boundaries:
+    ```csharp
+    try { /* existing Graph call */ }
+    catch (ODataError ex)
+    {
+        throw new SpaarkeStorageException(
+            ex.Error?.Message ?? "Storage error",
+            statusCode: ex.ResponseStatusCode,
+            errorCode: ex.Error?.Code,
+            inner: ex);
+    }
+    ```
+
+    **Endpoint refactor pattern** (per file):
+    ```csharp
+    // BEFORE
+    using Microsoft.Graph.Models.ODataErrors;
+    ...
+    catch (ODataError odataError) { return Results.Problem(odataError.Error?.Message, statusCode: 500); }
+
+    // AFTER
+    using Sprk.Bff.Api.Services;  // for SpaarkeStorageException
+    ...
+    catch (SpaarkeStorageException ex) { return Results.Problem(ex.Message, statusCode: ex.StatusCode ?? 500); }
+    ```
+
+    Each file edit: (a) remove `using Microsoft.Graph*` imports, (b) replace catch blocks, (c) replace any direct Graph SDK type references with domain equivalents.
+  </design>
+
+  <steps>
+    <step order="1">Read ADR-007 + BFF CLAUDE.md ADR-007 guidance + SpeFileStore.cs to understand current facade shape.</step>
+    <step order="2">Add `SpaarkeStorageException` type to SpeFileStore.cs (or new sibling file Infrastructure/SpaarkeStorageException.cs).</step>
+    <step order="3">Inventory each of 18 files: grep `using Microsoft.Graph` + `ODataError|ServiceException|DriveItem|Container` usage. Bucket as exception-only / DTO-only / mixed / deep.</step>
+    <step order="4">Identify SpeFileStore methods that touch Graph SDK at the boundary; add wrap-and-throw blocks.</step>
+    <step order="5">For each of 18 endpoint files (start with the simplest exception-only files first): remove Graph imports + replace catch blocks per pattern above.</step>
+    <step order="6">For DTO usages: identify if a domain DTO already exists; if not, add one to Models/; convert SpeFileStore return values + endpoint usage.</step>
+    <step order="7">After each file: `dotnet build src/server/api/Sprk.Bff.Api/` to catch breakage early.</step>
+    <step order="8">Update tests in tests/unit/Sprk.Bff.Api.Tests/ where Graph SDK exceptions are mocked → substitute SpaarkeStorageException.</step>
+    <step order="9">Run ADR-007 arch tests: `dotnet test tests/Spaarke.ArchTests/ --filter "FullyQualifiedName~ADR007"`. All 3 facts MUST pass.</step>
+    <step order="10">Run affected unit tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~UploadEndpoints|ContainerEndpoints|DocumentsEndpoints"` (sampler — full set in Tier 1 CI).</step>
+    <step order="11">Verify publish-size impact: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Expected: negligible.</step>
+    <step order="12">Step 9.5: code-review + adr-check on all 18+ modified files (FULL rigor binding).</step>
+    <step order="13">Commit + push. Pair with 087 in the same PR if it lands together, OR separate PR if 087 already shipped.</step>
+  </steps>
+
+  <outputs>
+    <output type="new-type">Sprk.Bff.Api.Services.SpaarkeStorageException (in SpeFileStore.cs OR sibling file)</output>
+    <output type="modified">src/server/api/Sprk.Bff.Api/Services/SpeFileStore.cs (Graph exception wrapping at boundary)</output>
+    <output type="modified">18 endpoint files (Graph imports removed; catch blocks updated)</output>
+    <output type="modified">Possible new files in Models/ for domain DTOs replacing Graph SDK types (if needed)</output>
+    <output type="modified">tests/unit/Sprk.Bff.Api.Tests/ (mock substitutions)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SpaarkeStorageException type exists and is thrown from SpeFileStore on Graph error</criterion>
+    <criterion testable="true">All 18 endpoint files no longer have `using Microsoft.Graph*` imports</criterion>
+    <criterion testable="true">All 18 endpoint files no longer reference `Microsoft.Graph.*` types in any position</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with zero new warnings</criterion>
+    <criterion testable="true">NetArchTest `EndpointsShouldNotReferenceGraphSdk` PASSES locally</criterion>
+    <criterion testable="true">NetArchTest `ControllersShouldNotReferenceGraphSdk` + `GraphTypesMustBeIsolatedToInfrastructure` STILL PASS (don't regress)</criterion>
+    <criterion testable="true">Affected BFF unit tests PASS after mock substitution</criterion>
+    <criterion testable="true">Publish-size delta &lt; +1 MB</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check PASS</criterion>
+  </acceptance-criteria>
+</task>

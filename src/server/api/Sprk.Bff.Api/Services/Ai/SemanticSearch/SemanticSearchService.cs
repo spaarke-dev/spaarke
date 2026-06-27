@@ -131,8 +131,19 @@ public sealed class SemanticSearchService : ISemanticSearchService
                 embeddingStopwatch.Stop();
             }
 
-            // Step 3: Get SearchClient for tenant
-            var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
+            // Step 3: Get SearchClient for tenant.
+            //
+            // multi-container-multi-index-r1 FR-BFF-07 (part 1): thread the caller-supplied
+            // `searchIndexName` from the request DTO through to the resolver. When omitted
+            // (null/whitespace), invoke the existing 2-arg overload UNCHANGED to preserve
+            // NFR-02 backward-compat — every existing test fixture sets up a 2-arg Moq
+            // expression (`GetSearchClientAsync(tenantId, ct)`) which would not match a
+            // 3-arg call. The 3-arg overload is reserved for the explicit-index path,
+            // where validation against `AiSearchOptions.AllowedIndexes` runs in
+            // `KnowledgeDeploymentService` (FR-BFF-02 / NFR-08, delivered by task 010).
+            var searchClient = !string.IsNullOrWhiteSpace(request.SearchIndexName)
+                ? await _deploymentService.GetSearchClientAsync(tenantId, request.SearchIndexName, cancellationToken)
+                : await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
 
             // Step 4: Build filter using SearchFilterBuilder
             var filter = SearchFilterBuilder.BuildFilter(
@@ -260,8 +271,15 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
         try
         {
-            // Get SearchClient for tenant
-            var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
+            // Get SearchClient for tenant.
+            //
+            // multi-container-multi-index-r1 FR-BFF-07 (part 1): mirror the SearchAsync
+            // thread-through so the count and search paths agree on which physical index
+            // is being queried. Backward-compat: when `request.SearchIndexName` is
+            // null/whitespace, call the 2-arg overload UNCHANGED (NFR-02).
+            var searchClient = !string.IsNullOrWhiteSpace(request.SearchIndexName)
+                ? await _deploymentService.GetSearchClientAsync(tenantId, request.SearchIndexName, cancellationToken)
+                : await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
 
             // Build filter using SearchFilterBuilder
             var filter = SearchFilterBuilder.BuildFilter(
@@ -556,6 +574,9 @@ public sealed class SemanticSearchService : ISemanticSearchService
                         // earlier AI-Search-sourced ModifiedAt is overwritten here.
                         ModifiedAt = doc.ModifiedOn,
                         ModifiedBy = doc.ModifiedBy,
+                        // FileSize from sprk_filesize — enables the Documents PCF email
+                        // wizard's 25 MB attachment-cap warning.
+                        FileSize = doc.FileSize,
                         Summary = doc.Summary,
                         Tldr = doc.Tldr,
                         // Populate SPE drive + item IDs so the client can invoke AI
@@ -637,14 +658,17 @@ public sealed class SemanticSearchService : ISemanticSearchService
         }
 
         // Dispatch on parent entity type — these are the lookup fields the upload wizard sets.
+        // Accept both shorthand ("workassignment") and Dataverse logical name ("sprk_workassignment")
+        // since the PCF caller and BFF contract both occur in the wild.
         IEnumerable<DocumentEntity> documents = request.EntityType.ToLowerInvariant() switch
         {
-            "matter"  => await _documentService.GetDocumentsByMatterAsync(parentGuid, null, cancellationToken),
-            "project" => await _documentService.GetDocumentsByProjectAsync(parentGuid, null, cancellationToken),
-            "invoice" => await _documentService.GetDocumentsByInvoiceAsync(parentGuid, null, cancellationToken),
+            "matter" or "sprk_matter" => await _documentService.GetDocumentsByMatterAsync(parentGuid, null, cancellationToken),
+            "project" or "sprk_project" => await _documentService.GetDocumentsByProjectAsync(parentGuid, null, cancellationToken),
+            "invoice" or "sprk_invoice" => await _documentService.GetDocumentsByInvoiceAsync(parentGuid, null, cancellationToken),
+            "workassignment" or "sprk_workassignment" => await _documentService.GetDocumentsByWorkAssignmentAsync(parentGuid, null, cancellationToken),
             _ => throw new ArgumentException(
                 $"associatedOnly is not supported for entityType '{request.EntityType}' " +
-                "(supported: matter, project, invoice).",
+                "(supported: matter, project, invoice, workassignment).",
                 nameof(request))
         };
 
@@ -673,8 +697,8 @@ public sealed class SemanticSearchService : ISemanticSearchService
 
         if (request.Filters?.DateRange is { } dateRange)
         {
-            if (dateRange.From is { } from)  documents = documents.Where(d => d.CreatedOn >= from.UtcDateTime);
-            if (dateRange.To   is { } to)    documents = documents.Where(d => d.CreatedOn <= to.UtcDateTime);
+            if (dateRange.From is { } from) documents = documents.Where(d => d.CreatedOn >= from.UtcDateTime);
+            if (dateRange.To is { } to) documents = documents.Where(d => d.CreatedOn <= to.UtcDateTime);
         }
 
         // Sort: most recent first, then name ascending for stable ordering.
@@ -731,7 +755,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
         // Parent lookup — the entity type dictates which property holds the FK.
         var (parentId, parentName) = parentEntityType.ToLowerInvariant() switch
         {
-            "matter"  => (doc.MatterId,  doc.MatterName),
+            "matter" => (doc.MatterId, doc.MatterName),
             "project" => (doc.ProjectId, doc.ProjectName),
             "invoice" => (doc.InvoiceId, doc.InvoiceName),
             _ => (null, null)
@@ -763,6 +787,7 @@ public sealed class SemanticSearchService : ISemanticSearchService
             // authoritative on this code path too.
             ModifiedAt = doc.ModifiedOn,
             ModifiedBy = doc.ModifiedBy,
+            FileSize = doc.FileSize,
             Summary = doc.Summary,
             Tldr = doc.Tldr
         };

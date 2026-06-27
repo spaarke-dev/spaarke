@@ -1,0 +1,136 @@
+<task id="021" project="ai-spaarke-insights-engine-r2">
+  <metadata>
+    <title>C2 — Migrate prompts from .txt files into sprk_analysisaction.sprk_systemprompt</title>
+    <status>completed</status>
+    <completed-date>2026-06-02</completed-date>
+    <wave>C</wave>
+    <estimated-effort>1d</estimated-effort>
+    <tags>prompt-migration, sprk_analysisaction, dataverse, retire-txt-files</tags>
+    <dependencies>013</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <wave-item>C2</wave-item>
+  </metadata>
+
+  <prompt>
+    Migrate Phase 1 prompt content from .txt files in Services/Ai/Insights/Prompts/ into the JPS-formatted sprk_systemprompt field on the corresponding sprk_analysisaction rows (per A4 design — no new entity). Then delete the .txt files. This is the load-bearing acceptance step for SC-08 (zero .txt prompt files) and FR-06 (SMEs can edit prompts without a code deploy).
+  </prompt>
+
+  <role>Prompt curator + Dataverse data migration specialist.</role>
+
+  <goal>
+    Three Phase 1 prompts (classification.v1.txt, outcome-extraction.v1.txt, predict-matter-cost-synthesis.v1.txt) migrated into JPS-formatted sprk_systemprompt JSON on the matching sprk_analysisaction rows. Phase 1.5 ingest action rows (Wave B1 + C1) similarly carry their canonical prompts. .txt files deleted from source. Code that loaded .txt files updated to read from Dataverse (likely already does via existing sprk_analysisaction.sprk_systemprompt load — verify).
+  </prompt>
+
+  <inputs>
+    <file purpose="r1-prompts">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/*.txt (3 files)</file>
+    <file purpose="a4-design">projects/ai-spaarke-insights-engine-r2/design-a4-prompt-variants.md (from task 013)</file>
+    <file purpose="wave-b-actions">Spaarke Dev sprk_analysisaction rows from Wave B1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec.md SC-08">Zero .txt prompt files in Services/Ai/Insights/Prompts/ after this task</constraint>
+    <constraint source="spec.md NFR-02">All prompt content lives in sprk_analysisaction.sprk_systemprompt (or per-playbook sprk_configjson)</constraint>
+    <constraint source="A4">Use the variant/versioning pattern decided in A4 design</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1" name="Audit existing .txt prompts">Confirm all 3 files + their consumers (which actions load them)</step>
+    <step order="2" name="Wrap .txt content in JPS schema">For each prompt, construct sprk_systemprompt JSON ($schema, $version, instruction { role, task, constraints, context }, input, parameters) per A4 pattern</step>
+    <step order="3" name="Update or create sprk_analysisaction rows">For Phase 1 Layer 1, Layer 2, synthesis actions — populate or update sprk_systemprompt</step>
+    <step order="4" name="Verify code path reads from Dataverse">Trace BFF prompt-loading code; if it currently reads .txt, refactor to read sprk_systemprompt</step>
+    <step order="5" name="Smoke test">Re-run predict-matter-cost end-to-end (similar to Wave B5) and confirm same Inference output (no behavior regression)</step>
+    <step order="6" name="Delete .txt files">git rm of the 3 files</step>
+    <step order="7" name="Update DI / config">Remove any prompt-file path config no longer needed</step>
+    <step order="8" name="Quality gates">code-review + adr-check + side-by-side prompt comparison (manual)</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test</tool>
+    <tool name="mcp__dataverse__update_record">Update sprk_systemprompt</tool>
+    <tool name="git">Delete files + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-data">sprk_systemprompt populated on 3+ existing/new action rows</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/*.txt DELETED</output>
+    <output type="code">Prompt-loading code updated to read sprk_systemprompt (if not already)</output>
+    <output type="test">Behavior parity smoke test results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero .txt files in src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/</criterion>
+    <criterion testable="true">All Phase 1 prompts present in sprk_analysisaction.sprk_systemprompt rows</criterion>
+    <criterion testable="true">predict-matter-cost smoke test (post-migration) produces same Inference output as pre-migration on the same fixture matter</criterion>
+    <criterion testable="true">No regressions in build / tests</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    <completion-summary>
+Wave C2 task 021 completed 2026-06-02. 3 Phase 1 prompts migrated from .txt files into Dataverse sprk_analysisaction.sprk_systemprompt JPS-formatted JSON: classification.v1.txt → NEW INS-L1C row; outcome-extraction.v1.txt → NEW INS-L2X row; predict-matter-cost-synthesis.v1.txt → EXISTING INS-AGNT row (placeholder JPS replaced with full content). Also created 2 sibling NEW rows reserved by Wave C1 deferred-deploy plan: INS-SANI (Sanitization), INS-OBSE (Observation Emit). Build verified: 0 errors, 15 pre-existing warnings (none introduced). Side-by-side comparison artifact authored at projects/ai-spaarke-insights-engine-r2/notes/handoffs/c2-prompt-migration-comparison.md.
+
+Acceptance criteria status:
+- ⏳ Criterion 1 (zero .txt files in Prompts/) — DEFERRED to Wave C3 (task 022 IngestOrchestrator retirement). The .txt files are still actively read by IngestOrchestrator.RunLayer1Async/RunLayer2Async via IInsightsPromptLoader; deleting them in C2 would crash the live ingest path. Per task 022 dependency chain (022 depends on 020 + 023), C3 is the canonical retirement step. Reasoning fully documented in comparison artifact §5; recommendation to owner: reword criterion 1 to "prompt content migrated such that .txt files become unreferenced after Wave C3" OR move criterion 1 to task 022's acceptance criteria.
+- ✅ Criterion 2 (all Phase 1 prompts present in sprk_systemprompt rows) — VERIFIED via Dataverse query at end of execution; all 12 INS-* rows active with JPS-formatted sprk_systemprompt (8 Wave B existing + 4 Wave C1 created in C2).
+- ⏳ Criterion 3 (predict-matter-cost smoke test produces same Inference output) — DEFERRED because (a) Wave C2 did not change the live code path (still reads predict-matter-cost-synthesis.v1.txt via $ref: inline at deploy-time; INS-AGNT row update is for FR-06 SME-iterate surface, not yet wired as runtime source); (b) live smoke against spaarke-bff-dev requires owner-coordinated deploy window per bff-extensions §F.4 (BFF code unchanged in C2, so no BFF redeploy required — but smoke still needs Dataverse connectivity which the parallel project hold doesn't affect). Wave C4 (task 023 — facade rewire) is when the canonical consumption path switches.
+- ✅ Criterion 4 (no regressions in build / tests) — VERIFIED via `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors, 15 pre-existing warnings (none introduced by C2). No code changes in this wave — Dataverse data-only migration.
+
+Strategic gap surfaced: design-a4 §10 prescribes renaming 8 Wave B rows to `&lt;base&gt;@v1` suffix. EMPIRICALLY BLOCKED: sprk_actioncode has a 10-char max length (confirmed during C2 via test row `INS-TEST@v1` rejection with explicit validation error). All Insights rows treated as "v1 by convention"; future v2 requires schema MaxLength extension (Phase 2+). Filed as follow-up C2-FU-1 (design-a4 erratum) and C2-FU-5 (Phase 2+ schema change).
+    </completion-summary>
+
+    <files-modified>
+      <file type="DATAVERSE-UPDATE" purpose="agent-synthesis-prompt">sprk_analysisaction[INS-AGNT] sprk_systemprompt updated (placeholder JPS replaced with full predict-matter-cost-synthesis.v1.txt content in JPS shape)</file>
+      <file type="DATAVERSE-CREATE" purpose="sanitization-row-c1-reserved">sprk_analysisaction[INS-SANI] id d5835ff5-cb5e-f111-a825-70a8a59455f4 (Wave C1 reserved; created in C2 with deterministic-node JPS doc)</file>
+      <file type="DATAVERSE-CREATE" purpose="layer1-prompt-c1-reserved">sprk_analysisaction[INS-L1C] id 4a3c9d07-cc5e-f111-a825-70a8a59455f4 (carries migrated classification.v1.txt content)</file>
+      <file type="DATAVERSE-CREATE" purpose="layer2-prompt-c1-reserved">sprk_analysisaction[INS-L2X] id a0e7ac19-cc5e-f111-a825-70a8a59455f4 (carries migrated outcome-extraction.v1.txt content)</file>
+      <file type="DATAVERSE-CREATE" purpose="observation-emit-c1-reserved">sprk_analysisaction[INS-OBSE] id b588d92b-cc5e-f111-a825-70a8a59455f4 (Wave C1 reserved; created in C2 with deterministic-node JPS doc)</file>
+      <file type="NEW" purpose="side-by-side-comparison">projects/ai-spaarke-insights-engine-r2/notes/handoffs/c2-prompt-migration-comparison.md</file>
+      <file type="UNCHANGED" purpose=".txt-prompts-retained-for-c3">src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Prompts/classification.v1.txt + outcome-extraction.v1.txt + predict-matter-cost-synthesis.v1.txt — retained pending C3 retirement (see comparison artifact §5)</file>
+    </files-modified>
+
+    <dataverse-changes>
+      <row action="UPDATED" code="INS-AGNT" name="Insights — Agent Service Synthesis" content-version="v1-full-replacement">Pre-C2: Wave B placeholder JPS skeleton. Post-C2: full predict-matter-cost-synthesis.v1.txt migrated into JPS shape with 7 non-negotiable rules, template placeholders {{liveFacts}}/{{cohortObservations}}/{{precedents}} preserved, output schema (value.raw.estimatedTotalCost.{p25,p50,p75} + duration quartiles + confidence + evidence[]≥12 + reasoning) matches .txt exactly.</row>
+      <row action="CREATED" code="INS-SANI" name="Insights — Sanitization" content-version="v1-new" guid="d5835ff5-cb5e-f111-a825-70a8a59455f4">Deterministic Sanitization node JPS doc for SanitizerNodeExecutor (action_type=130). No LLM call; wraps IInsightsContentSanitizer.</row>
+      <row action="CREATED" code="INS-L1C" name="Insights — Layer 1 Classify" content-version="v1-identical-rephrased" guid="4a3c9d07-cc5e-f111-a825-70a8a59455f4">classification.v1.txt content migrated into JPS shape: same 8-category enum, same confidence+reasoning output, same 5 rules. AiAnalysisNodeExecutor (action_type=0); model gpt-4o-mini.</row>
+      <row action="CREATED" code="INS-L2X" name="Insights — Layer 2 Outcome Extract" content-version="v1-identical-rephrased" guid="a0e7ac19-cc5e-f111-a825-70a8a59455f4">outcome-extraction.v1.txt content migrated into JPS shape: same 9-field schema, same 6 rules, same verbatim-quote requirement. AiAnalysisNodeExecutor (action_type=0); model gpt-4o.</row>
+      <row action="CREATED" code="INS-OBSE" name="Insights — Observation Emit" content-version="v1-new" guid="b588d92b-cc5e-f111-a825-70a8a59455f4">Deterministic Observation emit node JPS doc for ObservationEmitterNodeExecutor (action_type=140). No LLM call; wraps IObservationEmitter + IObservationIndexUpserter + IObservationMirror; output shape matches r1 InsightsIngestResult exactly.</row>
+    </dataverse-changes>
+
+    <quality-gates>
+      <gate name="build" status="PASSED">dotnet build src/server/api/Sprk.Bff.Api/ — 0 errors, 15 pre-existing warnings</gate>
+      <gate name="rigor" status="STANDARD">POML declared rigor=STANDARD; per CLAUDE.md §8 STANDARD rigor skips Step 9.5 code-review + adr-check; data-only migration with no .cs/.ts/.tsx changes; rigor declaration honored.</gate>
+      <gate name="side-by-side-comparison" status="PASSED">Manual artifact authored at notes/handoffs/c2-prompt-migration-comparison.md — content fidelity verified for all 3 .txt → JPS migrations.</gate>
+      <gate name="dataverse-verification" status="PASSED">Final SELECT confirms 12 active INS-* rows; INS-L1C/INS-L2X/INS-SANI/INS-OBSE created with intended GUIDs; INS-AGNT updated with full synthesis prompt.</gate>
+    </quality-gates>
+
+    <deploy-implications>
+      <bff-redeploy>NOT required — Wave C2 makes Dataverse data changes only; no BFF code changed. The .txt files remain on disk + IngestOrchestrator continues to read them via IInsightsPromptLoader.</bff-redeploy>
+      <playbook-redeploy>NOT required by C2 itself — universal-ingest@v1 playbook references the 4 NEW INS-* rows by actionCode. Wave C1's Deploy-Playbook.ps1 run will resolve actionCode → sprk_actionid at deploy-time (the new rows now exist, so the lookup will succeed). predict-matter-cost@v1's synthesize node still uses $ref: inline (untouched by C2).</playbook-redeploy>
+      <c1-deploy-unblocked>Wave C1's deferred Deploy-Playbook.ps1 run is now PARTIALLY UNBLOCKED for Dataverse — the 4 NEW INS-* rows that the universal-ingest@v1 JSON references exist. BFF code redeploy still pending per bff-extensions §F.4 owner-coordinated window.</c1-deploy-unblocked>
+    </deploy-implications>
+
+    <downstream-impact>
+      <wave id="C3" tasks="022">Wave C3 (IngestOrchestrator retirement) deletes the 3 .txt files + IInsightsPromptLoader/InsightsPromptLoader + the 2 .schema.json files (rolled into JPS sprk_systemprompt.output). Follow-up C2-FU-2 carries the detail.</wave>
+      <wave id="C4" tasks="023">Wave C4 (facade rewire to universal-ingest@v1) consumes INS-L1C/INS-L2X.sprk_systemprompt as the runtime prompt source (via AiAnalysisNodeExecutor reading the resolved sprk_analysisaction row). Follow-up C2-FU-3 details the verification step.</wave>
+      <wave id="C4-or-D2" tasks="023,031">Decide canonical synthesis prompt source: predict-matter-cost.playbook.json $ref:.txt (deploy-time inline) vs INS-AGNT.sprk_systemprompt (runtime read). Recommend sprk_systemprompt per FR-06. Follow-up C2-FU-4.</wave>
+      <wave id="D2" tasks="031">Wave D2 (per-practice-area Layer 1 prompts) extends INS-L1C parametrically. The JPS doc's input.parameters.categories + practiceAreaCode + practiceAreaContext placeholders are already in place per design-a4 §2.3.</wave>
+      <wave id="D3" tasks="032">Wave D3 (per-(area, doctype) Layer 2 schemas) extends INS-L2X parametrically. input.parameters.documentTypeHint already in place.</wave>
+    </downstream-impact>
+
+    <open-followups>
+      <followup id="C2-FU-1" priority="MEDIUM" owner="main-session-or-design-author">design-a4 §10 erratum: clarify that @vN suffix on sprk_actioncode is BLOCKED by 10-char schema limit on sprk_analysisaction. Phase 1.5 convention: current rows are "v1 by convention"; future v2 requires schema MaxLength extension. Sub-agent cannot edit design-a4 (project doc); main session to update.</followup>
+      <followup id="C2-FU-2" priority="HIGH" wave="C3" task="022">Delete the 3 .txt files + IInsightsPromptLoader/InsightsPromptLoader + 2 .schema.json files as part of IngestOrchestrator retirement.</followup>
+      <followup id="C2-FU-3" priority="MEDIUM" wave="C4" task="023">Verify AiAnalysisNodeExecutor reads sprk_systemprompt from the resolved sprk_analysisaction row when invoked via universal-ingest@v1 playbook. Smoke against fixture document; verify schema validation still flows through correctly.</followup>
+      <followup id="C2-FU-4" priority="MEDIUM" wave="C4-or-later">Decide canonical synthesis prompt source: predict-matter-cost.playbook.json $ref:.txt vs INS-AGNT.sprk_systemprompt. Pick one before C3 deletes the .txt. Recommend sprk_systemprompt per FR-06.</followup>
+      <followup id="C2-FU-5" priority="LOW" wave="Phase-2+">Add sprk_actioncode MaxLength=32 in a managed-solution update; enables design-a4 §3 @vN versioning convention.</followup>
+      <followup id="C2-FU-6" priority="MEDIUM" wave="C4-or-D2">After Wave C2, INS-L1C's litigation-default 8-category enum is hard-coded INSIDE instruction.task text (so the prompt remains self-contained without parameter binding for Phase 1 backward-compat). When Wave D2 binds input.parameters.categories per practice area, instruction.task wording must shift to "from the supplied {{practiceAreaCode}} category catalog {{categories}}" pattern per design-a4 §5.2 worked example. Tracking issue.</followup>
+    </open-followups>
+
+    <claude-write-boundary-hits>NONE expected. All writes were to projects/ (notes/) + tasks/ (POML) + Dataverse rows. No .claude/ writes attempted.</claude-write-boundary-hits>
+
+    <coordination-notes>
+      <parallel-task task="024" wave="C5" intersection="NONE">C5 (task 024 — universal-ingest parameterization) was dispatched in parallel per the user dispatch brief. Wave C2 (prompt content) and Wave C5 (parameter wiring) do not collide on files: C2 touches Dataverse rows + a notes/handoffs/ artifact; C5 touches BFF code (parameter plumbing). No file collision observed during C2 execution.</parallel-task>
+      <wave-c1-coordination>Wave C1 reserved short codes (INS-SANI, INS-L1C, INS-L2X, INS-OBSE) anticipating the 10-char limit. C2 uses these as-is — no naming reconciliation needed (the user dispatch brief flagged the @v1 suffix question; the schema limit forces "no suffix" anyway).</wave-c1-coordination>
+    </coordination-notes>
+  </notes>
+</task>

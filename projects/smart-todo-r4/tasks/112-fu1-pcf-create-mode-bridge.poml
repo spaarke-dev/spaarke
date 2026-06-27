@@ -1,0 +1,80 @@
+<task id="R4-112" project="smart-todo-r4">
+  <metadata>
+    <title>RegardingResolver — Bug-1 diagnosis (user DevTools needed) + CREATE-mode validation + Event HOST-only docs (RESCOPED 2026-06-24)</title>
+    <phase>Closeout (UAT round 14)</phase>
+    <workstream>D path (regarding resolver) — UAT-14 bugs + delivery validation</workstream>
+    <status>partial — HOST-only docs DONE in worktree; Bug-1 awaiting user DevTools data; CREATE-mode awaiting end-to-end UAT</status>
+    <estimated-effort>1-2 hrs (was 3-4; CREATE-mode bridge already shipped in R4-051; only Bug-1 fix + UAT remaining)</estimated-effort>
+    <tags>pcf, regarding-resolver, create-mode, form-script, bug-fix</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>(none — independent of widget work)</dependencies>
+    <relevant-files>
+      <file>src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx (handleSelectRecord)</file>
+      <file>src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts (applyRegardingSelection)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/TodoRegardingCatalog.ts (TODO_REGARDING_CATALOG nav-prop vs rel-name fields)</file>
+      <file>src/client/webresources/js/sprk_todo_regarding_presave.js (OnSave handler that reads window.__sprk_regarding_pending__)</file>
+      <file>projects/smart-todo-r4/notes/d-form-bind-instructions.md (window.__sprk_regarding_pending__ payload contract)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Re-scoped 2026-06-24 after source audit revealed CREATE-mode bridge is ALREADY IMPLEMENTED (PCF lines 299-323 in RegardingResolverApp.tsx populate `window.__sprk_regarding_pending__` on CREATE; companion OnSave at sprk_todo_regarding_presave.js lines 152-247 reads + clears it). The original "PCF side deferred" wave note from R4-051 was stale — both halves shipped.
+
+What's left:
+
+**Bug 1 — UAT-14 m:1 relationship lookup error.** When a user picks a regarding record on the To Do form via the RegardingResolver, the lookup dialog throws: `Uncaught (in promise) {0: Error: Unable to find many-to-one relationship, entity: sprk_todo, referenced entity: sprk_matter, ...}`. The association persists (write succeeds via Xrm.WebApi.updateRecord) — verified in UAT screenshot showing "Associated with CMRCL-150071" and the Matter's "To Dos" tab showing the new To Do. **Diagnosis needed via DevTools (Network tab → look for RelationshipDefinitions or m:1 metadata API call) by user — cannot fix blind from worktree.** Likely candidates:
+ - `applyResolverFields` in @spaarke/ui-components passes wrong rel-name to a metadata call
+ - `Xrm.Utility.lookupObjects` filter parameter (currently empty — line 270-274) but error might originate elsewhere
+ - Stale m:1 metadata cache on the resolver — try hard refresh first
+
+**Cleanup — Event form HOST-only docs (DONE 2026-06-24).** User attempted to bind RegardingResolver on the `sprk_event` main form and got PATCH 400 "Error identified in Payload provided by the user for Entity:''" — Event is a TARGET entity, NOT a HOST entity. Added HOST-only contract section to `RegardingResolverApp.tsx` header docstring (commit XXX). Manifest description-key already states "reusable for sprk_todo and sprk_communication".
+
+**CREATE-mode end-to-end validation needed.** With the RegardingResolver now bound on the To Do form (user added 2026-06-24), the CREATE-mode bridge can FINALLY be validated end-to-end. Test procedure:
+ 1. Open NEW To Do form (e.g., from Matter "Create To Do" button once R4-118 deploys)
+ 2. Pick a regarding record via the resolver
+ 3. Save
+ 4. MCP query: confirm all 5 regarding fields populated on the created record (sprk_regardingrecordtype, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, + the entity-specific sprk_Regarding<X> lookup)
+  </prompt>
+
+  <role>Frontend / PCF developer.</role>
+
+  <goal>
+1. **Bug-1 fix**: Diagnose the m:1 rel-name error → fix in `TODO_REGARDING_CATALOG` entries (add explicit `relationshipName` field if missing, OR adjust how `handleSelectRecord` passes it to the lookup dialog). Verify no console error on lookup.
+2. **CREATE-mode bridge**: Implement `window.__sprk_regarding_pending__` population in `handleSelectRecord` per `notes/d-form-bind-instructions.md`. Verify on CREATE form: pick → save → all 5 fields populated on the new record.
+3. **UPDATE mode regression check**: pick → save → still works (no regression).
+4. **Pending-flag cleanup**: `window.__sprk_regarding_pending__` cleared after OnSave consumes it (no stale state across forms).
+5. **Event-form note**: Add HOST-only guidance to PCF README/manifest description.
+6. **Bump PCF version**: v1.1.0 → v1.2.0 across 4 locations (manifest + footer + solution manifest + control-manifest).
+7. Build (npm run build:prod) + smoke-test acceptance criteria.
+8. Commit (no deploy from worktree — deploy happens from master per durable rule).
+  </goal>
+
+  <constraints>
+    <constraint source="R4-051 instructions doc">`notes/d-form-bind-instructions.md` documents the `window.__sprk_regarding_pending__` payload contract. Follow the existing OnSave handler's expectations.</constraint>
+    <constraint source="ADR-024 polymorphic-resolver">The 5 fields must be set atomically. `PolymorphicResolverService.applyResolverFields` is the single source of truth — do NOT duplicate that logic.</constraint>
+    <constraint source="spaarkedev1-deploy-discipline">No deploy from this worktree. Build + commit only; deploy from master.</constraint>
+    <constraint source="PCF-DEPLOYMENT-GUIDE.md">Version bump in 4 locations per PCF deployment standard.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0">Context check + read `notes/d-form-bind-instructions.md` + RegardingResolverApp.tsx + ResolverWriteHandler.ts + TodoRegardingCatalog.ts.</step>
+    <step order="1">**Bug-1 diagnosis**: open DevTools on the To Do form, click Select Record in the resolver, capture the failing API URL (RelationshipDefinitions or similar). Identify whether the PCF passes lookup-attribute name vs m:1 rel-name.</step>
+    <step order="2">**Bug-1 fix**: update TODO_REGARDING_CATALOG entries (add `relationshipName` field per catalog entry) OR update `handleSelectRecord` to resolve rel-name correctly.</step>
+    <step order="3">**CREATE-mode bridge**: in `handleSelectRecord` (after the resolver write succeeds OR before the write on CREATE), populate `window.__sprk_regarding_pending__` with `{ hostEntity, entityType, entitySet, navProp, recordId, recordName, recordUrl }`.</step>
+    <step order="4">Verify the OnSave handler picks up the pending payload correctly (read the consumption code in `sprk_todo_regarding_presave.js`).</step>
+    <step order="5">Add Event-form HOST-only note to RegardingResolverApp/Host docstring + ControlManifest description-key.</step>
+    <step order="6">Bump version v1.1.0 → v1.2.0 (manifest + UI footer + solution manifest + control-manifest).</step>
+    <step order="7">Build PCF (npm run build:prod). Verify bundle generates clean.</step>
+    <step order="8">Manual test (in master worktree after deploy): NEW To Do form → pick regarding record → save → query created record via MCP, verify all 5 fields populated. UPDATE mode regression. Lookup dialog: no console error.</step>
+    <step order="9">Commit. Deploy + UAT happen from master per durable rule.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">**Bug-1**: Picking a regarding record on To Do form via resolver — no `Unable to find many-to-one relationship` console error.</criterion>
+    <criterion testable="true">**CREATE-mode**: Creating a NEW sprk_todo with regarding picker selection → all 5 regarding fields populated post-save.</criterion>
+    <criterion testable="true">**UPDATE-mode regression**: existing To Do, change regarding → save → fields update correctly (no regression).</criterion>
+    <criterion testable="true">`window.__sprk_regarding_pending__` cleared after OnSave handler consumes it (no stale state across forms).</criterion>
+    <criterion testable="true">PCF README + manifest description-key clearly state HOST-only usage (not for target entities).</criterion>
+    <criterion testable="true">PCF version bumped v1.1.0 → v1.2.0 in all 4 locations.</criterion>
+  </acceptance-criteria>
+</task>

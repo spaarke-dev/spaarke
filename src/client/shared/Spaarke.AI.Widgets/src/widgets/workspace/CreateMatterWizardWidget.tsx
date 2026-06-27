@@ -45,8 +45,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { makeStyles, mergeClasses, Spinner, Text, tokens } from '@fluentui/react-components';
 
-import { CreateMatterWizard } from '@spaarke/ui-components/src/components/CreateMatterWizard';
-import type { ICreateMatterWizardProps } from '@spaarke/ui-components/src/components/CreateMatterWizard';
+import { CreateMatterWizard } from '@spaarke/ui-components/components/CreateMatterWizard';
+import type { ICreateMatterWizardProps } from '@spaarke/ui-components/components/CreateMatterWizard';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { WidgetState } from '../../types/shared';
@@ -160,9 +160,7 @@ const CreateMatterWizardWidget: React.FC<WorkspaceWidgetProps<CreateMatterWizard
   const [wizardMountKey, setWizardMountKey] = useState(0);
 
   // ── Current step tracking (for serialize + context dispatch) ────────────
-  const [currentStepIndex, setCurrentStepIndex] = useState<number>(
-    data?.initialStepIndex ?? 0
-  );
+  const [currentStepIndex, setCurrentStepIndex] = useState<number>(data?.initialStepIndex ?? 0);
   const currentStepIndexRef = useRef(currentStepIndex);
   currentStepIndexRef.current = currentStepIndex;
 
@@ -174,42 +172,48 @@ const CreateMatterWizardWidget: React.FC<WorkspaceWidgetProps<CreateMatterWizard
   // ── PaneEventBus: subscribe to wizard_step events ───────────────────────
   const wizardId = data?.wizardId ?? 'create-matter';
 
-  usePaneEvent('workspace', useCallback((event) => {
-    if (event.type !== 'wizard_step') return;
-    // Type-narrow: wizardId and wizardAction are required on wizard_step
-    const wizardEvent = event as WizardStepEvent;
-    if (wizardEvent.wizardId !== wizardId) return;
+  usePaneEvent(
+    'workspace',
+    useCallback(
+      event => {
+        if (event.type !== 'wizard_step') return;
+        // Type-narrow: wizardId and wizardAction are required on wizard_step
+        const wizardEvent = event as WizardStepEvent;
+        if (wizardEvent.wizardId !== wizardId) return;
 
-    switch (wizardEvent.wizardAction) {
-      case 'next':
-        // Signal the wizard to advance one step. Because CreateMatterWizard
-        // manages its own step state internally, we use a synthetic "click"
-        // on the Next button by dispatching to a ref-held callback.
-        if (imperativeNextRef.current) {
-          imperativeNextRef.current();
-        }
-        break;
+        switch (wizardEvent.wizardAction) {
+          case 'next':
+            // Signal the wizard to advance one step. Because CreateMatterWizard
+            // manages its own step state internally, we use a synthetic "click"
+            // on the Next button by dispatching to a ref-held callback.
+            if (imperativeNextRef.current) {
+              imperativeNextRef.current();
+            }
+            break;
 
-      case 'back':
-        if (imperativeBackRef.current) {
-          imperativeBackRef.current();
-        }
-        break;
+          case 'back':
+            if (imperativeBackRef.current) {
+              imperativeBackRef.current();
+            }
+            break;
 
-      case 'set-field':
-        if (wizardEvent.fieldName !== undefined) {
-          setFieldOverrides(prev => ({
-            ...prev,
-            [wizardEvent.fieldName!]: wizardEvent.fieldValue,
-          }));
-          // Bump the mount key so the wizard picks up the new initial value.
-          // This is a remount — acceptable because the wizard is stateful but
-          // the set-field action is an AI-driven pre-fill, not user editing.
-          setWizardMountKey(k => k + 1);
+          case 'set-field':
+            if (wizardEvent.fieldName !== undefined) {
+              setFieldOverrides(prev => ({
+                ...prev,
+                [wizardEvent.fieldName!]: wizardEvent.fieldValue,
+              }));
+              // Bump the mount key so the wizard picks up the new initial value.
+              // This is a remount — acceptable because the wizard is stateful but
+              // the set-field action is an AI-driven pre-fill, not user editing.
+              setWizardMountKey(k => k + 1);
+            }
+            break;
         }
-        break;
-    }
-  }, [wizardId]));
+      },
+      [wizardId]
+    )
+  );
 
   // ── Imperative next/back refs ────────────────────────────────────────────
   // CreateMatterWizard does not expose an imperative handle directly. We
@@ -327,9 +331,7 @@ const CreateMatterWizardWidget: React.FC<WorkspaceWidgetProps<CreateMatterWizard
           <Text size={400} weight="semibold">
             {completedMatterName ? `Matter "${completedMatterName}" created` : 'Matter created'}
           </Text>
-          <Text style={{ color: tokens.colorNeutralForeground3 }}>
-            This wizard tab can now be closed.
-          </Text>
+          <Text style={{ color: tokens.colorNeutralForeground3 }}>This wizard tab can now be closed.</Text>
         </div>
       </div>
     );
@@ -340,9 +342,7 @@ const CreateMatterWizardWidget: React.FC<WorkspaceWidgetProps<CreateMatterWizard
     return (
       <div className={mergeClasses(styles.root, className)}>
         <div className={styles.centered}>
-          <Text style={{ color: tokens.colorNeutralForeground3 }}>
-            Wizard configuration not yet loaded.
-          </Text>
+          <Text style={{ color: tokens.colorNeutralForeground3 }}>Wizard configuration not yet loaded.</Text>
         </div>
       </div>
     );

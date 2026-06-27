@@ -1,0 +1,475 @@
+<task id="042" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D3-03 Telemetry dashboards (App Insights / Grafana) for R5 Summarize-for-Chat</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <phase>Phase 3 — Polish + Future-Use Validation</phase>
+    <wave>P3-2 (parallel-safe with 041; Phase 2 + task 008 are prerequisites)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>Phase 2 ✅, task 008 (telemetry events emitted)</dependencies>
+    <tags>dashboards, telemetry, kusto, grafana, observability</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Author the operational dashboards that visualize the R5 Summarize-for-Chat
+    telemetry stream emitted by task 008's `R5SummarizeTelemetry`. The dashboards
+    are how Operations + the R5 lead answer the four binding observability
+    questions from plan.md D3-03 + spec NFR-06 (cost control):
+
+    1. **Invocation counts + path mix** — how often is Summarize-for-Chat invoked,
+       and what's the split between the agent-tool path (`path = "agent_tool"`)
+       and the direct-endpoint path (`path = "direct_endpoint"`)? Stratified by
+       `completion_status`.
+    2. **Session-files index size** — distribution of per-session document counts
+       observed at `phase ∈ {post_write, post_evict, post_cleanup}` (the
+       `r5.session_files.index_size` Histogram from task 008). Drives the
+       cleanup-cadence tuning question from spec NFR-02 (assumed 6h cadence; may
+       tune to 1h if growth is high).
+    3. **Cost-per-session breakdown** — derived from `r5.summarize.total_tokens`
+       Histogram + token-pricing constants. Supports capacity planning + the
+       budget-burn-down question from spec NFR-06.
+    4. **SSE event-rate histogram** — `r5.summarize.latency_ms` distribution +
+       Counter rate, both stratified by `path`. Surfaces the FR-02 / NFR-01 SSE
+       TTFB &lt; 500ms commitment + identifies regressions.
+
+    The event schema is LOCKED by task 008 (see `notes/task-008-telemetry-evidence.md`
+    for the canonical table). This task CONSUMES that schema — Kusto queries
+    reference the exact metric names (`r5.summarize.invocation`,
+    `r5.summarize.file_count`, `r5.summarize.total_tokens`,
+    `r5.summarize.latency_ms`, `r5.session_files.index_size`) and exact dimension
+    names (`path`, `completion_status`, `phase`, `tenantId`). A schema breaking
+    change downstream would invalidate these dashboards.
+
+    R5 is configuration-first: this task ships dashboard configuration only. It
+    does NOT modify BFF code. The R5 publish-size budget (≤ +1 MB across the
+    project) is not consumed by this task. Publish-size delta = 0 MB.
+
+    Per CLAUDE.md §10 Placement Justification: dashboards belong in
+    `infrastructure/` IaC OR as portal-managed artifacts with re-creation
+    documentation in `notes/`. Bicep is preferred (idempotent IaC + reviewable
+    diff); portal-managed is acceptable when Bicep authoring cost is
+    disproportionate to the value (e.g., exploratory queries during stabilization).
+    The placement decision is recorded in task notes.
+  </prompt>
+
+  <role>
+    Senior observability engineer with deep Azure Monitor / Application Insights
+    + Kusto Query Language (KQL) experience, plus working knowledge of Azure
+    Dashboard ARM/Bicep authoring (the
+    `Microsoft.Portal/dashboards@2020-09-01-preview` resource type used by the
+    existing `infrastructure/bicep/modules/dashboard.bicep` precedent). Familiar
+    with the OpenTelemetry → App Insights metric / customMetrics ingestion path
+    so KQL queries against `customMetrics` / `customEvents` tables target the
+    right schema for task 008's emitted instruments.
+  </role>
+
+  <goal>
+    Four panels are live on a Spaarke Dev dashboard (Bicep-managed preferred,
+    portal-managed acceptable with documented re-creation steps), each backed
+    by a Kusto query referencing the locked task-008 schema. Each query returns
+    real data when run against Spaarke Dev App Insights. The cost-per-session
+    panel surfaces the Histogram-driven cost breakdown usable for capacity
+    planning. Dashboards are accessible to the R5 lead + Operations via the
+    Azure Portal. Placement decision (IaC vs portal-managed) is recorded in
+    task notes with rationale. BFF publish-size delta is verified at 0 MB
+    (no BFF code change in this task). Quality gates pass.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="upstream-task-locked-schema">projects/spaarke-ai-platform-unification-r5/tasks/008-telemetry-events-cost-observability.poml</file>
+    <file purpose="upstream-task-evidence-notes">projects/spaarke-ai-platform-unification-r5/notes/task-008-telemetry-evidence.md</file>
+    <file purpose="dashboard-bicep-precedent">infrastructure/bicep/modules/dashboard.bicep</file>
+    <file purpose="telemetry-emitter-reference">src/server/api/Sprk.Bff.Api/Telemetry/R5SummarizeTelemetry.cs</file>
+    <file purpose="telemetry-pattern-reference">src/server/api/Sprk.Bff.Api/Telemetry/AiTelemetry.cs</file>
+    <file purpose="telemetry-pattern-reference">src/server/api/Sprk.Bff.Api/Telemetry/RagTelemetry.cs</file>
+    <file purpose="azure-resources-reference">docs/architecture/auth-AI-azure-resources.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="bff-extensions-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="task 008 — locked schema (BINDING)">Dashboards MUST consume the EXACT metric names + dimension names locked in `notes/task-008-telemetry-evidence.md`: `r5.summarize.invocation` (Counter), `r5.summarize.file_count` (Histogram), `r5.summarize.total_tokens` (Histogram), `r5.summarize.latency_ms` (Histogram), `r5.session_files.index_size` (Histogram). Dimensions: `path` ∈ {`agent_tool`, `direct_endpoint`}, `completion_status` ∈ {`success`, `failed`, `declined`, `cancelled`}, `phase` ∈ {`post_write`, `post_evict`, `post_cleanup`}, optional `tenantId` (low-cardinality). No renames. No schema invention.</constraint>
+    <constraint source="R5 CLAUDE.md §3.6 + ADR-029">BFF publish-size verification — this task changes ZERO BFF code; publish-size delta MUST be 0 MB. Document explicitly in task notes that no `dotnet publish` measurement was required because no BFF binary was changed. (Verification is "confirm delta = 0 MB by inspection of changed files.")</constraint>
+    <constraint source="R5 CLAUDE.md §3.1 reuse mandate">If Bicep-managed, EXTEND existing `infrastructure/bicep/modules/dashboard.bicep` pattern (mirrors the precedent for AI feature monitoring) rather than introducing a new dashboard authoring pattern. If portal-managed, document the portal-managed rationale + provide a JSON export checked into `infrastructure/dashboards/` so the dashboard is reproducible after tenant rebuilds.</constraint>
+    <constraint source="ADR-014">Tenant isolation — if any panel filters or stratifies by `tenantId`, the query MUST scope to a single `tenantId` OR aggregate across tenants without leaking per-tenant identifiers in shared dashboards. Spaarke Dev dashboards may show all tenants; production dashboards (out of scope for R5) would partition per-tenant.</constraint>
+    <constraint source="ADR-015">Dashboards / queries MUST NOT surface document content, prompt text, file names, session IDs, correlation IDs, or any other PII from telemetry. Only enums + counts + durations + tenantId. (This is automatic since task 008 already excludes those from dimensions — but verify queries don't reach into other tables that DO carry such fields.)</constraint>
+    <constraint source="R5 CLAUDE.md §3.2 + ADR-018">No new feature flags introduced by this task. Dashboards are unconditional artifacts.</constraint>
+    <constraint source="spec NFR-06 cost control">Cost-per-session panel MUST derive cost from `r5.summarize.total_tokens` Histogram + the established Azure OpenAI token-pricing constants for the deployed model (record the pricing constants in the dashboard description / annotation so the derivation is auditable and re-runnable when prices change).</constraint>
+    <constraint source="spec NFR-02 cleanup cadence tuning">Index-size panel MUST stratify by `phase` so the post-cleanup vs post-write delta is visible — this is the load-bearing chart for the 6h → 1h cadence-tuning decision documented in spec NFR-02 + task 008.</constraint>
+    <constraint source="spec FR-02 / NFR-01 SSE TTFB">SSE event-rate / latency panel MUST surface the SSE TTFB &lt; 500ms commitment from FR-02 / NFR-01 — render a p50/p95/p99 line for `r5.summarize.latency_ms` Histogram with a horizontal threshold marker at 500ms so regressions are immediately visible.</constraint>
+    <constraint source="path-drift correction (operator note)">Index JSON path is `infrastructure/ai-search/` (NOT `infra/ai-search/`). Verify any path reference in dashboard descriptions / annotations + ensure consistency with existing R5 task POMLs (001 uses `infrastructure/ai-search/`).</constraint>
+    <constraint source="project">Each panel MUST be verified against LIVE Spaarke Dev telemetry data — the dashboard ships only when each query returns non-error rows from Spaarke Dev's App Insights instance. If task 008's events have not yet been emitted (because tasks 012/014/015/007 have not yet generated traffic), trigger a synthetic invocation manually to seed data BEFORE marking acceptance complete.</constraint>
+    <constraint source="project">Placement decision (Bicep IaC vs portal-managed) MUST be recorded explicitly in task notes with rationale. Bicep is preferred (idempotent + reviewable diff + tenant-rebuild safe); portal-managed is acceptable only when Bicep authoring cost is disproportionate. If portal-managed, include a JSON export in `infrastructure/dashboards/` so the dashboard is reproducible.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-monitor/application-insights + kusto-query-language + azure-dashboards-bicep</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r5/tasks/008-telemetry-events-cost-observability.poml</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/task-008-telemetry-evidence.md</file>
+      <file>infrastructure/bicep/modules/dashboard.bicep</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/R5SummarizeTelemetry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/AiTelemetry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/RagTelemetry.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/TelemetryModule.cs</file>
+      <file>docs/architecture/auth-AI-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="Azure Dashboard Bicep pattern" location="infrastructure/bicep/modules/dashboard.bicep">
+        The existing `Microsoft.Portal/dashboards@2020-09-01-preview` resource
+        pattern + per-tile `MonitorChartPart` / `LogsDashboardPart` parts. Mirror
+        this exact structure for the 4 new R5 panels. Parameterize `appInsightsId`
+        + `dashboardName` to match precedent. Use `lenses[].parts[]` for layout
+        positioning (`x`, `y`, `rowSpan`, `colSpan`).
+      </pattern>
+      <pattern name="OpenTelemetry → App Insights metric ingestion" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/TelemetryModule.cs">
+        OpenTelemetry meters registered via `AddMeter("Sprk.Bff.Api.R5Summarize")`
+        export to App Insights via the OTel → AI exporter. Counter measurements
+        appear in `customMetrics` table with `name` = meter-prefixed instrument
+        name (e.g., `r5.summarize.invocation`). Histogram measurements appear as
+        multiple aggregated entries (sum / count / min / max / percentiles
+        depending on aggregator config). Dimensions appear in `customDimensions`
+        bag. KQL queries `customMetrics | where name == "r5.summarize.invocation"`
+        and project `tostring(customDimensions.path)` etc. for stratification.
+      </pattern>
+      <pattern name="KQL invocation-count query shape" location="(canonical KQL — author this task)">
+        ```kusto
+        customMetrics
+        | where timestamp &gt; ago(24h)
+        | where name == "r5.summarize.invocation"
+        | extend path = tostring(customDimensions.path),
+                 completion_status = tostring(customDimensions.completion_status)
+        | summarize count_=sum(valueCount) by bin(timestamp, 5m), path, completion_status
+        | render timechart
+        ```
+        Reference + adapt for the four panels. For cost: multiply
+        `r5.summarize.total_tokens` by per-token pricing constant in `extend cost_usd = total_tokens * 0.00000xxx` then sum per bin.
+      </pattern>
+      <pattern name="Per-tenant safe aggregation" location="(canonical KQL — author this task)">
+        Where `tenantId` is a dimension, prefer aggregation across tenants in
+        shared dashboards (Spaarke Dev). If per-tenant drill-down is desired,
+        use Azure Workbook parameter binding rather than hardcoded `tenantId`
+        filters. R5 task 042 ships shared-aggregation dashboards only; per-tenant
+        drill-down is R6 backlog.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 ships chat-driven Summarize-for-Chat across two invocation paths
+      (agent-tool + direct endpoint). Task 008 instrumented both paths with a
+      single coherent OpenTelemetry meter (`Sprk.Bff.Api.R5Summarize`) emitting
+      `r5.summarize.invocation` (Counter) + four Histograms + a session-files
+      index-size Histogram. The schema was deliberately treated as a
+      public-API surface from task 008's commit forward — precisely so this
+      dashboard task can write stable Kusto queries against it.
+
+      This task is the LAST step in turning instrumentation into operational
+      value. Without it, task 008's events sit in App Insights but are not
+      surfaced for the four observability questions plan.md D3-03 calls out:
+      invocation counts + path mix; index size; cost-per-session; SSE event-rate
+      / latency. Spec NFR-06 (cost control) explicitly depends on the cost
+      panel; spec NFR-02 (cleanup cadence tuning) depends on the index-size
+      panel.
+
+      Parallel-safe with task 041 (Get Started welcome card) because the
+      surfaces don't overlap — 041 touches frontend, 042 touches dashboard
+      infrastructure / portal artifacts.
+    </background>
+    <dependencies>
+      <dependency task="008" status="prerequisite">
+        Task 008 emits the events these dashboards consume. The locked schema
+        in `notes/task-008-telemetry-evidence.md` is the binding contract.
+      </dependency>
+      <dependency task="phase-2" status="prerequisite">
+        Phase 2 tasks 012/014/015 INVOKE `R5SummarizeTelemetry.RecordSummarizeInvocation(...)`
+        + task 007's cleanup job INVOKES `RecordSessionFilesIndexSize(...)`.
+        Without Phase 2 traffic, dashboards have no data to display. (Task can
+        seed data via synthetic invocations if Spaarke Dev hasn't accumulated
+        live traffic yet — see Step 7.)
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>`infrastructure/bicep/modules/dashboard.bicep` — existing SDAP AI
+        Monitoring Dashboard. R5 dashboards EXTEND this precedent (additive
+        tiles or a sibling module). Same `Microsoft.Portal/dashboards@2020-09-01-preview`
+        resource type.</item>
+      <item>Task 041 (D3-02 Get Started welcome card) — parallel-safe with this
+        task; touches frontend SpaarkeAi shell + GetStartedCardsWidget catalog.
+        No surface overlap; both can be dispatched in P3-2 wave.</item>
+      <item>Task 043 (D3-04 operator-led end-to-end testing) — consumes these
+        dashboards as part of the discoverability + correctness pass. Dashboard
+        availability is implicitly a prerequisite for 043.</item>
+      <item>Task 044 (D3-05 lessons-learned + R6 backlog) — captures any
+        dashboard pattern improvements + per-tenant drill-down deferral as R6
+        backlog items.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL declaration">
+      Check context usage. If &gt; 70%, run `context-handoff` and request
+      `/compact`. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Infrastructure / observability change consuming locked
+        downstream-contract telemetry schema from task 008. Tags include
+        `dashboards` + `telemetry` + `observability` per CLAUDE.md §8
+        decision tree (FULL applies to BFF-adjacent infra changes that
+        load-bear on operational decisions — spec NFR-02 cadence tuning +
+        NFR-06 cost control both depend on these panels).
+      📖 PROTOCOL STEPS TO EXECUTE: 0 (this) → 1 review → 2 gather →
+        3 plan + placement decision → 4 author panel queries →
+        5 author dashboard artifact (Bicep OR portal) → 6 deploy →
+        7 verify against Spaarke Dev live data → 8 publish-size confirmation
+        → 9 acceptance walkthrough → 9.5 quality gates → 10 document + complete
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md` and confirm task 042 status is 🔲, wave is
+      P3-2, parallel-safe = ✅ (with 041), dependencies = Phase 2 ✅ + task 008.
+      Verify Phase 2 is ✅ in the index (all P2 tasks ✅) and task 008 is ✅
+      with `notes/task-008-telemetry-evidence.md` populated. Read
+      `current-task.md` to confirm 042 is the active task. Read project README
+      for project status.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Specifically extract:
+      (a) the canonical event schema table from
+      `notes/task-008-telemetry-evidence.md` (this is the binding contract);
+      (b) the exact instrument names + dimension names from
+      `src/server/api/Sprk.Bff.Api/Telemetry/R5SummarizeTelemetry.cs` to
+      cross-check the schema table; (c) the `Microsoft.Portal/dashboards@
+      2020-09-01-preview` resource pattern from
+      `infrastructure/bicep/modules/dashboard.bicep` (parameter list,
+      lenses/parts structure); (d) the Azure OpenAI token-pricing constants
+      for the deployed model from `docs/architecture/auth-AI-azure-resources.md`
+      or environment configuration so the cost-per-session derivation is
+      grounded in real prices.
+    </step>
+    <step order="3" name="Plan + Placement Decision (Bicep vs portal-managed)">
+      Make the IaC-vs-portal-managed decision EXPLICITLY:
+      - **Prefer Bicep IaC** when the dashboard is stable, audit-friendly,
+        + needs to survive tenant rebuilds. R5 dashboards qualify (stable
+        schema from task 008; production-bound observability).
+      - **Accept portal-managed** only if Bicep authoring cost is
+        disproportionate to value (e.g., exploratory mid-stabilization).
+        If chosen, export the dashboard JSON to
+        `infrastructure/dashboards/r5-summarize-dashboard.json` so it is
+        reproducible.
+
+      Default decision: **Bicep IaC** (extend
+      `infrastructure/bicep/modules/dashboard.bicep` with additive parts OR
+      add sibling module `infrastructure/bicep/modules/r5-summarize-dashboard.bicep`
+      using the same resource pattern). Document the decision + rationale in
+      task notes.
+
+      Lock the 4-panel layout BEFORE authoring:
+
+      | Panel | Source instrument | Stratification | Visualization |
+      |---|---|---|---|
+      | 1. Invocations + path mix | `r5.summarize.invocation` Counter | `path` × `completion_status` | Stacked timechart (5m bins) |
+      | 2. Session-files index size | `r5.session_files.index_size` Histogram | `phase` | Multi-series line (p50/p95 per phase) |
+      | 3. Cost-per-session | `r5.summarize.total_tokens` Histogram × pricing constant | `path` | Timechart of summed cost_usd per bin |
+      | 4. SSE event-rate + latency | `r5.summarize.latency_ms` Histogram + Counter rate | `path` | Dual chart: rate + p50/p95/p99 with 500ms threshold marker |
+    </step>
+    <step order="4" name="Author 4 KQL queries">
+      Author the four panel queries as standalone KQL files under
+      `infrastructure/dashboards/queries/` (one `.kql` per panel) — this
+      enables review-in-isolation + portability. Each query:
+      - Starts with `customMetrics | where timestamp &gt; ago(...)` scoped to
+        a sensible default window (24h for invocations + cost; 7d for
+        index-size trend);
+      - Filters `where name == "&lt;instrument-name&gt;"` using the exact
+        locked instrument names;
+      - Extends `customDimensions.&lt;dim&gt;` into typed columns;
+      - Aggregates per `bin(timestamp, ...)` plus stratification dimensions;
+      - Renders via `render timechart` (Panel 1, 3, 4 rate) or
+        `render columnchart` (Panel 2) or `render linechart` (Panel 4 latency);
+      - Annotates with `// derived from task-008 locked schema — DO NOT rename
+        dimensions without coordinated dashboard update` header comment.
+
+      For Panel 3 (cost): embed the per-token pricing constant in an `extend`
+      clause with a comment citing the source (Azure OpenAI pricing page /
+      `auth-AI-azure-resources.md` reference). When prices change, the constant
+      is updated in one place.
+
+      For Panel 4 (latency): include a horizontal threshold marker at 500ms
+      using the `render linechart with (ytitle="latency (ms)", ymin=0)` config
+      OR a workbook-level threshold rule. Surface the SSE TTFB commitment
+      visibly.
+    </step>
+    <step order="5" name="Author dashboard artifact (Bicep preferred)">
+      Per Step 3 decision:
+      - **Bicep path**: Add new tiles to
+        `infrastructure/bicep/modules/dashboard.bicep` OR create sibling module
+        `infrastructure/bicep/modules/r5-summarize-dashboard.bicep` using the
+        same `Microsoft.Portal/dashboards@2020-09-01-preview` resource pattern.
+        Each panel = one `lenses[0].parts[]` entry with `MonitorChartPart` (for
+        Panel 1, 3, 4 rate) or `LogsDashboardPart` (for KQL-driven panels).
+        Embed the Step-4 KQL queries inline (or reference them via
+        deployment-time parameter). Position via `x`, `y`, `rowSpan`,
+        `colSpan` for a 2×2 grid layout.
+      - **Portal path** (fallback): Author each panel in the Azure Portal
+        directly; export dashboard JSON to
+        `infrastructure/dashboards/r5-summarize-dashboard.json`; commit the
+        JSON + a `README.md` adjacent documenting how to re-import (Azure
+        Portal → Dashboards → New → upload JSON).
+    </step>
+    <step order="6" name="Deploy to Spaarke Dev">
+      Deploy the dashboard to Spaarke Dev:
+      - **Bicep path**: Run `az deployment group create ...` targeting the
+        Spaarke Dev resource group + the dashboard module. Use the
+        `azure-deploy` skill if applicable. Verify the dashboard appears in
+        Azure Portal → Dashboards.
+      - **Portal path**: Import the JSON via Azure Portal → Dashboards → New
+        → upload. Verify all 4 panels render.
+
+      Capture: dashboard name, dashboard resource ID, Azure Portal URL for
+      task notes.
+    </step>
+    <step order="7" name="Verify panels against Spaarke Dev live data">
+      For EACH of the 4 panels, open the panel + confirm:
+      1. The query executes without error;
+      2. The query returns non-empty rows from Spaarke Dev App Insights
+         (within the panel's time window);
+      3. The visualization renders correctly;
+      4. Stratification dimensions appear as expected (e.g., Panel 1 shows
+         both `agent_tool` and `direct_endpoint` series; Panel 2 shows all
+         three `phase` values when cleanup has run).
+
+      IF a panel returns no data because Spaarke Dev hasn't yet generated
+      traffic for that instrument (e.g., session-files cleanup hasn't fired
+      yet, OR no invocations have happened since dashboards-deployment-time):
+      seed data by triggering synthetic invocations:
+      - Manually invoke `/summarize` against a test session in Spaarke Dev
+        (covers Panel 1, 3, 4);
+      - Manually trigger task 007's cleanup job (or wait for the next 6h
+        scheduled run) to emit `phase = "post_cleanup"` measurements (covers
+        Panel 2);
+      - Document the seed mechanism in task notes so re-verification is
+        repeatable.
+
+      Capture per-panel screenshot reference + sample data row count in task
+      notes.
+    </step>
+    <step order="8" name="Publish-size confirmation (R5 §3.6)">
+      No BFF code change in this task — verify by inspecting changed files:
+      - Bicep path: changes are in `infrastructure/bicep/modules/*` +
+        `infrastructure/dashboards/queries/*` only; ZERO files in
+        `src/server/api/Sprk.Bff.Api/`.
+      - Portal path: changes are in `infrastructure/dashboards/*` only;
+        ZERO files in `src/server/api/Sprk.Bff.Api/`.
+
+      Record explicitly in task notes: "BFF publish-size delta = 0 MB
+      (no BFF binary change; verified by changed-file inspection)." No
+      `dotnet publish` measurement required per R5 §3.6 (verification is
+      "confirm delta = 0 MB by inspection" when no BFF code is changed).
+
+      Also confirm no new packages → no CVE scan required (no NuGet change).
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is
+      testable + passing. Record evidence per criterion (panel screenshot
+      reference, query row count, Spaarke Dev Portal URL, BFF publish-size
+      = 0 MB inspection note, placement decision rationale) in task notes.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the new + modified artifacts:
+      - `infrastructure/bicep/modules/dashboard.bicep` (modified — additive
+        tiles) OR `infrastructure/bicep/modules/r5-summarize-dashboard.bicep`
+        (NEW) OR `infrastructure/dashboards/r5-summarize-dashboard.json`
+        (NEW portal export, if portal path chosen);
+      - `infrastructure/dashboards/queries/*.kql` (NEW — 4 KQL files);
+      - `infrastructure/dashboards/README.md` (NEW if portal path; documents
+        re-import).
+
+      Run `adr-check` skill against the same files. Verify:
+      - ADR-014 — tenant isolation: queries aggregate safely across tenants in
+        shared Spaarke Dev dashboards; no per-tenant identifier leakage. ✅
+      - ADR-015 — no PII / customer content in queries; only locked enum
+        dimensions + counts + durations + tenantId. ✅
+      - ADR-018 — no new feature flags introduced. ✅
+      - ADR-029 — BFF publish hygiene: zero BFF code change; delta = 0 MB
+        confirmed by inspection. ✅
+      - ADR-030 — no PaneEventBus changes (out of scope; pure observability). ✅
+
+      Both gates MUST pass before task complete.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML metadata: `&lt;status&gt;` → `complete`,
+      `&lt;completed&gt;` → today's date, `&lt;actual-effort&gt;` filled.
+      Update `tasks/TASK-INDEX.md`: 042 🔲 → ✅.
+      Reset `current-task.md` to the next pending task per root CLAUDE.md §7
+      (next P3-3 task — likely 043 D3-04 operator-led testing once 040, 041,
+      042 all ✅).
+
+      Write task-completion notes to
+      `projects/spaarke-ai-platform-unification-r5/notes/task-042-dashboards-evidence.md`
+      containing:
+      - Placement decision (Bicep vs portal) + rationale;
+      - Per-panel: instrument consumed + KQL summary + stratification +
+        Spaarke Dev verification (row count + screenshot reference + Portal URL);
+      - Cost-per-session pricing constant used + source citation;
+      - BFF publish-size delta = 0 MB confirmation (changed-file inspection);
+      - CVE scan: N/A (no new packages);
+      - Note for task 043 (operator-led testing): dashboards are LIVE on
+        Spaarke Dev; 043 should walk through each panel as part of
+        discoverability pass;
+      - Note for task 044 (lessons-learned): any per-tenant drill-down
+        deferral, panel-evolution items, or workbook-vs-dashboard tradeoffs
+        observed during this task belong in the R6 backlog.
+
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI — Bicep deployment OR dashboard JSON import; App Insights query execution for verification</tool>
+    <tool name="azure-deploy">Skill for executing Bicep deployments per Spaarke conventions (Bicep path only)</tool>
+    <tool name="git">Stage + commit the new dashboard artifacts on the R5 branch</tool>
+    <tool name="code-review">FULL-rigor Step 9.5 quality gate</tool>
+    <tool name="adr-check">FULL-rigor Step 9.5 ADR conformance gate</tool>
+    <tool name="dotnet">Not used (no BFF code change in this task)</tool>
+  </tools>
+
+  <outputs>
+    <output type="infrastructure">infrastructure/bicep/modules/dashboard.bicep (MODIFIED with 4 additive R5 tiles) OR infrastructure/bicep/modules/r5-summarize-dashboard.bicep (NEW sibling module) — Bicep path</output>
+    <output type="infrastructure">infrastructure/dashboards/r5-summarize-dashboard.json (NEW portal export) + infrastructure/dashboards/README.md (NEW re-import documentation) — portal path only</output>
+    <output type="infrastructure">infrastructure/dashboards/queries/panel-1-invocations.kql (NEW)</output>
+    <output type="infrastructure">infrastructure/dashboards/queries/panel-2-index-size.kql (NEW)</output>
+    <output type="infrastructure">infrastructure/dashboards/queries/panel-3-cost-per-session.kql (NEW)</output>
+    <output type="infrastructure">infrastructure/dashboards/queries/panel-4-sse-latency.kql (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 042 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next P3-3 task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-042-dashboards-evidence.md (placement decision; per-panel verification evidence; pricing constants; publish-size = 0 MB confirmation; downstream-consumer notes for tasks 043 + 044)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Four panels exist on a Spaarke Dev dashboard (Bicep-managed OR portal-managed per Step 3 decision) backed by the task-008 locked schema: (1) `r5.summarize.invocation` counts stratified by `path` × `completion_status`; (2) `r5.session_files.index_size` distribution stratified by `phase`; (3) cost-per-session derived from `r5.summarize.total_tokens` × token pricing; (4) `r5.summarize.latency_ms` p50/p95/p99 with 500ms threshold marker.</criterion>
+    <criterion testable="true">Each of the four KQL queries returns non-empty rows from Spaarke Dev App Insights at verification time. If Spaarke Dev had insufficient traffic, synthetic invocations were triggered to seed data (documented in task notes).</criterion>
+    <criterion testable="true">Dashboard placement decision (Bicep IaC vs portal-managed) is recorded in `notes/task-042-dashboards-evidence.md` with explicit rationale. If Bicep, the module follows the existing `infrastructure/bicep/modules/dashboard.bicep` precedent. If portal-managed, a reproducible JSON export exists at `infrastructure/dashboards/r5-summarize-dashboard.json` with adjacent re-import README.</criterion>
+    <criterion testable="true">Four KQL query files exist at `infrastructure/dashboards/queries/panel-{1..4}-*.kql`, each annotated with a header comment citing task-008 as the locked-schema source + a "DO NOT rename dimensions without coordinated dashboard update" warning.</criterion>
+    <criterion testable="true">Panel 3 (cost-per-session) embeds the Azure OpenAI token-pricing constant in an `extend cost_usd = ...` clause with a comment citing the pricing source (`docs/architecture/auth-AI-azure-resources.md` or pricing-page URL). The cost panel is usable for capacity planning per spec NFR-06.</criterion>
+    <criterion testable="true">Panel 4 (SSE event-rate + latency) renders a 500ms horizontal threshold marker corresponding to the FR-02 / NFR-01 SSE TTFB commitment. Regressions above the threshold are immediately visible.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB, confirmed by inspection of changed files (zero files under `src/server/api/Sprk.Bff.Api/`). Recorded explicitly in task notes per R5 §3.6.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE introduced (N/A — no NuGet changes; confirmed in task notes).</criterion>
+    <criterion testable="true">Task notes (`notes/task-042-dashboards-evidence.md`) record: placement decision + rationale; per-panel verification evidence (instrument + KQL summary + Spaarke Dev row count + Azure Portal URL + screenshot reference); pricing constant + source citation; downstream-consumer notes for tasks 043 + 044.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5 against all new + modified artifacts (Bicep / portal JSON / KQL files / README).</criterion>
+    <criterion testable="true">TASK-INDEX.md updated: 042 🔲 → ✅. `current-task.md` reset to next pending P3-3 task (043 once 040 + 041 + 042 are all ✅).</criterion>
+  </acceptance-criteria>
+</task>

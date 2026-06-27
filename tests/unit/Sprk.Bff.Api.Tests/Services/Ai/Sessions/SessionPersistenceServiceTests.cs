@@ -1,12 +1,13 @@
 using System.Net;
-using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Azure.Cosmos;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Sessions;
+using Sprk.Bff.Api.Services.Ai.Telemetry;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Sessions;
@@ -31,7 +32,7 @@ public class SessionPersistenceServiceTests
     private const string DatabaseName = "spaarke-ai";
     private const string CosmosEndpoint = "https://spaarke-cosmos-dev.documents.azure.com:443/";
 
-    private readonly Mock<IDistributedCache> _cacheMock;
+    private readonly TrackingTenantCache _cache;
     private readonly Mock<CosmosClient> _cosmosClientMock;
     private readonly Mock<Container> _containerMock;
     private readonly Mock<ILogger<SessionPersistenceService>> _loggerMock;
@@ -40,7 +41,7 @@ public class SessionPersistenceServiceTests
 
     public SessionPersistenceServiceTests()
     {
-        _cacheMock = new Mock<IDistributedCache>();
+        _cache = new TrackingTenantCache();
         _cosmosClientMock = new Mock<CosmosClient>();
         _containerMock = new Mock<Container>();
         _loggerMock = new Mock<ILogger<SessionPersistenceService>>();
@@ -58,10 +59,14 @@ public class SessionPersistenceServiceTests
             .Returns(_containerMock.Object);
 
         _sut = new SessionPersistenceService(
-            _cacheMock.Object,
+            _cache,
             _cosmosClientMock.Object,
             _configuration,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            // chat-routing-redesign-r1 task 074 — IContextEventEmitter dep added for
+            // context.upload_persisted emission. Tests in this file do not exercise
+            // UpdateUploadedFilesAsync, so a Loose mock suffices.
+            new Mock<IContextEventEmitter>().Object);
     }
 
     // =========================================================================
@@ -72,7 +77,8 @@ public class SessionPersistenceServiceTests
     public void BuildRedisKey_ReturnsExpectedPattern()
     {
         var key = SessionPersistenceService.BuildRedisKey("tenant-a", "sess-1");
-        key.Should().Be("sessions:tenant-a:sess-1");
+        // FR-05 on-wire format
+        key.Should().Be("tenant:tenant-a:stored-session:sess-1:v1");
     }
 
     // =========================================================================
@@ -83,8 +89,7 @@ public class SessionPersistenceServiceTests
     public async Task PersistMessageAsync_HappyPath_WritesToBothRedisAndCosmos()
     {
         // Arrange — Redis cache miss (no existing session) + successful writes
-        SetupCacheMiss();
-        SetupCacheSetSuccess();
+        // TrackingTenantCache: empty by default → cache miss; SetAsync succeeds.
 
         var cosmosWritten = false;
         _containerMock
@@ -106,12 +111,10 @@ public class SessionPersistenceServiceTests
         await Task.Delay(50);
 
         // Assert — Redis set was called
-        _cacheMock.Verify(c => c.SetAsync(
-            It.Is<string>(k => k == SessionPersistenceService.BuildRedisKey(TenantId, SessionId)),
-            It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(),
-            It.IsAny<CancellationToken>()),
-            Times.Once);
+        _cache.SetCount.Should().Be(1, "tenant cache must be written exactly once");
+        _cache.LastTenantId.Should().Be(TenantId);
+        _cache.LastResource.Should().Be("stored-session");
+        _cache.LastId.Should().Be(SessionId);
 
         // Assert — Cosmos upsert was called with correct partition key
         cosmosWritten.Should().BeTrue("Cosmos DB write must happen in the happy path");
@@ -121,8 +124,7 @@ public class SessionPersistenceServiceTests
     public async Task PersistMessageAsync_UsesPartitionKeyTenantId_ForCosmosWrite()
     {
         // Arrange
-        SetupCacheMiss();
-        SetupCacheSetSuccess();
+        // TrackingTenantCache: empty by default → cache miss; SetAsync succeeds.
 
         PartitionKey? capturedPartitionKey = null;
         _containerMock
@@ -151,11 +153,7 @@ public class SessionPersistenceServiceTests
     public async Task PersistMessageAsync_RedisSetThrows_CosmosIsStillWritten_NoExceptionThrown()
     {
         // Arrange — Redis get succeeds (miss), Redis set throws
-        SetupCacheMiss();
-        _cacheMock
-            .Setup(c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Redis unavailable"));
+        _cache.SetThrows = new InvalidOperationException("Redis unavailable");
 
         var cosmosWritten = false;
         _containerMock
@@ -182,16 +180,9 @@ public class SessionPersistenceServiceTests
     [Fact]
     public async Task PersistMessageAsync_RedisGetThrows_FallsBackToEmptySession_CosmosWritten()
     {
-        // Arrange — Redis GET throws (connection problem)
-        _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Redis connection refused"));
-
-        // Redis SET also throws (still down)
-        _cacheMock
-            .Setup(c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Redis connection refused"));
+        // Arrange — Redis GET and SET both throw (connection problem)
+        _cache.GetThrows = new InvalidOperationException("Redis connection refused");
+        _cache.SetThrows = new InvalidOperationException("Redis connection refused");
 
         var cosmosWritten = false;
         _containerMock
@@ -222,9 +213,6 @@ public class SessionPersistenceServiceTests
     public async Task PersistMessageAsync_CosmosThrows_RedisIsStillWritten_NoExceptionThrown()
     {
         // Arrange
-        SetupCacheMiss();
-        SetupCacheSetSuccess();
-
         _containerMock
             .Setup(c => c.UpsertItemAsync(
                 It.IsAny<StoredSession>(),
@@ -240,12 +228,7 @@ public class SessionPersistenceServiceTests
         await Task.Delay(50);
 
         // Assert — Redis was still written
-        _cacheMock.Verify(c => c.SetAsync(
-            It.IsAny<string>(),
-            It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(),
-            It.IsAny<CancellationToken>()),
-            Times.Once);
+        _cache.SetCount.Should().Be(1, "Redis must be written exactly once even if Cosmos fails");
     }
 
     // =========================================================================
@@ -256,11 +239,7 @@ public class SessionPersistenceServiceTests
     public async Task PersistMessageAsync_BothStoresFail_NoExceptionThrown_OnlyWarningsLogged()
     {
         // Arrange — Redis get miss, Redis set throws, Cosmos throws
-        SetupCacheMiss();
-        _cacheMock
-            .Setup(c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Redis down"));
+        _cache.SetThrows = new InvalidOperationException("Redis down");
 
         _containerMock
             .Setup(c => c.UpsertItemAsync(
@@ -294,12 +273,10 @@ public class SessionPersistenceServiceTests
     [Fact]
     public async Task LoadSessionAsync_RedisHit_ReturnsSession_NoCosmosCalled()
     {
-        // Arrange — populate Redis with a serialised session
+        // Arrange — seed the tenant cache directly with the FR-05 (resource, id) coordinates
         var existing = BuildStoredSession();
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(existing);
-        _cacheMock
-            .Setup(c => c.GetAsync(SessionPersistenceService.BuildRedisKey(TenantId, SessionId), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(bytes);
+        await _cache.SetAsync<StoredSession>(
+            TenantId, "stored-session", SessionId, 1, existing);
 
         // Act
         var result = await _sut.LoadSessionAsync(TenantId, SessionId);
@@ -323,10 +300,7 @@ public class SessionPersistenceServiceTests
     [Fact]
     public async Task LoadSessionAsync_RedisMiss_LoadsFromCosmos_RewarmsRedis()
     {
-        // Arrange — Redis miss
-        SetupCacheMiss();
-        SetupCacheSetSuccess();
-
+        // Arrange — Redis miss; Cosmos returns the session
         var existing = BuildStoredSession();
         var cosmosMock = new Mock<ItemResponse<StoredSession>>();
         cosmosMock.SetupGet(r => r.Resource).Returns(existing);
@@ -346,21 +320,16 @@ public class SessionPersistenceServiceTests
         result.Should().NotBeNull();
         result!.SessionId.Should().Be(SessionId);
 
-        // Redis was re-warmed
-        _cacheMock.Verify(c => c.SetAsync(
-            It.Is<string>(k => k == SessionPersistenceService.BuildRedisKey(TenantId, SessionId)),
-            It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(),
-            It.IsAny<CancellationToken>()),
-            Times.Once,
-            "Redis must be re-warmed after a Cosmos fallback load");
+        // Redis was re-warmed (exactly one SetAsync to the cache after Cosmos fallback)
+        _cache.SetCount.Should().Be(1, "Redis must be re-warmed after a Cosmos fallback load");
+        _cache.LastResource.Should().Be("stored-session");
+        _cache.LastId.Should().Be(SessionId);
     }
 
     [Fact]
     public async Task LoadSessionAsync_BothMiss_ReturnsNull()
     {
-        // Arrange — Redis miss, Cosmos 404
-        SetupCacheMiss();
+        // Arrange — Redis miss (empty cache), Cosmos 404
 
         _containerMock
             .Setup(c => c.ReadItemAsync<StoredSession>(
@@ -385,10 +354,6 @@ public class SessionPersistenceServiceTests
     public async Task DeleteSessionAsync_DeletesFromBothStores()
     {
         // Arrange
-        _cacheMock
-            .Setup(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
         _containerMock
             .Setup(c => c.DeleteItemAsync<StoredSession>(
                 SessionId,
@@ -401,10 +366,9 @@ public class SessionPersistenceServiceTests
         await _sut.DeleteSessionAsync(TenantId, SessionId);
 
         // Assert — Redis remove called
-        _cacheMock.Verify(c => c.RemoveAsync(
-            SessionPersistenceService.BuildRedisKey(TenantId, SessionId),
-            It.IsAny<CancellationToken>()),
-            Times.Once);
+        _cache.RemoveCount.Should().Be(1, "Redis remove must be called exactly once");
+        _cache.LastResource.Should().Be("stored-session");
+        _cache.LastId.Should().Be(SessionId);
 
         // Assert — Cosmos delete called with correct partition key
         _containerMock.Verify(c => c.DeleteItemAsync<StoredSession>(
@@ -419,10 +383,6 @@ public class SessionPersistenceServiceTests
     public async Task DeleteSessionAsync_CosmosNotFound_IsIdempotent_NoException()
     {
         // Arrange — Cosmos returns 404 (already deleted)
-        _cacheMock
-            .Setup(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
         _containerMock
             .Setup(c => c.DeleteItemAsync<StoredSession>(
                 It.IsAny<string>(),
@@ -440,9 +400,7 @@ public class SessionPersistenceServiceTests
     public async Task DeleteSessionAsync_RedisThrows_CosmosStillCalled_NoExceptionThrown()
     {
         // Arrange
-        _cacheMock
-            .Setup(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Redis unavailable"));
+        _cache.RemoveThrows = new InvalidOperationException("Redis unavailable");
 
         _containerMock
             .Setup(c => c.DeleteItemAsync<StoredSession>(
@@ -480,23 +438,8 @@ public class SessionPersistenceServiceTests
     // Helpers
     // =========================================================================
 
-    private void SetupCacheMiss()
-    {
-        _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-    }
-
-    private void SetupCacheSetSuccess()
-    {
-        _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-    }
+    // TrackingTenantCache handles miss-by-default + set/remove behaviors directly —
+    // no helper setup methods needed.
 
     private static SessionMessage BuildMessage() => new()
     {

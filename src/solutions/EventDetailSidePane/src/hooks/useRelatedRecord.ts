@@ -18,7 +18,7 @@ import { getXrm } from "../utils/xrmAccess";
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface UseRelatedRecordOptions {
-  /** Entity logical name (e.g., "sprk_memo", "sprk_eventtodo") */
+  /** Entity logical name (e.g., "sprk_memo", "sprk_todo") */
   entityName: string;
   /** Lookup field name referencing the parent (e.g., "sprk_regardingevent") */
   parentLookupField: string;

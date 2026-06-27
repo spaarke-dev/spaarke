@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarke-ai-platform-unification-r4">
+  <metadata>
+    <title>Test infra: fix 69 cascading pre-existing compile errors across 17 BFF test files (CS7036 logger param drift + misc type drift)</title>
+    <phase>6: Build hygiene cluster</phase>
+    <status>not-started</status>
+    <estimated-hours>14</estimated-hours>
+    <dependencies>069</dependencies>
+    <blocks>none</blocks>
+    <tags>bff-api, testing, refactoring, integration-test, unit-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Fixes compile errors in ~17 existing test files (no production code modified). Larger scope than 069 but same character — type drift across many files. STANDARD per Step 3.5.5.</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Modifies BFF test files only. Production code untouched. Independent of other R4 work (069 must land first to expose these errors).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Filed 2026-05-26 as a follow-up to task 069 after the sub-agent fixed the originally-flagged
+    7 errors and ~69 previously-MASKED pre-existing errors surfaced across ~17 other BFF test
+    files. These were hidden because the build stopped early on the 7. Operator approved
+    adding to R4 scope (2026-05-26) — "must ensure these issues are resolved as part of this
+    project (Phase 6)".
+  </prompt>
+
+  <role>
+    .NET 8 test-infrastructure engineer. The errors are mostly CS7036 (logger param additions
+    in production handler ctors that weren't propagated to tests) + miscellaneous type drift.
+    Fix in test files only — DO NOT modify production code.
+  </role>
+
+  <goal>
+    `dotnet build tests/unit/Sprk.Bff.Api.Tests/` completes with 0 errors. `dotnet test` runs
+    the full test suite end-to-end. R4-added tests (050 attachments, 053 ModifiedOn, 054 PUT+ETag)
+    appear in the test run output and execute. No production code modified.
+  </goal>
+
+  <context>
+    <background>
+      Task 069 sub-agent fixed 7 namespace-drift errors in 3 specific test files. After those
+      fixes landed, the build advanced past the early-stop point and surfaced 69 additional
+      pre-existing compile errors across ~17 other BFF test files. Sub-agent escalated per
+      CLAUDE.md §6 (scope expansion).
+
+      Per task 069 memo (`projects/spaarke-ai-platform-unification-r4/notes/test-infra-bff-handler-fix-2026-05-26.md`):
+      - Dominant pattern: CS7036 (constructor missing required parameter — production handlers
+        added `ILogger<T>` deps without updating test instantiations)
+      - Secondary patterns: misc type drift from production refactors
+
+      Per task 069 sub-agent's stash + rebuild verification on master baseline: ALL 69 errors
+      are pre-existing — none introduced by R4 changes.
+    </background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/test-infra-bff-handler-fix-2026-05-26.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">No production code modification. Fix in test files (or test helper files like fixtures, builders, mocks) only.</constraint>
+    <constraint source="project">If a production class genuinely cannot be tested due to a real design issue, ESCALATE per CLAUDE.md §6 — do NOT modify production code to "make tests pass".</constraint>
+    <constraint source="project">If a test is obsolete (tests a removed handler), DELETE it cleanly with a comment citing the removal commit.</constraint>
+    <constraint source="ADR-013">If a handler test touches AI-internal types, route through `PublicContracts/` facade where possible.</constraint>
+    <constraint source="project">For CS7036 errors, the fix is to add the missing constructor param to the test instantiation (typically `Mock.Of<ILogger<T>>()` or `NullLogger<T>.Instance`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r4/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r4/notes/test-infra-bff-handler-fix-2026-05-26.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Catalog">Run `dotnet build tests/unit/Sprk.Bff.Api.Tests/` and catalog all 69 errors: file + line + diagnostic ID + production class affected. Group by error pattern (CS7036 logger, CS0246 type missing, CS1503 type mismatch, etc.).</step>
+    <step order="2" name="Triage by pattern">For each group, design the bulk fix pattern. E.g., for CS7036 logger: identify which production class added `ILogger<T>`; the standard fix is `new T(..., NullLogger<T>.Instance)` in tests OR `Mock.Of<ILogger<T>>()` if mock framework is used.</step>
+    <step order="3" name="Apply bulk fixes">Apply the bulk fix patterns. Verify each group of fixes compiles before moving to the next.</step>
+    <step order="4" name="Handle stragglers">Remaining one-off errors that don't fit a bulk pattern — fix individually. For obsolete tests (handler removed) — delete with comment.</step>
+    <step order="5" name="Verify build">`dotnet build tests/unit/Sprk.Bff.Api.Tests/` → 0 errors.</step>
+    <step order="6" name="Verify test run">`dotnet test` runs end-to-end. Capture: total tests, passed, failed. (Existing pre-existing failures are out of scope; just need the suite to execute.)</step>
+    <step order="7" name="Verify R4 tests now run">Confirm R4-added tests are in the test run output: PUT+ETag (054), attachments (050), ModifiedOn wire-shape (053).</step>
+    <step order="8" name="Document">Write `projects/spaarke-ai-platform-unification-r4/notes/test-infra-bff-cascading-fix-2026-05-26.md` with: full 69-error catalog, fix patterns applied, file-by-file changes, current `dotnet test` baseline numbers.</step>
+    <step order="9" name="Update TASK-INDEX">Change task 070 status to ✅ completed.</step>
+    <step order="10" name="Escalate (if applicable)">If any subset requires production-code change, ESCALATE before applying.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect test files + production handlers (read-only)</tool>
+    <tool name="Edit">Fix test files</tool>
+    <tool name="Bash">Run dotnet build + dotnet test</tool>
+    <tool name="Grep">Cross-reference production constructor signatures</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">~17 BFF test files in `tests/unit/Sprk.Bff.Api.Tests/` (fixed or deleted)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r4/notes/test-infra-bff-cascading-fix-2026-05-26.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`dotnet build tests/unit/Sprk.Bff.Api.Tests/` → 0 errors.</criterion>
+    <criterion testable="true">`dotnet test` runs to completion (any individual test failures are out of scope but the suite must execute).</criterion>
+    <criterion testable="true">R4-added BFF tests (050 attachments, 053 ModifiedOn, 054 PUT+ETag) appear in the test run output.</criterion>
+    <criterion testable="true">No production code modified in `src/server/api/Sprk.Bff.Api/` (verified via `git diff src/server/api/`).</criterion>
+    <criterion testable="true">Memo at `notes/test-infra-bff-cascading-fix-2026-05-26.md` catalogs all 69 errors + fixes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task exists because task 069 surfaced these errors. They were all pre-existing — none
+    introduced by R4. The work is mostly mechanical (apply bulk patterns) but volume-intensive
+    (~17 files, ~69 errors). Estimated 12-16h.
+
+    Bulk pattern for CS7036 logger drift:
+    ```csharp
+    // Before (compile error)
+    var sut = new EmailAnalysisJobHandler(deps...);
+
+    // After (added ILogger<T> param)
+    var sut = new EmailAnalysisJobHandler(deps..., NullLogger<EmailAnalysisJobHandler>.Instance);
+    ```
+
+    DO NOT pursue (out of scope): test quality improvements, framework migration, coverage expansion.
+    Narrow goal: build green + suite running.
+
+    R4 acceptance criteria depending on this: 050/053/054 tests must execute as part of CI gate.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor — bulk test fixes, no production code. Quality gates SKIPPED per Step 0.5.</protocol>
+  </execution>
+</task>

@@ -1,17 +1,38 @@
 /**
- * SearchCommandBar — Selection-aware, entity-type-aware command bar
+ * SearchCommandBar — Power-Apps-OOB-style toolbar for the Semantic Search
+ * Code Page.
  *
- * Command availability changes based on:
- *   1. Number of selected rows (0, 1, multiple)
- *   2. Active domain (Documents vs Records)
+ * Layout (all items right-aligned; parent App.tsx row supplies the leading
+ * spacer to push the toolbar to the right):
+ *   [Refresh] [Columns] [Delete] [...overflow]
  *
- * Document-only commands hidden for Matters/Projects/Invoices domains.
+ * Column picker is the SECOND toolbar item (not in the overflow) per
+ * operator directive 2026-06-04. The overflow `...` Menu hosts secondary
+ * actions: Email a Link / Open in Web / Open in Desktop / Download / Send to
+ * Index / Save Search. Document-only commands remain domain-gated.
+ *
+ * The view tabs + visualization settings render as App.tsx siblings AFTER
+ * this component (i.e. even further right), per the dataset grid command bar
+ * pattern.
  *
  * @see spec.md Section 6.6 / FR-09 — command bar specification
+ * @see docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md — the dataset grid contract
  */
 
 import React, { useCallback } from 'react';
-import { makeStyles, tokens, Toolbar, ToolbarButton, ToolbarDivider, Tooltip } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  Toolbar,
+  ToolbarButton,
+  Tooltip,
+  Menu,
+  MenuTrigger,
+  MenuList,
+  MenuItem,
+  MenuPopover,
+  MenuItemCheckbox,
+} from '@fluentui/react-components';
 import {
   DeleteRegular,
   ArrowClockwiseRegular,
@@ -21,8 +42,11 @@ import {
   ArrowDownloadRegular,
   DatabaseSearchRegular,
   SaveRegular,
+  MoreHorizontalRegular,
+  ColumnTriple20Regular,
 } from '@fluentui/react-icons';
 import type { SearchDomain } from '../types';
+import type { IDatasetColumn } from '../hooks/useSearchViewDefinitions';
 
 // =============================================
 // Props
@@ -49,6 +73,13 @@ export interface SearchCommandBarProps {
   onSendToIndex: (ids: string[]) => void;
   /** Save current search to favorites. */
   onSaveSearch: () => void;
+
+  /** Column definitions for the picker menu. */
+  columns: IDatasetColumn[];
+  /** Set of column names currently HIDDEN by the user. */
+  hiddenColumns: Set<string>;
+  /** Callback to update the hidden-column set. */
+  onHiddenColumnsChange: (hidden: Set<string>) => void;
 }
 
 // =============================================
@@ -56,8 +87,15 @@ export interface SearchCommandBarProps {
 // =============================================
 
 const useStyles = makeStyles({
+  // Toolbar — `width: fit-content` overrides Fluent v9's default that makes
+  // Toolbar stretch when it's a flex child. Without this the Toolbar fills
+  // the row and pushes its items left (visible after operator UAT, screenshot
+  // 2026-06-04). The parent `commandBar` row uses `justifyContent: flex-end`;
+  // for that to push the Toolbar right, the Toolbar must take its natural
+  // (content-sized) width.
   toolbar: {
-    gap: tokens.spacingHorizontalXS,
+    width: 'fit-content',
+    columnGap: tokens.spacingHorizontalXS,
   },
 });
 
@@ -76,6 +114,9 @@ export const SearchCommandBar: React.FC<SearchCommandBarProps> = ({
   onDownload,
   onSendToIndex,
   onSaveSearch,
+  columns,
+  hiddenColumns,
+  onHiddenColumnsChange,
 }) => {
   const styles = useStyles();
 
@@ -107,65 +148,92 @@ export const SearchCommandBar: React.FC<SearchCommandBarProps> = ({
     if (hasSelection) onSendToIndex(selectedIds);
   }, [hasSelection, onSendToIndex, selectedIds]);
 
+  // Column picker — MenuItemCheckbox state shape
+  const columnCheckedValues = React.useMemo(() => {
+    const visible = columns.filter(col => !hiddenColumns.has(col.name)).map(col => col.name);
+    return { columns: visible };
+  }, [columns, hiddenColumns]);
+
+  const handleColumnsCheckedChange = useCallback(
+    (_ev: unknown, data: { name: string; checkedItems: string[] }) => {
+      if (data.name !== 'columns') return;
+      const visibleSet = new Set(data.checkedItems);
+      const next = new Set<string>();
+      for (const col of columns) {
+        if (!visibleSet.has(col.name)) next.add(col.name);
+      }
+      onHiddenColumnsChange(next);
+    },
+    [columns, onHiddenColumnsChange]
+  );
+
   return (
     <Toolbar className={styles.toolbar} size="small" aria-label="Search actions">
-      {/* Always available */}
       <ToolbarButton icon={<ArrowClockwiseRegular />} onClick={onRefresh}>
         Refresh
       </ToolbarButton>
 
-      <ToolbarDivider />
+      {/* Column picker — SECOND toolbar item (per operator directive
+          2026-06-04). Implemented as a Menu wrapping a ToolbarButton so the
+          checkbox behavior works without leaving the Fluent v9 Toolbar's
+          visual style. */}
+      <Menu checkedValues={columnCheckedValues} onCheckedValueChange={handleColumnsCheckedChange}>
+        <MenuTrigger disableButtonEnhancement>
+          <ToolbarButton icon={<ColumnTriple20Regular />} aria-label="Choose columns">
+            Columns
+          </ToolbarButton>
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            {columns.map(col => (
+              <MenuItemCheckbox key={col.name} name="columns" value={col.name}>
+                {col.displayName}
+              </MenuItemCheckbox>
+            ))}
+          </MenuList>
+        </MenuPopover>
+      </Menu>
 
-      {/* Selection-dependent */}
       <Tooltip content={hasSelection ? 'Delete selected' : 'Select items to delete'} relationship="label">
         <ToolbarButton icon={<DeleteRegular />} disabled={!hasSelection} onClick={handleDelete}>
           Delete
         </ToolbarButton>
       </Tooltip>
 
-      <Tooltip content={isSingle ? 'Email a link' : 'Select one item to email'} relationship="label">
-        <ToolbarButton icon={<MailRegular />} disabled={!isSingle} onClick={handleEmailLink}>
-          Email a Link
-        </ToolbarButton>
-      </Tooltip>
+      {/* Overflow Menu — secondary actions */}
+      <Menu>
+        <MenuTrigger disableButtonEnhancement>
+          <ToolbarButton icon={<MoreHorizontalRegular />} aria-label="More actions" />
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            <MenuItem icon={<MailRegular />} disabled={!isSingle} onClick={handleEmailLink}>
+              Email a Link
+            </MenuItem>
 
-      {/* Document-only commands */}
-      {isDocumentDomain && (
-        <>
-          <ToolbarDivider />
+            {isDocumentDomain && (
+              <>
+                <MenuItem icon={<OpenRegular />} disabled={!isSingle} onClick={handleOpenInWeb}>
+                  Open in Web
+                </MenuItem>
+                <MenuItem icon={<DesktopRegular />} disabled={!isSingle} onClick={handleOpenInDesktop}>
+                  Open in Desktop
+                </MenuItem>
+                <MenuItem icon={<ArrowDownloadRegular />} disabled={!isSingle} onClick={handleDownload}>
+                  Download
+                </MenuItem>
+                <MenuItem icon={<DatabaseSearchRegular />} disabled={!hasSelection} onClick={handleSendToIndex}>
+                  Send to Index
+                </MenuItem>
+              </>
+            )}
 
-          <Tooltip content={isSingle ? 'Open in browser' : 'Select one document'} relationship="label">
-            <ToolbarButton icon={<OpenRegular />} disabled={!isSingle} onClick={handleOpenInWeb}>
-              Open in Web
-            </ToolbarButton>
-          </Tooltip>
-
-          <Tooltip content={isSingle ? 'Open in desktop app' : 'Select one document'} relationship="label">
-            <ToolbarButton icon={<DesktopRegular />} disabled={!isSingle} onClick={handleOpenInDesktop}>
-              Open in Desktop
-            </ToolbarButton>
-          </Tooltip>
-
-          <Tooltip content={isSingle ? 'Download file' : 'Select one document'} relationship="label">
-            <ToolbarButton icon={<ArrowDownloadRegular />} disabled={!isSingle} onClick={handleDownload}>
-              Download
-            </ToolbarButton>
-          </Tooltip>
-
-          <Tooltip content={hasSelection ? 'Send to AI index' : 'Select documents to index'} relationship="label">
-            <ToolbarButton icon={<DatabaseSearchRegular />} disabled={!hasSelection} onClick={handleSendToIndex}>
-              Send to Index
-            </ToolbarButton>
-          </Tooltip>
-        </>
-      )}
-
-      <ToolbarDivider />
-
-      {/* Save current search to favorites */}
-      <ToolbarButton icon={<SaveRegular />} onClick={onSaveSearch}>
-        Save Search
-      </ToolbarButton>
+            <MenuItem icon={<SaveRegular />} onClick={onSaveSearch}>
+              Save Search
+            </MenuItem>
+          </MenuList>
+        </MenuPopover>
+      </Menu>
     </Toolbar>
   );
 };

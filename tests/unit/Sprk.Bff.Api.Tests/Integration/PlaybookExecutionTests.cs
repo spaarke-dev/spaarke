@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Xunit;
@@ -25,7 +26,16 @@ namespace Sprk.Bff.Api.Tests.Integration;
 /// - Throttling limits concurrent node execution
 /// - All delivery executors are properly registered
 /// - Full playbook execution end-to-end flow
+///
+/// Task 061 (Wave 2.4 — sdap-bff.api-test-suite-repair): repaired
+/// `CreateTaskNodeExecutor_WithValidConfig_CreatesTask`. The pre-existing test mocked
+/// `IHttpClientFactory` but never stubbed `CreateClient("DataverseApi")` to return a
+/// usable HttpClient — production code received a null and the catch block returned an
+/// Error result. Added a `StubHttpMessageHandler` (Dataverse-shaped 204 + OData-EntityId
+/// header) wired to the mock factory so the test exercises the success path. Test-only
+/// addition; production unchanged (NFR-01 preserved).
 /// </remarks>
+[Trait("status", "repaired")]
 public class PlaybookExecutionTests
 {
     #region Node Executor Registry Tests
@@ -35,7 +45,7 @@ public class PlaybookExecutionTests
     {
         // Arrange
         var mockTemplateEngine = new Mock<ITemplateEngine>();
-        var mockHttpClientFactory = new Mock<IHttpClientFactory>();
+        var mockHttpClientFactory = new Mock<Spaarke.Dataverse.IGenericEntityService>(); // R2.3: was Mock<IHttpClientFactory> before IGenericEntityService refactor — variable name retained for diff hygiene
         var mockToolHandlerRegistry = new Mock<IToolHandlerRegistry>();
         var mockGraphClientFactory = new Mock<IGraphClientFactory>();
         var mockHttpContextAccessor = new Mock<IHttpContextAccessor>();
@@ -89,7 +99,7 @@ public class PlaybookExecutionTests
     {
         // Arrange
         var mockTemplateEngine = new Mock<ITemplateEngine>();
-        var mockHttpClientFactory = new Mock<IHttpClientFactory>();
+        var mockHttpClientFactory = new Mock<Spaarke.Dataverse.IGenericEntityService>(); // R2.3: was Mock<IHttpClientFactory> before IGenericEntityService refactor — variable name retained for diff hygiene
 
         var createTaskExecutor = new CreateTaskNodeExecutor(
             mockTemplateEngine.Object,
@@ -112,7 +122,7 @@ public class PlaybookExecutionTests
     {
         // Arrange
         var mockTemplateEngine = new Mock<ITemplateEngine>();
-        var mockHttpClientFactory = new Mock<IHttpClientFactory>();
+        var mockHttpClientFactory = new Mock<Spaarke.Dataverse.IGenericEntityService>(); // R2.3: was Mock<IHttpClientFactory> before IGenericEntityService refactor — variable name retained for diff hygiene
         var mockToolHandlerRegistry = new Mock<IToolHandlerRegistry>();
         var mockGraphClientFactory = new Mock<IGraphClientFactory>();
         var mockHttpContextAccessor = new Mock<IHttpContextAccessor>();
@@ -419,16 +429,23 @@ public class PlaybookExecutionTests
     {
         // Arrange
         var templateEngineMock = new Mock<ITemplateEngine>();
-        var httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        var entityServiceMock = new Mock<Spaarke.Dataverse.IGenericEntityService>();
         var loggerMock = new Mock<ILogger<CreateTaskNodeExecutor>>();
 
         templateEngineMock
             .Setup(t => t.Render(It.IsAny<string>(), It.IsAny<IDictionary<string, object?>>()))
             .Returns((string template, IDictionary<string, object?> _) => template);
 
+        // R2.3 (2026-06-23): production refactored from IHttpClientFactory.CreateClient("DataverseApi")
+        // (orphan, never registered) to IGenericEntityService.CreateAsync. Stub returns a fresh GUID.
+        var newTaskId = Guid.NewGuid();
+        entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Microsoft.Xrm.Sdk.Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(newTaskId);
+
         var executor = new CreateTaskNodeExecutor(
             templateEngineMock.Object,
-            httpClientFactoryMock.Object,
+            entityServiceMock.Object,
             loggerMock.Object);
 
         var context = CreateNodeContext(ActionType.CreateTask, @"{""subject"":""Review document"",""description"":""Please review""}");
@@ -446,12 +463,12 @@ public class PlaybookExecutionTests
     {
         // Arrange
         var templateEngineMock = new Mock<ITemplateEngine>();
-        var httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        var entityServiceMock = new Mock<Spaarke.Dataverse.IGenericEntityService>();
         var loggerMock = new Mock<ILogger<CreateTaskNodeExecutor>>();
 
         var executor = new CreateTaskNodeExecutor(
             templateEngineMock.Object,
-            httpClientFactoryMock.Object,
+            entityServiceMock.Object,
             loggerMock.Object);
 
         var context = CreateNodeContext(ActionType.CreateTask, @"{""description"":""No subject""}");
@@ -869,6 +886,18 @@ public class PlaybookExecutionTests
         var scopeResolverMock = new Mock<IScopeResolverService>();
         var legacyOrchestratorMock = new Mock<IAnalysisOrchestrationService>();
         var executorMock = new Mock<INodeExecutor>();
+
+        // Wave D4 / task 033: pass-through router for non-Insights playbooks. Existing
+        // integration tests do not exercise universal-ingest@v1 routing; the default
+        // PassThrough behavior preserves pre-Wave-D4 semantics.
+        var insightsRouterMock = new Mock<IInsightsActionRouter>();
+        insightsRouterMock
+            .Setup(r => r.ResolveLayer1ActionAsync(It.IsAny<string?>(), It.IsAny<AnalysisAction>(), It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync((string? _, AnalysisAction action, System.Threading.CancellationToken _) => action);
+        insightsRouterMock
+            .Setup(r => r.ResolveLayer2ActionAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<AnalysisAction>(), It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync((string? _, string? __, AnalysisAction action, System.Threading.CancellationToken _) => InsightsLayer2RoutingResult.PassThrough(action));
+
         var loggerMock = new Mock<ILogger<PlaybookOrchestrationService>>();
 
         var service = new PlaybookOrchestrationService(
@@ -876,6 +905,7 @@ public class PlaybookExecutionTests
             executorRegistryMock.Object,
             scopeResolverMock.Object,
             legacyOrchestratorMock.Object,
+            insightsRouterMock.Object,
             loggerMock.Object);
 
         return (service, new TestMocks(
@@ -912,6 +942,27 @@ public class PlaybookExecutionTests
         mocks.ScopeResolver
             .Setup(x => x.GetActionAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new AnalysisAction { Id = actionId, Name = "Test Action" });
+    }
+
+    /// <summary>
+    /// Test-only HttpMessageHandler that delegates response generation to a callback.
+    /// Used by `CreateTaskNodeExecutor_WithValidConfig_CreatesTask` (task 061) to stub
+    /// the Dataverse Web API call without standing up a real HTTP server.
+    /// </summary>
+    private sealed class StubHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handler;
+
+        public StubHttpMessageHandler(
+            Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)
+        {
+            _handler = handler;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+            => _handler(request, cancellationToken);
     }
 
     #endregion

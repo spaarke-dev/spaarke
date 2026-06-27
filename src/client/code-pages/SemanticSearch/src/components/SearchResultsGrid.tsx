@@ -29,12 +29,6 @@ import {
   createTableColumn,
   Spinner,
   Text,
-  Button,
-  Menu,
-  MenuTrigger,
-  MenuPopover,
-  MenuList,
-  MenuItemCheckbox,
   makeStyles,
   tokens,
   type TableColumnDefinition,
@@ -42,7 +36,6 @@ import {
   type TableRowId,
   type TableColumnSizingOptions,
 } from '@fluentui/react-components';
-import { ColumnTriple20Regular } from '@fluentui/react-icons';
 import type { IDatasetColumn } from '../hooks/useSearchViewDefinitions';
 import type { IDatasetRecord } from '../adapters/searchResultAdapter';
 import type { SearchDomain } from '../types';
@@ -72,6 +65,16 @@ export interface SearchResultsGridProps {
   onSelectionChange: (selectedIds: string[]) => void;
   /** Callback when a column sort is requested. */
   onSort: (columnKey: string, direction: 'asc' | 'desc') => void;
+
+  /**
+   * Set of column names currently HIDDEN by the user. When supplied, the grid
+   * filters its rendered columns through it. Lifted out of the grid so the
+   * unified SearchCommandBar can host the column picker UI alongside the other
+   * toolbar items (task 035 hardening follow-up — UI alignment with the
+   * Spaarke dataset grid command-bar pattern). Optional for backward compat;
+   * when undefined the grid renders all columns (no internal picker).
+   */
+  hiddenColumns?: Set<string>;
 }
 
 // =============================================
@@ -144,17 +147,6 @@ const useStyles = makeStyles({
     position: 'relative',
     overflow: 'hidden',
   },
-  gridToolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
-    backgroundColor: tokens.colorNeutralBackground2,
-    minHeight: '32px',
-  },
   gridContainer: {
     flex: 1,
     overflow: 'auto',
@@ -193,19 +185,43 @@ const useStyles = makeStyles({
     height: '1px',
     width: '100%',
   },
+  // Cell + header styles aligned with the @spaarke/ui-components DataGrid
+  // framework (see src/client/shared/Spaarke.UI.Components/src/components/
+  // DataGrid/DataGrid.tsx — `cell` + `headerCell` styles). Same Segoe UI 14px
+  // family + token sizes + Power Apps OOB row heights, so the SemanticSearch
+  // grid renders identically to InvoicesPage / EventsPage / KPI grids.
+  // Task 035 UAT alignment pass (2026-06-04).
   cell: {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
+    minHeight: '38px',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground1,
   },
   headerCell: {
-    paddingLeft: tokens.spacingHorizontalS,
-    paddingRight: tokens.spacingHorizontalS,
+    minHeight: '41px',
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    fontFamily: "'Segoe UI', 'Segoe UI Web', Arial, sans-serif",
+    fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
+    backgroundColor: tokens.colorNeutralBackground2,
+    color: tokens.colorNeutralForeground1,
   },
 });
+
+// Stable identity for "no hidden columns" — keeps useMemo deps stable when
+// host doesn't supply the hiddenColumns prop.
+const EMPTY_HIDDEN_SET: Set<string> = new Set();
 
 // =============================================
 // Component
@@ -222,6 +238,7 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
   onLoadMore,
   onSelectionChange,
   onSort,
+  hiddenColumns,
 }) => {
   const styles = useStyles();
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -232,17 +249,14 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
     direction: 'asc' | 'desc';
   } | null>(null);
 
-  // --- Column visibility state ---
-  // All columns visible by default; key = column name
-  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
+  // Resolve effective hidden-column set. When the host (App.tsx) supplies the
+  // prop, use it; otherwise treat all columns as visible.
+  const effectiveHidden = hiddenColumns ?? EMPTY_HIDDEN_SET;
 
-  // Suppress unused-var warning — totalCount reserved for future status display
+  // Suppress unused-var warning — totalCount + activeDomain reserved for future
+  // status display + domain-aware behavior.
   void totalCount;
-
-  // Reset hidden columns when domain changes (columns change)
-  useEffect(() => {
-    setHiddenColumns(new Set());
-  }, [activeDomain]);
+  void activeDomain;
 
   // --- Infinite scroll via IntersectionObserver ---
   useEffect(() => {
@@ -268,7 +282,10 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
   }, [hasMore, isLoadingMore, isLoading, onLoadMore]);
 
   // --- Visible columns (filtered by user selection) ---
-  const visibleColumns = useMemo(() => columns.filter(col => !hiddenColumns.has(col.name)), [columns, hiddenColumns]);
+  const visibleColumns = useMemo(
+    () => columns.filter(col => !effectiveHidden.has(col.name)),
+    [columns, effectiveHidden]
+  );
 
   // --- Map IDatasetColumn to Fluent TableColumnDefinition ---
   type GridItem = IDatasetRecord & { _rowId: number };
@@ -309,28 +326,6 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
     }
     return options;
   }, [visibleColumns]);
-
-  // --- Column picker: checked state for MenuItemCheckbox ---
-  const columnCheckedValues = useMemo(() => {
-    const visible = columns.filter(col => !hiddenColumns.has(col.name)).map(col => col.name);
-    return { columns: visible };
-  }, [columns, hiddenColumns]);
-
-  const handleCheckedValueChange = useCallback(
-    (_ev: unknown, data: { name: string; checkedItems: string[] }) => {
-      if (data.name !== 'columns') return;
-      // checkedItems = names of columns that are now checked (visible)
-      const visibleSet = new Set(data.checkedItems);
-      const newHidden = new Set<string>();
-      for (const col of columns) {
-        if (!visibleSet.has(col.name)) {
-          newHidden.add(col.name);
-        }
-      }
-      setHiddenColumns(newHidden);
-    },
-    [columns]
-  );
 
   // --- Selection handler ---
   const handleSelectionChange: DataGridProps['onSelectionChange'] = useCallback(
@@ -390,25 +385,8 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
         </div>
       )}
 
-      {/* Column picker toolbar */}
-      <div className={styles.gridToolbar}>
-        <Menu checkedValues={columnCheckedValues} onCheckedValueChange={handleCheckedValueChange}>
-          <MenuTrigger disableButtonEnhancement>
-            <Button appearance="subtle" size="small" icon={<ColumnTriple20Regular />} aria-label="Choose columns">
-              Columns
-            </Button>
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              {columns.map(col => (
-                <MenuItemCheckbox key={col.name} name="columns" value={col.name}>
-                  {col.displayName}
-                </MenuItemCheckbox>
-              ))}
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-      </div>
+      {/* Column picker is now hosted by the unified SearchCommandBar in App.tsx —
+          state lifted via the optional `hiddenColumns` prop. Task 035 UI alignment. */}
 
       <div className={styles.gridContainer} ref={gridContainerRef}>
         <DataGrid
@@ -451,7 +429,6 @@ export const SearchResultsGrid: React.FC<SearchResultsGridProps> = ({
                 selectionCell={{
                   checkboxIndicator: { 'aria-label': 'Select row' },
                 }}
-                style={{ height: '44px' }}
               >
                 {({ renderCell }) => <DataGridCell className={styles.cell}>{renderCell(item)}</DataGridCell>}
               </DataGridRow>

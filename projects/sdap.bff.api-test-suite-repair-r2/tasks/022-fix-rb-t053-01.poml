@@ -1,0 +1,128 @@
+<task id="022" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P2.W1 — Fix RB-T053-01: CapabilityRouter Layer-1 classifier false-positives (owner decision required)</title>
+    <phase>Phase 2</phase>
+    <status>not-started</status>
+    <estimated-effort>2-6 hours (depends on chosen fix option)</estimated-effort>
+    <dependencies>013</dependencies>
+    <blocks>029</blocks>
+    <tags>phase-2, bff-api, real-bug-ledger, medium-severity, production-fix, ai, routing</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production code change in `src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs` (routing decisions affect cost / correctness); FULL rigor + Step 9.5 quality gates mandatory</rigor-reason>
+    <parallel-group>P2-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Disjoint file (`CapabilityRouter.cs`) vs Wave 1 peers (CitationExtractor, AnalysisChatContextResolver, UploadEndpoints)</parallel-reason>
+    <production-fix-per-ledger>true</production-fix-per-ledger>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Close real-bug-ledger entry **RB-T053-01** by fixing the production bug in `CapabilityRouter` Layer-1 classifier. The substring-match scoring produces semantic-gap false-positives (e.g., "case law" → matches "case" hint → confidently routes to legal_research; "brief" → confidently routes to summarize_content). The documented Layer-1 contract ("must never confidently route to the wrong capability") is violated.
+
+    🚨 **OWNER DECISION REQUIRED AT TASK START** — the ledger ranks 3 fix options (lines 478-487). The task agent MUST surface the decision before implementing:
+
+    1. **Word-boundary matching** (~2h): change `Contains(hint, OrdinalIgnoreCase)` to `\b<hint>\b` regex. Eliminates "case law" → "case" false-positive.
+    2. **Negative-evidence scoring** (~4-6h): track capability-hint subset relationships; apply discount when only shorter substring matches. Eliminates entire bigram-superstring class.
+    3. **Confidence-saturation guard** (~1h): cap single-match confidence at 0.75 (below 0.80 threshold); forces Layer 2 disambiguation. Conservative; sacrifices some Layer 1 hit rate.
+
+    Surface a 🔔 **Human Input Required** block at Step 2 with the three options, the ledger's recommendation ("approach 2 if router precision matters for cost; approach 3 if the contract guarantee matters more"), and your suggested default. Wait for owner ACK before applying the fix.
+
+    After fix: remove Skip + per-test traits on both affected tests; confirm Layer 2/3 cascade behavior unchanged on non-affected corpus. Per NFR-04 cite `RB-T053-01`.
+  </prompt>
+
+  <role>Backend AI agent fixing the Layer-1 capability-routing classifier; owner-decision-gated implementation.</role>
+
+  <goal>
+    `src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs` Layer-1 classifier no longer confidently routes false-positive matches. Owner selects one of 3 ranked fix options. The 2 Skip'd tests (`Layer1_DoesNotFalsePositive_OnNonKeywordMessages` + `Layer1_FullCorpus_DistributionSummary`) flip Skip → Pass. RB-T053-01 transitions to `repaired`.
+  </goal>
+
+  <inputs>
+    <file purpose="target-production-file">src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+    <file purpose="target-test-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/CapabilityRouterBenchmarkTests.cs</file>
+    <file purpose="ledger-entry">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (RB-T053-01 section, lines 428-491)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">CapabilityRouter is part of the AI extension surface; refined ADR-013 keeps routing in-process</constraint>
+    <constraint source="ADR-010">DI minimalism — fix is internal to `CapabilityRouter`; no new DI registrations</constraint>
+    <constraint source="NFR-01">Production code IS in scope (r2 inverts r1); tests modified ONLY for Skip→Pass</constraint>
+    <constraint source="NFR-02"><50% line replacement per file; >50% (likely on option 2 negative-evidence) escalates via `escalations/rewrite-request-T-022-CapabilityRouter.md`</constraint>
+    <constraint source="NFR-04">Commit message cites `RB-T053-01` + resolution mode `repaired`</constraint>
+    <constraint source="D-02">One production fix = one ledger entry closed</constraint>
+    <constraint source="design.md §5.3">3 fix options ranked; owner decision required at task start</constraint>
+    <constraint source="root CLAUDE.md §6">Owner-decision-gated work: MUST request human input before implementing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/notes/lessons-learned.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      `CapabilityRouter` is a multi-layer cascade (Layer 1 keyword classifier → Layer 2 LLM disambiguator → Layer 3 fallback). The Layer-1 hit rate is 68.6% on the corpus (above the 60% target); Layer 2/3 corrects misroutes in live traffic. The bug observable only in isolated Layer-1 benchmark tests — production routing converges. However, the documented zero-false-positive invariant for Layer 1 is violated, which undermines single-call cost optimization for affected message patterns.
+
+      The 3 fix options have very different scope characteristics: option 1 (~2h) is minimally invasive but only fixes the bigram-superstring class; option 2 (~4-6h) is comprehensive but may approach the 50% line replacement limit; option 3 (~1h) is the contract-guarantee fix but sacrifices Layer-1 hit rate.
+    </background>
+    <dependencies>
+      <dependency task="013" status="required">Phase 1 exit triple-run validated</dependency>
+      <dependency task="owner-decision" status="required">Owner ACK on 3-option ranking before implementation</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/CapabilityRouterBenchmarkTests.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Load RB-T053-01 ledger entry (lines 428-491 in real-bug-ledger.md). Confirm Status is `open` or `assigned-to-r2`.</step>
+    <step order="2">🔔 **Human Input Required** — surface the 3 fix options to the owner with effort estimates + tradeoffs; recommend approach 2 if router precision matters for cost, approach 3 if the contract guarantee matters more. WAIT for owner ACK before proceeding.</step>
+    <step order="3">Once owner selects: read `CapabilityRouter.cs` Layer-1 scoring path (the substring-match + confidence formula identified in the ledger). Hand-trace the failing assertions in `Layer1_DoesNotFalsePositive_OnNonKeywordMessages` test (line ~191) to confirm the bug reproduces.</step>
+    <step order="4">Apply the selected fix option. For option 1 (word-boundary): swap `Contains(hint, OrdinalIgnoreCase)` for `Regex.IsMatch(message, $@"\b{Regex.Escape(hint)}\b", RegexOptions.IgnoreCase)`. For option 2: add a hint-subset map + discount; per-message scoring updated. For option 3: cap single-match confidence at 0.75 in the confidence formula.</step>
+    <step order="5">Verify NFR-02: if option 2 is chosen and edits approach 50% line replacement on `CapabilityRouter.cs`, STOP and produce `escalations/rewrite-request-T-022-CapabilityRouter.md` before continuing.</step>
+    <step order="6">Remove `Skip = "..."` + per-test traits on `Layer1_DoesNotFalsePositive_OnNonKeywordMessages` + `Layer1_FullCorpus_DistributionSummary`.</step>
+    <step order="7">Build: `dotnet build src/server/api/Sprk.Bff.Api/`. Verify 0 errors.</step>
+    <step order="8">Run targeted tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~CapabilityRouter"`. Confirm both Layer-1 tests pass + Layer 2/3 cascade tests remain green.</step>
+    <step order="9">Step 9.5 quality gates: `code-review` + `adr-check`. Verify <50% line replacement (or escalation filed); no DI changes; AI service stays in-process.</step>
+    <step order="10">Update RB-T053-01 ledger: Status → `repaired`; record chosen fix option in ledger Notes + decision record `decisions/D-08-rb-t053-01-fix-option.md`. Commit: `fix(ai/capabilities): apply Layer-1 false-positive fix option N to CapabilityRouter (RB-T053-01; repaired)`. Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">CapabilityRouter.cs + test file + ledger entry</tool>
+    <tool name="Edit">Production fix per chosen option + test Skip removal</tool>
+    <tool name="Bash">`dotnet build` + targeted `dotnet test`</tool>
+    <tool name="Write">`decisions/D-08-rb-t053-01-fix-option.md` (record owner decision)</tool>
+    <tool name="Skill">Step 9.5 quality gate via `code-review` + `adr-check` skills (ADR-010 / ADR-013)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs (Layer-1 scoring path updated per chosen option)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Capabilities/CapabilityRouterBenchmarkTests.cs (2 tests Skip→Pass)</output>
+    <output type="ledger">RB-T053-01 status: `assigned-to-r2` → `repaired`; chosen option recorded in Notes</output>
+    <output type="decision">decisions/D-08-rb-t053-01-fix-option.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Owner-selected fix option documented in `decisions/D-08-rb-t053-01-fix-option.md` BEFORE code change applied</criterion>
+    <criterion testable="true">`Layer1_DoesNotFalsePositive_OnNonKeywordMessages` test passes (no Skip)</criterion>
+    <criterion testable="true">`Layer1_FullCorpus_DistributionSummary` test passes (no Skip)</criterion>
+    <criterion testable="true">Layer 2/3 cascade tests in `CapabilityRouter*` test classes remain green</criterion>
+    <criterion testable="true">RB-T053-01 ledger Status transitions to `repaired`; chosen option cited in Notes</criterion>
+    <criterion testable="true">Commit message includes `RB-T053-01` + resolution mode `repaired`</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <approach>Owner-gated decision at Step 2; FULL-rigor implementation of the chosen option. Possible escalation on option 2 if line replacement exceeds 50%.</approach>
+  </execution>
+</task>

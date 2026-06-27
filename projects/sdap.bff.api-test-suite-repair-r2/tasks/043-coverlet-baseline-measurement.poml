@@ -1,0 +1,119 @@
+<task id="043" project="sdap.bff.api-test-suite-repair-r2">
+  <metadata>
+    <title>P4.D — Coverlet baseline measurement per project (no threshold enforcement)</title>
+    <phase>Phase 4</phase>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <dependencies>039</dependencies>
+    <blocks>080</blocks>
+    <tags>phase-4, ci-cd, coverlet, coverage, measurement</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Coverlet already active in CI (sdap-ci.yml lines 85-102 via config/coverlet.runsettings); task scope is measurement + baseline doc. Minimal CI change possible (no threshold add); no `src/` or test logic edits. STANDARD per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>P4-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes only to `projects/.../baseline/coverlet-baseline-2026-08-XX.md`. CI YAML touched IF needed (likely not — already wired). Disjoint write path from Track A (audits/), B (stryker-config.json + baseline/mutation-*), C (src/server Workspace + tests), E (baseline/anti-drift).</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+    <repair-not-rewrite>false</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Surface Coverlet coverage % per project in r2's exit ledger. **Coverlet is ALREADY active in CI** (`.github/workflows/sdap-ci.yml` lines 85-102 via `config/coverlet.runsettings`). The task scope is **measurement only** — capture the current baseline % per project; do NOT add threshold enforcement (D-04: thresholds defer to r3 per ADR-029 publish-hygiene framing).
+
+    **EXTERNAL DEPENDENCY**: This task is gated on `github-actions-rationalization-r1` Phase 1 completion. If that project's Phase 1 has not landed when r2 Phase 4 starts, slip this task to Phase 5 (does not block other Phase 4 tracks). Document the slip in `current-task.md` and the audit report.
+
+    Per FR-14, deliverable is the baseline doc + exit-ledger entry; no CI YAML threshold added.
+  </prompt>
+
+  <role>CI/CD AI agent surfacing Coverlet coverage baseline % per project for r2 exit-ledger documentation.</role>
+
+  <goal>
+    Single deliverable: `projects/sdap.bff.api-test-suite-repair-r2/baseline/coverlet-baseline-2026-08-XX.md` containing:
+    - **Coverage % per project**: `Sprk.Bff.Api.Tests` (unit) and `Spe.Integration.Tests` (integration)
+    - **Per-area breakdown** (best-effort): top 5 namespaces by coverage % and bottom 5 by coverage %
+    - **Comparison to industry benchmarks**: brief context for the numbers (typical .NET BFF coverage range)
+    - **r3 threshold-gate recommendation**: when to consider adding required-status-check thresholds; suggested initial threshold value
+    - **External dependency status**: confirmation that `github-actions-rationalization-r1` Phase 1 is landed (or slip note if not)
+
+    The same numbers are copied/cross-referenced into `projects/sdap.bff.api-test-suite-repair-r2/ledgers/exit-ledger.md` at Phase 5 wrap-up (task 090).
+
+    **NO threshold enforcement added** to `sdap-ci.yml` or branch protection. **NO CI gate changes** to required-status-checks list.
+  </goal>
+
+  <inputs>
+    <file purpose="ci-workflow">.github/workflows/sdap-ci.yml</file>
+    <file purpose="coverlet-config">config/coverlet.runsettings</file>
+    <file purpose="external-project">projects/github-actions-rationalization-r1/ (check status)</file>
+    <file purpose="project-claude">projects/sdap.bff.api-test-suite-repair-r2/CLAUDE.md</file>
+    <file purpose="spec">projects/sdap.bff.api-test-suite-repair-r2/spec.md</file>
+    <file purpose="design">projects/sdap.bff.api-test-suite-repair-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-029">BFF Publish Hygiene — Coverlet collection must NOT impact publish size baseline (collector runs in test scope only)</constraint>
+    <constraint source="D-04">Phase 4 tracks are pilot-grade — measurement only, NO threshold enforcement</constraint>
+    <constraint source="FR-14">Coverlet baseline % per project published; NO threshold added to required-status-checks (deferred to r3)</constraint>
+    <constraint source="NFR-01">No `src/` or test logic modifications</constraint>
+    <constraint source="External dependency">`github-actions-rationalization-r1` Phase 1 must land first; otherwise slip to Phase 5</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.github/workflows/sdap-ci.yml</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §2.3 long-term item 9, CI-side coverage gating (Codecov / Coverlet thresholds tied to required-status-checks) is a long-term direction; r2 takes the **measurement** step but explicitly defers the **gate** to r3. The reason: introducing a coverage threshold prematurely creates merge friction without a calibrated baseline. r2 captures the baseline; r3 (if commissioned) can use that baseline to set a non-disruptive initial threshold (e.g., "must not decrease by >2 pp from baseline").
+
+      Coverlet is already wired in CI per `.github/workflows/sdap-ci.yml` lines 85-102 and `config/coverlet.runsettings`. The task's mechanical work is small: ensure the latest CI run's Coverlet output is accessible; parse it into the baseline doc; cross-reference in exit-ledger.
+
+      The external-dependency framing: `github-actions-rationalization-r1` (PR #315 in flight per CLAUDE.md) may modify CI workflow structure. If those changes haven't landed, the Coverlet output location/format may shift. Slip Track D to Phase 5 in that case — other Phase 4 tracks are unaffected.
+    </background>
+    <dependencies>
+      <dependency task="039" status="not-started">Phase 3 exit (all 20 ledger entries closed)</dependency>
+      <dependency external="github-actions-rationalization-r1 Phase 1" status="check-at-start">If unlanded, slip to Phase 5</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>projects/sdap.bff.api-test-suite-repair-r2/baseline/coverlet-baseline-2026-08-XX.md</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Verify `github-actions-rationalization-r1` Phase 1 status. If unlanded, document the slip and route this task to Phase 5 (do NOT proceed with measurement now — wait for stable CI structure).</step>
+    <step order="2">If proceeding: read `.github/workflows/sdap-ci.yml` lines 85-102 to confirm Coverlet collection is producing output. Read `config/coverlet.runsettings` to understand format + exclusions.</step>
+    <step order="3">Identify the most recent CI run's Coverlet artifact location (likely an artifact upload step in the workflow OR local generation via `dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings`). Run locally if needed to capture current % per project.</step>
+    <step order="4">Parse Coverlet output (Cobertura XML or equivalent): extract overall % per project (`Sprk.Bff.Api.Tests` and `Spe.Integration.Tests`); extract per-namespace breakdowns (top 5 / bottom 5).</step>
+    <step order="5">Author `projects/sdap.bff.api-test-suite-repair-r2/baseline/coverlet-baseline-2026-08-XX.md` with: overall % per project; per-namespace breakdown; industry-benchmark context; r3 threshold-gate recommendation; external dependency status.</step>
+    <step order="6">Verify `git status` shows ONLY the new baseline doc (NO `.github/workflows/sdap-ci.yml` modifications; NO threshold added).</step>
+    <step order="7">Commit message: "docs(coverage): Coverlet baseline % per project (FR-14; no threshold enforcement per D-04)".</step>
+    <step order="8">Note: the numbers in this doc are referenced/copied into `ledgers/exit-ledger.md` at Phase 5 wrap-up (task 090); no action here.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">sdap-ci.yml, coverlet.runsettings, external project status</tool>
+    <tool name="Bash">`dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings`; parse Cobertura XML; `git status`; final commit</tool>
+    <tool name="Write">baseline doc</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/sdap.bff.api-test-suite-repair-r2/baseline/coverlet-baseline-2026-08-XX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Baseline doc exists at `projects/sdap.bff.api-test-suite-repair-r2/baseline/coverlet-baseline-2026-08-XX.md`</criterion>
+    <criterion testable="true">Doc contains overall coverage % for `Sprk.Bff.Api.Tests`</criterion>
+    <criterion testable="true">Doc contains overall coverage % for `Spe.Integration.Tests`</criterion>
+    <criterion testable="true">Doc contains per-namespace top/bottom breakdown (best-effort)</criterion>
+    <criterion testable="true">Doc contains r3 threshold-gate recommendation with suggested initial threshold value</criterion>
+    <criterion testable="true">NO threshold added to `.github/workflows/sdap-ci.yml`; NO required-status-checks modification (verified by `git status`)</criterion>
+    <criterion testable="true">If `github-actions-rationalization-r1` Phase 1 unlanded: slip documented; task re-queued to Phase 5</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. STANDARD rigor (measurement only; no Step 9.5 quality gates required).
+  </execution>
+</task>

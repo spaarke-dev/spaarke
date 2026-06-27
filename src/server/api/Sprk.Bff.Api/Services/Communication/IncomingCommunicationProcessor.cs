@@ -7,10 +7,11 @@ using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
-using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -35,6 +36,7 @@ public sealed class IncomingCommunicationProcessor
     private readonly GraphMessageToEmlConverter _emlConverter;
     private readonly SpeFileStore _speFileStore;
     private readonly JobSubmissionService _jobSubmissionService;
+    private readonly IPostUploadIndexingEnqueuer _postUploadIndexingEnqueuer;
     private readonly NotificationService _notificationService;
     private readonly CommunicationOptions _options;
     private readonly IConfiguration _configuration;
@@ -58,6 +60,7 @@ public sealed class IncomingCommunicationProcessor
         GraphMessageToEmlConverter emlConverter,
         SpeFileStore speFileStore,
         JobSubmissionService jobSubmissionService,
+        IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
         NotificationService notificationService,
         IOptions<CommunicationOptions> options,
         IConfiguration configuration,
@@ -72,6 +75,7 @@ public sealed class IncomingCommunicationProcessor
         _emlConverter = emlConverter;
         _speFileStore = speFileStore;
         _jobSubmissionService = jobSubmissionService;
+        _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
         _notificationService = notificationService;
         _options = options.Value;
         _configuration = configuration;
@@ -730,51 +734,32 @@ public sealed class IncomingCommunicationProcessor
 
     /// <summary>
     /// Enqueues a RAG indexing job for a document to enable semantic search.
-    /// Mirrors UploadFinalizationWorker.EnqueueRagIndexingAsync pattern.
+    /// Delegates to the centralized <see cref="IPostUploadIndexingEnqueuer"/> helper
+    /// (Phase 2 of upload-indexing centralization — same idempotency key, same payload
+    /// shape, same Source="InboundEmail" tag for telemetry).
     /// </summary>
     private async Task EnqueueRagIndexingAsync(
         string driveId, string itemId, Guid documentId, string fileName,
         Guid communicationId, CancellationToken ct)
     {
-        try
-        {
-            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+        var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
 
-            var indexingJob = new JobContract
-            {
-                JobId = Guid.NewGuid(),
-                JobType = RagIndexingJobHandler.JobTypeName,
-                SubjectId = documentId.ToString(),
-                CorrelationId = communicationId.ToString("N"),
-                IdempotencyKey = $"rag-index-{driveId}-{itemId}",
-                Attempt = 1,
-                MaxAttempts = 3,
-                CreatedAt = DateTimeOffset.UtcNow,
-                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new RagIndexingJobPayload
-                {
-                    TenantId = tenantId,
-                    DriveId = driveId,
-                    ItemId = itemId,
-                    FileName = fileName,
-                    DocumentId = documentId.ToString(),
-                    Source = "InboundEmail",
-                    EnqueuedAt = DateTimeOffset.UtcNow
-                }))
-            };
+        var request = new PostUploadIndexingRequest(
+            TenantId: tenantId,
+            DriveId: driveId,
+            ItemId: itemId,
+            FileName: fileName,
+            FileSizeBytes: null,
+            ContentType: null,
+            DocumentId: documentId.ToString(),
+            ParentEntity: null,
+            SearchIndexName: null, // handler runs ISearchIndexNameResolver chain
+            Source: "InboundEmail",
+            CorrelationId: communicationId.ToString("N"));
 
-            await _jobSubmissionService.SubmitJobAsync(indexingJob, ct);
-
-            _logger.LogInformation(
-                "Enqueued RAG indexing job {JobId} for inbound document {DocumentId} (file: {FileName}) | CommunicationId: {CommunicationId}",
-                indexingJob.JobId, documentId, fileName, communicationId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Failed to enqueue RAG indexing for inbound document {DocumentId} (non-fatal) | CommunicationId: {CommunicationId}",
-                documentId, communicationId);
-        }
+        // App-only path: Email-to-Document uploads inbound mail attachments AS MI, so MI can
+        // read them (writer-identity rule per sdap-auth-patterns.md Pattern 4).
+        await _postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct);
     }
 
     /// <summary>

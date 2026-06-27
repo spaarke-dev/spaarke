@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -241,6 +242,176 @@ public class PlaybookChatContextProviderTests
         context.KnowledgeScope.ParentEntityId.Should().BeNull();
     }
 
+    // ── R5 task 033 — UploadedFiles surfacing in ChatContext ──────────────────────
+
+    /// <summary>
+    /// When the session manifest carries uploaded files, the provider MUST surface them
+    /// verbatim on the returned <see cref="ChatContext.UploadedFiles"/> so downstream
+    /// agent construction (<see cref="SprkChatAgentFactory"/>) can build a Session Files
+    /// manifest suffix on the system prompt. R5 task 033 acceptance criterion.
+    /// </summary>
+    [Fact]
+    public async Task GetContextAsync_SurfacesUploadedFiles_WhenSessionHasFiles()
+    {
+        // Arrange
+        SetupEmptyScopes();
+
+        var manifest = new List<ChatSessionFile>
+        {
+            new(
+                FileId: "file-001",
+                FileName: "contract.pdf",
+                ContentType: "application/pdf",
+                SizeBytes: 12_345,
+                SearchDocumentIdsCsv: "idx-001",
+                UploadedAt: DateTimeOffset.UtcNow),
+            new(
+                FileId: "file-002",
+                FileName: "schedule.docx",
+                ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                SizeBytes: 6_789,
+                SearchDocumentIdsCsv: "idx-002,idx-003",
+                UploadedAt: DateTimeOffset.UtcNow)
+        };
+
+        var sut = CreateProvider();
+
+        // Act
+        var context = await sut.GetContextAsync(
+            TestDocumentId,
+            TestTenantId,
+            TestPlaybookId,
+            hostContext: null,
+            additionalDocumentIds: null,
+            uploadedFiles: manifest,
+            cancellationToken: CancellationToken.None);
+
+        // Assert — manifest forwarded verbatim onto returned ChatContext.
+        context.UploadedFiles.Should().NotBeNull();
+        context.UploadedFiles!.Should().HaveCount(2);
+        context.UploadedFiles.Should().Contain(f => f.FileId == "file-001" && f.FileName == "contract.pdf");
+        context.UploadedFiles.Should().Contain(f => f.FileId == "file-002" && f.FileName == "schedule.docx");
+    }
+
+    /// <summary>
+    /// When the session has no uploaded files (null or empty manifest), the returned
+    /// <see cref="ChatContext.UploadedFiles"/> MUST be <c>null</c> — backward-compatible
+    /// with pre-R5 callers and standalone chat. R5 task 033 acceptance criterion.
+    /// </summary>
+    [Fact]
+    public async Task GetContextAsync_LeavesUploadedFilesNull_WhenSessionHasNone()
+    {
+        // Arrange
+        SetupEmptyScopes();
+        var sut = CreateProvider();
+
+        // Act — case 1: null manifest (default param, mimicking pre-R5 callers)
+        var contextWhenNull = await sut.GetContextAsync(
+            TestDocumentId,
+            TestTenantId,
+            TestPlaybookId,
+            cancellationToken: CancellationToken.None);
+
+        // Act — case 2: explicit empty manifest (defensive: treated identically to null)
+        var contextWhenEmpty = await sut.GetContextAsync(
+            TestDocumentId,
+            TestTenantId,
+            TestPlaybookId,
+            hostContext: null,
+            additionalDocumentIds: null,
+            uploadedFiles: Array.Empty<ChatSessionFile>(),
+            cancellationToken: CancellationToken.None);
+
+        // Assert — both treatments are equivalent: null surface on returned context.
+        contextWhenNull.UploadedFiles.Should().BeNull();
+        contextWhenEmpty.UploadedFiles.Should().BeNull();
+    }
+
+    // ─── FR-27 + FR-45 binding-invariant regression (chat-routing-redesign-r1 task 078) ──
+    //
+    // These tests pin two contracts the per-turn composition seam MUST never lose:
+    //
+    //   FR-45: PlaybookChatContextProvider.GetContextAsync MUST call
+    //          IMatterMemoryService.ToSystemPromptFragmentAsync (cross-session matter
+    //          memory activation). Architecture §11.1.
+    //
+    //   FR-27: there is exactly ONE per-turn composition seam — this method. There MUST
+    //          NOT be a parallel composer in SprkChatAgentFactory that bypasses
+    //          IChatContextProvider.GetContextAsync.
+    //
+    // Both tests use the source-file regex pattern (mirrors MatterPreFillServiceTests
+    // NFR-07 invariants). Line numbers are intentionally NOT pinned — the invariant is
+    // the call's existence, not its position. Task 080 escalates this with a stricter
+    // regression test scoped to the binding pair.
+
+    [Fact]
+    public void GetContextAsync_PreservesMatterMemoryServiceInvocation_FR45()
+    {
+        // FR-45 BINDING: PlaybookChatContextProvider MUST invoke
+        // IMatterMemoryService.ToSystemPromptFragmentAsync to activate cross-session
+        // matter memory (architecture §11.1). Source-text check pins the invocation
+        // so future refactors that accidentally drop the wiring fail this test loudly.
+        var source = File.ReadAllText(LocatePlaybookChatContextProviderSource());
+        source.Should().Contain("_matterMemoryService.ToSystemPromptFragmentAsync(",
+            "FR-45 BINDING — chat-routing-redesign-r1 task 078: the per-turn composition " +
+            "seam MUST call IMatterMemoryService.ToSystemPromptFragmentAsync to activate " +
+            "cross-session matter memory. Architecture §11.1. Do NOT regress.");
+    }
+
+    [Fact]
+    public void GetContextAsync_IsSinglePerTurnCompositionSeam_FR27()
+    {
+        // FR-27 BINDING: chat-routing-redesign-r1 requires "no parallel pipelines."
+        // PlaybookChatContextProvider.GetContextAsync is the ONLY per-turn composition
+        // seam. SprkChatAgentFactory must consume it via IChatContextProvider and only
+        // append suffix blocks under the shared budget tracker — it must NOT contain
+        // a parallel composer that bypasses the provider.
+        //
+        // Mechanism: verify the factory still resolves IChatContextProvider and calls
+        // GetContextAsync (single composer wiring). If anyone introduces a second
+        // composer in the factory, the call-site count grows or the seam name changes —
+        // either drift fails this test.
+        var factorySource = File.ReadAllText(LocateSprkChatAgentFactorySource());
+        factorySource.Should().Contain("contextProvider.GetContextAsync(",
+            "FR-27 BINDING — SprkChatAgentFactory MUST consume the single composition " +
+            "seam via IChatContextProvider.GetContextAsync. A second composer in the " +
+            "factory violates the single-pipeline contract.");
+        factorySource.Should().Contain("GetRequiredService<IChatContextProvider>()",
+            "FR-27 BINDING — SprkChatAgentFactory MUST resolve IChatContextProvider from " +
+            "the per-turn scope (not bypass it via a direct composer). Architecture §4.3.");
+    }
+
+    private static string LocatePlaybookChatContextProviderSource()
+        => LocateBffSource("Services", "Ai", "Chat", "PlaybookChatContextProvider.cs");
+
+    private static string LocateSprkChatAgentFactorySource()
+        => LocateBffSource("Services", "Ai", "Chat", "SprkChatAgentFactory.cs");
+
+    private static string LocateBffSource(params string[] tailSegments)
+    {
+        // Resolve from the test assembly's parent directory tree. The test project lives
+        // at tests/unit/Sprk.Bff.Api.Tests; the source lives at
+        // src/server/api/Sprk.Bff.Api/Services/Ai/Chat/...
+        var assemblyPath = typeof(PlaybookChatContextProviderTests).Assembly.Location;
+        var dir = new DirectoryInfo(Path.GetDirectoryName(assemblyPath)!);
+
+        while (dir is not null && !Directory.Exists(Path.Combine(dir.FullName, "src", "server")))
+        {
+            dir = dir.Parent;
+        }
+
+        dir.Should().NotBeNull("repo root must be locatable from the test assembly path");
+
+        var segments = new[]
+        {
+            dir!.FullName, "src", "server", "api", "Sprk.Bff.Api"
+        }.Concat(tailSegments).ToArray();
+
+        var path = Path.Combine(segments);
+        File.Exists(path).Should().BeTrue($"expected source file at {path}");
+        return path;
+    }
+
     #region Setup helpers
 
     private PlaybookChatContextProvider CreateProvider()
@@ -248,7 +419,12 @@ public class PlaybookChatContextProviderTests
             _scopeResolverMock.Object,
             _playbookServiceMock.Object,
             _dataverseServiceMock.Object,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            // R6 task 069 follow-up housekeeping: task 068 made IMatterMemoryService a
+            // required ctor param without migrating this fixture. Pass a default mock so
+            // the matter-memory append path is a no-op for these tests (no matter context
+            // is set up in the test fixtures below).
+            new Mock<IMatterMemoryService>().Object);
 
     private void SetupPlaybook(Guid[]? actionIds = null)
     {

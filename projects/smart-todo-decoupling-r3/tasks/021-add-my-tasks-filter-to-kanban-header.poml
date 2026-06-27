@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Add "My Tasks" filter component to `KanbanHeader` with three modes + user-preference persistence</title>
+    <phase>Phase 3: SmartTodo Code Page Repoint</phase>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>020</dependencies>
+    <blocks>024</blocks>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New `.tsx` component with state management + persistence; tags include `fluent-ui` + `frontend`. FULL rigor.</rigor-reason>
+    <parallel-group>P3-W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a "My Tasks" filter component to `KanbanHeader` with three modes: **My Tasks** (default — owner OR assignee = current user OR owner = team-where-currentuser-is-member per A-6); **Assigned to me** (assignee = current user); **All** (no filter). Persist mode in user preferences alongside existing kanban-threshold prefs. Default to "My Tasks" on first load.
+  </prompt>
+
+  <role>Spaarke Code Page developer with Fluent v9 + Dataverse user-preference handling.</role>
+
+  <goal>Filter component renders three radio/toggle options in `KanbanHeader`. Toggling changes the OData `$filter` query. Selection persists across page reload. Default is "My Tasks".</goal>
+
+  <constraints>
+    <constraint source="FR-12">Three modes: My Tasks (default), Assigned to me, All. Persist in user preferences.</constraint>
+    <constraint source="A-6">"My Tasks" semantics: `ownerid eq @currentuser OR sprk_assignedto eq @currentuser OR ownerid eq team-where-currentuser-is-member`.</constraint>
+    <constraint source="NFR-01">Fluent v9 + semantic tokens + Griffel only.</constraint>
+    <constraint source="NFR-10">Keyboard navigation + screen-reader labels accessible.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Design filter component with Fluent v9 `RadioGroup` or `SegmentedControl`. Use semantic tokens for styling.</step>
+    <step order="2">Implement three modes with corresponding OData `$filter` expressions per A-6 semantics.</step>
+    <step order="3">Wire user-preference read/write (reuse existing kanban-threshold preference path).</step>
+    <step order="4">Add accessibility attributes: aria-labels, keyboard navigation between options.</step>
+    <step order="5">Unit tests: default state, mode-toggle changes filter, preference persistence.</step>
+    <step order="6">Run `npm run build` + `npm test`. Fluent v9 lint pass.</step>
+    <step order="7">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">`src/solutions/SmartTodo/src/components/MyTasksFilter.tsx` (new component)</output>
+    <output type="code">`src/solutions/SmartTodo/src/components/KanbanHeader.tsx` (integration)</output>
+    <output type="test">Unit tests for filter modes + persistence</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Toggle changes the OData filter on the next kanban query.</criterion>
+    <criterion testable="true">Selected mode persists across page reload.</criterion>
+    <criterion testable="true">Default is My Tasks on first load.</criterion>
+    <criterion testable="true">Keyboard-accessible (Tab + arrow keys); SR labels present.</criterion>
+    <criterion testable="true">Fluent v9 lint passes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

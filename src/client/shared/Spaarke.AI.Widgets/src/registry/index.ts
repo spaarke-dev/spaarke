@@ -15,14 +15,14 @@ export {
   replaceWorkspaceWidget,
   resolveWorkspaceWidget,
   getWorkspaceWidgetMetadata,
+  getWorkspaceWidgetVisibleStateFn,
   getAllWorkspaceWidgetTypes,
   hasWorkspaceWidget,
   clearWorkspaceRegistry,
 } from './WorkspaceWidgetRegistry';
 
-export type {
-  WorkspaceWidgetRegistration,
-} from './WorkspaceWidgetRegistry';
+// Task 072 (D-C-27) — Pillar 9 visibility extension.
+export type { WorkspaceWidgetRegistration, RegistryGetAgentVisibleState } from './WorkspaceWidgetRegistry';
 
 // WidgetMetadata is exported from @spaarke/ai-widgets via types/widget-types.ts.
 // Do not re-export here to avoid duplicate identifier errors.

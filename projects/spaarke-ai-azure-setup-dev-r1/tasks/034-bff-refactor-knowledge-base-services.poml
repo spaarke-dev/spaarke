@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>BFF refactor: KnowledgeDeployment + KnowledgeBaseEndpoints (FR-13)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>completed</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>046</blocks>
+    <tags>bff-api, refactoring, ai, endpoints</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation: BFF services + endpoint definitions</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Refactor KnowledgeDeploymentService.cs + IKnowledgeDeploymentService.cs (interface) + KnowledgeBaseEndpoints.cs per FR-13.
+    Replace `spaarke-knowledge-index-v2` references in interface signatures + XML doc comments + endpoint logic.
+  </prompt>
+
+  <role>
+    Spaarke platform .NET 8 Minimal API developer.
+  </role>
+
+  <goal>
+    All 3 files use canonical index name; interface signatures + endpoint logic updated.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/KnowledgeDeploymentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/KnowledgeBaseEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">Replace all spaarke-knowledge-index-v2 references; canonical = spaarke-files-index</constraint>
+    <constraint source="CLAUDE.md §10">MUST NOT introduce new endpoints — only update existing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep within 3 files for `spaarke-knowledge-index-v2`</step>
+    <step order="2">Edit each file (including XML doc comments) to use canonical name</step>
+    <step order="3">Build BFF</step>
+    <step order="4">Update TASK-INDEX.md: task 034 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Find references</tool>
+    <tool name="Edit">Replace</tool>
+    <tool name="dotnet">Build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">3 BFF files</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep in 3 files returns zero spaarke-knowledge-index-v2 matches</criterion>
+    <criterion testable="true">BFF builds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

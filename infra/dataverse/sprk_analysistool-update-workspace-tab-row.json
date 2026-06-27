@@ -1,0 +1,54 @@
+{
+  "_comment_top": "R6 Pillar 6b / D-C-06 / task 055 — seed row for the UpdateWorkspaceTabHandler chat tool. Surfaces a single LLM-visible 'update_workspace_tab(tabId, widgetData, expectedLastUserEditAt?)' function that mutates an existing WorkspaceTab via IWorkspaceStateService.UpsertTabAsync with Q8 USER-WINS conflict resolution.",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'UpdateWorkspaceTabHandler' (= nameof handler class). Auto-discovered via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) — ZERO new top-level DI line.",
+  "_comment_placement_boundary": "ADR-013 binding: the handler injects IWorkspaceStateService directly (BFF-internal workspace plumbing) — NOT through a PublicContracts facade. Mirrors task 054 (SendWorkspaceArtifactHandler) and task 053 (SprkChatAgentFactory.ResolveTools system-prompt block) — workspace state is a chat-session state primitive owned by Pillar 6a, not an AI capability.",
+  "_comment_q8_conflict_resolution": "Spec FR-40 + project Q8 binding: USER WINS. The handler fetches the current tab via GetTabsAsync, compares its LastUserEditAt against the LLM-supplied expectedLastUserEditAt, and REFUSES the write when stored > expected. The refusal is a structured 'stale_read' response (success=true; data.status='stale_read'; data.currentLastUserEditAt populated) — NOT an error — so the LLM pattern-matches on data.status in its next-turn reasoning. Task 058 will wire the corresponding persona-prompt snippet instructing the agent to re-read the tab and re-attempt. No OT/CRDT in R6.",
+  "_comment_security": "sprk_requiredcapability = null (intentional). Updating a workspace tab is a default user affordance available in every chat session. The handler's own gates — tab must exist + be owned by chat session's tenant + must have CanEdit=true + widgetData.kind must match existing widgetType — are the authorization surface.",
+  "_comment_tenant_isolation": "ADR-014 binding: the chat session's TenantId is forwarded into IWorkspaceStateService.GetTabsAsync + UpsertTabAsync (Redis key + Cosmos partition key). Cross-tenant mutation is structurally impossible. The handler ALSO asserts current.TenantId == context.TenantId as defense in depth in case a future cache-layer bug surfaces a foreign-tenant tab.",
+  "_comment_adr015": "ADR-015 data governance: telemetry logs handler name + decision (applied | refused_stale_read | refused_not_found | refused_not_editable | refused_tenant_mismatch | refused_kind_mismatch) + tabId + deterministic IDs + duration ONLY. NEVER the LLM-supplied widgetData body, NEVER the tab's existing widget content, NEVER user message text. The expectedLastUserEditAt is logged as a boolean presence flag — the actual timestamp value is governed (it reveals user-edit cadence).",
+  "_comment_pane_event_bus": "ADR-030 binding: NO new SSE channel or PaneEventBus event type introduced by this handler. The client-side 'workspace.tab_edited' PaneEventBus event (task 060 additive types) is dispatched by the frontend tab manager when it observes the polled state delta — server-side responsibility ends at persistence via UpsertTabAsync. Polling channel = existing R6 Pillar 6a workspace state endpoint.",
+  "_comment_description_loadbearing": "sprk_description is LOAD-BEARING per NFR-12: the LLM uses the description text to decide WHEN to invoke this tool AND how to populate the expectedLastUserEditAt argument. The phrasing makes the stale_read consequence explicit so the LLM knows to capture the timestamp when reading workspace state into its prompt (system-prompt snapshot from task 053).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter; UPSERTs.",
+  "sprk_name": "SYS-Update Workspace Tab",
+  "sprk_toolcode": "UPDATE-WORKSPACE-TAB",
+  "sprk_description": "Update an existing workspace tab's widget data. Use this when you have refined a previously dispatched artifact and the user should see the updated state on the same tab (instead of a new one). Conflict resolution: pass the 'expectedLastUserEditAt' timestamp you observed when you last read the tab from your system-prompt snapshot. If the user has edited the tab since then, this tool will REFUSE with a 'stale_read' status — you must re-read the workspace state in your next turn and re-attempt with the refreshed timestamp. User edits always win. Omit expectedLastUserEditAt only when the tab has never been user-edited (e.g., you just created it via send_workspace_artifact).",
+  "sprk_handlerclass": "UpdateWorkspaceTabHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only. Workspace tab mutation is a chat-surface affordance — playbook nodes write to sprk_analysisoutput + sprk_workingdocument, not the chat-session per-tenant workspace tab list.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "UpdateWorkspaceTabHandler Request",
+    "description": "Argument shape for chat-driven invocation of the update_workspace_tab tool. Mutates an existing WorkspaceTab via IWorkspaceStateService.UpsertTabAsync with Q8 USER-WINS conflict resolution.",
+    "type": "object",
+    "required": ["tabId", "widgetData"],
+    "properties": {
+      "tabId": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Stable workspace tab identifier (matches WorkspaceTab.id from the system-prompt snapshot)."
+      },
+      "widgetData": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["kind"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["Summary", "DocumentViewer", "Dashboard", "Table"],
+            "description": "Discriminator — MUST equal the existing tab's widgetType. Updating a tab's widgetType is not supported; close the tab and create a new one instead."
+          }
+        },
+        "description": "Replacement widget-data payload. Same per-variant shape as send_workspace_artifact: Summary requires {body, tldr?}; DocumentViewer requires {documentId, filename, mimeType, sizeBytes, hasSelection?, selectionText?}; Dashboard requires {layoutId, dashboardName, lastViewedSection?}; Table requires {rowCount, filteredColumns[], selectedRows[], sortColumn?, sortDirection?, dataSourceId?}. Deterministic identifiers + display metadata only — ADR-015 binding: NEVER raw user message text."
+      },
+      "expectedLastUserEditAt": {
+        "type": "string",
+        "format": "date-time",
+        "description": "ISO-8601 timestamp the agent observed for the tab's lastUserEditAt when it last read the tab from its system-prompt snapshot. Omit (null) only when the tab has never been user-edited (e.g., the agent just created it via send_workspace_artifact). When supplied, the handler refuses the write if the current stored lastUserEditAt is later than this value (Q8: user wins)."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — this row exposes a single LLM-facing function. Empty object reserved for future per-row defaults (e.g., per-tenant 'always-pin-after-update' policy)."
+  }
+}

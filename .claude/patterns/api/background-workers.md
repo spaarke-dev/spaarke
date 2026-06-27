@@ -1,11 +1,11 @@
-# Background Workers Pattern
+# Background Workers Pattern (Queue-Driven)
 
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
+> **Last Reviewed**: 2026-06-22
+> **Reviewed By**: spaarke-platform-foundations-r3 Wave 28 (refreshed to distinguish queue-vs-schedule shape)
 > **Status**: Verified
 
 ## When
-Adding async job processing via Service Bus queue.
+Adding async job processing via **Service Bus queue** (event-triggered work — incoming message kicks off a handler). For **schedule-driven** work (cron, interval, daily-at-time), use [`scheduled-jobs.md`](scheduled-jobs.md) instead (`IScheduledJob` + `Spaarke.Scheduling` framework, R3).
 
 ## Read These Files
 1. `src/server/api/Sprk.Bff.Api/Services/Jobs/JobContract.cs` — Job envelope schema (JobId, JobType, IdempotencyKey, Payload)

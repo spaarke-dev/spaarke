@@ -35,8 +35,8 @@ import {
   Dialog,
   DialogSurface,
   DialogBody,
-  DialogContent,
-  DialogActions,
+  DialogContent as _DialogContent,
+  DialogActions as _DialogActions,
   Button,
   MessageBar,
   MessageBarBody,
@@ -62,22 +62,38 @@ import type {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  // Override DialogSurface — landscape orientation, resizable
+  // Override DialogSurface — landscape orientation, resizable.
+  // v1.1.63: `width` kept here as the default (1100px) for back-compat;
+  // `maxWidth` and the body `height`/`min-height` are now driven by the
+  // consumer-provided `maxWidth`/`height` props via inline style on
+  // DialogSurface (same width-clamp-bypass pattern as SendEmailDialog
+  // since v1.1.56) so the makeStyles cascade can't override them.
   surface: {
-    width: '1100px',
-    maxWidth: '95vw',
-    maxHeight: '80vh',
+    width: '100%',
+    // maxWidth + maxHeight intentionally OMITTED here — see the inline
+    // `style={{ maxWidth, height, minHeight: height }}` on DialogSurface
+    // below; that pattern is the only reliable way to bypass Fluent v9's
+    // DialogSurface inner-content sizing under tall content.
     padding: '0px',
     resize: 'both',
     overflow: 'auto',
     border: `1px solid ${tokens.colorNeutralStroke1}`,
+    // v1.1.63 — the surface must be a flex column so DialogBody can
+    // flex-grow to fill the surface height. Fluent DialogSurface is
+    // already display:flex by default; we just ensure direction.
+    display: 'flex',
+    flexDirection: 'column',
   },
-  // DialogBody: remove default padding so we control layout entirely
+  // DialogBody: remove default padding so we control layout entirely.
+  // v1.1.63 — body fills the surface (flex:1) rather than hard-coding
+  // a 70vh height; the consumer-controlled height on DialogSurface now
+  // drives the overall vertical footprint.
   body: {
     padding: '0px',
     display: 'flex',
     flexDirection: 'column',
-    height: '70vh',
+    flex: 1,
+    minHeight: 0,
     overflow: 'hidden',
   },
   // Embedded mode: fills the host container (e.g., Dataverse dialog iframe)
@@ -177,6 +193,11 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     finishingLabel = 'Processing\u2026',
     finishLabel = 'Finish',
     footerLeftExtra,
+    // v1.1.63 \u2014 sizing overrides; default to the pre-v1.1.63 values
+    // (95vw max-width / 70vh body height) so existing consumers
+    // (DocumentRelationshipViewer etc.) render unchanged.
+    maxWidth = '95vw',
+    height = '70vh',
   } = props;
 
   const styles = useStyles();
@@ -403,9 +424,7 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
       {successConfig ? (
         <div className={styles.footer}>
           <div className={styles.footerLeft} />
-          <div className={styles.footerRight}>
-            {successConfig.actions}
-          </div>
+          <div className={styles.footerRight}>{successConfig.actions}</div>
         </div>
       ) : (
         <div className={styles.footer}>
@@ -466,6 +485,14 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
   }
 
   // Standard mode: render inside Fluent Dialog overlay.
+  //
+  // v1.1.63 — DialogSurface receives an inline `style={{ maxWidth, height,
+  // minHeight: height }}` so the surface honors the consumer's sizing
+  // overrides. Inline style is the only reliable bypass for Fluent v9's
+  // makeStyles + DialogSurface inner-content sizing (verified across
+  // SendEmailDialog v1.1.56+ where the same pattern fixed the same
+  // width-clamp issue). When the consumer omits the props, the defaults
+  // (95vw / 70vh) match the pre-v1.1.63 sizing exactly.
   return (
     <Dialog
       open={open}
@@ -473,7 +500,11 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
         if (!data.open) onClose();
       }}
     >
-      <DialogSurface className={styles.surface} aria-label={ariaLabel ?? title}>
+      <DialogSurface
+        className={styles.surface}
+        style={{ maxWidth, height, minHeight: height }}
+        aria-label={ariaLabel ?? title}
+      >
         <DialogBody className={styles.body}>{innerContent}</DialogBody>
       </DialogSurface>
     </Dialog>

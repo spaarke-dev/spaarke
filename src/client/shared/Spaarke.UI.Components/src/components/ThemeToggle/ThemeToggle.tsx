@@ -1,36 +1,29 @@
-import * as React from "react";
-import {
-  Button,
-  Tooltip,
-  makeStyles,
-} from "@fluentui/react-components";
-import {
-  WeatherSunnyRegular,
-  WeatherMoonRegular,
-} from "@fluentui/react-icons";
-import { useTheme, DarkLightMode } from "../../hooks/useTheme";
+import * as React from 'react';
+import { Button, Tooltip, makeStyles } from '@fluentui/react-components';
+import { WeatherSunnyRegular, WeatherMoonRegular } from '@fluentui/react-icons';
+import { useTheme, DarkLightMode } from '../../hooks/useTheme';
 
 const useStyles = makeStyles({
   toggleButton: {
-    minWidth: "auto",
+    minWidth: 'auto',
   },
 });
 
 const NEXT_MODE: Record<DarkLightMode, DarkLightMode> = {
-  light: "dark",
-  dark: "light",
+  light: 'dark',
+  dark: 'light',
 };
 
 const MODE_LABELS: Record<DarkLightMode, string> = {
-  light: "Light theme",
-  dark: "Dark theme",
+  light: 'Light theme',
+  dark: 'Dark theme',
 };
 
 function ThemeIcon({ mode }: { mode: DarkLightMode }): React.ReactElement {
   switch (mode) {
-    case "dark":
+    case 'dark':
       return <WeatherMoonRegular />;
-    case "light":
+    case 'light':
     default:
       return <WeatherSunnyRegular />;
   }
@@ -62,10 +55,7 @@ export const ThemeToggle: React.FC = () => {
   const nextLabel = MODE_LABELS[nextMode];
 
   return (
-    <Tooltip
-      content={`${currentLabel} — click to switch to ${nextLabel}`}
-      relationship="label"
-    >
+    <Tooltip content={`${currentLabel} — click to switch to ${nextLabel}`} relationship="label">
       <Button
         className={styles.toggleButton}
         appearance="subtle"

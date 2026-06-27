@@ -169,14 +169,16 @@ public sealed class GraphUserService
     /// <summary>
     /// Assigns the configured demo licenses to a user.
     /// Idempotent: skips licenses already assigned.
-    /// SKU IDs are sourced from DemoProvisioningOptions.Licenses.
+    /// SKU IDs come from the per-environment license config (FR-11) when it specifies
+    /// at least one SKU; otherwise falls back to the tenant-wide DemoProvisioningOptions.Licenses.
     /// </summary>
     /// <param name="userId">Entra ID user object ID.</param>
+    /// <param name="environmentLicenses">Per-environment license SKUs from sprk_licenseconfigjson; null or all-empty falls back to global config.</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task AssignLicensesAsync(string userId, CancellationToken ct = default)
+    public async Task AssignLicensesAsync(string userId, LicenseSkuConfig? environmentLicenses = null, CancellationToken ct = default)
     {
         var graphClient = _graphClientFactory.ForApp();
-        var licenses = _options.Licenses;
+        var licenses = ResolveLicenses(_options.Licenses, environmentLicenses);
 
         var skuIds = new[]
         {
@@ -214,6 +216,23 @@ public sealed class GraphUserService
             cancellationToken: ct);
 
         _logger.LogInformation("Successfully assigned licenses to user {UserId}", userId);
+    }
+
+    /// <summary>
+    /// Resolves which license set to assign: the per-environment config wins when it
+    /// specifies at least one SKU; a null or all-empty per-environment config falls back
+    /// to the global config so legacy environment records keep working.
+    /// </summary>
+    internal static LicenseSkuConfig ResolveLicenses(LicenseSkuConfig global, LicenseSkuConfig? perEnvironment)
+    {
+        if (perEnvironment is null)
+            return global;
+
+        var hasAnySku = !string.IsNullOrWhiteSpace(perEnvironment.PowerAppsPlan2TrialSkuId)
+            || !string.IsNullOrWhiteSpace(perEnvironment.FabricFreeSkuId)
+            || !string.IsNullOrWhiteSpace(perEnvironment.PowerAutomateFreeSkuId);
+
+        return hasAnySku ? perEnvironment : global;
     }
 
     /// <summary>

@@ -85,7 +85,7 @@ public class FileIndexingServiceTests
             });
 
         _ragServiceMock
-            .Setup(x => x.IndexDocumentsBatchAsync(It.IsAny<IEnumerable<KnowledgeDocument>>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.IndexDocumentsBatchAsync(It.IsAny<IEnumerable<KnowledgeDocument>>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<IndexResult> { IndexResult.Success("chunk-id-0") });
 
         // Act
@@ -160,7 +160,7 @@ public class FileIndexingServiceTests
             });
 
         _ragServiceMock
-            .Setup(x => x.IndexDocumentsBatchAsync(It.IsAny<IEnumerable<KnowledgeDocument>>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.IndexDocumentsBatchAsync(It.IsAny<IEnumerable<KnowledgeDocument>>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<IndexResult> { IndexResult.Success("chunk-id-0") });
 
         // Act
@@ -212,7 +212,7 @@ public class FileIndexingServiceTests
             .ReturnsAsync(chunks);
 
         _ragServiceMock
-            .Setup(x => x.IndexDocumentsBatchAsync(It.IsAny<IEnumerable<KnowledgeDocument>>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.IndexDocumentsBatchAsync(It.IsAny<IEnumerable<KnowledgeDocument>>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<IndexResult>
             {
                 IndexResult.Success("chunk-0"),
@@ -246,7 +246,7 @@ public class FileIndexingServiceTests
             .ReturnsAsync(chunks);
 
         _ragServiceMock
-            .Setup(x => x.IndexDocumentsBatchAsync(It.IsAny<IEnumerable<KnowledgeDocument>>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.IndexDocumentsBatchAsync(It.IsAny<IEnumerable<KnowledgeDocument>>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<IndexResult>
             {
                 IndexResult.Success("chunk-0"),
@@ -292,7 +292,7 @@ public class FileIndexingServiceTests
             });
 
         _ragServiceMock
-            .Setup(x => x.IndexDocumentsBatchAsync(It.IsAny<IEnumerable<KnowledgeDocument>>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.IndexDocumentsBatchAsync(It.IsAny<IEnumerable<KnowledgeDocument>>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<IndexResult> { IndexResult.Success("chunk-id-0") });
 
         // Act
@@ -363,6 +363,140 @@ public class FileIndexingServiceTests
         // Assert
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("No chunks");
+    }
+
+    #endregion
+
+    #region SearchIndexName Thread-Through (multi-container-multi-index-r1 indexer-routing-fix Tier 3)
+
+    [Fact]
+    public async Task IndexFileAppOnlyAsync_WithSearchIndexName_ThreadsThroughToRagService()
+    {
+        // FR-BFF-07 write path: when the FileIndexRequest.SearchIndexName is set, the
+        // internal pipeline MUST pass it verbatim into IRagService.IndexDocumentsBatchAsync
+        // (3-arg overload). This is the chokepoint the indexer-routing-fix targets.
+
+        // Arrange
+        var service = CreateService();
+        var request = CreateFileIndexRequest() with { SearchIndexName = "spaarke-file-index" };
+        var fileContent = new MemoryStream("Test file content"u8.ToArray());
+        var extractedText = "Extracted text from the document.";
+
+        _speFileOperationsMock
+            .Setup(x => x.DownloadFileAsync(request.DriveId, request.ItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(fileContent);
+
+        _textExtractorMock
+            .Setup(x => x.ExtractAsync(It.IsAny<Stream>(), request.FileName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TextExtractionResult.Succeeded(extractedText, TextExtractionMethod.DocumentIntelligence));
+
+        _chunkingServiceMock
+            .Setup(x => x.ChunkTextAsync(extractedText, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<TextChunk>
+            {
+                new() { Content = extractedText, Index = 0, StartPosition = 0, EndPosition = extractedText.Length }
+            });
+
+        _ragServiceMock
+            .Setup(x => x.IndexDocumentsBatchAsync(
+                It.IsAny<IEnumerable<KnowledgeDocument>>(),
+                "spaarke-file-index",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<IndexResult> { IndexResult.Success("chunk-id-0") });
+
+        // Act
+        await service.IndexFileAppOnlyAsync(request);
+
+        // Assert — 3-arg overload invoked with the explicit index name verbatim
+        _ragServiceMock.Verify(
+            x => x.IndexDocumentsBatchAsync(
+                It.IsAny<IEnumerable<KnowledgeDocument>>(),
+                "spaarke-file-index",
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task IndexContentAsync_WithSearchIndexName_ThreadsThroughToRagService()
+    {
+        // FR-BFF-07 — Email pre-extracted content path also routes the per-record index name.
+
+        // Arrange
+        var service = CreateService();
+        var request = CreateContentIndexRequest() with { SearchIndexName = "spaarke-knowledge-index-v2" };
+
+        _chunkingServiceMock
+            .Setup(x => x.ChunkTextAsync(request.Content, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<TextChunk>
+            {
+                new() { Content = request.Content, Index = 0, StartPosition = 0, EndPosition = request.Content.Length }
+            });
+
+        _ragServiceMock
+            .Setup(x => x.IndexDocumentsBatchAsync(
+                It.IsAny<IEnumerable<KnowledgeDocument>>(),
+                "spaarke-knowledge-index-v2",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<IndexResult> { IndexResult.Success("chunk-id-0") });
+
+        // Act
+        await service.IndexContentAsync(request);
+
+        // Assert
+        _ragServiceMock.Verify(
+            x => x.IndexDocumentsBatchAsync(
+                It.IsAny<IEnumerable<KnowledgeDocument>>(),
+                "spaarke-knowledge-index-v2",
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task IndexFileAppOnlyAsync_WithoutSearchIndexName_PassesNullToRagService()
+    {
+        // NFR-02 regression: when SearchIndexName is not set on the request, the internal
+        // pipeline MUST pass null to IRagService — which then falls through to the tenant
+        // default chain. Existing callers that never set the value see byte-for-byte
+        // backward-compat.
+
+        // Arrange
+        var service = CreateService();
+        var request = CreateFileIndexRequest(); // SearchIndexName not set → null
+        var fileContent = new MemoryStream("Test file content"u8.ToArray());
+        var extractedText = "Extracted text.";
+
+        _speFileOperationsMock
+            .Setup(x => x.DownloadFileAsync(request.DriveId, request.ItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(fileContent);
+
+        _textExtractorMock
+            .Setup(x => x.ExtractAsync(It.IsAny<Stream>(), request.FileName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TextExtractionResult.Succeeded(extractedText, TextExtractionMethod.DocumentIntelligence));
+
+        _chunkingServiceMock
+            .Setup(x => x.ChunkTextAsync(extractedText, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<TextChunk>
+            {
+                new() { Content = extractedText, Index = 0, StartPosition = 0, EndPosition = extractedText.Length }
+            });
+
+        _ragServiceMock
+            .Setup(x => x.IndexDocumentsBatchAsync(
+                It.IsAny<IEnumerable<KnowledgeDocument>>(),
+                (string?)null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<IndexResult> { IndexResult.Success("chunk-id-0") });
+
+        // Act
+        await service.IndexFileAppOnlyAsync(request);
+
+        // Assert — null was passed (tenant-default fall-through behavior)
+        _ragServiceMock.Verify(
+            x => x.IndexDocumentsBatchAsync(
+                It.IsAny<IEnumerable<KnowledgeDocument>>(),
+                (string?)null,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     #endregion

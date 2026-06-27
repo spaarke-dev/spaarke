@@ -560,8 +560,11 @@ public class DocumentContextE2ETests
             .Setup(d => d.GetDocumentAsync("doc-ok-1", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DocumentEntity
             {
-                Id = "doc-ok-1", Name = "Good1.pdf", FileName = "Good1.pdf",
-                GraphDriveId = "drive-doc-ok-1", GraphItemId = "item-doc-ok-1"
+                Id = "doc-ok-1",
+                Name = "Good1.pdf",
+                FileName = "Good1.pdf",
+                GraphDriveId = "drive-doc-ok-1",
+                GraphItemId = "item-doc-ok-1"
             });
         var bytes1 = Encoding.UTF8.GetBytes(content1);
         speOps
@@ -579,8 +582,11 @@ public class DocumentContextE2ETests
             .Setup(d => d.GetDocumentAsync("doc-ok-3", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DocumentEntity
             {
-                Id = "doc-ok-3", Name = "Good3.pdf", FileName = "Good3.pdf",
-                GraphDriveId = "drive-doc-ok-3", GraphItemId = "item-doc-ok-3"
+                Id = "doc-ok-3",
+                Name = "Good3.pdf",
+                FileName = "Good3.pdf",
+                GraphDriveId = "drive-doc-ok-3",
+                GraphItemId = "item-doc-ok-3"
             });
         var bytes3 = Encoding.UTF8.GetBytes(content3);
         speOps

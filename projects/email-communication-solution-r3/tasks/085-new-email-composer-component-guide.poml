@@ -1,0 +1,142 @@
+<task id="085" project="email-communication-solution-r3">
+  <metadata>
+    <title>Create NEW `docs/guides/EMAIL-COMPOSER-COMPONENT-GUIDE.md` developer guide</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>077</dependencies>
+    <blocks>093</blocks>
+    <tags>docs, architecture</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>NEW developer guide that future Spaarke developers will rely on; must accurately reflect the canonical `<EmailComposer />` API surface as shipped in Waves 1–5</rigor-reason>
+    <parallel-group>M</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-27</fr-refs>
+  </metadata>
+
+  <prompt>
+    Create a new developer guide at `docs/guides/EMAIL-COMPOSER-COMPONENT-GUIDE.md` documenting the canonical `<EmailComposer />` engine and its 3 wrappers (`<SendEmailStep />`, `<SendEmailDialog />`, `<SendEmailPage />`) for Spaarke developers building new email-touching surfaces.
+
+    The guide is the practical "how do I use this" reference for every future surface — it must accurately reflect what shipped in Waves 1–5 (engine API, wrapper prop surfaces, validation contract, error handling, attachment sources, mount variants). It also tells developers what NOT to do (per ADR-033 MUST NOT rules: no 6th send-email implementation, no inline `fetch`, no `@spaarke/auth` import in shared lib).
+  </prompt>
+
+  <role>
+    Spaarke shared-lib documentation author. Familiar with the EmailComposer engine + wrappers as built in Waves 1–5 and the ADR-033 canonical pattern.
+  </role>
+
+  <goal>
+    A complete, accurate developer guide at `docs/guides/EMAIL-COMPOSER-COMPONENT-GUIDE.md` covering: when to use which wrapper (decision tree), prop API for each wrapper, mount variants per NFR-03 (page/dialog/inline), validation contract per FR-08 (canonical error codes), error handling via `SendCommunicationError` per FR-09, attachment sources per FR-07 (4 sources), mode logic per FR-10–FR-13 (5 modes), and explicit ADR-033 references. Cross-linked from `docs/guides/SHARED-UI-COMPONENTS-GUIDE.md` (task 089 adds the back-reference).
+  </goal>
+
+  <context>
+    <background>
+      Per FR-27 #2, a new developer guide is required. The guide is the practical companion to ADR-033 (which is architectural) — it covers actual usage patterns with code examples.
+
+      Surfaces consuming `<EmailComposer />` family today: 5 create-record wizards (via SendEmailStep), FilePreview (via SendEmailDialog), Code Page (via SendEmailPage), DocumentEmailWizard (via SendEmailStep), SummarizeFiles (via SendEmailStep). The guide documents the same usage pattern these consumers established in Waves 3–5.
+    </background>
+    <relevant-files>
+      <file>docs/guides/EMAIL-COMPOSER-COMPONENT-GUIDE.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-27 #2">Guide MUST cover decision tree for which wrapper to use</constraint>
+    <constraint source="FR-08">Validation contract section MUST list all canonical error codes</constraint>
+    <constraint source="FR-09">Error handling section MUST document `SendCommunicationError` (status/code/detail/correlationId)</constraint>
+    <constraint source="FR-07">Attachment sources section MUST cover all 4 sources (local/spe/related/wizard)</constraint>
+    <constraint source="NFR-03">Mount variants section MUST distinguish page/dialog/inline visual semantics</constraint>
+    <constraint source="ADR-033">Guide MUST reference ADR-033 as the binding architecture</constraint>
+    <constraint source="ADR-033">Guide MUST NOT teach inline `fetch` to `/api/communications/send` — that is forbidden</constraint>
+    <constraint source="NFR-02">Guide MUST teach `authenticatedFetch` injection (not direct `@spaarke/auth` import in shared lib)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailStep.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPage.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts</file>
+    </files>
+    <patterns>
+      <pattern name="docs/guides exemplar" location="docs/guides/SHARED-UI-COMPONENTS-GUIDE.md">
+        Existing shared-lib component guide — use as structural model for the new EmailComposer guide.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ADR-033 (canonical architecture) + spec FR-07/08/09/10/11/12/13 + NFR-03 to ground guide scope.</step>
+    <step order="2">Read the as-built engine + 3 wrappers + `communicationApi.ts` to extract the actual prop API surfaces (what shipped, not what spec proposed — these may differ on detail).</step>
+    <step order="3">Read `docs/guides/SHARED-UI-COMPONENTS-GUIDE.md` for the structural model + tone.</step>
+    <step order="4">Read `.claude/patterns/api/send-email-integration.md` (current state — will be updated by task 086 separately).</step>
+    <step order="5">Draft the guide with sections:
+      (a) Overview + ADR-033 reference
+      (b) When to use which wrapper (decision tree: wizard-step → SendEmailStep; dialog → SendEmailDialog; standalone page → SendEmailPage; programmatic no-UI → sendCommunication())
+      (c) `<SendEmailStep />` prop API (wizard step usage)
+      (d) `<SendEmailDialog />` prop API (popup dialog usage)
+      (e) `<SendEmailPage />` prop API (Code Page usage)
+      (f) Mount variants (page/dialog/inline) per NFR-03 — visual differences
+      (g) Validation contract (canonical error codes per FR-08)
+      (h) Error handling (`SendCommunicationError` per FR-09)
+      (i) Attachment sources (4 sources per FR-07)
+      (j) Mode logic (compose/view/reply/forward/draft per FR-10–FR-13)
+      (k) ADR-033 MUST NOT rules (do not add a 6th implementation; do not inline `fetch`; do not import `@spaarke/auth` in shared lib)
+      (l) Code examples for the 3 most common patterns (wizard step, dialog launch, Code Page mount)
+      (m) Related docs (ADR-033, SHARED-UI-COMPONENTS-GUIDE, communication-service-architecture, COMMUNICATION-ATTACHMENT-POLICY)
+    </step>
+    <step order="6">Verify code examples compile against the as-built engine API (read EmailComposer.tsx imports + component signature).</step>
+    <step order="7">Add cross-reference from `docs/guides/SHARED-UI-COMPONENTS-GUIDE.md` to the new guide (task 089 does this, but include the planned link in the new guide's "Related docs" section as well).</step>
+    <step order="8">Run `grep` for orphaned references that might benefit from a cross-link to the new guide.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 085 ✅ completed.</step>
+    <step order="10">Update `current-task.md`: status → completed, advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read ADR-033, as-built code, existing guides</tool>
+    <tool name="write">Author the new guide</tool>
+    <tool name="grep">Find cross-reference opportunities</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/EMAIL-COMPOSER-COMPONENT-GUIDE.md (NEW — comprehensive developer guide)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`docs/guides/EMAIL-COMPOSER-COMPONENT-GUIDE.md` exists.</criterion>
+    <criterion testable="true">Guide covers all sections listed in step 5 (a–m).</criterion>
+    <criterion testable="true">Decision tree for wrapper choice is unambiguous.</criterion>
+    <criterion testable="true">Validation error codes match canonical list from FR-08.</criterion>
+    <criterion testable="true">`SendCommunicationError` documented with all 4 fields (status/code/detail/correlationId).</criterion>
+    <criterion testable="true">All 4 attachment sources documented.</criterion>
+    <criterion testable="true">All 5 modes documented.</criterion>
+    <criterion testable="true">ADR-033 explicitly referenced.</criterion>
+    <criterion testable="true">Code examples compile against as-built engine signatures.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Empirical findings from project pipeline (relevant here):
+    - Engine + 3 wrappers built in Wave 1 (tasks 010–029); the AS-BUILT signatures are the source of truth, NOT spec assumptions. Verify before writing examples.
+    - Code Page (`sprk_emailcomposer`) deployed in Wave 2 — guide should reference it as the standalone-page consumer.
+
+    Parallel-safe with tasks 088, 089, 090, 091 (all `docs/` updates, different files).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Step 6 (verify examples compile) is critical — outdated examples cause future bugs.
+    </protocol>
+  </execution>
+</task>

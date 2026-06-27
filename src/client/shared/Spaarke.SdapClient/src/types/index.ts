@@ -104,3 +104,78 @@ export interface Container {
   /** Drive ID */
   driveId: string;
 }
+
+/**
+ * Authenticated fetch function signature. Matches `@spaarke/auth.authenticatedFetch`.
+ * Consumers inject this so `sdap-client` operations can call BFF endpoints with
+ * the canonical Spaarke Auth v2 contract (ADR-028) without taking a direct
+ * dependency on `@spaarke/auth`. The function MUST attach a valid Bearer token
+ * for the BFF API audience (`api://{bff-client-id}/SDAP.Access`).
+ */
+export type AuthenticatedFetchFn = (url: string, options?: RequestInit) => Promise<Response>;
+
+/**
+ * Parent entity context attached to indexed file chunks for entity-scoped search.
+ * Mirrors the BFF's `ParentEntityContext` record so chunks are filterable by
+ * parent record in `spaarke-files-index`.
+ */
+export interface ParentEntityContext {
+  /** Logical entity name — e.g., 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_event'. */
+  entityType: string;
+
+  /** GUID of the parent record. */
+  entityId: string;
+
+  /** Display name of the parent record (e.g., matter name) — informational, no routing impact. */
+  entityName: string;
+}
+
+/**
+ * Request payload for `SdapApiClient.indexFile()` / `IndexFileOperation`.
+ * Triggers sync OBO indexing of a SPE-resident file into Azure AI Search.
+ *
+ * Pattern: writer-identity matching (Pattern 4) — the same user who wrote the
+ * file via OBO MUST be the caller indexing it via OBO. Used by wizards after
+ * a successful PUT to `/api/obo/containers/{id}/files/{path}`.
+ */
+export interface IndexFileRequest {
+  /** SPE drive ID (NOT the container ID — these are different). */
+  driveId: string;
+
+  /** SPE drive item ID (returned from a prior upload). */
+  itemId: string;
+
+  /** File name with extension — used for format detection. */
+  fileName: string;
+
+  /** Tenant ID for multi-tenant index routing. */
+  tenantId: string;
+
+  /** Optional Dataverse `sprk_document` record GUID linked to this file. */
+  documentId?: string;
+
+  /** Optional parent entity context for entity-scoped search. */
+  parentEntity?: ParentEntityContext;
+
+  /**
+   * Optional explicit Azure AI Search index name. When provided, routes to that
+   * index after validating against the BFF's `AiSearchOptions.AllowedIndexes`.
+   * When omitted, the BFF resolver falls through the standard chain
+   * (parent record → BU cascade → tenant default).
+   */
+  searchIndexName?: string;
+}
+
+/**
+ * Result returned by `SdapApiClient.indexFile()`.
+ */
+export interface IndexFileResult {
+  /** True when indexing succeeded end-to-end (chunks written to AI Search). */
+  success: boolean;
+
+  /** Number of chunks indexed (when `success` is true). */
+  chunksIndexed?: number;
+
+  /** Error message when `success` is false. */
+  errorMessage?: string;
+}

@@ -15,7 +15,8 @@
  */
 
 import { useState, useCallback } from 'react';
-import { getBffBaseUrl, buildAuthHeaders } from '../services/apiBase';
+import { authenticatedFetch } from '@spaarke/auth';
+import { getBffBaseUrl } from '../services/apiBase';
 
 // =============================================
 // Types
@@ -44,8 +45,7 @@ export interface UseDocumentActionsResult {
 // =============================================
 
 async function getDocumentLinks(documentId: string): Promise<OpenLinksResponse> {
-  const headers = await buildAuthHeaders();
-  const response = await fetch(`${getBffBaseUrl()}/api/documents/${documentId}/open-links`, { headers });
+  const response = await authenticatedFetch(`${getBffBaseUrl()}/api/documents/${documentId}/open-links`);
 
   if (!response.ok) {
     throw new Error(`Failed to get document links: ${response.status}`);
@@ -55,8 +55,7 @@ async function getDocumentLinks(documentId: string): Promise<OpenLinksResponse> 
 }
 
 async function deleteDocument(documentId: string): Promise<void> {
-  const headers = await buildAuthHeaders();
-  const response = await fetch(`${getBffBaseUrl()}/api/documents/${documentId}`, { method: 'DELETE', headers });
+  const response = await authenticatedFetch(`${getBffBaseUrl()}/api/documents/${documentId}`, { method: 'DELETE' });
 
   if (!response.ok) {
     throw new Error(`Failed to delete document: ${response.status}`);
@@ -64,8 +63,9 @@ async function deleteDocument(documentId: string): Promise<void> {
 }
 
 async function analyzeDocument(documentId: string): Promise<void> {
-  const headers = await buildAuthHeaders();
-  const response = await fetch(`${getBffBaseUrl()}/api/documents/${documentId}/analyze`, { method: 'POST', headers });
+  const response = await authenticatedFetch(`${getBffBaseUrl()}/api/documents/${documentId}/analyze`, {
+    method: 'POST',
+  });
 
   if (!response.ok && response.status !== 202) {
     throw new Error(`Failed to send document to index: ${response.status}`);
@@ -115,10 +115,9 @@ export function useDocumentActions(): UseDocumentActionsResult {
     setIsActing(true);
     setActionError(null);
     try {
-      const headers = await buildAuthHeaders();
       const url = `${getBffBaseUrl()}/api/documents/${documentId}/download`;
       // Use a hidden link to trigger browser download
-      const response = await fetch(url, { headers });
+      const response = await authenticatedFetch(url);
       if (!response.ok) {
         throw new Error(`Download failed: ${response.status}`);
       }

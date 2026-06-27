@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.AI;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
@@ -192,6 +193,7 @@ public static class AgentEndpoints
                 httpContext,
                 noOpSseWriter,
                 latestUserMessage: request.Message,
+                uploadedFiles: session.UploadedFiles,
                 cancellationToken: cancellationToken);
 
             // Build AI history from existing session messages
@@ -223,6 +225,16 @@ public static class AgentEndpoints
             };
 
             return Results.Ok(agentResponse);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 3 (D-09 §2 B2): NullSprkChatAgentFactory surfaced via the
+            // agent-gateway entry point. AgentEndpoints returns JSON (not SSE) so a 503
+            // ProblemDetails with stable errorCode is the canonical kill-switch response.
+            logger.LogDebug(
+                "[AGENT] message rejected — AI chat feature disabled. ErrorCode={ErrorCode}, UserId={UserId}",
+                ex.ErrorCode, userId);
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {

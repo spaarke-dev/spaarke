@@ -1,0 +1,152 @@
+<task id="040" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P23.H1 — Workspace scoring tests (PriorityScoringService, EffortScoring, WorkspaceMatcher)</title>
+    <status>completed</status>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-2-3, high-tier, p23-h, bff-api, testing, workspace, scoring</tags>
+    <parallel-group>23-H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Services/Workspace/* test files are disjoint from other H-track batches (Scorecard, Finance, Email, Ai/Safety, Filters, Resilience)</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Repair the HIGH-tier Workspace scoring tests (~3 large files, ~2300 LOC total). Per design.md
+    §3.3 HIGH-tier rationale: pure algorithm + safety tests; deterministic; silent bugs cost
+    money. These are the highest-value tests in the suite — their defect-prevention value justifies
+    careful per-assertion repair rather than archiving.
+
+    Files in scope:
+    - `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/PriorityScoringServiceTests.cs` (~772 LOC)
+    - `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/EffortScoringTests.cs` (~872 LOC)
+    - `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/WorkspaceMatcherTests.cs`
+
+    For each failing test in these files:
+    1. Identify the failure (scoring formula change, threshold change, edge-case handling change)
+    2. Determine: is the test correct + production drifted? OR is the test stale?
+    3. If test is correct + production has a bug: mark `[Trait("status", "real-bug-pending-fix")]`,
+       file entry in `ledgers/real-bug-ledger.md`, do NOT touch `src/`
+    4. If test is stale: update assertion to match current behavior, mark `[Trait("status", "repaired")]`
+    5. Run affected test method; verify Pass (or Skip with reason)
+
+    Per project CLAUDE.md NFR-02 + design.md §4.1: this is repair, NOT rewrite. If ANY file's diff
+    would exceed 50% line replacement, HALT and file
+    `projects/sdap-bff.api-test-suite-repair/escalations/rewrite-request-T-040-{FileName}.md`
+    per §4.8 escalation procedure. Do NOT proceed without owner approval.
+
+    NO production code changes (NFR-01). Per §6.2, every touched test ends in a final end-state.
+    `Failed` is FORBIDDEN at project close.
+  </prompt>
+
+  <role>Senior .NET test repair specialist; expert in scoring algorithms + xUnit theory patterns.</role>
+
+  <goal>
+    All Workspace scoring tests (PriorityScoringService, EffortScoring, WorkspaceMatcher) end in
+    `repaired`, `real-bug-pending-fix`, `flaky-quarantined`, or archived. Zero failures in this
+    HIGH-tier batch. Real-bug ledger updated for any tests blocked on production fixes.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="target-1">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/PriorityScoringServiceTests.cs</file>
+    <file purpose="target-2">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/EffortScoringTests.cs</file>
+    <file purpose="target-3">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/WorkspaceMatcherTests.cs</file>
+    <file purpose="real-bug-ledger">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">MUST NOT modify production code in `src/`, `power-platform/`, `infra/`, `scripts/`</constraint>
+    <constraint source="NFR-02">MUST NOT replace &gt;50% of any file without §4.8 escalation BEFORE work proceeds</constraint>
+    <constraint source="§6.2">Every touched test gets a §6.2 final end-state trait</constraint>
+    <constraint source="§4.5">MUST NOT touch `CustomWebAppFactory.cs`</constraint>
+    <constraint source="FR-16">All HIGH-tier tests must end in §6.2 final end-state</constraint>
+    <constraint source="HIGH-tier rationale">Defaulting to archive is NOT appropriate here — these tests are defect-prevention load-bearing</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.3 HIGH-tier tests (~35 files total) are pure algorithm + safety: deterministic,
+      silent-bug-cost is real money. Workspace scoring (Priority + Effort) drives matter assignment
+      and workload distribution; quiet drift here directly affects user-facing prioritization.
+      This task is the largest single batch in the HIGH-tier (~2300 LOC across 3 files).
+    </background>
+    <dependencies>
+      <dependency task="014" status="not-started">Compile health verified after P1.A batches</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/PriorityScoringServiceTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/EffortScoringTests.cs</file>
+    <file>tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/WorkspaceMatcherTests.cs</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">From Phase 0 baseline TRX, list failing tests in the 3 target files.</step>
+    <step order="2">For each file: compute pre-edit line count. Read the failing tests and the corresponding production scoring code.</step>
+    <step order="3">For each failing test: determine `test-stale` (production behavior is correct but test is hardcoded against old formula) vs `production-bug` (test asserts correct formula but production drifted).</step>
+    <step order="4">If any planned file edit would exceed 50% of file lines → HALT, file `escalations/rewrite-request-T-040-{FileName}.md`, await owner approval.</step>
+    <step order="5">For `test-stale` cases: update the assertion / theory data to match current formula. Mark `[Trait("status", "repaired")]`.</step>
+    <step order="6">For `production-bug` cases: mark test `[Trait("status", "real-bug-pending-fix")]`, add `Skip = "Real bug pending fix - see real-bug-ledger.md entry &lt;ID&gt;"`, add ledger entry with file/line/description/fix-by date.</step>
+    <step order="7">After each file: `dotnet test --filter "FullyQualifiedName~&lt;ClassName&gt;"` verify Pass + Skip counts match expectation.</step>
+    <step order="8">Update `projects/sdap-bff.api-test-suite-repair/current-task.md` with disposition table per file.</step>
+    <step order="9">Verify `git status` shows NO modifications under `src/`, `power-platform/`, `infra/`, `scripts/`. Confirm any production bugs are in `real-bug-ledger.md` not `src/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test (per-file iterative)</tool>
+    <tool name="git">status (verify NFR-01)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/PriorityScoringServiceTests.cs (repaired)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/EffortScoringTests.cs (repaired)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/WorkspaceMatcherTests.cs (repaired)</output>
+    <output type="docs">projects/sdap-bff.api-test-suite-repair/ledgers/real-bug-ledger.md (entries if production bugs found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Workspace scoring tests Pass or Skip-with-reason; zero Failed</criterion>
+    <criterion testable="true">Per-file diff is &lt;50% line replacement (NFR-02); if exceeded, escalation file exists</criterion>
+    <criterion testable="true">Every touched test has a §6.2 final end-state trait</criterion>
+    <criterion testable="true">`git status` shows zero changes under `src/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">Any production bugs identified are filed in `real-bug-ledger.md` with fix-by date</criterion>
+  </acceptance-criteria>
+
+  <notes>
+## 2026-05-31 — Task 040 completion (Wave 2.1)
+
+**Outcome**: NO-OP. All 3 in-scope files pass with zero failures.
+
+**Targeted measurement**: `dotnet test --filter "FullyQualifiedName~Sprk.Bff.Api.Tests.Services.Workspace"` → Passed: 196 / Failed: 0 / Skipped: 0 (TRX: `tests/unit/Sprk.Bff.Api.Tests/TestResults/task-040-baseline.trx`).
+
+**Cross-check against failure inventory**: `baseline/failure-inventory-post-018-2026-05-31.md` confirms NONE of the 33 failing classes are in the `Services.Workspace.*` namespace. The HIGH-tier defect-prevention thesis from design.md §3.3 holds — pure-logic scoring tests are factory-independent and assert against currently-correct production formulas.
+
+**File inventory clarification**: POML target-3 names `WorkspaceMatcherTests.cs` (does not exist). The actual third file in `Services/Workspace/` is `TodoGenerationServiceTests.cs` (685 LOC). Substituted and verified passing.
+
+**Acceptance criteria**:
+- ✅ Zero `Failed` end-state (0 of 196 tests failing)
+- ✅ Per-file diff <50% (no edits = 0%)
+- ✅ Every touched test has §6.2 trait — vacuously true (zero touched tests)
+- ✅ `git status --short` empty (no `src/`, `power-platform/`, `infra/`, `scripts/` changes)
+- ✅ No production bugs surfaced (no ledger entries needed)
+
+**Build**: `dotnet build tests/unit/Sprk.Bff.Api.Tests/ -c Release` → 0 errors / 1 pre-existing Kiota NU1903 warning (unchanged from baseline).
+
+**Disposition recorded in**: `projects/sdap-bff.api-test-suite-repair/current-task.md` (appended).
+
+**TASK-INDEX.md**: NOT updated per execution-prompt instruction (orchestrator will reconcile).
+  </notes>
+</task>

@@ -1,0 +1,117 @@
+<task id="R4-002" project="smart-todo-r4">
+  <metadata>
+    <title>D — Audit regarding resolver architecture (PCF vs Web Resource vs Code Page embed)</title>
+    <phase>Phase 0: Foundation</phase>
+    <workstream>D</workstream>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <tags>audit, pcf, webresource, code-page, dataverse, resolver, polymorphic</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <relevant-files>
+      <file>projects/smart-todo-r4/notes/regarding-resolver-audit.md (new)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Decide which client surface architecture (PCF / Web Resource / embedded Code Page) is the most resilient, multi-environment-stable, low-coupling host for the reusable regarding resolver. The audit outcome is binding and gates tasks 050-052 (D implementation). Per spec assumption, PCF is the likely winner but the audit may surface a tie-breaker.
+  </prompt>
+
+  <role>
+Spaarke client architect with deep knowledge of ADR-006 (PCF over Web Resources), ADR-022 (PCF platform libraries), and ADR-026 (Code Page build standard).
+  </role>
+
+  <goal>
+A written audit at `projects/smart-todo-r4/notes/regarding-resolver-audit.md` that:
+1. Evaluates PCF, Web Resource, and embedded Code Page against the 4 criteria in spec FR-19: (a) solution export/import portability for multi-env, (b) form designer ergonomics, (c) coupling to BFF (zero preferred), (d) maintenance burden (one shared artifact vs. per-form duplication).
+2. Recommends ONE architecture with explicit rationale.
+3. Documents implementation outline for the chosen architecture: directory location, build/deploy pipeline, form-binding strategy (hidden field + side effects if PCF), test approach.
+4. Captures the spec's stated assumption (PCF likely winner) and either confirms it or overrides it with audit evidence.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="design">projects/smart-todo-r4/design.md</file>
+    <file purpose="project-plan">projects/smart-todo-r4/plan.md</file>
+    <file purpose="project-claude">projects/smart-todo-r4/CLAUDE.md</file>
+    <file purpose="adr">.claude/adr/ADR-006-pcf-over-webresources.md</file>
+    <file purpose="adr">.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file purpose="adr">.claude/adr/ADR-024-polymorphic-resolver.md</file>
+    <file purpose="adr">.claude/adr/ADR-026-code-page-build-standard.md</file>
+    <file purpose="standards">docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    <file purpose="resolver-service">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+    <file purpose="picker-ux">src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx</file>
+    <file purpose="pattern">.claude/patterns/dataverse/polymorphic-resolver.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-024">MUST wrap `PolymorphicResolverService.applyResolverFields` for any regarding write</constraint>
+    <constraint source="ADR-006">PCF preferred over Web Resource for new client surfaces unless audit overrides</constraint>
+    <constraint source="ADR-021">Fluent UI v9 + Griffel `makeStyles` mandatory regardless of surface choice</constraint>
+    <constraint source="ADR-012">All shared primitives MUST hoist to `@spaarke/ui-components`</constraint>
+    <constraint source="spec FR-19">Audit MUST evaluate all 4 criteria and recommend ONE approach with rationale</constraint>
+    <constraint source="spec FR-22">Chosen architecture MUST be reusable for `sprk_todo` AND `sprk_communication` (same shape) with zero entity-specific branching</constraint>
+    <constraint source="spec NFR-03">MUST be multi-environment portable — no hardcoded environment URLs, app IDs, container IDs</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>client-surface/polymorphic-resolver</topic>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver.md</file>
+      <file>.claude/adr/ADR-026-code-page-build-standard.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Polymorphic resolver dual-field" location=".claude/patterns/dataverse/polymorphic-resolver.md">
+        R3 introduced `sprk_regarding<X>` lookups + 4 resolver fields. `PolymorphicResolverService.applyResolverFields` handles mutual exclusivity.
+      </pattern>
+      <pattern name="AssociateToStep 11-entity picker" location="src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx">
+        Existing UX for picking among 11 entities; D resolver picker can reuse or adapt this pattern.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R3 stood up the polymorphic regarding shape on `sprk_todo` (and `sprk_communication`). R4 needs one reusable client component to render the regarding picker on the To Do main form. The architectural choice (PCF / Web Resource / Code Page embed) genuinely depends on multi-env deploy stability — not pre-determined by ADR-006.</background>
+    <dependencies></dependencies>
+    <related-work>
+      <item>R3 introduced `PolymorphicResolverService` (canonical write logic).</item>
+      <item>R3 introduced `AssociateToStep` picker UX (11 entities).</item>
+      <item>FR-22: same component must work for `sprk_communication` regarding shape.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 70%. Load this task + spec + plan + ADRs.</step>
+    <step order="1" name="Load reference materials">Read ADR-006, ADR-022, ADR-024, ADR-026; PolymorphicResolverService.ts; AssociateToStep.tsx; DATA-ACCESS-DECISION-CRITERIA.md.</step>
+    <step order="2" name="Evaluate PCF option">Score against 4 criteria: multi-env portability (PCF solution import = standard), form designer (PCF drops cleanly), BFF coupling (zero — Xrm.WebApi), maintenance (one PCF, used by 2+ forms). Note hidden-field binding strategy.</step>
+    <step order="3" name="Evaluate Web Resource option">Score against 4 criteria. Note known fragility: solution export/import can lose web resource bindings; form designer has limited UX for web resources.</step>
+    <step order="4" name="Evaluate Code Page embed option">Score against 4 criteria. Note: Code Pages are forms-embeddable via iframe but form-designer ergonomics are poor; multi-env Code Page deploys require host config.</step>
+    <step order="5" name="Decide and document">Pick ONE. Write `notes/regarding-resolver-audit.md` with: scoring table, rationale, implementation outline (directory + binding + build/deploy + test approach), risks + mitigations.</step>
+    <step order="6" name="Update task scopes">Add note in audit doc to gate tasks 050/051/052: scope depends on outcome (e.g., "if PCF: 050 creates `src/client/pcf/RegardingResolver/`; if Web Resource: 050 creates `src/client/webresources/`; if Code Page embed: 050 creates `src/solutions/RegardingResolver/`").</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">ADRs, source, patterns</tool>
+    <tool name="Grep">Search for existing PCF / Web Resource / Code Page examples in repo</tool>
+    <tool name="Glob">Locate similar deployed components for comparison</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/smart-todo-r4/notes/regarding-resolver-audit.md</output>
+    <output type="report">Task completion report — chosen architecture + 2-sentence rationale</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/regarding-resolver-audit.md` exists with scoring table for all 3 options against all 4 criteria</criterion>
+    <criterion testable="true">ONE architecture is recommended with explicit rationale</criterion>
+    <criterion testable="true">Implementation outline includes: directory location, binding strategy, build/deploy pipeline, test approach</criterion>
+    <criterion testable="true">FR-22 reuse for `sprk_communication` is addressed in the outline</criterion>
+    <criterion testable="true">Tasks 050/051/052 scopes are gated by the audit decision (note added to those POML metadata or to the audit doc)</criterion>
+  </acceptance-criteria>
+</task>

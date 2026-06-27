@@ -1,0 +1,124 @@
+<task id="086" project="email-communication-solution-r3">
+  <metadata>
+    <title>Update `.claude/patterns/api/send-email-integration.md` to reference canonical EmailComposer engine + wrappers</title>
+    <phase>Wave 6 — Retirement + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>077</dependencies>
+    <blocks>093</blocks>
+    <tags>docs, patterns, communication</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Updates a binding `.claude/patterns/` file that the agent loads automatically per task tags; correctness here affects every future Communication-touching task's auto-loaded context</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `.claude/` — main-session-only (permission boundary per CLAUDE.md §3)</parallel-reason>
+    <fr-refs>FR-27</fr-refs>
+  </metadata>
+
+  <prompt>
+    Update `.claude/patterns/api/send-email-integration.md` to reflect the canonical `<EmailComposer />` engine + 3 wrappers + typed `sendCommunication()` wrapper pattern that R3 shipped. The old fragmentation pattern (6 ad-hoc implementations, inline `fetch` calls, multiple error contracts) is marked obsolete and explicitly replaced by the canonical pattern.
+
+    **⚠ PR #360 COLLISION WARNING**: Active PR #360 (`audit-r1-docs-update`) touches `.claude/patterns/`. CHECK FOR REBASE NEED before editing this file. If PR #360 is still open and touches this specific file, coordinate via rebase before applying R3's changes.
+  </prompt>
+
+  <role>
+    Spaarke patterns curator. Familiar with the `.claude/patterns/` 25-line pointer file convention (terse pointers to code, not full how-to). Authoritative on the canonical Communication pattern as shipped by R3.
+  </role>
+
+  <goal>
+    `.claude/patterns/api/send-email-integration.md` updated to point to the canonical pattern: engine entry point (`EmailComposer.tsx`), 3 wrappers, typed BFF wrapper (`sendCommunication()`), `SendCommunicationError` class, ADR-033 reference. Old pattern (R1/R2 fragmentation) marked obsolete. Pattern file remains compliant with 25-line pointer convention (links to code, not duplicating the EMAIL-COMPOSER-COMPONENT-GUIDE.md content).
+  </goal>
+
+  <context>
+    <background>
+      Per CLAUDE.md §2, `.claude/patterns/` files are 25-line pointer files telling the agent WHICH code to read. They are auto-loaded per task tags. The current `send-email-integration.md` likely describes the pre-R3 fragmented state (5+ ad-hoc implementations). R3 ended that class of bug; the pattern file must reflect the new reality.
+
+      Active PR #360 (audit-r1-docs-update) touches `.claude/patterns/` per CLAUDE.md PR collision warning. Coordinate before editing.
+    </background>
+    <relevant-files>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>docs/guides/EMAIL-COMPOSER-COMPONENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §2">Pattern files are ~25 lines — pointers to code, not full documentation</constraint>
+    <constraint source="CLAUDE.md §3">Touches `.claude/` — main-session-only (sub-agent write boundary)</constraint>
+    <constraint source="FR-27 #5">Pattern MUST reference canonical engine + 3 wrappers + typed wrapper</constraint>
+    <constraint source="ADR-033">Pattern MUST reference ADR-033 as binding architecture</constraint>
+    <constraint source="project">PR #360 collision: CHECK FOR REBASE NEED before editing — `.claude/patterns/` is in scope of that PR</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/assessments/communication-architecture-assessment-2026-06-05.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts</file>
+    </files>
+    <patterns>
+      <pattern name="pattern file exemplar" location=".claude/patterns/auth/spaarke-sso-binding.md">
+        Existing pattern file — use as structural model for the updated send-email-integration pattern. Terse, ~25 lines, link-heavy.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">**Rebase check**: `gh pr view 360 --json files` (or `gh pr diff 360 --name-only`) — confirm whether PR #360 touches `.claude/patterns/api/send-email-integration.md` specifically. If yes: notify, recommend waiting for PR #360 to merge OR coordinate rebase. If no: proceed.</step>
+    <step order="2">Read current `.claude/patterns/api/send-email-integration.md` to understand the existing structure and what's being replaced.</step>
+    <step order="3">Read `.claude/patterns/auth/spaarke-sso-binding.md` as the structural exemplar (the 25-line pointer form).</step>
+    <step order="4">Read ADR-033 + EmailComposer source files for accurate code-pointer paths.</step>
+    <step order="5">Author the updated pattern file:
+      (a) Title + 1-line summary of the canonical pattern
+      (b) Code pointers: `EmailComposer.tsx`, the 3 wrappers, `communicationApi.ts`, `SendCommunicationError` class
+      (c) When to use which (1-line pointer to EMAIL-COMPOSER-COMPONENT-GUIDE.md for full details)
+      (d) Binding rules (from ADR-033 MUST/MUST NOT)
+      (e) Obsolete pattern callout: "Pre-R3 fragmentation (6 ad-hoc implementations + inline `fetch`) is RETIRED — see ADR-033"
+      (f) Related: ADR-033, EMAIL-COMPOSER-COMPONENT-GUIDE.md, communication-service-architecture.md
+    </step>
+    <step order="6">Verify line count remains close to 25 lines (terse pointer style, not full documentation).</step>
+    <step order="7">Run a quick grep of repo references to ensure pattern file path is reachable from auto-loading mechanism (`/adr-check` etc.).</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark task 086 ✅ completed.</step>
+    <step order="9">Update `current-task.md`: status → completed, advance.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh-pr">Check PR #360 collision</tool>
+    <tool name="read">Read current pattern, ADR-033, code</tool>
+    <tool name="edit">Update pattern file</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/patterns/api/send-email-integration.md (UPDATED — canonical pattern with ADR-033 reference)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Pattern file references `EmailComposer.tsx`, 3 wrappers, `communicationApi.ts`, `sendCommunication()`, `SendCommunicationError`.</criterion>
+    <criterion testable="true">Pattern file references ADR-033.</criterion>
+    <criterion testable="true">Pattern file marks pre-R3 fragmentation as RETIRED.</criterion>
+    <criterion testable="true">Pattern file remains ~25 lines (terse pointer style).</criterion>
+    <criterion testable="true">PR #360 rebase check explicitly performed (recorded in current-task.md).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **PR #360 COLLISION**: This task touches `.claude/patterns/` which is also in scope of active PR #360. The step 1 rebase check is non-negotiable. If the specific file is touched by PR #360: STOP and coordinate via PR merge order OR rebase. Do NOT silently apply changes that will conflict.
+
+    Empirical findings from project pipeline (relevant here):
+    - Engine + 3 wrappers built in Waves 1; verify code paths match what shipped.
+    - This pattern file is loaded automatically per task tags `communication` / `email` — accuracy matters for every future task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Step 1 PR #360 rebase check is the binding pre-condition.
+    </protocol>
+  </execution>
+</task>

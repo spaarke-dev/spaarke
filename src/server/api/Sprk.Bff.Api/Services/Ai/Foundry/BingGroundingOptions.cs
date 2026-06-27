@@ -32,10 +32,12 @@ public sealed class BingGroundingOptions
     /// Name of the Bing Grounding connection registered in Azure AI Foundry.
     /// Used by the AgentsClient to locate the Bing connection when creating agent runs
     /// with <c>BingGroundingTool</c>. Retrieve from AI Foundry Studio > Connections.
-    /// Required when <see cref="Enabled"/> is <c>true</c>.
+    /// Required when <see cref="Enabled"/> is <c>true</c> — enforced at use-site in
+    /// <see cref="Chat.Tools.LegalResearchTools"/>.<c>RunBingGroundingAsync</c>, NOT via
+    /// DataAnnotation (so the app starts cleanly when Enabled=false and no Bing config is
+    /// present, even when LegalResearchHandler is constructed at startup — pre-Phase B
+    /// hardening, surfaced by R6 Wave B-G8 deploy 2026-06-09).
     /// </summary>
-    [Required]
-    [MinLength(1)]
     public string BingConnectionName { get; init; } = string.Empty;
 
     /// <summary>

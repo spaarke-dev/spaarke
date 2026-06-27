@@ -1,5 +1,5 @@
-import * as React from "react";
-import { useParams } from "react-router-dom";
+import * as React from 'react';
+import { useParams } from 'react-router-dom';
 import {
   makeStyles,
   tokens,
@@ -16,7 +16,7 @@ import {
   Field,
   Input,
   Textarea,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import {
   CalendarRegular,
   CheckmarkCircleRegular,
@@ -25,10 +25,10 @@ import {
   MailRegular,
   AlertRegular,
   Sparkle20Regular,
-} from "@fluentui/react-icons";
-import { getProjectById, ODataProject } from "../api/web-api-client";
-import { ApiError } from "../types";
-import { AccessLevel } from "../types";
+} from '@fluentui/react-icons';
+import { getProjectById, ODataProject } from '../api/web-api-client';
+import { ApiError } from '../types';
+import { AccessLevel } from '../types';
 import {
   PageContainer,
   NavigationBar,
@@ -38,8 +38,8 @@ import {
   EventsCalendar,
   SmartTodo,
   InviteUserDialog,
-} from "../components";
-import { useAccessLevel } from "../hooks/useAccessLevel";
+} from '../components';
+import { useAccessLevel } from '../hooks/useAccessLevel';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -48,27 +48,27 @@ import { useAccessLevel } from "../hooks/useAccessLevel";
 const useStyles = makeStyles({
   // Page header: reference number + project name + badges + icon row
   pageHeader: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalM,
   },
   pageHeaderTitleRow: {
-    display: "flex",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalM,
   },
   pageHeaderLeft: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
     minWidth: 0,
-    flex: "1",
+    flex: '1',
   },
   pageHeaderIcons: {
-    display: "flex",
-    alignItems: "center",
+    display: 'flex',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
     paddingTop: tokens.spacingVerticalXS,
@@ -77,54 +77,54 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
   badgeRow: {
-    display: "flex",
+    display: 'flex',
     gap: tokens.spacingHorizontalS,
-    flexWrap: "wrap",
-    alignItems: "center",
+    flexWrap: 'wrap',
+    alignItems: 'center',
     paddingTop: tokens.spacingVerticalXXS,
   },
   // Tab content
   tabContentArea: {
     paddingTop: tokens.spacingVerticalM,
-    minHeight: "320px",
+    minHeight: '320px',
   },
   // Overview tab
   overviewTab: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   infoGrid: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
     gap: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-    "@media (max-width: 600px)": {
-      gridTemplateColumns: "1fr",
+    '@media (max-width: 600px)': {
+      gridTemplateColumns: '1fr',
     },
   },
   fullWidth: {
-    gridColumn: "1 / -1",
+    gridColumn: '1 / -1',
   },
   // Calendar tab
   calendarTab: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   // Contacts tab
   contactsHeader: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: tokens.spacingVerticalS,
   },
   // Loading
   loadingContainer: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "400px",
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '400px',
     gap: tokens.spacingVerticalM,
   },
 });
@@ -133,7 +133,7 @@ const useStyles = makeStyles({
 // Types
 // ---------------------------------------------------------------------------
 
-type ProjectTab = "overview" | "calendar" | "contacts";
+type ProjectTab = 'overview' | 'calendar' | 'contacts';
 
 interface ProjectPageParams {
   id: string;
@@ -146,41 +146,57 @@ interface ProjectPageParams {
 
 function getStatusLabel(status: number | null | undefined): string {
   switch (status) {
-    case 1: return "Active";
-    case 2: return "Closed";
-    case 3: return "Archived";
-    default: return "Active";
+    case 1:
+      return 'Active';
+    case 2:
+      return 'Closed';
+    case 3:
+      return 'Archived';
+    default:
+      return 'Active';
   }
 }
 
 function getStatusColor(
   status: number | null | undefined
-): "brand" | "success" | "warning" | "danger" | "informative" | "important" | "severe" | undefined {
+): 'brand' | 'success' | 'warning' | 'danger' | 'informative' | 'important' | 'severe' | undefined {
   switch (status) {
-    case 1: return "success";
-    case 2: return "warning";
-    case 3: return "informative";
-    default: return "success";
+    case 1:
+      return 'success';
+    case 2:
+      return 'warning';
+    case 3:
+      return 'informative';
+    default:
+      return 'success';
   }
 }
 
 function getAccessLevelLabel(value: number): string {
   switch (value) {
-    case 100000000: return "View Only";
-    case 100000001: return "Collaborate";
-    case 100000002: return "Full Access";
-    default: return "Unknown";
+    case 100000000:
+      return 'View Only';
+    case 100000001:
+      return 'Collaborate';
+    case 100000002:
+      return 'Full Access';
+    default:
+      return 'Unknown';
   }
 }
 
 function getAccessLevelColor(
   value: number
-): "brand" | "success" | "warning" | "danger" | "informative" | "important" | "severe" | undefined {
+): 'brand' | 'success' | 'warning' | 'danger' | 'informative' | 'important' | 'severe' | undefined {
   switch (value) {
-    case 100000000: return "informative";
-    case 100000001: return "brand";
-    case 100000002: return "success";
-    default: return "informative";
+    case 100000000:
+      return 'informative';
+    case 100000001:
+      return 'brand';
+    case 100000002:
+      return 'success';
+    default:
+      return 'informative';
   }
 }
 
@@ -194,11 +210,7 @@ interface OverviewTabContentProps {
   accessLevel: AccessLevel;
 }
 
-const OverviewTabContent: React.FC<OverviewTabContentProps> = ({
-  project,
-  projectId,
-  accessLevel,
-}) => {
+const OverviewTabContent: React.FC<OverviewTabContentProps> = ({ project, projectId, accessLevel }) => {
   const styles = useStyles();
 
   return (
@@ -207,48 +219,23 @@ const OverviewTabContent: React.FC<OverviewTabContentProps> = ({
       <SectionCard title="Project Information">
         <div className={styles.infoGrid}>
           <Field label="Project Number">
-            <Input
-              value={project.sprk_referencenumber ?? ""}
-              readOnly
-              appearance="outline"
-            />
+            <Input value={project.sprk_referencenumber ?? ''} readOnly appearance="outline" />
           </Field>
           <Field label="Project Name">
-            <Input
-              value={project.sprk_name ?? ""}
-              readOnly
-              appearance="outline"
-            />
+            <Input value={project.sprk_name ?? ''} readOnly appearance="outline" />
           </Field>
           <Field label="Project Type">
-            <Input
-              value={"—"}
-              readOnly
-              appearance="outline"
-            />
+            <Input value={'—'} readOnly appearance="outline" />
           </Field>
           <Field label="Matter Type">
-            <Input
-              value={"—"}
-              readOnly
-              appearance="outline"
-            />
+            <Input value={'—'} readOnly appearance="outline" />
           </Field>
           <Field label="Practice Area">
-            <Input
-              value={"—"}
-              readOnly
-              appearance="outline"
-            />
+            <Input value={'—'} readOnly appearance="outline" />
           </Field>
           <div className={styles.fullWidth}>
             <Field label="Project Description">
-              <Textarea
-                value={project.sprk_description ?? ""}
-                readOnly
-                appearance="outline"
-                resize="vertical"
-              />
+              <Textarea value={project.sprk_description ?? ''} readOnly appearance="outline" resize="vertical" />
             </Field>
           </div>
         </div>
@@ -256,10 +243,7 @@ const OverviewTabContent: React.FC<OverviewTabContentProps> = ({
 
       {/* DOCUMENTS */}
       <SectionCard title="Documents">
-        <DocumentLibrary
-          projectId={projectId}
-          accessLevel={accessLevel}
-        />
+        <DocumentLibrary projectId={projectId} accessLevel={accessLevel} />
       </SectionCard>
     </div>
   );
@@ -274,22 +258,13 @@ interface CalendarTabContentProps {
   accessLevel: AccessLevel;
 }
 
-const CalendarTabContent: React.FC<CalendarTabContentProps> = ({
-  projectId,
-  accessLevel,
-}) => {
+const CalendarTabContent: React.FC<CalendarTabContentProps> = ({ projectId, accessLevel }) => {
   const styles = useStyles();
 
   return (
     <div className={styles.calendarTab}>
-      <EventsCalendar
-        projectId={projectId}
-        accessLevel={accessLevel}
-      />
-      <SmartTodo
-        projectId={projectId}
-        accessLevel={accessLevel}
-      />
+      <EventsCalendar projectId={projectId} accessLevel={accessLevel} />
+      <SmartTodo projectId={projectId} accessLevel={accessLevel} />
     </div>
   );
 };
@@ -303,10 +278,7 @@ interface ContactsTabContentProps {
   accessLevel: AccessLevel;
 }
 
-const ContactsTabContent: React.FC<ContactsTabContentProps> = ({
-  projectId,
-  accessLevel,
-}) => {
+const ContactsTabContent: React.FC<ContactsTabContentProps> = ({ projectId, accessLevel }) => {
   const styles = useStyles();
   const [inviteDialogOpen, setInviteDialogOpen] = React.useState<boolean>(false);
   const canUserInvite = accessLevel === AccessLevel.FullAccess;
@@ -316,14 +288,8 @@ const ContactsTabContent: React.FC<ContactsTabContentProps> = ({
       {/* Invite button — only for FullAccess users */}
       {canUserInvite && (
         <div className={styles.contactsHeader}>
-          <Text size={300}>
-            Manage external users who have access to this project.
-          </Text>
-          <Button
-            appearance="primary"
-            icon={<PersonAddRegular />}
-            onClick={() => setInviteDialogOpen(true)}
-          >
+          <Text size={300}>Manage external users who have access to this project.</Text>
+          <Button appearance="primary" icon={<PersonAddRegular />} onClick={() => setInviteDialogOpen(true)}>
             Invite User
           </Button>
         </div>
@@ -391,7 +357,7 @@ export const ProjectPage: React.FC = () => {
   const [project, setProject] = React.useState<ODataProject | null>(null);
   const [loadingProject, setLoadingProject] = React.useState<boolean>(true);
   const [projectError, setProjectError] = React.useState<{ status: number; message: string } | null>(null);
-  const [activeTab, setActiveTab] = React.useState<TabValue>("overview");
+  const [activeTab, setActiveTab] = React.useState<TabValue>('overview');
 
   // ---------------------------------------------------------------------------
   // Data fetching
@@ -416,7 +382,7 @@ export const ProjectPage: React.FC = () => {
           if (err instanceof ApiError) {
             setProjectError({ status: err.statusCode, message: err.message });
           } else {
-            setProjectError({ status: 0, message: "An unexpected error occurred loading the project." });
+            setProjectError({ status: 0, message: 'An unexpected error occurred loading the project.' });
           }
         }
       } finally {
@@ -469,16 +435,11 @@ export const ProjectPage: React.FC = () => {
     if (projectError.status === 403) {
       return (
         <PageContainer>
-          <NavigationBar
-            items={[
-              { label: "My Workspace", href: "#/" },
-              { label: "Access Denied" },
-            ]}
-          />
+          <NavigationBar items={[{ label: 'My Workspace', href: '#/' }, { label: 'Access Denied' }]} />
           <MessageBar intent="warning">
             <MessageBarBody>
-              You do not have permission to view this project. If you believe this is an error,
-              please contact the project team.
+              You do not have permission to view this project. If you believe this is an error, please contact the
+              project team.
             </MessageBarBody>
           </MessageBar>
         </PageContainer>
@@ -488,12 +449,7 @@ export const ProjectPage: React.FC = () => {
     if (projectError.status === 404) {
       return (
         <PageContainer>
-          <NavigationBar
-            items={[
-              { label: "My Workspace", href: "#/" },
-              { label: "Project Not Found" },
-            ]}
-          />
+          <NavigationBar items={[{ label: 'My Workspace', href: '#/' }, { label: 'Project Not Found' }]} />
           <MessageBar intent="error">
             <MessageBarBody>
               The project could not be found. It may have been closed or the link may be incorrect.
@@ -505,16 +461,9 @@ export const ProjectPage: React.FC = () => {
 
     return (
       <PageContainer>
-        <NavigationBar
-          items={[
-            { label: "My Workspace", href: "#/" },
-            { label: "Error" },
-          ]}
-        />
+        <NavigationBar items={[{ label: 'My Workspace', href: '#/' }, { label: 'Error' }]} />
         <MessageBar intent="error">
-          <MessageBarBody>
-            Failed to load project: {projectError.message}
-          </MessageBarBody>
+          <MessageBarBody>Failed to load project: {projectError.message}</MessageBarBody>
         </MessageBar>
       </PageContainer>
     );
@@ -538,10 +487,7 @@ export const ProjectPage: React.FC = () => {
     <PageContainer>
       {/* Breadcrumb */}
       <NavigationBar
-        items={[
-          { label: "My Workspace", href: "#/" },
-          { label: project.sprk_referencenumber ?? project.sprk_name },
-        ]}
+        items={[{ label: 'My Workspace', href: '#/' }, { label: project.sprk_referencenumber ?? project.sprk_name }]}
       />
 
       {/* Page header: reference number as title + page-level icon row */}
@@ -557,11 +503,7 @@ export const ProjectPage: React.FC = () => {
               </Text>
             )}
             <div className={styles.badgeRow}>
-              <Badge
-                appearance="tint"
-                color={getStatusColor(project.sprk_status)}
-                size="medium"
-              >
+              <Badge appearance="tint" color={getStatusColor(project.sprk_status)} size="medium">
                 {getStatusLabel(project.sprk_status)}
               </Badge>
 
@@ -575,11 +517,7 @@ export const ProjectPage: React.FC = () => {
                 content={`Your access level for this project: ${getAccessLevelLabel(accessLevel)}`}
                 relationship="label"
               >
-                <Badge
-                  appearance="outline"
-                  color={getAccessLevelColor(accessLevel)}
-                  size="medium"
-                >
+                <Badge appearance="outline" color={getAccessLevelColor(accessLevel)} size="medium">
                   {getAccessLevelLabel(accessLevel)}
                 </Badge>
               </Tooltip>
@@ -589,36 +527,16 @@ export const ProjectPage: React.FC = () => {
           {/* Page-level action icons */}
           <div className={styles.pageHeaderIcons}>
             <Tooltip content="Send email" relationship="label">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<MailRegular />}
-                aria-label="Send email"
-              />
+              <Button appearance="subtle" size="small" icon={<MailRegular />} aria-label="Send email" />
             </Tooltip>
             <Tooltip content="Tasks" relationship="label">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<CheckmarkCircleRegular />}
-                aria-label="Tasks"
-              />
+              <Button appearance="subtle" size="small" icon={<CheckmarkCircleRegular />} aria-label="Tasks" />
             </Tooltip>
             <Tooltip content="Notifications" relationship="label">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<AlertRegular />}
-                aria-label="Notifications"
-              />
+              <Button appearance="subtle" size="small" icon={<AlertRegular />} aria-label="Notifications" />
             </Tooltip>
             <Tooltip content="AI Assistant" relationship="label">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<Sparkle20Regular />}
-                aria-label="AI Assistant"
-              />
+              <Button appearance="subtle" size="small" icon={<Sparkle20Regular />} aria-label="AI Assistant" />
             </Tooltip>
           </div>
         </div>
@@ -631,9 +549,7 @@ export const ProjectPage: React.FC = () => {
         appearance="subtle"
         size="medium"
       >
-        <Tab value="overview">
-          Overview
-        </Tab>
+        <Tab value="overview">Overview</Tab>
         <Tab value="calendar" icon={<CalendarRegular />}>
           Calendar
         </Tab>
@@ -643,25 +559,9 @@ export const ProjectPage: React.FC = () => {
       </TabList>
 
       <div className={styles.tabContentArea}>
-        {activeTab === "overview" && (
-          <OverviewTabContent
-            project={project}
-            projectId={id}
-            accessLevel={accessLevel}
-          />
-        )}
-        {activeTab === "calendar" && (
-          <CalendarTabContent
-            projectId={id}
-            accessLevel={accessLevel}
-          />
-        )}
-        {activeTab === "contacts" && (
-          <ContactsTabContent
-            projectId={id}
-            accessLevel={accessLevel}
-          />
-        )}
+        {activeTab === 'overview' && <OverviewTabContent project={project} projectId={id} accessLevel={accessLevel} />}
+        {activeTab === 'calendar' && <CalendarTabContent projectId={id} accessLevel={accessLevel} />}
+        {activeTab === 'contacts' && <ContactsTabContent projectId={id} accessLevel={accessLevel} />}
       </div>
     </PageContainer>
   );

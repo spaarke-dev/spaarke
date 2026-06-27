@@ -33,7 +33,17 @@ namespace Sprk.Bff.Api.Tests.Integration;
 ///
 /// ADR-014: Streaming tokens are transient — MUST NOT be written to cache.
 /// ADR-016: Rate limiting via "ai-stream" policy (10 req/min/user, queue 2).
+///
+/// Task 061 (Wave 2.4 — sdap-bff.api-test-suite-repair): repaired test-stale failures.
+/// `ChatResponseUpdate` from Microsoft.Extensions.AI has a non-virtual `Text` property
+/// that NSubstitute cannot intercept (CouldNotSetReturnDueToMissingInfoAboutLastCallException).
+/// Helper methods now construct `new ChatResponseUpdate(ChatRole.Assistant, text)` directly,
+/// matching the pattern used by `Mocks/AsyncEnumerableHelpers.FromChunks` (task 015).
+/// `ConcurrencyLimit_Returns429WhenExceeded_AiStreamPolicy` switched from `AcquireAsync`
+/// (queue-blocking) to `AttemptAcquire` (synchronous, non-queueing) so attempts beyond
+/// the 10 permit + 2 queue slots are rejected immediately rather than hanging.
 /// </summary>
+[Trait("status", "repaired")]
 public class SseStreamingIntegrationTests
 {
     // === JSON options matching ChatEndpoints.WriteChatSSEAsync ===
@@ -460,7 +470,7 @@ public class SseStreamingIntegrationTests
     /// the SlidingWindowRateLimiter behavior with the configured parameters.
     /// </summary>
     [Fact]
-    public async Task ConcurrencyLimit_Returns429WhenExceeded_AiStreamPolicy()
+    public void ConcurrencyLimit_Returns429WhenExceeded_AiStreamPolicy()
     {
         // Arrange — create a rate limiter matching the "ai-stream" policy configuration
         // from RateLimitingModule.cs: SlidingWindow, 10 permits/min, queue 2, 6 segments
@@ -476,10 +486,17 @@ public class SseStreamingIntegrationTests
         var acquiredLeases = new List<System.Threading.RateLimiting.RateLimitLease>();
         var rejectedCount = 0;
 
-        // Act — attempt to acquire more permits than the limit (10 + queue 2 = 12 max)
+        // Act — attempt to acquire more permits than the limit (10 + queue 2 = 12 max).
+        // Task 061: use AttemptAcquire (synchronous, non-queueing) instead of AcquireAsync.
+        // The original AcquireAsync(1) would block indefinitely on the queue once the
+        // 2-slot queue filled (PermitLimit reached, QueueLimit reached → next callers
+        // wait until window slides or are rejected by FIFO eviction). AttemptAcquire is
+        // the semantic match for "429 when exceeded" — it returns IsAcquired=false
+        // immediately for the rejected attempts, simulating the rate-limiter middleware's
+        // 429 response behavior without test hangs.
         for (var i = 0; i < 15; i++)
         {
-            var lease = await limiter.AcquireAsync(1);
+            var lease = limiter.AttemptAcquire(1);
             if (lease.IsAcquired)
             {
                 acquiredLeases.Add(lease);
@@ -491,12 +508,13 @@ public class SseStreamingIntegrationTests
             }
         }
 
-        // Assert — first 10 should succeed, 2 queued, remaining should be rejected
-        acquiredLeases.Count.Should().BeGreaterOrEqualTo(10,
-            "At least 10 permits should be acquired (the configured PermitLimit)");
+        // Assert — first 10 should succeed, remaining should be rejected
+        acquiredLeases.Count.Should().Be(10,
+            "Exactly 10 permits should be acquired (the configured PermitLimit); " +
+            "AttemptAcquire does not queue, so the 2-slot queue is not exercised here");
 
-        rejectedCount.Should().BeGreaterThan(0,
-            "Requests exceeding the limit + queue should be rejected (simulating 429 response)");
+        rejectedCount.Should().Be(5,
+            "Requests exceeding the limit should be rejected (simulating 429 response)");
 
         (acquiredLeases.Count + rejectedCount).Should().Be(15,
             "All 15 attempts should be accounted for");
@@ -782,14 +800,16 @@ public class SseStreamingIntegrationTests
     /// <summary>
     /// Sets up a mock IChatClient to yield the specified tokens as streaming response updates.
     /// </summary>
+    /// <remarks>
+    /// Task 061: `ChatResponseUpdate.Text` is a non-virtual aggregator over
+    /// `Contents` — NSubstitute cannot stub it. Constructed instances are used so the
+    /// real getter returns the value we want.
+    /// </remarks>
     private static void SetupChatClientTokens(IChatClient chatClient, params string[] tokens)
     {
-        var updates = tokens.Select(t =>
-        {
-            var update = Substitute.For<ChatResponseUpdate>();
-            update.Text.Returns(t);
-            return update;
-        }).ToList();
+        var updates = tokens
+            .Select(t => new ChatResponseUpdate(ChatRole.Assistant, t))
+            .ToList();
 
         chatClient.GetStreamingResponseAsync(
             Arg.Any<IEnumerable<AiChatMessage>>(),
@@ -846,9 +866,8 @@ public class SseStreamingIntegrationTests
                 await Task.Delay(delay, cancellationToken);
             }
 
-            var update = Substitute.For<ChatResponseUpdate>();
-            update.Text.Returns(text);
-            yield return update;
+            // Task 061: construct directly — `ChatResponseUpdate.Text` is non-virtual.
+            yield return new ChatResponseUpdate(ChatRole.Assistant, text);
         }
     }
 
@@ -856,9 +875,8 @@ public class SseStreamingIntegrationTests
     {
         for (var i = 0; i < tokensBeforeError; i++)
         {
-            var update = Substitute.For<ChatResponseUpdate>();
-            update.Text.Returns($"Token{i + 1}");
-            yield return update;
+            // Task 061: construct directly — `ChatResponseUpdate.Text` is non-virtual.
+            yield return new ChatResponseUpdate(ChatRole.Assistant, $"Token{i + 1}");
         }
 
         await Task.CompletedTask; // Ensure async state machine

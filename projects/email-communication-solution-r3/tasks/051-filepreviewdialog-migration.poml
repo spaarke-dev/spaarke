@@ -1,0 +1,135 @@
+<task id="051" project="email-communication-solution-r3">
+  <metadata>
+    <title>Migrate FilePreviewDialog to canonical `<SendEmailDialog />` wrapper</title>
+    <phase>Wave 3 — SendEmailDialog + FilePreview</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>054</blocks>
+    <tags>react, frontend, communication, refactoring, migration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Removes inline `fetch` to `/api/communications/send` from a LegalWorkspace consumer (one of the core FR-14 success criteria); changes prop contract; must respect ADR-033 (canonical send-email pattern, MUST NOT inline fetch) + ADR-019 (typed error contract) + ADR-021 (Fluent UI v9). Touches `src/solutions/LegalWorkspace/` — production-shipped surface.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential gate: depends on 050 (canonical wrapper integration). Single file modification in `FilePreviewDialog.tsx`; running in parallel with 053 (consumer audit) risks divergent state on the same dependency chain.</parallel-reason>
+    <fr-refs>FR-14</fr-refs>
+  </metadata>
+
+  <prompt>
+    Migrate `src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx` to use the canonical `<SendEmailDialog />` wrapper from `@spaarke/ui-components`. Remove the inline `handleSendEmail` function and inline `fetch` call to `/api/communications/send`. Update consumer call sites within `FilePreviewDialog.tsx` to pass canonical props (`open` / `onClose` / `onSent` / `onError`) instead of the legacy `onSend` callback.
+
+    Empirical state (CLAUDE.md row + spec FR-14): `FilePreviewDialog.tsx` currently has inline `handleSendEmail` + inline `fetch` to `/api/communications/send`. This is one of the 6 ad-hoc send-email implementations R3 is consolidating. After this task, the file MUST contain zero `fetch.*communications/send` references.
+
+    Post-migration acceptance: the file's "Send by Email" path is now: user clicks the action → `FilePreviewDialog.tsx` toggles a state variable to open `<SendEmailDialog />` → wrapper owns the send (delegates to engine + `sendCommunication()`) → on success, wrapper calls `onSent` which `FilePreviewDialog.tsx` uses to dismiss the dialog + show a Fluent toast. On error, `onError` receives a `SendCommunicationError` which the parent displays.
+  </prompt>
+
+  <role>
+    Frontend developer authoritative on LegalWorkspace consumer integration patterns. Familiar with the canonical wrapper contract per FR-03, the inline-fetch anti-pattern this migration replaces, and the `authenticatedFetch` injection pattern used by LegalWorkspace (provided by the host bootstrap).
+  </role>
+
+  <goal>
+    `src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx` mounts `<SendEmailDialog />` from `@spaarke/ui-components` for its "Send by Email" action. Inline `handleSendEmail` + inline `fetch` REMOVED. Canonical prop signature consumed. LegalWorkspace solution builds clean. Grep verification: zero `fetch.*communications/send` references in the file.
+  </goal>
+
+  <context>
+    <background>
+      `FilePreviewDialog.tsx` is the LegalWorkspace file-preview surface (open a file → preview thumbnail + metadata → optional actions like "Send by Email"). The current implementation directly calls `fetch('/api/communications/send', ...)` with an inline request body construction — bypassing both the typed `sendCommunication()` wrapper AND the canonical `<SendEmailDialog />` UI. This is the most visible R3 fragmentation case in LegalWorkspace.
+
+      The migration is straightforward because LegalWorkspace already has `authenticatedFetch` available (provided by the solution's auth bootstrap) and the canonical wrapper accepts it via props. The wrapper handles dialog open/close state, attachment carrying (the previewed file as a `wizard`-source attachment), and error surfacing.
+
+      The current `ISendEmailDialogProps` (pre-R3) had a legacy `onSend` callback the parent populated with the request body. The canonical signature drops `onSend` entirely — the wrapper sends, the parent reacts to `onSent` / `onError`. This is the breaking shape change called out in FR-14.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx (PRIMARY — migration target)</file>
+      <file>src/solutions/LegalWorkspace/src/components/FilePreview/ (audit for any sibling files referencing `handleSendEmail`)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/SendEmailDialog.tsx (canonical wrapper produced by task 050)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (`sendCommunication()` + `SendCommunicationError`)</file>
+      <file>src/solutions/LegalWorkspace/package.json (verify `@spaarke/ui-components` dependency)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-033">MUST NOT inline `fetch` to `/api/communications/send`. MUST use canonical wrapper.</constraint>
+    <constraint source="ADR-019">Error path consumes `SendCommunicationError` typed class via `onError` callback; no string-only error handling.</constraint>
+    <constraint source="ADR-021">Replacement dialog chrome is Fluent UI v9 (from the canonical wrapper); LegalWorkspace toast notifications on success/error also Fluent v9.</constraint>
+    <constraint source="NFR-02">No direct `@spaarke/auth` import added; LegalWorkspace's existing host bootstrap provides `authenticatedFetch` which is threaded through wrapper props.</constraint>
+    <constraint source="spec FR-14">Post-migration: zero `fetch.*communications/send` references in `FilePreviewDialog.tsx`.</constraint>
+    <constraint source="spec FR-25">No new LegalWorkspace fork created during this migration — only consume from `@spaarke/ui-components`.</constraint>
+    <constraint source="repo">LegalWorkspace solution build MUST remain green.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical wrapper consumer" location="src/client/shared/Spaarke.UI.Components/src/components/SendEmailDialog/SendEmailDialog.tsx">
+        Reference for the wrapper's prop signature and example consumer mount pattern. After task 050, this file is the public-export canonical wrapper.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx` in full. Identify: the inline `handleSendEmail` function, the inline `fetch('/api/communications/send', ...)` call, the current `<SendEmailDialog />` mount call site (if present) using legacy `onSend`, the imports.</step>
+    <step order="2">Grep `src/solutions/LegalWorkspace/src/components/FilePreview/` for any sibling files that reference `handleSendEmail` or share request-body construction.</step>
+    <step order="3">Sketch the migration in task notes: list which lines/blocks get deleted (inline fetch, inline handler) vs preserved (open-state toggle, attachment source plumbing).</step>
+    <step order="4">Replace the inline send logic with the canonical `<SendEmailDialog />` mount: pass `open`, `onClose`, `initialTo` (if `FilePreviewDialog` had a `defaultRecipient`), `attachmentSources` (configure for the previewed file as a single `wizard`-source or `local`-source attachment with the file already loaded), `onSent`, `onError`. Remove `handleSendEmail`.</step>
+    <step order="5">Update the parent's `onSent` handler to dismiss the email dialog + show a Fluent toast "Email sent". Update `onError` to display a Fluent error banner with `error.detail` and `error.correlationId`.</step>
+    <step order="6">Verify the previewed file is carried as an attachment by the wrapper — confirm with the FilePreview's existing file-buffer access pattern. If the file lives in SPE, configure `attachmentSources={['spe']}` with the SPE driveItem ID pre-selected; if it's loaded into memory, configure `attachmentSources={['local']}` with the blob/File pre-attached.</step>
+    <step order="7">Update imports: add `SendEmailDialog` from `@spaarke/ui-components`, remove now-unused imports (e.g., direct `fetch` helpers, request-body type defs that were inline).</step>
+    <step order="8">Grep verify: `fetch.*communications/send` returns zero hits in `FilePreviewDialog.tsx`.</step>
+    <step order="9">Run `npm run build` in `src/solutions/LegalWorkspace/` (use `npm install --legacy-peer-deps --no-audit --no-fund` if dependencies are stale, per CLAUDE.md §11). Verify clean.</step>
+    <step order="10">Run `npm run lint`. Verify clean.</step>
+    <step order="11">Quality gate (Step 9.5 per FULL rigor): invoke `/code-review` on the modified `FilePreviewDialog.tsx`. Invoke `/adr-check` to verify no ADR-033 / ADR-019 / ADR-021 violations.</step>
+    <step order="12">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 051 ✅ completed.</step>
+    <step order="13">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect `FilePreviewDialog.tsx` current state</tool>
+    <tool name="grep">Verify inline-fetch removal + sibling-file audit</tool>
+    <tool name="edit">Apply migration in `FilePreviewDialog.tsx`</tool>
+    <tool name="bash">Run `npm run build` + `npm run lint` in LegalWorkspace</tool>
+    <tool name="code-review">Quality gate</tool>
+    <tool name="adr-check">Quality gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">src/solutions/LegalWorkspace/src/components/FilePreview/FilePreviewDialog.tsx (UPDATED — canonical wrapper consumer)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`FilePreviewDialog.tsx` contains zero `fetch.*communications/send` references (grep verified).</criterion>
+    <criterion testable="true">`FilePreviewDialog.tsx` imports `SendEmailDialog` from `@spaarke/ui-components`.</criterion>
+    <criterion testable="true">Inline `handleSendEmail` function REMOVED from `FilePreviewDialog.tsx`.</criterion>
+    <criterion testable="true">Canonical props consumed: `open`, `onClose`, `onSent`, `onError` (no `onSend`).</criterion>
+    <criterion testable="true">`onError` handler uses typed `SendCommunicationError` properties (`error.detail`, `error.correlationId`).</criterion>
+    <criterion testable="true">LegalWorkspace `npm run build` exits 0.</criterion>
+    <criterion testable="true">LegalWorkspace `npm run lint` exits 0.</criterion>
+    <criterion testable="true">`/adr-check` returns no violations against ADR-033 / ADR-019 / ADR-021.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 051 ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Attachment source decision (step 6): the FilePreview surface displays a file that is either (a) already in SPE (driveItem) or (b) loaded into a browser buffer for preview. Inspect the existing FilePreview code to determine which. The `<SendEmailDialog />` wrapper accepts both `spe` and `local` source pickers; configure whichever matches the file's current state. Document the choice in task notes.
+
+    Smoke testing of the migrated flow happens in task 055, NOT here. This task focuses on the code change + static verification (build/lint/adr-check). E2E verification is deferred to the wave-level smoke test.
+
+    If the migration reveals an unexpected wrapper-API gap (e.g., the wrapper does not yet support pre-attaching a `local`-source file from a JS blob), document it in task notes and escalate — but DO NOT extend the wrapper from this task. Wrapper changes belong in Wave 1.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply FULL rigor per `<rigor-hint>`. Quality gates at Step 9.5 (code-review + adr-check) ARE REQUIRED for FULL rigor.
+    </protocol>
+  </execution>
+</task>

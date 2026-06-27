@@ -84,14 +84,14 @@ public static class SseEventSchemaValidator
 
         var result = eventType switch
         {
-            ChatSseR2EventTypes.WorkspaceWidget   => ValidateWorkspaceWidget(payload),
-            ChatSseR2EventTypes.ContextUpdate     => ValidateContextUpdate(payload),
-            ChatSseR2EventTypes.ContextHighlight  => ValidateContextHighlight(payload),
-            ChatSseR2EventTypes.WorkspaceAction   => ValidateWorkspaceAction(payload),
-            ChatSseR2EventTypes.Suggestions       => ValidateSuggestions(payload),
-            ChatSseR2EventTypes.CapabilityChange  => ValidateCapabilityChange(payload),
-            ChatSseR2EventTypes.SafetyAnnotation  => ValidateSafetyAnnotation(payload),
-            _                                     => SseValidationResult.Valid   // R1 / unknown — pass through
+            ChatSseR2EventTypes.WorkspaceWidget => ValidateWorkspaceWidget(payload),
+            ChatSseR2EventTypes.ContextUpdate => ValidateContextUpdate(payload),
+            ChatSseR2EventTypes.ContextHighlight => ValidateContextHighlight(payload),
+            ChatSseR2EventTypes.WorkspaceAction => ValidateWorkspaceAction(payload),
+            ChatSseR2EventTypes.Suggestions => ValidateSuggestions(payload),
+            ChatSseR2EventTypes.CapabilityChange => ValidateCapabilityChange(payload),
+            ChatSseR2EventTypes.SafetyAnnotation => ValidateSafetyAnnotation(payload),
+            _ => SseValidationResult.Valid   // R1 / unknown — pass through
         };
 
         return new ValueTask<SseValidationResult>(result);

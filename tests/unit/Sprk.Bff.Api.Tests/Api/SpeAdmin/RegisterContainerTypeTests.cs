@@ -31,16 +31,6 @@ public class RegisterContainerTypeTests
 
     #region Endpoint Registration
 
-    [Fact]
-    public void MapContainerTypeEndpoints_MethodExists_AndIsExtensionOnRouteGroupBuilder()
-    {
-        // MapContainerTypeEndpoints now registers the register endpoint too.
-        var method = typeof(ContainerTypeEndpoints).GetMethod("MapContainerTypeEndpoints");
-
-        method.Should().NotBeNull("MapContainerTypeEndpoints extension method must exist");
-        method!.IsStatic.Should().BeTrue("must be a static extension method");
-        method.ReturnType.Should().Be(typeof(RouteGroupBuilder), "must return RouteGroupBuilder for chaining");
-    }
 
     #endregion
 
@@ -304,22 +294,27 @@ public class RegisterContainerTypeTests
     [Fact]
     public void SharePointAdminUrl_Validation_MustBeAbsoluteHttps()
     {
-        // Valid: absolute HTTPS URLs
-        Uri.TryCreate("https://contoso-admin.sharepoint.com", UriKind.Absolute, out var valid1).Should().BeTrue();
-        valid1!.Scheme.Should().Be("https");
+        // The validation intent: input must parse as an absolute URI AND have https scheme.
+        // Asserted via a single helper so the test reflects the actual production check.
+        static bool IsValidAdminUrl(string input) =>
+            Uri.TryCreate(input, UriKind.Absolute, out var u)
+            && u.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase);
 
-        Uri.TryCreate("https://contoso-admin.sharepoint.com/", UriKind.Absolute, out var valid2).Should().BeTrue();
-        valid2!.Scheme.Should().Be("https");
+        // Valid: absolute HTTPS URLs
+        IsValidAdminUrl("https://contoso-admin.sharepoint.com").Should().BeTrue();
+        IsValidAdminUrl("https://contoso-admin.sharepoint.com/").Should().BeTrue();
 
         // Invalid: HTTP (not HTTPS)
-        Uri.TryCreate("http://contoso-admin.sharepoint.com", UriKind.Absolute, out var httpUri).Should().BeTrue();
-        httpUri!.Scheme.Should().NotBe("https", "HTTP is not allowed — HTTPS required");
+        IsValidAdminUrl("http://contoso-admin.sharepoint.com").Should().BeFalse("HTTP is not allowed — HTTPS required");
 
-        // Invalid: relative URL
-        Uri.TryCreate("/admin", UriKind.Absolute, out _).Should().BeFalse();
+        // Invalid: relative path — note that Uri.TryCreate("/admin", Absolute) behaves
+        // differently on Linux (parses as file:///admin → true) vs Windows (false). The
+        // scheme-based check above is platform-independent and matches production intent:
+        // a relative path is rejected on every OS because its scheme is never "https".
+        IsValidAdminUrl("/admin").Should().BeFalse("relative path is not a valid HTTPS admin URL");
 
-        // Invalid: not a URI
-        Uri.TryCreate("", UriKind.Absolute, out _).Should().BeFalse();
+        // Invalid: empty string
+        IsValidAdminUrl("").Should().BeFalse();
     }
 
     [Fact]

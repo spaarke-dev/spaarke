@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Update `@spaarke/ui-components` barrel exports and bump version</title>
+    <phase>Phase 2: Shared-Lib Hoist</phase>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <dependencies>010, 011</dependencies>
+    <blocks>020, 030</blocks>
+    <tags>frontend, typescript, refactoring, config</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Barrel + version bump only; no logic changes. STANDARD rigor.</rigor-reason>
+    <parallel-group>P2-W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update the `@spaarke/ui-components` top-level barrel (`src/index.ts`) to export the new `Kanban/` subpath. Bump the package version in `package.json` per Spaarke semver conventions (minor bump — new exports). Run `npm install` (or workspace equivalent) to refresh consumers.
+  </prompt>
+
+  <role>Spaarke shared-UI developer.</role>
+
+  <goal>Barrel exports the Kanban subpath. Package version bumped. Consumers (SmartTodo, LegalWorkspace) resolve the new exports cleanly.</goal>
+
+  <constraints>
+    <constraint source="project">Use `npm install --legacy-peer-deps --no-audit --no-fund` for Vite solutions (per CLAUDE.md §11 note).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update `src/client/shared/Spaarke.UI.Components/src/index.ts` to export `./components/Kanban` (and any new types).</step>
+    <step order="2">Bump the `package.json` version (minor bump).</step>
+    <step order="3">Run `npm run build` in Spaarke.UI.Components; verify clean build.</step>
+    <step order="4">Run `npm install` (with the Vite-friendly flags) in consumer projects to pick up the new version.</step>
+    <step order="5">Verify SmartTodo + LegalWorkspace build clean.</step>
+    <step order="6">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + install</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">`src/client/shared/Spaarke.UI.Components/src/index.ts` updated</output>
+    <output type="config">`src/client/shared/Spaarke.UI.Components/package.json` version bumped</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Barrel exports `./components/Kanban`.</criterion>
+    <criterion testable="true">Version bumped per semver (minor for additive change).</criterion>
+    <criterion testable="true">Consumer projects build clean after install.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor. No quality gates required.</protocol>
+  </execution>
+</task>

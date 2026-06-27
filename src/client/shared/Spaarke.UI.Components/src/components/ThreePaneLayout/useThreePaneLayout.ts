@@ -97,12 +97,7 @@ function safeSetItem(key: string, value: string): void {
  * used as the viewport reference because the layout's own bounding rect is
  * not yet measurable on first mount.
  */
-function resolveInitialWidth(
-  key: string,
-  defaultPx: number,
-  min: number,
-  frac: number | undefined
-): number {
+function resolveInitialWidth(key: string, defaultPx: number, min: number, frac: number | undefined): number {
   // 1. Stored pixel width always wins (user-dragged value persists).
   const stored = safeGetItem(key);
   if (stored !== null) {
@@ -398,11 +393,7 @@ export function useThreePaneLayout(options: UseThreePaneLayoutOptions = {}): Use
   // ------------------------------------------------------------------
 
   const resetToFracDefaults = useCallback(() => {
-    const computeFromFrac = (
-      frac: number | undefined,
-      defaultPx: number,
-      min: number
-    ): number => {
+    const computeFromFrac = (frac: number | undefined, defaultPx: number, min: number): number => {
       if (
         frac !== undefined &&
         Number.isFinite(frac) &&

@@ -1,0 +1,145 @@
+<task id="023" project="email-communication-solution-r3">
+  <metadata>
+    <title>SendEmailPage wrapper — page-mount wrapper for Code Page usage</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>033</blocks>
+    <tags>react, frontend, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Wrapper supports ALL 5 modes (compose/view/reply/forward/draft) — mode dispatch logic + URL-driven mode resolution is non-trivial; consumed by Wave 2 Code Page; touches the full mode matrix. FULL appropriate.</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-04</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build the canonical `<SendEmailPage />` wrapper at `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPage.tsx`. Locks `mount='page'`. Supports all 5 modes — the Code Page (Wave 2) drives `mode` from URL parameters.
+
+    Props (FR-04):
+    - `mode: EmailComposerMode` — driven by URL `?mode=compose|view|reply|forward|draft`
+    - `communicationId?: string` — required when `mode ∈ {view, reply, forward, draft}`; the `sprk_communication` record to load
+    - `initialTo?: IRecipient[] | string` — only used in `compose` mode
+    - `initialCc?: IRecipient[] | string`
+    - `initialSubject?: string`
+    - `initialBody?: string`
+    - `initialBodyFormat?: 'html' | 'plaintext'`
+    - `associations?: IComposerAssociation[]` — URL `?associatedTo=` parses into this
+    - `attachmentSources?: IComposerAttachmentSource[]` — defaults to `[{ kind: 'local' }, { kind: 'spe' }, { kind: 'related' }]` for full Code Page experience
+    - `authenticatedFetch: typeof fetch`
+    - `onSent?: (communicationId: string) => void`
+    - `onClose?: () => void` — Code Page may navigate back via Xrm.Navigation; passed through
+
+    Implementation responsibilities:
+    - Validate prop combos: `view`/`reply`/`forward`/`draft` require `communicationId` — throw a helpful error if missing
+    - Mode-specific load: for `view`/`reply`/`forward`/`draft`, load the existing record via Xrm.WebApi.retrieveRecord('sprk_communication', communicationId) and pass into engine as initial state. The actual mode-specific pre-fill logic (e.g., reply prefix, forward attachment carry) is in tasks 024-027 (mode files); this wrapper just passes the loaded record through to the engine
+    - For `compose` mode: pass initialX props through directly
+    - Render `<EmailComposer mount='page' mode={mode} ref={composerRef} ... />` — engine + ComposerActionBar handle the bottom-right action chrome for `page` mount
+
+    Page-level header (NFR-03): wrapper renders a Fluent v9 page header above the engine showing entity context (e.g., "New Email" / "Re: <subject>" / "Draft: <subject>" / "Email from <sender>" based on mode + state). Header is part of `page` mount chrome; engine reserves space for it.
+  </prompt>
+
+  <role>
+    Senior React developer; familiar with mode-dispatch + URL-driven state patterns.
+  </role>
+
+  <goal>
+    `SendEmailPage.tsx` compiles + lint-clean. Locks `mount='page'`. All 5 modes supported. Prop validation enforces `communicationId` requirement for non-compose modes. Page-level header renders mode-appropriate title. Wave 2 Code Page (task 033) consumes this.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-04 + FR-18: the Code Page is the full-form-replacement surface. It opens with `?mode=compose|view|reply|forward|draft&id={guid}&to=&cc=&subject=&body=&associatedTo=`. The wrapper's job is to take these URL-derived props and render the engine correctly.
+
+      Mode load: for `view`/`reply`/`forward`/`draft`, the wrapper fetches the existing `sprk_communication` record. Engine receives the record (via `initialX` props plus a `sourceRecord` prop for mode-specific logic — tasks 024-027 fill in the mode-specific pre-fill behavior).
+
+      Per NFR-03 page mount visual variant: page-level header + full-width form chrome + bottom-right prominent action bar. Header rendered by wrapper; engine renders the rest.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPage.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (UPDATE — export SendEmailPage)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts (UPDATE — IComposerSourceRecord type for mode loaders)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only — `Title2`, `Body1`, `Card` for page header</constraint>
+    <constraint source="ADR-024">Server-side polymorphic resolver unchanged; client passes `associations` through to engine which translates for the BFF request</constraint>
+    <constraint source="ADR-028">No `@spaarke/auth` import — `authenticatedFetch` injected (NFR-02)</constraint>
+    <constraint source="ADR-033">Thin-ish wrapper; mode-specific logic in modes/ dir (tasks 024-027); wrapper just dispatches</constraint>
+    <constraint source="NFR-03">`page` mount — full-width form, page header, bottom-right action chrome</constraint>
+    <constraint source="project">Locks `mount='page'`</constraint>
+    <constraint source="project">Supports all 5 modes; validates `communicationId` requirement for non-compose</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Update `EmailComposer.types.ts` to add `IComposerSourceRecord` shape — minimum: `{ communicationId: string; subject: string; body: string; bodyFormat: 'html'|'plaintext'; from: IRecipient; to: IRecipient[]; cc: IRecipient[]; attachments: IAttachment[]; associations: IComposerAssociation[]; internetMessageId?: string; threadId?: string; statusCode?: 'Draft'|'Sent' }`. Add `sourceRecord?: IComposerSourceRecord` to `IEmailComposerProps`.</step>
+    <step order="2">Author `SendEmailPage.tsx`:
+      - Props per prompt
+      - Prop validation: if `mode !== 'compose' &amp;&amp; !communicationId`, throw `new Error('SendEmailPage requires communicationId for mode='+mode)`
+      - `useEffect`-driven load: when `mode !== 'compose'`, fetch the record via `Xrm.WebApi.retrieveRecord('sprk_communication', communicationId)` (or BFF fallback) and set local state `sourceRecord`
+      - Compute page-header title based on mode + sourceRecord (e.g., `compose` → "New Email"; `view` → `Email: ${sourceRecord.subject}`; `reply` → `Re: ${sourceRecord.subject}`; etc.)
+      - Render: `&lt;Title2&gt;{headerTitle}&lt;/Title2&gt;` then `&lt;EmailComposer mount='page' mode={mode} sourceRecord={sourceRecord} ...props /&gt;`</step>
+    <step order="3">Update `EmailComposer/index.ts` — export `SendEmailPage`, `ISendEmailPageProps`, `IComposerSourceRecord`.</step>
+    <step order="4">Smoke test in dev: all 5 mode URLs render correctly (compose with no id; view/reply/forward/draft each fetches sourceRecord).</step>
+    <step order="5">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="5.5">Step 9.5 quality gates — code-review + adr-check (ADR-021, ADR-024, ADR-026, ADR-028, ADR-033).</step>
+    <step order="6">Update `TASK-INDEX.md`: 023 ✅.</step>
+    <step order="7">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="write">SendEmailPage.tsx</tool>
+    <tool name="edit">EmailComposer.types.ts (sourceRecord type), index.ts</tool>
+    <tool name="bash">npm run build + lint</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/wrappers/SendEmailPage.tsx (NEW)</output>
+    <output type="file">EmailComposer/EmailComposer.types.ts (UPDATED — IComposerSourceRecord)</output>
+    <output type="file">EmailComposer/index.ts (UPDATED)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SendEmailPage.tsx` compiles + lint-clean.</criterion>
+    <criterion testable="true">Locks `mount='page'`.</criterion>
+    <criterion testable="true">All 5 modes supported; `communicationId` requirement enforced for non-compose.</criterion>
+    <criterion testable="true">Loads `sourceRecord` via `Xrm.WebApi.retrieveRecord` (or BFF fallback) for non-compose modes.</criterion>
+    <criterion testable="true">Page-level header rendered with mode-appropriate title (NFR-03).</criterion>
+    <criterion testable="true">No `@spaarke/auth` import (NFR-02).</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 2 task 033 mounts this in the Code Page. Mode-specific pre-fill logic (e.g., `subject = 'Re: ' + original.subject`) lives in `modes/replyMode.ts` etc. (tasks 024-027) — wrapper just loads the source record + passes it through. Engine consumes `sourceRecord` and dispatches mode-specific initial-state derivation.
+
+    `IComposerSourceRecord` deliberately mirrors `EmailComposerState` shape — the mode loaders (024-027) can copy fields directly when pre-filling.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 9.5 mandatory.
+    </protocol>
+  </execution>
+</task>

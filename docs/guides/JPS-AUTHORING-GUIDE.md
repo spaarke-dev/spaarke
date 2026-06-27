@@ -1,12 +1,14 @@
 # JPS Authoring Guide
 
-> **Version**: 3.0 (consolidated)
-> **Date**: 2026-04-05
+> **Version**: 3.0 (consolidated) — scope statement added 2026-06-26 (R4 canonical-truth loop); §§6, 9, 10, 14 stripped in favour of skill-owned procedures
+> **Date**: 2026-04-05 (last full review); 2026-06-26 (scope + dedup pass)
 > **Status**: Production
 > **Author**: Spaarke Engineering
 > **Audience**: Developers, AI engineers, prompt authors, solution architects
 > **Supersedes**: PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md, PLAYBOOK-DESIGN-GUIDE.md (merged in)
-> **Related**: [AI Architecture Guide](../architecture/AI-ARCHITECTURE.md), [Scope Configuration Guide](SCOPE-CONFIGURATION-GUIDE.md)
+> **Related**: [AI Architecture Overview](../architecture/AI-ARCHITECTURE.md), [Playbook Runtime](../architecture/ai-architecture-playbook-runtime.md), [Actions/Nodes/Scopes Boundary](../architecture/ai-architecture-actions-nodes-scopes.md), [Playbook Deploy Recipe](ai-guide-playbook-deploy-recipe.md)
+>
+> **Scope of this guide**: schema reference for the JPS (JSON Prompt Schema) DSL — section grammars (`instruction`, `input`, `output`, `scopes`, `examples`, `metadata`), feature deep dives (template parameters, `$ref`, `$choices`, override merge, structured output), best practices, validation, troubleshooting. NOT a procedural how-to — see the skills below.
 
 ---
 
@@ -538,9 +540,15 @@ When `output.structuredOutput` is `true`:
 
 ---
 
-## 6. Creating a New JPS Action (Step-by-Step)
+## 6. Creating a New JPS Action — REDIRECT
 
-### Decision Tree: Do I Need JPS?
+> **Moved 2026-06-26 (R4 canonical-truth loop)**: the 7-step procedural recipe for creating a new JPS Action lives in the [`jps-action-create`](../../.claude/skills/jps-action-create/SKILL.md) skill. The skill is the procedural source-of-truth; this guide is the schema reference. Invoke via `/jps-action-create` or by stating the trigger phrases listed in the skill's frontmatter.
+>
+> Use this guide for: the schema fields each step should populate (sections 4 and 5 above).
+> Use the skill for: the procedural sequence + Dataverse seed step + validation runner.
+>
+> The "Decision Tree: Do I Need JPS?" originally inlined here is preserved in git history and lives operationally inside the skill's Step 0.
+<!-- ORIGINAL CONTENT STRIPPED: 65 lines of step-by-step procedure consolidated into .claude/skills/jps-action-create/SKILL.md (R4 canonical-truth loop, 2026-06-26). Recover via git history if needed.
 
 ```
 Does the action need structured JSON output?  --> Yes --> Use JPS
@@ -602,6 +610,7 @@ JPS JSON files are stored in `projects/*/notes/jps-conversions/` and mapped to A
 3. Verify structured output matches the expected JSON Schema
 4. Verify scope resolution succeeded (check for missing `$ref` warnings)
 5. Test with template parameters if applicable
+-->
 
 ---
 
@@ -842,9 +851,13 @@ An action designed for form pre-fill workflows with Dataverse lookup constraints
 
 ---
 
-## 9. Migration Guide (Hardcoded to JPS)
+## 9. Migration Guide (Hardcoded to JPS) — REDIRECT
 
-### Assessment Checklist
+> **Moved 2026-06-26 (R4 canonical-truth loop)**: the migration procedure (assessment, conversion steps, strategies, testing) was a one-time R1/R2 migration aid and is no longer canonical. Recover from git history if needed for historical context. New JPS Actions are created via [`jps-action-create`](../../.claude/skills/jps-action-create/SKILL.md) skill, not via migration from flat text.
+
+<!-- ORIGINAL CONTENT STRIPPED: migration recipe consolidated into git history (R4 canonical-truth loop, 2026-06-26).
+
+### Assessment Checklist (HISTORICAL)
 
 Migrate a handler when:
 - [ ] Handler has a hardcoded prompt string > 200 characters
@@ -911,6 +924,9 @@ The BFF API contains all JPS pipeline components (`PromptSchemaRenderer`, `JpsRe
 ### Rollback
 
 Restore from backup files (`-BackupPath`), re-seed from git history, or remove JPS from the record (dual-path falls back to flat text automatically).
+-->
+
+> **§10 (Deployment) moved 2026-06-26 (R4 canonical-truth loop)**: BFF API deployment + Dataverse seeding + verification + rollback procedures are now canonicalised in [`ai-guide-playbook-deploy-recipe.md`](ai-guide-playbook-deploy-recipe.md) (for `Deploy-Playbook.ps1` flow) and [`.claude/skills/bff-deploy/SKILL.md`](../../.claude/skills/bff-deploy/SKILL.md) (for BFF deploy). `Seed-JpsActions.ps1` invocation lives in [`.claude/skills/jps-action-create/SKILL.md`](../../.claude/skills/jps-action-create/SKILL.md) Step 7.
 
 ---
 
@@ -1067,11 +1083,15 @@ All paths relative to `src/server/api/Sprk.Bff.Api/`:
 
 ---
 
-## 14. Designing Playbooks with Claude Code
+## 14. Designing Playbooks with Claude Code — REDIRECT
 
-This section covers how to design and deploy complete playbooks using Claude Code — from natural language descriptions to deployed Dataverse records.
+> **Moved 2026-06-26 (R4 canonical-truth loop)**: end-to-end playbook design via Claude Code lives in the [`jps-playbook-design`](../../.claude/skills/jps-playbook-design/SKILL.md) skill (13-step orchestrator including scope catalog lookup + Dataverse cross-check + `Deploy-Playbook.ps1` invocation). The skill is the procedural source-of-truth.
+>
+> For scope catalog (Actions / Skills / Knowledge / Tools), use `/jps-scope-refresh` to view current catalog from `.claude/catalogs/scope-model-index.json` — do NOT consult an inline catalog (manual sync drift). For model selection (gpt-4o-mini vs gpt-4o), see [`ai-guide-model-selection.md`](AI-MODEL-SELECTION-GUIDE.md) (when present) or the model decision matrix inside `jps-playbook-design` skill Step 5. For Output node types, see [`../architecture/ai-architecture-playbook-runtime.md`](../architecture/ai-architecture-playbook-runtime.md) §9 (NodeType vs ActionType axes) and [`../architecture/ai-architecture-actions-nodes-scopes.md`](../architecture/ai-architecture-actions-nodes-scopes.md) (config-bag boundary). For new scope primitives, see [`../../.claude/skills/jps-action-create/SKILL.md`](../../.claude/skills/jps-action-create/SKILL.md). For definition file format + troubleshooting + deployment, see [`ai-guide-playbook-deploy-recipe.md`](ai-guide-playbook-deploy-recipe.md).
 
-### Quick Start
+<!-- ORIGINAL §14 CONTENT STRIPPED 2026-06-26 (R4 canonical-truth loop): this section originally inlined ~300 lines of skill-procedure content (Quick Start, How Claude Code Designs Playbooks, Scope Catalog (8 ACT codes + 10 SKL + 10 KNW + 8 TL), Model Selection, Output Node Types, Creating New Scope Primitives, Definition File Format, Troubleshooting Deployment) that drift relative to the live skill body + scope-model-index.json. The skill bodies are canonical; the inline catalog was a manual sync risk per docs survey §3 Cluster D6. Recover via git history if needed.
+
+### Quick Start (HISTORICAL — see skill instead)
 
 #### Option 1: Natural Language (Recommended)
 
@@ -1382,8 +1402,9 @@ Deploy with:
 | Playbook doesn't appear in canvas | Canvas layout JSON not saved | Re-run Deploy-Playbook.ps1 with the same definition |
 | Wrong model being used | Model deployment not found | Check `sprk_aimodeldeployments` in Dataverse |
 | Node scopes not linked | N:N association failed | Check script output for errors; verify relationship names |
+-->
 
 ---
 
 *Document Owner: Spaarke Engineering*
-*Last Updated: 2026-04-05*
+*Last Updated: 2026-04-05 (content); 2026-06-26 (R4 canonical-truth scope + dedup pass)*

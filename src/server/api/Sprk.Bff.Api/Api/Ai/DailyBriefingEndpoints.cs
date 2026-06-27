@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -107,6 +108,14 @@ public static class DailyBriefingEndpoints
                 PriorityItemCount = request.PriorityItems.Length
             });
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 L1): NullBriefingAi surfaced.
+            logger.LogDebug(
+                "Daily briefing summarize called while AI feature disabled. ErrorCode={ErrorCode}",
+                ex.ErrorCode);
+            return ex.AsFeatureDisabled503();
+        }
         catch (OpenAiCircuitBrokenException ex)
         {
             logger.LogWarning(
@@ -175,25 +184,29 @@ public static class DailyBriefingEndpoints
 
     /// <summary>
     /// Generate a narrative briefing with TL;DR and per-channel narrative bullets.
-    /// Fires all AI prompts in parallel (TL;DR + each channel) via Task.WhenAll.
+    /// R4 FR-12 / task 031 (Path A.5): the body of this endpoint is a thin dispatch
+    /// wrapper that resolves the <c>DAILY-BRIEFING-NARRATE</c> playbook via
+    /// <see cref="IConsumerRoutingService"/> and invokes it via the
+    /// <see cref="IInvokePlaybookAi"/> facade. No inline LLM prompt strings remain
+    /// in this method or its helpers — all prompt content lives in the playbook +
+    /// associated Action rows (BRIEF-NARRATE-TLDR / BRIEF-NARRATE-CHANNEL /
+    /// BRIEF-VALIDATE-ENTITY-NAMES). See <c>projects/spaarke-daily-update-service-r4/
+    /// notes/decisions/030-dispatch-path.md</c> for the path decision.
     /// </summary>
+    /// <remarks>
+    /// Response shape (<see cref="DailyBriefingNarrateResponse"/>) is preserved for
+    /// backward compatibility — the widget parser at <c>useBriefingNarration.ts</c>
+    /// consumes the exact same JSON shape (R3 contract; AC-12b binding).
+    /// </remarks>
     private static async Task<IResult> HandleNarrate(
         DailyBriefingNarrateRequest request,
         ILoggerFactory loggerFactory,
+        IConsumerRoutingService routing,
+        IInvokePlaybookAi invokePlaybookAi,
         HttpContext httpContext,
-        CancellationToken cancellationToken,
-        IBriefingAi? briefingAi = null)
+        CancellationToken cancellationToken)
     {
         var logger = loggerFactory.CreateLogger("DailyBriefingEndpoints");
-
-        // Fail fast when AI is disabled — daily briefing has no non-AI fallback.
-        if (briefingAi is null)
-        {
-            return Results.Problem(
-                statusCode: 503,
-                title: "Service Unavailable",
-                detail: "Daily briefing requires AI features. Set 'Analysis:Enabled=true' AND 'DocumentIntelligence:Enabled=true' to enable.");
-        }
 
         // Empty-payload tolerance: the frontend `useDailyBriefing` hook may send a request
         // with all collections empty when the user has no notifications, no priority items,
@@ -202,6 +215,8 @@ public static class DailyBriefingEndpoints
         // bullets/channels response — the client renders an empty state (per FR-16 /
         // task 035 graceful-empty UX). Returning 400 here would force the hook into its
         // 400-special-case branch and surface as a misleading "Bad Request" in App Insights.
+        // This branch MUST short-circuit BEFORE playbook dispatch so we never burn an LLM
+        // call when there is nothing to narrate.
         if (request.Categories.Length == 0 && request.PriorityItems.Length == 0 && request.Channels.Length == 0)
         {
             logger.LogInformation(
@@ -211,7 +226,8 @@ public static class DailyBriefingEndpoints
             {
                 Tldr = new TldrResult
                 {
-                    Briefing = string.Empty,
+                    Summary = string.Empty,
+                    KeyTakeaways = [],
                     TopAction = string.Empty,
                     CategoryCount = 0,
                     PriorityItemCount = 0
@@ -222,44 +238,114 @@ public static class DailyBriefingEndpoints
         }
 
         logger.LogInformation(
-            "Generating daily briefing narration: Categories={CategoryCount}, PriorityItems={PriorityCount}, Channels={ChannelCount}",
+            "Dispatching daily briefing narration: Categories={CategoryCount}, PriorityItems={PriorityCount}, Channels={ChannelCount}",
             request.Categories.Length, request.PriorityItems.Length, request.Channels.Length);
 
         try
         {
-            // Fire TL;DR prompt and all channel narration prompts in parallel
-            var tldrTask = GetTldrAsync(request, briefingAi, logger, cancellationToken);
+            // 1. Resolve playbook GUID via the canonical sprk_playbookconsumer routing
+            //    facade. Uses the ConsumerTypes.DailyBriefingNarrate compile-time constant
+            //    (hardening per chat-routing-redesign-r1 code-review S-5 — never a literal
+            //    string). Path A.5 binding per task 030 decision.
+            var playbookId = await routing.ResolveAsync(
+                ConsumerTypes.DailyBriefingNarrate,
+                consumerCode: "default",
+                context: null,
+                environment: null,
+                cancellationToken).ConfigureAwait(false);
 
-            var channelTasks = request.Channels.Select(channel =>
-                GetChannelNarrationAsync(channel, briefingAi, logger, cancellationToken));
-
-            var allTasks = new List<Task> { tldrTask };
-            var channelTaskList = channelTasks.ToList();
-            allTasks.AddRange(channelTaskList);
-
-            await Task.WhenAll(allTasks);
-
-            var tldrResult = await tldrTask;
-            var channelResults = new List<ChannelNarrationResult>();
-            foreach (var ct in channelTaskList)
+            // Service-availability fail-fast (analogous to the prior briefingAi-null 503):
+            // no sprk_playbookconsumer row → dispatch is unconfigured for this environment.
+            if (playbookId is null)
             {
-                var result = await ct;
-                if (result is not null)
-                {
-                    channelResults.Add(result);
-                }
+                logger.LogWarning(
+                    "No sprk_playbookconsumer row matched for {ConsumerType} — daily briefing dispatch unconfigured.",
+                    ConsumerTypes.DailyBriefingNarrate);
+
+                return Results.Problem(
+                    statusCode: 503,
+                    title: "Service Unavailable",
+                    detail: "Daily briefing dispatch is unconfigured. Ensure a sprk_playbookconsumer row exists for 'daily-briefing-narrate'.");
             }
 
-            logger.LogDebug(
-                "Daily briefing narration generated: Channels={SuccessCount}/{TotalCount}",
-                channelResults.Count, request.Channels.Length);
-
-            return TypedResults.Ok(new DailyBriefingNarrateResponse
+            // 2. Serialize the structured request payload into the IInvokePlaybookAi
+            //    parameter dictionary. The facade's parameter contract is
+            //    IReadOnlyDictionary<string,string> (template substitution); the
+            //    playbook's Start node binds {{json start}} and {{start.*}} from these
+            //    parameter entries. We serialize the full request as one JSON-string
+            //    parameter keyed "briefingPayload" plus convenience scalars for
+            //    template-condition checks.
+            var serializedPayload = JsonSerializer.Serialize(request, NarrateSerializerOptions);
+            var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                Tldr = tldrResult,
-                ChannelNarratives = channelResults.ToArray(),
-                GeneratedAtUtc = DateTimeOffset.UtcNow
-            });
+                ["briefingPayload"] = serializedPayload,
+                ["totalNotificationCount"] = request.TotalNotificationCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["categoryCount"] = request.Categories.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["priorityItemCount"] = request.PriorityItems.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["channelCount"] = request.Channels.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            };
+
+            var tenantId =
+                httpContext.User?.FindFirst("tid")?.Value
+                ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+                ?? string.Empty;
+
+            var invocationContext = new PlaybookInvocationContext
+            {
+                TenantId = tenantId,
+                HttpContext = httpContext,
+                CorrelationId = httpContext.TraceIdentifier
+            };
+
+            // 3. Invoke the playbook via the existing IInvokePlaybookAi facade.
+            //    The facade aggregates the orchestration SSE stream into a single
+            //    PlaybookInvocationResult — non-streaming, single typed result.
+            var playbookResult = await invokePlaybookAi.InvokePlaybookAsync(
+                playbookId.Value,
+                parameters,
+                invocationContext,
+                cancellationToken).ConfigureAwait(false);
+
+            if (!playbookResult.Success)
+            {
+                logger.LogWarning(
+                    "Daily briefing narrate playbook reported failure. PlaybookId={PlaybookId}, RunId={RunId}, ErrorCode={ErrorCode}, Error={ErrorMessage}",
+                    playbookId.Value,
+                    playbookResult.RunId,
+                    playbookResult.ErrorCode,
+                    playbookResult.ErrorMessage);
+
+                return ProblemDetailsHelper.AiUnavailable(
+                    playbookResult.ErrorMessage ?? "AI briefing service is temporarily unavailable.",
+                    httpContext.TraceIdentifier);
+            }
+
+            // 4. Project the playbook result into the existing DailyBriefingNarrateResponse
+            //    contract. The playbook's ReturnResponse node binds tldr/channelNarratives
+            //    into StructuredData (per repo source-of-truth daily-briefing-narrate.json
+            //    "responseBinding"). When StructuredData parsing fails (e.g., model drift),
+            //    fall back to a TL;DR-only response carrying TextContent — graceful
+            //    degradation rather than 500.
+            var response = ProjectPlaybookResultToNarrateResponse(
+                playbookResult,
+                request,
+                logger);
+
+            logger.LogDebug(
+                "Daily briefing narration dispatched: RunId={RunId}, PlaybookId={PlaybookId}, Channels={ChannelCount}",
+                playbookResult.RunId,
+                playbookId.Value,
+                response.ChannelNarratives.Length);
+
+            return TypedResults.Ok(response);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // P3 Fail-Fast (ADR-032 / NullInvokePlaybookAi): AI kill-switch is OFF.
+            logger.LogDebug(
+                "Daily briefing narrate called while AI feature disabled. ErrorCode={ErrorCode}",
+                ex.ErrorCode);
+            return ex.AsFeatureDisabled503();
         }
         catch (OpenAiCircuitBrokenException ex)
         {
@@ -271,9 +357,14 @@ public static class DailyBriefingEndpoints
                 "AI briefing service is temporarily unavailable.",
                 httpContext.TraceIdentifier);
         }
+        catch (OperationCanceledException)
+        {
+            // Caller cancellation — propagate cleanly without logging as error.
+            throw;
+        }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to generate daily briefing narration");
+            logger.LogError(ex, "Failed to dispatch daily briefing narration");
 
             return Results.Problem(
                 statusCode: 500,
@@ -283,231 +374,106 @@ public static class DailyBriefingEndpoints
     }
 
     /// <summary>
-    /// Generate the TL;DR briefing (5-7 sentences) with top action identification.
+    /// Cached JSON serializer options for the IInvokePlaybookAi parameter payload.
+    /// camelCase property naming matches the playbook node graph's template references
+    /// ({{start.categories}}, {{start.channels}}, etc.).
     /// </summary>
-    private static async Task<TldrResult> GetTldrAsync(
-        DailyBriefingNarrateRequest request,
-        IBriefingAi briefingAi,
-        ILogger logger,
-        CancellationToken cancellationToken)
+    private static readonly JsonSerializerOptions NarrateSerializerOptions = new()
     {
-        var prompt = BuildNarrateTldrPrompt(request);
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.Never
+    };
 
-        var briefingText = await briefingAi.GenerateNarrativeAsync(
-            prompt,
-            maxOutputTokens: 500,
-            cancellationToken: cancellationToken);
-
-        // Extract top action from the briefing text (last sentence starting with "Your most important action today is...")
-        var trimmed = briefingText.Trim();
-        var topAction = "";
-        var sentences = trimmed.Split(new[] { ". " }, StringSplitOptions.RemoveEmptyEntries);
-        foreach (var sentence in sentences)
+    /// <summary>
+    /// Project the playbook invocation result into the
+    /// <see cref="DailyBriefingNarrateResponse"/> shape consumed by the widget parser.
+    /// Reads the playbook's terminal StructuredData (per ReturnResponse node binding);
+    /// falls back to a TL;DR-only response when StructuredData is absent or malformed
+    /// (graceful degradation per FR-16).
+    /// </summary>
+    internal static DailyBriefingNarrateResponse ProjectPlaybookResultToNarrateResponse(
+        PlaybookInvocationResult playbookResult,
+        DailyBriefingNarrateRequest request,
+        ILogger logger)
+    {
+        var generatedAtUtc = DateTimeOffset.UtcNow;
+        var tldr = new TldrResult
         {
-            if (sentence.TrimStart().StartsWith("Your most important action today is", StringComparison.OrdinalIgnoreCase))
-            {
-                topAction = sentence.TrimStart();
-                if (!topAction.EndsWith('.'))
-                    topAction += ".";
-                break;
-            }
-        }
-
-        return new TldrResult
-        {
-            Briefing = trimmed,
-            TopAction = topAction,
+            Summary = string.Empty,
+            KeyTakeaways = [],
+            TopAction = string.Empty,
             CategoryCount = request.Categories.Length,
             PriorityItemCount = request.PriorityItems.Length
         };
-    }
+        ChannelNarrationResult[] channelNarratives = [];
 
-    /// <summary>
-    /// Generate narrative bullets for a single channel.
-    /// Returns null if the AI call fails due to circuit breaker.
-    /// </summary>
-    private static async Task<ChannelNarrationResult?> GetChannelNarrationAsync(
-        ChannelNarrationInput channel,
-        IBriefingAi briefingAi,
-        ILogger logger,
-        CancellationToken cancellationToken)
-    {
-        if (channel.Items.Length == 0)
+        if (playbookResult.StructuredData is JsonElement data && data.ValueKind == JsonValueKind.Object)
         {
-            return new ChannelNarrationResult
+            try
             {
-                Category = channel.Category,
-                Bullets = []
-            };
-        }
-
-        try
-        {
-            var prompt = BuildChannelNarrationPrompt(channel);
-
-            var responseJson = await briefingAi.GenerateNarrativeAsync(
-                prompt,
-                maxOutputTokens: 300,
-                cancellationToken: cancellationToken);
-
-            var bullets = ParseChannelBullets(responseJson, logger);
-
-            return new ChannelNarrationResult
-            {
-                Category = channel.Category,
-                Bullets = bullets
-            };
-        }
-        catch (OpenAiCircuitBrokenException ex)
-        {
-            logger.LogWarning(
-                "OpenAI circuit breaker open for channel narration. Channel={Channel}, RetryAfter={RetryAfter}s",
-                channel.Category, ex.RetryAfter.TotalSeconds);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Build the TL;DR prompt for narrate endpoint.
-    /// Instructs the model to produce a 5-7 sentence briefing ending with the most important action.
-    /// </summary>
-    internal static string BuildNarrateTldrPrompt(DailyBriefingNarrateRequest request)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("You are a concise executive assistant writing a daily briefing for a legal professional.");
-        sb.AppendLine("Summarize the user's daily notifications into a prioritized briefing of 5-7 sentences.");
-        sb.AppendLine("IMPORTANT: Reference specific names, titles, matters, and entities from the data below. Do NOT write vague summaries like 'you have one overdue task'. Instead write 'The Acme Corp engagement letter review is 2 days overdue'.");
-        sb.AppendLine("Focus on what requires immediate attention first, then provide context on volume and trends.");
-        sb.AppendLine("Do NOT use bullet points. Write in natural prose.");
-        sb.AppendLine("End with a sentence identifying the single most important action for today, starting with 'Your most important action today is...'");
-        sb.AppendLine();
-        sb.AppendLine("=== Notification Data ===");
-
-        if (request.Categories.Length > 0)
-        {
-            sb.AppendLine();
-            sb.AppendLine("Categories:");
-            foreach (var cat in request.Categories)
-            {
-                if (string.Equals(cat.Name, "System", StringComparison.OrdinalIgnoreCase)) continue;
-                sb.AppendLine($"- {cat.Name}: {cat.Count} notification(s){(cat.UnreadCount > 0 ? $" ({cat.UnreadCount} unread)" : "")}");
-            }
-        }
-
-        if (request.PriorityItems.Length > 0)
-        {
-            sb.AppendLine();
-            sb.AppendLine("Top Priority Items (reference these by name!):");
-            foreach (var item in request.PriorityItems)
-            {
-                sb.AppendLine($"- [{item.Category}] {item.Title}{(item.DueDate.HasValue ? $" (due {item.DueDate.Value:yyyy-MM-dd})" : "")}");
-            }
-        }
-
-        // Include per-channel item details so AI can reference specific names
-        if (request.Channels.Length > 0)
-        {
-            sb.AppendLine();
-            sb.AppendLine("Item Details (reference specific names and matters!):");
-            foreach (var channel in request.Channels)
-            {
-                if (string.Equals(channel.Category, "system", StringComparison.OrdinalIgnoreCase)) continue;
-                foreach (var item in channel.Items)
+                if (data.TryGetProperty("tldr", out var tldrElement) && tldrElement.ValueKind == JsonValueKind.Object)
                 {
-                    var parts = new List<string> { item.Title };
-                    if (!string.IsNullOrEmpty(item.RegardingName))
-                        parts.Add($"on {item.RegardingName}");
-                    if (item.Priority != "normal")
-                        parts.Add($"[{item.Priority}]");
-                    sb.AppendLine($"  - {string.Join(" ", parts)}");
+                    var deserializedTldr = tldrElement.Deserialize<TldrResult>(NarrateSerializerOptions);
+                    if (deserializedTldr is not null)
+                    {
+                        tldr = deserializedTldr with
+                        {
+                            CategoryCount = request.Categories.Length,
+                            PriorityItemCount = request.PriorityItems.Length
+                        };
+                    }
+                }
+
+                if (data.TryGetProperty("channelNarratives", out var channelsElement) && channelsElement.ValueKind == JsonValueKind.Array)
+                {
+                    channelNarratives = channelsElement.Deserialize<ChannelNarrationResult[]>(NarrateSerializerOptions)
+                        ?? [];
                 }
             }
-        }
-
-        if (request.TotalNotificationCount > 0)
-        {
-            sb.AppendLine();
-            sb.AppendLine($"Total notifications: {request.TotalNotificationCount}");
-        }
-
-        sb.AppendLine();
-        sb.AppendLine("Write a 5-7 sentence briefing referencing specific names and entities:");
-
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// Build a prompt for narrating a single channel's items into grouped narrative bullets.
-    /// </summary>
-    internal static string BuildChannelNarrationPrompt(ChannelNarrationInput channel)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine($"You are a concise executive assistant. Convert the following '{channel.Label}' notification items into 1-4 narrative bullet points.");
-        sb.AppendLine("Rules:");
-        sb.AppendLine("- Group related items (e.g., multiple documents on the same matter → single bullet)");
-        sb.AppendLine("- Write each bullet in natural prose (not a raw title)");
-        sb.AppendLine("- Include entity names and dates where available");
-        sb.AppendLine("- Lead with the most urgent item");
-        sb.AppendLine("- Return ONLY a JSON array (no markdown, no code fences). Each element must have:");
-        sb.AppendLine("  { \"narrative\": \"...\", \"itemIds\": [\"id1\", ...], \"primaryEntityType\": \"...\", \"primaryEntityId\": \"...\", \"primaryEntityName\": \"...\" }");
-        sb.AppendLine();
-        sb.AppendLine($"=== {channel.Label} Items ===");
-        sb.AppendLine();
-
-        foreach (var item in channel.Items)
-        {
-            var parts = new List<string> { item.Title };
-            if (!string.IsNullOrEmpty(item.Body))
-                parts.Add(item.Body);
-            if (!string.IsNullOrEmpty(item.RegardingName))
-                parts.Add($"regarding: {item.RegardingName} ({item.RegardingEntityType})");
-            if (!string.IsNullOrEmpty(item.CreatedOn))
-                parts.Add($"date: {item.CreatedOn}");
-            if (item.Priority != "normal")
-                parts.Add($"priority: {item.Priority}");
-
-            sb.AppendLine($"- [id={item.Id}] {string.Join(" | ", parts)}");
-        }
-
-        sb.AppendLine();
-        sb.AppendLine("JSON array:");
-
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// Parse the AI response JSON into NarrativeBulletDto array.
-    /// Handles potential JSON extraction from markdown code fences.
-    /// </summary>
-    private static NarrativeBulletDto[] ParseChannelBullets(string responseJson, ILogger logger)
-    {
-        var json = responseJson.Trim();
-
-        // Strip markdown code fences if present
-        if (json.StartsWith("```"))
-        {
-            var firstNewline = json.IndexOf('\n');
-            if (firstNewline > 0)
-                json = json[(firstNewline + 1)..];
-            if (json.EndsWith("```"))
-                json = json[..^3];
-            json = json.Trim();
-        }
-
-        try
-        {
-            var bullets = JsonSerializer.Deserialize<NarrativeBulletDto[]>(json, new JsonSerializerOptions
+            catch (JsonException ex)
             {
-                PropertyNameCaseInsensitive = true
-            });
-            return bullets ?? [];
+                logger.LogWarning(
+                    ex,
+                    "Failed to deserialize StructuredData fields from playbook result. Falling back to TextContent-only TL;DR. RunId={RunId}",
+                    playbookResult.RunId);
+            }
         }
-        catch (JsonException ex)
+        else if (!string.IsNullOrWhiteSpace(playbookResult.TextContent))
         {
-            logger.LogWarning(ex, "Failed to parse channel narration JSON. Response={Response}", json);
-            return [];
+            // Fallback path: playbook returned TextContent but no StructuredData.
+            // Treat as a raw TL;DR summary — preserves response contract without
+            // hallucinated bullets / topAction.
+            tldr = tldr with { Summary = playbookResult.TextContent!.Trim() };
         }
+
+        return new DailyBriefingNarrateResponse
+        {
+            Tldr = tldr,
+            ChannelNarratives = channelNarratives,
+            GeneratedAtUtc = generatedAtUtc
+        };
     }
+
+    // ────────────────────────────────────────────────────────────────
+    // R4 task 031 (FR-12 Path A.5): inline LLM-prompt helpers REMOVED.
+    //
+    // Prior implementations of `BuildNarrateTldrPrompt`, `BuildChannelNarrationPrompt`,
+    // `ParseTldrResponse`, `ParseChannelBullets`, `BuildAllowedRegardingIdSet`,
+    // `ValidateBulletPrimaryEntityIds`, `GetTldrAsync`, `GetChannelNarrationAsync`,
+    // and the inner `TldrJsonPayload` DTO previously lived here.
+    //
+    // ALL prompt construction + entity-name validation now lives in the playbook
+    // (`DAILY-BRIEFING-NARRATE`) + its Action rows:
+    //   - BRIEF-NARRATE-TLDR     (TL;DR prompt + JSON shape)
+    //   - BRIEF-NARRATE-CHANNEL  (per-channel narration prompt + JSON shape)
+    //   - BRIEF-VALIDATE-ENTITY-NAMES (post-LLM scrub of hallucinated names)
+    //
+    // The endpoint is now a thin dispatch wrapper — see HandleNarrate above.
+    // Removing these helpers also removes the `IBriefingAi` parameter from
+    // HandleNarrate; the Summarize endpoint above continues to inject
+    // `IBriefingAi?` for the prioritized-briefing-summary path (not affected by
+    // R4 FR-12 / task 031).
+    // ────────────────────────────────────────────────────────────────
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -679,7 +645,7 @@ public record ChannelItemDto
 /// </summary>
 public record DailyBriefingNarrateResponse
 {
-    /// <summary>TL;DR executive summary (5-7 sentences).</summary>
+    /// <summary>TL;DR executive summary (2-3 sentences + 3-5 key-takeaway bullets + top action).</summary>
     [JsonPropertyName("tldr")]
     public TldrResult Tldr { get; init; } = new();
 
@@ -693,15 +659,22 @@ public record DailyBriefingNarrateResponse
 }
 
 /// <summary>
-/// TL;DR executive summary with top action identification.
+/// TL;DR executive summary with key takeaways and top action identification.
+/// R2.2: switched from a single 5-7 sentence narrative to a structured shape —
+/// a 2-3 sentence executive summary + 3-5 key-takeaway bullets — so the client
+/// can render an at-a-glance scannable summary instead of a paragraph block.
 /// </summary>
 public record TldrResult
 {
-    /// <summary>AI-generated 5-7 sentence prioritized briefing narrative.</summary>
-    [JsonPropertyName("briefing")]
-    public string Briefing { get; init; } = "";
+    /// <summary>AI-generated 2-3 sentence executive summary.</summary>
+    [JsonPropertyName("summary")]
+    public string Summary { get; init; } = "";
 
-    /// <summary>The single most important action for today, extracted from the briefing.</summary>
+    /// <summary>AI-generated 3-5 short key-takeaway bullet strings (no leading "- ").</summary>
+    [JsonPropertyName("keyTakeaways")]
+    public string[] KeyTakeaways { get; init; } = [];
+
+    /// <summary>The single most important action for today.</summary>
     [JsonPropertyName("topAction")]
     public string TopAction { get; init; } = "";
 

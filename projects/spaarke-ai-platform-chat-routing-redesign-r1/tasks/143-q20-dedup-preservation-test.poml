@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="143" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Q20 binding test — CapabilityRouter dedup semantics preserved through new dispatcher</title>
+    <phase>7: WP4 Retirement + Project Closeout</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>142</dependencies>
+    <blocks>144,145,146,147,148,150</blocks>
+    <tags>testing, regression, binding-invariant</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Asserts a binding architectural invariant (R6 FR-30 dedup); STANDARD per task-execute Step 0.5</rigor-reason>
+    <parallel-group>7-D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after task 142 — verifies the WP4 cutover (141 + 142) preserved dedup invariant before parallel verifications (144, 145) run</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per spec FR-24 + Q20 owner directive: author a binding regression test verifying that R6 FR-30 CapabilityRouter dedup semantics are preserved through the new dispatcher path after WP4 cutover. The dedup invariant: chat + workspace SUM-CHAT siblings (`summarize-document-for-chat` + `summarize-document-for-workspace`) dedup to ONE render — one Workspace tab + one chat ack — not two independent renders. Task 141's tool-filtering replacement must structurally preserve this; task 143 verifies.
+  </prompt>
+
+  <role>SPAARKE BFF integration test engineer. Knows the R6 FR-30 dedup behavior.</role>
+
+  <goal>
+    Integration test exists asserting: when user invokes the SUM-CHAT capability (chat + workspace siblings), the new dispatcher routes to ONE playbook + emits ONE Workspace tab open + ONE chat ack — NOT two. Test fails if WP4 cutover regressed dedup. Marked binding-invariant.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-24 + Q20 + design §WP4 phased removal "preserve dedup semantics through the new dispatcher". The R6 FR-30 dedup test suite passed under the old CapabilityRouter + PlaybookDispatcher dual-layer architecture. After task 141 deletes CapabilityRouter, dedup must remain structurally enforced through `PlaybookDispatcher` + the new tool-filtering replacement + `DispatchResult.NodeDestination` (from WP3 Phase 3). This test asserts the invariant.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOutputHandler.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-24 acceptance — existing dedup test suite remains green; one Workspace tab + one chat ack for `summarize-document-for-workspace` invocation.</constraint>
+    <constraint source="owner-clarification">Q20 — preserve CapabilityRouter dedup semantics in new PlaybookDispatcher path.</constraint>
+    <constraint source="ADR-015">Test fixtures tier-1 safe — synthetic documents only.</constraint>
+    <constraint source="project">Test marked with binding-invariant trait — fails loudly on regression.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate any existing R6 FR-30 dedup tests in `tests/integration/Sprk.Bff.Api.IntegrationTests/` (likely under `Services/Ai/Capabilities/` or `Services/Ai/Routing/`). Catalog and decide: migrate to new dispatcher fixtures vs replace.</step>
+    <step order="2">Author new integration test "SumChatSiblings_DedupToOneRender": (a) invoke chat-Summarize with `summarize-document-for-workspace`; (b) assert exactly ONE Workspace tab open event + ONE chat ack message; (c) assert PlaybookDispatcher selected one playbook (not two).</step>
+    <step order="3">Add a deliberate negative-control sub-test: a turn that DOES produce two distinct renders (e.g., a multi-node playbook with both Workspace + Chat outputs) — verify that case is NOT incorrectly deduped.</step>
+    <step order="4">Mark with binding-invariant trait / category.</step>
+    <step order="5">Run `dotnet test`. Must pass.</step>
+    <step order="6">Sanity-check: temporarily disable dedup in dispatcher; verify test FAILS (confirms the gate has teeth). Restore.</step>
+    <step order="7">Update TASK-INDEX.md: task 143 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Existing dedup tests + PlaybookDispatcher.cs</tool>
+    <tool name="Write">New integration test</tool>
+    <tool name="Bash">dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/Routing/SumChatDedupPreservationTests.cs (or equivalent path)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test asserts exactly ONE Workspace tab + ONE chat ack for SUM-CHAT sibling invocation.</criterion>
+    <criterion testable="true">Negative-control sub-test passes (legitimate multi-render case NOT deduped).</criterion>
+    <criterion testable="true">Test passes against current (post-task-141, post-task-142) state.</criterion>
+    <criterion testable="true">Test marked binding-invariant.</criterion>
+    <criterion testable="true">Sanity-check confirms test FAILS if dedup artificially disabled.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The R6 FR-30 dedup invariant is sacred — it's what users see (no duplicate tab + chat ack stutter). This test is the safety net for any future dispatcher refactor.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

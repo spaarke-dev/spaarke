@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Subpath exports contract (`./components`, `./widgets`, `./hooks`, `./services`, `./types`) (FR-10)</title>
+    <phase>P2: Pattern D Hoist</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>017, 018, 020, 063</blocks>
+    <tags>frontend, refactoring, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Locks public API surface of new package; consumers depend on these exports</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 015; defines API surface; gate to Group B (017, 018) and P2a start (020)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Finalize subpath exports map in `@spaarke/daily-briefing-components/package.json` per FR-10. Exports: `./components`, `./widgets`, `./hooks`, `./services`, `./types`. Verify all five subpaths resolve from a consumer import. Also export a default barrel from `./` for legacy single-import consumers.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in `package.json` exports map and Pattern D subpath conventions.</role>
+
+  <goal>Subpath exports map matches Calendar + Smart Todo precedent; all five subpaths resolve from a test consumer.</goal>
+
+  <context>
+    <background>
+      Per FR-10: subpath contract per `@spaarke/events-components` precedent. Consumers (DailyBriefing solution, LegalWorkspace shim, SpaarkeAi shim) import from named subpaths.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/package.json</file>
+      <file>src/client/shared/Spaarke.Events.Components/package.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Subpath exports per Pattern D convention.</constraint>
+    <constraint source="project">Five subpaths required (FR-10); a default barrel export from `./` is allowed for ergonomics.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.Events.Components/package.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Compare current `package.json` exports map against `@spaarke/events-components` (the canonical reference).</step>
+    <step order="2">Add/update exports map to include `./components`, `./widgets`, `./hooks`, `./services`, `./types` (+ default `./`).</step>
+    <step order="3">Verify each subpath has the corresponding `src/{name}/index.ts` populated.</step>
+    <step order="4">Test from a consumer: `import { DailyBriefingApp } from '@spaarke/daily-briefing-components/components'` resolves; same for each subpath.</step>
+    <step order="5">Run `npm run build` on new package + consumers; verify green.</step>
+    <step order="6">Update TASK-INDEX.md: change task 016 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript packages.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/package.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Exports map includes `./components`, `./widgets`, `./hooks`, `./services`, `./types`.</criterion>
+    <criterion testable="true">Each subpath resolves from a consumer import (build verifies).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If the new package's `./widgets` subpath is empty (because all widgets are exported from `./components`), still include it — Pattern D convention is to expose all five subpaths even if one is a passthrough.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

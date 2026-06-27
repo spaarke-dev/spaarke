@@ -1,0 +1,95 @@
+<task id="071" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-26 — `getAgentVisibleState(): SerializedWidgetState` TypeScript interface</title>
+    <status>completed</status>
+    <outcome-note>2026-06-09: Pillar 9 visibility contract shipped to `@spaarke/ai-widgets`. SerializedWidgetState 4-variant discriminated union (Summary/DocumentViewer/Dashboard/Table) reuses WorkspaceTabWidgetType from task 050 (cross-task alignment guard `_DiscriminatorAlignment` enforces drift detection at compile time). GetAgentVisibleState returns union | null (null = privacy default per ADR-015). Type-check 0 errors. Consumer-smoke: 3 anticipatory JSDoc references in tasks 050/051/052 — no migration needed; tasks 072/073/074 are the actual consumers. Dispatched in parallel with Phase B walkthrough; 053 is logical-not-actual dependency (053 is C# in Sprk.Bff.Api, 071 is TypeScript in @spaarke/ai-widgets — zero file overlap). Evidence: `notes/task-071-visibility-contract-evidence.md`.</outcome-note>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>Phase C — Widget Visibility Contract (Pillar 9)</phase>
+    <wave>C-G2 (parallel after 6a)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>053 (workspace state wired)</dependencies>
+    <tags>frontend, typescript, ai-widgets</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Interface consumed by widget registry + per-widget implementations + prompt builder; contract-defining work.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Define `getAgentVisibleState(): SerializedWidgetState` TypeScript interface in
+    `@spaarke/ai-widgets/src/types/`. Returns compact, schema-typed representation of
+    widget state for inclusion in agent prompts. Nullable: widget can opt out (returns
+    `null` or method absent). `SerializedWidgetState` itself is a discriminated union
+    keyed by `widgetType` so per-widget implementations from task 073 can typecheck.
+    JSDoc cites FR-55 + ADR-015 (widgets choose what to expose; privacy default off).
+  </prompt>
+
+  <role>
+    Senior TypeScript engineer with familiarity with the canonical `WorkspaceTab`
+    interface from task 050 + discriminated-union typing patterns.
+  </role>
+
+  <goal>
+    Interface defined + exported; downstream task 072 (registry extension) + 073
+    (per-widget implementations) + 074 (prompt builder) can import + use.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="dashboard-widget-model">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    <file purpose="workspace-tab">src/client/shared/Spaarke.AI.Widgets/src/types/WorkspaceTab.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared lib `@spaarke/ai-widgets`.</constraint>
+    <constraint source="ADR-015">Privacy default — widgets choose what to expose; no automatic widget-state exposure to LLM.</constraint>
+    <constraint source="spec FR-55">Returns compact, schema-typed representation; nullable (opt out supported).</constraint>
+    <constraint source="project R6 Pillar 9">Contract gates 072/073/074; drift here breaks all three.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/widget-visibility</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — Contract defines Pillar 9; consumed by 3 downstream tasks."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 053 complete.</step>
+    <step order="2" name="Gather Resources">Read existing types folder + dashboard-widget-model.</step>
+    <step order="3" name="Author Interface">`SerializedWidgetState` discriminated union by `widgetType` (Summary, DocumentViewer, Dashboard, Table). Each variant typed compact.</step>
+    <step order="4" name="Define Function Signature">`getAgentVisibleState(): SerializedWidgetState | null`.</step>
+    <step order="5" name="JSDoc + Export">Cite FR-55 + ADR-015; export from barrel.</step>
+    <step order="6" name="Type-Check">tsc --noEmit.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 071 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">tsc + lint</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/types/SerializedWidgetState.ts (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/index.ts (export update)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SerializedWidgetState` discriminated union with 4 variants (Summary/DocumentViewer/Dashboard/Table).</criterion>
+    <criterion testable="true">`getAgentVisibleState` signature returns union or null.</criterion>
+    <criterion testable="true">Interface exported from package barrel.</criterion>
+    <criterion testable="true">JSDoc cites FR-55 + ADR-015 privacy default.</criterion>
+    <criterion testable="true">tsc --noEmit passes.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

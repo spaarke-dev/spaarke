@@ -62,12 +62,17 @@ public sealed class PlaybookIndexingBackgroundService : BackgroundService
             var playbookService = scope.ServiceProvider.GetRequiredService<IPlaybookService>();
             var searchIndexClient = scope.ServiceProvider.GetRequiredService<SearchIndexClient>();
             var openAiClient = scope.ServiceProvider.GetRequiredService<IOpenAiClient>();
+            // chat-routing-redesign-r1 FR-13 (task 034 Gap 5 closure): inject the canonical
+            // hash calculator so PlaybookIndexingService can persist sprk_indexhash at
+            // successful index completion.
+            var hashCalculator = scope.ServiceProvider.GetRequiredService<IPlaybookEmbeddingHashCalculator>();
             var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
 
             var indexingService = new PlaybookIndexingService(
                 playbookService,
                 searchIndexClient,
                 openAiClient,
+                hashCalculator,
                 loggerFactory);
 
             // Expose to static accessor for endpoint access

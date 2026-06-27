@@ -1,0 +1,112 @@
+<task id="015" project="email-communication-solution-r3">
+  <metadata>
+    <title>LocalAttachmentSource — file input picker for local-disk uploads</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>020</blocks>
+    <tags>react, frontend, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Source-specific picker — small surface area; no architecture decisions; follows the framework contract established in 014. STANDARD covers it.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-07</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build `LocalAttachmentSource.tsx` at `subcomponents/sources/LocalAttachmentSource.tsx`. Wraps a hidden `<input type='file' multiple />` and a visible Fluent `<Button>` that triggers the file dialog. Selected files become `IAttachment` records with `source='local'` and `localFile: File`.
+
+    File picker respects the MIME allow-list defined in the upcoming `docs/standards/COMMUNICATION-ATTACHMENT-POLICY.md` (Wave 6 task 088). For Wave 1, accept all MIME types — Wave 6 wires the allow-list in. Document the TODO clearly with a comment referencing task 088.
+
+    Local files are NOT uploaded at this step — they're held client-side until `engine.send()`, which posts them as multipart form data alongside the BFF `/api/communications/send` request. (Server then uploads to SPE + captures `driveItemId` per existing R2 path.)
+  </prompt>
+
+  <role>
+    Frontend developer comfortable with file input + Fluent v9 Button + multi-file selection patterns.
+  </role>
+
+  <goal>
+    `LocalAttachmentSource.tsx` compiles + lint-clean. Clicking the Add button opens the OS file picker; selecting files adds them to the AttachmentList via `onAdd(IAttachment[])` callback. No MIME filter applied (Wave 6 wires policy).
+  </goal>
+
+  <context>
+    <background>
+      Per FR-07, local is one of 4 sources. Simplest of the four — just a file input wrapper.
+
+      MIME allow-list comes in Wave 6 task 088 (`COMMUNICATION-ATTACHMENT-POLICY.md` analog of `CHAT-ATTACHMENT-POLICY.md`). For Wave 1, accept-all is acceptable since server-side enforcement still applies (per NFR-04 server caps).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/sources/LocalAttachmentSource.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.tsx (UPDATE — wire local picker to Add button)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (UPDATE — export LocalAttachmentSource)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only — `Button`</constraint>
+    <constraint source="ADR-033">One canonical local picker — replaces ad-hoc `&lt;input type='file'&gt;` usages in other surfaces (e.g., DocumentEmailWizard)</constraint>
+    <constraint source="NFR-04">Cap enforcement happens in `AttachmentList` framework — this picker just emits new `IAttachment[]`</constraint>
+    <constraint source="project">No MIME filtering yet — Wave 6 task 088 wires `COMMUNICATION-ATTACHMENT-POLICY.md`. Add a TODO comment with the reference.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.types.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author `LocalAttachmentSource.tsx`:
+      - Props: `{ onAdd: (attachments: IAttachment[]) =&gt; void; disabled?: boolean }`
+      - Hidden file input + visible Button labeled "Add from device"
+      - onChange handler: convert `FileList` to `IAttachment[]` with `id: crypto.randomUUID()`, `name: file.name`, `sizeBytes: file.size`, `mimeType: file.type`, `source: 'local'`, `localFile: file`
+      - Reset input value after select (so same file can be added twice if needed)
+      - TODO comment: `// Wave 6 task 088 will add MIME allow-list per COMMUNICATION-ATTACHMENT-POLICY.md`</step>
+    <step order="2">Wire into AttachmentList — when `attachmentSources` includes `{ kind: 'local' }`, render LocalAttachmentSource's button.</step>
+    <step order="3">Update `EmailComposer/index.ts` — export `LocalAttachmentSource`.</step>
+    <step order="4">Smoke test: click button, select 2 files, verify they appear in AttachmentList with correct sizes + source badge "Local".</step>
+    <step order="5">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="6">Update `TASK-INDEX.md`: 015 ✅.</step>
+    <step order="7">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="write">LocalAttachmentSource.tsx</tool>
+    <tool name="edit">AttachmentList.tsx wire-in, index.ts barrel</tool>
+    <tool name="bash">npm run build + lint</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/subcomponents/sources/LocalAttachmentSource.tsx (NEW)</output>
+    <output type="file">EmailComposer/subcomponents/AttachmentList.tsx (UPDATED — local picker wired)</output>
+    <output type="file">EmailComposer/index.ts (UPDATED)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`LocalAttachmentSource.tsx` compiles + lint-clean.</criterion>
+    <criterion testable="true">Button click opens OS file picker; selected files appear in AttachmentList with source badge "Local".</criterion>
+    <criterion testable="true">`IAttachment.localFile` populated with the `File` object.</criterion>
+    <criterion testable="true">TODO comment references task 088 / `COMMUNICATION-ATTACHMENT-POLICY.md`.</criterion>
+    <criterion testable="true">Disabled when caps reached (controlled by parent AttachmentList).</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Local source is the simplest of the 4. The interesting question is upload-at-send-time vs upload-on-add. We choose upload-at-send-time because (a) cancel-after-pick is a common flow, (b) avoids orphan uploads to SPE, (c) matches the existing R2 server-side pattern.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      STANDARD rigor. Step 9.5 skipped.
+    </protocol>
+  </execution>
+</task>

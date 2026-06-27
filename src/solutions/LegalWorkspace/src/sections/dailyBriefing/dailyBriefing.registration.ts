@@ -1,57 +1,107 @@
 /**
- * dailyBriefing.registration.ts — LegalWorkspace re-export shim.
+ * dailyBriefing.registration.ts — LegalWorkspace section-registration thin shim.
  *
- * Hoisted to `@spaarke/ui-components` in task 069 as a FACTORY
- * (`createDailyBriefingRegistration`). This shim preserves the pre-069
- * STATIC export shape `dailyBriefingRegistration: SectionRegistration` so
- * `sectionRegistry.ts` and `sections/index.ts` continue working unchanged.
+ * Pattern D dual-use per Calendar (`calendar.registration.ts`, task 115) and
+ * Smart Todo precedent (ADR-012). This shim delegates to the shared
+ * `createDailyBriefingRegistration` factory in `@spaarke/ui-components` and
+ * closes over LegalWorkspace-local `authenticatedFetch` + `trackEvent`
+ * telemetry — preserving FR-25 / NFR-10.
  *
- * The shim uses the LegalWorkspace-LOCAL `DailyBriefingSection` shim
- * (which already closes over local `authenticatedFetch` + `trackEvent`),
- * so no auth deps are passed to the factory pattern — the local component
- * wrapper handles all wiring identically to the pre-069 implementation.
- * This preserves FR-25 / NFR-10 (standalone byte-identical render).
+ * # History of the customization seam
  *
- * See task 067/069 hoist precedent and:
- *   - `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/dailyBriefing.registration.ts`
- *   - ADR-012 (shared components).
+ * Pre-R2: STATIC `SectionRegistration` const that lost the factory's
+ *   `loadNotificationContext` option entirely (see `notes/task-002-blocker.md`).
+ *
+ * Pre-Option D (R2 task 002 / Wave 8): module-mutable slot pattern. The default
+ *   registration wrapped a late-bound loader that read from a module-level
+ *   `_globalNotificationLoader`; SpaarkeAi `main.tsx` mutated the slot at
+ *   bootstrap via `setLegalWorkspaceDailyBriefingNotificationLoader`. That was
+ *   a band-aid that did not scale beyond one widget.
+ *
+ * Post-Option D (R2, 2026-06-18): the slot is gone. Per-host customization
+ *   happens via
+ *     `createLegalWorkspaceSectionRegistry({ dailyBriefing: { loadNotificationContext } })`
+ *   in `sectionRegistry.ts` — the registry-as-composition factory pattern. See
+ *   `projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md`.
+ *   This file now exposes only the per-widget factory + a no-loader default
+ *   registration for standalone consumers.
+ *
+ * Standards: ADR-012 (shared components), ADR-021 (Fluent v9 tokens),
+ *            ADR-022 (React 19), ADR-028 (function-based auth contract).
  */
 
-import * as React from "react";
-import { SparkleRegular } from "@fluentui/react-icons";
-import type {
-  SectionRegistration,
-  SectionFactoryContext,
-  ContentSectionConfig,
-} from "@spaarke/ui-components";
-import { DailyBriefingSection } from "./DailyBriefingSection";
+import {
+  createDailyBriefingRegistration,
+  TELEMETRY_EVENT_DAILY_BRIEFING_429,
+} from "@spaarke/daily-briefing-components/widgets";
+import type { NarrateRequest } from "@spaarke/daily-briefing-components/widgets";
+import type { SectionRegistration } from "@spaarke/ui-components";
+import { authenticatedFetch, getTenantId } from "../../services/authInit";
+import { trackEvent } from "../../services/telemetry";
+
+// R2.1 hotfix (2026-06-19): factory moved from @spaarke/ui-components into
+// @spaarke/daily-briefing-components/widgets so it mounts the full DailyBriefingApp
+// (TL;DR + Activity Notes + per-item actions) instead of the old
+// narrative-only DailyBriefingSection. The options surface is preserved
+// verbatim for backward compat with this shim and the Option D registry
+// chain; they are no-ops in the new factory because DailyBriefingApp
+// self-resolves Xrm + webApi and fetches via useBriefingNotifications.
+// SectionRegistration type itself still comes from @spaarke/ui-components.
 
 /**
- * Daily Briefing section registration (LegalWorkspace shim).
+ * Options for `createLegalWorkspaceDailyBriefingRegistration`.
  *
- * Mirrors the pre-069 static const shape exactly. The factory delegates
- * rendering to the local `DailyBriefingSection` shim, which closes over
- * LegalWorkspace-local `authenticatedFetch` + tenant ID resolver + local
- * `trackEvent` telemetry — preserving the standalone behavior byte-for-byte.
+ * `loadNotificationContext` is the P1 seam (FR-01 / FR-02): supplied by
+ * SpaarkeAi (via `createLegalWorkspaceSectionRegistry`) to flow real
+ * notification context into the BFF `/narrate` envelope so embedded Daily
+ * Briefing renders real bullets on cold load. Omitted by standalone
+ * LegalWorkspace → empty-payload contract preserved.
  */
-export const dailyBriefingRegistration: SectionRegistration = {
-  id: "daily-briefing",
-  label: "Daily Briefing",
-  description: "AI-curated highlights from your day",
-  icon: SparkleRegular,
-  category: "ai",
-  // "medium" per FR-15 — mapped to 325px (matches Latest Updates sibling)
-  defaultHeight: "325px",
+export interface CreateLegalWorkspaceDailyBriefingRegistrationOptions {
+  loadNotificationContext?: () => Promise<NarrateRequest | null>;
+}
 
-  factory(_context: SectionFactoryContext): ContentSectionConfig {
-    return {
-      id: "daily-briefing",
-      type: "content",
-      title: "Daily Briefing",
-      style: {},
-      renderContent: () => React.createElement(DailyBriefingSection),
-    };
-  },
-};
+/** Route 429 telemetry through LegalWorkspace's App Insights helper. */
+function routeRateLimitTelemetry(properties: Record<string, unknown>): void {
+  const stringProps: Record<string, string> = {};
+  for (const [k, v] of Object.entries(properties)) {
+    stringProps[k] = String(v);
+  }
+  trackEvent(TELEMETRY_EVENT_DAILY_BRIEFING_429, stringProps);
+}
+
+/**
+ * Create a Daily Briefing `SectionRegistration` bound to LegalWorkspace-local
+ * auth + telemetry, with optional consumer-supplied notification loader.
+ */
+export function createLegalWorkspaceDailyBriefingRegistration(
+  options: CreateLegalWorkspaceDailyBriefingRegistrationOptions = {},
+): SectionRegistration {
+  return createDailyBriefingRegistration({
+    authenticatedFetch,
+    // tenantId resolved lazily inside the shared `useDailyBriefing` hook
+    // (anonymous cache-key fallback when undefined — acceptable per ADR-014).
+    tenantId: undefined,
+    onRateLimitError: routeRateLimitTelemetry,
+    loadNotificationContext: options.loadNotificationContext,
+  });
+}
+
+/**
+ * Default LegalWorkspace Daily Briefing registration: no loader supplied →
+ * the standalone empty-payload contract is preserved (BFF `/narrate` returns
+ * empty bullets → empty-state UI). FR-25 / NFR-10.
+ *
+ * Embedding consumers (SpaarkeAi) do NOT use this const directly — they build
+ * a custom registry via
+ * `createLegalWorkspaceSectionRegistry({ dailyBriefing: { loadNotificationContext } })`
+ * which calls `createLegalWorkspaceDailyBriefingRegistration(options.dailyBriefing)`
+ * with their loader. See `sectionRegistry.ts` and Option D design rationale.
+ */
+export const dailyBriefingRegistration: SectionRegistration =
+  createLegalWorkspaceDailyBriefingRegistration();
 
 export default dailyBriefingRegistration;
+
+// Re-export `getTenantId` for downstream consumers / tests.
+export { getTenantId };

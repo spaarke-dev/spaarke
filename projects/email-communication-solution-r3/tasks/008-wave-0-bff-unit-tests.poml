@@ -1,0 +1,157 @@
+<task id="008" project="email-communication-solution-r3">
+  <metadata>
+    <title>Wave 0 — Unit tests for DTO mapping + `Internet-Message-Id` capture + `SendCommunicationError`</title>
+    <phase>Wave 0 — Foundations + Non-Breaking BFF</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>002, 003, 005</dependencies>
+    <blocks>007</blocks>
+    <tags>testing, unit-test, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test authoring task — STANDARD per CLAUDE.md rigor table. Closes the bff-extensions.md test-update obligation for tasks 002 + 003 + 005.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-09, FR-20, FR-21, FR-22</fr-refs>
+  </metadata>
+
+  <prompt>
+    Add unit tests covering the three Wave 0 code-changing tasks (002, 003, 005). Specifically:
+
+    (a) **DTO mapping (task 002)** — `SendCommunicationRequestMappingTests`:
+    - Only `AttachmentDocumentIds` set (alias path): canonical list populated; deprecation warning logged.
+    - Only `AttachmentDriveItemIds` set (canonical path): canonical list populated; no warning.
+    - Both set: canonical wins; structured warning logged.
+    - Neither set: canonical list empty / null per design; no warning.
+
+    (b) **`Internet-Message-Id` capture (task 003)** — `CommunicationServiceMessageIdTests`:
+    - Success path: Graph `SendMail` succeeds → resolver returns an id → `sprk_internetmessageid` is stamped on the `sprk_communication` record.
+    - Retrieval failure path: resolver returns null → warning logged → send does NOT throw → `sprk_communication` record exists but `sprk_internetmessageid` is null.
+    - Retrieval retry: resolver throws once → single backoff retry → retry succeeds → field stamped.
+
+    (c) **Client error class (task 005)** — `sendCommunication.error.test.ts` (Jest):
+    - Non-2xx response with ProblemDetails body → `SendCommunicationError` thrown with `status`, `code`, `detail`, `correlationId` populated.
+    - Non-2xx response with non-JSON body → `SendCommunicationError` thrown with `status` populated; other fields undefined.
+    - 2xx response → no throw; resolves normally.
+    - Deprecation warning fires ONCE per session when `attachmentDocumentIds` is used.
+
+    Per CLAUDE.md §10 bullet 6 + spec.md §5.5, this task closes the bff-extensions.md test-update obligation for tasks 002 + 003.
+  </prompt>
+
+  <role>
+    Spaarke test engineer. Authoritative on `tests/unit/Sprk.Bff.Api.Tests/` (xUnit + Moq + FluentAssertions per existing convention) and `@spaarke/ui-components` Jest setup. Familiar with `.claude/constraints/testing.md` patterns + `.claude/patterns/testing/unit-test-structure.md`.
+  </role>
+
+  <goal>
+    Three test files exist and pass:
+    - `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/SendCommunicationRequestMappingTests.cs`
+    - `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceMessageIdTests.cs`
+    - `src/client/shared/Spaarke.UI.Components/src/services/__tests__/sendCommunication.error.test.ts`
+
+    All three are runnable via `dotnet test` (first two) and `npm test` (third). Together they cover every FR-09 / FR-20 / FR-21 / FR-22 behavior implemented in tasks 002 / 003 / 005. The bff-extensions.md test-update obligation is closed for Wave 0 code-changing tasks.
+  </goal>
+
+  <context>
+    <background>
+      Per `.claude/constraints/bff-extensions.md` §F (Test update obligation, binding per FR-22 / D-05): PRs modifying `src/server/api/Sprk.Bff.Api/Services/` MUST add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`. Tasks 002 + 003 deferred test authoring to this task per parallel-group ordering. This task closes that obligation.
+
+      Per spec NFR-06: client send-email paths surface errors as `SendCommunicationError`. The Jest tests verify the contract at the typed-wrapper layer.
+
+      Empirical state of test infrastructure:
+      - `tests/unit/Sprk.Bff.Api.Tests/` exists; uses xUnit + Moq + FluentAssertions.
+      - `src/client/shared/Spaarke.UI.Components/` has Jest setup (per existing component tests).
+    </background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/__tests__/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs (read; tested in 008.a)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (read; tested in 008.b)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (read; tested in 008.c)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Per bff-extensions.md §F + CLAUDE.md §10 bullet 6: tests are MANDATORY for `Services/` changes.</constraint>
+    <constraint source="project">Per §F.2 (Fixture-Config-FIRST): if a test is Skip'd suspecting DI issue, FIRST inspect fixture config / claims / mocks for non-contract values per `docs/procedures/test-fixture-contracts.md`. Do not Skip tests in this task — author them functioning.</constraint>
+    <constraint source="project">Tests MUST use existing project conventions (xUnit + Moq + FluentAssertions for C#; Jest for TS). Do not introduce a new test framework.</constraint>
+    <constraint source="project">Mocks for Graph client + Dataverse client per existing test infrastructure. Do NOT make live calls.</constraint>
+    <constraint source="ADR-019">ProblemDetails parsing tests confirm the canonical shape; fallback path tested for non-JSON.</constraint>
+    <constraint source="ADR-033">The new ADR (task 001) codifies the canonical pattern. Confirm this task aligns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>docs/procedures/test-fixture-contracts.md</file>
+    </files>
+    <patterns>
+      <pattern name="xUnit + Moq + FluentAssertions" location=".claude/patterns/testing/unit-test-structure.md">
+        Arrange / Act / Assert; one logical assertion per test; descriptive test names (`MethodName_Condition_ExpectedOutcome`); mock external services via Moq; use FluentAssertions for readable expectations.
+      </pattern>
+      <pattern name="Jest test layout" location="src/client/shared/Spaarke.UI.Components/src/services/__tests__/">
+        `*.test.ts` co-located in `__tests__/`; mocks via `jest.fn()` for injected dependencies (e.g., `authenticatedFetch`); `describe` / `it` structure.
+      </pattern>
+      <pattern name="ProblemDetails JSON shape" location=".claude/adr/ADR-019-problemdetails-error-responses.md">
+        `{ type, title, status, detail, instance | traceId, correlationId?, code? }`. Test cases exercise both populated and partial shapes.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `.claude/patterns/testing/unit-test-structure.md` for the canonical xUnit pattern.</step>
+    <step order="2">Read existing tests under `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/` (if any) to match the project's mocking + DI fixture style.</step>
+    <step order="3">Author `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/SendCommunicationRequestMappingTests.cs`. Test cases: (a) `AttachmentDocumentIds_Only_NormalizesToCanonical_LogsDeprecationWarning`; (b) `AttachmentDriveItemIds_Only_NormalizesToCanonical_NoWarning`; (c) `BothFieldsSet_CanonicalWins_LogsBothSetWarning`; (d) `NeitherFieldSet_CanonicalEmpty_NoWarning`. Use `ILogger&lt;CommunicationService&gt;` mock to assert warning logs. Use FluentAssertions for the canonical-list content.</step>
+    <step order="4">Author `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceMessageIdTests.cs`. Test cases: (a) `SendAsync_ResolverReturnsId_StampsField`; (b) `SendAsync_ResolverReturnsNull_LogsWarning_DoesNotThrow_FieldNull`; (c) `SendAsync_ResolverThrowsThenSucceeds_RetriesOnce_StampsField`. Mock `IGraphMessageIdResolver` (the helper from task 003). Mock Dataverse client to capture the update payload.</step>
+    <step order="5">Author `src/client/shared/Spaarke.UI.Components/src/services/__tests__/sendCommunication.error.test.ts`. Test cases: (a) `throws SendCommunicationError on 400 with ProblemDetails body — all fields populated`; (b) `throws SendCommunicationError on 500 with non-JSON body — only status populated`; (c) `resolves normally on 2xx`; (d) `logs deprecation warning exactly once across multiple calls when attachmentDocumentIds used`. Use `jest.fn()` to mock `authenticatedFetch` returning a fabricated `Response`.</step>
+    <step order="6">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Communication"` — confirm all new + existing Communication tests pass.</step>
+    <step order="7">Run `npm test -- --testPathPattern=sendCommunication.error` from `src/client/shared/Spaarke.UI.Components/` — confirm new Jest test passes.</step>
+    <step order="8">Confirm overall test runs are clean: `dotnet test` (root) + `npm test` (shared lib).</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark task 008 ✅ completed; confirm Wave 0 test obligation closed (no other tasks blocked by this).</step>
+    <step order="10">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect existing test conventions</tool>
+    <tool name="write">Author 3 new test files</tool>
+    <tool name="bash">dotnet test, npm test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/SendCommunicationRequestMappingTests.cs (NEW)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceMessageIdTests.cs (NEW)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/__tests__/sendCommunication.error.test.ts (NEW)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SendCommunicationRequestMappingTests` covers all 4 mapping cases (alias only, canonical only, both, neither).</criterion>
+    <criterion testable="true">`CommunicationServiceMessageIdTests` covers success, retrieval failure, and single-retry paths.</criterion>
+    <criterion testable="true">`sendCommunication.error.test.ts` covers ProblemDetails parse, non-JSON fallback, 2xx normal resolve, and one-shot deprecation warning.</criterion>
+    <criterion testable="true">`dotnet test` passes (no Skip'd tests in the new suite per §F.2).</criterion>
+    <criterion testable="true">`npm test` passes for the new Jest file.</criterion>
+    <criterion testable="true">No new test fixtures introduced that contradict existing contract per `docs/procedures/test-fixture-contracts.md`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task runs in parallel-group B (with task 006). Both are documentation/test work that does not share files with each other or with task 007 (deploy).
+
+    Per task brief: task 008 "blocks 007" — but in practice, task 007 (deploy) does NOT functionally depend on task 008 (unit tests). The block arrow expresses a process discipline: PRs to dev should not deploy untested code. Practically, task 008 and task 007 run in parallel (007 in sequential-group, 008 in parallel-group B) — but Wave 0 wrap-up does not declare Wave 0 done until BOTH complete.
+
+    Per CLAUDE.md §10 bullet 6 + bff-extensions.md §F: this task closes the test-update obligation for Wave 0. Subsequent Wave 0 + Wave 1+ tasks must verify their own test obligation independently.
+
+    If any test produces Skip'd behavior due to fixture/DI mismatch (per §F.2 anti-pattern), STOP and inspect fixture config FIRST — do not author a workaround. Empirical-Reproduction-FIRST per §F.3 if a known ledger entry seems to apply.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>` — Step 9.5 quality gates are SKIPPED for STANDARD. Per bff-extensions.md §F.2 / §F.3: do NOT Skip tests; if a test seems intractable, inspect fixture config first then escalate to human rather than author a workaround.
+    </protocol>
+  </execution>
+</task>

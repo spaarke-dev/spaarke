@@ -167,7 +167,7 @@ type BuilderTab = 'playbook' | 'custom';
 // ---------------------------------------------------------------------------
 
 export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
-  entityType,
+  entityType: _entityType,
   entityId,
   documentIds,
   allowedPlaybookIds,
@@ -241,16 +241,19 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
   const [successMessage, setSuccessMessage] = React.useState<string | null>(null);
 
   // --- Build a webApi-compatible adapter from IDataService (for playbookService reads) ---
-  const webApiAdapter = React.useMemo(() => ({
-    retrieveMultipleRecords: (entityName: string, options?: string) =>
-      dataService.retrieveMultipleRecords(entityName, options),
-    retrieveRecord: (entityName: string, id: string, options?: string) =>
-      dataService.retrieveRecord(entityName, id, options),
-    createRecord: async (entityName: string, data: Record<string, unknown>) => {
-      const id = await dataService.createRecord(entityName, data);
-      return { id };
-    },
-  }), [dataService]);
+  const webApiAdapter = React.useMemo(
+    () => ({
+      retrieveMultipleRecords: (entityName: string, options?: string) =>
+        dataService.retrieveMultipleRecords(entityName, options),
+      retrieveRecord: (entityName: string, id: string, options?: string) =>
+        dataService.retrieveRecord(entityName, id, options),
+      createRecord: async (entityName: string, data: Record<string, unknown>) => {
+        const id = await dataService.createRecord(entityName, data);
+        return { id };
+      },
+    }),
+    [dataService]
+  );
 
   // --- Load data on mount ---
   React.useEffect(() => {
@@ -284,12 +287,19 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
             match = filteredPlaybooks.find(p => p.id === mappedPlaybookId);
           }
 
-          // Fallback: fuzzy name match
+          // Fallback: fuzzy name match.
+          //
+          // Defensive null guard (FR-59, task 110a): `p.name` is typed as `string`
+          // in `IPlaybook` but is populated from a nullable Dataverse column
+          // (`sprk_analysisplaybook.sprk_name`) via an unsafe cast in
+          // `playbookService.loadPlaybooks`. A single record with a null/missing
+          // `sprk_name` was crashing the Library modal with
+          // `Cannot read properties of null (reading 'toLowerCase')`. Guard each
+          // input independently so a single bad record does not abort the match
+          // loop for the remaining records.
           if (!match) {
-            const intentLower = intent.toLowerCase();
-            match = filteredPlaybooks.find(
-              p => p.name.toLowerCase().includes(intentLower)
-            );
+            const intentLower = (intent ?? '').toLowerCase();
+            match = filteredPlaybooks.find(p => (p.name ?? '').toLowerCase().includes(intentLower));
           }
 
           if (match) {
@@ -311,28 +321,30 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
         if (!cancelled) setIsLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [webApiAdapter, allowedPlaybookIds, mode, intent]);
 
   // --- Playbook selection handler ---
-  const handlePlaybookSelect = React.useCallback(async (playbook: IPlaybook) => {
-    setSelectedPlaybook(playbook);
-    try {
-      const scopes = await loadPlaybookScopes(webApiAdapter, playbook.id);
-      setPlaybookScopes(scopes);
-    } catch (err) {
-      console.error('[PlaybookLibraryShell] Failed to load playbook scopes:', err);
-      setPlaybookScopes(null);
-    }
-  }, [webApiAdapter]);
+  const handlePlaybookSelect = React.useCallback(
+    async (playbook: IPlaybook) => {
+      setSelectedPlaybook(playbook);
+      try {
+        const scopes = await loadPlaybookScopes(webApiAdapter, playbook.id);
+        setPlaybookScopes(scopes);
+      } catch (err) {
+        console.error('[PlaybookLibraryShell] Failed to load playbook scopes:', err);
+        setPlaybookScopes(null);
+      }
+    },
+    [webApiAdapter]
+  );
 
   // --- Tab change handler ---
-  const handleTabSelect = React.useCallback(
-    (_event: unknown, data: { value: unknown }) => {
-      setActiveTab(data.value as BuilderTab);
-    },
-    []
-  );
+  const handleTabSelect = React.useCallback((_event: unknown, data: { value: unknown }) => {
+    setActiveTab(data.value as BuilderTab);
+  }, []);
 
   // --- Intent mode derived flag ---
   const isIntentMode = mode === 'intent' && !!intent && selectedPlaybook !== null && playbookScopes !== null;
@@ -421,7 +433,9 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
       <div className={styles.root}>
         {!embedded && (
           <div className={styles.header}>
-            <Text size={500} weight="semibold">{title}</Text>
+            <Text size={500} weight="semibold">
+              {title}
+            </Text>
           </div>
         )}
         <div className={styles.content}>
@@ -430,7 +444,9 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
           </MessageBar>
         </div>
         <div className={styles.footer}>
-          <Button appearance="primary" onClick={handleCancel}>Close</Button>
+          <Button appearance="primary" onClick={handleCancel}>
+            Close
+          </Button>
         </div>
       </div>
     );
@@ -453,7 +469,9 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
       {/* Header */}
       {!embedded && (
         <div className={styles.header}>
-          <Text size={500} weight="semibold">{title}</Text>
+          <Text size={500} weight="semibold">
+            {title}
+          </Text>
           {entityDisplayName && (
             <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
               {entityDisplayName}

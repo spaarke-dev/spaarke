@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="089" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>GetUserPreferencesHandler (T4 read-only) — reads sprk_userpreferences from Dataverse</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4d)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>091</blocks>
+    <tags>bff-api, services, handlers, tool-handler, ai, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'dataverse'; creates new `.cs` handler file; T4 read-only boundary; ADR-013/ADR-015/ADR-033 binding</rigor-reason>
+    <parallel-group>4-H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `GetUserPreferencesHandler` (NEW) at `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GetUserPreferencesHandler.cs` implementing the T4 `get_user_preferences()` tool per architecture §8.1. READ-ONLY: reads from `sprk_userpreferences` Dataverse entity (existing — used by SmartTodo + LegalWorkspace) via `IUserPreferencesService` (architecture §4.4 — verify whether existing service is present; if absent, create a thin read-only service). Returns `{ writingStyle, summaryLength, citationStyle, pinnedPlaybooks[] }`. Implements FR-30 (get_user_preferences row of the 8-tool surface).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat tool-handler authoring + Dataverse `sprk_userpreferences` read patterns.</role>
+
+  <goal>
+    `GetUserPreferencesHandler` lives at `Services/Ai/Handlers/GetUserPreferencesHandler.cs` implementing `IToolHandler`. Reads via `IUserPreferencesService` (existing if SmartTodo registered it; else new at `Services/Ai/Memory/UserPreferencesService.cs`). Returns the §8.1 user-preferences shape verbatim. Returns sensible defaults (`writingStyle: "concise" | summaryLength: "medium" | citationStyle: "inline" | pinnedPlaybooks: []`) on read failure per architecture §9.1 graceful-degradation. Single `ToolResult`; tier-1-safe telemetry; ≤+0.1 MB delta. Unit tests cover hit, defaults-on-failure, ADR-015 telemetry safety.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §3.1 (T4) + §4.4 (UserPreferencesService — verify or create) + §4.3 (existing R6/SmartTodo components reused) + §8.1 schema + §8.2 routing (always-on). T4 is bound by ADR-013 facade — chat code READS via this handler; WRITES go through user-settings UI (out of scope here).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ManagePinnedContextHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/PinnedContextRepository.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">No new endpoint.</constraint>
+    <constraint source="ADR-010">Auto-discovered; `IUserPreferencesService` (existing or new) is registered by task 091.</constraint>
+    <constraint source="ADR-013">T4 is bound by facade — but this handler is READ-ONLY from chat side; the service it consumes (`IUserPreferencesService`) wraps the Dataverse read. NO direct `IDataverseClient` injection into the handler.</constraint>
+    <constraint source="ADR-015">Telemetry payload: handlerName + sessionId + userId (boolean present/absent) + decision (`hit` | `defaults`) + durationMs ONLY. NEVER preference values.</constraint>
+    <constraint source="ADR-029">≤+0.1 MB delta (read-only wrapper).</constraint>
+    <constraint source="ADR-033">SINGLE `ToolResult` return.</constraint>
+    <constraint source="architecture">§3.2 rule 3 — T4 bound by ADR-013 facade; chat reads via `get_user_preferences`; writes go through user-settings UI (out of scope here).</constraint>
+    <constraint source="architecture">§9.1 — graceful degradation on `sprk_userpreferences` read failure: return defaults; log Warning.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §3.1, §4.3, §4.4, §8.1, §9.1.</step>
+    <step order="2">Grep across `src/server/api/Sprk.Bff.Api/` for `UserPreferencesService` to confirm presence; if absent, plan to author a minimal read-only `Services/Ai/Memory/UserPreferencesService.cs` + interface that wraps the Dataverse `sprk_userpreferences` read.</step>
+    <step order="3">Author `Services/Ai/Handlers/GetUserPreferencesHandler.cs` implementing `IToolHandler`. No parameters required.</step>
+    <step order="4">Implement `ExecuteAsync`: call `IUserPreferencesService.GetAsync(tenantId, userId, ct)`; on success map to §8.1 shape; on failure return defaults `{ writingStyle: "concise", summaryLength: "medium", citationStyle: "inline", pinnedPlaybooks: [] }` and log Warning per §9.1.</step>
+    <step order="5">If `IUserPreferencesService` does not exist: create it at `Services/Ai/Memory/UserPreferencesService.cs` + `IUserPreferencesService.cs`. Inject the existing Dataverse read client used by SmartTodo's `sprk_userpreferences` consumers.</step>
+    <step order="6">Add Dataverse seed-row JSON at `infra/dataverse/sprk_analysistool-get-user-preferences-row.json`.</step>
+    <step order="7">Author unit tests: hit, defaults-on-failure, ADR-015 telemetry safety.</step>
+    <step order="8">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="9">Measure BFF publish-size delta; write `notes/handoffs/089-bff-publish-delta.md`.</step>
+    <step order="10">Run code-review + adr-check (Step 9.5).</step>
+    <step order="11">Update TASK-INDEX.md: 089 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Reference handlers + architecture</tool>
+    <tool name="Grep">Locate existing UserPreferencesService</tool>
+    <tool name="Write">Handler + (possibly) service + tests + seed-row JSON</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GetUserPreferencesHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IUserPreferencesService.cs (if not present)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/UserPreferencesService.cs (if not present)</output>
+    <output type="code">infra/dataverse/sprk_analysistool-get-user-preferences-row.json</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/GetUserPreferencesHandlerTests.cs</output>
+    <output type="docs">notes/handoffs/089-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler exists at the specified path and implements `IToolHandler`.</criterion>
+    <criterion testable="true">Single `ToolResult` return.</criterion>
+    <criterion testable="true">Read-only — `grep "UpdateAsync\|SaveAsync" src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GetUserPreferencesHandler.cs` returns ZERO matches.</criterion>
+    <criterion testable="true">Defaults returned on read failure (unit test asserts shape).</criterion>
+    <criterion testable="true">Telemetry payload contains no preference values.</criterion>
+    <criterion testable="true">BFF publish delta ≤+0.1 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Read-only chat side; T4 writes go through user-settings UI (out of scope). If creating the `UserPreferencesService` for the first time, keep it MINIMAL — read-only single GetAsync method; no caching layer (the chat path is per-turn; caching can be added later).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

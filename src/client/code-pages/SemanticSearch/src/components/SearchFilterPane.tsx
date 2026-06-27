@@ -1,41 +1,81 @@
 /**
  * SearchFilterPane -- Collapsible left-side filter pane
  *
+ * Phase G (Lookup-driven multi-index) — spec §6.
+ *
  * Layout (top to bottom):
  *   1. "Search Criteria" header with collapse chevron
- *   2. Domain tabs (Documents / Matters / Projects / Invoices)
+ *   2. Search Index dropdown (REPLACES the prior 4-domain ToggleButton grid)
  *   3. Saved Searches selector
- *   4. AI Search query textarea
+ *   4. AI Search query textarea + (i) info popover
  *   5. Dashed separator
  *   6. Domain-aware filter dropdowns (Document Type, File Type, Matter Type)
  *   7. Date range
- *   8. Search button
+ *   8. Relevance Threshold + (i) info popover (MOVED IN from top-right overlay)
+ *   9. Search Mode + (i) info popover (MOVED IN from top-right overlay)
+ *  10. Search button + Cancel button
  *
- * Relevance Threshold and Search Mode live in VisualizationSettings (overlay).
+ * The Relevance Threshold + Search Mode controls were previously in the
+ * VisualizationSettings overlay (top-right) which was too hidden for users
+ * to discover. They now live in the side pane below the existing filters,
+ * above the Search button — keeping all search-shaping controls in one
+ * discoverable surface.
  *
  * @see ADR-021 for Fluent UI v9 design system requirements
+ * @see projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md §6
  */
 
-import { useState, useCallback } from 'react';
-import { makeStyles, tokens, mergeClasses, Textarea, Button, Label, Text } from '@fluentui/react-components';
-import { ChevronDoubleLeft20Regular, ChevronDoubleRight20Regular, Search20Regular } from '@fluentui/react-icons';
-import type { SearchDomain, SearchFilters, FilterOption, SavedSearch } from '../types';
-import { SearchDomainTabs } from './SearchDomainTabs';
+import { useCallback, useState } from 'react';
+import {
+  makeStyles,
+  tokens,
+  mergeClasses,
+  Textarea,
+  Button,
+  Label,
+  Text,
+  Slider,
+  Dropdown,
+  Option,
+} from '@fluentui/react-components';
+import { ChevronDoubleLeft20Regular, ChevronDoubleRight20Regular } from '@fluentui/react-icons';
+import type { SearchDomain, SearchFilters, FilterOption, SavedSearch, HybridMode } from '../types';
+import { SearchIndexSelector } from './SearchIndexSelector';
+import { InfoPopover } from './InfoPopover';
 import { FilterDropdown } from './FilterDropdown';
 import { DateRangeFilter } from './DateRangeFilter';
 import { SavedSearchSelector } from './SavedSearchSelector';
+import type { AiSearchIndexRow } from '../services/aiSearchIndexService';
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const EXPANDED_WIDTH = '280px';
+const COLLAPSED_WIDTH = '40px';
+const TRANSITION_DURATION = '200ms';
+
+const SEARCH_MODE_OPTIONS: { value: HybridMode; label: string }[] = [
+  { value: 'rrf', label: 'Hybrid (RRF)' },
+  { value: 'vectorOnly', label: 'Vector Only' },
+  { value: 'keywordOnly', label: 'Keyword Only' },
+];
 
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 export interface SearchFilterPaneProps {
-  /** Currently active search domain — controls which filter sections are visible */
+  /** Currently active search domain — drives which filter sections are visible. */
   activeDomain: SearchDomain;
-  /** Callback when the user switches domain tabs */
-  onDomainChange: (domain: SearchDomain) => void;
-  /** Callback to trigger a domain-change search (query + domain) */
-  onDomainSearch: (query: string, domain: SearchDomain) => void;
+  /** Active `sprk_aisearchindex` rows (already loaded by App). */
+  searchIndexes: AiSearchIndexRow[];
+  /** Selected index row PK (empty string when none). */
+  selectedSearchIndexId: string;
+  /** Whether the indexes are still being fetched. */
+  isLoadingSearchIndexes: boolean;
+  /** Called when the user selects a different Search Index row. */
+  onSelectSearchIndex: (row: AiSearchIndexRow) => void;
   /** Current filter state */
   filters: SearchFilters;
   /** Callback when any filter value changes */
@@ -64,15 +104,12 @@ export interface SearchFilterPaneProps {
   onSaveCurrentSearch: () => void;
   /** Whether saved searches are loading */
   isSavedSearchesLoading: boolean;
+  /**
+   * Cancel handler — clears AI Search query + all filters + active saved-search
+   * selection, returning the pane to its initial state.
+   */
+  onCancel: () => void;
 }
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const EXPANDED_WIDTH = '280px';
-const COLLAPSED_WIDTH = '40px';
-const TRANSITION_DURATION = '200ms';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -117,7 +154,7 @@ const useStyles = makeStyles({
   collapseButton: {
     minWidth: 'auto',
   },
-  domainTabsSection: {
+  searchIndexSection: {
     marginBottom: tokens.spacingVerticalM,
   },
   savedSearchSection: {
@@ -129,7 +166,12 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalXXS,
     marginBottom: tokens.spacingVerticalM,
   },
-  queryLabel: {
+  labelRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+  },
+  fieldLabel: {
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
@@ -148,7 +190,26 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalXS,
     marginBottom: tokens.spacingVerticalM,
   },
-  searchButton: {
+  sliderRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sliderValue: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorBrandForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+    minWidth: '36px',
+    textAlign: 'right',
+  },
+  dropdown: {
+    width: '100%',
+    minWidth: 0,
+  },
+  actionRow: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    columnGap: tokens.spacingHorizontalS,
     marginTop: tokens.spacingVerticalM,
   },
 });
@@ -159,8 +220,10 @@ const useStyles = makeStyles({
 
 export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
   activeDomain,
-  onDomainChange,
-  onDomainSearch,
+  searchIndexes,
+  selectedSearchIndexId,
+  isLoadingSearchIndexes,
+  onSelectSearchIndex,
   filters,
   onFiltersChange,
   onSearch,
@@ -173,6 +236,7 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
   onSelectSavedSearch,
   onSaveCurrentSearch,
   isSavedSearchesLoading,
+  onCancel,
 }) => {
   const styles = useStyles();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -230,6 +294,21 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
     [filters, onFiltersChange]
   );
 
+  const handleThresholdChange = useCallback(
+    (_ev: unknown, data: { value: number }) => {
+      onFiltersChange({ ...filters, threshold: data.value });
+    },
+    [filters, onFiltersChange]
+  );
+
+  const handleSearchModeChange = useCallback(
+    (_ev: unknown, data: { optionValue?: string }) => {
+      if (!data.optionValue) return;
+      onFiltersChange({ ...filters, searchMode: data.optionValue as HybridMode });
+    },
+    [filters, onFiltersChange]
+  );
+
   // --- Render ---
 
   const paneClassName = mergeClasses(styles.pane, isCollapsed ? styles.collapsed : styles.expanded);
@@ -250,6 +329,8 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
     );
   }
 
+  const searchModeLabel = SEARCH_MODE_OPTIONS.find(o => o.value === filters.searchMode)?.label ?? 'Hybrid (RRF)';
+
   return (
     <div className={paneClassName} role="region" aria-label="Search filters">
       {/* Header: "Search Criteria" title + collapse chevron */}
@@ -267,17 +348,17 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
         />
       </div>
 
-      {/* Domain tabs (Documents / Matters / Projects / Invoices) */}
-      <div className={styles.domainTabsSection}>
-        <SearchDomainTabs
-          activeDomain={activeDomain}
-          onDomainChange={onDomainChange}
-          query={query}
-          onSearch={onDomainSearch}
+      {/* Search Index dropdown (replaces the prior 4-domain ToggleButton grid) */}
+      <div className={styles.searchIndexSection}>
+        <SearchIndexSelector
+          indexes={searchIndexes}
+          selectedIndexId={selectedSearchIndexId}
+          isLoading={isLoadingSearchIndexes}
+          onSelectIndex={onSelectSearchIndex}
         />
       </div>
 
-      {/* Dotted divider between domain tabs and saved searches */}
+      {/* Dotted divider between search index and saved searches */}
       <div className={styles.separator} />
 
       {/* Saved Searches */}
@@ -291,9 +372,15 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
         />
       </div>
 
-      {/* AI Search query textarea */}
+      {/* AI Search query textarea — with info popover */}
       <div className={styles.querySection}>
-        <Label className={styles.queryLabel}>AI Search</Label>
+        <div className={styles.labelRow}>
+          <Label className={styles.fieldLabel}>AI Search</Label>
+          <InfoPopover ariaLabel="About AI search">
+            Describe what you&apos;re looking for in natural language. The semantic search engine interprets meaning,
+            not just keywords. Press <strong>Ctrl+Enter</strong> to search.
+          </InfoPopover>
+        </div>
         <Textarea
           className={styles.queryTextarea}
           placeholder="Describe what you're looking for..."
@@ -353,16 +440,67 @@ export const SearchFilterPane: React.FC<SearchFilterPaneProps> = ({
         <DateRangeFilter value={filters.dateRange} onChange={handleDateRangeChange} />
       </div>
 
-      {/* Search Button */}
-      <Button
-        className={styles.searchButton}
-        appearance="primary"
-        icon={<Search20Regular />}
-        onClick={handleSearch}
-        disabled={isLoading}
-      >
-        Search
-      </Button>
+      {/* Dotted divider between filters and the relocated threshold/mode */}
+      <div className={styles.separator} />
+
+      {/* Relevance Threshold (moved IN from the top-right overlay) */}
+      <div className={styles.filterSection}>
+        <div className={styles.sliderRow}>
+          <div className={styles.labelRow}>
+            <Label className={styles.fieldLabel}>Relevance Threshold</Label>
+            <InfoPopover ariaLabel="About relevance threshold">
+              Hide results scoring below this percentage. Higher values keep only the most relevant results. Default
+              50%.
+            </InfoPopover>
+          </div>
+          <Text className={styles.sliderValue}>{filters.threshold}%</Text>
+        </div>
+        <Slider
+          min={0}
+          max={100}
+          value={filters.threshold}
+          onChange={handleThresholdChange}
+          aria-label="Relevance threshold"
+        />
+      </div>
+
+      {/* Search Mode (moved IN from the top-right overlay) */}
+      <div className={styles.filterSection}>
+        <div className={styles.labelRow}>
+          <Label className={styles.fieldLabel}>Search Mode</Label>
+          <InfoPopover ariaLabel="About search mode">
+            <strong>Hybrid (RRF):</strong> Combines meaning and keyword for the best overall results.
+            <br />
+            <strong>Vector Only:</strong> Pure meaning-based search — good for abstract queries.
+            <br />
+            <strong>Keyword Only:</strong> Traditional exact-word matching — good for specific terms or clause numbers.
+          </InfoPopover>
+        </div>
+        <Dropdown
+          className={styles.dropdown}
+          size="small"
+          value={searchModeLabel}
+          selectedOptions={[filters.searchMode]}
+          onOptionSelect={handleSearchModeChange}
+          aria-label="Search mode"
+        >
+          {SEARCH_MODE_OPTIONS.map(opt => (
+            <Option key={opt.value} value={opt.value}>
+              {opt.label}
+            </Option>
+          ))}
+        </Dropdown>
+      </div>
+
+      {/* Action row — Spaarke standard pattern. */}
+      <div className={styles.actionRow}>
+        <Button appearance="primary" size="small" onClick={handleSearch} disabled={isLoading}>
+          Search
+        </Button>
+        <Button appearance="subtle" size="small" onClick={onCancel} aria-label="Clear search criteria">
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 };

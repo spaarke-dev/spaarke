@@ -528,9 +528,7 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
         {/* Content area: Editor (flex:1) | [Splitter+Source] | Chat (360px fixed) */}
         <div className={styles.content} ref={containerRef}>
           {/* Editor Panel — flex:1 always fills remaining space */}
-          <div
-            className={mergeClasses(styles.editorPanel, !isDragging && styles.panelAnimated)}
-          >
+          <div className={mergeClasses(styles.editorPanel, !isDragging && styles.panelAnimated)}>
             {/* Show error state if analysis load or execution failed */}
             {(analysisError || executionError) && !isAnalysisLoading && !isExecuting ? (
               <div
@@ -642,7 +640,12 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
               tabIndex={0}
               title="Show source document"
               aria-label="Show source document"
-              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleSource(); } }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  toggleSource();
+                }
+              }}
             >
               <ChevronLeft16Regular style={{ color: 'var(--colorNeutralForeground3)', flexShrink: 0 }} />
               <span className={styles.sourcePanelCollapsedLabel}>SOURCE</span>
@@ -651,10 +654,7 @@ export function App({ analysisId, documentId, tenantId }: AppProps): JSX.Element
 
           {/* Chat Panel — fixed 360px width, no splitter (not user-resizable) */}
           {isChatVisible && (
-            <div
-              className={styles.chatPanel}
-              data-testid="chat-panel-container"
-            >
+            <div className={styles.chatPanel} data-testid="chat-panel-container">
               <ChatPanel />
             </div>
           )}

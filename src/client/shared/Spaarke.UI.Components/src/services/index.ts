@@ -1,4 +1,38 @@
+// IDataverseClient - Spaarke DataGrid Framework R1 contract (task 001)
+// (Type names chosen to avoid collision with the existing `DataverseAttributeType` enum
+//  in types/ColumnRendererTypes.ts and `RetrieveMultipleResult` in utils/xrmContext.ts —
+//  those are PCF-dataset / raw-Xrm shapes, distinct from these Web-API-metadata projections.)
+export type {
+  IDataverseClient,
+  SavedQueryResult,
+  SavedQuerySummary,
+  EntityMetadata,
+  EntityAttributeMetadata,
+  MetadataAttributeType,
+  OptionSetOption,
+  FetchMultipleResult,
+} from './IDataverseClient';
+
+export { XrmDataverseClient } from './XrmDataverseClient';
+
+// BffDataverseClient — BFF-passthrough sibling impl (task 015, FR-BFF-06).
+// Use in non-MDA hosts: Code Pages, workspace widgets, Office Add-ins, Storybook.
+// Constructor takes `authenticatedFetch` from `@spaarke/auth` (DI for decoupling)
+// and an optional `bffBaseUrl` (falls back to window.SPAARKE_BFF_URL / env).
+export { BffDataverseClient } from './BffDataverseClient';
+export type { BffDataverseClientOptions, AuthenticatedFetchFn as BffAuthenticatedFetchFn } from './BffDataverseClient';
+export {
+  BffDataverseClientError,
+  BffDataverseClientConfigurationError,
+  BffNotFoundError,
+  BffForbiddenError,
+  BffBadRequestError,
+  BffServerError,
+} from './BffDataverseClient';
+
 export { AppInsightsService } from './AppInsightsService';
+export { reportClientError, setClientErrorTelemetryHook } from './reportClientError';
+export type { ClientErrorContext } from './reportClientError';
 export { EntityCreationService } from './EntityCreationService';
 export type {
   IFileUploadResult,
@@ -7,6 +41,7 @@ export type {
   ISendEmailInput,
   ISendEmailResult,
   IUploadProgress,
+  IUserBuCascadeDefaults,
   AuthenticatedFetchFn,
 } from './EntityCreationService';
 export * from './CommandRegistry';
@@ -50,6 +85,17 @@ export type {
   INavPropEntry,
   IResolverFieldValues,
 } from './PolymorphicResolverService';
+
+// TodoRegardingUpdateBuilder — FR-13 helper for sprk_todo regarding edits.
+// Wraps applyResolverFields with clear-and-set semantics across all 11 lookups.
+export {
+  TODO_REGARDING_CATALOG,
+  buildTodoRegardingUpdate,
+  buildTodoRegardingClear,
+  discoverTodoNavProps,
+  _resetTodoNavPropCacheForTests,
+} from './TodoRegardingUpdateBuilder';
+export type { ITodoRegardingTargetCatalogEntry, ITodoRegardingUpdate } from './TodoRegardingUpdateBuilder';
 export { renderMarkdown, SPRK_MARKDOWN_CSS } from './renderMarkdown';
 export type { RenderMarkdownOptions } from './renderMarkdown';
 export { SprkChatBridge } from './SprkChatBridge';

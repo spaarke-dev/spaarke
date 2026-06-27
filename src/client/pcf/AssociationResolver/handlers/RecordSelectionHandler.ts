@@ -215,7 +215,11 @@ export async function loadEntityConfigs(webApi: ComponentFramework.WebApi): Prom
             regardingField: e.sprk_regardingfield as string,
           }));
 
-        logger.logInfo('RecordSelection', `Loaded ${dynamicEntityConfigs.length} entity configs`, dynamicEntityConfigs.map(c => c.logicalName));
+        logger.logInfo(
+          'RecordSelection',
+          `Loaded ${dynamicEntityConfigs.length} entity configs`,
+          dynamicEntityConfigs.map(c => c.logicalName)
+        );
         return dynamicEntityConfigs;
       } else {
         logger.logWarn('RecordSelection', 'No Record Types found, falling back to hardcoded configs');
@@ -491,7 +495,10 @@ export async function handleRecordSelection(
   // Overall success if lookup was set (denormalized fields are secondary)
   result.success = result.lookupFieldSet;
 
-  logger.logInfo('RecordSelection', `Result: success=${result.success}, lookupSet=${result.lookupFieldSet}, denormalized=${result.denormalizedFieldsSet}, cleared=${result.otherLookupsCleared}`);
+  logger.logInfo(
+    'RecordSelection',
+    `Result: success=${result.success}, lookupSet=${result.lookupFieldSet}, denormalized=${result.denormalizedFieldsSet}, cleared=${result.otherLookupsCleared}`
+  );
 
   return result;
 }
@@ -582,7 +589,10 @@ export function detectPrePopulatedParent(): IDetectedParentContext | null {
               recordName: lookupValue.name || '',
               regardingField: config.regardingField,
             };
-            logger.logInfo('RecordSelection', `Detected pre-populated parent: ${config.displayName} - ${detected.recordName} (${detected.recordId})`);
+            logger.logInfo(
+              'RecordSelection',
+              `Detected pre-populated parent: ${config.displayName} - ${detected.recordName} (${detected.recordId})`
+            );
             return detected;
           }
         }
@@ -619,7 +629,10 @@ export async function completeAutoDetectedAssociation(
     errors: [],
   };
 
-  logger.logInfo('RecordSelection', `Completing auto-detected association: ${detectedParent.entityDisplayName} - ${detectedParent.recordName}`);
+  logger.logInfo(
+    'RecordSelection',
+    `Completing auto-detected association: ${detectedParent.entityDisplayName} - ${detectedParent.recordName}`
+  );
 
   // Set denormalized fields
   let denormalizedSuccess = true;
@@ -658,7 +671,10 @@ export async function completeAutoDetectedAssociation(
   result.denormalizedFieldsSet = denormalizedSuccess;
   result.success = denormalizedSuccess;
 
-  logger.logInfo('RecordSelection', `Auto-detection completion result: success=${result.success}, denormalized=${result.denormalizedFieldsSet}`);
+  logger.logInfo(
+    'RecordSelection',
+    `Auto-detection completion result: success=${result.success}, denormalized=${result.denormalizedFieldsSet}`
+  );
 
   return result;
 }

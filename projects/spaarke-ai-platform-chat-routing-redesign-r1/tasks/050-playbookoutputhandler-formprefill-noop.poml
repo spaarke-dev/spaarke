@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>PlaybookOutputHandler FormPrefill case — no-op preserve (NFR-07 forbids modification)</title>
+    <phase>3: WP3 Destination Metadata Wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>045,046,047</dependencies>
+    <blocks>052,054</blocks>
+    <tags>bff-api, services, NFR-07, ADR-013, ADR-029</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' but the change is a no-op preserve branch (intentionally minimal) — STANDARD per Step 0.5</rigor-reason>
+    <parallel-group>3-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares PlaybookOutputHandler.cs switch with tasks 048, 049, 051 — sequential within wave 3-B per task-create Step 3.8 file-overlap auto-demotion rule (CRIT-8 fix)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a `FormPrefill` case to `PlaybookOutputHandler.HandleOutputAsync` that is INTENTIONALLY a no-op (no user-visible content emitted; no streaming; no chat). The pre-fill flow (`MatterPreFillService` / `ProjectPreFillService`) is the consumer that produces form-prefill output via its own pipeline; NFR-07 forbids modification of that flow. The handler simply returns gracefully when `NodeDestination = FormPrefill`. Implements spec FR-14d FormPrefill branch.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in NFR-07 pre-fill flow contracts (signature, timeout, `$choices`, `useAiPrefill`).</role>
+
+  <goal>
+    `PlaybookOutputHandler.HandleOutputAsync` FormPrefill case explicitly returns without emitting any user-visible content. Comment documents the rationale (NFR-07 forbids handler-side modification; pre-fill flow is consumer). Unit test verifies no SSE event + no chat token emitted. Pre-fill flow regression: `useAiPrefill` hook end-to-end still works (existing test).
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-14d FormPrefill branch + design §1.3 ("FormPrefill: no-op in handler — pre-fill flow MatterPreFillService / ProjectPreFillService is consumer; NFR-07 forbids modifying it"). This case exists for switch completeness, not for user-visible behavior. Without it, the switch would either throw or fall through to default — both undesirable.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookOutputHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/MatterPreFillService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ProjectPreFillService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">NFR-07: pre-fill flow contracts preserved (signatures, 45s timeout, `useAiPrefill`, `$choices`). Binding constraint.</constraint>
+    <constraint source="spec">FR-14d FormPrefill: handler is no-op; pre-fill flow is consumer.</constraint>
+    <constraint source="ADR-013">Handler in `Services/Ai/Chat/`; AI-internal.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="project">Wave 3-B parallel safe — distinct switch arm.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookOutputHandler.cs` switch.</step>
+    <step order="2">Add `FormPrefill` case with explicit `return Task.CompletedTask;` (or method-shape equivalent). Add a code comment citing NFR-07 + spec FR-14d.</step>
+    <step order="3">Add unit test: invoke handler with `NodeDestination = FormPrefill`; assert no SSE event captured + no chat token emitted.</step>
+    <step order="4">Regression test (existing): `useAiPrefill` end-to-end pre-fill flow still works (no change to that flow expected; this test confirms).</step>
+    <step order="5">Run `dotnet build` + tests; measure publish delta.</step>
+    <step order="6">Update TASK-INDEX.md: task 050 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookOutputHandler.cs</tool>
+    <tool name="Edit">Add FormPrefill case + test</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookOutputHandler.cs — FormPrefill no-op case</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookOutputHandlerFormPrefillTests.cs</output>
+    <output type="docs">notes/handoffs/050-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FormPrefill case explicitly handled (not default fallthrough).</criterion>
+    <criterion testable="true">No SSE event emitted for FormPrefill dispatch.</criterion>
+    <criterion testable="true">No chat token emitted for FormPrefill dispatch.</criterion>
+    <criterion testable="true">Pre-fill flow regression test (Matter/Project pre-fill) passes unchanged.</criterion>
+    <criterion testable="true">`dotnet build` + tests exit 0.</criterion>
+    <criterion testable="true">BFF publish delta within NFR-01 thresholds.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    A no-op case is still meaningful — switch completeness avoids default-branch confusion. Code comment is load-bearing here: future devs will see "why is this empty?" and need the answer in-place.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

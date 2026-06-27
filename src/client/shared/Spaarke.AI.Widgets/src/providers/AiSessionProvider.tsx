@@ -44,15 +44,7 @@
  * @see AUDIT-FINDINGS-AUTH-SYSTEM §H-4 — function-based auth contract
  */
 
-import React, {
-  createContext,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import React, { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { buildBffApiUrl, useAuth, type AuthenticatedFetchFn } from '@spaarke/auth';
 import { useDispatchPaneEvent } from '../events/useDispatchPaneEvent';
 import type { AiPaneEvent, EntityContext, StreamingCallbacks, StreamingState } from '@spaarke/ai-context';
@@ -60,12 +52,28 @@ import type { WorkspacePaneEvent, ContextPaneEvent, SafetyPaneEvent } from '../e
 
 // ---------------------------------------------------------------------------
 // Session storage keys (scoped to R2 to avoid collisions with R1 keys)
+//
+// R4 task 031 (A-5b / FR-05): promoted from sessionStorage → localStorage so
+// the `chatSessionId` lookup key survives browser close/reopen. The 90-day
+// Cosmos snapshot in BFF (`StoredSession.Tabs`) is unreachable without this
+// key — sessionStorage dies with the window. localStorage is origin-scoped
+// and persists indefinitely (subject to browser eviction).
+//
+// Key names retained (`sprk_ai2_*`) because:
+//   - No PII / no auth tokens are persisted (only opaque chat/playbook ids)
+//   - A one-shot migration in readPersistedValue() copies any pre-existing
+//     sessionStorage values to localStorage on first localStorage-aware load
+//   - Avoids breaking any external consumer that might inspect these keys
+//     (none known, but cheap insurance)
+//
+// ADR-028 compliance: the migrated keys hold opaque session/playbook ids
+// only — never tokens. Spaarke Auth v2 invariants preserved.
 // ---------------------------------------------------------------------------
 
 const SESSION_KEY_PREFIX = 'sprk_ai2_';
-/** sessionStorage key for the active chat session ID */
+/** localStorage key for the active chat session ID (was sessionStorage pre-R4 task 031) */
 export const AI_SESSION_CHAT_SESSION_KEY = `${SESSION_KEY_PREFIX}chatSessionId`;
-/** sessionStorage key for the active playbook ID */
+/** localStorage key for the active playbook ID (was sessionStorage pre-R4 task 031) */
 export const AI_SESSION_PLAYBOOK_KEY = `${SESSION_KEY_PREFIX}playbookId`;
 
 // ---------------------------------------------------------------------------
@@ -119,13 +127,13 @@ export interface AiSessionContextValue {
   /** BFF API base URL (HOST only — use buildBffApiUrl() to build endpoint URLs) */
   bffBaseUrl: string;
 
-  // ── Session State (persisted to sessionStorage) ───────────────────────────
+  // ── Session State (persisted to localStorage — R4 task 031) ──────────────
   /** Active chat session ID (null when no session is open) */
   chatSessionId: string | null;
   /** Set the chat session ID — called when SprkChat creates a new session */
   setChatSessionId: (sessionId: string) => void;
 
-  // ── Playbook State (persisted to sessionStorage) ──────────────────────────
+  // ── Playbook State (persisted to localStorage — R4 task 031) ─────────────
   /** Active playbook ID governing session behaviour */
   playbookId: string | undefined;
   /** Set the playbook ID — called on playbook switch */
@@ -195,21 +203,56 @@ export interface AiSessionProviderProps {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** Safe sessionStorage read — returns null if storage is unavailable */
+/**
+ * Safe localStorage read with one-shot sessionStorage → localStorage migration.
+ *
+ * R4 task 031 (A-5b / FR-05): The first time a localStorage-aware build runs
+ * inside a window that still has the pre-R4 sessionStorage entry, copy the
+ * value to localStorage. After the copy the localStorage value is the source
+ * of truth; the sessionStorage entry is left in place to expire naturally
+ * with the window (no explicit removeItem — avoids racing with any other
+ * code path that might still consume the legacy entry within the same
+ * window). On every subsequent reopen, localStorage already holds the value
+ * and the sessionStorage check short-circuits.
+ *
+ * Returns null if both storages are empty / unavailable.
+ */
 function readSession(key: string): string | null {
   try {
-    return sessionStorage.getItem(key);
+    const fromLocal = localStorage.getItem(key);
+    if (fromLocal !== null) return fromLocal;
+
+    // One-shot migration: legacy sessionStorage value (pre-R4 task 031) is
+    // still present for the lifetime of this window. Copy it to localStorage
+    // so the next browser-close/reopen can read it.
+    const fromSession = sessionStorage.getItem(key);
+    if (fromSession !== null) {
+      try {
+        localStorage.setItem(key, fromSession);
+      } catch {
+        /* localStorage write failed (quota / private mode); fall through */
+      }
+      return fromSession;
+    }
+
+    return null;
   } catch {
     return null;
   }
 }
 
-/** Safe sessionStorage write — silently swallows quota/security errors */
+/**
+ * Safe localStorage write — silently swallows quota/security errors.
+ *
+ * R4 task 031 (A-5b / FR-05): writes go to localStorage (origin-scoped,
+ * survives browser close/reopen). Pre-R4 this targeted sessionStorage which
+ * died with the window — see readSession() block comment for full context.
+ */
 function writeSession(key: string, value: string): void {
   try {
-    sessionStorage.setItem(key, value);
+    localStorage.setItem(key, value);
   } catch {
-    /* sessionStorage may be unavailable in some Dataverse webresource contexts */
+    /* localStorage may be unavailable in some Dataverse webresource contexts */
   }
 }
 
@@ -333,9 +376,11 @@ export function AiSessionProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bffBaseUrl, entityContext, isAuthenticated]);
 
-  // ── Chat Session State (persisted to sessionStorage) ───────────────────
-  const [chatSessionId, setChatSessionIdState] = useState<string | null>(
-    () => readSession(AI_SESSION_CHAT_SESSION_KEY)
+  // ── Chat Session State (persisted to localStorage — R4 task 031) ───────
+  // Initial state seeded via readSession() which performs the one-shot
+  // sessionStorage → localStorage migration on first localStorage-aware load.
+  const [chatSessionId, setChatSessionIdState] = useState<string | null>(() =>
+    readSession(AI_SESSION_CHAT_SESSION_KEY)
   );
 
   const setChatSessionId = useCallback((sessionId: string): void => {
@@ -343,7 +388,7 @@ export function AiSessionProvider({
     writeSession(AI_SESSION_CHAT_SESSION_KEY, sessionId);
   }, []);
 
-  // ── Playbook State (persisted to sessionStorage) ───────────────────────
+  // ── Playbook State (persisted to localStorage — R4 task 031) ───────────
   const [playbookId, setPlaybookIdState] = useState<string | undefined>(
     () => readSession(AI_SESSION_PLAYBOOK_KEY) ?? undefined
   );
@@ -464,7 +509,7 @@ export function AiSessionProvider({
         tokenCountRef.current += 1;
         // Batch state updates every 10 tokens to avoid re-render storm.
         if (tokenCountRef.current % 10 === 0) {
-          setStreamingState((prev) => ({
+          setStreamingState(prev => ({
             ...prev,
             tokenCount: tokenCountRef.current,
           }));
@@ -478,7 +523,7 @@ export function AiSessionProvider({
           tokenCount: tokenCountRef.current,
         });
         // Increment turn count — one turn completes per stream-end.
-        setTurnCount((n) => n + 1);
+        setTurnCount(n => n + 1);
       },
 
       // onPaneEvent — the critical R1→R2 migration point.

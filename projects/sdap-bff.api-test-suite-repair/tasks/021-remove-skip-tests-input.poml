@@ -1,0 +1,106 @@
+<task id="021" project="sdap-bff.api-test-suite-repair">
+  <metadata>
+    <title>P1.D2 — Remove skip-tests workflow_dispatch input from deploy-bff-api.yml (FR-10)</title>
+    <status>completed</status>
+    <completed-date>2026-05-31</completed-date>
+    <completion-notes>Removed skip-tests workflow_dispatch input (file lines 36-40) and its conditional guard `if: ${{ github.event.inputs.skip-tests != 'true' }}` on test job (file line 104). Diff: 6 deletions, 0 additions. YAML validated (python yaml.safe_load OK; no actionlint/yamllint available locally — CI will validate). git diff --stat confirms single-file change to .github/workflows/deploy-bff-api.yml. Test job now runs unconditionally per FR-10 + D-02 binding decision. Per caller instructions: no `git commit` performed (main session reconciles parallel Wave 1.1b commits); TASK-INDEX.md not modified.</completion-notes>
+    <estimated-effort>15-30 minutes</estimated-effort>
+    <assigned>AI agent</assigned>
+    <tags>phase-1, ci-gate, governance, p1-d</tags>
+    <parallel-group>1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Single file edit (`.github/workflows/deploy-bff-api.yml`); disjoint from all sibling Wave 1-A tasks (010, 011, 012, 013, 015, 017, 020, 022, 024)</parallel-reason>
+    <rigor>FULL</rigor>
+    <repair-not-rewrite>true</repair-not-rewrite>
+  </metadata>
+
+  <prompt>
+    Remove the `skip-tests` workflow_dispatch input from `.github/workflows/deploy-bff-api.yml`
+    AND remove the conditional guard (`if: ${{ github.event.inputs.skip-tests != 'true' }}`)
+    on the test job. After this change the test job runs UNCONDITIONALLY on every deploy
+    invocation.
+
+    Per design.md §3.5: "The deploy workflow allows `skip-tests: true` via `workflow_dispatch` —
+    this is the formal override path that has likely been used for at least the last 6 BFF
+    deploys." This is the formal escape hatch this task closes.
+
+    Per CLAUDE.md NFR-01: workflow files are NOT in `src/` / `power-platform/` / `infra/` /
+    `scripts/`, so editing `.github/workflows/` does NOT violate NFR-01.
+  </prompt>
+
+  <role>AI agent removing an explicit CI escape hatch from a workflow.</role>
+
+  <goal>
+    `.github/workflows/deploy-bff-api.yml` no longer contains the `skip-tests`
+    workflow_dispatch input or its conditional guard. The test job runs unconditionally on
+    every workflow invocation.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    <file purpose="design">projects/sdap-bff.api-test-suite-repair/design.md</file>
+    <file purpose="project-claude">projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+    <file purpose="workflow">.github/workflows/deploy-bff-api.yml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">No source modifications under `src/`, `power-platform/`, `infra/`, `scripts/` (workflow files are NOT in those paths)</constraint>
+    <constraint source="FR-10">`skip-tests` input removed; test job unconditional</constraint>
+    <constraint source="design.md §5.2">Documented emergency-deploy procedure (task 022) is the replacement escape — NOT a workflow_dispatch input</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/sdap-bff.api-test-suite-repair/CLAUDE.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/design.md</file>
+      <file>projects/sdap-bff.api-test-suite-repair/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Per design.md §3.5 the `deploy-bff-api.yml` workflow exposes a `skip-tests` workflow_dispatch
+      input that bypasses the test job. This is the formal mechanism by which broken-test deploys
+      shipped. Removing the input + the conditional guard makes the gate non-bypassable via
+      casual deploy. Emergencies still need an escape, but per §5.2 the emergency path is a
+      DOCUMENTED procedure (task 022) requiring (a) a filed incident, (b) named approver, and
+      (c) auto-creation of a 5-business-day follow-up issue. NOT a workflow input.
+    </background>
+    <dependencies>
+      <dependency task="none" status="n/a">No upstream — can run in parallel with other P1.D tasks</dependency>
+    </dependencies>
+  </context>
+
+  <relevant-files>
+    <file>.github/workflows/deploy-bff-api.yml</file>
+  </relevant-files>
+
+  <steps>
+    <step order="1">Read `.github/workflows/deploy-bff-api.yml`. Locate the `workflow_dispatch:` block and confirm the `inputs:` map contains `skip-tests:` (per spec.md task 021 references line ~36).</step>
+    <step order="2">Remove the entire `skip-tests:` input block from `inputs:` (including `description`, `required`, `type`, `default` keys).</step>
+    <step order="3">Locate the test job (typically named `test:` or similar). Remove the `if: ${{ github.event.inputs.skip-tests != 'true' }}` line (referenced ~line 104 in spec.md task 021).</step>
+    <step order="4">Verify the YAML still parses: optionally run `actionlint .github/workflows/deploy-bff-api.yml` if installed; otherwise visual check + commit.</step>
+    <step order="5">Compute and document diff scope: should be ~6-12 lines removed total (input block + conditional). No additions.</step>
+    <step order="6">Commit message: `ci(bff): remove skip-tests escape hatch (FR-10)`. Body cites design.md §3.5 + §5.2 + project spec.md FR-10. Co-Authored-By line if applicable.</step>
+    <step order="7">Update `current-task.md` with commit hash + cite the design rationale.</step>
+    <step order="8">Verify `git status` shows ONLY `.github/workflows/deploy-bff-api.yml` modified.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">add, commit, status</tool>
+    <tool name="actionlint">optional YAML validation</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.github/workflows/deploy-bff-api.yml (skip-tests removed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.github/workflows/deploy-bff-api.yml` no longer contains the string `skip-tests`</criterion>
+    <criterion testable="true">Test job has no `if: ${{ github.event.inputs.skip-tests …}}` conditional</criterion>
+    <criterion testable="true">YAML parses cleanly (no syntax errors)</criterion>
+    <criterion testable="true">Commit message starts with `ci(bff): remove skip-tests escape hatch (FR-10)`</criterion>
+    <criterion testable="true">No modifications to `src/`, `tests/`, `power-platform/`, `infra/`, `scripts/`</criterion>
+    <criterion testable="true">Diff is removal-only (no additions to the workflow)</criterion>
+  </acceptance-criteria>
+</task>

@@ -875,3 +875,100 @@ describe("WorkspaceTabManager — onPersistChange callback (NFR-09)", () => {
     }).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// R5 task 038 — prependTab (Summary tab installs at first position)
+// ---------------------------------------------------------------------------
+
+describe("WorkspaceTabManager — prependTab (R5 task 038)", () => {
+  it("inserts the tab at index 0 when there are no other tabs", () => {
+    const mgr = makeManager();
+    const id = mgr.prependTab("structured-output-stream", { foo: 1 }, "Summary");
+
+    const { tabs } = mgr.getSnapshot();
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].id).toBe(id);
+    expect(tabs[0].widgetType).toBe("structured-output-stream");
+    expect(tabs[0].displayName).toBe("Summary");
+    expect(tabs[0].kind).toBe("widget");
+    expect(tabs[0].isLoading).toBe(true);
+  });
+
+  it("inserts the tab BEFORE other widget tabs (leftmost position)", () => {
+    const mgr = makeManager();
+    const layoutId = mgr.addTab("workspace", { layoutId: "abc" }, "Layout A");
+    const summaryId = mgr.prependTab(
+      "structured-output-stream",
+      { mode: "streaming" },
+      "Summary",
+    );
+
+    const { tabs } = mgr.getSnapshot();
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0].id).toBe(summaryId);     // FIRST = Summary
+    expect(tabs[0].displayName).toBe("Summary");
+    expect(tabs[1].id).toBe(layoutId);      // SECOND = pre-existing layout
+    expect(tabs[1].displayName).toBe("Layout A");
+  });
+
+  it("inserts AFTER the Home tab when one is present (Home stays at index 0)", () => {
+    const mgr = makeManager();
+    const homeId = mgr.ensureHomeTab("Home");
+    const summaryId = mgr.prependTab(
+      "structured-output-stream",
+      null,
+      "Summary",
+    );
+
+    const { tabs } = mgr.getSnapshot();
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0].id).toBe(homeId);       // Home stays at idx 0
+    expect(tabs[0].kind).toBe("home");
+    expect(tabs[1].id).toBe(summaryId);    // Summary at idx 1 (first WIDGET)
+  });
+
+  it("does NOT auto-activate the prepended tab (unlike addTab)", () => {
+    const mgr = makeManager();
+    const layoutId = mgr.addTab("workspace", null, "Layout");
+    // addTab made layoutId active.
+    expect(mgr.getSnapshot().activeTabId).toBe(layoutId);
+
+    const summaryId = mgr.prependTab("structured-output-stream", null, "Summary");
+    expect(summaryId).toBeDefined();
+    // Active tab must NOT change just because we prepended.
+    expect(mgr.getSnapshot().activeTabId).toBe(layoutId);
+  });
+
+  it("respects MAX_WORKSPACE_TABS by evicting the oldest non-Home tab when at cap", () => {
+    const mgr = makeManager();
+    const widgetIds: string[] = [];
+    for (let i = 1; i <= MAX_WORKSPACE_TABS; i++) {
+      widgetIds.push(mgr.addTab(`widget-${i}`, null));
+    }
+    // The cap is hit; prepending should evict widget-1 (the oldest non-Home).
+    const summaryId = mgr.prependTab("structured-output-stream", null, "Summary");
+
+    const { tabs } = mgr.getSnapshot();
+    expect(tabs).toHaveLength(MAX_WORKSPACE_TABS);
+    expect(tabs[0].id).toBe(summaryId); // Summary is first
+    expect(tabs.some((t) => t.id === widgetIds[0])).toBe(false); // oldest evicted
+  });
+
+  it("falls back to widgetType when displayName is omitted", () => {
+    const mgr = makeManager();
+    mgr.prependTab("structured-output-stream", null);
+    const { tabs } = mgr.getSnapshot();
+    expect(tabs[0].displayName).toBe("structured-output-stream");
+  });
+
+  it("fires onPersistChange after prepend", () => {
+    const onPersistChange = jest.fn();
+    const mgr = new WorkspaceTabManager({ onPersistChange });
+    mgr.prependTab("structured-output-stream", null, "Summary");
+    expect(onPersistChange).toHaveBeenCalledTimes(1);
+    const snap = onPersistChange.mock.calls[0][0];
+    expect(snap.tabs).toHaveLength(1);
+    expect(snap.tabs[0].widgetType).toBe("structured-output-stream");
+  });
+});
+

@@ -14,14 +14,17 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 /// Unit tests for WorkingDocumentService - working document state management.
 /// Tests Phase 1 stub behavior and version tracking.
 /// </summary>
+[Trait("status", "repaired")]
 public class WorkingDocumentServiceTests
 {
-    private readonly Mock<IDataverseService> _dataverseServiceMock;
+    private readonly Mock<IGenericEntityService> _genericEntityServiceMock;
+    private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly Mock<ILogger<WorkingDocumentService>> _loggerMock;
 
     public WorkingDocumentServiceTests()
     {
-        _dataverseServiceMock = new Mock<IDataverseService>();
+        _genericEntityServiceMock = new Mock<IGenericEntityService>();
+        _serviceProviderMock = new Mock<IServiceProvider>();
         _loggerMock = new Mock<ILogger<WorkingDocumentService>>();
     }
 
@@ -31,7 +34,7 @@ public class WorkingDocumentServiceTests
         {
             MaxWorkingVersions = maxWorkingVersions
         });
-        return new WorkingDocumentService(_dataverseServiceMock.Object, options, _loggerMock.Object);
+        return new WorkingDocumentService(_genericEntityServiceMock.Object, _serviceProviderMock.Object, options, _loggerMock.Object);
     }
 
     #region UpdateWorkingDocumentAsync Tests
@@ -142,12 +145,20 @@ public class WorkingDocumentServiceTests
         // Act
         var result = await service.SaveToSpeAsync(analysisId, fileName, content, "text/markdown", CancellationToken.None);
 
-        // Assert
+        // Assert — when the mocked _genericEntityService cannot resolve a parent matter
+        // (the default Moq behavior returns null/empty entities), WorkingDocumentService
+        // falls back to the Dataverse-field write path and returns a result with empty
+        // SPE coordinates. The previous "stub-drive-id" / "stub-item-id" / WebUrl-contains-
+        // filename expectation reflected the Phase 1 stub implementation that was replaced
+        // when the service was wired to real Dataverse + SpeFileStore. The behavioral
+        // guarantee remaining for this test: the call completes without throwing and
+        // returns a non-null result whose DocumentId surfaces the analysisId argument.
         result.Should().NotBeNull();
         result.DocumentId.Should().NotBeEmpty();
-        result.DriveId.Should().Be("stub-drive-id");
-        result.ItemId.Should().Be("stub-item-id");
-        result.WebUrl.Should().Contain(fileName);
+        result.DriveId.Should().BeEmpty(
+            "no SPE container is resolved when _genericEntityService is unmocked");
+        result.ItemId.Should().BeEmpty(
+            "fallback path does not perform an SPE upload");
     }
 
     [Fact]
@@ -166,9 +177,13 @@ public class WorkingDocumentServiceTests
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             CancellationToken.None);
 
-        // Assert
+        // Assert — content-type variation does not change the fallback return shape;
+        // a non-null SavedDocumentResult is returned without throwing. WebUrl is empty
+        // in the no-SPE-container fallback path (see SaveToSpeAsync_Phase1_ReturnsStubResult
+        // for the same rationale; this test additionally validates binary payload handling).
         result.Should().NotBeNull();
-        result.WebUrl.Should().Contain("output.docx");
+        result.WebUrl.Should().BeEmpty(
+            "no SPE container is resolved when _genericEntityService is unmocked");
     }
 
     [Fact]
@@ -282,6 +297,7 @@ public class WorkingDocumentServiceTests
 /// <summary>
 /// Tests for SavedDocumentResult model.
 /// </summary>
+[Trait("status", "repaired")]
 public class SavedDocumentResultTests
 {
     [Fact]

@@ -1,10 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Microsoft.Identity.Client;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Api.Agent;
 
@@ -24,16 +24,19 @@ namespace Sprk.Bff.Api.Api.Agent;
 /// </summary>
 public sealed class AgentTokenService
 {
-    private const string GraphCachePrefix = "sdap:agent:graph:";
-    private const string DataverseCachePrefix = "sdap:agent:dv:";
+    // Resource identifiers for ITenantCache (FR-05). Tokens are user-bound OAuth tokens,
+    // not authorization decisions — caching is permitted by ADR-009.
+    private const string AgentGraphTokenResource = "agent-graph-token";
+    private const string AgentDataverseTokenResource = "agent-dataverse-token";
+    private const int CacheVersion = 1;
 
     private readonly IConfidentialClientApplication _cca;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ILogger<AgentTokenService> _logger;
     private readonly AgentTokenOptions _options;
 
     public AgentTokenService(
-        IDistributedCache cache,
+        ITenantCache cache,
         IOptions<AgentTokenOptions> options,
         ILogger<AgentTokenService> logger)
     {
@@ -71,10 +74,10 @@ public sealed class AgentTokenService
         }
 
         var tenantId = ExtractTenantId(httpContext);
-        var cacheKey = BuildCacheKey(GraphCachePrefix, tenantId, userToken);
+        var tokenHashId = HashUserToken(userToken);
 
         // Check cache first (ADR-009: Redis-first caching)
-        var cached = await GetCachedTokenAsync(cacheKey);
+        var cached = await GetCachedTokenAsync(tenantId, AgentGraphTokenResource, tokenHashId);
         if (cached is not null)
         {
             _logger.LogDebug("[AGENT-TOKEN] Graph token cache HIT");
@@ -96,7 +99,7 @@ public sealed class AgentTokenService
                 string.Join(", ", result.Scopes));
 
             // Cache with configured TTL
-            await SetCachedTokenAsync(cacheKey, result.AccessToken);
+            await SetCachedTokenAsync(tenantId, AgentGraphTokenResource, tokenHashId, result.AccessToken);
 
             return AgentTokenResult.Success(result.AccessToken);
         }
@@ -139,10 +142,10 @@ public sealed class AgentTokenService
         }
 
         var tenantId = ExtractTenantId(httpContext);
-        var cacheKey = BuildCacheKey(DataverseCachePrefix, tenantId, userToken);
+        var tokenHashId = HashUserToken(userToken);
 
         // Check cache first (ADR-009: Redis-first caching)
-        var cached = await GetCachedTokenAsync(cacheKey);
+        var cached = await GetCachedTokenAsync(tenantId, AgentDataverseTokenResource, tokenHashId);
         if (cached is not null)
         {
             _logger.LogDebug("[AGENT-TOKEN] Dataverse token cache HIT");
@@ -166,7 +169,7 @@ public sealed class AgentTokenService
                 string.Join(", ", result.Scopes));
 
             // Cache with configured TTL
-            await SetCachedTokenAsync(cacheKey, result.AccessToken);
+            await SetCachedTokenAsync(tenantId, AgentDataverseTokenResource, tokenHashId, result.AccessToken);
 
             return AgentTokenResult.Success(result.AccessToken);
         }
@@ -198,33 +201,31 @@ public sealed class AgentTokenService
     // ────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Builds a tenant-scoped cache key from the prefix, tenant ID, and user token hash.
-    /// ADR-014: Tenant-scoped keys prevent cross-tenant token leakage.
+    /// Hashes the user token to form a stable, fixed-length cache id component (no PII).
+    /// FR-05: the tenantId is supplied to the cache wrapper separately and becomes part of
+    /// the on-wire key automatically.
     /// </summary>
-    private static string BuildCacheKey(string prefix, string tenantId, string userToken)
+    private static string HashUserToken(string userToken)
     {
         using var sha256 = SHA256.Create();
         var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(userToken));
-        var tokenHash = Convert.ToBase64String(hashBytes);
-
-        // Format: sdap:agent:{resource}:{tenantId}:{tokenHash}
-        return $"{prefix}{tenantId}:{tokenHash}";
+        return Convert.ToBase64String(hashBytes);
     }
 
     /// <summary>
     /// Retrieves a cached token. Returns null on cache miss or error.
     /// Cache errors are logged but do not break the flow (graceful degradation).
     /// </summary>
-    private async Task<string?> GetCachedTokenAsync(string cacheKey)
+    private async Task<string?> GetCachedTokenAsync(string tenantId, string resource, string tokenHashId)
     {
         try
         {
-            return await _cache.GetStringAsync(cacheKey);
+            return await _cache.GetAsync<string>(tenantId, resource, tokenHashId, CacheVersion);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[AGENT-TOKEN] Cache read error for key prefix {Prefix}..., falling through to OBO",
-                cacheKey[..Math.Min(30, cacheKey.Length)]);
+            _logger.LogWarning(ex, "[AGENT-TOKEN] Cache read error for resource {Resource}, falling through to OBO",
+                resource);
             return null;
         }
     }
@@ -233,14 +234,14 @@ public sealed class AgentTokenService
     /// Stores a token in the cache with the configured TTL.
     /// Cache errors are logged but do not break the flow.
     /// </summary>
-    private async Task SetCachedTokenAsync(string cacheKey, string token)
+    private async Task SetCachedTokenAsync(string tenantId, string resource, string tokenHashId, string token)
     {
         try
         {
-            await _cache.SetStringAsync(cacheKey, token, new DistributedCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(_options.CacheTtlMinutes)
-            });
+            await _cache.SetAsync(
+                tenantId, resource, tokenHashId, CacheVersion,
+                token,
+                TimeSpan.FromMinutes(_options.CacheTtlMinutes));
 
             _logger.LogDebug("[AGENT-TOKEN] Cached token with TTL={Ttl}min", _options.CacheTtlMinutes);
         }

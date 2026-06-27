@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Add `loadNotificationContext` factory option to dailyBriefingRegistration</title>
+    <phase>P1: Wiring Seam Fix</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002, 003, 010</blocks>
+    <tags>frontend, react, fluent-ui, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies .tsx code; precondition for whole project; downstream-blocks 002/003/010</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single-task wave; blocks downstream P1/P2 work</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add an optional `loadNotificationContext?: () => Promise&lt;NarrateRequest | null&gt;` factory option to the existing Daily Briefing section registration. When the option is omitted, behavior matches the empty-payload contract today (UI renders empty state, BFF returns empty bullets). When the option is provided, the value is invoked to obtain the per-user notification context that gets passed to BFF `/narrate`. This is the injection seam that P2 will preserve when the registration moves to the new shared package.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React 19, Fluent UI v9, and the SpaarkeAi workspace section-registration pattern.</role>
+
+  <goal>The dailyBriefingRegistration factory signature accepts `loadNotificationContext` as an optional option; existing standalone code page consumers continue to work unchanged; the registration is ready for SpaarkeAi `main.tsx` to inject `loadSpaarkeAiNotificationContext` (task 002).</goal>
+
+  <context>
+    <background>
+      Per spec FR-01: SpaarkeAi workspace pane currently renders empty Daily Briefing despite users having unread notifications because `loadSpaarkeAiNotificationContext` has no injection seam. Adding the factory option closes the seam without breaking the standalone code page (which omits the option).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/dailyBriefingRegistration.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/calendar/calendarRegistration.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Code Page pattern — Daily Briefing stays Vite + React 19 + Fluent v9; no platform changes.</constraint>
+    <constraint source="ADR-012">Factory option pattern follows the established Calendar `@spaarke/events-components` registration shape.</constraint>
+    <constraint source="ADR-021">No hard-coded colors; semantic tokens only (this task adds no UI but verify imports remain Fluent v9 only).</constraint>
+    <constraint source="project">Pre-hoist seam — must be carryable into the new `@spaarke/daily-briefing-components` package in task 010+ without further API change.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-006-ui-surface-architecture.md</file>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/calendar/calendarRegistration.ts</file>
+    </files>
+    <patterns>
+      <pattern name="Section-registration factory option" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/calendar/calendarRegistration.ts">
+        Calendar uses a factory option for click-day callbacks; mirror this shape for `loadNotificationContext`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `dailyBriefingRegistration.ts` and the local `types.ts` to map current factory signature.</step>
+    <step order="2">Read `calendarRegistration.ts` as the precedent shape.</step>
+    <step order="3">Add `loadNotificationContext?: () =&gt; Promise&lt;NarrateRequest | null&gt;` to the factory options interface; thread it through the registration to wherever the briefing fetch is initiated.</step>
+    <step order="4">When the option is omitted, behavior MUST match current empty-payload contract (BFF returns empty bullets; UI renders empty state).</step>
+    <step order="5">When provided, the value is invoked once per briefing fetch and the result is the NarrateRequest payload posted to BFF `/narrate`.</step>
+    <step order="6">Run TypeScript build for the local Spaarke.UI.Components package; confirm no type errors.</step>
+    <step order="7">Update TASK-INDEX.md: change task 001 status from 🔲 to ✅.</step>
+    <step order="8">If any deviations from spec FR-01, document in projects/spaarke-daily-update-service-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript packages.</tool>
+    <tool name="terminal">Run shell commands.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/dailyBriefingRegistration.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/types.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given no `loadNotificationContext` provided, when the registration is mounted, then BFF `/narrate` is called with an empty/default payload and the UI renders empty state (FR-01 default branch).</criterion>
+    <criterion testable="true">Given `loadNotificationContext` is provided, when the registration mounts and fetches, then the function is invoked and its result is used as the BFF `/narrate` request body.</criterion>
+    <criterion testable="true">TypeScript build passes with no new errors or warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Keep this task scoped to API shape only. Do NOT yet implement the SpaarkeAi side (task 002) or move anything to the new package (task 010). Preserve `loadNotificationContext` as the option name — task 002 and the P2 hoist depend on it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -8,8 +8,8 @@ using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Email;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Ai.Jobs;
+using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
 namespace Sprk.Bff.Api.Api.Ai;
@@ -207,10 +207,39 @@ public static class RagEndpoints
             });
         }
 
+        // multi-container-multi-index-r1 FR-BFF-07 (task 016 — final wiring): the
+        // client supplies `searchIndexName` at the top level of `RagSearchRequest`
+        // (per the DTO contract in task 011), but `IRagService.SearchAsync(query,
+        // options, ct)` consumes the value from `RagSearchOptions.SearchIndexName`
+        // (added in task 014). Bridge the two here without mutating the caller's
+        // request DTO. When the caller did NOT set `request.SearchIndexName`,
+        // pass `request.Options` verbatim — preserves byte-for-byte backward-compat
+        // (NFR-02) for existing callers and the unmodified service-level test
+        // suite. ProblemDetails 400 (ADR-019) for INDEX_NOT_ALLOWED propagates
+        // from the resolver via the generic 500 catch — see Step 9.5 notes.
+        var effectiveOptions = !string.IsNullOrWhiteSpace(request.SearchIndexName)
+            ? request.Options with { SearchIndexName = request.SearchIndexName }
+            : request.Options;
+
         try
         {
-            var response = await ragService.SearchAsync(request.Query, request.Options, cancellationToken);
+            var response = await ragService.SearchAsync(request.Query, effectiveOptions, cancellationToken);
             return Results.Ok(response);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            return ex.AsFeatureDisabled503();
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException)
+        {
+            // multi-container-multi-index-r1 FR-BFF-07 (task 016) — rethrow so the
+            // global `UseExceptionHandler` middleware (MiddlewarePipelineExtensions)
+            // renders the canonical ProblemDetails JSON per ADR-019. Without this,
+            // the generic `catch (Exception)` below would convert
+            // `INDEX_NOT_ALLOWED` (statusCode 400) into a 500 response — breaking
+            // NFR-08 (rejected index name MUST surface as ProblemDetails 400).
+            throw;
         }
         catch (Exception ex)
         {
@@ -264,6 +293,11 @@ public static class RagEndpoints
             var indexed = await ragService.IndexDocumentAsync(document, cancellationToken);
             return Results.Ok(indexed);
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            return ex.AsFeatureDisabled503();
+        }
         catch (Exception ex)
         {
             return Results.Problem(
@@ -276,9 +310,19 @@ public static class RagEndpoints
     /// <summary>
     /// Batch index multiple document chunks.
     /// </summary>
+    /// <remarks>
+    /// multi-container-multi-index-r1 indexer-routing-fix (Tier 3): the optional
+    /// <paramref name="searchIndexName"/> query parameter routes the batch to a specific
+    /// Azure AI Search index (validated against <c>AiSearchOptions.AllowedIndexes</c>; rejected
+    /// values surface as <c>400 INDEX_NOT_ALLOWED</c> per ADR-019 + NFR-08). Omit the parameter
+    /// to fall through to the tenant-default chain (NFR-02 backward-compat). The OBO contract is
+    /// preserved: rejection is a hard 400 — there is NO default-fall-back on synchronous endpoints
+    /// (that behavior is only for background jobs per the indexer-routing-fix task brief).
+    /// </remarks>
     private static async Task<IResult> IndexDocumentsBatch(
         IEnumerable<KnowledgeDocument> documents,
         IRagService ragService,
+        [FromQuery] string? searchIndexName,
         CancellationToken cancellationToken)
     {
         var docList = documents.ToList();
@@ -295,8 +339,21 @@ public static class RagEndpoints
 
         try
         {
-            var results = await ragService.IndexDocumentsBatchAsync(docList, cancellationToken);
+            var results = await ragService.IndexDocumentsBatchAsync(docList, searchIndexName, cancellationToken);
             return Results.Ok(results);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            return ex.AsFeatureDisabled503();
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException)
+        {
+            // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — rethrow so the
+            // global UseExceptionHandler middleware renders the canonical ProblemDetails
+            // (e.g., 400 INDEX_NOT_ALLOWED). Without this, the generic Exception catch below
+            // would convert it to 500 and break the NFR-08 contract.
+            throw;
         }
         catch (Exception ex)
         {
@@ -331,6 +388,11 @@ public static class RagEndpoints
             var deleted = await ragService.DeleteDocumentAsync(documentId, query.TenantId, cancellationToken);
             return Results.Ok(new RagDeleteResult { Deleted = deleted, Count = deleted ? 1 : 0 });
         }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            return ex.AsFeatureDisabled503();
+        }
         catch (Exception ex)
         {
             return Results.Problem(
@@ -363,6 +425,11 @@ public static class RagEndpoints
         {
             var count = await ragService.DeleteBySourceDocumentAsync(sourceDocumentId, query.TenantId, cancellationToken);
             return Results.Ok(new RagDeleteResult { Deleted = count > 0, Count = count });
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {
@@ -399,6 +466,11 @@ public static class RagEndpoints
                 Embedding = embedding,
                 Dimensions = embedding.Length
             });
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {
@@ -477,21 +549,34 @@ public static class RagEndpoints
                     statusCode: 500);
             }
 
-            // Update Dataverse tracking fields when DocumentId is provided
+            // Update Dataverse tracking fields when DocumentId is provided.
+            // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
+            // sprk_searchindexed=true + sprk_searchindexedon for the transition window
+            // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
             if (!string.IsNullOrEmpty(request.DocumentId))
             {
                 var indexName = analysisOptions.Value.SharedIndexName;
+                var completedAt = DateTime.UtcNow;
                 var updateRequest = new UpdateDocumentRequest
                 {
+                    // New canonical lifecycle marker (R3+)
+                    SearchIndexCompletedOn = completedAt,
+                    // Legacy dual-write (preserved during transition)
                     SearchIndexed = true,
-                    SearchIndexName = indexName,
-                    SearchIndexedOn = DateTime.UtcNow
+                    SearchIndexedOn = completedAt,
+                    // Index routing (unchanged)
+                    SearchIndexName = indexName
                 };
 
                 await dataverseService.UpdateDocumentAsync(request.DocumentId, updateRequest, cancellationToken);
             }
 
             return Results.Ok(result);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            // Task 011 Phase 1b Tier 1.5 round 4 (D-02 cluster exception): NullFileIndexingService surfaced.
+            return ex.AsFeatureDisabled503();
         }
         catch (Exception ex)
         {
@@ -619,12 +704,20 @@ public static class RagEndpoints
 
                 if (indexResult.Success)
                 {
-                    // Step 6: Update Dataverse with search index fields
+                    // Step 6: Update Dataverse with search index fields.
+                    // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
+                    // sprk_searchindexed=true + sprk_searchindexedon for the transition window
+                    // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
+                    var completedAt = DateTime.UtcNow;
                     var updateRequest = new UpdateDocumentRequest
                     {
+                        // New canonical lifecycle marker (R3+)
+                        SearchIndexCompletedOn = completedAt,
+                        // Legacy dual-write (preserved during transition)
                         SearchIndexed = true,
-                        SearchIndexName = indexName,
-                        SearchIndexedOn = DateTime.UtcNow
+                        SearchIndexedOn = completedAt,
+                        // Index routing (unchanged)
+                        SearchIndexName = indexName
                     };
 
                     await dataverseService.UpdateDocumentAsync(documentId, updateRequest, cancellationToken);
@@ -656,6 +749,14 @@ public static class RagEndpoints
                         ErrorMessage = indexResult.ErrorMessage
                     });
                 }
+            }
+            catch (FeatureDisabledException ex)
+            {
+                // Task 011 Phase 1b Tier 1.5 round 4 (D-02 cluster exception): NullFileIndexingService surfaced.
+                // Kill-switch state is request-global, not per-document — short-circuit the whole batch
+                // with a 503 ProblemDetails rather than recording per-document failures that would mislead
+                // operators into chasing N "indexing failed" entries when the root cause is one kill switch.
+                return ex.AsFeatureDisabled503();
             }
             catch (Exception ex)
             {
@@ -959,6 +1060,18 @@ public record RagSearchRequest
     /// Search options including tenant, filters, and limits.
     /// </summary>
     public required RagSearchOptions Options { get; init; }
+
+    /// <summary>
+    /// Optional explicit Azure AI Search index name to target for this request. When
+    /// provided (non-null and non-empty), the BFF resolver MUST use this index in place
+    /// of the Dataverse / appsettings fallback chain — subject to the allow-list in
+    /// <c>appsettings.AiSearch.AllowedIndexes</c>. When omitted (null or empty), the
+    /// existing 2-tier resolver chain (<c>sprk_aiknowledgedeployment</c> Dataverse entity
+    /// then <c>appsettings.AiSearch.KnowledgeIndexName</c>) is used unchanged.
+    /// JSON deserialization is forward-compatible: requests without this field continue
+    /// to work as today (FR-BFF-05, NFR-02).
+    /// </summary>
+    public string? SearchIndexName { get; init; }
 }
 
 /// <summary>

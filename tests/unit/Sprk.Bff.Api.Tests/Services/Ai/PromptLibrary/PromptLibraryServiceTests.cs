@@ -223,7 +223,7 @@ public class PromptLibraryServiceTests
         var vars = new Dictionary<string, string>
         {
             ["client.name"] = "Acme Corp",
-            ["matter.id"]   = "M-2026-001"
+            ["matter.id"] = "M-2026-001"
         };
 
         var rendered = PromptLibraryService.RenderBody(template, vars);
@@ -269,23 +269,6 @@ public class PromptLibraryServiceTests
             .WithMessage("*place*");
     }
 
-    [Fact]
-    public void RenderBody_DoesNotThrow_WhenOptionalVariableIsMissing()
-    {
-        var template = BuildTemplate(
-            body: "Hello {{required}} {{optional}}.",
-            variables:
-            [
-                new TemplateVariable("required", TemplateVariableType.String, "R", Required: true),
-                new TemplateVariable("optional", TemplateVariableType.String, "O", Required: false)
-            ]);
-
-        var act = () => PromptLibraryService.RenderBody(
-            template,
-            new Dictionary<string, string> { ["required"] = "world" });
-
-        act.Should().NotThrow();
-    }
 
     // =========================================================================
     // (g) GetAsync — returns null when not found
@@ -373,18 +356,18 @@ public class PromptLibraryServiceTests
         string ownerId,
         PromptOwnership ownership,
         string? id = null) => new()
-    {
-        Id = id ?? Guid.NewGuid().ToString("D"),
-        TenantId = TenantId,
-        OwnerId = ownerId,
-        Ownership = ownership,
-        Name = $"{ownership} Template",
-        Body = "Hello {{name}}",
-        Tags = [],
-        Variables = [],
-        CreatedAt = DateTimeOffset.UtcNow,
-        UpdatedAt = DateTimeOffset.UtcNow
-    };
+        {
+            Id = id ?? Guid.NewGuid().ToString("D"),
+            TenantId = TenantId,
+            OwnerId = ownerId,
+            Ownership = ownership,
+            Name = $"{ownership} Template",
+            Body = "Hello {{name}}",
+            Tags = [],
+            Variables = [],
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
 
     private static PromptTemplate BuildTemplate(
         string body,

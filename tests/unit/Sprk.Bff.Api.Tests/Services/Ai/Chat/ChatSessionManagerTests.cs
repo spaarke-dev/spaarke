@@ -1,8 +1,7 @@
-using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Sessions;
@@ -17,7 +16,9 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 /// - <see cref="ChatSessionManager.CreateSessionAsync"/> persists to Dataverse and warms Redis.
 /// - <see cref="ChatSessionManager.GetSessionAsync"/> returns cached session on Redis hit (no Dataverse call).
 /// - <see cref="ChatSessionManager.GetSessionAsync"/> falls back to Dataverse on Redis miss.
-/// - Cache key pattern: "chat:session:{tenantId}:{sessionId}" (ADR-014).
+/// - Cache wrapper invariants per spaarke-redis-cache-remediation-r1 FR-05:
+///     tenantId + resource "session" + sessionId + version 1 produces the on-wire key
+///     <c>spaarke:tenant:{tenantId}:session:{sessionId}:v1</c> when prefixed by InstanceName.
 /// - Sliding TTL: 24 hours (NFR-07, ADR-009).
 /// - <see cref="ChatSessionManager.DeleteSessionAsync"/> removes from Redis and archives in Dataverse.
 ///
@@ -31,9 +32,11 @@ public class ChatSessionManagerTests
 {
     private const string TenantId = "tenant-abc";
     private const string DocumentId = "doc-001";
+    private const string CacheResource = ChatSessionManager.CacheResource;
+    private const int CacheVersion = ChatSessionManager.CacheVersion;
     private static readonly Guid PlaybookId = Guid.Parse("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA");
 
-    private readonly Mock<IDistributedCache> _cacheMock;
+    private readonly Mock<ITenantCache> _cacheMock;
     private readonly Mock<IChatDataverseRepository> _repoMock;
     private readonly Mock<ILogger<ChatSessionManager>> _loggerMock;
     private readonly Mock<ISessionPersistenceService> _persistenceMock;
@@ -46,7 +49,7 @@ public class ChatSessionManagerTests
 
     public ChatSessionManagerTests()
     {
-        _cacheMock = new Mock<IDistributedCache>();
+        _cacheMock = new Mock<ITenantCache>();
         _repoMock = new Mock<IChatDataverseRepository>();
         _loggerMock = new Mock<ILogger<ChatSessionManager>>();
         _persistenceMock = new Mock<ISessionPersistenceService>();
@@ -110,67 +113,85 @@ public class ChatSessionManagerTests
     }
 
     [Fact]
-    public async Task CreateSessionAsync_WarmsRedisCache_After_DataversePersist()
+    public async Task CreateSessionAsync_WarmsRedisCache_With24hSlidingTtl()
     {
         // Arrange
         _repoMock.Setup(r => r.CreateSessionAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>()))
                  .Returns(Task.CompletedTask);
 
-        byte[]? capturedBytes = null;
-        DistributedCacheEntryOptions? capturedOptions = null;
+        TimeSpan capturedSliding = TimeSpan.Zero;
+        _cacheMock
+            .Setup(c => c.SetSlidingAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<ChatSession>(),
+                It.IsAny<TimeSpan>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, string, string, int, ChatSession, TimeSpan, string, CancellationToken>(
+                (_, _, _, _, _, sliding, _, _) => capturedSliding = sliding)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var session = await _sut.CreateSessionAsync(TenantId, DocumentId, PlaybookId);
+
+        // Assert — wrapper invoked with 24h sliding TTL (NFR-07, ADR-009)
+        _cacheMock.Verify(c => c.SetSlidingAsync(
+            TenantId,
+            CacheResource,
+            session.SessionId,
+            CacheVersion,
+            It.IsAny<ChatSession>(),
+            ChatSessionManager.SessionCacheTtl,
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        capturedSliding.Should().Be(TimeSpan.FromHours(24));
+    }
+
+    [Fact]
+    public async Task CreateSessionAsync_CacheCall_UsesSessionResource_ForFR14SmokeTest()
+    {
+        // Arrange — FR-14 / Phase 3 smoke test requires resource = "session"
+        // so the on-wire key matches spaarke:tenant:{tenantId}:session:{id}:v1.
+        _repoMock.Setup(r => r.CreateSessionAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>()))
+                 .Returns(Task.CompletedTask);
+
+        string? capturedTenant = null;
+        string? capturedResource = null;
+        string? capturedId = null;
+        int capturedVersion = 0;
 
         _cacheMock
-            .Setup(c => c.SetAsync(
+            .Setup(c => c.SetSlidingAsync(
                 It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<ChatSession>(),
+                It.IsAny<TimeSpan>(),
+                It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, byte[], DistributedCacheEntryOptions, CancellationToken>(
-                (_, bytes, opts, _) =>
+            .Callback<string, string, string, int, ChatSession, TimeSpan, string, CancellationToken>(
+                (tenant, resource, id, version, _, _, _, _) =>
                 {
-                    capturedBytes = bytes;
-                    capturedOptions = opts;
+                    capturedTenant = tenant;
+                    capturedResource = resource;
+                    capturedId = id;
+                    capturedVersion = version;
                 })
             .Returns(Task.CompletedTask);
 
         // Act
         var session = await _sut.CreateSessionAsync(TenantId, DocumentId, PlaybookId);
 
-        // Assert — Redis Set was called once
-        _cacheMock.Verify(c => c.SetAsync(
-            It.IsAny<string>(),
-            It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(),
-            It.IsAny<CancellationToken>()), Times.Once);
-
-        // Verify 24-hour sliding TTL (NFR-07, ADR-009)
-        capturedOptions.Should().NotBeNull();
-        capturedOptions!.SlidingExpiration.Should().Be(ChatSessionManager.SessionCacheTtl);
-        capturedOptions.SlidingExpiration.Should().Be(TimeSpan.FromHours(24));
-    }
-
-    [Fact]
-    public async Task CreateSessionAsync_CacheKey_FollowsPattern_TenantScopedSessionId()
-    {
-        // Arrange
-        _repoMock.Setup(r => r.CreateSessionAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>()))
-                 .Returns(Task.CompletedTask);
-
-        string? capturedKey = null;
-        _cacheMock
-            .Setup(c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
-            .Callback<string, byte[], DistributedCacheEntryOptions, CancellationToken>(
-                (key, _, _, _) => capturedKey = key)
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var session = await _sut.CreateSessionAsync(TenantId, DocumentId, PlaybookId);
-
-        // Assert — key format: "chat:session:{tenantId}:{sessionId}" (ADR-014)
-        capturedKey.Should().NotBeNull();
-        capturedKey.Should().StartWith($"chat:session:{TenantId}:");
-        capturedKey.Should().EndWith(session.SessionId);
+        // Assert — resource MUST be "session" (FR-14 smoke-test contract)
+        capturedTenant.Should().Be(TenantId);
+        capturedResource.Should().Be("session");
+        capturedId.Should().Be(session.SessionId);
+        capturedVersion.Should().Be(1);
     }
 
     // =========================================================================
@@ -182,14 +203,16 @@ public class ChatSessionManagerTests
     {
         // Arrange
         var existingSession = CreateTestSession("session-xyz");
-        var cachedBytes = JsonSerializer.SerializeToUtf8Bytes(existingSession);
-        var cacheKey = ChatSessionManager.BuildCacheKey(TenantId, "session-xyz");
 
         _cacheMock
-            .Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cachedBytes);
+            .Setup(c => c.GetAsync<ChatSession>(
+                TenantId, CacheResource, "session-xyz", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingSession);
         _cacheMock
-            .Setup(c => c.RefreshAsync(cacheKey, It.IsAny<CancellationToken>()))
+            .Setup(c => c.RefreshAsync(
+                TenantId, CacheResource, "session-xyz", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Act
@@ -206,25 +229,29 @@ public class ChatSessionManagerTests
     }
 
     [Fact]
-    public async Task GetSessionAsync_RefressesSlidingTtl_OnRedisHit()
+    public async Task GetSessionAsync_RefreshesSlidingTtl_OnRedisHit()
     {
         // Arrange
         var existingSession = CreateTestSession("session-ttl");
-        var cachedBytes = JsonSerializer.SerializeToUtf8Bytes(existingSession);
-        var cacheKey = ChatSessionManager.BuildCacheKey(TenantId, "session-ttl");
 
         _cacheMock
-            .Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cachedBytes);
+            .Setup(c => c.GetAsync<ChatSession>(
+                TenantId, CacheResource, "session-ttl", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingSession);
         _cacheMock
-            .Setup(c => c.RefreshAsync(cacheKey, It.IsAny<CancellationToken>()))
+            .Setup(c => c.RefreshAsync(
+                TenantId, CacheResource, "session-ttl", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Act
         await _sut.GetSessionAsync(TenantId, "session-ttl");
 
-        // Assert — sliding TTL is refreshed via RefreshAsync
-        _cacheMock.Verify(c => c.RefreshAsync(cacheKey, It.IsAny<CancellationToken>()), Times.Once);
+        // Assert — sliding TTL is refreshed via wrapper RefreshAsync
+        _cacheMock.Verify(c => c.RefreshAsync(
+            TenantId, CacheResource, "session-ttl", CacheVersion,
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // =========================================================================
@@ -234,10 +261,12 @@ public class ChatSessionManagerTests
     [Fact]
     public async Task GetSessionAsync_FallsBackToDataverse_OnRedisMiss()
     {
-        // Arrange — cache returns null (miss)
+        // Arrange — cache returns default (miss)
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<ChatSession>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
 
         var dvSession = CreateTestSession("session-cold");
         _repoMock
@@ -260,8 +289,10 @@ public class ChatSessionManagerTests
     {
         // Arrange
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<ChatSession>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
 
         var dvSession = CreateTestSession("session-rewarm");
         _repoMock
@@ -274,10 +305,14 @@ public class ChatSessionManagerTests
         await _sut.GetSessionAsync(TenantId, "session-rewarm");
 
         // Assert — cache was set (re-warmed) after Dataverse fallback
-        _cacheMock.Verify(c => c.SetAsync(
-            It.Is<string>(k => k.Contains("session-rewarm")),
-            It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(),
+        _cacheMock.Verify(c => c.SetSlidingAsync(
+            TenantId,
+            CacheResource,
+            "session-rewarm",
+            CacheVersion,
+            It.IsAny<ChatSession>(),
+            It.IsAny<TimeSpan>(),
+            It.IsAny<string>(),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -286,8 +321,10 @@ public class ChatSessionManagerTests
     {
         // Arrange
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<ChatSession>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
 
         _repoMock
             .Setup(r => r.GetSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -309,7 +346,9 @@ public class ChatSessionManagerTests
     {
         // Arrange
         _cacheMock
-            .Setup(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.RemoveAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _repoMock
             .Setup(r => r.ArchiveSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -320,8 +359,8 @@ public class ChatSessionManagerTests
 
         // Assert
         _cacheMock.Verify(c => c.RemoveAsync(
-            It.Is<string>(k => k == ChatSessionManager.BuildCacheKey(TenantId, "session-delete")),
-            It.IsAny<CancellationToken>()), Times.Once);
+            TenantId, CacheResource, "session-delete", CacheVersion,
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -329,7 +368,9 @@ public class ChatSessionManagerTests
     {
         // Arrange
         _cacheMock
-            .Setup(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.RemoveAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _repoMock
             .Setup(r => r.ArchiveSessionAsync(TenantId, "session-archive", It.IsAny<CancellationToken>()))
@@ -343,18 +384,69 @@ public class ChatSessionManagerTests
     }
 
     // =========================================================================
-    // Cache key and TTL constants
+    // R5 task 007 (D1-07) — Session-files cleanup signal integration
     // =========================================================================
 
     [Fact]
-    public void BuildCacheKey_ProducesExpectedPattern()
+    public async Task DeleteSessionAsync_FiresCleanupSignal_ExactlyOnce_WithTenantAndSessionIds()
     {
+        // Arrange
+        var cleanupSignalMock = new Mock<Sprk.Bff.Api.Services.Ai.Chat.ISessionFilesCleanupSignal>();
+        var sut = new ChatSessionManager(
+            _cacheMock.Object,
+            _repoMock.Object,
+            _loggerMock.Object,
+            persistence: null,
+            cleanupSignal: cleanupSignalMock.Object);
+
+        _cacheMock
+            .Setup(c => c.RemoveAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _repoMock
+            .Setup(r => r.ArchiveSessionAsync(TenantId, "session-r5-signal", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
         // Act
-        var key = ChatSessionManager.BuildCacheKey("my-tenant", "my-session");
+        await sut.DeleteSessionAsync(TenantId, "session-r5-signal");
 
         // Assert
-        key.Should().Be("chat:session:my-tenant:my-session");
+        cleanupSignalMock.Verify(
+            s => s.SignalSessionEnded(TenantId, "session-r5-signal"),
+            Times.Once,
+            "DeleteSessionAsync must raise the cleanup signal at the end of the existing logic " +
+            "(spec NFR-02 aggressive cleanup-on-session-end contract)");
     }
+
+    [Fact]
+    public async Task DeleteSessionAsync_SucceedsWhenCleanupSignalIsNull_BackCompat()
+    {
+        // Arrange
+        _cacheMock
+            .Setup(c => c.RemoveAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _repoMock
+            .Setup(r => r.ArchiveSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act + Assert — no exception, no dependency on the cleanup signal.
+        var act = async () => await _sut.DeleteSessionAsync(TenantId, "session-no-cleanup-signal");
+        await act.Should().NotThrowAsync(
+            "the cleanup-signal injection is nullable + the call is fire-and-forget — " +
+            "DeleteSessionAsync must continue to work when the signal is not registered");
+
+        _cacheMock.Verify(c => c.RemoveAsync(
+            TenantId, CacheResource, "session-no-cleanup-signal", CacheVersion,
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        _repoMock.Verify(r => r.ArchiveSessionAsync(TenantId, "session-no-cleanup-signal", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // =========================================================================
+    // Cache TTL constants
+    // =========================================================================
 
     [Fact]
     public void SessionCacheTtl_Is24Hours()
@@ -362,33 +454,40 @@ public class ChatSessionManagerTests
         ChatSessionManager.SessionCacheTtl.Should().Be(TimeSpan.FromHours(24));
     }
 
+    [Fact]
+    public void CacheResource_Is_Session_ForFR14SmokeTest()
+    {
+        // FR-14 / Phase 3 smoke test contract: on-wire key MUST contain ":session:"
+        // produced by the wrapper. Migration agent guards this constant.
+        ChatSessionManager.CacheResource.Should().Be("session");
+        ChatSessionManager.CacheVersion.Should().Be(1);
+    }
+
     // =========================================================================
     // Cosmos write-through integration tests (decision D-06)
     // =========================================================================
 
-    /// <summary>
-    /// Write-through: GetSessionAsync on a warm Redis cache must NOT call Cosmos.
-    /// Cosmos is consulted only on Redis misses (ADR-009 Redis-first).
-    /// </summary>
     [Fact]
     public async Task GetSessionAsync_WarmRedisHit_DoesNotCallCosmos()
     {
         // Arrange
         var existingSession = CreateTestSession("session-warm");
-        var cachedBytes = JsonSerializer.SerializeToUtf8Bytes(existingSession);
-        var cacheKey = ChatSessionManager.BuildCacheKey(TenantId, "session-warm");
 
         _cacheMock
-            .Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cachedBytes);
+            .Setup(c => c.GetAsync<ChatSession>(
+                TenantId, CacheResource, "session-warm", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingSession);
         _cacheMock
-            .Setup(c => c.RefreshAsync(cacheKey, It.IsAny<CancellationToken>()))
+            .Setup(c => c.RefreshAsync(
+                TenantId, CacheResource, "session-warm", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Act
         var result = await _sutWithCosmos.GetSessionAsync(TenantId, "session-warm");
 
-        // Assert — result returned from Redis, Cosmos NOT called
+        // Assert
         result.Should().NotBeNull();
         result!.SessionId.Should().Be("session-warm");
         _persistenceMock.Verify(
@@ -397,28 +496,25 @@ public class ChatSessionManagerTests
             "Cosmos must not be consulted on a Redis hit (ADR-009 Redis-first)");
     }
 
-    /// <summary>
-    /// Redis miss + Cosmos hit: Cosmos fallback re-populates Redis so subsequent requests hit the hot path.
-    /// Dataverse must NOT be called when Cosmos holds the session.
-    /// </summary>
     [Fact]
     public async Task GetSessionAsync_RedisMiss_CosmosFallback_RePopulatesRedisAndSkipsDataverse()
     {
-        // Arrange — Redis returns null (cache miss)
+        // Arrange
         _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
+            .Setup(c => c.GetAsync<ChatSession>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
 
-        // Cosmos holds the session
         var storedSession = new StoredSession
         {
-            Id          = "session-cold-cosmos",
-            SessionId   = "session-cold-cosmos",
-            TenantId    = TenantId,
-            PlaybookId  = PlaybookId,
-            Messages    = [],
+            Id = "session-cold-cosmos",
+            SessionId = "session-cold-cosmos",
+            TenantId = TenantId,
+            PlaybookId = PlaybookId,
+            Messages = [],
             WidgetStates = [],
-            CreatedAt   = DateTimeOffset.UtcNow.AddMinutes(-30),
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-30),
             LastActivity = DateTimeOffset.UtcNow.AddMinutes(-5)
         };
         _persistenceMock
@@ -430,31 +526,29 @@ public class ChatSessionManagerTests
         // Act
         var result = await _sutWithCosmos.GetSessionAsync(TenantId, "session-cold-cosmos");
 
-        // Assert — session returned from Cosmos
+        // Assert
         result.Should().NotBeNull();
         result!.SessionId.Should().Be("session-cold-cosmos");
         result.TenantId.Should().Be(TenantId);
 
-        // Redis must be re-warmed
-        _cacheMock.Verify(c => c.SetAsync(
-            It.Is<string>(k => k.Contains("session-cold-cosmos")),
-            It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(),
+        _cacheMock.Verify(c => c.SetSlidingAsync(
+            TenantId,
+            CacheResource,
+            "session-cold-cosmos",
+            CacheVersion,
+            It.IsAny<ChatSession>(),
+            It.IsAny<TimeSpan>(),
+            It.IsAny<string>(),
             It.IsAny<CancellationToken>()),
             Times.Once,
             "Redis must be re-warmed from Cosmos so subsequent reads hit the hot path");
 
-        // Dataverse must NOT be called — Cosmos was sufficient
         _repoMock.Verify(r => r.GetSessionAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "Dataverse must not be called when Cosmos already has the session");
     }
 
-    /// <summary>
-    /// Cosmos write failure: Redis write succeeds and the session is returned normally.
-    /// The Cosmos failure must never propagate to the caller (D-06 non-fatal policy).
-    /// </summary>
     [Fact]
     public async Task CreateSessionAsync_CosmosWriteFailure_RedisWriteSucceeds_NoExceptionThrown()
     {
@@ -476,10 +570,14 @@ public class ChatSessionManagerTests
             "Cosmos write failure must not surface to the caller (D-06 non-fatal policy)");
 
         // Assert — Redis was still written
-        _cacheMock.Verify(c => c.SetAsync(
+        _cacheMock.Verify(c => c.SetSlidingAsync(
             It.IsAny<string>(),
-            It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<int>(),
+            It.IsAny<ChatSession>(),
+            It.IsAny<TimeSpan>(),
+            It.IsAny<string>(),
             It.IsAny<CancellationToken>()),
             Times.Once,
             "Redis write must succeed even when Cosmos is unavailable");
@@ -502,10 +600,14 @@ public class ChatSessionManagerTests
     private void SetupCacheSetSuccess()
     {
         _cacheMock
-            .Setup(c => c.SetAsync(
+            .Setup(c => c.SetSlidingAsync(
                 It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<ChatSession>(),
+                It.IsAny<TimeSpan>(),
+                It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
     }

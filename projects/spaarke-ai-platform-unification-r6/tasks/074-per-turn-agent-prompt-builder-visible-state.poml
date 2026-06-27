@@ -1,0 +1,119 @@
+<task id="074" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-29 + D-C-30 — Per-turn agent prompt builder gathers visible state from Assistant-visible tabs + privacy default verified</title>
+    <status>pending</status>
+    <estimated-effort>1 day</estimated-effort>
+    <phase>Phase C — Widget Visibility Contract (Pillar 9)</phase>
+    <wave>C-G2 (sequential after 073)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>053 (workspace state wired into factory), 073 (per-widget impls)</dependencies>
+    <tags>bff-api, ai, chat, workspace</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies chat agent factory hot path; consumes workspace state + each tab's getVisibleState; privacy filter + ADR-015 binding.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Refine the workspace state block in `SprkChatAgentFactory.CreateAgentAsync` (added in
+    task 053 with a minimal text summary) to gather rich visible state from each
+    Assistant-visible tab. For each tab where `visibleToAssistant: true`, call its
+    registered `getAgentVisibleState()` (when defined) + include the structured output in
+    the "Workspace State" prompt block. Filter logic: `tab.visibleToAssistant === true`
+    AND `widget.getVisibleState` is defined. Tabs that should NOT expose to LLM
+    (default state OR widget opt-out) MUST NOT appear in agent prompts (FR-59 privacy
+    default).
+
+    The frontend per-tab `getAgentVisibleState` runs in browser; BFF reaches it via the
+    workspace state already persisted (the frontend pushed serialized visible state to
+    BFF on tab create/update — added as part of the workspace state model). BFF
+    composition reads the persisted serialized state, applies the `visibleToAssistant`
+    filter, formats for prompt inclusion.
+
+    Per spec FR-58: included in system prompt "Workspace State" block; respects
+    `visibleToAssistant: true` filter per ADR-015 data governance. Per FR-59 privacy
+    default: widgets that don't return state (no impl) OR tabs not flagged visible DO
+    NOT appear.
+  </prompt>
+
+  <role>
+    Senior AI platform engineer + BFF engineer with familiarity with `SprkChatAgentFactory`
+    + workspace state model + per-widget visibility contract.
+  </role>
+
+  <goal>
+    Per-turn agent prompt builder refined; tabs with `visibleToAssistant: true` + defined
+    `getVisibleState` appear in prompt; others filtered out; integration test verifies
+    privacy default.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="chat-arch">docs/architecture/chat-architecture.md</file>
+    <file purpose="ai-arch">docs/architecture/AI-ARCHITECTURE.md</file>
+    <file purpose="chat-factory">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="workspace-svc">src/server/api/Sprk.Bff.Api/Services/Workspace/IWorkspaceStateService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Existing module registration; ZERO new Program.cs lines.</constraint>
+    <constraint source="ADR-013">BFF-side AI service.</constraint>
+    <constraint source="ADR-015">Privacy default — widgets opt in; tabs flag `visibleToAssistant: true` to participate. No automatic exposure.</constraint>
+    <constraint source="ADR-029">Publish-size delta verified.</constraint>
+    <constraint source="spec FR-58">Per-turn prompt builder gathers visible state; respects `visibleToAssistant: true` filter.</constraint>
+    <constraint source="spec FR-59">Privacy default — widgets that shouldn't expose don't appear; user override via Pillar 6b "Add to Assistant" toggle (task 057).</constraint>
+    <constraint source="spec NFR-10">Total 8K budget preserved.</constraint>
+    <constraint source="project R6 Pillar 9 binding">Filter rule: `tab.visibleToAssistant === true` AND widget has `getVisibleState`. Both required.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/ai-prompt-assembly</topic>
+    <files>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — Chat factory hot path; privacy filter; ADR-015 binding."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 053 + 073 complete.</step>
+    <step order="2" name="Gather Resources">Read SprkChatAgentFactory + workspace state service + serialized state interface.</step>
+    <step order="3" name="Refine Workspace State Block Builder">Replace minimal text summary from task 053 with rich serialized-state composition. Filter: `visibleToAssistant: true` AND widget has impl.</step>
+    <step order="4" name="Format for Prompt">Each tab's visible state as structured block (JSON or table-like format the LLM can parse).</step>
+    <step order="5" name="Budget Enforcement">Respect 8K via shared budget tracker (task 068).</step>
+    <step order="6" name="Tests">Unit tests: (a) visible + impl → in prompt; (b) visible + no impl → not in prompt; (c) not visible → not in prompt; (d) budget enforcement.</step>
+    <step order="7" name="Integration Test">End-to-end: 3 tabs (visible+impl, visible+no-impl, not-visible); verify only first appears in agent prompt.</step>
+    <step order="8" name="Publish-Size + CVE">dotnet publish + vulnerable check.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check (ADR-010/013/015/029).</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 074 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test + publish</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (modified — rich visible state block)</output>
+    <output type="tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryTests.cs (updated)</output>
+    <output type="tests">tests/integration/ — privacy default end-to-end test</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Workspace State block contains serialized state from each tab where `visibleToAssistant: true` AND widget impl defined.</criterion>
+    <criterion testable="true">Tabs without `visibleToAssistant` flag DO NOT appear (privacy default).</criterion>
+    <criterion testable="true">Tabs whose widget has no impl DO NOT appear.</criterion>
+    <criterion testable="true">8K budget enforced via shared tracker.</criterion>
+    <criterion testable="true">Integration test confirms 3-tab privacy filter behavior.</criterion>
+    <criterion testable="true">ZERO new Program.cs lines.</criterion>
+    <criterion testable="true">Publish-size delta within budget.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

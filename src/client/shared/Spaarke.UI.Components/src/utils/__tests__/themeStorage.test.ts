@@ -41,6 +41,34 @@ const localStorageMock = (() => {
 
 Object.defineProperty(window, 'localStorage', { value: localStorageMock });
 
+// ──────────────────────────────────────────────────────────────────────────
+// Location mock helpers (task 071)
+//
+// Newer jsdom marks `window.location` non-configurable, breaking
+// `jest.spyOn(window, 'location', 'get')`. Replacement pattern: use jsdom's
+// `Location.assign` semantics by navigating via `history.pushState` (changes
+// `location.search`) — keeps the real `window.location` object intact and
+// works with the strict `Location` interface.
+// ──────────────────────────────────────────────────────────────────────────
+function setMockLocation(loc: { search?: string }): void {
+  // Use history API to mutate window.location.search without redefining
+  // the (non-configurable) `location` property.
+  const search = loc.search ?? '';
+  // History.pushState requires same-origin; build a URL on current origin.
+  const url = (window.location.origin || 'http://localhost') + window.location.pathname + search;
+  window.history.pushState({}, '', url);
+}
+
+function installLocationMock(): void {
+  // Reset to clean state
+  setMockLocation({ search: '' });
+}
+
+function restoreLocation(): void {
+  // Reset search to empty
+  setMockLocation({ search: '' });
+}
+
 describe('themeStorage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -126,43 +154,41 @@ describe('themeStorage', () => {
   });
 
   describe('detectDarkModeFromUrl', () => {
-    let locationSpy: jest.SpyInstance;
-
     beforeEach(() => {
-      locationSpy = jest.spyOn(window, 'location', 'get');
+      installLocationMock();
     });
 
     afterEach(() => {
-      locationSpy.mockRestore();
+      restoreLocation();
     });
 
     it('should return true for flags=themeOption=dark', () => {
-      locationSpy.mockReturnValue({ search: '?flags=themeOption%3Ddark' });
+      setMockLocation({ search: '?flags=themeOption%3Ddark' });
       expect(detectDarkModeFromUrl()).toBe(true);
     });
 
     it('should return false for flags=themeOption=light', () => {
-      locationSpy.mockReturnValue({ search: '?flags=themeOption%3Dlight' });
+      setMockLocation({ search: '?flags=themeOption%3Dlight' });
       expect(detectDarkModeFromUrl()).toBe(false);
     });
 
     it('should return true for direct theme=dark param', () => {
-      locationSpy.mockReturnValue({ search: '?theme=dark' });
+      setMockLocation({ search: '?theme=dark' });
       expect(detectDarkModeFromUrl()).toBe(true);
     });
 
     it('should return false for direct theme=light param', () => {
-      locationSpy.mockReturnValue({ search: '?theme=light' });
+      setMockLocation({ search: '?theme=light' });
       expect(detectDarkModeFromUrl()).toBe(false);
     });
 
     it('should return null when no theme param', () => {
-      locationSpy.mockReturnValue({ search: '?other=value' });
+      setMockLocation({ search: '?other=value' });
       expect(detectDarkModeFromUrl()).toBeNull();
     });
 
     it('should return null for empty search', () => {
-      locationSpy.mockReturnValue({ search: '' });
+      setMockLocation({ search: '' });
       expect(detectDarkModeFromUrl()).toBeNull();
     });
   });
@@ -382,21 +408,20 @@ describe('themeStorage', () => {
   });
 
   describe('resolveCodePageTheme', () => {
-    let locationSpy: jest.SpyInstance;
     let querySelectorSpy: jest.SpyInstance;
     let getComputedStyleSpy: jest.SpyInstance;
 
     beforeEach(() => {
-      locationSpy = jest.spyOn(window, 'location', 'get');
+      installLocationMock();
       querySelectorSpy = jest.spyOn(document, 'querySelector');
       getComputedStyleSpy = jest.spyOn(window, 'getComputedStyle');
       // Default: no URL params, no navbar
-      locationSpy.mockReturnValue({ search: '' });
+      setMockLocation({ search: '' });
       querySelectorSpy.mockReturnValue(null);
     });
 
     afterEach(() => {
-      locationSpy.mockRestore();
+      restoreLocation();
       querySelectorSpy.mockRestore();
       getComputedStyleSpy.mockRestore();
     });
@@ -413,7 +438,7 @@ describe('themeStorage', () => {
 
     it('should use URL flags when preference is "auto"', () => {
       localStorageMock.getItem.mockReturnValue('auto');
-      locationSpy.mockReturnValue({ search: '?flags=themeOption%3Ddark' });
+      setMockLocation({ search: '?flags=themeOption%3Ddark' });
 
       expect(resolveCodePageTheme()).toBe(webDarkTheme);
     });
@@ -441,7 +466,7 @@ describe('themeStorage', () => {
 
     it('should prioritize localStorage over URL flags', () => {
       localStorageMock.getItem.mockReturnValue('light');
-      locationSpy.mockReturnValue({ search: '?flags=themeOption%3Ddark' });
+      setMockLocation({ search: '?flags=themeOption%3Ddark' });
 
       expect(resolveCodePageTheme()).toBe(webLightTheme);
     });
@@ -540,20 +565,19 @@ describe('themeStorage', () => {
   describe('setupCodePageThemeListener', () => {
     let addEventListenerSpy: jest.SpyInstance;
     let removeEventListenerSpy: jest.SpyInstance;
-    let locationSpy: jest.SpyInstance;
 
     beforeEach(() => {
       addEventListenerSpy = jest.spyOn(window, 'addEventListener');
       removeEventListenerSpy = jest.spyOn(window, 'removeEventListener');
-      locationSpy = jest.spyOn(window, 'location', 'get');
-      locationSpy.mockReturnValue({ search: '' });
+      installLocationMock();
+      setMockLocation({ search: '' });
       jest.spyOn(document, 'querySelector').mockReturnValue(null);
     });
 
     afterEach(() => {
       addEventListenerSpy.mockRestore();
       removeEventListenerSpy.mockRestore();
-      locationSpy.mockRestore();
+      restoreLocation();
       (document.querySelector as jest.Mock).mockRestore();
     });
 

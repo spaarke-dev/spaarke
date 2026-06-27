@@ -1,0 +1,236 @@
+{
+  "$comment": "D-P14 predict-matter-cost synthesis playbook (Phase 1 task 060). This is the canonical Insights-mode playbook for the questions-as-playbooks pattern per D-54 + SPEC §3.4.3. Unlike universal-ingest (which has a fixed sequence realized in code), this playbook is data-driven (Dataverse sprk_analysisplaybook + sprk_playbooknodes) because future synthesis questions will be authored against the same node executors with different graphs. Deploy via: scripts/Deploy-Playbook.ps1 -DefinitionFile <this-file> after az login.",
+  "$comment-publication": "Published as a Dataverse sprk_analysisplaybook row + N sprk_playbooknodes rows. The IInsightsAi.AnswerQuestionAsync facade resolves Question (Guid) -> playbook row -> nodes via INodeService.GetNodesAsync; PlaybookOrchestrationService.ExecuteAppOnlyAsync drains the stream; InsightsPlaybookExecutionCache (D-P13) extracts the final ReturnInsightArtifactNode output as the cached InsightArtifact.",
+  "$comment-deviation": "Synthesis LLM call uses AgentServiceNodeExecutor (action_type=60) rather than AiAnalysisNodeExecutor (action_type=0). Rationale: AiAnalysisNodeExecutor requires NodeExecutionContext.Document with extracted text (it bridges to IAnalysisToolHandler which is document-bound). Synthesis playbooks have NO document — they compose retrieved evidence from prior nodes. AgentServiceNodeExecutor accepts pure prompt + tenantId via ConfigJson, matching synthesis semantics. The task 060 invocation guidance suggests AiAnalysisNodeExecutor in the abstract; the existing executor wiring requires the substitution. The synthesis prompt + node graph + evidence-sufficiency contract are unchanged.",
+
+  "playbook": {
+    "name": "predict-matter-cost@v1",
+    "description": "Insights-mode synthesis playbook (D-P14). Predicts likely total cost + duration of a new legal matter by composing Live Facts (current matter scope) + cohort Observations (from comparable matters via spaarke-insights-index) + applicable Confirmed Precedents. Evidence-sufficiency rule comparableMatters.min=12 routes to DeclineToFindNode on insufficient cohort. Cached for 5 min per D-P13.",
+    "isPublic": true,
+    "isSystemPlaybook": true,
+    "sprk_playbooktype": 0,
+    "$comment-type": "sprk_playbooktype=0 (AiAnalysis) — closest existing semantic in the option set (range 0-4: AiAnalysis/Workflow/Notification/Notification/Hybrid). Phase 1 discriminator for Insights vs Analysis is isSystemPlaybook=true + the '@v1' naming convention. Phase 1.5 may add an explicit Insights value to the type option set AND map sprk_playbookmode=1 (NodeBased) via script; the current Deploy-Playbook.ps1 does not read sprk_playbookmode so adding it here would be a no-op.",
+    "sprk_configjson": {
+      "mode": "insights",
+      "tier": "inference",
+      "cacheTtlSeconds": 300,
+      "$comment-cacheTtl": "5 minutes per D-P13 (matches InsightsPlaybookExecutionCache.DefaultTtl). The orchestrator reads this and passes as Ttl override to the cache.",
+      "evidenceRule": {
+        "comparableMatters": { "min": 12 }
+      },
+      "$comment-evidenceRule": "Mirrors EvidenceSufficiencyNode 'checkSufficiency' config below. Recorded on the playbook record so admin tooling can audit evidence rules without traversing node configs.",
+      "insufficientEvidenceTemplate": "Cannot predict cost: only {have} comparable matters were found (need {need} per rule '{rule}' from {from}). {reason}",
+      "$comment-insufficientTemplate": "D-49 LAVERN Pattern #7 structured template. Tokens: {have}={cohortCount}, {need}=12, {rule}='comparableMatters.min', {from}='retrieveCohortObservations', {reason}=human-readable explanation.",
+      "parameterSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+          "matterId": { "type": "string", "description": "Subject matter Guid in matter:M-XXXX form (passed via Subject field at runtime, not Parameters)" },
+          "matterType": { "type": "string", "description": "Optional: narrow cohort retrieval by matter type (e.g., 'IP licensing')" },
+          "dealSizeBucket": { "type": "string", "description": "Optional: narrow cohort retrieval by deal size bucket" },
+          "opposingCounsel": { "type": "string", "description": "Optional: surface relevant Precedents by opposing counsel" }
+        }
+      }
+    },
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    },
+    "$comment-scopes": "Insights-mode playbooks bypass the legacy skill/action/knowledge/tool resolution — the node executors are auto-discovered by NodeExecutorRegistry via SupportedActionTypes. Scopes left empty intentionally; the seed script tolerates empty arrays per resolution-loop guards."
+  },
+
+  "nodes": [
+    {
+      "name": "resolveLiveFacts",
+      "nodeType": "AIAnalysis",
+      "actionCode": "INS-FACT@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave B (D-01 path-b): action row INS-FACT in sprk_analysisaction, sprk_actiontypeid -> '80 - Live Fact Resolver' with sprk_executoractiontype=80. Deploy-Playbook.ps1 line 673 resolves actionCode -> sprk_actionid FK at deploy time.",
+      "actionType": 80,
+      "$comment-actionType": "ActionType.LiveFact = 80; handled by LiveFactNode (task 022)",
+      "outputVariable": "liveFacts",
+      "positionX": 100, "positionY": 200,
+      "configJson": {
+        "subject": "matter:{{matterId}}",
+        "predicate": "currentMatterFacts",
+        "$comment": "Resolves current matter Live Facts (attorney, matter type, client, opposing counsel, current spend, duration) via ILiveFactResolver. Template variable {{matterId}} substituted from Parameters at runtime."
+      }
+    },
+    {
+      "name": "retrieveCohortObservations",
+      "nodeType": "AIAnalysis",
+      "actionCode": "INS-IDXR@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave B: INS-IDXR action row; lookup '90 - Index Retrieve' with sprk_executoractiontype=90.",
+      "actionType": 90,
+      "$comment-actionType": "ActionType.IndexRetrieve = 90; handled by IndexRetrieveNode (task 022)",
+      "outputVariable": "cohortObservations",
+      "positionX": 400, "positionY": 100,
+      "dependsOn": ["resolveLiveFacts"],
+      "configJson": {
+        "indexName": "spaarke-insights-index",
+        "artifactType": "observation",
+        "filter": "predicate eq 'outcomeCategory' or predicate eq 'settlementAmount' or predicate eq 'outcomeDate' or predicate eq 'matterDurationDays'",
+        "vectorQuery": "{{matterDescription}}",
+        "topK": 25,
+        "requireEvidence": false,
+        "$comment-requireEvidence": "false here because empty cohort is handled by EvidenceSufficiencyNode (with structured gap analysis), not by IndexRetrieveNode's hard fail. Setting true would mask the decline path."
+      }
+    },
+    {
+      "name": "retrievePrecedents",
+      "nodeType": "AIAnalysis",
+      "actionCode": "INS-IDXR@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave B: same INS-IDXR action row as retrieveCohortObservations (two nodes reference one action row — different configJson distinguishes the queries).",
+      "actionType": 90,
+      "$comment-actionType": "ActionType.IndexRetrieve = 90; second IndexRetrieveNode query (precedents)",
+      "outputVariable": "precedents",
+      "positionX": 400, "positionY": 300,
+      "dependsOn": ["resolveLiveFacts"],
+      "configJson": {
+        "indexName": "spaarke-insights-index",
+        "artifactType": "precedent",
+        "filter": "status eq 'confirmed'",
+        "vectorQuery": "{{matterDescription}}",
+        "topK": 10,
+        "requireEvidence": false,
+        "$comment-requireEvidence": "false — having zero applicable Precedents is normal; the synthesis prompt handles 'no precedents' explicitly."
+      }
+    },
+    {
+      "name": "checkSufficiency",
+      "nodeType": "Control",
+      "actionCode": "INS-EVID@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave B: INS-EVID action row; lookup '100 - Evidence Sufficiency' with sprk_executoractiontype=100.",
+      "actionType": 100,
+      "$comment-actionType": "ActionType.EvidenceSufficiency = 100; handled by EvidenceSufficiencyNode (task 022)",
+      "outputVariable": "sufficiency",
+      "positionX": 700, "positionY": 200,
+      "dependsOn": ["retrieveCohortObservations", "retrievePrecedents"],
+      "configJson": {
+        "rules": [
+          {
+            "name": "comparableMatters",
+            "from": "retrieveCohortObservations",
+            "countFrom": "totalCount",
+            "minCount": 12,
+            "$comment-minCount": "Phase 1 acceptance bar per SPEC-phase-1-minimum.md §6. Below 12 cohort matches yields verdict=insufficient + structured gap (have:N, need:12-N, rule:'comparableMatters.min')."
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthesize",
+      "nodeType": "AIAnalysis",
+      "actionCode": "INS-AGNT@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave B: INS-AGNT action row (Insights — Agent Service Synthesis); lookup '60 - Agent Service' with sprk_executoractiontype=60.",
+      "actionType": 60,
+      "$comment-actionType": "ActionType.AgentService = 60; handled by AgentServiceNodeExecutor. Used here (not AiAnalysisNodeExecutor) because synthesis composes prior-node outputs into a prompt — no document bound. See top-of-file $comment-deviation.",
+      "outputVariable": "synthesis",
+      "positionX": 1000, "positionY": 200,
+      "dependsOn": ["checkSufficiency"],
+      "configJson": {
+        "tenantId": "{{tenantId}}",
+        "$comment-prompt-source": "Synthesis prompt content lives in sprk_analysisaction[INS-AGNT@v1].sprk_systemprompt (Wave C2 task 021 migrated predict-matter-cost-synthesis.v1.txt → row; the .txt file was deleted in Wave C-G4 task 022). AgentServiceNodeExecutor reads the prompt at runtime via the actionCode FK; template placeholders {{liveFacts}}, {{cohortObservations}}, {{precedents}} are resolved by PlaybookOrchestrationService.ApplyConfigJsonTemplates from prior-node OutputVariables.",
+        "$comment-branching": "This node executes ONLY when checkSufficiency.verdict == 'sufficient'. The orchestrator's branch routing is handled by checkSufficiency's selectedBranch output + the engine's downstream node skip logic (Wave C1 Gap #2 patch: a node whose upstream EvidenceSufficiency emitted 'insufficient' is skipped per EvidenceSufficiencyNode docs)."
+      }
+    },
+    {
+      "name": "groundCitations",
+      "nodeType": "Control",
+      "actionCode": "INS-GRND@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave B: INS-GRND action row; lookup '70 - Grounding Verify' with sprk_executoractiontype=70.",
+      "actionType": 70,
+      "$comment-actionType": "ActionType.GroundingVerify = 70; handled by GroundingVerifyNode (task 020)",
+      "outputVariable": "groundedSynthesis",
+      "positionX": 1300, "positionY": 200,
+      "dependsOn": ["synthesize"],
+      "configJson": {
+        "citationsFrom": "synthesize",
+        "citationsJsonPath": "evidence",
+        "sourceChunksFrom": "retrieveCohortObservations",
+        "sourceChunksJsonPath": "documents",
+        "annotationText": "[citation could not be verified]",
+        "$comment": "Mechanically verifies every evidence[].snippet against the source observations' verbatim text. Failed citations are stripped (not annotated) before ReturnInsightArtifactNode emits the final InferenceArtifact. The D-A23 EvidenceGuard downstream then enforces the 12-citation minimum after stripping."
+      }
+    },
+    {
+      "name": "ReturnInsightArtifactNode",
+      "$comment-name": "MUST be exactly 'ReturnInsightArtifactNode' (case-sensitive). InsightsPlaybookExecutionCache.ReturnInsightArtifactNodeName is hardcoded to this string for stream draining — see InsightsPlaybookExecutionCache.cs line 59.",
+      "nodeType": "Output",
+      "actionCode": "INS-RART@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave B: INS-RART action row; lookup '120 - Return Insight Artifact' with sprk_executoractiontype=120.",
+      "actionType": 120,
+      "$comment-actionType": "ActionType.ReturnInsightArtifact = 120; handled by ReturnInsightArtifactNode (task 022)",
+      "outputVariable": "inferenceArtifact",
+      "positionX": 1600, "positionY": 200,
+      "dependsOn": ["groundCitations"],
+      "configJson": {
+        "from": "groundCitations",
+        "artifactKind": "inference",
+        "subject": "matter:{{matterId}}",
+        "predicate": "predictedCost",
+        "displayHint": "currency-usd-range",
+        "producedById": "playbook://predict-matter-cost@v1",
+        "producedByKind": "playbook",
+        "producedByVersion": "v1",
+        "valueFrom": "value",
+        "evidenceFrom": "evidence",
+        "confidenceFrom": "confidence",
+        "reasoningFrom": "reasoning",
+        "allowEmptyEvidence": false,
+        "$comment-evidenceGuard": "allowEmptyEvidence=false enforces D-A23 / D-48 EvidenceGuard: an empty evidence[] after GroundingVerifyNode stripping yields node-level EVIDENCE_REQUIRED error. The orchestrator's null-artifact handling (InsightsOrchestrator.AnswerQuestionAsync line 130 onward) surfaces this as a DeclineResponse to Zone B."
+      }
+    },
+    {
+      "name": "declineInsufficient",
+      "nodeType": "Output",
+      "actionCode": "INS-DECL@v1",
+      "$comment-actionCode": "Insights Engine r2 Wave B: INS-DECL action row; lookup '110 - Decline to Find' with sprk_executoractiontype=110.",
+      "actionType": 110,
+      "$comment-actionType": "ActionType.DeclineToFind = 110; handled by DeclineToFindNode (task 022). Insufficient-evidence branch.",
+      "outputVariable": "decline",
+      "positionX": 1000, "positionY": 400,
+      "dependsOn": ["checkSufficiency"],
+      "configJson": {
+        "reason": "insufficient-evidence",
+        "from": "checkSufficiency",
+        "explanationTemplate": "Cannot predict cost: only {have} comparable matters were found (need {need} per rule 'comparableMatters.min' from retrieveCohortObservations). Phase 1 requires at least 12 comparable matters in the tenant's spaarke-insights-index cohort.",
+        "suggestedActions": [
+          "Broaden the matter-type filter (e.g., 'IP' instead of 'IP licensing')",
+          "Remove the dealSizeBucket constraint if present",
+          "Author a Spaarke Precedent for this matter pattern so future predictions have an authoritative anchor (POST /api/insights/admin/precedents)",
+          "Ingest more historical matter documents into the tenant so the cohort grows"
+        ],
+        "confidenceInDecline": 0.95,
+        "$comment": "This node fires ONLY when checkSufficiency.verdict == 'insufficient'. Emits a DeclineResponse rather than an InsightArtifact — the cache's DrainEngineStreamAsync returns null (no ReturnInsightArtifactNode output), the orchestrator's null-handling returns Declined(...) to Zone B. Phase 1.5+ may add a separate ReturnDeclineNode for stream-level structured decline propagation; Phase 1 piggybacks on the null-artifact path."
+      }
+    }
+  ],
+
+  "dependsOnGraph": {
+    "$comment": "Documentation-only view of the dependency graph. Realized in Dataverse via sprk_dependsonjson on each node row. The seed script Deploy-Playbook.ps1 sets these from the 'dependsOn' arrays above.",
+    "edges": [
+      { "from": "resolveLiveFacts", "to": "retrieveCohortObservations" },
+      { "from": "resolveLiveFacts", "to": "retrievePrecedents" },
+      { "from": "retrieveCohortObservations", "to": "checkSufficiency" },
+      { "from": "retrievePrecedents", "to": "checkSufficiency" },
+      { "from": "checkSufficiency", "to": "synthesize", "branch": "sufficient" },
+      { "from": "checkSufficiency", "to": "declineInsufficient", "branch": "insufficient" },
+      { "from": "synthesize", "to": "groundCitations" },
+      { "from": "groundCitations", "to": "ReturnInsightArtifactNode" }
+    ]
+  },
+
+  "acceptanceCriteria": {
+    "$comment": "Mirrors task 060 POML <acceptance-criteria>. Used as documentation + as fixture targets for PredictMatterCostPlaybookTests.cs.",
+    "criteria": [
+      "Playbook publishes successfully as Insights-mode (sprk_analysisplaybook row + 8 sprk_playbooknodes rows in Dataverse, name='predict-matter-cost@v1', isSystemPlaybook=true)",
+      "Sufficient-evidence test: 15 mock comparable matters → IInsightsAi.AnswerQuestionAsync returns InsightsAgentResult.Success(artifact) with InferenceArtifact carrying ≥12 evidence refs",
+      "Insufficient-evidence test: 5 mock comparable matters → returns InsightsAgentResult.Declined(decline) with MinimumEvidenceNeeded carrying gap analysis (need ≥7 more)",
+      "GroundingVerifyNode strips one synthetic fabricated citation from synthesis output",
+      "Precedent citation: applicable Confirmed Precedent in retrievePrecedents output → cited in InferenceArtifact.evidence[] as precedent://prec:... ref",
+      "D-P13 cache hit on second identical invocation (verified via Mock<IInsightsPlaybookExecutionCache>.Verify(Times.Once) on engineInvocation factory)"
+    ]
+  }
+}

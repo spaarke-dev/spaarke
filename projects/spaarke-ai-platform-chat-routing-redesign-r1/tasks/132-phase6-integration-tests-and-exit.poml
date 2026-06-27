@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="132" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Phase 6 integration tests (NDA/Patent/Invoice routing) + Phase 6 exit gate</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>131</dependencies>
+    <blocks>140</blocks>
+    <tags>testing, e2e-test, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration tests + exit gate; STANDARD per task-execute Step 0.5</rigor-reason>
+    <parallel-group>6-G</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Exit gate — must run after task 131 indexing completes; gates Phase 7 entry</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author + run Phase 6 integration tests verifying NDA/Patent/Invoice uploads route to their specialized playbooks and produce expected output schemas. Implements FR-43 acceptance + the Phase 6 exit gate. Tests cover the full Path 3 happy path: upload → enrichment → dispatch → JpsRefResolver → persona binding → evidence precheck → streaming structured output. Phase 6 status flipped to complete in TASK-INDEX.md after all tests pass.
+  </prompt>
+
+  <role>SPAARKE BFF integration test engineer + Phase exit-gate coordinator.</role>
+
+  <goal>
+    Integration test suite at `tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/Phase6/` exercises: (1) upload NDA test fixture → routes to PB-009 (rewritten) → 7-section output schema emitted; (2) upload patent test fixture → routes to summarize-patent → patent output schema emitted; (3) upload invoice test fixture → routes to extract-invoice → invoice output schema emitted. All tests pass. Phase 6 exit gate document `notes/handoffs/132-phase6-exit-gate.md` confirms all FR-38 through FR-45 acceptance criteria met.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-43 acceptance + Phase 6 wave 6-G exit. Phase 7 cannot start until this gate passes. Uses synthetic test fixtures (no real legal documents) per ADR-015. Tests assert routing outcomes via telemetry inspection, not via internal API mocking — true integration.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/131-playbook-indexing.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/120-pb-audit.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-43 acceptance — NDA/Patent/Invoice upload routes correctly.</constraint>
+    <constraint source="ADR-015">Use synthetic test fixtures — no real legal documents in test data.</constraint>
+    <constraint source="ADR-033">Streaming preservation regression test from task 123 MUST still pass.</constraint>
+    <constraint source="project">Phase 6 exit gate — task 132 PASS gates task 140 (Phase 7 entry).</constraint>
+    <constraint source="project">Test fixtures placed under tests/integration/.../Fixtures/Phase6/ with clear synthetic markers.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author 3 synthetic test fixtures: `synthetic-nda.txt`, `synthetic-patent.txt`, `synthetic-invoice.txt`. Each ~500-1500 chars with clear domain markers (NDA: "DISCLOSING PARTY", "RECEIVING PARTY", "CONFIDENTIAL INFORMATION"; Patent: "CLAIMS", "INVENTOR", "ABSTRACT"; Invoice: "INVOICE NUMBER", "DUE DATE", "LINE ITEMS").</step>
+    <step order="2">Author test 1: upload synthetic NDA → assert routing telemetry shows PB-009 selected → assert streaming response emits all 7 NDA sections (parties, definition, exclusions, term, permittedUse, remedies, redFlags) via FieldDelta SSE events.</step>
+    <step order="3">Author test 2: upload synthetic patent → assert routing selects summarize-patent → assert patent output schema fields emitted (inventors, claims, abstract, etc.).</step>
+    <step order="4">Author test 3: upload synthetic invoice → assert routing selects extract-invoice → assert invoice output schema fields emitted (vendor, customer, lineItems, totals).</step>
+    <step order="5">Add cross-validation: confirm task 123 streaming regression test still passes (re-run as part of Phase 6 suite).</step>
+    <step order="6">Run `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/Phase6/`. All must pass.</step>
+    <step order="7">Author Phase 6 exit gate document `notes/handoffs/132-phase6-exit-gate.md` with checkboxes for FR-38, FR-39, FR-40, FR-41, FR-42, FR-43, FR-44, FR-45 acceptance — each checkbox must reference the verifying test or artifact.</step>
+    <step order="8">Update TASK-INDEX.md: task 132 → ✅; mark Phase 6 as complete.</step>
+  </steps>
+
+  <tools>
+    <tool name="Write">Test fixtures + integration tests + exit-gate document</tool>
+    <tool name="Bash">dotnet test</tool>
+    <tool name="Edit">TASK-INDEX.md Phase 6 → complete</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/Phase6/*.cs — 3 routing tests</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/Phase6/Fixtures/ — 3 synthetic fixtures</output>
+    <output type="docs">notes/handoffs/132-phase6-exit-gate.md — exit gate</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">NDA test passes: routes to PB-009 + emits 7 NDA sections.</criterion>
+    <criterion testable="true">Patent test passes: routes to summarize-patent + emits patent schema.</criterion>
+    <criterion testable="true">Invoice test passes: routes to extract-invoice + emits invoice schema.</criterion>
+    <criterion testable="true">Task 123 streaming regression test passes when re-run as part of Phase 6 suite.</criterion>
+    <criterion testable="true">Exit-gate document has FR-38 through FR-45 checked with evidence references.</criterion>
+    <criterion testable="true">TASK-INDEX.md marks Phase 6 complete.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase 6 exit gates Phase 7. If any test fails, Phase 7 cannot start — escalate per CLAUDE.md §6. Synthetic fixtures avoid ADR-015 risk + make tests deterministic.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

@@ -7,7 +7,9 @@
     Orchestrates the complete customer onboarding pipeline:
       1. Validate inputs and prerequisites (Azure CLI, PAC CLI, Bicep template)
       2. Create resource group (rg-spaarke-{customerId}-{env})
-      3. Deploy customer.bicep (Storage, Key Vault, Service Bus, Redis)
+      3. Deploy customer.bicep (Storage, Key Vault, Service Bus)
+         Note: per-customer Redis is DEPRECATED (Q-E Architecture 1, FR-12).
+         Use scripts/Deploy-RedisCache.ps1 for per-environment Redis.
       4. Populate customer Key Vault with secrets (connection strings, API keys)
       5. Create Dataverse environment via Power Platform Admin API
       6. Wait for Dataverse environment provisioning
@@ -415,11 +417,39 @@ function Invoke-Step2_CreateResourceGroup {
 # ============================================================================
 # STEP 3: Deploy customer.bicep (Azure resources)
 # ============================================================================
+# ----------------------------------------------------------------------------
+# DEPRECATED PATH: per-customer Redis provisioning
+# ----------------------------------------------------------------------------
+# Date    : 2026-06-25
+# Project : spaarke-redis-cache-remediation-r1 (FR-12, Q-E Architecture 1)
+#
+# Per Q-E Architecture 1, per-customer Redis is DEPRECATED. Redis is now
+# provisioned per-environment via `scripts/Deploy-RedisCache.ps1`
+# (`spaarke-bff-redis-{env}`), and the BFF is wired to it via Key Vault
+# reference (`Redis-ConnectionString` in `spaarke-bff-{env}` App Settings).
+#
+# The inline Redis-deploy block previously living in this Step 3 (alongside
+# Storage/KV/Service Bus output extraction) and the `Redis-ConnectionString`
+# entry in Step 4 (Key Vault secrets) have been REMOVED. The customer.bicep
+# template still emits redis* outputs as a transitional measure (Bicep changes
+# are out of scope for this refactor task — see task 027), but
+# Provision-Customer.ps1 NO LONGER consumes them.
+#
+# Path forward — if a customer needs DEDICATED Redis:
+#   Register the customer via the wrapper named-instance pattern per NFR-12:
+#   an additive `cacheInstance` parameter on `ITenantCache` selects a
+#   per-customer `IConnectionMultiplexer`. Do NOT recreate the inline
+#   provisioning path here.
+#
+# Reference: scripts/Deploy-RedisCache.ps1, projects/spaarke-redis-cache-
+# remediation-r1/spec.md (FR-12, NFR-12), and git history of this file for
+# the original inline block.
+# ----------------------------------------------------------------------------
 
 function Invoke-Step3_DeployBicep {
     param([PSCustomObject]$State)
 
-    Write-StepHeader 3 "Deploying customer.bicep (Storage, Key Vault, Service Bus, Redis)"
+    Write-StepHeader 3 "Deploying customer.bicep (Storage, Key Vault, Service Bus)"
 
     $deploymentName = "customer-$CustomerId-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 
@@ -448,6 +478,9 @@ function Invoke-Step3_DeployBicep {
     $outputs = $deployResult.properties.outputs
 
     # Extract outputs for subsequent steps
+    # Note: redis* outputs from customer.bicep are intentionally NOT consumed
+    # per Q-E Architecture 1 (per-customer Redis deprecated). See deprecation
+    # header above and scripts/Deploy-RedisCache.ps1 for the canonical path.
     $stepOutputs = @{
         StorageAccountName      = $outputs.storageAccountName.value
         StorageConnectionString = $outputs.storageConnectionString.value
@@ -455,14 +488,11 @@ function Invoke-Step3_DeployBicep {
         KeyVaultUri             = $outputs.keyVaultUri.value
         ServiceBusName          = $outputs.serviceBusName.value
         ServiceBusConnString    = $outputs.serviceBusConnectionString.value
-        RedisHostName           = $outputs.redisHostName.value
-        RedisConnectionString   = $outputs.redisConnectionString.value
     }
 
     Write-Log "Storage Account: $($stepOutputs.StorageAccountName)" -Level SUCCESS
     Write-Log "Key Vault: $($stepOutputs.KeyVaultName)" -Level SUCCESS
     Write-Log "Service Bus: $($stepOutputs.ServiceBusName)" -Level SUCCESS
-    Write-Log "Redis: $($stepOutputs.RedisHostName)" -Level SUCCESS
 
     Complete-Step -State $State -StepNumber 3 -StepName "Deploy customer.bicep" -Outputs $stepOutputs
 }
@@ -481,10 +511,13 @@ function Invoke-Step4_PopulateKeyVault {
     Write-Log "Target Key Vault: $kvName"
 
     # Secrets to set (connection strings from Bicep outputs, plus cross-references)
+    # Note: `Redis-ConnectionString` is intentionally NOT set per customer
+    # (Q-E Architecture 1, FR-12). Redis is per-environment; the BFF reads
+    # `Redis-ConnectionString` from the platform Key Vault populated by
+    # `scripts/Deploy-RedisCache.ps1`. See deprecation header in Step 3.
     $secrets = [ordered]@{
         "Storage-ConnectionString"    = $State.StepOutputs.StorageConnectionString
         "ServiceBus-ConnectionString" = $State.StepOutputs.ServiceBusConnString
-        "Redis-ConnectionString"      = $State.StepOutputs.RedisConnectionString
         "Customer-Id"                 = $CustomerId
         "Customer-DisplayName"        = $DisplayName
         "Dataverse-Url"               = $DataverseEnvUrl
@@ -1434,18 +1467,19 @@ if ($WhatIfPreference) {
     Write-Host "    2. Storage Account: sprk${CustomerId}${EnvironmentName}sa" -ForegroundColor White
     Write-Host "    3. Key Vault:       $KeyVaultName" -ForegroundColor White
     Write-Host "    4. Service Bus:     spaarke-$CustomerId-$EnvironmentName-sbus" -ForegroundColor White
-    Write-Host "    5. Redis Cache:     spaarke-$CustomerId-$EnvironmentName-cache" -ForegroundColor White
+    Write-Host "    -- Redis (per-customer): DEPRECATED (Q-E Architecture 1, FR-12)" -ForegroundColor DarkGray
+    Write-Host "       Use scripts/Deploy-RedisCache.ps1 for per-environment Redis." -ForegroundColor DarkGray
     if (-not $SkipDataverse) {
-        Write-Host "    6. Dataverse Env:   $DataverseEnvName ($DataverseEnvUrl)" -ForegroundColor White
-        Write-Host "    7. Solutions:       10 managed solutions (SpaarkeCore + features)" -ForegroundColor White
-        Write-Host "    8. Env Variables:   7 Dataverse Environment Variables" -ForegroundColor White
-        Write-Host "    9. Config JSON:     environment-config.json output" -ForegroundColor White
+        Write-Host "    5. Dataverse Env:   $DataverseEnvName ($DataverseEnvUrl)" -ForegroundColor White
+        Write-Host "    6. Solutions:       10 managed solutions (SpaarkeCore + features)" -ForegroundColor White
+        Write-Host "    7. Env Variables:   7 Dataverse Environment Variables" -ForegroundColor White
+        Write-Host "    8. Config JSON:     environment-config.json output" -ForegroundColor White
     }
     else {
-        Write-Host "    6. Dataverse Env:   SKIPPED" -ForegroundColor DarkGray
-        Write-Host "    7. Solutions:       SKIPPED" -ForegroundColor DarkGray
-        Write-Host "    8. Env Variables:   SKIPPED" -ForegroundColor DarkGray
-        Write-Host "    9. Config JSON:     environment-config.json output" -ForegroundColor White
+        Write-Host "    5. Dataverse Env:   SKIPPED" -ForegroundColor DarkGray
+        Write-Host "    6. Solutions:       SKIPPED" -ForegroundColor DarkGray
+        Write-Host "    7. Env Variables:   SKIPPED" -ForegroundColor DarkGray
+        Write-Host "    8. Config JSON:     environment-config.json output" -ForegroundColor White
     }
     Write-Host "   10. SPE Containers:  On-demand via BFF API" -ForegroundColor White
     Write-Host "   11. Tenant Registry: $PlatformKeyVaultName / Tenant-$CustomerId" -ForegroundColor White

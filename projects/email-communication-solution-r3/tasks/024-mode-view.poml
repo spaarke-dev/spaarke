@@ -1,0 +1,153 @@
+<task id="024" project="email-communication-solution-r3">
+  <metadata>
+    <title>View mode — read-only display of existing sprk_communication record</title>
+    <phase>Wave 1 — Engine + Wrappers + Sub-Components</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>028</blocks>
+    <tags>react, frontend, communication, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>View mode is the default Code Page surface (Form Component Control swap per FR-19); user-facing immutability + a11y of read-only display + transition-to-edit logic carry visibility risk. FULL appropriate.</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-10</fr-refs>
+  </metadata>
+
+  <prompt>
+    Implement `view` mode behavior in `EmailComposer/modes/viewMode.ts` (pure logic) + integration in `EmailComposer.tsx`.
+
+    Behavior (FR-10):
+    - Engine receives `sourceRecord: IComposerSourceRecord` (loaded by SendEmailPage wrapper or programmatic prop)
+    - State derives entirely from sourceRecord — From, To, Cc, Subject, Body, Attachments, Associations all read-only
+    - All sub-components render in read-only / disabled state:
+      * RecipientField — Tags rendered as non-removable, no input field
+      * BodyEditor — rendered as static HTML/text display (no editor toolbar, no contentEditable)
+      * AttachmentList — list rendered, no Add buttons, no remove buttons; attachment names are LINKS to download the driveItem (via existing SPE facade)
+      * ComposerActionBar — view-mode action set (Edit / Reply / Forward / Close per task 019)
+    - No validation (record is immutable from the user's perspective)
+    - Transition behaviors:
+      * "Edit" action (per UQ2: may not be enabled depending on owner decision; spec ships with view = strictly read-only; Edit button rendered but disabled with tooltip explaining "Sent records are immutable") — when enabled, transitions engine state to `compose` mode keeping all fields populated
+      * "Reply" action → transitions engine to `reply` mode (task 025 logic kicks in)
+      * "Forward" action → transitions engine to `forward` mode (task 026 logic kicks in)
+      * "Close" action → fires `onClose` callback if provided (Code Page handles navigation)
+
+    Files:
+    - `modes/viewMode.ts` (NEW) — pure functions: `deriveViewState(sourceRecord): Partial<EmailComposerState>`, `viewToEditTransition(state): Partial<EmailComposerState>`
+    - Update `EmailComposer.reducer.ts` — handle `SET_MODE` action with mode-specific logic from view
+    - Update `EmailComposer.tsx` — when `mode === 'view'`, render sub-components in read-only mode (passes `readOnly` prop or wraps in a `<ReadOnlyContext.Provider>`)
+    - Update `RecipientField.tsx`, `BodyEditor.tsx`, `AttachmentList.tsx` to honor a `readOnly` prop
+  </prompt>
+
+  <role>
+    React + TypeScript developer comfortable with mode-state-machine + read-only-render patterns.
+  </role>
+
+  <goal>
+    `view` mode renders sourceRecord as read-only. No editable controls. Action buttons trigger correct mode transitions or callbacks. Attachments are downloadable links. `npm run build` + `npm run lint` clean.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-10 + FR-19: view mode is the default surface when a user opens an existing `sprk_communication` record via the Form Component Control. Replaces the auto-generated Dataverse standard form (which is retained as admin fallback per NFR-07).
+
+      Per UQ2: spec ships with view mode = strictly read-only. Edit button rendered but disabled. If owner later decides Edit IS allowed for sent records, the engine already has the transition logic — just enable the button.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/modes/viewMode.ts (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts (UPDATE)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (UPDATE — readOnly mode)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/RecipientField.tsx (UPDATE — readOnly prop)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/BodyEditor.tsx (UPDATE — readOnly prop)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AttachmentList.tsx (UPDATE — readOnly + download link)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; read-only display uses Fluent labels + tags (not disabled inputs)</constraint>
+    <constraint source="ADR-007">Attachment download links use existing SPE facade endpoint — no direct SPE/Graph access from client</constraint>
+    <constraint source="ADR-033">View mode is part of the canonical engine — DO NOT create a parallel read-only viewer</constraint>
+    <constraint source="NFR-09">Read-only fields still keyboard-accessible (focusable to inspect content)</constraint>
+    <constraint source="project">UQ2 — Edit button rendered but DISABLED in spec v1; engine has transition logic ready</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/adr/ADR-007-spe-filestore.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-033-communication-architecture.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author `modes/viewMode.ts`:
+      - `deriveViewState(sourceRecord: IComposerSourceRecord): Partial&lt;EmailComposerState&gt;` — maps sourceRecord fields → state slots
+      - `viewToEditTransition(state): Partial&lt;EmailComposerState&gt;` — flips mode to `compose`, keeps all fields; for UQ2 future use</step>
+    <step order="2">Update `EmailComposer.reducer.ts`:
+      - `initialState` handles `mode === 'view' &amp;&amp; sourceRecord` by applying `deriveViewState`
+      - `SET_MODE` action handles view → reply/forward/edit transitions</step>
+    <step order="3">Update sub-components (`RecipientField`, `BodyEditor`, `AttachmentList`) to honor `readOnly` prop:
+      - RecipientField: render Tags only, no input field
+      - BodyEditor: render `&lt;div dangerouslySetInnerHTML={{__html: sanitizedHtml}}&gt;` for html OR `&lt;pre&gt;{text}&lt;/pre&gt;` for plaintext; no toolbar, no editor
+      - AttachmentList: render rows with download links (anchor pointing to existing SPE facade GET endpoint with the driveItemId); no Add/Remove buttons</step>
+    <step order="4">Update `EmailComposer.tsx` to compute `isReadOnly = mode === 'view'` and pass to all sub-components.</step>
+    <step order="5">Wire view-mode action buttons (ComposerActionBar) to mode transitions:
+      - Edit → dispatch `SET_MODE` to `compose` (button DISABLED per UQ2; tooltip explains)
+      - Reply → dispatch `SET_MODE` to `reply` (task 025 logic handles pre-fill)
+      - Forward → dispatch `SET_MODE` to `forward` (task 026)
+      - Close → invoke `props.onClose?.()`</step>
+    <step order="6">Smoke test in dev: load a sample record, all sub-components read-only, Reply transitions to reply mode (visible as subject prefix change once task 025 lands).</step>
+    <step order="7">Run `npm run build` + `npm run lint` clean.</step>
+    <step order="7.5">Step 9.5 quality gates — code-review + adr-check.</step>
+    <step order="8">Update `TASK-INDEX.md`: 024 ✅.</step>
+    <step order="9">Update `current-task.md` per task-execute protocol.</step>
+  </steps>
+
+  <tools>
+    <tool name="write">viewMode.ts</tool>
+    <tool name="edit">reducer, EmailComposer.tsx, sub-components readOnly support</tool>
+    <tool name="bash">npm run build + lint</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="file">EmailComposer/modes/viewMode.ts (NEW)</output>
+    <output type="file">EmailComposer/EmailComposer.reducer.ts (UPDATED)</output>
+    <output type="file">EmailComposer/EmailComposer.tsx (UPDATED — isReadOnly prop propagation)</output>
+    <output type="file">EmailComposer/subcomponents/RecipientField.tsx (UPDATED — readOnly)</output>
+    <output type="file">EmailComposer/subcomponents/BodyEditor.tsx (UPDATED — readOnly display)</output>
+    <output type="file">EmailComposer/subcomponents/AttachmentList.tsx (UPDATED — readOnly + download links)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`view` mode renders sourceRecord fields read-only.</criterion>
+    <criterion testable="true">No editable controls; sub-components honor `readOnly` prop.</criterion>
+    <criterion testable="true">AttachmentList rows are download-linked via SPE facade endpoint (no direct SPE access — ADR-007).</criterion>
+    <criterion testable="true">ComposerActionBar shows Edit/Reply/Forward/Close.</criterion>
+    <criterion testable="true">Edit button DISABLED per UQ2 v1; transition logic exists for future enable.</criterion>
+    <criterion testable="true">Reply/Forward dispatch `SET_MODE` to the appropriate mode.</criterion>
+    <criterion testable="true">No validation in view mode.</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    `dangerouslySetInnerHTML` is used for HTML body display ONLY after the `sanitizeHtml` from task 013 runs. Re-use that util.
+
+    SPE facade endpoint for downloads: confirm path during implementation; existing R2 server-side code or `documentApi.ts` may already expose it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor. Step 9.5 mandatory.
+    </protocol>
+  </execution>
+</task>

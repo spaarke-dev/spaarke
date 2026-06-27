@@ -33,6 +33,10 @@ export type { AttachmentSelectorProps } from './AttachmentSelector';
 export { SaveFlow } from './SaveFlow';
 export type { SaveFlowProps } from './SaveFlow';
 
+// Linked Todos Banner (smart-todo-decoupling-r3 FR-28 / A-1)
+export { LinkedTodosBanner } from './LinkedTodosBanner';
+export type { LinkedTodosBannerProps } from './LinkedTodosBanner';
+
 // Views
 export { SaveView } from './views/SaveView';
 export type { SaveViewProps } from './views/SaveView';

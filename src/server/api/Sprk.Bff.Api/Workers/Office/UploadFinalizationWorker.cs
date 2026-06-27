@@ -1,16 +1,17 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
-using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using Sprk.Bff.Api.Workers.Office.Messages;
 // Alias to resolve ambiguity between Services.Jobs.JobStatus and Models.Office.JobStatus
@@ -43,7 +44,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 {
     private readonly ILogger<UploadFinalizationWorker> _logger;
     private readonly SpeFileStore _speFileStore;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ServiceBusClient _serviceBusClient;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ServiceBusOptions _serviceBusOptions;
@@ -53,6 +54,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private readonly IEmailToEmlConverter _emlConverter;
     private readonly AttachmentFilterService _attachmentFilterService;
     private readonly JobSubmissionService _jobSubmissionService;
+    private readonly IPostUploadIndexingEnqueuer _postUploadIndexingEnqueuer;
     private readonly IConfiguration _configuration;
 
     private const string QueueName = "office-upload-finalization";
@@ -76,7 +78,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     public UploadFinalizationWorker(
         ILogger<UploadFinalizationWorker> logger,
         SpeFileStore speFileStore,
-        IDistributedCache cache,
+        ITenantCache cache,
         ServiceBusClient serviceBusClient,
         IServiceScopeFactory scopeFactory,
         IOptions<ServiceBusOptions> serviceBusOptions,
@@ -86,6 +88,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         IEmailToEmlConverter emlConverter,
         AttachmentFilterService attachmentFilterService,
         JobSubmissionService jobSubmissionService,
+        IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
         IConfiguration configuration)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -100,6 +103,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         _emlConverter = emlConverter ?? throw new ArgumentNullException(nameof(emlConverter));
         _attachmentFilterService = attachmentFilterService ?? throw new ArgumentNullException(nameof(attachmentFilterService));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
+        _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer ?? throw new ArgumentNullException(nameof(postUploadIndexingEnqueuer));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     }
 
@@ -551,8 +555,13 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 
     private async Task<bool> IsAlreadyProcessedAsync(string idempotencyKey, CancellationToken cancellationToken)
     {
-        var cacheKey = $"office:upload:processed:{idempotencyKey}";
-        var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+        var tenantId = GetTenantIdForCache();
+        var cached = await _cache.GetAsync<string>(
+            tenantId,
+            resource: "office-upload-processed",
+            id: idempotencyKey,
+            version: 1,
+            ct: cancellationToken);
         return !string.IsNullOrEmpty(cached);
     }
 
@@ -561,12 +570,27 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         Guid documentId,
         CancellationToken cancellationToken)
     {
-        var cacheKey = $"office:upload:processed:{idempotencyKey}";
-        await _cache.SetStringAsync(
-            cacheKey,
-            documentId.ToString(),
-            new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = IdempotencyKeyTtl },
-            cancellationToken);
+        var tenantId = GetTenantIdForCache();
+        await _cache.SetAsync<string>(
+            tenantId,
+            resource: "office-upload-processed",
+            id: idempotencyKey,
+            version: 1,
+            value: documentId.ToString(),
+            ttl: IdempotencyKeyTtl,
+            ct: cancellationToken);
+    }
+
+    /// <summary>
+    /// Resolves the BFF's tenant ID from configuration for cache scoping.
+    /// Per ADR-029 the BFF is single-tenant per Redis instance; this tenant ID
+    /// is the BFF's own AAD tenant (TENANT_ID or AzureAd:TenantId).
+    /// Falls back to "bff" if neither is configured (defensive — should not happen in deployed envs).
+    /// </summary>
+    private string GetTenantIdForCache()
+    {
+        var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"];
+        return string.IsNullOrWhiteSpace(tenantId) ? "bff" : tenantId;
     }
 
     private static UploadFinalizationPayload? DeserializePayload(JsonElement payload)
@@ -953,6 +977,15 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         {
             await EnqueueRagIndexingAsync(driveId, itemId, documentId, payload.FileName, cancellationToken);
         }
+
+        // Insights Engine Phase 1 — D-P8 SPE-upload consumer (task 050).
+        // Default OFF for Phase 1; D-P16 smoke test (task 070) flips it on for fixtures.
+        // Production rollout pending per-document cost cap signoff
+        // (see projects/ai-spaarke-insights-engine-r1/notes/cost-projection-d-p8.md).
+        if (aiOptions.InsightsIngest)
+        {
+            await EnqueueInsightsIngestAsync(documentId, payload, cancellationToken);
+        }
     }
 
     private async Task CleanupTempFileAsync(string location, CancellationToken cancellationToken)
@@ -1269,10 +1302,23 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     }
 
     /// <summary>
-    /// Enqueues a RAG indexing job for a document.
-    /// Uses try/catch to ensure enqueueing failures don't fail the main processing.
-    /// Follows the same pattern as EmailToDocumentJobHandler.EnqueueRagIndexingJobAsync.
+    /// Enqueues a RAG indexing job for a document by delegating to the centralized
+    /// <see cref="IPostUploadIndexingEnqueuer"/> helper.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Phase 2 refactor (upload-indexing centralization, scope extension to
+    /// multi-container-multi-index-r1): the inline enqueue body that used to live
+    /// here was the canonical pattern source. It now lives in
+    /// <see cref="Services.Ai.PostUploadIndexingEnqueuer"/>. This method preserves
+    /// its existing signature so call sites don't change.
+    /// </para>
+    /// <para>
+    /// Behavior is identical: non-fatal try/catch around enqueue (handled inside
+    /// the helper), same idempotency key (<c>rag-index-{driveId}-{itemId}</c>),
+    /// same payload shape, same <c>Source="OfficeAddin"</c> tag for telemetry.
+    /// </para>
+    /// </remarks>
     private async Task EnqueueRagIndexingAsync(
         string driveId,
         string itemId,
@@ -1280,44 +1326,122 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string fileName,
         CancellationToken cancellationToken)
     {
+        var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+        var correlationId = Activity.Current?.Id ?? Guid.NewGuid().ToString();
+
+        var request = new PostUploadIndexingRequest(
+            TenantId: tenantId,
+            DriveId: driveId,
+            ItemId: itemId,
+            FileName: fileName,
+            FileSizeBytes: null, // unknown at this site; helper bypasses size-based skips when null
+            ContentType: null,
+            DocumentId: documentId.ToString(),
+            ParentEntity: null,
+            SearchIndexName: null, // handler runs the ISearchIndexNameResolver chain
+            Source: "OfficeAddin",
+            CorrelationId: correlationId);
+
+        // App-only path: Office Add-in finalization uploads files AS MI, so MI can read them
+        // (writer-identity rule per sdap-auth-patterns.md Pattern 4).
+        await _postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, cancellationToken);
+    }
+
+    /// <summary>
+    /// Enqueues an Insights Engine universal-ingest job (D-P8, task 050) for a document.
+    /// Resolves the document's Matter lookup via <see cref="IDocumentDataverseService"/>
+    /// and emits a <c>JobType="InsightsUniversalIngest"</c> job to the existing
+    /// <c>sdap-jobs</c> queue. Routed by <see cref="ServiceBusJobProcessor"/> to
+    /// <c>InsightsIngestJobHandler</c> (Zone B per §3.5).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Wrapped in try/catch so an ingest-queue failure does NOT fail the main upload
+    /// finalization path. The existing AppOnlyDocumentAnalysis + RAG indexing jobs are
+    /// already queued at this point; the Insights pipeline is additive and best-effort
+    /// during Phase 1.
+    /// </para>
+    /// <para>
+    /// <b>Phase 1 design notes</b>:
+    /// <list type="bullet">
+    ///   <item>Default-off via <c>AiProcessingOptions.InsightsIngest = false</c>. Caller
+    ///   (Office add-in / API client) must opt in. D-P16 smoke test (task 070) flips it
+    ///   on for fixtures.</item>
+    ///   <item>Skips queuing if MatterId cannot be resolved — the universal ingest
+    ///   pipeline requires a Matter subject for Layer 2 Observations
+    ///   (<c>matter:{MatterId}</c>); a future Phase 1.5 enhancement may relax this
+    ///   for tenant-scoped Observations without a matter.</item>
+    ///   <item>Tenant comes from <c>TENANT_ID</c> / <c>AzureAd:TenantId</c> config
+    ///   (D-52 single-tenant Phase 1) — same pattern as <see cref="EnqueueRagIndexingAsync"/>.</item>
+    /// </list>
+    /// </para>
+    /// </remarks>
+    private async Task EnqueueInsightsIngestAsync(
+        Guid documentId,
+        UploadFinalizationPayload payload,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            // Get tenant ID from configuration (same pattern as EmailToDocumentJobHandler)
-            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+            // Resolve MatterId from the Document record. The universal ingest pipeline
+            // (D-P7) requires a Matter subject for Layer 2 Observations.
+            var document = await _documentService.GetDocumentAsync(documentId.ToString(), cancellationToken);
+            if (document is null)
+            {
+                _logger.LogWarning(
+                    "Skipping Insights Engine ingest for document {DocumentId}: document record not found in Dataverse.",
+                    documentId);
+                return;
+            }
 
-            var indexingJob = new JobContract
+            if (string.IsNullOrWhiteSpace(document.MatterId))
+            {
+                _logger.LogInformation(
+                    "Skipping Insights Engine ingest for document {DocumentId} ({FileName}): no Matter lookup on the document record (Phase 1 requires a matter subject).",
+                    documentId, payload.FileName);
+                return;
+            }
+
+            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+            if (string.IsNullOrWhiteSpace(tenantId))
+            {
+                _logger.LogWarning(
+                    "Skipping Insights Engine ingest for document {DocumentId}: TENANT_ID / AzureAd:TenantId not configured.",
+                    documentId);
+                return;
+            }
+
+            var ingestJob = new JobContract
             {
                 JobId = Guid.NewGuid(),
-                JobType = RagIndexingJobHandler.JobTypeName,
+                JobType = Sprk.Bff.Api.Services.Jobs.Insights.InsightsIngestJobHandler.JobTypeName,
                 SubjectId = documentId.ToString(),
                 CorrelationId = Activity.Current?.Id ?? Guid.NewGuid().ToString(),
-                IdempotencyKey = $"rag-index-{driveId}-{itemId}",
+                IdempotencyKey = $"insights-ingest-{documentId}-{document.MatterId}",
                 Attempt = 1,
                 MaxAttempts = 3,
                 CreatedAt = DateTimeOffset.UtcNow,
-                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new RagIndexingJobPayload
+                Payload = JsonDocument.Parse(JsonSerializer.Serialize(new Sprk.Bff.Api.Services.Jobs.Insights.InsightsIngestPayload
                 {
-                    TenantId = tenantId,
-                    DriveId = driveId,
-                    ItemId = itemId,
-                    FileName = fileName,
                     DocumentId = documentId.ToString(),
-                    Source = "OfficeAddin",
+                    MatterId = document.MatterId,
+                    TenantId = tenantId,
+                    Source = "OfficeAddinUpload",
                     EnqueuedAt = DateTimeOffset.UtcNow
                 }))
             };
 
-            await _jobSubmissionService.SubmitJobAsync(indexingJob, cancellationToken);
+            await _jobSubmissionService.SubmitJobAsync(ingestJob, cancellationToken);
 
             _logger.LogInformation(
-                "Enqueued RAG indexing job {JobId} for document {DocumentId} (file: {FileName})",
-                indexingJob.JobId, documentId, fileName);
+                "Enqueued Insights Engine universal-ingest job {JobId} for document {DocumentId} (matter: {MatterId}, file: {FileName})",
+                ingestJob.JobId, documentId, document.MatterId, payload.FileName);
         }
         catch (Exception ex)
         {
-            // Log but don't fail - RAG indexing is non-critical
+            // Best-effort dispatch — existing CRUD/AI pipeline must not be impacted.
             _logger.LogWarning(ex,
-                "Failed to enqueue RAG indexing job for document {DocumentId}: {Error}. Processing will continue.",
+                "Failed to enqueue Insights Engine universal-ingest job for document {DocumentId}: {Error}. Existing AppOnly/RAG pipelines unaffected.",
                 documentId, ex.Message);
         }
     }

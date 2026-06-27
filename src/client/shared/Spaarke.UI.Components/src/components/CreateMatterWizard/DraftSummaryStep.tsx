@@ -13,19 +13,8 @@
  */
 
 import * as React from 'react';
-import {
-  Card,
-  CardHeader,
-  Textarea,
-  Text,
-  Badge,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  SparkleRegular,
-  WarningRegular,
-} from '@fluentui/react-icons';
+import { Card, CardHeader, Textarea, Text, Badge, makeStyles, tokens } from '@fluentui/react-components';
+import { SparkleRegular, WarningRegular } from '@fluentui/react-icons';
 import { AiProgressStepper, DOCUMENT_ANALYSIS_STEPS } from '../AiProgressStepper';
 import { streamAiDraftSummary } from './matterService';
 import { RecipientField, IRecipientItem } from './RecipientField';
@@ -37,7 +26,7 @@ import type { ILookupItem } from '../../types/LookupTypes';
 // ---------------------------------------------------------------------------
 
 // Step IDs match DOCUMENT_ANALYSIS_STEPS from the shared library
-const ALL_STEP_IDS = DOCUMENT_ANALYSIS_STEPS.map((s) => s.id);
+const ALL_STEP_IDS = DOCUMENT_ANALYSIS_STEPS.map(s => s.id);
 
 // ---------------------------------------------------------------------------
 // Props
@@ -175,9 +164,7 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
 }) => {
   const styles = useStyles();
 
-  const [summaryStatus, setSummaryStatus] = React.useState<
-    'idle' | 'loading' | 'loaded' | 'error'
-  >('idle');
+  const [summaryStatus, setSummaryStatus] = React.useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
   const hasFetchedRef = React.useRef(false);
 
   const [activeStepId, setActiveStepId] = React.useState<string | null>(null);
@@ -212,9 +199,9 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
       },
       abortController.signal,
       authenticatedFetch,
-      bffBaseUrl,
+      bffBaseUrl
     )
-      .then((result) => {
+      .then(result => {
         if (abortController.signal.aborted) return;
         onSummaryChange(result.summary);
         setCompletedStepIds(ALL_STEP_IDS);
@@ -241,17 +228,11 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
             Draft Summary
           </Text>
           <Text size={200} className={styles.stepSubtitle}>
-            Review and edit the AI-generated summary below, then add recipient
-            email addresses for distribution.
+            Review and edit the AI-generated summary below, then add recipient email addresses for distribution.
           </Text>
         </div>
         {summaryStatus === 'loaded' && (
-          <Badge
-            className={styles.aiBadge}
-            appearance="tint"
-            color="brand"
-            icon={<SparkleRegular />}
-          >
+          <Badge className={styles.aiBadge} appearance="tint" color="brand" icon={<SparkleRegular />}>
             AI Generated
           </Badge>
         )}
@@ -285,9 +266,7 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
         {summaryStatus === 'error' && (
           <div className={styles.summaryUnavailable}>
             <WarningRegular aria-hidden="true" fontSize={16} />
-            <Text size={200}>
-              Summary unavailable. You can type a summary manually below.
-            </Text>
+            <Text size={200}>Summary unavailable. You can type a summary manually below.</Text>
           </div>
         )}
 
@@ -295,7 +274,7 @@ export const DraftSummaryStep: React.FC<IDraftSummaryStepProps> = ({
           <Textarea
             className={styles.summaryTextarea}
             value={summaryText}
-            onChange={(e) => onSummaryChange(e.target.value)}
+            onChange={e => onSummaryChange(e.target.value)}
             placeholder="Enter or edit the matter summary here&hellip;"
             rows={10}
             resize="vertical"

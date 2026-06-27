@@ -34,7 +34,23 @@
 
 import { registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
 import { createWorkspaceWrapper } from './WorkspaceWidgetWrapper';
+import { safeRegister } from '@spaarke/ui-components';
 import type { WorkspaceWidgetComponent } from '../../types/widget-types';
+// Pillar 9 visibility derivations (task 073, D-C-28). The Dashboard category
+// is attached to the 'workspace' registration (WorkspaceLayoutWidget); the
+// Table category is attached to all 5 DataverseEntityViewWidget-backed
+// system widgets (documents/matters/projects/invoices/work-assignments).
+import { dashboardWidgetVisibility, tableWidgetVisibility } from './pillar9-visibility';
+
+// ai-spaarke-ai-workspace-UI-r1 brittleness Phase B.5 (2026-06-09):
+// Isolate each registration in its own try/catch. Without this, a synchronous
+// throw from ANY call below (malformed metadata, factory-expression evaluation
+// failure, missing import) would skip all subsequent registrations, leaving
+// the registry partially populated and the workspace pane rendering empty
+// widget tabs. See safeRegister docblock + brittleness-remediation-plan.md.
+function safeRegisterWidget(...args: Parameters<typeof registerWorkspaceWidget>): void {
+  safeRegister('WorkspaceWidget', args[0], () => registerWorkspaceWidget(...args));
+}
 
 // ---------------------------------------------------------------------------
 // Widget type string constants
@@ -64,7 +80,9 @@ const WIDGET_TYPE = {
  * serialize/restore.
  */
 function wrapFactory<T>(
-  loaderFn: () => Promise<{ default: React.ComponentType<{ data: T; isLoading?: boolean; error?: string; className?: string }> }>,
+  loaderFn: () => Promise<{
+    default: React.ComponentType<{ data: T; isLoading?: boolean; error?: string; className?: string }>;
+  }>,
   widgetType: string
 ): () => Promise<{ default: WorkspaceWidgetComponent }> {
   return () =>
@@ -79,7 +97,7 @@ function wrapFactory<T>(
 //    allowMultiple=false — a session has one budget view at a time.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.BudgetDashboard,
   {
     displayName: 'Budget Dashboard',
@@ -92,7 +110,7 @@ registerWorkspaceWidget(
     () =>
       import(
         /* webpackChunkName: "widget-budget-dashboard" */
-        '@spaarke/ai-outputs/src/output-widgets/BudgetDashboardWidget'
+        '@spaarke/ai-outputs/output-widgets/BudgetDashboardWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.BudgetDashboard
   )
@@ -104,7 +122,7 @@ registerWorkspaceWidget(
 //    allowMultiple=true — different queries can produce parallel result tabs.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.SearchResults,
   {
     displayName: 'Search Results',
@@ -117,7 +135,7 @@ registerWorkspaceWidget(
     () =>
       import(
         /* webpackChunkName: "widget-search-results" */
-        '@spaarke/ai-outputs/src/output-widgets/SearchResultsWidget'
+        '@spaarke/ai-outputs/output-widgets/SearchResultsWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.SearchResults
   )
@@ -130,7 +148,7 @@ registerWorkspaceWidget(
 //    allowMultiple=true — different documents/turns can each have an analysis tab.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.AnalysisEditor,
   {
     displayName: 'Analysis Editor',
@@ -143,7 +161,7 @@ registerWorkspaceWidget(
     () =>
       import(
         /* webpackChunkName: "widget-analysis-editor" */
-        '@spaarke/ai-outputs/src/output-widgets/AnalysisEditorWidget'
+        '@spaarke/ai-outputs/output-widgets/AnalysisEditorWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.AnalysisEditor
   )
@@ -155,7 +173,7 @@ registerWorkspaceWidget(
 //    allowMultiple=true — users may compare multiple document pairs.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.ContractComparison,
   {
     displayName: 'Contract Comparison',
@@ -168,7 +186,7 @@ registerWorkspaceWidget(
     () =>
       import(
         /* webpackChunkName: "widget-contract-comparison" */
-        '@spaarke/ai-outputs/src/output-widgets/ContractComparisonWidget'
+        '@spaarke/ai-outputs/output-widgets/ContractComparisonWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.ContractComparison
   )
@@ -180,7 +198,7 @@ registerWorkspaceWidget(
 //    allowMultiple=false — a session has one status overview at a time.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.StatusSummary,
   {
     displayName: 'Status Summary',
@@ -193,7 +211,7 @@ registerWorkspaceWidget(
     () =>
       import(
         /* webpackChunkName: "widget-status-summary" */
-        '@spaarke/ai-outputs/src/output-widgets/StatusSummaryWidget'
+        '@spaarke/ai-outputs/output-widgets/StatusSummaryWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.StatusSummary
   )
@@ -205,7 +223,7 @@ registerWorkspaceWidget(
 //    allowMultiple=false — single recommendation set per session.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.Recommendation,
   {
     displayName: 'Recommendations',
@@ -218,7 +236,7 @@ registerWorkspaceWidget(
     () =>
       import(
         /* webpackChunkName: "widget-recommendation" */
-        '@spaarke/ai-outputs/src/output-widgets/RecommendationWidget'
+        '@spaarke/ai-outputs/output-widgets/RecommendationWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.Recommendation
   )
@@ -230,7 +248,7 @@ registerWorkspaceWidget(
 //    allowMultiple=false — a session has one active action plan at a time.
 // ---------------------------------------------------------------------------
 
-registerWorkspaceWidget(
+safeRegisterWidget(
   WIDGET_TYPE.ActionPlan,
   {
     displayName: 'Action Plan',
@@ -243,7 +261,7 @@ registerWorkspaceWidget(
     () =>
       import(
         /* webpackChunkName: "widget-action-plan" */
-        '@spaarke/ai-outputs/src/output-widgets/ActionPlanWidget'
+        '@spaarke/ai-outputs/output-widgets/ActionPlanWidget'
       ) as Promise<{ default: React.ComponentType<any> }>,
     WIDGET_TYPE.ActionPlan
   )
@@ -560,9 +578,201 @@ registerWorkspaceWidget(
     defaultOrder: 140,
   },
   () =>
-    import('./WorkspaceLayoutWidget').then((m) => ({
+    import('./WorkspaceLayoutWidget').then(m => ({
       default: m.WorkspaceLayoutWidget as import('../../types/widget-types').WorkspaceWidgetComponent,
     })),
+  // Pillar 9 visibility opt-in (task 073, D-C-28). Dashboard category:
+  // exposes `dashboardName` + optional `lastViewedSection` ONLY. Never
+  // chart data / section payloads (token economy + privacy per ADR-015).
+  // See `pillar9-visibility.ts` for the derivation rationale.
+  dashboardWidgetVisibility
+);
+
+// ---------------------------------------------------------------------------
+// ai-spaarke-ai-workspace-UI-r1 #4 (2026-06-08) — Dataverse entity-view widgets
+//
+// Four system widgets backed by the shared <DataverseEntityViewWidget>: a thin
+// wrapper around the Spaarke DataGrid framework. Each registration baked a
+// specific `configId` (the operator-created `sprk_gridconfiguration` row) into
+// the resolved component via the factory wrapper below.
+//
+// **DEPLOYMENT REQUIREMENT** — before these widgets render correctly, the
+// operator MUST create one `sprk_gridconfiguration` row per entity and replace
+// the placeholder constants below with the real GUIDs. See
+// `projects/ai-spaarke-ai-workspace-UI-r1/notes/entity-view-widget-deployment.md`
+// for the seed instructions. The widget falls back to a clear empty state when
+// `data.configId` resolves to an unknown record (DataGrid's invalid-config
+// guard); no production crash.
+// ---------------------------------------------------------------------------
+
+// Real sprk_gridconfiguration GUIDs in spaarkedev1:
+//  - documents:        'Active Documents (Workspace)'    (created 2026-06-09; replaces
+//                       the legacy 'Semantic Search Documents View' row d99a4352-…,
+//                       which was authored for SemanticSearchControl PCF and lacks
+//                       the DataGrid framework's source.savedQueryId field).
+//  - matters:          'Active Matters (Workspace)'      (created 2026-06-08)
+//  - projects:         'Active Projects (Workspace)'     (created 2026-06-08)
+//  - invoices:         'Invoice Matter Budget Performance' (pre-existing)
+//  - workAssignments:  'Active Work Assignments (Workspace)' (created 2026-06-08)
+const ENTITY_VIEW_CONFIG_IDS = {
+  documents: '1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6',
+  matters: '113ad380-9e63-f111-ab0c-70a8a53ec687',
+  projects: '97ee98e7-7a63-f111-ab0c-70a8a53ec687',
+  invoices: 'd021827b-9b5e-f111-ab0c-7c1e521545d7',
+  workAssignments: '9c5b0ee7-7a63-f111-ab0c-000d3a4d8152',
+} as const;
+
+/**
+ * Build a lazy factory that resolves the shared `DataverseEntityViewWidget`
+ * pre-configured with a specific `configId`. The wrapper accepts the standard
+ * `WorkspaceWidgetProps<DataverseEntityViewWidgetData>` and merges the baked
+ * `configId` into `data` (caller-supplied `configId` still wins, which keeps
+ * the dispatcher path open for future overrides).
+ */
+function createEntityViewFactory(configId: string) {
+  return () =>
+    import('./DataverseEntityViewWidget').then(m => {
+      const Base = m.DataverseEntityViewWidget;
+      const Wrapped = (
+        props: import('../../types/widget-types').WorkspaceWidgetProps<
+          import('./DataverseEntityViewWidget').DataverseEntityViewWidgetData
+        >
+      ): ReturnType<typeof Base> => {
+        // Caller-supplied configId wins; baked-in configId is the default.
+        const mergedData = {
+          ...(props.data ?? {}),
+          configId: props.data?.configId ?? configId,
+        };
+        return Base({ ...props, data: mergedData });
+      };
+      Wrapped.displayName = `DataverseEntityViewWidget(${configId})`;
+      return {
+        default: Wrapped as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+      };
+    });
+}
+
+// Pillar 9 visibility opt-in (task 073, D-C-28). Table category: exposes
+// structural state (rowCount + sort + filter + selection CARDINALITY) for
+// all 5 system table widgets. selectedRows is converted from row IDs to a
+// COUNT per SerializedTableState privacy contract — row IDs / cell content
+// never reach the agent prompt. See `pillar9-visibility.ts`.
+
+registerWorkspaceWidget(
+  'documents-list',
+  {
+    displayName: 'Documents',
+    category: 'data',
+    icon: 'DocumentRegular',
+    allowMultiple: true,
+    defaultOrder: 200,
+  },
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.documents),
+  tableWidgetVisibility
+);
+
+safeRegisterWidget(
+  'matters-list',
+  {
+    displayName: 'Matters',
+    category: 'data',
+    icon: 'BriefcaseSearchRegular',
+    allowMultiple: true,
+    defaultOrder: 205,
+  },
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.matters),
+  tableWidgetVisibility
+);
+
+registerWorkspaceWidget(
+  'projects-list',
+  {
+    displayName: 'Projects',
+    category: 'data',
+    icon: 'FolderRegular',
+    allowMultiple: true,
+    defaultOrder: 210,
+  },
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.projects),
+  tableWidgetVisibility
+);
+
+registerWorkspaceWidget(
+  'invoices-list',
+  {
+    displayName: 'Invoices',
+    category: 'data',
+    icon: 'ReceiptRegular',
+    allowMultiple: true,
+    defaultOrder: 220,
+  },
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.invoices),
+  tableWidgetVisibility
+);
+
+registerWorkspaceWidget(
+  'work-assignments-list',
+  {
+    displayName: 'Work Assignments',
+    category: 'data',
+    icon: 'BriefcaseRegular',
+    allowMultiple: true,
+    defaultOrder: 230,
+  },
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.workAssignments),
+  tableWidgetVisibility
+);
+
+// ---------------------------------------------------------------------------
+// ai-spaarke-ai-workspace-UI-r1 #7 (2026-06-08) — Metrics dashboards
+//
+// Each dashboard ("Matters Report", "Invoice Report", "Project Report", …) is
+// a STANDALONE direct widget — not a composable Dashboard section. Operators
+// confirmed (2026-06-08) that these reports are not added to consolidated
+// workspaces; each owns its full tab.
+//
+// Configs live in `metricsDashboardConfigs.ts` (in-code per the same
+// 2026-06-08 decision; promote to a `sprk_dashboardconfiguration` Dataverse
+// entity later if maker-authored dashboards become a requirement).
+//
+// To add a new dashboard:
+//   1. Add a MetricsDashboardConfig entry in `metricsDashboardConfigs.ts`.
+//   2. Add a registerWorkspaceWidget call below using
+//      `createMetricsDashboardFactory(dashboardId)`.
+// ---------------------------------------------------------------------------
+
+function createMetricsDashboardFactory(dashboardId: string) {
+  return () =>
+    import('./MetricsDashboardWidget').then(m => {
+      const Base = m.MetricsDashboardWidget;
+      const Wrapped = (
+        props: import('../../types/widget-types').WorkspaceWidgetProps<
+          import('./MetricsDashboardWidget').MetricsDashboardWidgetData
+        >
+      ): ReturnType<typeof Base> => {
+        const mergedData = {
+          ...(props.data ?? {}),
+          dashboardId: props.data?.dashboardId ?? dashboardId,
+        };
+        return Base({ ...props, data: mergedData });
+      };
+      Wrapped.displayName = `MetricsDashboardWidget(${dashboardId})`;
+      return {
+        default: Wrapped as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+      };
+    });
+}
+
+registerWorkspaceWidget(
+  'matters-dashboard',
+  {
+    displayName: 'Matters Report',
+    category: 'ai',
+    icon: 'DataBarVerticalRegular',
+    allowMultiple: false,
+    defaultOrder: 300,
+  },
+  createMetricsDashboardFactory('matters-dashboard')
 );
 
 // ---------------------------------------------------------------------------

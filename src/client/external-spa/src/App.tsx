@@ -1,58 +1,48 @@
-import * as React from "react";
-import {
-  FluentProvider,
-  makeStyles,
-  tokens,
-  Text,
-  webDarkTheme,
-} from "@fluentui/react-components";
-import type { Theme } from "@fluentui/react-components";
-import { useMsal } from "@azure/msal-react";
-import { HashRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import {
-  resolveCodePageTheme,
-  setupCodePageThemeListener,
-  setUserThemePreference,
-} from "@spaarke/ui-components";
-import { APP_VERSION } from "./config";
-import { AppHeader } from "./components/AppHeader";
-import { AuthGuard } from "./components/AuthGuard";
-import { ErrorBoundary } from "./components/ErrorBoundary";
-import { WorkspaceHomePage } from "./pages/WorkspaceHomePage";
-import { ProjectPage } from "./pages/ProjectPage";
-import { PlaybookLibraryPage } from "./pages/PlaybookLibraryPage";
-import { DocumentUploadPage } from "./pages/DocumentUploadPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import type { PortalUser } from "./types";
+import * as React from 'react';
+import { FluentProvider, makeStyles, tokens, Text, webDarkTheme } from '@fluentui/react-components';
+import type { Theme } from '@fluentui/react-components';
+import { useMsal } from '@azure/msal-react';
+import { HashRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { resolveCodePageTheme, setupCodePageThemeListener, setUserThemePreference } from '@spaarke/ui-components';
+import { APP_VERSION } from './config';
+import { AppHeader } from './components/AppHeader';
+import { AuthGuard } from './components/AuthGuard';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { WorkspaceHomePage } from './pages/WorkspaceHomePage';
+import { ProjectPage } from './pages/ProjectPage';
+import { PlaybookLibraryPage } from './pages/PlaybookLibraryPage';
+import { DocumentUploadPage } from './pages/DocumentUploadPage';
+import { SettingsPage } from './pages/SettingsPage';
+import type { PortalUser } from './types';
 
 const useStyles = makeStyles({
   root: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     // Use 100dvh to guarantee full viewport height regardless of parent container
     // height in the Power Pages Code Site context (parent may be height: auto)
-    height: "100dvh",
+    height: '100dvh',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
-    overflow: "hidden",
+    overflow: 'hidden',
   },
   content: {
-    flex: "1 1 auto",
-    display: "flex",
-    flexDirection: "column",
-    overflow: "auto",
+    flex: '1 1 auto',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'auto',
     // Hide scrollbar track but preserve mouse-wheel scrolling
-    scrollbarWidth: "none",
-    msOverflowStyle: "none",
+    scrollbarWidth: 'none',
+    msOverflowStyle: 'none',
   },
   footer: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalL}`,
-    borderTopWidth: "1px",
-    borderTopStyle: "solid",
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke2,
     backgroundColor: tokens.colorNeutralBackground2,
-    display: "flex",
-    justifyContent: "flex-end",
+    display: 'flex',
+    justifyContent: 'flex-end',
     flexShrink: 0,
   },
 });
@@ -60,13 +50,13 @@ const useStyles = makeStyles({
 /**
  * Map an MSAL account to the PortalUser shape used by AppHeader and pages.
  */
-function accountToPortalUser(account: ReturnType<typeof useMsal>["accounts"][0] | undefined): PortalUser | null {
+function accountToPortalUser(account: ReturnType<typeof useMsal>['accounts'][0] | undefined): PortalUser | null {
   if (!account) return null;
-  const nameParts = (account.name ?? "").split(" ");
+  const nameParts = (account.name ?? '').split(' ');
   return {
     userName: account.username,
-    firstName: nameParts[0] ?? "",
-    lastName: nameParts.slice(1).join(" "),
+    firstName: nameParts[0] ?? '',
+    lastName: nameParts.slice(1).join(' '),
     displayName: account.name ?? account.username,
     tenantId: account.tenantId,
   };
@@ -89,7 +79,7 @@ const AppShell: React.FC<{
         isDark={isDark}
         onToggleDark={onToggleDark}
         portalUser={portalUser}
-        onSettingsClick={() => navigate("/settings")}
+        onSettingsClick={() => navigate('/settings')}
       />
 
       <main className={styles.content}>
@@ -102,13 +92,7 @@ const AppShell: React.FC<{
               <Route path="/upload" element={<DocumentUploadPage />} />
               <Route
                 path="/settings"
-                element={
-                  <SettingsPage
-                    isDark={isDark}
-                    onToggleDark={onToggleDark}
-                    portalUser={portalUser}
-                  />
-                }
+                element={<SettingsPage isDark={isDark} onToggleDark={onToggleDark} portalUser={portalUser} />}
               />
               {/* Redirect any unknown hash paths back to home */}
               <Route path="*" element={<Navigate to="/" replace />} />
@@ -145,9 +129,16 @@ export const App: React.FC = () => {
   const [theme, setTheme] = React.useState<Theme>(resolveCodePageTheme);
 
   const { accounts } = useMsal();
-  const portalUser = import.meta.env.VITE_DEV_MOCK === "true"
-    ? { userName: "jane.smith@externalfirm.com", firstName: "Jane", lastName: "Smith", displayName: "Jane Smith (Mock)", tenantId: "mock" }
-    : accountToPortalUser(accounts[0]);
+  const portalUser =
+    import.meta.env.VITE_DEV_MOCK === 'true'
+      ? {
+          userName: 'jane.smith@externalfirm.com',
+          firstName: 'Jane',
+          lastName: 'Smith',
+          displayName: 'Jane Smith (Mock)',
+          tenantId: 'mock',
+        }
+      : accountToPortalUser(accounts[0]);
 
   const isDark = theme === webDarkTheme;
 
@@ -160,7 +151,7 @@ export const App: React.FC = () => {
   // Toggle persists to localStorage and dispatches custom event so all listeners (including
   // other tabs and shared components) pick up the change via setupCodePageThemeListener.
   const handleToggleDark = React.useCallback(() => {
-    const newPreference = isDark ? "light" : "dark";
+    const newPreference = isDark ? 'light' : 'dark';
     setUserThemePreference(newPreference);
     // setUserThemePreference dispatches THEME_CHANGE_EVENT which setupCodePageThemeListener
     // handles, but we also set state directly for immediate UI response.
@@ -168,13 +159,9 @@ export const App: React.FC = () => {
   }, [isDark]);
 
   return (
-    <FluentProvider theme={theme} style={{ height: "100%" }}>
+    <FluentProvider theme={theme} style={{ height: '100%' }}>
       <HashRouter>
-        <AppShell
-          isDark={isDark}
-          onToggleDark={handleToggleDark}
-          portalUser={portalUser}
-        />
+        <AppShell isDark={isDark} onToggleDark={handleToggleDark} portalUser={portalUser} />
       </HashRouter>
     </FluentProvider>
   );

@@ -29,7 +29,7 @@ export type { WebSourceData };
  */
 const WebSourceContextWidget = createContextWidgetAdapter<WebSourceData>(
   WebSourceWidget,
-  createNoOpHighlighter<WebSourceData>(),
+  createNoOpHighlighter<WebSourceData>()
 );
 
 WebSourceContextWidget.displayName = 'WebSourceContextWidget';

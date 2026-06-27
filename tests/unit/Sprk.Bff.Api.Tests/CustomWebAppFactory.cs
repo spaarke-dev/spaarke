@@ -68,6 +68,13 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
                 ["DocumentIntelligence:OpenAiDeployment"] = "gpt-4o",
                 ["Analysis:Enabled"] = "true",
 
+                // RB-T070-03 Path 1 (owner-approved 2026-06-01): activate the test seam in
+                // AnalysisChatContextResolver. When ON, non-GUID analysisIds return a canned
+                // response (echoes the original stub-resolver behavior the 7 affected tests
+                // were written against). Production never sets this key, so the seam is
+                // dormant in real traffic. See ADR-010 / ADR-018 / decision D-12.
+                ["Analysis:UseStubResolver"] = "true",
+
                 // AI Search options (required for IRagService)
                 ["DocumentIntelligence:AiSearchEndpoint"] = "https://test.search.windows.net",
                 ["DocumentIntelligence:AiSearchKey"] = "test-search-key",
@@ -77,6 +84,11 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
 
                 // Redis options (disabled for tests)
                 ["Redis:Enabled"] = "false",
+                // spaarke-redis-cache-remediation-r1 task 003 (FR-02 fail-fast): CacheModule now
+                // throws unless either Redis is enabled OR AllowInMemoryFallback is set AND env
+                // is Development. Opt the test host into the in-memory fallback branch so the
+                // host can build. See bff-extensions.md §F.2 (Fixture-Config-FIRST).
+                ["Redis:AllowInMemoryFallback"] = "true",
 
                 // ModelSelector options
                 ["ModelSelector:DefaultModel"] = "gpt-4o",
@@ -103,7 +115,24 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
                 ["SpeAdmin:KeyVaultUri"] = "https://test.vault.azure.net/",
 
                 // ManagedIdentity options (required by DataverseWebApiClient in SpeAdminModule)
-                ["ManagedIdentity:ClientId"] = "test-managed-identity-client-id"
+                ["ManagedIdentity:ClientId"] = "test-managed-identity-client-id",
+
+                // CosmosPersistence options (required by AiPersistenceModule — raw config read, not bound to Options class)
+                // Missing this key causes InvalidOperationException at Program.cs line 107 during host build
+                // Affects: ALL failing tests using CustomWebAppFactory (fires before any test assertion runs)
+                // Source: projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md (task 017 inventory)
+                ["CosmosPersistence:Endpoint"] = "https://test.documents.azure.com:443/",
+                ["CosmosPersistence:DatabaseName"] = "spaarke-ai-test",
+
+                // AgentService options (required by AgentServiceOptions ValidateDataAnnotations + ValidateOnStart)
+                // Missing these causes OptionsValidationException at Program.cs line 107 during host build
+                // ADR-018: Enabled=false keeps the kill-switch OFF in tests (no accidental Foundry network calls)
+                // Source: projects/sdap-bff.api-test-suite-repair/notes/spikes/factory-config-gaps.md (task 017 inventory)
+                ["AgentService:Enabled"] = "false",
+                ["AgentService:Endpoint"] = "https://test.services.ai.azure.com/api/projects/test-project",
+                ["AgentService:AgentId"] = "test-agent-id",
+                ["AgentService:MaxConcurrency"] = "4",
+                ["AgentService:ThreadCacheExpiryMinutes"] = "60"
             };
             config.AddInMemoryCollection(dict!);
         });
@@ -113,15 +142,33 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        // Use Testing environment (consistent with other test fixtures)
-        // This disables ValidateScopes which catches pre-existing singleton→scoped
-        // DI lifetime issues in the production codebase (not introduced by this PR)
-        builder.UseEnvironment("Testing");
+        // spaarke-redis-cache-remediation-r1 task 003 (FR-02): CacheModule's in-memory fallback
+        // branch requires IHostEnvironment.IsDevelopment(). "Testing" environment trips Branch (c)
+        // and throws at startup. Switch to "Development" so the fallback path runs, then
+        // explicitly disable ValidateScopes (previously implicit under "Testing") to preserve
+        // the pre-existing behavior — the production codebase has known singleton→scoped DI
+        // lifetime issues unrelated to this PR.
+        builder.UseEnvironment("Development");
+        builder.UseDefaultServiceProvider(options =>
+        {
+            options.ValidateScopes = false;
+            options.ValidateOnBuild = false;
+        });
 
         // Use ConfigureTestServices to replace services AFTER the app's services are registered.
         // This ensures our fakes override the real implementations registered in Program.cs.
         builder.ConfigureTestServices(services =>
         {
+            // spaarke-redis-cache-remediation-r1 task 003 follow-up: under "Development" the
+            // minimal-API binder defaults to ThrowOnBadRequest=true (vs false in other envs);
+            // missing-required-query-param then surfaces as BadHttpRequestException → our
+            // global exception handler maps it to 500 instead of the framework's built-in 400.
+            // Restore the production-equivalent contract for tests by forcing ThrowOnBadRequest=false.
+            services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
+            {
+                options.ThrowOnBadRequest = false;
+            });
+
             // ---------------------------------------------------------------
             // AUTHENTICATION: Replace JWT/OIDC with a fake handler that
             // injects a known test identity when an Authorization header is

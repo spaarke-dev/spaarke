@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>Project wrap-up: quality gates + repo cleanup + README/plan completion + lessons-learned</title>
+    <phase>Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>009,017,026,035,042,054</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, testing</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final quality gates (/code-review + /adr-check) on all project code; mandatory per task-create Step 3.7</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task — aggregates all phases; verifies project completion</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Run the mandatory project wrap-up per task-create Step 3.7: final quality gates (`/code-review` + `/adr-check` on all project code), repository cleanup (`/repo-cleanup`), README + plan status updates to "Complete", lessons-learned document, and final verification that all graduation criteria are met.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in `/code-review`, `/adr-check`, `/repo-cleanup` skills.
+  </role>
+
+  <goal>
+    All quality gates pass; README + plan show "Complete"; lessons-learned written; repo clean; project formally closed.
+  </goal>
+
+  <context>
+    <background>
+      Per task-create Step 3.7. Mandatory final task for ALL Spaarke projects. Aggregates the project's completion criteria into a single verification + cleanup pass.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-datagrid-framework-r1/README.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/plan.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/notes/lessons-learned.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All Phase A-F acceptance criteria met before closing.</constraint>
+    <constraint source="project">No critical `/code-review` findings remain unresolved.</constraint>
+    <constraint source="project">No ADR violations.</constraint>
+    <constraint source="project">README + plan reflect "Complete" status with checked criteria.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/README.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/code-review` against all project code (Phase A framework + Phase B BFF + Phase C-F migrations). Address any critical findings.</step>
+    <step order="2">Run `/adr-check` against project code. Verify ADR-008/012/019/021/022/026/028/029 compliance.</step>
+    <step order="3">Run `/repo-cleanup projects/spaarke-datagrid-framework-r1` — audit ephemeral files; approve removals (notes/debug/, notes/spikes/, notes/drafts/); archive handoffs if any.</step>
+    <step order="4">Update `README.md`: Status = "Complete"; Last Updated = current date; Phase = "Complete"; Progress = "100%"; Completed Date filled; ALL Graduation Criteria checkboxes checked.</step>
+    <step order="5">Add Changelog entry: "Project completed" with date.</step>
+    <step order="6">Update `plan.md`: Status = "Complete"; all phase statuses ✅.</step>
+    <step order="7">Verify all task POMLs marked completed in TASK-INDEX.md.</step>
+    <step order="8">Write `notes/lessons-learned.md`: what worked, what surprised, what to do differently next time. Cover: framework adoption (Phase A→C→D consumers), the bff-extensions.md governance gate, the squash-merge false-positive in Step 0.5, MDA visual parity gates, EventsPage migration pattern (~1500 → ~150 lines), the record-link bug closure mechanism.</step>
+    <step order="9">Final verification:
+      - All graduation criteria met (per README.md checklist)
+      - All quality gates passed (`/code-review` + `/adr-check`)
+      - No critical issues remaining
+      - Repository cleanup completed
+    </step>
+    <step order="10">Update TASK-INDEX.md: task 090 ✅; project ✅ Complete.</step>
+    <step order="11">Update `current-task.md`: Task ID = "none"; Status = "none"; Next Action = "Project complete — proceed to merge-to-master".</step>
+  </steps>
+
+  <tools>
+    <tool name="code-review">Skill</tool>
+    <tool name="adr-check">Skill</tool>
+    <tool name="repo-cleanup">Skill</tool>
+    <tool name="Edit">Update README/plan/TASK-INDEX/current-task</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/README.md (modified to Complete)</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/plan.md (modified to Complete)</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/tasks/TASK-INDEX.md (modified)</output>
+    <output type="docs">projects/spaarke-datagrid-framework-r1/current-task.md (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `/code-review` on project code, when complete, then no critical/high findings remain.</criterion>
+    <criterion testable="true">Given `/adr-check`, when run, then no ADR violations.</criterion>
+    <criterion testable="true">Given `/repo-cleanup`, when run, then ephemeral files audited and cleaned.</criterion>
+    <criterion testable="true">Given README.md, when reviewed, then all 13 graduation criteria are checked.</criterion>
+    <criterion testable="true">Given lessons-learned.md, when written, then it covers what worked + what surprised + recommendations.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Final task — closes the project. After this, the typical next action is `/merge-to-master`. Per task-create Step 3.7 this task is MANDATORY for every Spaarke project. Don't skip steps. The lessons-learned should be specific and actionable — vague observations don't help future projects.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>All steps mandatory. Quality gates first; cleanup second; documentation third. Project closes when all acceptance criteria verified.</protocol>
+  </execution>
+</task>

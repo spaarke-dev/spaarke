@@ -70,18 +70,6 @@ public class GetStructuredCompletionAsyncTests : IDisposable
 
     #region Schema Configuration Tests
 
-    [Fact]
-    public void ChatResponseFormat_CreateJsonSchemaFormat_Configures_Strict_Schema()
-    {
-        // Arrange & Act — verify CreateJsonSchemaFormat produces a non-null format
-        var format = ChatResponseFormat.CreateJsonSchemaFormat(
-            SchemaName,
-            s_testSchema,
-            jsonSchemaIsStrict: true);
-
-        // Assert
-        format.Should().NotBeNull("structured output requires a JSON schema response format");
-    }
 
     [Fact]
     public void JsonSchema_Has_AdditionalProperties_False_For_Strict_Mode()

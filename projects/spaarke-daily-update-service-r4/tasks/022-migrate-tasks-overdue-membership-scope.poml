@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Migrate notification-tasks-overdue.json to membership-scope union FetchXml</title>
+    <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>REVISED 2026-06-25 (redo): DEPLOYMENT SUCCESSFUL via mcp__dataverse__update_record overlay on sprk_analysisplaybook.sprk_configjson (PB-021 GUID 4369cab2-5f2d-f111-88b5-7ced8d1dc988). Pre-deploy state: 152-char header-only configjson (hourly frequency, no ActionType 52); post-deploy state: 5,096-char full multinode graph (daily 06:00, 5 nodes with LookupUserMembership + sprk_event Task discriminator + membership-scope FetchXml union). statecode=0 (Active) preserved. Verified via post-deploy read_query: ActionType 52 present, sprk_event entity, Task eventtype GUID 124f5fc9-…, membership-scope OR-branch, overdue filter (sprk_duedate OR sprk_finalduedate lt todayUtc), dedupe by sprk_eventid, 5-node graph wired correctly. Spec FR-7 "Dedupe by activityid" wording bug confirmed corrected in repo JSON + deployed configjson to sprk_eventid per CLAUDE.md § '2026-06-25 — Spaarke entity architecture' BINDING rule. AC-7 manual UAT now testable per scenario in notes/smoke/022-tasks-overdue-deploy.md. PB-021 now at parity with PB-020 (task 023), PB-017 (024), PB-022 (025). PRIOR DEFERRAL DISPROVED: the first-attempt hypothesis that runtime engine reads from sprk_playbooknode child rows (not sprk_configjson) was wrong — tasks 011/023/024/025 all successfully overlay configjson via update_record. Historical deferral discussion preserved in smoke notes' "First attempt deferred — reason invalid" section.</completion-notes>
+    <estimated-hours>2.5</estimated-hours>
+    <dependencies>020, 021</dependencies>
+    <blocks>026</blocks>
+    <tags>jps, dataverse, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Modifies an independent playbook JSON file + redeploys via MCP. No C# code changes. Parallel-safe with other PR-3 playbook tasks (022/023/024/025 each own their own JSON file). FR-7 binds: membership-scope expansion enables AC-7 manual UAT scenario.</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Edit `projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-overdue.json` (PB-021). Add a parallel branch using `LookupUserMembership` (ActionType 52) so the FetchXml query becomes a union: `(ownerid eq-userid)` OR `(regardingobjectid IN membership-matterIds)`. Dedupe by `activityid`. Redeploy via MCP `update_record` on the existing `sprk_analysisplaybook` row (`sprk_configjson` attribute).</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS playbook designer with expertise in FetchXml union semantics + LookupUserMembership ActionType 52 (ADR-034).</role>
+
+  <goal>`notification-tasks-overdue.json` reflects membership-scope union query. Deployed `sprk_analysisplaybook` row for PB-021 has updated `sprk_configjson` matching the repo file. `jps-validate` passes. Manual UAT confirms AC-7 (user who is `assignedAttorney` on Matter-X but doesn't own any task on it sees overdue tasks on Matter-X).</goal>
+
+  <context>
+    <background>R4 spec FR-7 (line 142) requires both `notification-tasks-overdue` (PB-021) and `notification-tasks-due-soon` (PB-020) to surface tasks regarding any matter the user is a member of, not just tasks they directly own. The canonical union pattern uses `LookupUserMembership` (ActionType 52, deployed by W0 task series) to resolve the user's matter memberships, then a FetchXml query unions `(ownerid eq-userid)` with `(regardingobjectid IN membership-matterIds)` and dedupes by `activityid`. PB-016 (`notification-new-documents.json`) is the reference example — it already uses LookupUserMembership in this pattern.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-overdue.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-034">Membership resolution via ActionType 52 LookupUserMembership — canonical primitive. Do NOT compose a custom membership query.</constraint>
+    <constraint source="ADR-013">Playbook composes JPS primitives only. No new endpoints, no new C# services.</constraint>
+    <constraint source="ADR-037">Multinode output composition — fan-out from LookupUserMembership → QueryDataverse → CreateNotification.</constraint>
+    <constraint source="CLAUDE.md §11">Component Justification not required (modifying existing playbook, not creating a new component).</constraint>
+    <constraint source="project">Dedupe by activityid (FetchXml union may produce duplicates when a user owns a task AND is a member of its regarding matter). Repo JSON file = source-of-truth; deploy from repo, never edit deployed sprk_configjson directly.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership-resolution.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/skills/jps-playbook-design/SKILL.md</file>
+      <file>.claude/skills/jps-playbook-audit/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load knowledge files. Read spec FR-7 + AC-7.</step>
+    <step order="2">Read the reference playbook `projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json` (PB-016) to understand the existing LookupUserMembership union pattern.</step>
+    <step order="3">Read current `notification-tasks-overdue.json` (PB-021). Document the existing node graph + FetchXml in `notes/`.</step>
+    <step order="4">Edit the JSON: add a LookupUserMembership(sprk_matter) node parallel to existing query, then a unified QueryDataverse node with FetchXml: union `(ownerid eq-userid)` OR `(regardingobjectid IN membership-matterIds)`, with distinct/dedupe by activityid.</step>
+    <step order="5">Validate via `jps-validate` skill. Fix schema violations.</step>
+    <step order="6">Audit via `jps-playbook-audit` skill against deployed Action codes (LookupUserMembership = ActionType 52; ensure SYS-LOOKUP-MEMBERSHIP Action code is referenced).</step>
+    <step order="7">Redeploy via `mcp__dataverse__update_record` on `sprk_analysisplaybook` row for PB-021 — set `sprk_configjson` to the new content.</step>
+    <step order="8">Verify deployment: `mcp__dataverse__read_query` to fetch PB-021 row + confirm sprk_configjson matches.</step>
+    <step order="9">Run tests + build (no C# changes — confirm green): `dotnet build src/server/api/Sprk.Bff.Api/`.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: change task 022 status to ✅.</step>
+    <step order="11">Document deviations / UAT script in `projects/spaarke-daily-update-service-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">update_record — redeploy playbook sprk_configjson; read_query — verify deployment.</tool>
+    <tool name="jps-validate">Schema validation</tool>
+    <tool name="jps-playbook-audit">Audit against deployed Action catalog</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">projects/spaarke-daily-update-service/notes/playbooks/notification-tasks-overdue.json</output>
+    <output type="data">sprk_analysisplaybook PB-021 row sprk_configjson updated</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notification-tasks-overdue.json node graph includes a LookupUserMembership(sprk_matter) node.</criterion>
+    <criterion testable="true">FetchXml unions (ownerid eq-userid) OR (regardingobjectid IN membership-matterIds) with distinct/dedupe on activityid.</criterion>
+    <criterion testable="true">jps-validate passes on the file.</criterion>
+    <criterion testable="true">Deployed PB-021 sprk_configjson matches the repo file (verified by read_query).</criterion>
+    <criterion testable="true">Manual UAT scenario documented for AC-7 verification.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-7 (line 142), AC-7 (line 143). Hint: PB-016 (`notification-new-documents.json`) is the reference example — already does this exact pattern. Hint: the dedupe-by-activityid can be done via `distinct="true"` on FetchXml `&lt;fetch&gt;` element OR via post-query dedupe in the QueryDataverse node config. Hint: this task is parallel-safe with 023, 024, 025 (each owns a different JSON file).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

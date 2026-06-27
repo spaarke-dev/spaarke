@@ -1,0 +1,131 @@
+<task id="063" project="email-communication-solution-r3">
+  <metadata>
+    <title>Build + deploy SummarizeFilesWizard solution to dev (Wave 4)</title>
+    <phase>Wave 4 — SummarizeFiles Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>060, 062</dependencies>
+    <blocks>065</blocks>
+    <tags>deploy, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task; mechanical build + deploy via `dataverse-deploy` skill. No code changes. STANDARD covers verification + skill invocation.</rigor-reason>
+    <parallel-group>J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-15</fr-refs>
+  </metadata>
+
+  <prompt>
+    Build and deploy the `SummarizeFilesWizard` solution to the dev environment via the `dataverse-deploy` skill. This deploy ships the Wave 4 shared-lib migration:
+    - `SummarizeFilesDialog.tsx` now consumes canonical `<SendEmailStep />` (task 060)
+    - Inline `fetch` at line 436 removed
+    - Implicit dependency on the canonical wrapper from `@spaarke/ui-components` (already published by Wave 1)
+
+    Pre-deploy: confirm `@spaarke/ui-components` resolves to a version containing the Wave 1 wrappers + Wave 4 SummarizeFiles fix. Confirm SummarizeFilesWizard solution `npm run build` is clean.
+
+    Post-deploy: navigate to a surface that mounts the SummarizeFilesWizard in dev. Confirm zero console errors on load. Functional smoke test is task 065.
+
+    Note: this task is `parallel-safe: true` in `parallel-group: J` — runs in parallel with task 064 (LegalWorkspace deploy). They target different solutions, so concurrent deploys are safe at the Dataverse import layer. Both feed into smoke test 065.
+  </prompt>
+
+  <role>
+    Deployment engineer familiar with `dataverse-deploy` skill for SummarizeFilesWizard solution. Knows the build pipeline + solution-import path + dev environment target.
+  </role>
+
+  <goal>
+    SummarizeFilesWizard solution deployed to dev with Wave 4 shared-lib changes shipped. Build clean. Lint clean. Solution imported successfully. Smoke loading shows zero console errors. Ready for task 065 (functional smoke).
+  </goal>
+
+  <context>
+    <background>
+      SummarizeFilesWizard is the Vite-built React solution at `src/solutions/SummarizeFilesWizard/` (verify path during execution — solution-tree layout may use a slightly different name). The solution bundles `@spaarke/ui-components` and ships via the existing Dataverse deploy pipeline.
+
+      Wave 4 changes affecting this deploy:
+      - Shared `SummarizeFilesDialog.tsx` migrated to canonical `<SendEmailStep />` (task 060)
+      - Line 436 inline `fetch` removed
+
+      Per CLAUDE.md §11, use `npm install --legacy-peer-deps --no-audit --no-fund` for Vite solutions.
+
+      Per `dataverse-deploy` skill: deploy is solution-scoped. SummarizeFilesWizard and LegalWorkspace are separate solutions — concurrent deploys are safe.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SummarizeFilesWizard/ (build root — verify exact path during execution)</file>
+      <file>src/solutions/SummarizeFilesWizard/package.json</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx (migrated by task 060)</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">Use `npm install --legacy-peer-deps --no-audit --no-fund` for Vite solutions.</constraint>
+    <constraint source="project">Deploy targets DEV environment only.</constraint>
+    <constraint source="ADR-033">No code changes during deploy — mechanical packaging only.</constraint>
+    <constraint source="repo">Solution import MUST succeed without errors.</constraint>
+    <constraint source="project">Document deploy result in `notes/wave-4-deploy-summarize.md`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r3/spec.md</file>
+      <file>projects/email-communication-solution-r3/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r3/plan.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate the SummarizeFilesWizard solution root. Likely at `src/solutions/SummarizeFilesWizard/`; if path differs, search with `ls src/solutions/` and pick the matching directory name.</step>
+    <step order="2">Pre-deploy: from the solution root:
+      <code>
+      npm install --legacy-peer-deps --no-audit --no-fund
+      npm run build
+      npm run lint
+      </code>
+      If any step fails, escalate to task 060 — do NOT attempt deploy with broken build.
+    </step>
+    <step order="3">Verify `@spaarke/ui-components` resolves to a version containing the Wave 4 canonical wrapper consumption (task 060 output). Inspect `node_modules/@spaarke/ui-components/dist/` or equivalent for the migrated SummarizeFilesDialog.</step>
+    <step order="4">Invoke `dataverse-deploy` skill: target = dev, solution = SummarizeFilesWizard.</step>
+    <step order="5">Monitor deploy. On success: capture timestamp + dev environment URL. On failure: capture error, escalate per category (build → task 060; auth → re-authenticate).</step>
+    <step order="6">Post-deploy: load the SummarizeFilesWizard surface in browser DevTools. Confirm zero console errors on load. Functional smoke is task 065 — do NOT execute send from this task.</step>
+    <step order="7">Write deploy summary to `notes/wave-4-deploy-summarize.md`: timestamp, dev URL, console-check result.</step>
+    <step order="8">Update `projects/email-communication-solution-r3/tasks/TASK-INDEX.md`: mark task 063 ✅ completed.</step>
+    <step order="9">Update `projects/email-communication-solution-r3/current-task.md` per task-execute protocol: status → completed, advance to next pending task (065 if 064 already complete; otherwise wait for 064).</step>
+  </steps>
+
+  <tools>
+    <tool name="bash">Run build + lint locally</tool>
+    <tool name="dataverse-deploy">Solution deploy to dev</tool>
+    <tool name="write">Create `notes/wave-4-deploy-summarize.md` deploy summary</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/email-communication-solution-r3/notes/wave-4-deploy-summarize.md (NEW — deploy summary)</output>
+    <output type="deploy">SummarizeFilesWizard solution deployed to dev</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SummarizeFilesWizard solution `npm run build` exits 0.</criterion>
+    <criterion testable="true">SummarizeFilesWizard solution `npm run lint` exits 0.</criterion>
+    <criterion testable="true">`dataverse-deploy` skill reports successful solution import to dev.</criterion>
+    <criterion testable="true">SummarizeFilesWizard surface loads in dev with zero JS console errors.</criterion>
+    <criterion testable="true">`notes/wave-4-deploy-summarize.md` exists with timestamp + dev URL + console-check result.</criterion>
+    <criterion testable="true">`TASK-INDEX.md` marks task 063 ✅ completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-group J: this task and 064 (LegalWorkspace deploy) target different Dataverse solutions, so concurrent execution is safe at the platform level. Both produce their own deploy notes. Smoke test 065 depends on both completing.
+
+    Solution-name verification: `SummarizeFilesWizard` is the canonical name per `src/solutions/SummarizeFilesWizard/` convention. If the actual directory uses a different name (e.g., `SummarizeWizard`), the canonical solution name takes precedence — record the actual path in task notes.
+
+    If the SummarizeFilesWizard solution does not exist as a standalone Vite solution (i.e., the wizard is consumed only via LegalWorkspace), this task degenerates to "verify no standalone deploy needed" — skip the deploy step + document the finding. Empirical pre-flight suggests it DOES exist as a solution but verify before assuming.
+
+    Escalation policy: if deploy fails, fix upstream FIRST (task 060), then re-run this task. Do not patch around build failures.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `<knowledge><files>` before starting. Apply STANDARD rigor per `<rigor-hint>`. Quality gates at Step 9.5 SKIPPED for STANDARD rigor. Invoke `dataverse-deploy` skill for deploy procedure.
+    </protocol>
+  </execution>
+</task>

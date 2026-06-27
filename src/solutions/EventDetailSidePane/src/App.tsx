@@ -638,7 +638,21 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
   }, [params.eventId]);
 
   /**
-   * Handle +To Do button: create a new sprk_eventtodo record
+   * Handle +To Do button: create a new sprk_todo record regarding this event.
+   *
+   * R3 single-entity model (FR-09 / OS-1): the legacy two-entity
+   * (`sprk_event` + `sprk_eventtodo`) shape has been retired. A To Do is now
+   * a standalone `sprk_todo` row with the `sprk_RegardingEvent` lookup pointing
+   * at the source event. This binds the entity-specific lookup directly; the
+   * four polymorphic resolver fields (sprk_regardingrecordtype/id/name/url)
+   * are populated server-side by SprkPolymorphicResolverPlugin on create.
+   *
+   * Initial status/state: Active / Open (statecode=0, statuscode=1) — matches
+   * `SmartTodo/DataverseService.createTodo` (task 020).
+   *
+   * @see src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts (TODO_REGARDING_CATALOG canonical entry: sprk_regardingevent → sprk_events)
+   * @see src/solutions/SmartTodo/src/services/DataverseService.ts createTodo (canonical record body shape)
+   * @see .claude/adr/ADR-024-polymorphic-resolver-pattern.md
    */
   const handleAddTodo = React.useCallback(async () => {
     if (!params.eventId) return;
@@ -649,11 +663,13 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
     }
 
     try {
-      await xrm.WebApi.createRecord("sprk_eventtodo", {
+      await xrm.WebApi.createRecord("sprk_todo", {
         sprk_name: "New To Do",
+        statecode: 0,
+        statuscode: 1,
         "sprk_RegardingEvent@odata.bind": `/sprk_events(${params.eventId})`,
       });
-      console.log("[App] To-do created for event:", params.eventId);
+      console.log("[App] sprk_todo created for event:", params.eventId);
     } catch (err) {
       console.error("[App] Error creating to-do:", err);
     }

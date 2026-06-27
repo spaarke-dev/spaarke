@@ -7,10 +7,18 @@
 ## Module Overview
 
 This module contains TypeScript/React PCF controls for Dataverse model-driven apps:
-- **UniversalQuickCreate** - Document upload with quick create form
-- **UniversalDatasetGrid** - Custom dataset grid with actions
-- **SpeFileViewer** - SharePoint Embedded file viewer
-- **DocumentGrid** / **DocumentViewer** - Document management components
+- **UniversalDatasetGrid** - Custom dataset grid with actions (shared lib component)
+- **VisualHost** - Configuration-driven visualization (charts, drill-through, MetricCards)
+- **SemanticSearchControl** - Semantic document search with natural-language queries
+- **DocumentRelationshipViewer** - Document relationship visualization
+- **RelatedDocumentCount** - Semantically-related document count + drill-through
+- **RegardingResolver** - 11-entity regarding picker
+- **AssociationResolver** - Entity selection + field mapping
+- **EmailProcessingMonitor** - Admin monitoring control
+- **ScopeConfigEditor** - Scope entity admin (Action / Skill / Knowledge / Tool)
+- **SpaarkeGridCustomizer** - Power Apps Grid Control cell customizer
+- **UpdateRelatedButton** - Field-mapping update trigger
+- **ThemeEnforcer** - User theme preference enforcer
 - **PlaybookBuilderHost** - Node-based visual workflow builder (see special architecture below)
 
 ## Key Structure
@@ -19,7 +27,7 @@ This module contains TypeScript/React PCF controls for Dataverse model-driven ap
 src/client/pcf/
 ├── package.json            # Root NPM package (workspace)
 ├── controls.pcfproj        # PCF project definition
-├── UniversalQuickCreate/   # Each control in its own folder
+├── VisualHost/             # Each control in its own folder
 │   ├── ControlManifest.Input.xml
 │   ├── index.ts            # PCF entry point
 │   ├── App.tsx             # React root component
@@ -37,7 +45,7 @@ src/client/pcf/
 ### From ADR-006: PCF Over Webresources
 ```typescript
 // ✅ CORRECT: Build as PCF control
-export class UniversalQuickCreate implements ComponentFramework.StandardControl<IInputs, IOutputs> {
+export class VisualHost implements ComponentFramework.StandardControl<IInputs, IOutputs> {
     public init(context: ComponentFramework.Context<IInputs>): void { }
     public updateView(context: ComponentFramework.Context<IInputs>): void { }
     public destroy(): void { }
@@ -289,7 +297,7 @@ describe('DocumentGrid', () => {
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
 <manifest>
-  <control namespace="Spaarke" constructor="UniversalQuickCreate" version="1.0.0" display-name-key="Universal Quick Create" description-key="Document upload with quick create">
+  <control namespace="Spaarke.Visuals" constructor="VisualHost" version="1.4.16" display-name-key="Visual Host" description-key="Configuration-driven visualization">
     <property name="sampleProperty" display-name-key="Sample Property" description-key="Sample property description" of-type="SingleLine.Text" usage="bound" required="false" />
     <resources>
       <code path="index.ts" order="1"/>

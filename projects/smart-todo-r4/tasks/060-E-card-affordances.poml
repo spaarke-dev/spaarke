@@ -1,0 +1,105 @@
+<task id="R4-060" project="smart-todo-r4">
+  <metadata>
+    <title>E — Card affordances (Open icon, double-click, selection checkbox)</title>
+    <phase>Phase 2: Wave 2b</phase>
+    <workstream>E</workstream>
+    <status>complete</status>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>smart-todo, ui, fluent-v9, card, selection, react</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-012, R4-030, R4-040</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/components/TodoCard.tsx (or equivalent — existing)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Add three card affordances to the SmartTodo Kanban card:
+1. "Open" icon (`Open20Regular` or equivalent) upper-right — single click opens modal (delegates to task 040).
+2. Double-click on card body opens modal (same flow).
+3. Selection checkbox upper-left — drives the selection-aware toolbar from task 032.
+  </prompt>
+
+  <role>React + Fluent v9 engineer modifying existing TodoCard.</role>
+
+  <goal>Card has 3 distinct affordances. Each fires correct event. Selection state drives toolbar visibility.</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="target">src/solutions/SmartTodo/src/components/TodoCard.tsx</file>
+    <file purpose="modal-wire">src/solutions/SmartTodo/src/components/Modal/SmartTodoModal.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + Griffel; no v8; no inline styles</constraint>
+    <constraint source="spec FR-25">Open icon upper-right; single click opens modal</constraint>
+    <constraint source="spec FR-26">Double-click on body (except checkbox) opens modal</constraint>
+    <constraint source="spec FR-27">Selection checkbox upper-left; drives selection-aware toolbar (FR-08)</constraint>
+    <constraint source="spec NFR-07">WCAG 2.1 AA — affordances keyboard accessible</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/card-ux</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R4-012" status="must-complete">Toolbar primitives hoisted</dependency>
+      <dependency task="R4-030" status="must-complete">4-row layout in place</dependency>
+      <dependency task="R4-040" status="must-complete">Modal opens — Open action target ready</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Add Open icon to upper-right">Fluent v9 `Open20Regular`. onClick → openModal(card.id). Hit area large enough for touch.</step>
+    <step order="2" name="Add double-click on card body">`onDoubleClick` handler. Filter out double-click target = checkbox or Open icon (use `e.target` check).</step>
+    <step order="3" name="Add selection checkbox upper-left">Fluent v9 `<Checkbox>`. Bound to selection state in parent. onChange → toggleSelection(card.id).</step>
+    <step order="4" name="Wire selection state to App.tsx">A `useState<Set<string>>` for selected ids; passed to checkbox + SelectionAwareToolbar.</step>
+    <step order="5" name="A11y — keyboard nav">Open icon focusable; Enter activates. Checkbox focusable; Space toggles. Card body focusable; Enter opens modal (treat as double-click equivalent for keyboard users).</step>
+    <step order="6" name="Build + test">`npm run build:prod`; unit tests for each affordance + selection state.</step>
+    <step order="7" name="Smoke test">Open SmartTodo Code Page; verify all 3 affordances functional.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="ui-test">Affordance smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/components/TodoCard.tsx (modified)</output>
+    <output type="code">src/solutions/SmartTodo/src/App.tsx (modified — selection state)</output>
+    <output type="test">Unit tests for affordances + selection state</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="All 3 affordances functional">
+      <steps>
+        <step>Open SmartTodo Code Page</step>
+        <step>Click Open icon on a card → modal opens</step>
+        <step>Close modal; double-click card body → modal opens</step>
+        <step>Close modal; click checkbox → toolbar appears</step>
+        <step>Click another card's checkbox → toolbar updates count</step>
+      </steps>
+      <expected>All 3 affordances work; selection drives toolbar</expected>
+    </test>
+    <test name="Keyboard accessibility">
+      <steps>
+        <step>Tab to Open icon; press Enter → modal opens</step>
+        <step>Close; Tab to Checkbox; press Space → selected</step>
+      </steps>
+      <expected>Keyboard activation works for all affordances</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Open icon upper-right; single click opens modal</criterion>
+    <criterion testable="true">Double-click on card body opens modal (except on checkbox / icon target)</criterion>
+    <criterion testable="true">Selection checkbox upper-left; drives selection-aware toolbar</criterion>
+    <criterion testable="true">Keyboard nav: Enter on Open icon opens modal; Space on checkbox toggles</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

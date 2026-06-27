@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Audit `TodoDetailSidePane` solution consumers (resolve assumption A-2)</title>
+    <phase>Phase 9: Cleanup & Documentation</phase>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>022</dependencies>
+    <blocks>081</blocks>
+    <tags>refactoring, audit</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Audit-only; produces a single decision doc. STANDARD rigor.</rigor-reason>
+    <parallel-group>P9-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Audit `src/solutions/TodoDetailSidePane/` consumers: ribbon buttons, app modules, sitemap entries, any external link references. Per assumption A-2, the default is **retirement** unless an unavoidable consumer is found. Output a decision doc with one of two recommendations: (a) RETIRE — delete the solution; or (b) REFACTOR — keep as a thin shell around the simplified `TodoDetail` component.
+  </prompt>
+
+  <role>Spaarke developer + Dataverse customization auditor.</role>
+
+  <goal>Decision doc `projects/smart-todo-decoupling-r3/notes/tododetailsidepane-decision.md` exists with: list of every consumer found (or zero found); recommendation (retire vs refactor); rationale.</goal>
+
+  <constraints>
+    <constraint source="A-2">Default: retirement. Refactor only if unavoidable consumer found.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/solutions/TodoDetailSidePane/</file>
+      <file>projects/smart-todo-decoupling-r3/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep repo for references to `TodoDetailSidePane` (URL, ribbon command id, sitemap entry, etc.).</step>
+    <step order="2">Inspect ribbon XML for command bar entries linking to the side-pane page.</step>
+    <step order="3">Inspect any app modules in the solution for sitemap nodes pointing at this surface.</step>
+    <step order="4">Recommend retire or refactor per the rule above.</step>
+    <step order="5">Write `notes/tododetailsidepane-decision.md`.</step>
+    <step order="6">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">`projects/smart-todo-decoupling-r3/notes/tododetailsidepane-decision.md`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Decision doc exists with consumer audit + recommendation + rationale.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

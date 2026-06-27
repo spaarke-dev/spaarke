@@ -15,6 +15,17 @@ interface ImportMetaEnv {
    * Example: https://spe-api-dev-67e2xz.azurewebsites.net
    */
   readonly VITE_BFF_BASE_URL: string;
+
+  /**
+   * Application Insights instrumentation key (optional). When set, errors
+   * caught by AppErrorBoundary / WidgetErrorBoundary / safeRegister are
+   * shipped to App Insights "Failures" pane via reportClientError() — see
+   * brittleness Phase D (2026-06-09). Absent in dev → boundary logs to
+   * console only.
+   *
+   * Set via CI/CD pipeline env var: VITE_APP_INSIGHTS_KEY=<key> npm run build
+   */
+  readonly VITE_APP_INSIGHTS_KEY?: string;
 }
 
 interface ImportMeta {

@@ -1,0 +1,479 @@
+<task id="027" project="spaarke-ai-platform-unification-r5">
+  <metadata>
+    <title>D2-17 Clickable citations (v1.1 `citations[].href`; v1.0 fallback)</title>
+    <status>complete</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <actual-effort>~1.5h (sub-agent code-authoring scope; main session owns build, quality gates, commit, push)</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-06-04</started>
+    <completed>2026-06-04</completed>
+    <phase>Phase 2 — Vertical Slice + Insights Tool Integration</phase>
+    <wave>P2-G6 (parallel-safe within group; share `InsightsResponseRenderer` surface with tasks 024, 025, 026, 028)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>026 (D2-16 `InsightsResponseRenderer` two-path renderer exists; this task EXTENDS its citation rendering surface)</dependencies>
+    <tags>frontend, insights, citations, v1.1</tags>
+    <rigor-level>FULL</rigor-level>
+  </metadata>
+
+  <prompt>
+    Extend the Insights v1.1 chat-tool response renderer (`InsightsResponseRenderer`,
+    produced by task 026) to render the `[n]` citation tokens in RAG-path and decline
+    responses as clickable buttons WHEN the Insights v1.1 `citations[].href` field is
+    populated. Clicking a clickable `[n]` MUST dispatch the EXISTING `context_update`
+    event on the `context` PaneEventBus channel carrying the resolved URL as the
+    payload; the existing `ContextPaneController` then resolves to the
+    `FilePreviewContextWidget` (task 018), which opens the URL via iframe.
+
+    The task ships THREE rendering scenarios for graceful v1.1/v1.0 + spike-outcome
+    fallback per spec NFR-11 + UR-04:
+      (a) **v1.1 with all `href` populated** (full clickable-citations UX);
+      (b) **v1.1 with observation-only `href`** (Wave F spike-outcome contingency:
+          document-citation `href` defers to v1.2; observation citations clickable,
+          document citations render as display-name only);
+      (c) **v1.0 with no `href` at all** (every citation renders display-name only,
+          non-clickable; existing v1.0 behavior preserved).
+
+    The task is **strictly additive frontend extension**: NO BFF code change, NO
+    parallel preview surface (reuses `FilePreviewContextWidget` from task 018 via
+    the existing `context_update` event channel), NO new PaneEventBus event type
+    (the `context_update` discriminant already exists on the `context` channel per
+    `PaneEventTypes.ts`). Per R5 CLAUDE.md §3.4 + ADR-030: channel set stays at 4,
+    event-type set on `context` channel includes the pre-existing
+    `context_update` literal — this task DISPATCHES it; it does NOT add a new type.
+
+    Per R5 CLAUDE.md §3.5 + spec NFR-11: v1.0 fallback MUST be silent (display-name
+    only) — NO error UX when `href: null` or absent. Per the Insights team correction
+    integrated into `notes/insights-engine-contract-v1.1-request.md` §0a: the URL
+    in `citations[].href` resolves server-side via
+    `DocumentCheckoutService.GetPreviewUrlAsync(driveId, itemId, ct)` on the Insights
+    BFF side; R5 just consumes the pre-resolved URL string.
+  </prompt>
+
+  <role>
+    Senior frontend engineer with Fluent UI v9 + React 19 expertise, familiarity
+    with the existing `@spaarke/ai-widgets` PaneEventBus dispatch surface
+    (`useDispatchPaneEvent`), the four-channel `PaneEventTypes` discriminated-union
+    pattern (`workspace` / `context` / `chat` / `command`), the existing
+    `context_update` event semantics consumed by `ContextPaneController.tsx`, and
+    the `InsightsResponseRenderer` two-path rendering surface produced by task 026.
+  </role>
+
+  <goal>
+    The `InsightsResponseRenderer` citation-rendering sub-component is extended so
+    that all three scenarios (a/b/c) render correctly on Spaarke Dev. Specifically:
+    (1) When a citation has a non-null `href`, `[n]` renders as a Fluent v9 `Button`
+    (appearance="subtle" or "transparent", inline-friendly) with `onClick`
+    dispatching `{ type: 'context_update', contextType: 'document', contextData:
+    { url: citation.href, displayName: citation.source } }` to the `context`
+    channel via `useDispatchPaneEvent`.
+    (2) When a citation has `href: null` OR `href` is absent (v1.0 response or
+    spike-outcome "observation-only-href"), `[n]` renders as a non-interactive
+    `<span>` styled identically to its prior v1.0 appearance — display-name only;
+    no button, no error.
+    (3) The `FilePreviewContextWidget` (task 018) consumes the dispatched
+    `context_update` event via its registered widget-resolution path
+    (`ContextPaneController` → `ContextWidgetRegistry` lookup → `file-preview`
+    widget type) and opens the URL in its iframe surface. Verification: click on
+    `[n]` in the Insights renderer causes Context pane to render the source
+    document inline.
+    (4) Mixed-mode response (some citations have `href`, some don't) renders the
+    clickable subset as buttons and the non-clickable subset as plain spans —
+    no error, no rendering glitch.
+    (5) `code-review` + `adr-check` quality gates pass at Step 9.5.
+    (6) BFF publish-size delta = 0 MB (frontend-only change; confirmed in task notes).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r5/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r5/plan.md</file>
+    <file purpose="project-design">projects/spaarke-ai-platform-unification-r5/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r5/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="binding-contract-v1.0">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+    <file purpose="binding-contract-v1.1">projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+    <file purpose="dependency-output-task-026">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/InsightsResponseRenderer.tsx</file>
+    <file purpose="dependency-output-task-018">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FilePreviewContextWidget.tsx</file>
+    <file purpose="existing-event-types">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+    <file purpose="existing-dispatch-hook">src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts</file>
+    <file purpose="context-pane-consumer">src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx</file>
+    <file purpose="context-widget-registry">src/client/shared/Spaarke.AI.Widgets/src/registry/register-context-widgets.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="R5 CLAUDE.md §3.1 reuse mandate">REUSE MANDATE — citation-click handler MUST dispatch the EXISTING `context_update` event on the EXISTING `context` PaneEventBus channel. MUST NOT add a parallel preview surface; the `FilePreviewContextWidget` (task 018) consumes the event via the existing `ContextPaneController` → `ContextWidgetRegistry` resolution path. MUST NOT introduce a new "open URL in iframe" component.</constraint>
+    <constraint source="R5 CLAUDE.md §3.4">PaneEventBus channels are closed at 4 per ADR-030. The `context_update` literal already exists in `ContextPaneEvent.type` union (`'context_update' | 'context_highlight' | 'stage_change'` — verified in `PaneEventTypes.ts`). This task DISPATCHES it; it does NOT add a new event type.</constraint>
+    <constraint source="R5 CLAUDE.md §3.5">Insights tool integration governance — R5 NEVER injects Insights-internal types directly. R5 consumes the v1.1 contract via HTTP only. URL resolution happens server-side on the Insights BFF via `DocumentCheckoutService.GetPreviewUrlAsync(driveId, itemId, ct)` per Insights team correction (`insights-engine-contract-v1.1-request.md` §0a). R5 just consumes the pre-resolved URL string in `citations[].href`. NO frontend URL-construction logic.</constraint>
+    <constraint source="spec NFR-11">Back-compat for Insights consumption — R5 falls back gracefully to v1.0 (display-name only) if `href: null` or absent. UX is degraded but functional. NO error UX, NO console warnings, NO broken rendering. Mixed-mode (some `href` populated, some not) MUST render correctly.</constraint>
+    <constraint source="spec UR-04">`citations[].href` schema-plumbing spike outcome — if Insights Wave F spike defers document-citation `href` to v1.2, R5 lives with observation-only `href` in v1.1 + display-name-only document citations. This task handles ALL THREE scenarios (a/b/c per &lt;goal&gt;) so that the spike outcome doesn't block R5 Phase 2.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 semantic tokens only — zero hard-coded hex/rgb. Dark-mode parity by construction. Clickable `[n]` MUST be a Fluent v9 `Button` (subtle/transparent appearance) styled inline-friendly so it doesn't break prose flow. Non-clickable `[n]` MUST be a `<span>` styled identically to its prior v1.0 appearance — no visual regression.</constraint>
+    <constraint source="ADR-022">React 19 functional components. Hooks only — `useDispatchPaneEvent` at component top level (NOT inside event handlers) per React 19 hook rules.</constraint>
+    <constraint source="ADR-012">Code lives in `@spaarke/ai-widgets` (extends `InsightsResponseRenderer` produced by task 026). Component library boundaries respected.</constraint>
+    <constraint source="ADR-018">R5 introduces NO new feature flags. The clickable-citation behavior is unconditional (auto-detected from `href` presence per response payload).</constraint>
+    <constraint source="ADR-030">Additive event-type discipline — this task does NOT add a new event type; it DISPATCHES the existing `context_update` literal on the existing `context` channel. Existing subscribers (`ContextPaneController`) handle the event without modification.</constraint>
+    <constraint source="ADR-029 / spec NFR-07">BFF publish-size — this task is frontend-only. Confirm `dotnet publish` delta = 0 MB in task notes. NO BFF code touched.</constraint>
+    <constraint source="project">If task 026 produced a different citation payload shape than expected (e.g. `citations[].href` is named differently, or `source` is not the display name), surface the mismatch in task notes and request alignment with task 026 owner — do NOT silently rewrite the contract.</constraint>
+    <constraint source="project">Mixed-mode rendering MUST be tested with a synthetic response payload (observation citation with `href`, document citation with `href: null`) — capture the verification in task notes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/insights-renderer-citations</topic>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/InsightsResponseRenderer.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/context/FilePreviewContextWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/register-context-widgets.ts</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-assistant-integration-brief.md</file>
+      <file>projects/spaarke-ai-platform-unification-r5/notes/insights-engine-contract-v1.1-request.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-react-19.md</file>
+      <file>.claude/adr/ADR-030-paneeventbus-closed-channels.md</file>
+    </files>
+    <patterns>
+      <pattern name="PaneEventBus dispatch (existing channel + event type)" location="src/client/shared/Spaarke.AI.Widgets/src/events/useDispatchPaneEvent.ts">
+        `const dispatch = useDispatchPaneEvent(); ... dispatch('context', { type: 'context_update', contextType: 'document', contextData: { url, displayName } });`. The `context_update` discriminant already exists in `ContextPaneEvent.type` (verified in `PaneEventTypes.ts`); this task DISPATCHES it. Hook MUST be called at component top level (React 19 hook rules), then the resulting `dispatch` function may be used inside `onClick` handlers.
+      </pattern>
+      <pattern name="ContextPaneController consumption of context_update" location="src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx">
+        Existing flow: `usePaneEvent('context', ...)` handler matches `event.type === 'context_update'`, extracts `event.contextType` + `event.contextData`, resolves a widget via `ContextWidgetRegistry`, renders it. For the clickable-citation path: set `contextType = 'document'` (or whatever the registered `file-preview` widget keys off; verify against task 018's registration key); `contextData = { url, displayName }`. The `FilePreviewContextWidget` then opens the URL in its iframe surface.
+      </pattern>
+      <pattern name="Citation token rendering — clickable vs non-clickable" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/InsightsResponseRenderer.tsx">
+        Extend the citation rendering loop produced by task 026. Pseudo-shape: `citations.map((c, i) =&gt; c.href ? &lt;Button appearance="subtle" inline onClick={() =&gt; dispatch('context', { type: 'context_update', contextType: 'document', contextData: { url: c.href, displayName: c.source }})}&gt;[{i+1}]&lt;/Button&gt; : &lt;span&gt;[{i+1}]&lt;/span&gt;)`. Use Fluent v9 `Button` for clickable; styled inline (no block-level layout disruption). Use plain `&lt;span&gt;` for non-clickable. Both share the same `[n]` visual baseline (font-size, color tokens) so the response prose flow is uniform.
+      </pattern>
+      <pattern name="Mixed-mode rendering tolerance" location="N/A — design pattern">
+        Citations array may contain a mix of `href`-populated and `href: null` entries (Wave F spike-outcome scenario b). The map MUST evaluate `c.href` per entry — no all-or-nothing rendering decision at the array level.
+      </pattern>
+      <pattern name="No URL construction on client" location="notes/insights-engine-contract-v1.1-request.md §0a">
+        Per Insights team correction integrated into the v1.1 negotiation outcome: the URL in `citations[].href` is pre-resolved server-side via `DocumentCheckoutService.GetPreviewUrlAsync(driveId, itemId, ct)` on the Insights BFF. R5 frontend does NOT construct, sign, augment, or transform the URL. It is passed through verbatim to the dispatched event payload.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R5 Phase 2 consumes the Insights Engine v1.1 chat-tool contract via the
+      `insights.query` agent-tool (task 024). Responses arrive in two shapes
+      (playbook / RAG) with a `citations[]` array on RAG and decline paths. The
+      v1.0 contract carries `Source string` only — citations appear in prose as
+      `[n]` tokens that the user cannot click to verify. The v1.1 negotiation
+      added optional `citations[].href` so the chat agent can render `[n]` as
+      a clickable button that opens the source in the Context pane via the
+      existing `FilePreviewContextWidget` (task 018). This task ships that
+      clickable-button UX, with graceful fallback for v1.0 + the Wave F
+      spike-outcome contingency (document-citation `href` deferred to v1.2;
+      observation-only-href scenario per `insights-engine-contract-v1.1-request.md`
+      §0a). The dispatching mechanism is the existing `context_update` event on
+      the existing `context` PaneEventBus channel — same path used by entity-info
+      / citation-highlight / sources-citations widgets today. The
+      `FilePreviewContextWidget` produced by task 018 is the consumer; this
+      task wires the producer (citation click → dispatch).
+    </background>
+    <dependencies>
+      <dependency task="026" status="not-started">
+        Task 026 (D2-16) produces the two-path `InsightsResponseRenderer` with
+        a citation-rendering sub-component. This task EXTENDS that sub-component
+        with the clickable-button logic + dispatch wiring. If task 026 has not
+        landed, this task is blocked.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 018 (D2-09) `FilePreviewContextWidget` is the consumer of the
+        dispatched `context_update` event. Task 018 must be landed for the
+        click path to render a preview; otherwise the dispatch happens but the
+        Context pane renders its default empty/spinner state (the path is still
+        not broken — degraded gracefully).</item>
+      <item>Task 024 (D2-14) registers `InsightsQueryToolHandler` and produces
+        the response payload that feeds `InsightsResponseRenderer`. Task 027
+        consumes `citations[].href` if it's populated.</item>
+      <item>Task 028 (D2-18) adds the confidence-floor badge to the same
+        `InsightsResponseRenderer` surface. Parallel-safe with this task —
+        different sub-components, no overlap.</item>
+      <item>Task 029 (D2-19) handles the 12 Insights error codes. Independent
+        from this task (error-code rendering is a separate sub-component).</item>
+      <item>Spec UR-04 + NFR-11 + design.md §4.12 — this task is the load-bearing
+        implementation of the "v1.1 graceful fallback" claim.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context usage. If &gt; 70%, create handoff summary and request
+      `/compact`. Output the mandatory rigor declaration per CLAUDE.md §8:
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: Frontend extension of @spaarke/ai-widgets InsightsResponseRenderer;
+                 React 19 + Fluent v9 + existing-channel/existing-event-type dispatch;
+                 v1.1 schema-plumbing contingency handling (UR-04); spec NFR-11
+                 graceful fallback path; reuses FilePreviewContextWidget (task 018)
+                 via existing context_update event.
+      📖 PROTOCOL STEPS TO EXECUTE: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 9.5 → 10
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`; confirm task 027 status is 🔲 and that
+      dependency 026 is ✅ (if not, report blocker + STOP). Read
+      `current-task.md` to verify no conflicting R5 task is in flight in the
+      `InsightsResponseRenderer` area. Note dependent task 018 status — if NOT
+      ✅, document that the click-to-preview path will degrade to the Context
+      pane's empty/spinner state until task 018 lands (graceful; not a blocker
+      for THIS task).
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file listed in &lt;inputs&gt; + &lt;knowledge&gt;. In particular:
+      (a) the task-026 output `InsightsResponseRenderer.tsx` — locate the
+      citation-rendering sub-component + verify the payload shape it consumes
+      (citations array structure, field names, `source` vs `displayName`, etc.);
+      (b) `PaneEventTypes.ts` `ContextPaneEvent` union — confirm `context_update`
+      literal is present + payload field names (`contextType`, `contextData`);
+      (c) `ContextPaneController.tsx` `context_update` handler — verify the
+      `contextType` value the `file-preview` widget keys off (cross-check
+      against task 018's registry key `'file-preview'`);
+      (d) `insights-engine-contract-v1.1-request.md` §0a — confirm
+      `citations[].href` semantics + the three scenarios (a/b/c per &lt;goal&gt;).
+    </step>
+    <step order="3" name="Plan Implementation">
+      Decompose into sub-tasks:
+      (a) Locate the citation-rendering sub-component in `InsightsResponseRenderer.tsx`
+          (produced by task 026);
+      (b) Add `useDispatchPaneEvent` hook at top of the containing component
+          (React 19 hook rules);
+      (c) Implement per-citation conditional rendering: `c.href ? &lt;Button&gt; :
+          &lt;span&gt;`;
+      (d) Wire `onClick` handler on the `Button` to dispatch
+          `context_update` event with `{ url, displayName }` payload;
+      (e) Verify mixed-mode rendering (some `href`, some `null`) — no
+          all-or-nothing decision at the array level;
+      (f) Confirm v1.0 (no `href` at all) → all `&lt;span&gt;` rendering, no
+          errors, no console warnings;
+      (g) Visual styling — match prior v1.0 `[n]` appearance for non-clickable
+          spans; Fluent v9 `Button` subtle/transparent inline for clickable;
+      (h) Dark-mode verification.
+    </step>
+    <step order="4" name="Implement Clickable-Button Branch (scenario a)">
+      In the citation-rendering sub-component, add the clickable branch.
+      Pseudo-shape:
+      ```tsx
+      const dispatch = useDispatchPaneEvent();
+      // ... within citation map:
+      citations.map((c, i) =&gt; {
+        const label = `[${i + 1}]`;
+        if (c.href) {
+          return (
+            &lt;Button
+              key={i}
+              appearance="subtle"
+              size="small"
+              onClick={() =&gt; dispatch('context', {
+                type: 'context_update',
+                contextType: 'document',
+                contextData: { url: c.href, displayName: c.source },
+              })}
+              className={styles.citationButton}
+            &gt;{label}&lt;/Button&gt;
+          );
+        }
+        // Fall through to scenario (b)/(c) span branch in Step 5
+      });
+      ```
+      Use Fluent v9 semantic tokens for the button (no hex/rgb). Verify
+      `contextType: 'document'` matches the registry key consumed by
+      `ContextPaneController` for the `file-preview` widget (cross-check
+      against task 018 + `register-context-widgets.ts` registration).
+    </step>
+    <step order="5" name="Implement Non-Clickable Span Branch (scenarios b + c)">
+      Add the non-clickable branch for `href: null` OR `href` absent:
+      ```tsx
+      return &lt;span key={i} className={styles.citationLabel}&gt;{label}&lt;/span&gt;;
+      ```
+      Style the span to match prior v1.0 `[n]` visual (font-size, color tokens
+      identical to clickable button's text). Confirm v1.0 (no `href` field at
+      all in payload) → JavaScript truthiness check `c.href` evaluates to
+      `false`/`undefined` → renders span (no `TypeError`, no console warning).
+      Confirm scenario (b) "observation-only-href" — citations array contains
+      mix of `href`-populated (observation citations) and `href: null`
+      (document citations) — renders correctly per-entry.
+    </step>
+    <step order="6" name="Verify Mixed-Mode Rendering With Synthetic Payload">
+      Build a synthetic test payload covering all three scenarios:
+      ```ts
+      // Scenario (a) — all href populated
+      const v11Full = { citations: [
+        { source: 'Matter Engagement Letter', href: 'https://.../api/v1/documents/abc/preview' },
+        { source: 'Invoice #12345', href: 'https://.../api/v1/documents/def/preview' },
+      ]};
+      // Scenario (b) — observation-only href (spike-outcome contingency)
+      const v11Partial = { citations: [
+        { source: 'Matter observation', href: 'https://.../api/insights/observation/xyz' },
+        { source: 'Document — Engagement Letter', href: null },
+      ]};
+      // Scenario (c) — v1.0 (no href at all)
+      const v10 = { citations: [
+        { source: 'Matter Engagement Letter' },
+        { source: 'Invoice #12345' },
+      ]};
+      ```
+      Render each via Storybook or test harness; verify:
+      - (a) two Buttons, both clickable, both dispatch on click;
+      - (b) one Button (observation) + one span (document); only the Button
+            dispatches;
+      - (c) two spans; neither dispatches; no console warnings/errors.
+      Capture the verification (screenshots or assertion log) in task notes.
+    </step>
+    <step order="7" name="Verify FilePreviewContextWidget Consumption">
+      With task 018 already landed (or stubbed if not), verify the end-to-end
+      click-to-preview flow on Spaarke Dev (or a local SpaarkeAi shell):
+      (a) trigger an Insights query that returns v1.1 RAG response with `href`;
+      (b) click `[1]` in the Workspace tab's `InsightsResponseRenderer` output;
+      (c) confirm `ContextPaneController` receives the `context_update` event
+          (browser devtools — PaneEventBus subscription firing);
+      (d) confirm Context pane switches to `FilePreviewContextWidget` rendering
+          the source URL in its iframe surface;
+      (e) confirm task 018's `file-preview` registry key resolves correctly
+          (no console errors about unresolved widget type).
+      If task 018 has not yet landed, document that the dispatch fires
+      correctly but the Context pane renders its default empty/spinner state
+      (graceful; not a defect).
+    </step>
+    <step order="8" name="Dark-Mode + Visual Regression Check">
+      Toggle the SpaarkeAi shell theme (light → dark). Verify:
+      (a) clickable `[n]` Button retains brand stroke + readable text in both
+          themes (Fluent v9 tokens only);
+      (b) non-clickable `[n]` span retains correct color in both themes;
+      (c) clickable + non-clickable in the same response paragraph have
+          consistent visual weight — no jarring contrast between the two;
+      (d) regex audit: NO `#[0-9a-fA-F]{3,8}` or `rgb(` literals introduced
+          in the modified files (Fluent semantic tokens only).
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below and confirm each is
+      testable + passing. Record evidence per criterion in task notes
+      (synthetic-payload screenshots; mixed-mode verification log;
+      `ContextPaneController` event-receipt confirmation; dark-mode toggle
+      screenshots; publish-size delta = 0 MB confirmation).
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` skill against the modified `InsightsResponseRenderer.tsx`
+      citation sub-component. Run `adr-check` skill; verify ADR-012 (component
+      library boundaries), ADR-018 (no new feature flags), ADR-021 (Fluent v9
+      tokens + dark mode), ADR-022 (React 19), ADR-029 (BFF publish hygiene —
+      delta = 0 MB), ADR-030 (additive event-type discipline — existing channel
+      + existing event type re-used; no new types added by this task). Both
+      gates MUST pass before marking the task complete. Record results in task
+      notes.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status to `complete`. Update `TASK-INDEX.md`:
+      027 🔲 → ✅. Reset `current-task.md` to the next pending task per
+      CLAUDE.md §7. Record in task notes:
+      - BFF publish-size delta = 0 MB (frontend-only change confirmed);
+      - Three scenarios verified (a) v1.1 full / (b) v1.1 observation-only-href
+        / (c) v1.0 no-href — all render correctly;
+      - Click-to-preview end-to-end flow verified against `FilePreviewContextWidget`
+        (or documented as deferred if task 018 not yet landed);
+      - `contextType` key used (`'document'` or whatever cross-checked against
+        task 018's registry key);
+      - Citation payload field names (`citations[].href` + `citations[].source`)
+        cross-checked against task 026's renderer surface — any mismatch
+        surfaced + resolved;
+      - Any UR-04 spike-outcome observations (was scenario b actually
+        triggered by a real Insights response? or only synthetic?).
+      Report task completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + lint the `@spaarke/ai-widgets` library (Vite TS check + unit test runner)</tool>
+    <tool name="git">Stage + commit the citation extension on the R5 branch</tool>
+    <tool name="code-review">Skill invocation at Step 9.5</tool>
+    <tool name="adr-check">Skill invocation at Step 9.5</tool>
+    <tool name="dotnet">Not used directly (no BFF code change) — available for verification builds if requested</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/InsightsResponseRenderer.tsx (EXTEND — citation sub-component clickable-button logic + `useDispatchPaneEvent` wiring)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/tasks/TASK-INDEX.md (status: 027 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r5/current-task.md (reset to next task)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r5/notes/task-027-clickable-citations-verification.md (three-scenario synthetic-payload screenshots; mixed-mode log; ContextPaneController event-receipt confirmation; dark-mode toggle evidence; `contextType` key cross-check; payload-field-name cross-check; publish-size delta = 0 MB confirmation)</output>
+    <output type="report">Task completion report (per task-execute template Step 6)</output>
+  </outputs>
+
+  <examples>
+    <example name="Citation rendering — clickable vs non-clickable branching" location="N/A — implementation pattern">
+      ```tsx
+      const dispatch = useDispatchPaneEvent();
+      const styles = useStyles();
+
+      return (
+        &lt;&gt;
+          {citations.map((c, i) =&gt; {
+            const label = `[${i + 1}]`;
+            return c.href ? (
+              &lt;Button
+                key={i}
+                appearance="subtle"
+                size="small"
+                className={styles.citationButton}
+                onClick={() =&gt; dispatch('context', {
+                  type: 'context_update',
+                  contextType: 'document',
+                  contextData: { url: c.href, displayName: c.source },
+                })}
+              &gt;{label}&lt;/Button&gt;
+            ) : (
+              &lt;span key={i} className={styles.citationLabel}&gt;{label}&lt;/span&gt;
+            );
+          })}
+        &lt;/&gt;
+      );
+      ```
+    </example>
+    <example name="Synthetic mixed-mode payload (scenario b)" location="N/A — verification fixture">
+      ```ts
+      // Wave F spike-outcome contingency: observation-citation href populated,
+      // document-citation href deferred to v1.2 (per UR-04).
+      const v11ObservationOnlyHref = {
+        answer: 'The matter's engagement letter caps fees at $50,000 [1] per the executed agreement [2].',
+        citations: [
+          { source: 'Engagement Letter Observation', href: 'https://.../api/insights/observation/abc' },
+          { source: 'Engagement Letter (document)', href: null },
+        ],
+      };
+      // Expected render: [1] is a clickable Button; [2] is a non-clickable span.
+      ```
+    </example>
+    <example name="Existing context_update event consumed by ContextPaneController" location="src/solutions/SpaarkeAi/src/components/context/ContextPaneController.tsx">
+      Pre-existing handler shape:
+      ```ts
+      usePaneEvent('context', (event) =&gt; {
+        switch (event.type) {
+          case 'context_update': {
+            const widgetType = event.contextType ?? 'unknown';
+            const data = event.contextData ?? null;
+            // resolve widget from ContextWidgetRegistry by widgetType
+            // (e.g. 'document' → 'file-preview' via task 018's registration)
+            // render via &lt;ActiveContextWidget Component={...} data={data} /&gt;
+          }
+        }
+      });
+      ```
+      This task's dispatch slots into the existing pipeline — no controller change required.
+    </example>
+  </examples>
+
+  <acceptance-criteria>
+    <criterion testable="true">`InsightsResponseRenderer.tsx` is extended such that citation `[n]` tokens render as a Fluent v9 `Button` (subtle/transparent appearance) WHEN `citations[i].href` is non-null/non-undefined, and as a plain `&lt;span&gt;` otherwise.</criterion>
+    <criterion testable="true">Clicking a clickable `[n]` Button dispatches an event to the `context` PaneEventBus channel with shape `{ type: 'context_update', contextType: 'document', contextData: { url: citations[i].href, displayName: citations[i].source } }` via `useDispatchPaneEvent` — verified by inspecting the dispatch in browser devtools / a test harness assertion.</criterion>
+    <criterion testable="true">Scenario (a) — v1.1 response with all `href` populated — every citation renders as a clickable Button; clicking opens the source URL in the Context pane via `FilePreviewContextWidget` (task 018) consuming the dispatched event.</criterion>
+    <criterion testable="true">Scenario (b) — v1.1 response with observation-only `href` (UR-04 spike-outcome contingency) — observation citations render as Buttons (clickable); document citations render as `&lt;span&gt;` (display-name only); no console errors or warnings; mixed-mode rendering works correctly per-entry.</criterion>
+    <criterion testable="true">Scenario (c) — v1.0 response with no `href` at all — every citation renders as `&lt;span&gt;` (display-name only); no error UX; no broken rendering; `[n]` visual matches prior v1.0 appearance (no regression).</criterion>
+    <criterion testable="true">`FilePreviewContextWidget` (task 018) consumes the dispatched `context_update` event and renders the source URL in its iframe surface — end-to-end click-to-preview verified on Spaarke Dev (or documented as deferred if task 018 is not yet ✅, with the dispatch itself verified independently).</criterion>
+    <criterion testable="true">NO new PaneEventBus event type is added by this task (the `context_update` literal already exists in `ContextPaneEvent.type` per `PaneEventTypes.ts`) — verified by diff against `PaneEventTypes.ts` (no edits to that file by this task).</criterion>
+    <criterion testable="true">NO new PaneEventBus channel is added (channel set remains the closed 4 per ADR-030 + R5 CLAUDE.md §3.4) — verified by absence of new channel registration code.</criterion>
+    <criterion testable="true">NO new feature flag introduced; clickable-citation behavior is auto-detected from `href` presence per response payload — verified by absence of `if (flag)` blocks in modified files.</criterion>
+    <criterion testable="true">Dark-mode parity verified by toggling SpaarkeAi shell theme; no hard-coded hex/rgb appears in the modified files (regex audit: no `#[0-9a-fA-F]{3,8}` or `rgb(` outside Fluent token references).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (frontend-only change; confirmed in task notes; no BFF code touched).</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5; ADR-012, ADR-018, ADR-021, ADR-022, ADR-029, ADR-030 all verified.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-datagrid-framework-r1">
+  <metadata>
+    <title>DataGrid core component (scaffold, three-tier config resolution, lazy infinite-scroll, useDataGridContext)</title>
+    <phase>1: Phase A — Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>004,005,006,007,008,009</blocks>
+    <tags>fluent-ui, frontend, react, typescript, e2e-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation of the framework's core component; 10+ steps; ADR-021/022 constraints; blocks all primitive tasks</rigor-reason>
+    <parallel-group>A1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build the `<DataGrid configId={...} />` core component: three-tier config resolution (explicit prop → record → metadata defaults), Fluent v9 native `<DataGrid>` primitive with `selectionMode` / `focusMode` / `resizableColumns` / `sticky header`, lazy infinite-scroll paging via `IntersectionObserver` (page size 100), and `useDataGridContext()` hook. NO hand-rolled `<table>`. NO React-18-only APIs.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React 16-safe code, Fluent UI v9 native `DataGrid`, `IntersectionObserver`, and Dataverse FetchXML paging cookies. Follow ADR-021 + ADR-022.
+  </role>
+
+  <goal>
+    `<DataGrid configId={...} dataverseClient={...} parentContext={...} onRecordOpen={...} onRecordAction={...} onCommandInvoke={...} overrides={...} />` renders in Storybook over a sample `sprk_event` config, three-tier resolution works (with non-existent configId still rendering via metadata defaults), lazy-load fetches page 2 on scroll, selection persists across pages, all powered by Fluent v9 native props.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-DG-01 (component contract), FR-DG-04 (three-tier resolution), FR-DG-11 (Fluent native exploitation), FR-DG-12 (lazy paging), FR-DG-15 (useDataGridContext hook). Model the core on [SearchResultsGrid.tsx] — closest existing Fluent v9 native DataGrid usage. NO hand-rolled checkbox columns / sort arrows / resize handles — Fluent provides all of these.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/useLazyLoad.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/useDataGridContext.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/storybook/DataGrid.stories.tsx</file>
+      <file>src/client/code-pages/SemanticSearch/src/components/SearchResultsGrid.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 native `<DataGrid>` ONLY. NO `@fluentui/react` v8. NO `teamsHighContrastTheme`. Dark mode must work via tokens.</constraint>
+    <constraint source="ADR-022">React-16-safe — NO `useId`, `useSyncExternalStore`, `createRoot`. Use `JSXElement` from `@fluentui/react-components` for cross-version compat.</constraint>
+    <constraint source="project">Selection MUST use `<DataGrid selectionMode="multiselect">` — NO hand-rolled checkbox column.</constraint>
+    <constraint source="project">Sort MUST use `createTableColumn({ compare })` — NO manual sort state.</constraint>
+    <constraint source="project">Column resize MUST use `resizableColumns + columnSizingOptions` — NO custom drag handles.</constraint>
+    <constraint source="project">Keyboard nav MUST use `focusMode` — NO manual `onKeyDown` arrow/tab logic.</constraint>
+    <constraint source="project">Three-tier resolution: explicit prop `overrides` → `sprk_gridconfiguration.sprk_configjson` (fetched via `IDataverseClient`) → entity metadata + layoutXml defaults → framework defaults. A `configId` pointing to a non-existent record MUST still render using metadata defaults.</constraint>
+    <constraint source="project">Lazy load: page size default 100 (override via `configjson.behavior.pageSize`), `IntersectionObserver` on sentinel row, selection `Set&lt;string&gt;` preserved across pages, no "Load More" button, no classic pagination.</constraint>
+    <constraint source="project">`useDataGridContext()` MUST return `{ selectedIds, refresh, currentView, parentContext, dataverseClient, entityMetadata }` — no prop drilling for host extensions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/spec.md</file>
+      <file>projects/spaarke-datagrid-framework-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 native DataGrid usage" location="src/client/code-pages/SemanticSearch/src/components/SearchResultsGrid.tsx">Closest existing usage; model `createTableColumn`, `DataGridHeader`, `DataGridRow`, `DataGridCell` structure on this.</pattern>
+      <pattern name="IntersectionObserver lazy load" location="design.md §11.5.1">Sentinel row at bottom triggers fetch of next page via FetchXML page cookie chain.</pattern>
+      <pattern name="Three-tier config resolution" location="design.md §6.4">Explicit > record > defaults; non-existent record gracefully falls through.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/fluent-v9-component` skill Step 0.5 checklist (mandatory per FR-DG-13).</step>
+    <step order="2">Author `src/components/DataGrid/configResolution.ts`: pure function `resolveConfig(overrides, configRecord, entityMetadata, layoutXml): ResolvedConfig`. Handles all four fallback levels per FR-DG-04.</step>
+    <step order="3">Author `src/components/DataGrid/useLazyLoad.ts`: hook managing FetchXML paging cookie chain; takes `dataverseClient`, `entityName`, `fetchXml`, `pageSize`; returns `{ records, isLoading, hasMore, fetchNextPage, reset }`. `IntersectionObserver` set up by caller on sentinel ref.</step>
+    <step order="4">Author `src/hooks/useDataGridContext.ts`: React context provider + hook. Returns `{ selectedIds, refresh, currentView, parentContext, dataverseClient, entityMetadata }`.</step>
+    <step order="5">Author `src/components/DataGrid/DataGrid.tsx`: top-level component. Resolves config, fetches savedquery + metadata via `IDataverseClient`, builds Fluent v9 `createTableColumn` array from layoutXml + metadata, renders `<DataGrid selectionMode resizableColumns focusMode size>` with `<DataGridHeader>` + lazy-loaded `<DataGridBody>` + sentinel row. Default `dataverseClient = new XrmDataverseClient()` if not passed.</step>
+    <step order="6">Update `src/index.ts` barrel export.</step>
+    <step order="7">Author `storybook/DataGrid.stories.tsx`: 4 stories — "Default (sprk_event configId)", "No configId (metadata fallback)", "Lazy load (1000 records)", "Selection across pages". All wrapped in `<FluentProvider applyStylesToPortals theme={webLightTheme}>` and dark variants.</step>
+    <step order="8">Build `@spaarke/ui-components` (`npm run build`); verify zero TypeScript errors.</step>
+    <step order="9">Run `npm run storybook` locally; verify 4 stories render; verify lazy load fetches on scroll; verify selection persists.</step>
+    <step order="10">Grep for forbidden APIs: `grep -E 'useId|useSyncExternalStore|createRoot|teamsHighContrastTheme|@fluentui/react[^-]' src/components/DataGrid/ src/hooks/useDataGridContext.ts` returns nothing.</step>
+    <step order="11">Update `projects/spaarke-datagrid-framework-r1/tasks/TASK-INDEX.md`: change task 003 status to ✅; mark tasks 004,005,006,007,008 ready (Wave A2 parallel-eligible).</step>
+    <step order="12">If any deviations from design.md §6.1 / §11.5.1, document in `projects/spaarke-datagrid-framework-r1/notes/drafts/003-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + Storybook</tool>
+    <tool name="grep">Verify no forbidden APIs</tool>
+    <tool name="Edit">Author component files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/useLazyLoad.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/hooks/useDataGridContext.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/storybook/DataGrid.stories.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a `sprk_event` configId, when `<DataGrid />` mounts in Storybook, then it renders selection-mode multi-select, sortable columns, resizable columns, focus-mode keyboard nav — all from Fluent v9 native props.</criterion>
+    <criterion testable="true">Given `configId="nonexistent"`, when DataGrid renders, then it falls through to metadata + layoutXml defaults without throwing.</criterion>
+    <criterion testable="true">Given a 1000-record entity, when user scrolls to bottom, then page 2 loads via FetchXML paging cookie within 1 second.</criterion>
+    <criterion testable="true">Given user selects 5 rows on page 1 then scrolls to page 3, when checked, then all 5 selections persist.</criterion>
+    <criterion testable="true">Given `grep -E 'useId|useSyncExternalStore|createRoot' src/components/DataGrid/`, when run, then zero matches (React-16-safe).</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="DataGrid renders with valid configId">
+      <url>http://localhost:6006/?path=/story/datagrid--default-sprk-event</url>
+      <steps>
+        <step>Navigate to Storybook DataGrid default story</step>
+        <step>Verify table renders with column headers from layoutXml</step>
+        <step>Verify rows render with sample data</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Table visible, no console errors, columns match layoutXml</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle Storybook dark mode via toolbar</step>
+        <step>Verify all colors adapt — no white background in dark mode</step>
+        <step>Verify popover-bearing surfaces (column header menu) render correctly in dark</step>
+      </steps>
+      <expected>All colors via tokens.*; applyStylesToPortals working; dark mode visually correct</expected>
+    </test>
+    <test name="Selection persists across lazy-load pages">
+      <steps>
+        <step>Open "Lazy load (1000 records)" story</step>
+        <step>Select 5 rows on page 1</step>
+        <step>Scroll to bottom — verify page 2, 3 load</step>
+        <step>Scroll back to top — verify all 5 selections still checked</step>
+      </steps>
+      <expected>Selection Set&lt;string&gt; preserved across page boundaries</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    This is the largest Phase A task and the most architecturally consequential. Three watch-outs: (1) the three-tier config resolution must be a pure function that's easy to unit-test independently — don't bake it into the component; (2) `IntersectionObserver` cleanup on unmount is mandatory or you'll leak observers across hot reloads; (3) the `useDataGridContext()` hook is what every host extension uses — get the return shape right per FR-DG-15. Parallels task 002.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Mandatory `/fluent-v9-component` Step 0.5. Load all `<knowledge>` files. Verify all acceptance criteria + UI tests before marking complete.</protocol>
+  </execution>
+</task>

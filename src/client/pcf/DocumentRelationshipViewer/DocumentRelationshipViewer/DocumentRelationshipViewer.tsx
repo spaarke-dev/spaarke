@@ -180,12 +180,8 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
   // does not reliably trigger updateView() for read-only controls — only React state
   // changes guarantee a re-render. See pattern: .claude/patterns/pcf/control-initialization.md
   const [isAuthInitialized, setIsAuthInitialized] = React.useState(false);
-  const [resolvedApiBaseUrl, setResolvedApiBaseUrl] = React.useState<string>(
-    context.parameters.apiBaseUrl?.raw ?? ''
-  );
-  const [resolvedTenantId, setResolvedTenantId] = React.useState<string>(
-    context.parameters.tenantId?.raw ?? ''
-  );
+  const [resolvedApiBaseUrl, setResolvedApiBaseUrl] = React.useState<string>(context.parameters.apiBaseUrl?.raw ?? '');
+  const [resolvedTenantId, setResolvedTenantId] = React.useState<string>(context.parameters.tenantId?.raw ?? '');
 
   React.useEffect(() => {
     let cancelled = false;
@@ -226,7 +222,9 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
 
     void resolveConfigAndAuth();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // Run once on mount — context.webAPI and parameters are stable for control lifetime
   }, []);
 
@@ -246,7 +244,8 @@ export const DocumentRelationshipViewer: React.FC<IDocumentRelationshipViewerPro
     limit: 25,
     depth: 1,
     relationshipTypes: selectedRelationshipTypes.length > 0 ? selectedRelationshipTypes : undefined,
-    enabled: isAuthInitialized && !!documentId && documentId.trim() !== '' && !!resolvedTenantId && !!resolvedApiBaseUrl,
+    enabled:
+      isAuthInitialized && !!documentId && documentId.trim() !== '' && !!resolvedTenantId && !!resolvedApiBaseUrl,
   });
 
   // Get container dimensions for layout

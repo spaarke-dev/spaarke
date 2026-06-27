@@ -1,5 +1,5 @@
 using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -23,33 +23,62 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///
 /// DI registration: Scoped (one per HTTP request, same as <see cref="ChatSessionManager"/>).
 /// No additional DI registrations needed — <see cref="IDistributedCache"/> is already registered.
+///
+/// Unseal note (task 011 Phase 1b Tier 3, D-09 §2 B3, 2026-06-01): class was `sealed`;
+/// unsealed to permit <see cref="NullPendingPlanManager"/> subclassing for the kill-switch-OFF
+/// (compound AI disabled) DI state. Per ADR-010 (DI minimalism) the concrete-class Null-Object
+/// is preferred over introducing an interface. Production constructor and method bodies are
+/// unchanged; only the `sealed` keyword was removed and the 4 publicly-overridable methods
+/// were marked `virtual`.
 /// </summary>
-public sealed class PendingPlanManager
+public class PendingPlanManager
 {
     /// <summary>Absolute TTL for pending plans (30 minutes per task 070 design).</summary>
     internal static readonly TimeSpan PendingPlanTtl = TimeSpan.FromMinutes(30);
+
+    /// <summary>Tenant-cache resource name for pending plan payloads (FR-05).</summary>
+    internal const string CacheResource = "pending-plan";
+
+    /// <summary>Tenant-cache schema version for pending plan payloads.</summary>
+    internal const int CacheVersion = 1;
+
+    /// <summary>
+    /// Reproduces the on-wire cache key produced by <see cref="ITenantCache"/> for legacy
+    /// test consumers that asserted on the raw Redis key shape pre-FR-05.
+    /// Format: <c>tenant:{tenantId}:pending-plan:{sessionId}:v1</c>.
+    /// </summary>
+    internal static string BuildPendingPlanKey(string tenantId, string sessionId)
+        => $"tenant:{tenantId}:{CacheResource}:{sessionId}:v{CacheVersion}";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ILogger<PendingPlanManager> _logger;
 
-    /// <summary>
-    /// Builds the Redis key for a pending plan.
-    /// Pattern: <c>"plan:pending:{tenantId}:{sessionId}"</c> (ADR-014).
-    /// </summary>
-    internal static string BuildPendingPlanKey(string tenantId, string sessionId)
-        => $"plan:pending:{tenantId}:{sessionId}";
-
     public PendingPlanManager(
-        IDistributedCache cache,
+        ITenantCache cache,
         ILogger<PendingPlanManager> logger)
     {
         _cache = cache;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Protected constructor used only by <see cref="NullPendingPlanManager"/> when the
+    /// compound AI kill switch is OFF. The production scoped instance always uses the public ctor.
+    /// </summary>
+    /// <remarks>
+    /// Task 011 Phase 1b Tier 3 (D-09 §2 B3, 2026-06-01). Keeps the Null-Object subclass from
+    /// resolving <see cref="IDistributedCache"/> (which is unconditional, so this is purely a
+    /// hygiene measure: the Null subclass never touches Redis even if it's available).
+    /// </remarks>
+    protected PendingPlanManager(ILogger<PendingPlanManager> logger)
+    {
+        _cache = null!;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>
@@ -58,18 +87,20 @@ public sealed class PendingPlanManager
     /// </summary>
     /// <param name="plan">The pending plan to store.</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task StoreAsync(PendingPlan plan, CancellationToken ct = default)
+    public virtual async Task StoreAsync(PendingPlan plan, CancellationToken ct = default)
     {
-        var key = BuildPendingPlanKey(plan.TenantId, plan.SessionId);
+        // Tenant-scoped via ITenantCache per FR-05. PendingPlan is JSON-serialised
+        // by the wrapper using the same JsonSerializerOptions defaults; we keep the
+        // pre-migration camelCase casing by serialising through SetStringAsync.
         var json = JsonSerializer.Serialize(plan, JsonOptions);
-        var bytes = System.Text.Encoding.UTF8.GetBytes(json);
-
-        var options = new DistributedCacheEntryOptions
-        {
-            AbsoluteExpirationRelativeToNow = PendingPlanTtl
-        };
-
-        await _cache.SetAsync(key, bytes, options, ct);
+        await _cache.SetStringAsync(
+            plan.TenantId,
+            CacheResource,
+            plan.SessionId,
+            CacheVersion,
+            json,
+            ttl: PendingPlanTtl,
+            ct: ct);
 
         _logger.LogInformation(
             "PendingPlan stored — planId={PlanId}, session={SessionId}, tenant={TenantId}, steps={StepCount}, ttl=30m",
@@ -83,12 +114,12 @@ public sealed class PendingPlanManager
     /// <param name="tenantId">Tenant ID (ADR-014 tenant isolation).</param>
     /// <param name="sessionId">Session ID.</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task<PendingPlan?> GetAsync(string tenantId, string sessionId, CancellationToken ct = default)
+    public virtual async Task<PendingPlan?> GetAsync(string tenantId, string sessionId, CancellationToken ct = default)
     {
-        var key = BuildPendingPlanKey(tenantId, sessionId);
-        var bytes = await _cache.GetAsync(key, ct);
+        var json = await _cache.GetStringAsync(
+            tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
 
-        if (bytes is null)
+        if (json is null)
         {
             _logger.LogDebug(
                 "PendingPlan not found (expired or never created) — session={SessionId}, tenant={TenantId}",
@@ -96,7 +127,6 @@ public sealed class PendingPlanManager
             return null;
         }
 
-        var json = System.Text.Encoding.UTF8.GetString(bytes);
         return JsonSerializer.Deserialize<PendingPlan>(json, JsonOptions);
     }
 
@@ -118,12 +148,12 @@ public sealed class PendingPlanManager
     /// <param name="sessionId">Session ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The pending plan, or null if not found (expired or already deleted).</returns>
-    public async Task<PendingPlan?> GetAndDeleteAsync(string tenantId, string sessionId, CancellationToken ct = default)
+    public virtual async Task<PendingPlan?> GetAndDeleteAsync(string tenantId, string sessionId, CancellationToken ct = default)
     {
-        var key = BuildPendingPlanKey(tenantId, sessionId);
-        var bytes = await _cache.GetAsync(key, ct);
+        var json = await _cache.GetStringAsync(
+            tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
 
-        if (bytes is null)
+        if (json is null)
         {
             _logger.LogInformation(
                 "PendingPlan not found on approval attempt — session={SessionId}, tenant={TenantId} (expired or already approved)",
@@ -133,9 +163,8 @@ public sealed class PendingPlanManager
 
         // Delete the key before parsing — ensures the plan is not approved twice
         // even in a race condition (the second request will find null after the delete)
-        await _cache.RemoveAsync(key, ct);
+        await _cache.RemoveAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
 
-        var json = System.Text.Encoding.UTF8.GetString(bytes);
         var plan = JsonSerializer.Deserialize<PendingPlan>(json, JsonOptions);
 
         _logger.LogInformation(
@@ -152,10 +181,9 @@ public sealed class PendingPlanManager
     /// <param name="tenantId">Tenant ID.</param>
     /// <param name="sessionId">Session ID.</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task DeleteAsync(string tenantId, string sessionId, CancellationToken ct = default)
+    public virtual async Task DeleteAsync(string tenantId, string sessionId, CancellationToken ct = default)
     {
-        var key = BuildPendingPlanKey(tenantId, sessionId);
-        await _cache.RemoveAsync(key, ct);
+        await _cache.RemoveAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
 
         _logger.LogDebug(
             "PendingPlan deleted — session={SessionId}, tenant={TenantId}",

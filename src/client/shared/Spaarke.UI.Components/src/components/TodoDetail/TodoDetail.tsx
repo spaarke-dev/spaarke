@@ -4,20 +4,26 @@
  * Layout (top to bottom):
  *   1. Description (editable, auto-expands, no scroll)
  *   2. Details: Record Type, Record link, Due Date, Assigned To
- *   3. To Do Notes (editable, auto-expands, no scroll) — from sprk_eventtodo
+ *   3. To Do Notes (editable, auto-expands, no scroll)
  *   4. To Do Score section (Priority, Effort, Urgency sliders)
- *   5. Sticky footer: Remove, Save, Completed buttons
+ *   5. Sticky footer: Dismiss, Save, Complete buttons
  *
- * Data spans TWO entities:
- *   - sprk_event: description, due date, scores, lookups
- *   - sprk_eventtodo: notes, completed flag/date, statuscode
+ * Single-entity model (R3 FR-09): all reads + writes target `sprk_todo`.
+ * The legacy two-entity (`sprk_event` + `sprk_eventtodo`) load/save was removed
+ * in smart-todo-decoupling-r3 Phase 2 (per OS-1: no compat shims).
+ *
+ * statuscode semantics (per task 009):
+ *   - 1          = Open       (statecode 0)
+ *   - 659490001  = In Progress(statecode 0)
+ *   - 2          = Completed  (statecode 1)
+ *   - 659490002  = Dismissed  (statecode 1)
  *
  * Context-agnostic (ADR-012): No Xrm, no PCF APIs.
  * All external I/O is via callback props.
  * All colours from Fluent UI v9 semantic tokens (ADR-021).
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -36,25 +42,36 @@ import {
   Spinner,
   MessageBar,
   MessageBarBody,
-} from "@fluentui/react-components";
+} from '@fluentui/react-components';
 import type {
   SliderOnChangeData,
   ComboboxProps,
-} from "@fluentui/react-components";
+  OptionOnSelectData,
+  SelectionEvents,
+} from '@fluentui/react-components';
 import {
   SaveRegular,
   InfoRegular,
   DeleteRegular,
   CheckmarkRegular,
   OpenRegular,
-} from "@fluentui/react-icons";
-import type {
-  ITodoRecord,
-  ITodoExtension,
-  IEventFieldUpdates,
-  ITodoExtensionUpdates,
-  IContactOption,
-} from "./types";
+  EditRegular,
+  DismissRegular,
+  AddCircleRegular,
+} from '@fluentui/react-icons';
+import type { ITodoRecord, ITodoFieldUpdates, IContactOption } from './types';
+
+// ---------------------------------------------------------------------------
+// statuscode + statecode constants (mirror task 009 customization)
+// ---------------------------------------------------------------------------
+
+/** statecode = Inactive (Active = 0, kept implicit via record.statecode value). */
+const STATECODE_INACTIVE = 1;
+
+/** statuscode = Completed (Inactive). statuscode=Open (1) is the active default. */
+const STATUSCODE_COMPLETED = 2;
+/** statuscode = Dismissed (Inactive). */
+const STATUSCODE_DISMISSED = 659490002;
 
 // ---------------------------------------------------------------------------
 // To Do Score computation (self-contained — no cross-solution imports)
@@ -105,10 +122,10 @@ function computeScore(
 
 /** Convert ISO date string to YYYY-MM-DD for input[type="date"]. */
 function toDateInputValue(dateStr?: string | null): string {
-  if (!dateStr) return "";
+  if (!dateStr) return '';
   const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return "";
-  return d.toISOString().split("T")[0];
+  if (isNaN(d.getTime())) return '';
+  return d.toISOString().split('T')[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -117,38 +134,38 @@ function toDateInputValue(dateStr?: string | null): string {
 
 const useStyles = makeStyles({
   container: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    overflow: 'hidden',
   },
   content: {
-    flex: "1 1 0",
-    overflowY: "auto",
+    flex: '1 1 0',
+    overflowY: 'auto',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
-    display: "flex",
-    flexDirection: "column",
-    gap: "0px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0px',
   },
   divider: {
-    height: "1px",
+    height: '1px',
     backgroundColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
-    marginTop: "25px",
-    marginBottom: "25px",
+    marginTop: '25px',
+    marginBottom: '25px',
   },
   section: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
   },
   sectionTitleRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   sectionTitle: {
@@ -156,9 +173,9 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
   fieldRow: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "2px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
   },
   fieldLabel: {
     color: tokens.colorNeutralForeground3,
@@ -166,45 +183,45 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   sliderRow: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "2px",
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
   },
   sliderLabelRow: {
-    display: "flex",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   sliderValue: {
     fontSize: tokens.fontSizeBase200,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    minWidth: "24px",
-    textAlign: "right" as const,
+    minWidth: '24px',
+    textAlign: 'right' as const,
   },
   scoreCircle: {
-    width: "36px",
-    height: "36px",
-    borderRadius: "50%",
+    width: '36px',
+    height: '36px',
+    borderRadius: '50%',
     backgroundColor: tokens.colorBrandBackground,
     color: tokens.colorNeutralForegroundOnBrand,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     fontWeight: tokens.fontWeightBold,
     fontSize: tokens.fontSizeBase300,
     flexShrink: 0,
   },
   infoPopover: {
-    maxWidth: "320px",
-    display: "flex",
-    flexDirection: "column",
+    maxWidth: '320px',
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
   infoSection: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
   infoSectionTitle: {
@@ -216,67 +233,103 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
   },
   footer: {
-    display: "flex",
-    justifyContent: "flex-end",
+    display: 'flex',
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
-    borderTopWidth: "1px",
-    borderTopStyle: "solid",
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
   },
   emptyState: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flex: "1 1 0",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: '1 1 0',
     color: tokens.colorNeutralForeground4,
     paddingTop: tokens.spacingVerticalXXXL,
   },
   loadingState: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flex: "1 1 0",
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: '1 1 0',
     paddingTop: tokens.spacingVerticalXXXL,
   },
   errorBanner: {
     flexShrink: 0,
   },
   assignedToDisplay: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
   assignedToName: {
-    flex: "1 1 0",
+    flex: '1 1 0',
     color: tokens.colorNeutralForeground1,
     fontSize: tokens.fontSizeBase300,
   },
   recordLink: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
-    cursor: "pointer",
+    cursor: 'pointer',
+  },
+  removeButton: {
+    color: tokens.colorPaletteRedForeground1,
+    marginRight: 'auto',
+  },
+  openIcon: {
+    fontSize: tokens.fontSizeBase200,
+  },
+  scoreCircleAlignRight: {
+    marginLeft: 'auto',
+  },
+  textareaMinHeight: {
+    minHeight: '160px',
   },
   completeBtn: {
     backgroundColor: tokens.colorPaletteYellowBackground3,
     color: tokens.colorNeutralForeground1,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorPaletteYellowForeground2,
     },
   },
   completedBtn: {
     backgroundColor: tokens.colorPaletteGreenBackground3,
     color: tokens.colorNeutralForegroundOnBrand,
-    ":hover": {
+    ':hover': {
       backgroundColor: tokens.colorPaletteGreenForeground2,
     },
+  },
+  scoreSection: {
+    marginBottom: '20px',
+  },
+  regardingRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
+  },
+  regardingLink: {
+    flex: '1 1 auto',
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  regardingActions: {
+    display: 'flex',
+    flexDirection: 'row',
+    gap: tokens.spacingHorizontalXS,
+    flexShrink: 0,
   },
 });
 
@@ -285,46 +338,89 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export interface ITodoDetailProps {
+  /** The `sprk_todo` record (or null while loading / no selection). */
   record: ITodoRecord | null;
-  /** sprk_eventtodo extension record (notes, completed, statuscode). */
-  todoExtension: ITodoExtension | null;
   isLoading: boolean;
   error: string | null;
-  /** Save event fields (sprk_event). */
-  onSaveEventFields: (
-    eventId: string,
-    fields: IEventFieldUpdates
-  ) => Promise<{ success: boolean; error?: string }>;
-  /** Save todo extension fields (sprk_eventtodo). */
-  onSaveTodoExtFields: (
-    todoId: string,
-    fields: ITodoExtensionUpdates
-  ) => Promise<{ success: boolean; error?: string }>;
-  /** Deactivate sprk_eventtodo (statecode=1, statuscode=2) via direct REST API. */
-  onDeactivateTodoExt: (
-    todoId: string
-  ) => Promise<{ success: boolean; error?: string }>;
-  /** Remove from To Do (sets sprk_todoflag=false, then closes pane). */
-  onRemoveTodo?: (eventId: string) => Promise<void>;
+  /**
+   * Save a subset of `sprk_todo` fields. Single Web API `updateRecord` call.
+   * Host implements via injected Web API client (no hardcoded URLs).
+   */
+  onSaveTodo: (todoId: string, fields: ITodoFieldUpdates) => Promise<{ success: boolean; error?: string }>;
+  /**
+   * Dismiss the to-do (sets statuscode = 659490002 / Dismissed, statecode = 1 / Inactive).
+   * Replaces the legacy "Remove from To Do" path that toggled `sprk_event.sprk_todoflag`.
+   *
+   * Hosts that prefer hard delete over Dismiss can implement this callback to call
+   * `deleteRecord("sprk_todo", id)` instead — the component is agnostic to the
+   * persistence semantics, it just invokes this callback when the user clicks "Dismiss".
+   */
+  onDismissTodo?: (todoId: string) => Promise<{ success: boolean; error?: string }>;
   /** Close the side pane. */
   onClose?: () => void;
   /**
-   * Search contacts by name for the Assigned To picker.
+   * Search the picker source (users or contacts) by name for the Assigned To picker.
    * Decoupled from Xrm — host provides the implementation (ADR-012).
+   *
+   * Note: `sprk_todo.sprk_assignedto` is a `systemuser` lookup. Hosts should resolve
+   * the picker against `systemuser` (or whichever picker source matches the host's
+   * binding). The IContactOption shape is generic (id + name).
    */
   onSearchContacts: (query: string) => Promise<IContactOption[]>;
   /**
-   * Open the regarding record (matter/project) in a new tab/window.
+   * Open the regarding record (matter/project/etc.) in a new tab/window.
    * Decoupled from Xrm — host provides the navigation implementation (ADR-012).
    * Called with the entity logical name and record ID.
+   *
+   * Hosts implementing FR-13 (regarding edit) should prefer `onOpenRegardingUrl`
+   * which uses the already-populated `sprk_regardingrecordurl` field directly
+   * (no Xrm dependency, supports all 11 regarding entity types).
    */
   onOpenRegardingRecord?: (entityName: string, recordId: string) => void;
+  /**
+   * Open the regarding record using the resolver `sprk_regardingrecordurl` field.
+   * Per FR-13, the URL is populated by `PolymorphicResolverService.applyResolverFields`
+   * and includes the Xrm clientUrl + appid. Preferred over `onOpenRegardingRecord`
+   * because it is portable across all 11 regarding entity types without requiring
+   * the host to maintain a record-type-to-entityname map.
+   */
+  onOpenRegardingUrl?: (url: string) => void;
+  /**
+   * Invoked when the user clicks "Change" / "Set Regarding…" — the host opens the
+   * `AssociateToStep` dialog (FR-13). Pure signal: no payload is passed. The host
+   * is responsible for orchestrating selection → `applyResolverFields` → save.
+   */
+  onChangeRegarding?: () => void;
+  /**
+   * Invoked when the user clicks "Clear Regarding" — the host nulls all 15
+   * regarding fields (11 lookups + 4 resolver fields) and saves.
+   *
+   * When omitted, the Clear button is hidden.
+   */
+  onClearRegarding?: () => void;
 }
 
-/** Map record type display name to Dataverse entity logical name for navigation. */
+/**
+ * Map record-type display name to Dataverse entity logical name for the
+ * legacy `onOpenRegardingRecord` Xrm-navigate fallback. Covers all 11
+ * `sprk_todo` regarding targets per spec.md FR-07.
+ *
+ * Note: callers implementing FR-13 should prefer `onOpenRegardingUrl` —
+ * that path uses the resolver `sprk_regardingrecordurl` directly and is
+ * portable without this map.
+ */
 const RECORD_TYPE_ENTITY_MAP: Record<string, string> = {
-  Matter: "sprk_matter",
-  Project: "sprk_project",
+  Matter: 'sprk_matter',
+  Project: 'sprk_project',
+  Event: 'sprk_event',
+  Communication: 'sprk_communication',
+  'Work Assignment': 'sprk_workassignment',
+  Invoice: 'sprk_invoice',
+  Budget: 'sprk_budget',
+  Analysis: 'sprk_analysis',
+  Organization: 'sprk_organization',
+  Contact: 'contact',
+  Document: 'sprk_document',
 };
 
 // ---------------------------------------------------------------------------
@@ -334,16 +430,16 @@ const RECORD_TYPE_ENTITY_MAP: Record<string, string> = {
 export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
   ({
     record,
-    todoExtension,
     isLoading,
     error,
-    onSaveEventFields,
-    onSaveTodoExtFields,
-    onDeactivateTodoExt,
-    onRemoveTodo,
-    onClose,
+    onSaveTodo,
+    onDismissTodo,
+    onClose: _onClose,
     onSearchContacts,
     onOpenRegardingRecord,
+    onOpenRegardingUrl,
+    onChangeRegarding,
+    onClearRegarding,
   }) => {
     const styles = useStyles();
 
@@ -351,138 +447,119 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
     const notesTextareaRef = React.useRef<HTMLTextAreaElement | null>(null);
 
-    // Editable field values (sprk_event fields)
-    const [description, setDescription] = React.useState("");
-    const [dueDate, setDueDate] = React.useState("");
+    // Editable field values (all on sprk_todo)
+    const [description, setDescription] = React.useState('');
+    const [notes, setNotes] = React.useState('');
+    const [dueDate, setDueDate] = React.useState('');
     const [priority, setPriority] = React.useState<number>(50);
     const [effort, setEffort] = React.useState<number>(50);
 
-    // Editable field value (sprk_eventtodo field)
-    const [toDoNotes, setToDoNotes] = React.useState("");
-
     // Assigned To state
     const [assignedToId, setAssignedToId] = React.useState<string | null>(null);
-    const [assignedToName, setAssignedToName] = React.useState("");
-    const [contactQuery, setContactQuery] = React.useState("");
+    const [assignedToName, setAssignedToName] = React.useState('');
+    const [contactQuery, setContactQuery] = React.useState('');
     const [contactOptions, setContactOptions] = React.useState<IContactOption[]>([]);
     const [isSearching, setIsSearching] = React.useState(false);
     const [isEditingAssignedTo, setIsEditingAssignedTo] = React.useState(false);
 
     // Save state
     const [isSaving, setIsSaving] = React.useState(false);
-    const [isRemoving, setIsRemoving] = React.useState(false);
+    const [isDismissing, setIsDismissing] = React.useState(false);
     const [isCompleting, setIsCompleting] = React.useState(false);
     const [saveError, setSaveError] = React.useState<string | null>(null);
 
     // Snapshot of original values (for dirty detection)
     const origRef = React.useRef({
-      description: "",
-      dueDate: "",
+      description: '',
+      notes: '',
+      dueDate: '',
       priority: 50,
       effort: 50,
       assignedToId: null as string | null,
-      toDoNotes: "",
     });
 
     // Reset when record changes
     React.useEffect(() => {
       if (record) {
-        const desc = record.sprk_description ?? "";
+        const desc = record.sprk_description ?? '';
+        const nts = record.sprk_notes ?? '';
         const dd = toDateInputValue(record.sprk_duedate);
         const pri = record.sprk_priorityscore ?? 50;
         const eff = record.sprk_effortscore ?? 50;
         const aId = record._sprk_assignedto_value ?? null;
-        const aName =
-          record[
-            "_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue"
-          ] ?? "";
+        const aName = record['_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue'] ?? '';
         setDescription(desc);
+        setNotes(nts);
         setDueDate(dd);
         setPriority(pri);
         setEffort(eff);
         setAssignedToId(aId);
         setAssignedToName(aName);
-        setContactQuery("");
+        setContactQuery('');
         setContactOptions([]);
         setIsEditingAssignedTo(false);
         setSaveError(null);
         origRef.current = {
-          ...origRef.current,
           description: desc,
+          notes: nts,
           dueDate: dd,
           priority: pri,
           effort: eff,
           assignedToId: aId,
         };
       }
-    }, [record?.sprk_eventid]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [record?.sprk_todoid]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Reset notes when todoExtension changes
-    React.useEffect(() => {
-      const notes = todoExtension?.sprk_todonotes ?? "";
-      setToDoNotes(notes);
-      origRef.current = { ...origRef.current, toDoNotes: notes };
-    }, [todoExtension?.sprk_eventtodoid]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // Dirty detection
-    const isEventDirty =
+    // Dirty detection (any tracked field changed)
+    const isDirty =
       description !== origRef.current.description ||
+      notes !== origRef.current.notes ||
       dueDate !== origRef.current.dueDate ||
       priority !== origRef.current.priority ||
       effort !== origRef.current.effort ||
       assignedToId !== origRef.current.assignedToId;
 
-    const isNotesDirty = toDoNotes !== origRef.current.toDoNotes;
-
-    const isDirty = isEventDirty || isNotesDirty;
-
     // --- Handlers ---
 
-    const handleDescriptionChange = React.useCallback(
-      (_ev: unknown, data: { value: string }) => {
-        setDescription(data.value);
-        requestAnimationFrame(() => {
-          const el = textareaRef.current;
-          if (!el) return;
-          el.style.height = "auto";
-          el.style.height = `${el.scrollHeight}px`;
-          el.style.overflowY = "hidden";
-        });
-      },
-      []
-    );
+    const handleDescriptionChange = React.useCallback((_ev: unknown, data: { value: string }) => {
+      setDescription(data.value);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = `${el.scrollHeight}px`;
+        el.style.overflowY = 'hidden';
+      });
+    }, []);
 
     // Auto-resize description textarea on initial load
     React.useEffect(() => {
       const el = textareaRef.current;
       if (!el) return;
-      el.style.height = "auto";
+      el.style.height = 'auto';
       el.style.height = `${el.scrollHeight}px`;
-      el.style.overflowY = "hidden";
+      el.style.overflowY = 'hidden';
     }, [description]);
 
-    const handleNotesChange = React.useCallback(
-      (_ev: unknown, data: { value: string }) => {
-        setToDoNotes(data.value);
-        requestAnimationFrame(() => {
-          const el = notesTextareaRef.current;
-          if (!el) return;
-          el.style.height = "auto";
-          el.style.height = `${el.scrollHeight}px`;
-          el.style.overflowY = "hidden";
-        });
-      },
-      []
-    );
+    const handleNotesChange = React.useCallback((_ev: unknown, data: { value: string }) => {
+      setNotes(data.value);
+      requestAnimationFrame(() => {
+        const el = notesTextareaRef.current;
+        if (!el) return;
+        el.style.height = 'auto';
+        el.style.height = `${el.scrollHeight}px`;
+        el.style.overflowY = 'hidden';
+      });
+    }, []);
 
     // Auto-resize notes textarea on initial load
     React.useEffect(() => {
       const el = notesTextareaRef.current;
       if (!el) return;
-      el.style.height = "auto";
+      el.style.height = 'auto';
       el.style.height = `${el.scrollHeight}px`;
-      el.style.overflowY = "hidden";
-    }, [toDoNotes]);
+      el.style.overflowY = 'hidden';
+    }, [notes]);
 
     const handleDueDateChange = React.useCallback(
       (ev: React.ChangeEvent<HTMLInputElement>) => setDueDate(ev.target.value),
@@ -504,10 +581,10 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     );
 
     // Debounced contact search (uses onSearchContacts callback prop)
-    const searchTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
-    const handleContactInput: ComboboxProps["onInput"] = React.useCallback(
-      (ev: React.ChangeEvent<HTMLInputElement>) => {
-        const q = ev.target.value;
+    const searchTimerRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const handleContactInput: ComboboxProps['onInput'] = React.useCallback(
+      (ev: React.FormEvent<HTMLInputElement>) => {
+        const q = ev.currentTarget.value;
         setContactQuery(q);
         clearTimeout(searchTimerRef.current);
         if (q.length < 2) {
@@ -524,12 +601,12 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       [onSearchContacts]
     );
 
-    const handleContactSelect: ComboboxProps["onOptionSelect"] = React.useCallback(
-      (_ev, data) => {
+    const handleContactSelect: ComboboxProps['onOptionSelect'] = React.useCallback(
+      (_ev: SelectionEvents, data: OptionOnSelectData) => {
         if (data.optionValue && data.optionText) {
           setAssignedToId(data.optionValue);
           setAssignedToName(data.optionText);
-          setContactQuery("");
+          setContactQuery('');
           setContactOptions([]);
           setIsEditingAssignedTo(false);
         }
@@ -537,198 +614,144 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
       []
     );
 
-    // Save dirty fields to the correct entities
+    /** Build an `ITodoFieldUpdates` from the current vs. original state (diff-based). */
+    const buildDirtyUpdates = React.useCallback((): ITodoFieldUpdates => {
+      const updates: ITodoFieldUpdates = {};
+      if (description !== origRef.current.description) {
+        updates.sprk_description = description;
+      }
+      if (notes !== origRef.current.notes) {
+        updates.sprk_notes = notes;
+      }
+      if (dueDate !== origRef.current.dueDate) {
+        updates.sprk_duedate = dueDate || null;
+      }
+      if (priority !== origRef.current.priority) {
+        updates.sprk_priorityscore = priority;
+      }
+      if (effort !== origRef.current.effort) {
+        updates.sprk_effortscore = effort;
+      }
+      if (assignedToId !== origRef.current.assignedToId) {
+        updates['sprk_AssignedTo@odata.bind'] = assignedToId ? `/systemusers(${assignedToId})` : null;
+      }
+      return updates;
+    }, [description, notes, dueDate, priority, effort, assignedToId]);
+
+    // Save: single updateRecord("sprk_todo", id, fields)
     const handleSave = React.useCallback(async () => {
       if (!record || !isDirty) return;
       setIsSaving(true);
       setSaveError(null);
 
       try {
-        // Save event fields if any changed
-        if (isEventDirty) {
-          const eventUpdates: IEventFieldUpdates = {};
-          if (description !== origRef.current.description) {
-            eventUpdates.sprk_description = description;
-          }
-          if (dueDate !== origRef.current.dueDate) {
-            eventUpdates.sprk_duedate = dueDate || null;
-          }
-          if (priority !== origRef.current.priority) {
-            eventUpdates.sprk_priorityscore = priority;
-          }
-          if (effort !== origRef.current.effort) {
-            eventUpdates.sprk_effortscore = effort;
-          }
-          if (assignedToId !== origRef.current.assignedToId) {
-            eventUpdates["sprk_AssignedTo@odata.bind"] = assignedToId
-              ? `/contacts(${assignedToId})`
-              : null;
-          }
-          const eventResult = await onSaveEventFields(record.sprk_eventid, eventUpdates);
-          if (!eventResult.success) {
-            setSaveError(eventResult.error ?? "Failed to save event fields");
-            setIsSaving(false);
-            return;
-          }
+        const updates = buildDirtyUpdates();
+        const result = await onSaveTodo(record.sprk_todoid, updates);
+        if (!result.success) {
+          setSaveError(result.error ?? 'Failed to save');
+          setIsSaving(false);
+          return;
         }
-
-        // Save notes if changed (requires todoExtension record)
-        if (isNotesDirty && todoExtension?.sprk_eventtodoid) {
-          const extUpdates: ITodoExtensionUpdates = {
-            sprk_todonotes: toDoNotes,
-          };
-          const extResult = await onSaveTodoExtFields(
-            todoExtension.sprk_eventtodoid,
-            extUpdates
-          );
-          if (!extResult.success) {
-            setSaveError(extResult.error ?? "Failed to save notes");
-            setIsSaving(false);
-            return;
-          }
-        }
-
-        // Update snapshots on success
+        // Update snapshot on success
         origRef.current = {
           description,
+          notes,
           dueDate,
           priority,
           effort,
           assignedToId,
-          toDoNotes,
         };
       } catch {
-        setSaveError("Save failed — unexpected error");
+        setSaveError('Save failed — unexpected error');
       } finally {
         setIsSaving(false);
       }
-    }, [
-      record,
-      todoExtension,
-      isDirty,
-      isEventDirty,
-      isNotesDirty,
-      description,
-      dueDate,
-      priority,
-      effort,
-      assignedToId,
-      toDoNotes,
-      onSaveEventFields,
-      onSaveTodoExtFields,
-    ]);
+    }, [record, isDirty, buildDirtyUpdates, onSaveTodo, description, notes, dueDate, priority, effort, assignedToId]);
 
-    // Remove from To Do: sets sprk_todoflag = false, notifies Kanban, closes pane
-    const handleRemoveTodo = React.useCallback(async () => {
-      if (!record || !onRemoveTodo) return;
-      setIsRemoving(true);
+    /**
+     * Dismiss: statuscode=659490002 (Dismissed), statecode=1 (Inactive).
+     *
+     * Per R3 OS-1 — the legacy "Remove from To Do" path that toggled
+     * `sprk_event.sprk_todoflag=false` is removed. The semantic equivalent for the new
+     * first-class `sprk_todo` model is statuscode=Dismissed. Hosts that prefer hard
+     * delete can implement the `onDismissTodo` callback as `deleteRecord("sprk_todo", id)`.
+     */
+    const handleDismiss = React.useCallback(async () => {
+      if (!record || !onDismissTodo) return;
+      setIsDismissing(true);
       setSaveError(null);
       try {
-        await onRemoveTodo(record.sprk_eventid);
+        const result = await onDismissTodo(record.sprk_todoid);
+        if (!result.success) {
+          setSaveError(result.error ?? 'Failed to dismiss');
+          setIsDismissing(false);
+        }
       } catch {
-        setSaveError("Failed to remove from To Do");
-        setIsRemoving(false);
+        setSaveError('Failed to dismiss — unexpected error');
+        setIsDismissing(false);
       }
-    }, [record, onRemoveTodo]);
+    }, [record, onDismissTodo]);
 
-    // Completed: saves dirty fields + marks sprk_eventtodo as completed
+    /**
+     * Complete: saves dirty fields + sets statecode=1 + statuscode=2 (Completed) +
+     * sprk_completedon. Single `updateRecord` call.
+     */
     const handleCompleted = React.useCallback(async () => {
       if (!record) return;
       setIsCompleting(true);
       setSaveError(null);
 
       try {
-        // Save any dirty event fields first
-        if (isEventDirty) {
-          const eventUpdates: IEventFieldUpdates = {};
-          if (description !== origRef.current.description) {
-            eventUpdates.sprk_description = description;
-          }
-          if (dueDate !== origRef.current.dueDate) {
-            eventUpdates.sprk_duedate = dueDate || null;
-          }
-          if (priority !== origRef.current.priority) {
-            eventUpdates.sprk_priorityscore = priority;
-          }
-          if (effort !== origRef.current.effort) {
-            eventUpdates.sprk_effortscore = effort;
-          }
-          if (assignedToId !== origRef.current.assignedToId) {
-            eventUpdates["sprk_AssignedTo@odata.bind"] = assignedToId
-              ? `/contacts(${assignedToId})`
-              : null;
-          }
-          const eventResult = await onSaveEventFields(record.sprk_eventid, eventUpdates);
-          if (!eventResult.success) {
-            setSaveError(eventResult.error ?? "Failed to save event fields");
-            setIsCompleting(false);
-            return;
-          }
+        const updates: ITodoFieldUpdates = {
+          ...buildDirtyUpdates(),
+          statecode: STATECODE_INACTIVE,
+          statuscode: STATUSCODE_COMPLETED,
+          sprk_completedon: new Date().toISOString(),
+        };
+        const result = await onSaveTodo(record.sprk_todoid, updates);
+        if (!result.success) {
+          setSaveError(result.error ?? 'Failed to complete');
+          setIsCompleting(false);
+          return;
         }
-
-        // Mark as completed on sprk_eventtodo — TWO separate calls:
-        // 1) Data fields via callback  2) State change via deactivate callback
-        if (todoExtension?.sprk_eventtodoid) {
-          // 1) Save data fields (completed flag, date, notes) while record is still active
-          const dataUpdates: ITodoExtensionUpdates = {
-            sprk_completed: true,
-            sprk_completeddate: new Date().toISOString(),
-          };
-          if (isNotesDirty) {
-            dataUpdates.sprk_todonotes = toDoNotes;
-          }
-          const dataResult = await onSaveTodoExtFields(
-            todoExtension.sprk_eventtodoid,
-            dataUpdates
-          );
-          if (!dataResult.success) {
-            setSaveError(dataResult.error ?? "Failed to save completion data");
-            setIsCompleting(false);
-            return;
-          }
-
-          // 2) Deactivate via callback
-          const stateResult = await onDeactivateTodoExt(
-            todoExtension.sprk_eventtodoid
-          );
-          if (!stateResult.success) {
-            setSaveError(stateResult.error ?? "Failed to deactivate record");
-            setIsCompleting(false);
-            return;
-          }
-        }
+        // Update snapshot to current values
+        origRef.current = {
+          description,
+          notes,
+          dueDate,
+          priority,
+          effort,
+          assignedToId,
+        };
       } catch {
-        setSaveError("Failed to mark as completed — unexpected error");
+        setSaveError('Failed to mark as completed — unexpected error');
       } finally {
         setIsCompleting(false);
       }
-    }, [
-      record,
-      todoExtension,
-      isEventDirty,
-      isNotesDirty,
-      description,
-      dueDate,
-      priority,
-      effort,
-      assignedToId,
-      toDoNotes,
-      onSaveEventFields,
-      onSaveTodoExtFields,
-      onDeactivateTodoExt,
-    ]);
+    }, [record, buildDirtyUpdates, onSaveTodo, description, notes, dueDate, priority, effort, assignedToId]);
 
-    // Open regarding record — delegates to host via callback prop
+    // Open regarding record — delegates to host via callback prop.
+    //
+    // Preference order (per FR-13):
+    //   1. onOpenRegardingUrl + sprk_regardingrecordurl — portable across all
+    //      11 regarding entity types without requiring a record-type map.
+    //   2. onOpenRegardingRecord + RECORD_TYPE_ENTITY_MAP fallback — legacy
+    //      Xrm-based path, supports only Matter + Project today.
     const handleOpenRegardingRecord = React.useCallback(() => {
-      if (!record?.sprk_regardingrecordid || !onOpenRegardingRecord) return;
-      const typeName =
-        record[
-          "_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue"
-        ] ?? "";
-      const entityName = RECORD_TYPE_ENTITY_MAP[typeName];
-      if (!entityName) return;
-      onOpenRegardingRecord(entityName, record.sprk_regardingrecordid);
-    }, [record, onOpenRegardingRecord]);
+      if (!record) return;
+      // Path 1: use sprk_regardingrecordurl (FR-13, ADR-024 resolver-field path)
+      if (record.sprk_regardingrecordurl && onOpenRegardingUrl) {
+        onOpenRegardingUrl(record.sprk_regardingrecordurl);
+        return;
+      }
+      // Path 2: legacy Xrm navigate fallback
+      if (record.sprk_regardingrecordid && onOpenRegardingRecord) {
+        const typeName = record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue'] ?? '';
+        const entityName = RECORD_TYPE_ENTITY_MAP[typeName];
+        if (!entityName) return;
+        onOpenRegardingRecord(entityName, record.sprk_regardingrecordid);
+      }
+    }, [record, onOpenRegardingUrl, onOpenRegardingRecord]);
 
     // --- Render states ---
 
@@ -751,13 +774,18 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
     if (!record) {
       return (
         <div className={styles.emptyState}>
-          <Text>No event selected</Text>
+          <Text>No to-do selected</Text>
         </div>
       );
     }
 
     // Compute score from CURRENT field values (live preview)
     const score = computeScore(priority, effort, dueDate || record.sprk_duedate);
+
+    // Derived: is the record already inactive (Completed or Dismissed)?
+    const isInactive = record.statecode === STATECODE_INACTIVE;
+    const isCompleted = isInactive && record.statuscode === STATUSCODE_COMPLETED;
+    const isDismissed = isInactive && record.statuscode === STATUSCODE_DISMISSED;
 
     return (
       <div className={styles.container}>
@@ -781,7 +809,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               resize="none"
               textarea={{
                 ref: textareaRef,
-                style: { minHeight: "160px" },
+                className: styles.textareaMinHeight,
               }}
             />
           </div>
@@ -795,43 +823,81 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
             </Text>
 
             {/* Record Type tag */}
-            {record["_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue"] && (
+            {record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue'] && (
               <div className={styles.fieldRow}>
                 <label className={styles.fieldLabel}>Record Type</label>
                 <div>
-                  <Badge
-                    appearance="filled"
-                    color="informative"
-                    size="medium"
-                  >
-                    {record["_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue"]}
+                  <Badge appearance="filled" color="informative" size="medium">
+                    {record['_sprk_regardingrecordtype_value@OData.Community.Display.V1.FormattedValue']}
                   </Badge>
                 </div>
               </div>
             )}
 
-            {/* Record link */}
-            {record.sprk_regardingrecordname && record.sprk_regardingrecordid && (
+            {/*
+              Regarding row (FR-13). When a regarding parent exists the row
+              shows the resolver name + an "open in new tab" icon (clickable
+              Link → sprk_regardingrecordurl via onOpenRegardingUrl). The Change
+              button (visible when onChangeRegarding is wired) launches the
+              AssociateToStep dialog hosted by the consumer. The Clear button
+              (visible when onClearRegarding is wired AND a regarding exists)
+              nulls all 15 regarding fields atomically.
+
+              When no regarding exists AND onChangeRegarding is wired, a single
+              "Set Regarding…" button is rendered in lieu of the link row.
+            */}
+            {record.sprk_regardingrecordname && record.sprk_regardingrecordid ? (
               <div className={styles.fieldRow}>
                 <label className={styles.fieldLabel}>Record</label>
-                <Link
-                  className={styles.recordLink}
-                  onClick={handleOpenRegardingRecord}
-                  as="button"
-                >
-                  {record.sprk_regardingrecordname}
-                  <OpenRegular style={{ fontSize: "12px" }} />
-                </Link>
+                <div className={styles.regardingRow}>
+                  <Link
+                    className={`${styles.recordLink} ${styles.regardingLink}`}
+                    onClick={handleOpenRegardingRecord}
+                    as="button"
+                  >
+                    {record.sprk_regardingrecordname}
+                    <OpenRegular className={styles.openIcon} />
+                  </Link>
+                  <div className={styles.regardingActions}>
+                    {onChangeRegarding && (
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<EditRegular />}
+                        onClick={onChangeRegarding}
+                        aria-label="Change regarding record"
+                      >
+                        Change
+                      </Button>
+                    )}
+                    {onClearRegarding && (
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<DismissRegular />}
+                        onClick={onClearRegarding}
+                        aria-label="Clear regarding record"
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                </div>
               </div>
-            )}
+            ) : onChangeRegarding ? (
+              <div className={styles.fieldRow}>
+                <label className={styles.fieldLabel}>Record</label>
+                <div className={styles.regardingRow}>
+                  <Button appearance="subtle" size="small" icon={<AddCircleRegular />} onClick={onChangeRegarding}>
+                    Set Regarding…
+                  </Button>
+                </div>
+              </div>
+            ) : null}
 
             <div className={styles.fieldRow}>
               <label className={styles.fieldLabel}>Due Date</label>
-              <Input
-                type="date"
-                value={dueDate}
-                onChange={handleDueDateChange}
-              />
+              <Input type="date" value={dueDate} onChange={handleDueDateChange} />
             </div>
 
             <div className={styles.fieldRow}>
@@ -839,18 +905,14 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               {assignedToName && !isEditingAssignedTo ? (
                 <div className={styles.assignedToDisplay}>
                   <Text className={styles.assignedToName}>{assignedToName}</Text>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    onClick={() => setIsEditingAssignedTo(true)}
-                  >
+                  <Button appearance="subtle" size="small" onClick={() => setIsEditingAssignedTo(true)}>
                     Change
                   </Button>
                 </div>
               ) : (
                 <Combobox
                   freeform
-                  placeholder="Search contacts..."
+                  placeholder="Search users..."
                   value={contactQuery}
                   onInput={handleContactInput}
                   onOptionSelect={handleContactSelect}
@@ -863,10 +925,10 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                   )}
                   {!isSearching && contactOptions.length === 0 && contactQuery.length >= 2 && (
                     <Option key="__empty" value="" text="" disabled>
-                      No contacts found
+                      No users found
                     </Option>
                   )}
-                  {contactOptions.map((c) => (
+                  {contactOptions.map(c => (
                     <Option key={c.id} value={c.id} text={c.name}>
                       {c.name}
                     </Option>
@@ -878,19 +940,19 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
 
           <div className={styles.divider} role="separator" />
 
-          {/* -- To Do Notes (from sprk_eventtodo) -- */}
+          {/* -- Notes (rich/multiline on sprk_todo.sprk_notes) -- */}
           <div className={styles.section}>
             <Text className={styles.sectionTitle} size={300}>
-              To Do Notes
+              Notes
             </Text>
             <Textarea
-              value={toDoNotes}
+              value={notes}
               onChange={handleNotesChange}
               placeholder="Add notes..."
               resize="none"
               textarea={{
                 ref: notesTextareaRef,
-                style: { minHeight: "160px" },
+                className: styles.textareaMinHeight,
               }}
             />
           </div>
@@ -898,19 +960,14 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
           <div className={styles.divider} role="separator" />
 
           {/* -- To Do Score: title row with circle + info, then sliders -- */}
-          <div className={styles.section} style={{ marginBottom: "20px" }}>
+          <div className={`${styles.section} ${styles.scoreSection}`}>
             <div className={styles.sectionTitleRow}>
               <Text className={styles.sectionTitle} size={300}>
                 To Do Score
               </Text>
               <Popover withArrow>
                 <PopoverTrigger disableButtonEnhancement>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    icon={<InfoRegular />}
-                    aria-label="Score information"
-                  />
+                  <Button appearance="subtle" size="small" icon={<InfoRegular />} aria-label="Score information" />
                 </PopoverTrigger>
                 <PopoverSurface>
                   <div className={styles.infoPopover}>
@@ -919,9 +976,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                         How Scoring Works
                       </Text>
                       <Text className={styles.infoSectionBody}>
-                        The To Do Score combines three factors into a single 0-100
-                        number. Higher scores surface more important items first in
-                        the Kanban board.
+                        The To Do Score combines three factors into a single 0-100 number. Higher scores surface more
+                        important items first in the Kanban board.
                       </Text>
                     </div>
 
@@ -930,8 +986,8 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                         Score Formula
                       </Text>
                       <Text className={styles.infoSectionBody}>
-                        Score = Priority (50%) + Inverted Effort (20%) + Urgency (30%).
-                        Lower effort items score higher (quick wins bubble up).
+                        Score = Priority (50%) + Inverted Effort (20%) + Urgency (30%). Lower effort items score higher
+                        (quick wins bubble up).
                       </Text>
                     </div>
 
@@ -940,14 +996,14 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                         Urgency Score
                       </Text>
                       <Text className={styles.infoSectionBody}>
-                        Auto-calculated from due date: Overdue = 100, within 3 days = 80,
-                        within 7 days = 50, within 10 days = 25, more than 10 days = 0.
+                        Auto-calculated from due date: Overdue = 100, within 3 days = 80, within 7 days = 50, within 10
+                        days = 25, more than 10 days = 0.
                       </Text>
                     </div>
                   </div>
                 </PopoverSurface>
               </Popover>
-              <div className={styles.scoreCircle} style={{ marginLeft: "auto" }}>
+              <div className={`${styles.scoreCircle} ${styles.scoreCircleAlignRight}`}>
                 {Math.round(score.todoScore)}
               </div>
             </div>
@@ -957,13 +1013,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                 <label className={styles.fieldLabel}>Priority (50%)</label>
                 <span className={styles.sliderValue}>{priority}</span>
               </div>
-              <Slider
-                value={priority}
-                onChange={handlePriorityChange}
-                min={0}
-                max={100}
-                step={5}
-              />
+              <Slider value={priority} onChange={handlePriorityChange} min={0} max={100} step={5} />
             </div>
 
             <div className={styles.sliderRow}>
@@ -971,46 +1021,39 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
                 <label className={styles.fieldLabel}>Effort (20%)</label>
                 <span className={styles.sliderValue}>{effort}</span>
               </div>
-              <Slider
-                value={effort}
-                onChange={handleEffortChange}
-                min={0}
-                max={100}
-                step={5}
-              />
+              <Slider value={effort} onChange={handleEffortChange} min={0} max={100} step={5} />
             </div>
-
           </div>
         </div>
 
         {/* -- Sticky footer -- */}
         <div className={styles.footer}>
-          {onRemoveTodo && (
+          {onDismissTodo && !isInactive && (
             <Button
               appearance="subtle"
               icon={<DeleteRegular />}
-              onClick={handleRemoveTodo}
-              disabled={isRemoving || isSaving || isCompleting}
-              style={{ color: tokens.colorPaletteRedForeground1, marginRight: "auto" }}
+              onClick={handleDismiss}
+              disabled={isDismissing || isSaving || isCompleting}
+              className={styles.removeButton}
             >
-              {isRemoving ? "Removing..." : "Remove"}
+              {isDismissing ? 'Dismissing...' : 'Dismiss'}
             </Button>
           )}
           <Button
             appearance="primary"
             icon={<SaveRegular />}
             onClick={handleSave}
-            disabled={!isDirty || isSaving || isCompleting}
+            disabled={!isDirty || isSaving || isCompleting || isInactive}
           >
-            {isSaving ? "Saving..." : "Save"}
+            {isSaving ? 'Saving...' : 'Save'}
           </Button>
-          {todoExtension?.statecode === 1 || todoExtension?.statuscode === 2 ? (
-            <Button
-              icon={<CheckmarkRegular />}
-              disabled
-              className={styles.completedBtn}
-            >
+          {isCompleted ? (
+            <Button icon={<CheckmarkRegular />} disabled className={styles.completedBtn}>
               Completed
+            </Button>
+          ) : isDismissed ? (
+            <Button icon={<DeleteRegular />} disabled className={styles.completedBtn}>
+              Dismissed
             </Button>
           ) : (
             <Button
@@ -1019,7 +1062,7 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
               disabled={isSaving || isCompleting}
               className={styles.completeBtn}
             >
-              {isCompleting ? "Completing..." : "Complete"}
+              {isCompleting ? 'Completing...' : 'Complete'}
             </Button>
           )}
         </div>
@@ -1028,4 +1071,4 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
   }
 );
 
-TodoDetail.displayName = "TodoDetail";
+TodoDetail.displayName = 'TodoDetail';

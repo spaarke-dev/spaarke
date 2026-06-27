@@ -29,6 +29,10 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // Tasks components. LegalWorkspace consumes them when task 115 adds a
     // Calendar section factory to its section registry.
     path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+    // R4 task 051 (C-3, 2026-05-26): @spaarke/ai-widgets hosts the
+    // consolidated `useWorkspaceLayouts` hook (formerly duplicated in
+    // LegalWorkspace + SpaarkeAi). LW's local hook is now a thin adapter.
+    path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(__dirname, "node_modules");
@@ -83,6 +87,12 @@ export default defineConfig({
         // Task 114 (2026-05-22): transpile Events components source.
         path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.ts"),
+        // R4 task 051 (C-3, 2026-05-26): transpile AI widgets source (only
+        // `hooks/useWorkspaceLayouts.ts` is consumed by LW today, but
+        // include the whole tree so future shared-lib consumption works
+        // without further vite plumbing).
+        path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src/**/*.ts"),
       ],
     }),
     viteSingleFile(),
@@ -97,6 +107,21 @@ export default defineConfig({
       // without further plumbing.
       "@spaarke/events-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
       "@spaarke/events-components": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+      // R4 task 051 (C-3, 2026-05-26): aliased to source so the LegalWorkspace
+      // adapter `hooks/useWorkspaceLayouts.ts` can import the consolidated
+      // hook from `@spaarke/ai-widgets/src/hooks/useWorkspaceLayouts.ts`
+      // without an intermediate build step. Matches the SpaarkeAi pattern.
+      "@spaarke/ai-widgets": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
+      // @spaarke/sdap-client — pulled in transitively via
+      // @spaarke/ui-components/services/EntityCreationService.ts (Phase G of
+      // multi-container-multi-index-r1 / PR #369). Mirrors the alias already
+      // present in CreateMatter/Project/Event/WorkAssignmentWizard +
+      // SmartTodo. Source-resolves rather than dist-resolves so no pre-build
+      // is required.
+      "@spaarke/sdap-client": path.resolve(
+        __dirname,
+        "../../client/shared/Spaarke.SdapClient/src",
+      ),
     },
     // Prefer .ts/.tsx over .js so stale tsc-emit siblings (if any escape
     // .gitignore) never silently shadow source. See Task 112 (2026-05-22).

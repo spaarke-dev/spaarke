@@ -1,0 +1,138 @@
+<task id="R4-040" project="smart-todo-r4">
+  <metadata>
+    <title>C — Wire SmartTodo card-open path to &lt;RecordNavigationModalShell&gt; with To Do main form iframe</title>
+    <phase>Phase 2: Wave 2b</phase>
+    <workstream>C</workstream>
+    <status>complete</status>
+    <estimated-effort>2 days</estimated-effort>
+    <tags>code-page, smart-todo, modal, iframe, cross-frame-messaging, react, fluent-v9</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-010, R4-030</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/components/Modal/SmartTodoModal.tsx (new)</file>
+      <file>src/solutions/SmartTodo/src/App.tsx (wires open path)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Wire the SmartTodo card-open path to `<RecordNavigationModalShell>` (from task 010) with an iframe pointing at the OOB MDA "To Do main form" (`eca59df4-1364-f111-ab0c-7ced8ddc4cc6`). Modal must work in BOTH MDA context (launched from a subgrid command / Visual Host drill-through) AND Code Page context (launched from SmartTodo Code Page). `<` `>` browses other cards in the current filter set with "N of M" counter.
+  </prompt>
+
+  <role>React + Code Page engineer wiring shared-lib component into SmartTodo.</role>
+
+  <goal>
+1. Clicking "Open" on a card opens modal with iframe-embedded To Do main form.
+2. `<` `>` nav browses current filter set; "N of M" accurate.
+3. Modal works in MDA context AND Code Page context (tested in both).
+4. Save / BPF / business rules / statuscode all function natively inside the iframe.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="shell">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/</file>
+    <file purpose="target">src/solutions/SmartTodo/src/App.tsx</file>
+    <file purpose="pattern">.claude/patterns/webresource/code-page-wizard-wrapper.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-13">Iframe URL: `Xrm.Page.context.getClientUrl()/main.aspx?pagetype=entityrecord&etn=sprk_todo&id=&lt;id&gt;&formid=eca59df4-1364-f111-ab0c-7ced8ddc4cc6&navbar=off`</constraint>
+    <constraint source="spec FR-16">Card-open path uses `<RecordNavigationModalShell>` with To Do main form iframe</constraint>
+    <constraint source="spec FR-17">Modal works in BOTH MDA context AND Code Page context</constraint>
+    <constraint source="spec NFR-03">No hardcoded environment URLs — use `Xrm.Page.context.getClientUrl()` (or equivalent global)</constraint>
+    <constraint source="spec NFR-05">Modal nav `<` `>` &lt;500ms perceived latency</constraint>
+    <constraint source="spec ❌ MUST NOT">MUST NOT reimplement save / BPF / business rules / statuscode in custom React form</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/modal-iframe</topic>
+    <files>
+      <file>.claude/patterns/webresource/code-page-wizard-wrapper.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>The hybrid modal is R4's architectural keystone. This task wires the SmartTodo-specific consumer.</background>
+    <dependencies>
+      <dependency task="R4-010" status="must-complete">RecordNavigationModalShell extracted and exported</dependency>
+      <dependency task="R4-030" status="must-complete">4-row layout in place (Open action target ready)</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 032 currently dispatches Open event as stub; wire to this modal here.</item>
+      <item>Task 041 implements dirty-check protocol cross-frame messaging side.</item>
+      <item>Task 042 retires TodoDetailPanel side-pane.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Build iframe URL">Construct via `Xrm.Page.context.getClientUrl() + '/main.aspx?pagetype=entityrecord&etn=sprk_todo&id=' + id + '&formid=eca59df4-1364-f111-ab0c-7ced8ddc4cc6&navbar=off'`. NO hardcoded host.</step>
+    <step order="2" name="Implement SmartTodoModal wrapper">Consumes `<RecordNavigationModalShell>`; passes current card index, filter-set total, navigate handler that swaps iframe `src`.</step>
+    <step order="3" name="Detect launch context">Code Page vs MDA — adjust iframe src accordingly (Code Page uses parent's getClientUrl).</step>
+    <step order="4" name="Wire Open action from task 032">Replace stub event with `setSelectedId(id)` opening modal.</step>
+    <step order="5" name="Wire card double-click and Open icon">From task 060.</step>
+    <step order="6" name="Build + test">`npm run build:prod`; tests for iframe URL construction + nav state.</step>
+    <step order="7" name="Smoke test MDA context">Open from a subgrid command on a Matter form (post-task 081-084 wiring; for now test with manual launch).</step>
+    <step order="8" name="Smoke test Code Page context">Open from inside SmartTodo Code Page.</step>
+    <step order="9" name="Verify OOB behaviors">Save persists; BPF advances; "Completed" statuscode control works; business rules fire.</step>
+    <step order="10" name="Quality gates">code-review + adr-check.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="ui-test">MDA + Code Page launch tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/components/Modal/SmartTodoModal.tsx (new)</output>
+    <output type="code">src/solutions/SmartTodo/src/App.tsx (modified — wires Open)</output>
+    <output type="test">Unit tests for iframe URL construction + filter-set nav</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Modal opens in Code Page context with iframe">
+      <steps>
+        <step>Open SmartTodo Code Page in spaarkedev1</step>
+        <step>Click Open icon on a card</step>
+        <step>Verify modal renders with iframe-embedded To Do main form</step>
+        <step>Verify "N of M" counter reflects filter set</step>
+      </steps>
+      <expected>Modal renders; iframe loads; counter accurate</expected>
+    </test>
+    <test name="Nav `<` `>` swaps iframe">
+      <steps>
+        <step>From modal, click `>`</step>
+        <step>Verify iframe src updates to next card's id</step>
+        <step>Verify "N of M" updates</step>
+        <step>Verify &lt;500ms perceived latency</step>
+      </steps>
+      <expected>Nav works; latency within budget</expected>
+    </test>
+    <test name="OOB save persists">
+      <steps>
+        <step>Open modal; edit a field in iframe form; click Save in iframe</step>
+        <step>Close modal; reload card</step>
+        <step>Verify field value persisted</step>
+      </steps>
+      <expected>OOB save works inside iframe; persists to Dataverse</expected>
+    </test>
+    <test name="OD-4 regression: 'Completed' statuscode works">
+      <steps>
+        <step>Open modal; set statuscode to Completed via OOB control</step>
+        <step>Save in iframe</step>
+        <step>Verify card moves to Completed lane on next refresh</step>
+      </steps>
+      <expected>Completed flow works (R3 side-pane bug fixed by hybrid modal)</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Open from card → modal with iframe-embedded To Do main form</criterion>
+    <criterion testable="true">`<` `>` swaps iframe src; "N of M" accurate</criterion>
+    <criterion testable="true">Works in BOTH MDA and Code Page contexts</criterion>
+    <criterion testable="true">No hardcoded environment URLs — uses `Xrm.Page.context.getClientUrl()`</criterion>
+    <criterion testable="true">OD-4 regressions fixed: save persists, "Completed" statuscode works</criterion>
+    <criterion testable="true">Modal nav &lt;500ms perceived latency (NFR-05)</criterion>
+  </acceptance-criteria>
+</task>

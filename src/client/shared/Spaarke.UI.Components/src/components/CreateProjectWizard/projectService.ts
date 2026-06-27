@@ -18,6 +18,7 @@
 import type { ICreateProjectFormState } from './projectFormTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
+import { EntityCreationService, type IUserBuCascadeDefaults } from '../../services/EntityCreationService';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -89,14 +90,16 @@ async function _discoverNavProps(entityLogicalName: string): Promise<NavPropEntr
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (json as any).value ?? [];
 
-    const entries: NavPropEntry[] = rels.map((r) => ({
+    const entries: NavPropEntry[] = rels.map(r => ({
       columnName: r.ReferencingAttribute,
       navPropName: r.ReferencingEntityNavigationPropertyName,
       referencedEntity: r.ReferencedEntity,
     }));
 
-    console.info(`[ProjectService] Nav-props for ${entityLogicalName}:`,
-      entries.map((e) => `${e.columnName} → ${e.navPropName} (→ ${e.referencedEntity})`));
+    console.info(
+      `[ProjectService] Nav-props for ${entityLogicalName}:`,
+      entries.map(e => `${e.columnName} → ${e.navPropName} (→ ${e.referencedEntity})`)
+    );
     _navPropCache[entityLogicalName] = entries;
     return entries;
   } catch (err) {
@@ -113,17 +116,13 @@ async function _discoverNavProps(entityLogicalName: string): Promise<NavPropEntr
  * When multiple relationships point to the same entity (e.g. two contact lookups),
  * use `columnHint` to disambiguate by matching a substring in the column name.
  */
-function _findNavProp(
-  entries: NavPropEntry[],
-  referencedEntity: string,
-  columnHint?: string,
-): string | undefined {
-  const matches = entries.filter((e) => e.referencedEntity === referencedEntity);
+function _findNavProp(entries: NavPropEntry[], referencedEntity: string, columnHint?: string): string | undefined {
+  const matches = entries.filter(e => e.referencedEntity === referencedEntity);
   if (matches.length === 0) return undefined;
   if (matches.length === 1) return matches[0].navPropName;
   // Multiple matches — use column hint to disambiguate
   if (columnHint) {
-    const hinted = matches.find((e) => e.columnName.includes(columnHint));
+    const hinted = matches.find(e => e.columnName.includes(columnHint));
     if (hinted) return hinted.navPropName;
   }
   return matches[0].navPropName;
@@ -158,7 +157,7 @@ export class ProjectService {
     try {
       const result = await this._dataService.retrieveMultipleRecords('sprk_projecttype_ref', query);
       console.info('[ProjectService] searchProjectTypes results:', result.entities.length);
-      return result.entities.map((e) => ({
+      return result.entities.map(e => ({
         id: e['sprk_projecttype_refid'] as string,
         name: e['sprk_name'] as string,
       }));
@@ -188,7 +187,7 @@ export class ProjectService {
     try {
       const result = await this._dataService.retrieveMultipleRecords('sprk_practicearea_ref', query);
       console.info('[ProjectService] searchPracticeAreas results:', result.entities.length);
-      return result.entities.map((e) => ({
+      return result.entities.map(e => ({
         id: e['sprk_practicearea_refid'] as string,
         name: e['sprk_practiceareaname'] as string,
       }));
@@ -219,7 +218,7 @@ export class ProjectService {
     try {
       const result = await this._dataService.retrieveMultipleRecords('contact', query);
       console.info('[ProjectService] searchContacts results:', result.entities.length);
-      return result.entities.map((e) => {
+      return result.entities.map(e => {
         const fullname = e['fullname'] as string;
         const email = e['emailaddress1'] as string | undefined;
         return {
@@ -253,7 +252,7 @@ export class ProjectService {
     try {
       const result = await this._dataService.retrieveMultipleRecords('sprk_organization', query);
       console.info('[ProjectService] searchOrganizations results:', result.entities.length);
-      return result.entities.map((e) => ({
+      return result.entities.map(e => ({
         id: e['sprk_organizationid'] as string,
         name: e['sprk_name'] as string,
       }));
@@ -271,9 +270,29 @@ export class ProjectService {
    * Uses navigation property discovery to resolve the correct OData
    * @odata.bind syntax for each lookup field.
    *
+   * BU cascade (FR-WIZ-02, fixes latent gap G2): when `cascadeDefaults` is provided,
+   * applies `sprk_containerid` AND `sprk_searchindexname` from the user's owning
+   * Business Unit to the create payload via
+   * {@link EntityCreationService.applyUserBuDefaults}. Both fields are guarded by
+   * INV-5 — explicit values pre-existing on the payload are preserved (never
+   * overwritten). Callers (typically `CreateProjectWizard.tsx`) resolve the
+   * defaults via {@link EntityCreationService.resolveUserBuDefaults}.
+   *
    * Returns ICreateProjectResult — never throws.
+   *
+   * @param formValues Form state captured by the wizard.
+   * @param cascadeDefaults Optional BU-derived defaults (containerId, searchIndexName).
+   *   When omitted/undefined the cascade step is a no-op (legacy behavior). New
+   *   wizard call sites pass the resolved value; tests can omit it.
+   *
+   * @see spec.md FR-WIZ-02
+   * @see spec.md FR-WIZ-08 (INV-5)
+   * @see design.md §5.0 (BU cascade source)
    */
-  async createProject(formValues: ICreateProjectFormState): Promise<ICreateProjectResult> {
+  async createProject(
+    formValues: ICreateProjectFormState,
+    cascadeDefaults?: IUserBuCascadeDefaults
+  ): Promise<ICreateProjectResult> {
     // Discover correct OData navigation property names from entity metadata.
     // Matches by referenced (target) entity to avoid hardcoding column names
     // which can differ between entities (e.g. sprk_mattertype vs sprk_projecttyperef).
@@ -295,23 +314,75 @@ export class ProjectService {
       entity['sprk_issecure'] = true;
     }
 
+    // FR-WIZ-02 / G2 latent-gap fix: cascade `sprk_containerid` AND
+    // `sprk_searchindexname` from the current user's owning Business Unit.
+    // INV-5 is enforced per-field by applyUserBuDefaults — explicit override
+    // values already on the payload are preserved.
+    if (cascadeDefaults) {
+      const applied = EntityCreationService.applyUserBuDefaults(entity, cascadeDefaults);
+      console.info('[ProjectService] BU cascade applied:', applied);
+    }
+
     // Add lookup bindings — match by referenced entity name (robust).
     // columnHint disambiguates when multiple lookups point to the same entity (e.g. contact).
-    const lookups: Array<{ referencedEntity: string; entitySet: string; guid: string; label: string; columnHint?: string }> = [];
+    const lookups: Array<{
+      referencedEntity: string;
+      entitySet: string;
+      guid: string;
+      label: string;
+      columnHint?: string;
+    }> = [];
     if (formValues.projectTypeId) {
-      lookups.push({ referencedEntity: 'sprk_projecttype_ref', entitySet: 'sprk_projecttype_refs', guid: formValues.projectTypeId, label: 'Project Type' });
+      lookups.push({
+        referencedEntity: 'sprk_projecttype_ref',
+        entitySet: 'sprk_projecttype_refs',
+        guid: formValues.projectTypeId,
+        label: 'Project Type',
+      });
     }
     if (formValues.practiceAreaId) {
-      lookups.push({ referencedEntity: 'sprk_practicearea_ref', entitySet: 'sprk_practicearea_refs', guid: formValues.practiceAreaId, label: 'Practice Area' });
+      lookups.push({
+        referencedEntity: 'sprk_practicearea_ref',
+        entitySet: 'sprk_practicearea_refs',
+        guid: formValues.practiceAreaId,
+        label: 'Practice Area',
+      });
     }
     if (formValues.assignedAttorneyId) {
-      lookups.push({ referencedEntity: 'contact', entitySet: 'contacts', guid: formValues.assignedAttorneyId, label: 'Attorney', columnHint: 'attorney' });
+      lookups.push({
+        referencedEntity: 'contact',
+        entitySet: 'contacts',
+        guid: formValues.assignedAttorneyId,
+        label: 'Attorney',
+        columnHint: 'attorney',
+      });
     }
     if (formValues.assignedParalegalId) {
-      lookups.push({ referencedEntity: 'contact', entitySet: 'contacts', guid: formValues.assignedParalegalId, label: 'Paralegal', columnHint: 'paralegal' });
+      lookups.push({
+        referencedEntity: 'contact',
+        entitySet: 'contacts',
+        guid: formValues.assignedParalegalId,
+        label: 'Paralegal',
+        columnHint: 'paralegal',
+      });
     }
     if (formValues.assignedOutsideCounselId) {
-      lookups.push({ referencedEntity: 'sprk_organization', entitySet: 'sprk_organizations', guid: formValues.assignedOutsideCounselId, label: 'Outside Counsel' });
+      lookups.push({
+        referencedEntity: 'sprk_organization',
+        entitySet: 'sprk_organizations',
+        guid: formValues.assignedOutsideCounselId,
+        label: 'Outside Counsel',
+      });
+    }
+
+    // Phase G: cascade BU's `sprk_ai_search_index` lookup onto the new Project.
+    if (cascadeDefaults?.searchIndexId) {
+      lookups.push({
+        referencedEntity: 'sprk_aisearchindex',
+        entitySet: 'sprk_aisearchindexes',
+        guid: cascadeDefaults.searchIndexId,
+        label: 'AI Search Index',
+      });
     }
 
     for (const lk of lookups) {
@@ -319,7 +390,9 @@ export class ProjectService {
       if (navProp) {
         entity[`${navProp}@odata.bind`] = `/${lk.entitySet}(${lk.guid})`;
       } else {
-        console.warn(`[ProjectService] No nav-prop found for ${lk.label} (referenced entity: ${lk.referencedEntity}) — skipping lookup binding`);
+        console.warn(
+          `[ProjectService] No nav-prop found for ${lk.label} (referenced entity: ${lk.referencedEntity}) — skipping lookup binding`
+        );
       }
     }
 

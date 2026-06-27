@@ -8,18 +8,7 @@
  * Dependencies are injected via props -- no solution-specific imports.
  */
 import * as React from 'react';
-import {
-  Text,
-  Input,
-  Textarea,
-  Dropdown,
-  Option,
-  Field,
-  Checkbox,
-  makeStyles,
-  tokens,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { Text, Input, Textarea, Dropdown, Option, Field, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from '../LookupField/LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
 import { searchUsersAsLookup } from './workAssignmentService';
@@ -76,12 +65,8 @@ const useStyles = makeStyles({
     gridTemplateColumns: '1fr 1fr',
     gap: tokens.spacingHorizontalM,
   },
-  todoCheckbox: {
-    color: tokens.colorNeutralForeground1,
-  },
-  todoCheckboxActive: {
-    color: tokens.colorBrandForeground1,
-  },
+  // Note (R3, task 031): `todoCheckbox` / `todoCheckboxActive` styles removed
+  // along with the "Add a 'To Do' Item" checkbox. See FR-15 / OS-1.
 });
 
 // ---------------------------------------------------------------------------
@@ -106,59 +91,39 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
     onFormValues(formValues);
   }, [formValues, onValidChange, onFormValues]);
 
-  const handleNameChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setFormValues((prev) => ({ ...prev, eventName: e.target.value }));
-    },
-    []
-  );
+  const handleNameChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormValues(prev => ({ ...prev, eventName: e.target.value }));
+  }, []);
 
-  const handleDescriptionChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setFormValues((prev) => ({ ...prev, eventDescription: e.target.value }));
-    },
-    []
-  );
+  const handleDescriptionChange = React.useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setFormValues(prev => ({ ...prev, eventDescription: e.target.value }));
+  }, []);
 
-  const handlePriorityChange = React.useCallback(
-    (_e: unknown, data: { optionValue?: string }) => {
-      const val = parseInt(data.optionValue ?? '100000001', 10);
-      setFormValues((prev) => ({ ...prev, eventPriority: val }));
-    },
-    []
-  );
+  const handlePriorityChange = React.useCallback((_e: unknown, data: { optionValue?: string }) => {
+    const val = parseInt(data.optionValue ?? '100000001', 10);
+    setFormValues(prev => ({ ...prev, eventPriority: val }));
+  }, []);
 
-  const handleDueDateChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setFormValues((prev) => ({ ...prev, eventDueDate: e.target.value }));
-    },
-    []
-  );
+  const handleDueDateChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormValues(prev => ({ ...prev, eventDueDate: e.target.value }));
+  }, []);
 
-  const handleFinalDueDateChange = React.useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setFormValues((prev) => ({ ...prev, eventFinalDueDate: e.target.value }));
-    },
-    []
-  );
+  const handleFinalDueDateChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormValues(prev => ({ ...prev, eventFinalDueDate: e.target.value }));
+  }, []);
 
-  const handleAssignedToChange = React.useCallback(
-    (item: ILookupItem | null) => {
-      setFormValues((prev) => ({
-        ...prev,
-        assignedToId: item?.id ?? '',
-        assignedToName: item?.name ?? '',
-      }));
-    },
-    []
-  );
+  const handleAssignedToChange = React.useCallback((item: ILookupItem | null) => {
+    setFormValues(prev => ({
+      ...prev,
+      assignedToId: item?.id ?? '',
+      assignedToName: item?.name ?? '',
+    }));
+  }, []);
 
-  const handleTodoChange = React.useCallback(
-    (_e: unknown, data: { checked: boolean | 'mixed' }) => {
-      setFormValues((prev) => ({ ...prev, addTodo: data.checked === true }));
-    },
-    []
-  );
+  // R3 (smart-todo-decoupling-r3, task 031): The `handleTodoChange` handler
+  // (formerly setting `formValues.addTodo`) was removed per FR-15 / OS-1.
+  // See `formTypes.ts` for the rationale — `sprk_event.sprk_todoflag` is
+  // being dropped from the schema in favor of first-class `sprk_todo`.
 
   const handleSearchUsers = React.useCallback(
     (query: string) => searchUsersAsLookup(dataService, query),
@@ -168,7 +133,7 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
   const assignedToValue: ILookupItem | null = formValues.assignedToId
     ? { id: formValues.assignedToId, name: formValues.assignedToName }
     : null;
-  const selectedPriorityText = PRIORITY_OPTIONS.find((o) => o.key === formValues.eventPriority)?.text ?? 'Normal';
+  const selectedPriorityText = PRIORITY_OPTIONS.find(o => o.key === formValues.eventPriority)?.text ?? 'Normal';
 
   return (
     <div className={styles.form}>
@@ -207,7 +172,7 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
             selectedOptions={[String(formValues.eventPriority)]}
             onOptionSelect={handlePriorityChange}
           >
-            {PRIORITY_OPTIONS.map((opt) => (
+            {PRIORITY_OPTIONS.map(opt => (
               <Option key={opt.key} value={String(opt.key)}>
                 {opt.text}
               </Option>
@@ -225,30 +190,21 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
 
       <div className={styles.row}>
         <Field label="Due Date">
-          <Input
-            type="date"
-            value={formValues.eventDueDate}
-            onChange={handleDueDateChange}
-          />
+          <Input type="date" value={formValues.eventDueDate} onChange={handleDueDateChange} />
         </Field>
         <Field label="Final Due Date">
-          <Input
-            type="date"
-            value={formValues.eventFinalDueDate}
-            onChange={handleFinalDueDateChange}
-          />
+          <Input type="date" value={formValues.eventFinalDueDate} onChange={handleFinalDueDateChange} />
         </Field>
       </div>
 
-      <Checkbox
-        checked={formValues.addTodo}
-        onChange={handleTodoChange}
-        label="Add a 'To Do' Item"
-        className={mergeClasses(
-          styles.todoCheckbox,
-          formValues.addTodo && styles.todoCheckboxActive
-        )}
-      />
+      {/*
+        R3 (smart-todo-decoupling-r3, task 031): The "Add a 'To Do' Item"
+        checkbox was removed per FR-15 / OS-1. The legacy implementation
+        wrote `sprk_event.sprk_todoflag=true`; that column is being dropped
+        from the schema. Companion To Dos are now first-class `sprk_todo`
+        records created via the CreateTodoWizard (which can set the new
+        event as its regarding record).
+      */}
     </div>
   );
 };
