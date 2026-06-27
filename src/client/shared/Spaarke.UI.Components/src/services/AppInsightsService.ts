@@ -21,7 +21,7 @@
  * @see spec FR-TEL-01
  */
 
-import { ApplicationInsights } from '@microsoft/applicationinsights-web';
+import { ApplicationInsights, SeverityLevel } from '@microsoft/applicationinsights-web';
 
 class AppInsightsServiceImpl {
   private _appInsights: ApplicationInsights | null = null;
@@ -97,6 +97,34 @@ class AppInsightsServiceImpl {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn(`[AppInsightsService] trackEvent('${name}') failed:`, err);
+    }
+  }
+
+  /**
+   * Track an exception with structured properties.
+   *
+   * Used by `reportClientError` (utils) to ship errors caught by
+   * AppErrorBoundary / WidgetErrorBoundary / safeRegister to App Insights.
+   * Renders in the App Insights "Failures" pane with proper stack-trace
+   * grouping.
+   *
+   * @param error      - The caught Error instance.
+   * @param properties - Optional structured property bag (no PII).
+   * @param severity   - SeverityLevel (default: Error).
+   */
+  public trackException(
+    error: Error,
+    properties?: Record<string, unknown>,
+    severity: SeverityLevel = SeverityLevel.Error
+  ): void {
+    if (!this._initialized || !this._appInsights) {
+      console.warn(`[AppInsightsService] trackException('${error.message}') called before initialize() — dropped.`);
+      return;
+    }
+    try {
+      this._appInsights.trackException({ exception: error, severityLevel: severity }, properties);
+    } catch (err) {
+      console.warn('[AppInsightsService] trackException failed:', err);
     }
   }
 

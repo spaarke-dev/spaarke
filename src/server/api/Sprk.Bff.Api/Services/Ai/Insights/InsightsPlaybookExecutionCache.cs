@@ -1,6 +1,7 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Telemetry;
 
@@ -74,18 +75,55 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
     /// </remarks>
     public const string DeclineToFindNodeName = "declineInsufficient";
 
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ILogger<InsightsPlaybookExecutionCache> _logger;
     private readonly InsightsCacheMetrics? _metrics;
+    private readonly TopicRegistryTtlLookup? _registryTtl;
+
+    // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
+    // spaarke:tenant:{tenantId}:insights-playbook:{hashKey}:v1
+    private const string CacheResource = "insights-playbook";
+    private const int CacheVersion = 1;
+
+    /// <summary>
+    /// Per-key semaphores for in-process concurrent-invocation dedup (r1 Insights Widgets task 053
+    /// / FR-22). When two requests arrive concurrently for the same
+    /// <c>(playbookId, subject, parameters, accessibleScopeHash)</c> key, the second waits on the
+    /// first to populate the cache, then re-reads Redis and returns the cached artifact instead of
+    /// invoking the engine a second time. This satisfies FR-22 within a single BFF instance; cross-
+    /// instance dedup would require a Redis-side distributed lock which is explicitly out of scope
+    /// per task 053 (audit DR-002 "do NOT add new cache abstraction" + ADR-010 DI minimalism).
+    ///
+    /// The dictionary is concurrent-safe and self-cleaning via TryRemove on the last waiter
+    /// (semaphore CurrentCount == 1 after release). Bounded by distinct hot-key cardinality
+    /// during the engine invocation window — typically &lt;100 entries even under load. Each
+    /// SemaphoreSlim is ~200 bytes; aggregate footprint negligible vs. the rest of the cache hot
+    /// path.
+    ///
+    /// NOT a new abstraction: this is private state on the existing concrete singleton; the
+    /// <see cref="IInsightsPlaybookExecutionCache"/> contract is unchanged.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _perKeyLocks = new();
 
     public InsightsPlaybookExecutionCache(
-        IDistributedCache cache,
+        ITenantCache cache,
         ILogger<InsightsPlaybookExecutionCache> logger,
-        InsightsCacheMetrics? metrics = null)
+        InsightsCacheMetrics? metrics = null,
+        TopicRegistryTtlLookup? registryTtl = null)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _metrics = metrics; // Optional — null in test scenarios that don't care about metrics
+
+        // Optional per-topic TTL lookup (r1 Insights Widgets task 052 / FR-21). When non-null,
+        // GetOrExecuteAsync resolves per-topic TTL from sprk_aitopicregistry.sprk_cachettlminutes
+        // for the playbook (in-process mirror, ≤5 min refresh window). When null OR the
+        // playbook has no registry entry, the cache falls back to DefaultTtl. The lookup is
+        // a sealed POCO (NOT a new interface seam — ADR-010 + audit DR-002 "do NOT add new
+        // cache abstraction"). It is registered alongside this cache in
+        // AnalysisServicesModule.AddInsightsCache, which runs only when the compound AI gate
+        // is ON (Endpoint↔DI Symmetry preserved per audit DR-008).
+        _registryTtl = registryTtl;
     }
 
     /// <inheritdoc />
@@ -100,17 +138,41 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
         var key = InsightsPlaybookCacheKey.Compose(
             request.PlaybookId, request.Subject, request.Parameters, request.AccessibleScopeHash);
 
-        var ttl = request.Ttl ?? DefaultTtl;
+        // TTL resolution precedence (per FR-21 / r1 Insights Widgets task 052):
+        //   1. Per-call override on the request (request.Ttl) — power-user / test path
+        //   2. Per-topic TTL from sprk_aitopicregistry.sprk_cachettlminutes via the
+        //      in-process mirror (TopicRegistryTtlLookup) — registry-driven default
+        //   3. DefaultTtl (5 min) — cache-level fallback when neither override applies
+        // The in-process mirror keeps this hot path Dataverse-free per task 052's
+        // "avoid per-call Dataverse lookup" constraint.
+        TimeSpan ttl;
+        if (request.Ttl.HasValue)
+        {
+            ttl = request.Ttl.Value;
+        }
+        else if (_registryTtl is not null)
+        {
+            var (found, registryTtl) = await _registryTtl
+                .TryGetTtlForPlaybookIdAsync(request.PlaybookId, cancellationToken)
+                .ConfigureAwait(false);
+            ttl = found ? registryTtl : DefaultTtl;
+        }
+        else
+        {
+            ttl = DefaultTtl;
+        }
+
         var ttlSeconds = (int)ttl.TotalSeconds;
 
-        // ---- HOT PATH: try Redis first (ADR-009) ----
+        // ---- HOT PATH: try Redis first (ADR-009 + FR-05 via ITenantCache wrapper) ----
         // Note: declines are NEVER cached (task 071), so any cached bytes deserialise to
         // an InsightArtifact only. A cache HIT therefore always means sufficient-evidence path.
         var sw = Stopwatch.StartNew();
-        byte[]? cachedBytes = null;
+        InsightArtifact? cached = null;
         try
         {
-            cachedBytes = await _cache.GetAsync(key, cancellationToken);
+            cached = await _cache.GetAsync<InsightArtifact>(
+                request.TenantId, CacheResource, key, CacheVersion, ct: cancellationToken);
         }
         catch (Exception ex)
         {
@@ -122,40 +184,71 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
         }
         sw.Stop();
 
-        if (cachedBytes is not null)
+        if (cached is not null)
         {
-            try
-            {
-                var cached = JsonSerializer.Deserialize<InsightArtifact>(cachedBytes);
-                if (cached is not null)
-                {
-                    _metrics?.RecordHit(request.PlaybookId, request.TenantId, ttlSeconds, sw.Elapsed.TotalMilliseconds);
-                    _logger.LogDebug(
-                        "Insights playbook cache HIT for playbook {PlaybookId}, subject {Subject}, key {Key}",
-                        request.PlaybookId, request.Subject, key);
-                    return InsightsEngineRunResult.FromArtifact(cached);
-                }
-
-                // Corrupt entry — log + treat as miss. Don't throw; we have a recovery path (re-run engine).
-                _logger.LogWarning(
-                    "Insights playbook cache returned non-null bytes but deserialisation produced null for key {Key}; treating as miss",
-                    key);
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex,
-                    "Insights playbook cache entry for key {Key} could not be deserialised; treating as miss and overwriting",
-                    key);
-            }
+            _metrics?.RecordHit(request.PlaybookId, request.TenantId, ttlSeconds, sw.Elapsed.TotalMilliseconds);
+            _logger.LogDebug(
+                "Insights playbook cache HIT for playbook {PlaybookId}, subject {Subject}, key {Key}",
+                request.PlaybookId, request.Subject, key);
+            return InsightsEngineRunResult.FromArtifact(cached);
         }
 
-        // ---- CACHE MISS: invoke the playbook engine ----
-        _metrics?.RecordMiss(request.PlaybookId, request.TenantId, ttlSeconds, sw.Elapsed.TotalMilliseconds);
-        _logger.LogDebug(
-            "Insights playbook cache MISS for playbook {PlaybookId}, subject {Subject}; invoking engine",
-            request.PlaybookId, request.Subject);
+        // ---- CACHE MISS: acquire per-key semaphore to dedup concurrent invocations (FR-22) ----
+        // Per task 053: simultaneous requests for the same (playbookId, subject, parameters,
+        // accessibleScopeHash) tuple MUST collapse to a single engine execution; the second
+        // observer must see the cached envelope produced by the first. We achieve this with a
+        // process-local SemaphoreSlim keyed on the same cache key — cheap, no new abstraction
+        // (audit DR-002), no new interface seam (ADR-010). Cross-instance dedup is explicitly
+        // out of scope for r1; short playbook TTLs + sticky-ish AppService routing make
+        // per-instance dedup the dominant win.
+        var perKeyLock = _perKeyLocks.GetOrAdd(key, _ => new SemaphoreSlim(1, 1));
+        await perKeyLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        InsightsEngineRunResult runResult;
+        try
+        {
+            // DOUBLE-CHECK: while we waited on the lock, the first invoker may have populated
+            // the cache. Re-read Redis; if HIT, return the cached artifact WITHOUT invoking the
+            // engine. This is the dedup payoff path for FR-22.
+            try
+            {
+                var raceCached = await _cache.GetAsync<InsightArtifact>(
+                    request.TenantId, CacheResource, key, CacheVersion, ct: cancellationToken).ConfigureAwait(false);
+                if (raceCached is not null)
+                {
+                    _metrics?.RecordHit(request.PlaybookId, request.TenantId, ttlSeconds, 0);
+                    _logger.LogDebug(
+                        "Insights playbook cache HIT after per-key lock acquisition (concurrent-dedup, FR-22) for playbook {PlaybookId}, subject {Subject}, key {Key}",
+                        request.PlaybookId, request.Subject, key);
+                    return InsightsEngineRunResult.FromArtifact(raceCached);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Same graceful-degradation policy as the primary GET — fall through to engine.
+                _logger.LogWarning(ex,
+                    "Insights playbook cache double-check GET failed for playbook {PlaybookId}; falling back to engine",
+                    request.PlaybookId);
+            }
 
-        var runResult = await DrainEngineStreamAsync(engineInvocation, cancellationToken);
+            // ---- TRUE CACHE MISS: invoke the playbook engine ----
+            _metrics?.RecordMiss(request.PlaybookId, request.TenantId, ttlSeconds, sw.Elapsed.TotalMilliseconds);
+            _logger.LogDebug(
+                "Insights playbook cache MISS for playbook {PlaybookId}, subject {Subject}; invoking engine",
+                request.PlaybookId, request.Subject);
+
+            runResult = await DrainEngineStreamAsync(engineInvocation, cancellationToken);
+        }
+        finally
+        {
+            perKeyLock.Release();
+            // Best-effort cleanup: remove the entry if no other waiters. Race-safe because
+            // TryRemove is no-op when another thread has already acquired the semaphore for
+            // a new request. Bounded growth of _perKeyLocks even under adversarial keys.
+            if (perKeyLock.CurrentCount == 1)
+            {
+                _perKeyLocks.TryRemove(new KeyValuePair<string, SemaphoreSlim>(key, perKeyLock));
+            }
+        }
 
         // Decline path: never cache (task 071). Evidence sufficiency depends on the current
         // state of the index; a cached decline becomes stale the moment a new Observation
@@ -184,12 +277,9 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
         var artifact = runResult.Artifact!;
         try
         {
-            var serialised = JsonSerializer.SerializeToUtf8Bytes(artifact);
             await _cache.SetAsync(
-                key,
-                serialised,
-                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = ttl },
-                cancellationToken);
+                request.TenantId, CacheResource, key, CacheVersion,
+                artifact, ttl, ct: cancellationToken);
 
             _logger.LogDebug(
                 "Cached InsightArtifact for playbook {PlaybookId}, subject {Subject}, TTL={TtlSeconds}s",
@@ -218,7 +308,7 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
         var key = InsightsPlaybookCacheKey.Compose(playbookId, subject, parameters, accessibleScopeHash);
         try
         {
-            await _cache.RemoveAsync(key, cancellationToken);
+            await _cache.RemoveAsync(tenantId, CacheResource, key, CacheVersion, ct: cancellationToken);
             _metrics?.RecordEviction(playbookId, tenantId);
             _logger.LogDebug(
                 "Evicted Insights playbook cache entry for playbook {PlaybookId}, subject {Subject}, key {Key}",

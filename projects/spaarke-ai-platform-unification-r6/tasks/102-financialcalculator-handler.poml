@@ -1,0 +1,215 @@
+<task id="102" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-H-02 `FinancialCalculatorHandler` (FR-18, Wave 1 — Pure Deterministic)</title>
+    <phase>Parallel — 8 Typed Tool Handlers</phase>
+    <status>completed</status>
+    <estimated-effort>6 hours</estimated-effort>
+    <dependencies>100</dependencies>
+    <blocks>105, 106, 107, 108, 109</blocks>
+    <tags>bff-api, ai, handler</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF handler implementation; financial math correctness has high blast radius; FULL quality gates required.</rigor-reason>
+    <parallel-group>H-G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Wave 1 pure-deterministic handler; independent of 101/103/104; touches its own files only.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build `FinancialCalculatorHandler` — a pure-deterministic `IToolHandler` implementation
+    per FR-18 that performs financial math on extracted figures. Examples: sum a list of
+    line-item amounts; compute tax (rate × subtotal); compute discount (subtotal − rate ×
+    subtotal); convert currencies (using a fixed FX-rate table from `sprk_configuration`,
+    NOT a live FX call); compute weighted averages; aggregate by category. NO LLM call.
+    NO Azure OpenAI dependency. Pure C# `decimal` arithmetic (NEVER `double` for money).
+
+    Handler registers via auto-discovery per task 100's contract — implements `IToolHandler`;
+    `HandlerId = "FinancialCalculatorHandler"`; lives in
+    `Services/Ai/Handlers/FinancialCalculatorHandler.cs`. Requires corresponding
+    `sprk_analysistool` row with `sprk_handlerclass = "FinancialCalculatorHandler"` +
+    `sprk_configuration` JSON specifying `supportedCurrencies`, `fxRateTable` (currency-pair
+    keyed), `defaultRoundingMode` (e.g., BankersRounding), `decimalPrecision` (default 2).
+
+    Configurable behavior per FR-18 acceptance: handler accepts optional configuration
+    from the tool row; output is identical for identical input + same config. All money
+    math uses `decimal`. Telemetry per ADR-015.
+
+    Tests: contract test + positive cases (sum, tax, discount, currency conversion,
+    weighted avg, aggregation) + error cases (negative amount where forbidden, unknown
+    currency code, division by zero) + config-driven test (different rounding modes
+    produce different deterministic outputs).
+  </prompt>
+
+  <role>
+    Senior BFF engineer with .NET 8 + financial-math experience. Understands `decimal`
+    vs `double` for money, banker's rounding, ISO 4217 currency codes, and the
+    correctness consequences of FX precision.
+  </role>
+
+  <goal>
+    `FinancialCalculatorHandler.cs` implemented in `Services/Ai/Handlers/`; auto-discovered;
+    `sprk_analysistool` row deployed with `sprk_handlerclass = "FinancialCalculatorHandler"`;
+    unit tests cover positive + error + config-driven cases including all standard
+    financial operations; ZERO LLM/Azure-OpenAI dependencies; all money math uses
+    `decimal`; BFF publish-size delta ≤+0.5 MB; `code-review` + `adr-check` green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="handler-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+    <file purpose="existing-handler-example">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    <file purpose="handler-conventions">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/HandlerRegistrationConventions.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — handler picked up via auto-discovery; ZERO manual DI line outside `AnalysisServicesModule`.</constraint>
+    <constraint source="ADR-013">Handler lives in `Services/Ai/Handlers/`; no direct CRUD-side injection.</constraint>
+    <constraint source="ADR-015">Telemetry logs handler name + execution outcome + timestamp ONLY; never user input content. Money values are user input — do NOT log them.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta measured + reported; per-task ≤+0.5 MB target.</constraint>
+    <constraint source="spec FR-18">Handler MUST be pure deterministic — NO LLM call, NO Azure OpenAI dependency; currencies configurable via `sprk_configuration`.</constraint>
+    <constraint source="spec NFR-02">R6 BFF publish-size budget ≤+5 MB total.</constraint>
+    <constraint source="project CLAUDE.md Pillar 2">Implements `IToolHandler`; auto-discovered; corresponding `sprk_analysistool` row required.</constraint>
+    <constraint source="money-math binding">All monetary computations MUST use `decimal` (never `double` / `float`). Banker's rounding default; configurable via `sprk_configuration`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/typed-handler-deterministic</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      `FinancialCalculatorHandler` performs deterministic financial computations on
+      structured numeric input — typically extracted line items from an invoice or
+      contract by an upstream `EntityExtractorHandler` or `InvoiceExtractionToolHandler`.
+      Because the math is pure, the handler is fast, testable, and audit-friendly
+      (auditors can replay calculations on identical inputs and get identical outputs).
+
+      The handler is distinct from `FinancialCalculationToolHandler` (task 104) which
+      handles formula-driven calculations (rate × principal × time). This handler is
+      for aggregation + tax/discount/FX math on already-extracted figures.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/FinancialCalculatorHandler.cs (NEW)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/FinancialCalculatorHandlerTests.cs (NEW)</file>
+      <file>infra/dataverse/sprk_analysistool-financial-calculator-row.json (NEW)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-102-deployment-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Task 100 — handler infrastructure. Hard dependency.</item>
+      <item>Sibling Wave 1 tasks 101, 103, 104 — parallel-safe.</item>
+      <item>Task 109 — dispatch test exercises this handler.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. If &gt;70%, run `context-handoff` then `/compact`. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: New BFF handler; financial math correctness; Pillar 2 binding rule; FR-18
+      📖 PROTOCOL STEPS TO EXECUTE: all 11 steps below including Step 9.5 quality gates
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read `tasks/TASK-INDEX.md`; confirm 102 is 🔲; dependency 100 is complete.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every file in &lt;inputs&gt; and &lt;knowledge&gt;. Extract from
+      `HandlerRegistrationConventions.md` (created by task 100) the 4-point contract.
+    </step>
+    <step order="3" name="Design Handler Surface">
+      Define: `HandlerId = "FinancialCalculatorHandler"`; supported operations enum
+      (Sum, Tax, Discount, FxConvert, WeightedAvg, AggregateByCategory); `ConfigSchema`
+      with `supportedCurrencies`, `fxRateTable`, `defaultRoundingMode`, `decimalPrecision`.
+      NO `IOpenAiClient` dependency.
+    </step>
+    <step order="4" name="Implement Handler">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/FinancialCalculatorHandler.cs`.
+      All money math uses `decimal`. Implement each operation with explicit rounding mode.
+      FX conversion uses the configured `fxRateTable` ONLY — no live FX calls. Validate
+      input figures are non-null + appropriately signed per operation.
+    </step>
+    <step order="5" name="Author Unit Tests">
+      Create `FinancialCalculatorHandlerTests.cs` using `TypedToolHandlerTestFixture`.
+      Cover: contract test; positive (sum, tax = 8.25% × subtotal rounded banker, discount
+      10%, USD→EUR FX, weighted avg, aggregate by category); error (unknown currency,
+      negative tax rate, division by zero, missing fxRateTable entry); config-driven
+      (BankersRounding vs MidpointAwayFromZero produce different deterministic outputs);
+      telemetry compliance.
+    </step>
+    <step order="6" name="Seed sprk_analysistool Row">
+      Create `infra/dataverse/sprk_analysistool-financial-calculator-row.json` with
+      `sprk_handlerclass = "FinancialCalculatorHandler"`, `sprk_toolcode = "FIN-CALC@v1"`,
+      sample `sprk_configuration`, `AvailableInContexts = "Playbook"`. Deploy to Spaarke
+      Dev. Capture evidence.
+    </step>
+    <step order="7" name="Verify Build + Tests">
+      `dotnet build` + targeted `dotnet test --filter "FinancialCalculatorHandler"`. Both
+      pass. Auto-discovery verification picks up handler.
+    </step>
+    <step order="8" name="Verify BFF Publish-Size Delta">
+      `dotnet publish -c Release ... -o deploy/api-publish/`. Report absolute + diff vs
+      baseline. Target ≤+0.5 MB.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through criteria; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Both MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task status `complete`; TASK-INDEX 102 🔲 → ✅; reset `current-task.md`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF + run tests + publish for size</tool>
+    <tool name="pac">Deploy seed row</tool>
+    <tool name="git">Commit</tool>
+    <tool name="dataverse-deploy">Deploy seed row</tool>
+    <tool name="code-review">FULL-rigor quality gate</tool>
+    <tool name="adr-check">FULL-rigor quality gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/FinancialCalculatorHandler.cs (NEW)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/FinancialCalculatorHandlerTests.cs (NEW)</output>
+    <output type="infrastructure">infra/dataverse/sprk_analysistool-financial-calculator-row.json (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-102-deployment-evidence.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (102 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`FinancialCalculatorHandler.cs` exists, implements `IToolHandler`, contains ZERO references to `IOpenAiClient` or Azure OpenAI.</criterion>
+    <criterion testable="true">All monetary computation uses `decimal` (no `double` / `float` in money paths) — grep verifiable.</criterion>
+    <criterion testable="true">Handler is auto-discovered per `AutoDiscoveryVerificationTests`.</criterion>
+    <criterion testable="true">`sprk_analysistool` row deployed with `sprk_handlerclass = "FinancialCalculatorHandler"`.</criterion>
+    <criterion testable="true">Unit tests pass: contract, positive (sum/tax/discount/FX/weighted-avg/aggregate), error (unknown currency, negative tax, missing FX rate), config-driven (rounding mode swap), telemetry (ADR-015).</criterion>
+    <criterion testable="true">Deterministic property verified — identical input + identical config → identical output.</criterion>
+    <criterion testable="true">BFF build succeeds.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤+0.5 MB; recorded.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` both pass.</criterion>
+  </acceptance-criteria>
+</task>

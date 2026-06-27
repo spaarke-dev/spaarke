@@ -1,0 +1,106 @@
+<task id="CICD-080" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Codify build-vs-maintain criteria: extend ADR-038 + .claude/constraints/testing.md + tests/CLAUDE.md with ≥10 new scaffolding-test bans</title>
+    <status>complete</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2.5 - Build-vs-maintain codification</phase>
+    <stream>B - Test reset (extended)</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies></dependencies>
+    <blocks>082</blocks>
+    <tags>testing, codification, ADR, directive-rewrite, build-vs-maintain</tags>
+    <execution-note>Modifies .claude/ AND docs/adr/ AND tests/CLAUDE.md — MUST run in main session</execution-note>
+  </metadata>
+
+  <prompt>
+    Per spec FR-B08 (added 2026-06-26 per owner-directed scope expansion): codify the build-vs-maintain criteria as a binding standard. Author ≥10 new scaffolding-test bans beyond the current 3-pattern list (Mock&lt;HttpMessageHandler&gt;, DI-registration, ctor null-checks). Each ban: concrete C# example + one-line "why it's scaffolding" rationale + acceptable alternative. Codified in three locations: ADR-038 (extension or new sibling ADR-039), .claude/constraints/testing.md MUST NOT rules, tests/CLAUDE.md Banned Antipatterns section. Industry references: Kent Beck "delete the scaffolding"; Michael Feathers characterization-vs-behavior; Google test-sizes; DHH/37signals less-tests.
+  </prompt>
+
+  <role>Test architecture engineer codifying judgment-based criteria as a binding standard.</role>
+
+  <goal>Three documents updated with the broader ban list; each scaffolding pattern has a concrete C# example + rationale + alternative. The standard is the input for task 082 (re-inventory) classifier.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md (FR-B08)</file>
+    <file purpose="existing-ADR">docs/adr/ADR-038-testing-strategy.md</file>
+    <file purpose="existing-constraint">.claude/constraints/testing.md</file>
+    <file purpose="existing-directive">tests/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="root-CLAUDE-3">Modifies `.claude/` AND root files — MUST run in main session, not sub-agent.</constraint>
+    <constraint source="spec FR-B08">Minimum 10 new scaffolding-test bans beyond the current 3. Each with: (1) signature/pattern description, (2) concrete C# example showing the antipattern, (3) one-line "why it's scaffolding" rationale, (4) acceptable alternative example.</constraint>
+    <constraint source="spec FR-B07">FULL rigor — Step 9.5 code-review + adr-check binding on all 3 files.</constraint>
+    <constraint source="project autonomous">Cite Beck, Feathers, Google test-sizes, DHH where relevant for any ban.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Industry consensus on scaffolding vs maintain tests</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md (current — extend or supplement)</file>
+      <file>.claude/constraints/testing.md (current — extend MUST NOT block)</file>
+      <file>tests/CLAUDE.md (current — extend Banned Antipatterns section)</file>
+      <file>projects/ci-cd-unit-test-remediation-r1/spec.md FR-B08</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Draft the ≥10 new scaffolding-test bans. Suggested categories (operator-confirmed list 2026-06-26):
+      (1) Mirror tests (test code 1:1 with production code)
+      (2) Tests-with-all-mocks-and-trivial-assertion (assertion count ≤ 2, all collaborators mocked)
+      (3) Internal/private method tests (via InternalsVisibleTo or reflection)
+      (4) Pass-through wrapper tests (testing trivial delegation)
+      (5) Coverage-fillers (tests added solely to push coverage % up)
+      (6) Language-feature redundancy tests (testing what the type system enforces)
+      (7) Snapshot tests of trivial output (e.g., JSON serializer round-trip)
+      (8) Tests whose name doesn't describe behavior (e.g., `MethodName_Test1`)
+      (9) Tests of types the type system enforces (e.g., enum exhaustiveness when language uses sealed enums)
+      (10) Tests where assertion count &lt; setup line count by &gt;10× (mostly setup, no signal)
+      (11) Bonus: Constructor-arg type-correctness tests when ArgumentNullException.ThrowIfNull is used
+      (12) Bonus: Tests of pure getters/setters/auto-properties
+    </step>
+    <step order="2">For each ban: write concrete C# example (BAD) + acceptable alternative (GOOD) + one-line "why scaffolding" rationale.</step>
+    <step order="3">Update ADR-038 — add new section "Build-vs-Maintain Criteria (Scaffolding Test Bans)" with the full list. Cross-reference Beck/Feathers/Google/DHH.</step>
+    <step order="4">Update `.claude/constraints/testing.md` MUST NOT rules — extend with the new bans, each one-liner with link back to ADR-038 for full example. Update document version note + Last Reviewed date.</step>
+    <step order="5">Update `tests/CLAUDE.md` "Banned Antipatterns" section — add the new bans with the C# examples inline (this is the Claude-session-loaded directive; needs the most concrete examples).</step>
+    <step order="6">Add a new section to tests/CLAUDE.md: "Expect to defend at project close — if your test can't be defended as integrate/maintain class, it gets deleted in the /test-diet pass." This is the cultural framing.</step>
+    <step order="7">Step 9.5: invoke code-review + adr-check on all 3 modified files. Verify ≥10 bans present with examples.</step>
+  </steps>
+
+  <outputs>
+    <output type="adr">docs/adr/ADR-038-testing-strategy.md (extended)</output>
+    <output type="constraint">.claude/constraints/testing.md (extended MUST NOT)</output>
+    <output type="directive">tests/CLAUDE.md (extended Banned Antipatterns + new "expect to defend" section)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ADR-038 contains a "Build-vs-Maintain Criteria" section with ≥10 new bans (in addition to original 3)</criterion>
+    <criterion testable="true">Each ban has: signature + concrete C# BAD example + acceptable GOOD alternative + rationale</criterion>
+    <criterion testable="true">.claude/constraints/testing.md MUST NOT block extends with the bans (one-liner per ban)</criterion>
+    <criterion testable="true">tests/CLAUDE.md Banned Antipatterns section extends; new "expect to defend at project close" section added</criterion>
+    <criterion testable="true">All 3 documents cross-reference each other and ADR-038</criterion>
+    <criterion testable="true">Industry references (Beck, Feathers, Google, DHH) cited at least once across the artifacts</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check pass on all 3 files</criterion>
+  </acceptance-criteria>
+
+  <notes status="completion-2026-06-26">
+    Executed in main session per parallel-safe=false (.claude/ + docs/adr/ + tests/CLAUDE.md modifications).
+
+    **Deliverables**:
+    - `docs/adr/ADR-038-testing-strategy.md` — added §7 "Build-vs-Maintain Criteria (Scaffolding-Test Bans)" with 12 new bans (B6-B17), each containing signature + BAD/GOOD C# examples + one-line rationale. Summary table of all 17 bans. Industry references: Beck, Feathers, Google test-sizes, DHH.
+    - `.claude/constraints/testing.md` — extended "Banned wiring-test antipatterns" section from 5 to 17 (renamed to "Banned scaffolding-test antipatterns"). B6-B17 are one-liners with link to ADR-038 §7 for full examples.
+    - `tests/CLAUDE.md` — extended "Banned Antipatterns" from 5 to 17 with C# examples inline. New "Expect to Defend at Project Close" section added with build-vs-maintain table + three-question test.
+
+    **Bans codified (12)**:
+    B6 Mirror tests · B7 All-mocks+trivial-assertion · B8 Internal/private method tests · B9 Pass-through wrappers · B10 Coverage-fillers · B11 Language-feature redundancy · B12 Snapshot-of-trivial-output · B13 Names-without-scenario+expected · B14 Exhaustive-switch coverage · B15 Setup-to-assertion ratio &gt;10:1 · B16 Pure getter/setter · B17 Generated-code field-by-field.
+
+    **Quality gates (BINDING per FR-B07)**:
+    - code-review: PASS (structure consistent, BAD/GOOD pairs self-contained)
+    - adr-check: PASS (ADR-038 §7 internally consistent; ADR-022 untouched)
+    - Lint: N/A (markdown only)
+
+    **Outputs feed**: Task 082 uses this list as classifier for the broader test inventory. Task 081 (`/test-diet` skill) uses this list as canonical reference. Tasks 083-085 use this list as their deletion criteria.
+  </notes>
+</task>

@@ -1,0 +1,114 @@
+<task id="089" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>Phase D Exit-Gate Validation — 5 Exit Criteria from spec §Phase D</title>
+    <phase>Phase D — Command Router + Integration + Closeout</phase>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <dependencies>088</dependencies>
+    <blocks>090</blocks>
+    <tags>docs, project-mgmt</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Validation-only exit gate; checklist walk-through; no code change; MINIMAL per task-create Step 0 rigor tree.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential; aggregates all Phase D outputs and is the final gate before project wrap-up (090).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Validate Phase D exit per spec.md §Success Criteria → Phase D Exit Criteria (5 bullets):
+
+    1. `/help` works and discoverable — confirmed by task 081 (drawer) + task 085 (input-bar
+       affordance).
+    2. Hard slashes bypass LLM (&lt;100ms latency; no Azure OpenAI request) — confirmed by
+       task 081 unit tests + vertical-slice run.
+    3. Soft slashes route via agent with prioritized intent — confirmed by task 082 +
+       vertical-slice run.
+    4. References resolve at parse time — confirmed by task 083 + vertical-slice run.
+    5. All R6 changes have integration test coverage (vertical-slice validation per §6) —
+       confirmed by task 087.
+
+    This is a documentation + checklist task. Walk through each exit criterion + cite the
+    evidence file/test. Update plan.md milestone status. Sign off on Phase D completion.
+
+    NO code change. BFF publish-size delta = 0 MB.
+  </prompt>
+
+  <role>
+    Project-management documentation engineer. Comfortable with checklist validation +
+    cross-referencing evidence files across multiple completed tasks.
+  </role>
+
+  <goal>
+    Phase D exit checklist complete; all 5 criteria signed off with evidence citations.
+    plan.md Phase D milestone status updated to ✅. Project ready for wrap-up task 090.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec §Phase D Exit Criteria">5 binding criteria must be satisfied with evidence cited.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB (validation-only task).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-mgmt/phase-exit-gate</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Exit-gate checklist shape" location="projects/spaarke-ai-platform-unification-r6/notes/phase-d-exit-checklist.md (new)">
+        Each criterion: bullet + evidence file path + ✅/❌ + sign-off date.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context. Output: "🔒 RIGOR LEVEL: MINIMAL — Phase D exit-gate validation; documentation + checklist only".
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 089 status is 🔲, dep 088 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Evidence">
+      Confirm tasks 080–088 are all ✅ in TASK-INDEX.md. Pull evidence file paths per the 5 exit criteria.
+    </step>
+    <step order="3" name="Author Exit Checklist">
+      Create `projects/spaarke-ai-platform-unification-r6/notes/phase-d-exit-checklist.md` with the 5 criteria, evidence citations, ✅ marks, today's date.
+    </step>
+    <step order="4" name="Update plan.md">
+      Mark Phase D milestone ✅ in plan.md §3 Phase Structure. No other plan changes.
+    </step>
+    <step order="5" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below.
+    </step>
+    <step order="6" name="Document + Complete">
+      Update task POML status. Update TASK-INDEX.md: 089 🔲 → ✅. Reset `current-task.md` to 090 (wrap-up). Report Phase D complete + ready for project wrap-up.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Stage + commit exit-checklist + plan.md update</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/notes/phase-d-exit-checklist.md (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/plan.md (MODIFIED — Phase D ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 089 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset to task 090)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`phase-d-exit-checklist.md` exists with 5 criteria, each ✅ + evidence file cited.</criterion>
+    <criterion testable="true">plan.md Phase D milestone marked ✅.</criterion>
+    <criterion testable="true">All tasks 080–088 marked ✅ in TASK-INDEX.md (verified).</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB.</criterion>
+  </acceptance-criteria>
+</task>

@@ -57,6 +57,20 @@
           ]
         },
         {
+          "id": "CreateTodoTaskpaneRuntime",
+          "type": "general",
+          "code": {
+            "page": "https://localhost:3000/outlook/taskpane.html?action=createTodo"
+          },
+          "lifetime": "short",
+          "actions": [
+            {
+              "id": "openCreateTodoTaskpane",
+              "type": "openPage"
+            }
+          ]
+        },
+        {
           "id": "CommandRuntime",
           "type": "general",
           "code": {
@@ -128,6 +142,30 @@
                         "description": "Save this email and its attachments to Spaarke Document Management System"
                       },
                       "actionId": "openTaskPane"
+                    },
+                    {
+                      "id": "CreateTodoButton",
+                      "type": "button",
+                      "label": "Create To Do",
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://localhost:3000/assets/icon-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://localhost:3000/assets/icon-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://localhost:3000/assets/icon-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Create Spaarke To Do",
+                        "description": "Create a Spaarke To Do linked to this email (smart-todo-decoupling-r3 FR-27)"
+                      },
+                      "actionId": "openCreateTodoTaskpane"
                     }
                   ]
                 }

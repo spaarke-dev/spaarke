@@ -1,0 +1,71 @@
+<task id="R3-001" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Register `default` Handlebars helper in TemplateEngine.cs</title>
+    <status>complete</status>
+    <phase>P1</phase>
+    <parallel-group>none (predecessor for 002, 003, 004)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>1-2h</estimated-effort>
+    <tags>bff-api,playbook-engine,handlebars,template-engine</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngineTests.cs</file>
+    </relevant-files>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Register a `default` Handlebars helper in TemplateEngine.cs to replace the broken `??` operator usage in playbook configs.
+    Source: spec.md FR-3H1.1, AC-H1.1; design.md Part 3 Workstream H1.
+  </prompt>
+
+  <role>Senior .NET developer familiar with Handlebars.NET and Spaarke playbook engine</role>
+
+  <goal>
+    `{{default X 'Y'}}` returns `X` if non-empty, else `'Y'`. Helper registered in TemplateEngine constructor. Unit tests cover: non-empty X → X; empty X → Y; null X → Y; missing X → Y.
+  </goal>
+
+  <constraints>
+    <constraint source="ADR-013">AI architecture — extend existing TemplateEngine, do not create parallel engine</constraint>
+    <constraint source="bff-extensions.md §A">Pre-merge checklist applies (BFF-touching task)</constraint>
+    <constraint source="NFR-01">Verify BFF publish-size delta after change; report in PR description</constraint>
+    <constraint source="NFR-03">Unit tests mandatory for new public surface</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>handlebars-helper-registration</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check + load CLAUDE.md + spec.md FR-3H1.1</step>
+    <step order="1">Read TemplateEngine.cs to find helper-registration block</step>
+    <step order="2">Add `_handlebars.RegisterHelper("default", ...)` per spec.md Workstream H1 code snippet</step>
+    <step order="3">Add unit tests in TemplateEngineTests.cs covering 4 scenarios</step>
+    <step order="4">Build + run tests; verify all pass</step>
+    <step order="5">Capture BFF publish-size; report delta vs baseline in task notes</step>
+    <step order="6">Update task status; checkpoint</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs (modified)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngineTests.cs (modified or created)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`{{default "X" "Y"}}` renders "X"</criterion>
+    <criterion testable="true">`{{default "" "Y"}}` renders "Y"</criterion>
+    <criterion testable="true">`{{default null "Y"}}` renders "Y"</criterion>
+    <criterion testable="true">`{{default undefinedVar "Y"}}` renders "Y"</criterion>
+    <criterion testable="true">All unit tests pass; `dotnet build` succeeds</criterion>
+    <criterion testable="true">BFF publish-size delta reported (NFR-01)</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,11 +1,11 @@
 using System.Diagnostics;
-using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Crm.Sdk.Messages;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Services.Dataverse.Privileges;
 
@@ -24,35 +24,53 @@ namespace Sprk.Bff.Api.Services.Dataverse.Privileges;
 ///   <item><description>Fails closed on Dataverse errors (returns empty set) and logs a warning. Cache failures are graceful.</description></item>
 /// </list>
 /// <para>
-/// Cache backend: shared <see cref="IDistributedCache"/> (Redis in production), matching the
-/// <c>GraphMetadataCache</c> precedent. Key shape:
-/// <c>sdap:dv:privilege:{userOid}:set</c>. Value: JSON-serialised <see cref="HashSet{T}"/> of strings.
+/// Cache backend: <see cref="ITenantCache"/> wrapping Redis (FR-05 / NFR-08).
+/// On-wire key shape: <c>tenant:{tenantId}:privileges:{userOid:D}:v1</c>.
+/// Value: JSON-serialised <see cref="HashSet{T}"/> of strings.
 /// </para>
 /// </remarks>
 internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
 {
+    /// <summary>
+    /// Cache resource label (per ITenantCache contract). On-wire key:
+    /// <c>tenant:{tenantId}:privileges:{userOid:D}:v1</c>.
+    /// </summary>
+    internal const string CacheResource = "privileges";
+
+    /// <summary>Cache schema version per ADR-009.</summary>
+    private const int CacheVersion = 1;
+
     private readonly IDataverseService _dataverseService;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly ILogger<UserPrivilegeChecker> _logger;
 
     // Per task 010 §6: 6-hour sliding TTL, 24-hour absolute maximum.
+    // ITenantCache supports only absolute TTL; preserve the 24-hour bound.
     private static readonly TimeSpan SlidingExpiration = TimeSpan.FromHours(6);
     private static readonly TimeSpan AbsoluteExpiration = TimeSpan.FromHours(24);
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     public UserPrivilegeChecker(
         IDataverseService dataverseService,
-        IDistributedCache cache,
-        ILogger<UserPrivilegeChecker> logger)
+        ITenantCache cache,
+        ILogger<UserPrivilegeChecker> logger,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _httpContextAccessor = httpContextAccessor;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    /// <summary>
+    /// Resolves the tenant ID for tenant-scoped cache keys (FR-05).
+    /// Reads the AAD <c>tid</c> claim from the current HttpContext per ADR-028;
+    /// falls back to <c>"anonymous"</c> when no HttpContext is available.
+    /// </summary>
+    private string GetTenantId()
+        => _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
+            ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? "anonymous";
 
     /// <inheritdoc />
     public async Task<bool> HasReadPrivilegeAsync(Guid userOid, string entityLogicalName, CancellationToken ct)
@@ -75,10 +93,11 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
             return EmptySet();
         }
 
-        var cacheKey = $"sdap:dv:privilege:{userOid:D}:set";
+        var tenantId = GetTenantId();
+        var cacheId = userOid.ToString("D");
 
         // Cache read (graceful — failures fall through to Dataverse).
-        var cached = await TryGetFromCacheAsync(cacheKey, ct);
+        var cached = await TryGetFromCacheAsync(tenantId, cacheId, ct);
         if (cached is not null)
         {
             _logger.LogDebug("Privilege cache HIT for user {UserOid} ({Count} readable entities)", userOid, cached.Count);
@@ -90,7 +109,7 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
         var fetched = await FetchReadablePrivilegesAsync(userOid, ct);
 
         // Cache write (graceful — failures don't break the request).
-        await TrySetInCacheAsync(cacheKey, fetched, ct);
+        await TrySetInCacheAsync(tenantId, cacheId, fetched, ct);
 
         return fetched;
     }
@@ -297,51 +316,57 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
         }
     }
 
-    private async Task<IReadOnlySet<string>?> TryGetFromCacheAsync(string cacheKey, CancellationToken ct)
+    private async Task<IReadOnlySet<string>?> TryGetFromCacheAsync(string tenantId, string cacheId, CancellationToken ct)
     {
         try
         {
-            var cached = await _cache.GetStringAsync(cacheKey, ct);
+            var cached = await _cache.GetAsync<HashSet<string>>(
+                tenantId,
+                CacheResource,
+                cacheId,
+                CacheVersion,
+                ct: ct);
             if (cached is null)
             {
                 return null;
             }
 
-            var deserialised = JsonSerializer.Deserialize<HashSet<string>>(cached, JsonOptions);
-            if (deserialised is null)
-            {
-                return null;
-            }
-
             // Rebuild with case-insensitive comparer (JSON deserialisation drops the comparer).
-            return new HashSet<string>(deserialised, StringComparer.OrdinalIgnoreCase);
+            return new HashSet<string>(cached, StringComparer.OrdinalIgnoreCase);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read privilege cache for key {Key}; falling back to Dataverse", cacheKey);
+            _logger.LogWarning(ex, "Failed to read privilege cache for tenant={TenantId} id={CacheId}; falling back to Dataverse", tenantId, cacheId);
             return null;
         }
     }
 
-    private async Task TrySetInCacheAsync(string cacheKey, IReadOnlySet<string> value, CancellationToken ct)
+    private async Task TrySetInCacheAsync(string tenantId, string cacheId, IReadOnlySet<string> value, CancellationToken ct)
     {
         try
         {
-            var json = JsonSerializer.Serialize(value, JsonOptions);
-            var options = new DistributedCacheEntryOptions
-            {
-                SlidingExpiration = SlidingExpiration,
-                AbsoluteExpirationRelativeToNow = AbsoluteExpiration
-            };
+            // ITenantCache supports only absolute TTL (no SlidingExpiration); preserve
+            // the 24-hour absolute bound from task 010 §6. SlidingExpiration retained
+            // as a named field for future reference; not enforced by ITenantCache today.
+            _ = SlidingExpiration;
+            // Serialize as a plain HashSet — case-insensitive comparer is rebuilt on read.
+            var payload = new HashSet<string>(value, StringComparer.Ordinal);
 
-            await _cache.SetStringAsync(cacheKey, json, options, ct);
+            await _cache.SetAsync(
+                tenantId,
+                CacheResource,
+                cacheId,
+                CacheVersion,
+                payload,
+                AbsoluteExpiration,
+                ct: ct);
             _logger.LogDebug(
-                "Cached privilege set for key {Key} (sliding={Sliding}, absolute={Absolute})",
-                cacheKey, SlidingExpiration, AbsoluteExpiration);
+                "Cached privilege set for tenant={TenantId} id={CacheId} (absolute={Absolute})",
+                tenantId, cacheId, AbsoluteExpiration);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to write privilege cache for key {Key}; continuing without cache", cacheKey);
+            _logger.LogWarning(ex, "Failed to write privilege cache for tenant={TenantId} id={CacheId}; continuing without cache", tenantId, cacheId);
         }
     }
 

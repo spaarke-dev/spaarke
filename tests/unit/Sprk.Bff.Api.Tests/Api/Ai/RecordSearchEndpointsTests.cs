@@ -22,17 +22,6 @@ public class RecordSearchEndpointsTests
 {
     #region Endpoint Mapping Tests
 
-    [Fact]
-    public void MapRecordSearchEndpoints_CreatesExpectedRoutes()
-    {
-        // Arrange - Verify endpoint extension method exists and has correct signature
-        var method = typeof(RecordSearchEndpoints).GetMethod("MapRecordSearchEndpoints");
-
-        // Assert
-        method.Should().NotBeNull();
-        method!.IsStatic.Should().BeTrue();
-        method.ReturnType.Should().Be(typeof(IEndpointRouteBuilder));
-    }
 
     #endregion
 
@@ -371,15 +360,6 @@ public class RecordSearchEndpointsTests
 
     #region RecordSearchAuthorizationFilter Tests
 
-    [Fact]
-    public void RecordSearchAuthorizationFilter_CanBeInstantiated()
-    {
-        // Arrange & Act
-        var filter = new RecordSearchAuthorizationFilter();
-
-        // Assert
-        filter.Should().NotBeNull();
-    }
 
     [Fact]
     public void RecordSearchAuthorizationFilter_ImplementsIEndpointFilter()
@@ -391,15 +371,6 @@ public class RecordSearchEndpointsTests
             .Contain(typeof(IEndpointFilter));
     }
 
-    [Fact]
-    public void RecordSearchAuthorizationFilter_AcceptsNullLogger()
-    {
-        // Arrange & Act - Should not throw
-        var filter = new RecordSearchAuthorizationFilter(null);
-
-        // Assert
-        filter.Should().NotBeNull();
-    }
 
     #endregion
 

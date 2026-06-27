@@ -1,0 +1,49 @@
+{
+  "_capture_metadata": {
+    "captured_at": "2026-06-26",
+    "captured_by": "task CICD-001 (ci-cd-unit-test-remediation-r1)",
+    "repo": "spaarke-dev/spaarke",
+    "branch": "master",
+    "command_v3_protection": "gh api repos/spaarke-dev/spaarke/branches/master/protection",
+    "command_v3_protection_result": "HTTP 404 — 'Branch protection has been disabled on this repository.'",
+    "command_branch_meta": "gh api repos/spaarke-dev/spaarke/branches/master",
+    "command_rulesets": "gh api repos/spaarke-dev/spaarke/rulesets",
+    "command_rulesets_result": "[] (empty array — no rulesets active)",
+    "interpretation": "Branch protection is presently OFF on master. The classic protection endpoint returns 404 (the canonical signal). The deprecated 'protection' field embedded in the /branches/master payload still shows a stale shadow ({\"enabled\":true, \"required_status_checks\":[\"Build & Test (Debug)\"]}) but the top-level 'protected' field is false and the protection settings endpoint refuses; treat as DISABLED. Rulesets API also returns empty array.",
+    "diff_vs_2026-06-01_baseline": "MATERIAL: baseline had 3 required checks (Build & Test Debug, Build & Test Release, Code Quality), enforce_admins=true, dismiss_stale_reviews=true, strict=true, allow_force_pushes=false, allow_deletions=false. Current: protection entirely disabled."
+  },
+  "raw_v3_protection_endpoint_response": {
+    "message": "Branch protection has been disabled on this repository.",
+    "documentation_url": "https://docs.github.com/rest/branches/branch-protection#get-branch-protection",
+    "status": "404"
+  },
+  "branch_metadata": {
+    "name": "master",
+    "protected": false,
+    "_deprecated_protection_shadow": {
+      "enabled": true,
+      "required_status_checks": {
+        "enforcement_level": "everyone",
+        "contexts": ["Build & Test (Debug)"],
+        "checks": [
+          {
+            "context": "Build & Test (Debug)",
+            "app_id": 15368
+          }
+        ]
+      }
+    }
+  },
+  "rulesets": [],
+  "required_status_checks": null,
+  "required_pull_request_reviews": null,
+  "required_signatures": null,
+  "enforce_admins": null,
+  "required_linear_history": null,
+  "allow_force_pushes": null,
+  "allow_deletions": null,
+  "block_creations": null,
+  "required_conversation_resolution": null,
+  "lock_branch": null,
+  "allow_fork_syncing": null
+}

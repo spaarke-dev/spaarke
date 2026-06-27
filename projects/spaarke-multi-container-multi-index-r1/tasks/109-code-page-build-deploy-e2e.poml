@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="109" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Code page build + deploy via `/code-page-deploy`; e2e verification (PCF launch + standalone)</title>
+    <phase>G: Lookup-driven multi-index</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>108</dependencies>
+    <blocks>110</blocks>
+    <tags>code-page, deploy, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deploy + e2e verify. No new code; invokes canonical code-page-deploy skill.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 108 — verifies that task's deliverable.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build + deploy the SemanticSearch code page via the canonical `/code-page-deploy` skill (clean rebuild + webpack + inline → out/sprk_semanticsearch.html + Dataverse web resource update + publish). Then run e2e verification: (a) launch from a PCF on a Matter w/ `sprk_aisearchindexid` set — confirms dropdown default matches the Matter's row, results show, request body has correct `searchIndexName`+`entityType`. (b) launch standalone (no PCF context) — dropdown defaults to `sprk_isdefault=true` row; user can switch indexes and re-search.
+  </prompt>
+
+  <role>
+    Code-page deployer familiar with `/code-page-deploy` skill (clean rebuild + shared-lib dist check + webpack + inline + DV deploy).
+  </role>
+
+  <goal>
+    `sprk_semanticsearch` web resource live at v(+). E2e UAT confirms multi-index routing works from both PCF-launched and standalone-launched code-page contexts.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>src/client/code-pages/SemanticSearch/build-webresource.ps1</file>
+      <file>scripts/Deploy-WebResourceInline.ps1</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source=".claude/skills/code-page-deploy/SKILL.md">Clear cache before EVERY build (rm -rf out/). Shared-lib dist check: rebuild @spaarke/ui-components + @spaarke/auth if src/ is newer than dist/.</constraint>
+    <constraint source="NFR-11">Code-page clean-rebuild mandatory (saved lesson feedback_stale-shared-lib-dist-poisons-codepage-bundle).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify @spaarke/ui-components + @spaarke/auth dist/ are fresh relative to src/. Rebuild if needed.</step>
+    <step order="2">Invoke `/code-page-deploy` skill OR follow the procedure: `cd src/client/code-pages/SemanticSearch &amp;&amp; rm -rf out/ &amp;&amp; npm run build &amp;&amp; powershell -File build-webresource.ps1`. Verify `out/sprk_semanticsearch.html` exists (~1 MB).</step>
+    <step order="3">Deploy: `pwsh -File scripts/Deploy-WebResourceInline.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -WebResourceName sprk_semanticsearch -FilePath src/client/code-pages/SemanticSearch/out/sprk_semanticsearch.html`. Confirm "Published: sprk_semanticsearch".</step>
+    <step order="4">UAT-A (PCF-launched): hard-refresh browser, open a Matter that has `sprk_aisearchindexid` set (e.g., the one pointing at spaarke-records-index/Matter row), open Semantic Search PCF, click "Open in Code Page" or equivalent. Verify the side-pane dropdown defaults to the Matter's row by display name; results render; browser Network tab shows `/api/ai/search` body with correct `searchIndexName`.</step>
+    <step order="5">UAT-B (standalone): navigate to `sprk_semanticsearch` web resource URL directly (no PCF context). Verify dropdown defaults to the `sprk_isdefault=true` row (Development Files 2 per seed); switching to "Matters" triggers a new search that returns results from `spaarke-records-index` filtered to Matters.</step>
+    <step order="6">UAT-C (no PCF binding): hard-refresh; switch dropdown to "All Records"; verify scope='all' is sent (no entityType filter), results span all record types in `spaarke-records-index`.</step>
+    <step order="7">Smoke: Relevance Threshold + Search Mode are visible in side pane and functional (changing them re-triggers search per existing behavior).</step>
+    <step order="8">Update `TASK-INDEX.md`: 109 🔲 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">npm run build, build-webresource.ps1, Deploy-WebResourceInline.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="artifact">out/sprk_semanticsearch.html (~1 MB)</output>
+    <output type="deploy">sprk_semanticsearch web resource updated + published in Dataverse</output>
+    <output type="verification">3 UAT scenarios pass (PCF launch / standalone default / "All" override)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dataverse web resource sprk_semanticsearch published with new content (verified by hash comparison or Last Modified timestamp).</criterion>
+    <criterion testable="true">UAT-A: PCF-launched code page shows correct default + correct results for a Matter w/ multi-index routing.</criterion>
+    <criterion testable="true">UAT-B: standalone code page defaults to isdefault row; switching index works.</criterion>
+    <criterion testable="true">UAT-C: "All Records" sends scope='all' (Network tab verification).</criterion>
+    <criterion testable="true">Relevance Threshold + Search Mode visible in side pane; both functional.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <deploy-skill>.claude/skills/code-page-deploy/SKILL.md</deploy-skill>
+  </execution>
+</task>

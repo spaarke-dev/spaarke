@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>`DeepLinkBuilder` service for Modern UCI deep links</title>
+    <phase>Phase 7: Graph Sync Engine</phase>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>002</dependencies>
+    <blocks>063</blocks>
+    <tags>bff-api, api, backend, config</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New `.cs` service in `Sprk.Bff.Api/Services/Todo/`; tags include `bff-api`. FULL rigor with publish-size + CVE checks.</rigor-reason>
+    <parallel-group>P7-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Implement `DeepLinkBuilder` service in `Sprk.Bff.Api/Services/Todo/`. The service constructs the Modern UCI URL `https://{org}.crm.dynamics.com/apps/{appid}/r/sprk_todo/{id}` from configuration values `Spaarke:Environment:OrgUrl` and `Spaarke:ModelDrivenApps:DefaultAppId`. Include unit tests covering: typical inputs, missing config (throw or fail-fast), malformed inputs.
+  </prompt>
+
+  <role>Spaarke BFF API developer.</role>
+
+  <goal>`DeepLinkBuilder.BuildTodoUrl(Guid todoId)` returns the correct Modern UCI URL. Service is DI-registered. Unit tests cover happy + error paths.</goal>
+
+  <context>
+    <background>Graph `linkedResources[0].webUrl` is populated with this URL so users can click through from Microsoft To Do back to the Spaarke form. Per FR-25.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Todo/DeepLinkBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Todo/IDeepLinkBuilder.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Todo/DeepLinkBuilderTests.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-25">URL scheme: `https://{org}.crm.dynamics.com/apps/{appid}/r/sprk_todo/{id}`. Read org URL + app id from configuration.</constraint>
+    <constraint source="ADR-001">Minimal API style for any new endpoint (no endpoint added in this task).</constraint>
+    <constraint source="bff-extensions.md §F">Test obligation: unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Todo/`.</constraint>
+    <constraint source="CLAUDE.md §10">BFF publish-size verification mandatory.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Define `IDeepLinkBuilder` interface with `Uri BuildTodoUrl(Guid todoId)`.</step>
+    <step order="2">Implement `DeepLinkBuilder` using `IOptions&lt;DeepLinkBuilderOptions&gt;` for config (org URL + app id). Validate config in constructor.</step>
+    <step order="3">Add `DeepLinkBuilderOptions` POCO + bind `Spaarke:Environment:OrgUrl` + `Spaarke:ModelDrivenApps:DefaultAppId` in DI.</step>
+    <step order="4">Register `IDeepLinkBuilder` → `DeepLinkBuilder` as singleton in DI.</step>
+    <step order="5">Unit tests: typical case, missing org URL → throws/fails-fast, missing app id → throws/fails-fast, GUID formatting.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`. Verify clean.</step>
+    <step order="7">BFF publish-size check + CVE scan.</step>
+    <step order="8">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Services/Todo/IDeepLinkBuilder.cs`</output>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Services/Todo/DeepLinkBuilder.cs`</output>
+    <output type="test">`tests/unit/Sprk.Bff.Api.Tests/Services/Todo/DeepLinkBuilderTests.cs`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`BuildTodoUrl(guid)` returns the correct URL given valid config.</criterion>
+    <criterion testable="true">Missing config → fail-fast on startup or first invocation (per chosen design).</criterion>
+    <criterion testable="true">Unit tests pass.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤+5 MB; zero new HIGH-severity CVEs.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

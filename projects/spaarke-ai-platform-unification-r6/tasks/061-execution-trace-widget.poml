@@ -1,0 +1,121 @@
+<task id="061" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-14 — `ExecutionTraceWidget.tsx` (Claude-Code-like Context-pane widget)</title>
+    <status>pending</status>
+    <estimated-effort>1.5 days</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6c)</phase>
+    <wave>C-G2 (parallel after 6a)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>059 (additive context.* event types)</dependencies>
+    <tags>frontend, react, fluent-ui, ai-widgets, context-pane</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New Context-pane widget; subscribes to live event stream; visible to end user; UX-critical; ADR-015 rendering surface.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Build `ExecutionTraceWidget.tsx` as a Context-pane widget that subscribes to all six
+    new `context.*` event types from task 059 and renders an ordered timeline of the
+    chat agent's reasoning steps — modeled on the Claude Code execution-trace surface.
+    Each event renders as a timeline entry: tool calls show tool name + decision + timing;
+    knowledge retrievals show source ID + relevance score; playbook node executions show
+    node ID + status; decisions show decision string + brief reason. Built in
+    `@spaarke/ai-widgets` per ADR-012; Fluent v9 components; light + dark mode parity
+    per ADR-021. Auto-scrolls on new events. Collapsible per-event-type filter.
+
+    **ADR-015 BINDING (CRITICAL)**: render only the typed fields from the event payload.
+    NEVER attempt to render free-form content. NEVER call any "show me the user
+    message" affordance — the widget is observability of agent reasoning, not
+    transcript replay.
+  </prompt>
+
+  <role>
+    Senior React/Fluent-v9 engineer with familiarity with PaneEventBus subscription
+    patterns + Context-pane widget registry + Claude Code transparency UX reference.
+  </role>
+
+  <goal>
+    Widget renders in Context pane; subscribes to `context.*` events; timeline auto-scrolls
+    on new events; collapsible filters work; light + dark parity verified; ADR-015 audit
+    confirms no free-form content rendering.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="workspace-arch">docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    <file purpose="dashboard-widget-model">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    <file purpose="event-types">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Built in `@spaarke/ai-widgets` shared lib; Fluent v9 conventions.</constraint>
+    <constraint source="ADR-015 BINDING">Renders typed fields from event payload only. NEVER attempts to render free-form content. NEVER includes a "show user message" affordance. Widget is observability, not transcript replay.</constraint>
+    <constraint source="ADR-021">Light + dark mode parity verified per dark-mode audit.</constraint>
+    <constraint source="ADR-030">Subscribes to existing `context` channel; no new channel.</constraint>
+    <constraint source="spec FR-36">Widget registered with `ContextWidgetRegistry`; subscribes to `context.*` events; renders ordered timeline.</constraint>
+    <constraint source="project R6 Pillar 6c">Widget is the Claude-Code-like surface. Visual model: ordered timeline grouped by event type with collapsible filters.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/context-pane-widget</topic>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — New Context-pane widget; ADR-015 rendering audit; light/dark parity."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 059 complete.</step>
+    <step order="2" name="Gather Resources">Read Fluent v9 patterns + Context-pane widget shape + event-types from 059.</step>
+    <step order="3" name="Author Widget">`src/client/shared/Spaarke.AI.Widgets/src/widgets/context/ExecutionTraceWidget.tsx`. Subscribes to `context.*` events via PaneEventBus.</step>
+    <step order="4" name="Build Timeline UI">Fluent v9 list + accordion components; per-event-type icon + colored band; auto-scroll on new entries; per-type collapsible filters.</step>
+    <step order="5" name="Light/Dark Parity">Per ADR-021 dark-mode audit; verify token usage; capture screenshots.</step>
+    <step order="6" name="ADR-015 Render Audit">Code review every render path — confirm no free-form content rendered; only typed enumerated fields. Document in task notes.</step>
+    <step order="7" name="UI Tests">Per ui-test skill: render with mock events; verify timeline order; verify filters work; verify dark mode.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check (ADR-012/015/021/030).</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 061 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + type-check + lint</tool>
+    <tool name="git">Stage + commit</tool>
+    <tool name="fluent-v9-component">Component authoring skill</tool>
+    <tool name="ui-test">Browser-based UI verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/ExecutionTraceWidget.tsx (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-061-adr015-render-audit.md</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Widget subscribes to all 6 `context.*` event types from task 059.</criterion>
+    <criterion testable="true">Timeline renders in event order; auto-scrolls on new events.</criterion>
+    <criterion testable="true">Collapsible per-event-type filters work.</criterion>
+    <criterion testable="true">Light + dark mode parity verified per ADR-021.</criterion>
+    <criterion testable="true">ADR-015 render audit confirms no free-form content rendered (only typed enumerated fields); audit documented.</criterion>
+    <criterion testable="true">Fluent v9 conventions followed per ADR-012.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test>Render widget with mock event stream (3 tool calls + 2 knowledge retrievals + 1 decision); verify timeline order + grouping.</test>
+    <test>Toggle each filter; verify only matching events shown.</test>
+    <test>Render in dark mode; verify ADR-021 token usage; no light-mode bleed-through.</test>
+    <test>Simulate fast event stream (10 events / 2s); verify auto-scroll smoothness.</test>
+  </ui-tests>
+</task>

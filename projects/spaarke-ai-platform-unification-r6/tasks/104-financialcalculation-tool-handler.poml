@@ -1,0 +1,225 @@
+<task id="104" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-H-04 `FinancialCalculationToolHandler` (FR-20, Wave 1 — Pure Deterministic)</title>
+    <phase>Parallel — 8 Typed Tool Handlers</phase>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <estimated-effort>6 hours</estimated-effort>
+    <completion-notes>
+      FinancialCalculationToolHandler (540 LOC) for named formulas: simple_interest, compound_interest, present_value, future_value, loan_payment, ROI. All math in decimal (binding); double escape-hatch with quantize-back only for fractional/large-exponent compound interest. Exponent capped at 1000. Parameter validation surfaces parameter NAMES only (no values) per ADR-015. 30 unit tests pass: positive cases per formula + validation errors (negative inputs, unknown formula) + banker's rounding default + decimal precision determinism (0.1+0.2=0.3 exactly) + ADR-015 telemetry hygiene (sentinel scan). sprk_analysistool seed row in infra/dataverse/. Added entry to shared scripts/Seed-TypedHandlers.ps1. Build clean. BFF size delta: +0.04 MB. Quality gates pass.
+    </completion-notes>
+    <dependencies>100</dependencies>
+    <blocks>105, 106, 107, 108, 109</blocks>
+    <tags>bff-api, ai, handler</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF handler; formula correctness matters for legal/financial outputs; FULL quality gates required.</rigor-reason>
+    <parallel-group>H-G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Wave 1 pure-deterministic handler; independent of 101/102/103.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build `FinancialCalculationToolHandler` — a pure-deterministic `IToolHandler`
+    implementation per FR-20 that performs formula-based financial calculations.
+    Examples: simple interest = principal × rate × time; compound interest = principal ×
+    (1 + rate / n)^(n × time); present value; future value; loan amortization payment;
+    days-of-interest accrued; pro-rated amounts. Currency-aware (results carry the input
+    currency code). NO LLM call. NO Azure OpenAI dependency. Pure C# `decimal` arithmetic.
+
+    Distinct from `FinancialCalculatorHandler` (task 102) which AGGREGATES extracted
+    figures (sum/tax/discount/FX). This handler implements FORMULAS taking parameters
+    (principal, rate, time, periods).
+
+    Handler registers via auto-discovery per task 100's contract — implements `IToolHandler`;
+    `HandlerId = "FinancialCalculationToolHandler"`; lives in
+    `Services/Ai/Handlers/FinancialCalculationToolHandler.cs`. Requires `sprk_analysistool`
+    row with `sprk_handlerclass = "FinancialCalculationToolHandler"` + `sprk_configuration`
+    specifying supported formulas, default rounding mode, decimal precision.
+
+    Configurable behavior per FR-20 acceptance: handler accepts formula name + named
+    parameters from playbook input; output is identical for identical input + same config;
+    output includes formula name + parameter snapshot for audit trail.
+
+    Tests: contract test + positive cases (each formula with worked-example numbers
+    matching known textbook outputs) + error cases (negative principal where forbidden,
+    zero periods for compound, unknown formula name) + config-driven test (rounding mode
+    changes deterministic output).
+  </prompt>
+
+  <role>
+    Senior BFF engineer with .NET 8 + financial-formula experience. Familiar with simple
+    + compound interest formulas, time-value-of-money, amortization, and the `decimal`
+    arithmetic discipline.
+  </role>
+
+  <goal>
+    `FinancialCalculationToolHandler.cs` implemented in `Services/Ai/Handlers/`;
+    auto-discovered; `sprk_analysistool` row deployed; unit tests cover positive (each
+    supported formula) + error + config-driven cases; ZERO LLM/Azure-OpenAI dependencies;
+    all math uses `decimal`; BFF publish-size delta ≤+0.5 MB; `code-review` + `adr-check`
+    green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="handler-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+    <file purpose="existing-handler-example">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    <file purpose="handler-conventions">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/HandlerRegistrationConventions.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — auto-discovery; ZERO manual DI line.</constraint>
+    <constraint source="ADR-013">Handler lives in `Services/Ai/Handlers/`.</constraint>
+    <constraint source="ADR-015">Telemetry logs handler name + execution outcome + timestamp ONLY; never parameter values (principal amounts are sensitive).</constraint>
+    <constraint source="ADR-029">BFF publish-size delta measured + reported; per-task ≤+0.5 MB.</constraint>
+    <constraint source="spec FR-20">Handler MUST be pure deterministic — NO LLM call; pure formulas (rate × principal × time, currency-aware).</constraint>
+    <constraint source="spec NFR-02">R6 BFF publish-size budget ≤+5 MB total.</constraint>
+    <constraint source="project CLAUDE.md Pillar 2">Implements `IToolHandler`; auto-discovered; `sprk_analysistool` row required.</constraint>
+    <constraint source="money-math binding">All formulas MUST use `decimal`. Banker's rounding default; configurable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/typed-handler-deterministic</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      `FinancialCalculationToolHandler` powers playbooks that need formula-based outputs
+      — interest calculations on overdue invoices, present-value analyses for settlement
+      offers, amortization schedules for installment plans. Pure C# formulas means
+      reviewable, replayable, audit-grade results.
+
+      Last task in Wave 1; completing Wave 1 unblocks Wave 2 (tasks 105–108) per
+      H-G2 group definition.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/FinancialCalculationToolHandler.cs (NEW)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/FinancialCalculationToolHandlerTests.cs (NEW)</file>
+      <file>infra/dataverse/sprk_analysistool-financial-calculation-row.json (NEW)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-104-deployment-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Task 100 — handler infrastructure. Hard dependency.</item>
+      <item>Sibling Wave 1 tasks 101, 102, 103 — parallel-safe.</item>
+      <item>This task being complete gates Wave 2 (105–108) start per H-G2.</item>
+      <item>Task 109 — dispatch test exercises this handler.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. If &gt;70%, run `context-handoff` then `/compact`. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: New BFF handler; formula correctness; Pillar 2 binding; FR-20
+      📖 PROTOCOL STEPS TO EXECUTE: all 11 steps below including Step 9.5 quality gates
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX; confirm 104 is 🔲; dependency 100 complete.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every &lt;inputs&gt; + &lt;knowledge&gt; file. Extract 4-point contract from
+      `HandlerRegistrationConventions.md`.
+    </step>
+    <step order="3" name="Design Handler Surface">
+      Define `HandlerId = "FinancialCalculationToolHandler"`; supported formulas enum
+      (SimpleInterest, CompoundInterest, PresentValue, FutureValue, AmortizationPayment,
+      DaysAccrued, ProRatedAmount); `ConfigSchema` with formula name + named parameters
+      schema + rounding mode + decimal precision. NO `IOpenAiClient` dependency.
+    </step>
+    <step order="4" name="Implement Handler">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/FinancialCalculationToolHandler.cs`.
+      Each formula a private method taking validated parameters; all `decimal`. Validate
+      formula name exists + required parameters present + parameter signs/ranges correct.
+      Emit `ToolResult` including formula name, parameter snapshot (parameter NAMES only,
+      not values logged per ADR-015), and computed result with currency code.
+    </step>
+    <step order="5" name="Author Unit Tests">
+      Create `FinancialCalculationToolHandlerTests.cs` using `TypedToolHandlerTestFixture`.
+      Cover: contract; positive (each formula with textbook-correct worked example —
+      e.g., simple interest of $1000 @ 5% for 2 years = $100); error (negative principal,
+      zero periods for compound, unknown formula); config-driven (rounding mode swap);
+      telemetry (parameter NAMES only in logs).
+    </step>
+    <step order="6" name="Seed sprk_analysistool Row">
+      Create `infra/dataverse/sprk_analysistool-financial-calculation-row.json` with
+      `sprk_handlerclass = "FinancialCalculationToolHandler"`, `sprk_toolcode = "FIN-CALC-FORMULA@v1"`,
+      sample `sprk_configuration`, `AvailableInContexts = "Playbook"`. Deploy to Spaarke
+      Dev. Capture evidence.
+    </step>
+    <step order="7" name="Verify Build + Tests">
+      `dotnet build` + `dotnet test --filter "FinancialCalculationToolHandler"`. Both
+      pass. Auto-discovery picks up handler.
+    </step>
+    <step order="8" name="Verify BFF Publish-Size Delta">
+      `dotnet publish -c Release ...`. Report absolute + diff vs baseline. Target ≤+0.5 MB.
+      With this task complete, cumulative Wave 1 delta should be tracked vs ≤+5 MB total
+      R6 budget.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through criteria; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Both MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update status `complete`; TASK-INDEX 104 🔲 → ✅; reset `current-task.md`. Note in
+      task-104-deployment-evidence.md that Wave 1 is now complete and Wave 2 (tasks
+      105–108) is unblocked.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF + run tests + publish</tool>
+    <tool name="pac">Deploy seed row</tool>
+    <tool name="git">Commit</tool>
+    <tool name="dataverse-deploy">Deploy seed row</tool>
+    <tool name="code-review">FULL-rigor quality gate</tool>
+    <tool name="adr-check">FULL-rigor quality gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/FinancialCalculationToolHandler.cs (NEW)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/FinancialCalculationToolHandlerTests.cs (NEW)</output>
+    <output type="infrastructure">infra/dataverse/sprk_analysistool-financial-calculation-row.json (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-104-deployment-evidence.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (104 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`FinancialCalculationToolHandler.cs` exists, implements `IToolHandler`, contains ZERO references to `IOpenAiClient` or Azure OpenAI.</criterion>
+    <criterion testable="true">All formulas use `decimal` (no `double` / `float`) — grep verifiable.</criterion>
+    <criterion testable="true">Handler auto-discovered per `AutoDiscoveryVerificationTests`.</criterion>
+    <criterion testable="true">`sprk_analysistool` row deployed with `sprk_handlerclass = "FinancialCalculationToolHandler"`.</criterion>
+    <criterion testable="true">Unit tests pass: contract, positive (each supported formula with textbook output), error (negative principal, zero periods, unknown formula), config-driven (rounding mode swap), telemetry (parameter names only in logs per ADR-015).</criterion>
+    <criterion testable="true">Deterministic property verified — identical inputs + same config → identical output.</criterion>
+    <criterion testable="true">BFF build succeeds.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤+0.5 MB; cumulative Wave 1 delta tracked vs ≤+5 MB R6 budget.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` both pass.</criterion>
+    <criterion testable="true">Task notes record that Wave 1 is complete and Wave 2 (105–108) is unblocked.</criterion>
+  </acceptance-criteria>
+</task>

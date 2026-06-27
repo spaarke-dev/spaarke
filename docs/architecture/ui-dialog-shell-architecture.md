@@ -80,7 +80,7 @@ Direct use of `Xrm.WebApi` or `window.Xrm` in shared components would make them 
 | Multi-step wizard with custom step sequence | **WizardShell** directly | Full control over steps (e.g., CreateWorkAssignment has non-standard flow) |
 | Playbook browse + execute | **PlaybookLibraryShell** | Tab UI with browse/custom scope tabs, intent mode for pre-selected playbooks |
 | Single-step dialog | **Fluent UI Dialog** | No wizard overhead needed |
-| Slide-in side panel | **SidePaneShell** | Used by CalendarSidePane, EventDetailSidePane, TodoDetailSidePane |
+| Slide-in side panel | **SidePaneShell** | Used by CalendarSidePane, EventDetailSidePane |
 
 ---
 

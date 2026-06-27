@@ -1,0 +1,93 @@
+<task id="079" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>Phase C exit-gate validation (6 exit criteria + Q7 criterion)</title>
+    <status>pending</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>Phase C — Exit Gate</phase>
+    <wave>C-G4 (sequential after 078)</wave>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>078 (integration test)</dependencies>
+    <tags>docs</tags>
+    <rigor-level>MINIMAL</rigor-level>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation + sign-off only; no code change.</rigor-reason>
+    <parallel-group>C-G4</parallel-group>
+  </metadata>
+
+  <prompt>
+    Validate Phase C exit gate per spec.md §Phase C Exit Criteria (6 criteria + Q7
+    expansion criterion). Walk through each:
+    1. Agent has accurate workspace awareness — confirmed by task 078 scenario 1.
+    2. "Update the summary in Tab 1" works — confirmed by tasks 055 + 058.
+    3. "Send to Workspace" + "Add to Assistant" + "Pin to Matter" all functional —
+       confirmed by task 057.
+    4. Context pane shows live execution trace in real time — confirmed by tasks 061 +
+       062 + 063.
+    5. Cross-conversation memory recalls prior-matter context — confirmed by tasks
+       064-068 + task 078 scenario 3.
+    6. Pinned facts persist as user preferences across sessions — confirmed by tasks
+       065 + 069 + task 078 scenario 5.
+    7. **Q7**: Pinned Memory CRUD UI in Context pane functional — confirmed by task 070
+       + task 078 scenario 6.
+
+    Document each criterion's evidence + sign off. Update plan.md or current-task.md
+    with Phase C complete status. Per CLAUDE.md §Confirmation Triggers, Phase C exit
+    → D triggers user sign-off before Phase D launches.
+  </prompt>
+
+  <role>
+    Project lead / senior engineer with familiarity across all Phase C deliverables.
+  </role>
+
+  <goal>
+    All 6 + Q7 exit criteria validated with evidence; user sign-off captured; Phase D
+    cleared to start.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="integration-results">projects/spaarke-ai-platform-unification-r6/notes/phase-c-integration-results.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec Phase C Exit Criteria">6 criteria + Q7 expansion.</constraint>
+    <constraint source="project Confirmation Trigger">Phase exit → next phase requires user sign-off.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-management</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: MINIMAL — Exit gate documentation."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 078 complete + all Phase C tasks ✅.</step>
+    <step order="2" name="Walk Through Exit Criteria">For each of 6 + Q7, record evidence (task #s + test results).</step>
+    <step order="3" name="Author Exit Report">`notes/phase-c-exit-report.md` with evidence per criterion + recommendation to proceed to Phase D.</step>
+    <step order="4" name="User Sign-Off Request">Per Confirmation Triggers, pause + request user sign-off.</step>
+    <step order="5" name="Update Plan + TASK-INDEX">Mark Phase C complete; identify first Phase D task.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 079 ✅; current-task → first Phase D task.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/spaarke-ai-platform-unification-r6/notes/phase-c-exit-report.md</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 exit criteria documented with evidence.</criterion>
+    <criterion testable="true">Q7 expansion criterion documented with evidence (task 070 + 078 scenario 6).</criterion>
+    <criterion testable="true">User sign-off captured before Phase D launches.</criterion>
+    <criterion testable="true">Phase D first task identified; current-task.md updated.</criterion>
+  </acceptance-criteria>
+</task>

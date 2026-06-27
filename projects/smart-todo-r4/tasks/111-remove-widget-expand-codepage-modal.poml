@@ -1,0 +1,59 @@
+<task id="R4-111" project="smart-todo-r4">
+  <metadata>
+    <title>Remove widget "Expand to Code Page modal" path — only modal from widget is the record modal</title>
+    <phase>Closeout (UAT round 14)</phase>
+    <workstream>widget UX simplification</workstream>
+    <status>closed-no-action</status>
+    <closure-reason>2026-06-24 — User opted to leave widget Expand path in place. F-7 (inner-modal sizing) and F-8 (Save&Close routing) deferred to R5 backlog instead. See R5 design.md.</closure-reason>
+    <estimated-effort>1-2 hrs</estimated-effort>
+    <tags>widget, modal, simplify, ux</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>(none)</dependencies>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/sections/todo.registration.ts (handleOpenTodo + no-todoId branch)</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx (Open button behavior)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Per user decision 2026-06-23: the ONLY modal that opens from the To Do widget is the record modal (when clicking Open on a card). Remove the "Expand → open SmartTodo Code Page as 85% dialog over SpaarkeAi" path entirely.
+
+Currently in `todo.registration.ts handleOpenTodo`:
+- `todoId` PRESENT → `Xrm.Navigation.navigateTo({pageType:'entityrecord', entityName:'sprk_todo', entityId:todoId}, {target:2, width:80%, height:80%})` — KEEP THIS
+- `todoId` ABSENT → `ctx.onOpenWizard(SMART_TODO_CODE_PAGE_NAME, undefined, {width:85%, height:85%})` — REMOVE THIS
+
+Effect: the widget's Open button becomes selection-required (or disabled when nothing selected). Card click / double-click still opens the record modal. Nested modal complexity goes away.
+  </prompt>
+
+  <role>Frontend developer.</role>
+
+  <goal>
+1. Remove the no-todoId branch in `todo.registration.ts handleOpenTodo`.
+2. Update widget Open button behavior: disable when no selection (revert R4-103's "always-enabled" decision) OR remove the toolbar Open button entirely (card-level Open icon + double-click remain).
+3. Update widget code comments to reflect the simplification.
+4. Test: widget → click card Open icon → record modal opens; Save & Close returns to widget context. NO Code Page modal anywhere in the path.
+  </goal>
+
+  <constraints>
+    <constraint source="user decision 2026-06-23">Widget should NOT launch the Code Page as a modal. The Code Page exists only as a standalone surface (sidebar navigation → To Do List).</constraint>
+    <constraint source="back-compat">The embedded Code Page (sidebar) flow stays unchanged — opens record modal as today.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0">Context check.</step>
+    <step order="1">Edit `todo.registration.ts`: remove the no-todoId fallback branch in `handleOpenTodo`.</step>
+    <step order="2">Decide Open button behavior: disabled-when-no-selection vs remove-entirely. Recommend: disabled (user can see it's there but inactive).</step>
+    <step order="3">Update widget Toolbar Open button if needed.</step>
+    <step order="4">Update R4-103 / R4-099 doc comments in `todo.registration.ts` and `SmartTodoWidget.tsx` to reflect the simplification.</step>
+    <step order="5">Build + deploy SpaarkeAi (carries the widget bundle).</step>
+    <step order="6">Manual test: click Open with no selection (should be no-op); click Open on a card; double-click a card. Save & Close. Confirm only ONE modal layer (the record modal).</step>
+    <step order="7">Commit + PR.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Widget Open with no selection does nothing (button disabled OR removed).</criterion>
+    <criterion testable="true">Widget card Open icon / double-click opens the record modal directly via navigateTo target:2.</criterion>
+    <criterion testable="true">No Code Page modal layer appears in any widget interaction path.</criterion>
+    <criterion testable="true">Save & Close from the record modal returns to SpaarkeAi (with widget intact, no navigation).</criterion>
+  </acceptance-criteria>
+</task>

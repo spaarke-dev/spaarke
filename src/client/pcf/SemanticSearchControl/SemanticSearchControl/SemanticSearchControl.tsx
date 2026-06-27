@@ -55,8 +55,9 @@ import {
 } from './components';
 import { useSemanticSearch, useFilters, useFilterOptions, useDocumentListPrefs } from './hooks';
 import { SemanticSearchApiService, NavigationService, DataverseMetadataService } from './services';
+import { resolveSearchIndexNameAsync } from './services/SearchIndexResolver';
 import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilter';
-import { authenticatedFetch, resolveTenantIdSync } from '@spaarke/auth';
+import { authenticatedFetch } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
 import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 import { FindSimilarDialog } from '@spaarke/ui-components/dist/components/FindSimilarDialog';
@@ -91,13 +92,40 @@ const useStyles = makeStyles({
     maxHeight: '400px',
   },
 
-  // Header region (search input)
+  // Header region (title row + search-input row stacked vertically)
   header: {
     display: 'flex',
     flexDirection: 'column',
     ...shorthands.padding(tokens.spacingHorizontalM),
     backgroundColor: tokens.colorNeutralBackground2,
     ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
+  },
+
+  // v1.1.73 — "DOCUMENTS" title row. Matches VisualHost CardChrome's
+  // `<Text size={300}>` (fontSizeBase300 = 14px) so the PCF reads as a
+  // titled section consistent with the rest of the page.
+  titleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    marginBottom: tokens.spacingVerticalXS,
+  },
+
+  // v1.1.73 — Search row: SearchInput + the 3 trailing action icons
+  // (Reload / Add / Open Full Viewer) on a single line. Previously the
+  // icons lived in the per-results-state toolbar below CommandBar; that
+  // toolbar now only appears when ≥1 row is selected (bulk-action mode).
+  searchRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  searchInputWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  inlineToolbarButton: {
+    minWidth: 'auto',
+    ...shorthands.padding('0px'),
   },
 
   // Main content area (single column, no sidebar — FR-DOC-06)
@@ -479,9 +507,51 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   // Filter state management — declared BEFORE auth effects so useEffect can reference filters
   const { filters, setFilters, clearFilters, hasActiveFilters } = useFilters();
 
+  // FR-PCF-02 / FR-PCF-03 — resolve the Azure AI Search index name via the
+  // host record's `sprk_ai_search_index` lookup column (Phase G, v1.1.75).
+  //
+  // v1.1.74 read this from the manifest bound property `searchIndexName`
+  // (SingleLine.Text) which was fed from `sprk_searchindexname` on the host
+  // record. Phase G replaces that text column with a lookup to the new
+  // master-data table `sprk_aisearchindex`; the bound property is dropped
+  // from the manifest and the PCF resolves the name itself on mount via
+  // `context.webAPI.retrieveRecord(...)$expand=sprk_ai_search_index(...)`.
+  //
+  // State semantics (React 16 — no React 18 transitions/suspense):
+  //   - `null` (initial)            → "not yet resolved" — downstream treats
+  //                                    same as "use BFF tenant default" per
+  //                                    the omit-on-empty contract (tasks
+  //                                    031/032). The initial load fires before
+  //                                    resolution completes; that's acceptable
+  //                                    behaviour (BFF default is the same
+  //                                    fallback the resolver would produce on
+  //                                    failure).
+  //   - non-empty string            → host record has a lookup pointing at a
+  //                                    valid `sprk_aisearchindex` row.
+  //   - `null` (after resolve fail) → BFF tenant default applies.
+  //
+  // Resolution runs once on mount; entityType + entityId are stable for the
+  // control's lifetime (page navigation re-mounts the PCF).
+  const [resolvedSearchIndexName, setResolvedSearchIndexName] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void resolveSearchIndexNameAsync(context).then(name => {
+      if (!cancelled) {
+        setResolvedSearchIndexName(name);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally empty deps — context.webAPI + context.mode are stable for
+    // the control's lifetime per PCF contract. Re-resolving on every render
+    // would spam Dataverse. (Same pattern as the auth-init useEffect below.)
+  }, []);
+  const boundSearchIndexName = resolvedSearchIndexName;
+
   // Search state management — declared BEFORE auth effects so useEffect can reference search
   const { results, totalCount, isLoading, isLoadingMore, error, hasMore, query, search, loadMore, reset } =
-    useSemanticSearch(apiService, searchScope, scopeId);
+    useSemanticSearch(apiService, searchScope, scopeId, boundSearchIndexName);
 
   // Auto-load all documents once auth is ready (shows documents without requiring a search query).
   // search and filters intentionally omitted from deps — we only want to fire once on auth ready.
@@ -710,39 +780,51 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     [context.webAPI]
   );
 
-  // Handle Open Viewer — opens DocumentRelationshipViewer via navigateTo
+  // v1.1.73 — Handle Open Viewer: opens the SemanticSearch Code Page
+  // (`sprk_semanticsearch` web resource) in a modal, prefilled with the
+  // current query + scope. The code page reads `query`, `theme`, `scope`,
+  // `entityId` from the Dataverse data envelope (parseUrlParams) so the
+  // dialog renders showing the same result set the PCF was showing.
+  //
+  // Previously this opened the DocumentRelationshipViewer scoped to the
+  // first result's documentId. The per-row "Find Similar" action retains
+  // that behavior; only the toolbar Open icon was redirected.
   const handleOpenViewer = useCallback(() => {
-    // Use the first result's documentId (most recent) or fall back to scopeId
-    const targetDocId = results.length > 0 ? results[0].documentId : null;
-    if (!targetDocId) return;
-
-    try {
-      const clientUrl =
-        (context as unknown as { page?: { getClientUrl?: () => string } }).page?.getClientUrl?.() ??
-        window.location.origin;
-      const theme = isDarkMode ? 'dark' : 'light';
-      const tenantId = resolvedApiBaseUrl ? '' : ''; // tenantId resolved from auth
-      let tid = '';
-      try {
-        tid = resolveTenantIdSync();
-      } catch {
-        /* */
-      }
-
-      const data = `documentId=${targetDocId}&tenantId=${encodeURIComponent(tid)}&theme=${theme}`;
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm;
-      if (xrm?.Navigation?.navigateTo) {
-        void xrm.Navigation.navigateTo(
-          { pageType: 'webresource', webresourceName: 'sprk_documentrelationshipviewer', data },
-          { target: 2, width: { value: 85, unit: '%' }, height: { value: 85, unit: '%' } }
-        );
-      }
-    } catch (err) {
-      console.error('[SemanticSearchControl] Failed to open viewer:', err);
-    }
-  }, [results, context, isDarkMode, resolvedApiBaseUrl]);
+    // FR-PCF-03 + FR-PARITY-01 (Wave 9 wiring) — surface the PCF's current
+    // filter state + the manifest-bound search-index binding into the code
+    // page envelope so the dialog opens showing the SAME result set the PCF
+    // is currently showing. `buildSemanticSearchEnvelope` handles default /
+    // empty omission per-key, so passing all keys here is safe.
+    void navigationService.openSemanticSearchPage(
+      query ?? queryInput ?? '',
+      searchScope,
+      scopeId,
+      isDarkMode,
+      undefined, // use default modal options (80% x 80%)
+      {
+        threshold: filters.threshold,
+        searchMode: filters.searchMode,
+        fileTypes: filters.fileTypes,
+        dateFrom: filters.dateRange?.from ?? null,
+        dateTo: filters.dateRange?.to ?? null,
+        // PCF surfaces tag filtering via `selectedTags` (FR-DOC-05/07); the
+        // code-page parser supports `tags` so we forward it for parity.
+        tags: selectedTags,
+        associatedOnly: filters.associatedOnly,
+      },
+      boundSearchIndexName ?? undefined
+    );
+  }, [
+    navigationService,
+    query,
+    queryInput,
+    searchScope,
+    scopeId,
+    isDarkMode,
+    filters,
+    selectedTags,
+    boundSearchIndexName,
+  ]);
 
   // Handle Add Document — opens DocumentUploadWizard Code Page dialog.
   // After upload completes, always re-run the search (empty query returns all
@@ -1603,89 +1685,92 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
     );
   };
 
-  // Renders the actions toolbar (selection · bulk actions · refresh · +)
-  // on a single row above the list/card surface. v1.1.45 folds the bulk-
-  // action affordances into this same row (UAT request — no separate
-  // sticky bulk bar). When zero rows are selected the row shows only
-  // Reload + Add Document; once any row is checked the bulk-action group
-  // appears at the leading edge of the row.
-  const renderActionsToolbar = () => (
-    <div className={styles.emptyStateToolbar}>
-      {/* Bulk-action group (icon-only) — renders only when ≥1 row selected.
-          Internally returns null at selectionCount === 0 so we can safely
-          mount it unconditionally; the leading-edge position is by design
-          (mockup: "[N selected] [bulk icons] ··· [refresh] [+]"). */}
-      <BulkActionBar
-        selectedIds={selectedIds}
-        docTypeOptions={tagOptions}
-        onClear={handleBulkClear}
-        onEmail={handleBulkEmail}
-        onDownload={handleBulkDownload}
-        onPin={handleBulkPin}
-        onDelete={handleBulkDelete}
-        onDocTypeChange={handleBulkDocTypeChange}
-        onShareLink={handleBulkShareLink}
-      />
-      {/* Spacer pushes Reload/Add to the trailing edge */}
-      <span style={{ flex: 1 }} aria-hidden="true" />
-      <Tooltip content="Reload results" relationship="label">
-        <Button
-          className={styles.emptyStateToolbarButton}
-          appearance="subtle"
-          size="small"
-          icon={<ArrowClockwise20Regular />}
-          aria-label="Reload results"
-          onClick={handleReload}
+  // Renders the bulk-action toolbar above the list/card surface ONLY when
+  // ≥1 row is selected. The Reload / Add / Open icons that used to live
+  // here moved up into the header search row in v1.1.73, so this row now
+  // exists solely to host the BulkActionBar. Returning null at zero
+  // selection lets the grid sit flush under the CommandBar (FR-DOC-04).
+  const renderActionsToolbar = () => {
+    if (selectedIds.size === 0) {
+      return null;
+    }
+    return (
+      <div className={styles.emptyStateToolbar}>
+        <BulkActionBar
+          selectedIds={selectedIds}
+          docTypeOptions={tagOptions}
+          onClear={handleBulkClear}
+          onEmail={handleBulkEmail}
+          onDownload={handleBulkDownload}
+          onPin={handleBulkPin}
+          onDelete={handleBulkDelete}
+          onDocTypeChange={handleBulkDocTypeChange}
+          onShareLink={handleBulkShareLink}
         />
-      </Tooltip>
-      {handleAddDocument && (
-        <Tooltip content="Add Document" relationship="label">
-          <Button
-            className={styles.emptyStateToolbarButton}
-            appearance="subtle"
-            size="small"
-            icon={<Add20Regular />}
-            aria-label="Add Document"
-            onClick={handleAddDocument}
-          />
-        </Tooltip>
-      )}
-      {/* v1.1.49 — UAT Items 2 & 5: "Open full viewer" button (Document
-          Relationship Viewer) is rendered in BOTH list and card view
-          toolbars so users always have a single, consistent path to the
-          full viewer. The button is suppressed only when no document is
-          available (results empty AND no first-doc fallback) so the
-          underlying handler doesn't open the viewer with no docId — the
-          legacy "single-document-centric requires-docId" guard. */}
-      {results.length > 0 && (
-        <Tooltip content="Open full viewer" relationship="label">
-          <Button
-            className={styles.emptyStateToolbarButton}
-            appearance="subtle"
-            size="small"
-            icon={<Open20Regular />}
-            aria-label="Open full viewer"
-            onClick={handleOpenViewer}
-          />
-        </Tooltip>
-      )}
-    </div>
-  );
+      </div>
+    );
+  };
 
   // Combine root styles based on mode
   const rootClassName = compactMode ? `${styles.root} ${styles.rootCompact}` : styles.root;
 
   return (
     <div className={rootClassName}>
-      {/* Header Region: Search Input + Document Count */}
+      {/* Header Region: Title row + Search row (with inline action icons) + count.
+          v1.1.73 — adds a "DOCUMENTS" title row (matches VisualHost CardChrome
+          font/size), and inlines the Reload / Add / Open-full-viewer icons next
+          to the search input so the row reads "[search] [Search] [⟳][+][↗]".
+          The previous standalone action-toolbar row below CommandBar now only
+          renders when ≥1 row is selected (bulk-action mode). */}
       <div className={styles.header}>
-        <SearchInput
-          value={queryInput}
-          placeholder={placeholder}
-          disabled={isLoading}
-          onValueChange={setQueryInput}
-          onSearch={handleSearch}
-        />
+        <div className={styles.titleRow}>
+          <Text size={300} weight="semibold">
+            Documents
+          </Text>
+        </div>
+        <div className={styles.searchRow}>
+          <div className={styles.searchInputWrap}>
+            <SearchInput
+              value={queryInput}
+              placeholder={placeholder}
+              disabled={isLoading}
+              onValueChange={setQueryInput}
+              onSearch={handleSearch}
+            />
+          </div>
+          <Tooltip content="Reload results" relationship="label">
+            <Button
+              className={styles.inlineToolbarButton}
+              appearance="subtle"
+              size="small"
+              icon={<ArrowClockwise20Regular />}
+              aria-label="Reload results"
+              onClick={handleReload}
+            />
+          </Tooltip>
+          {handleAddDocument && (
+            <Tooltip content="Add Document" relationship="label">
+              <Button
+                className={styles.inlineToolbarButton}
+                appearance="subtle"
+                size="small"
+                icon={<Add20Regular />}
+                aria-label="Add Document"
+                onClick={handleAddDocument}
+              />
+            </Tooltip>
+          )}
+          <Tooltip content="Open in Semantic Search" relationship="label">
+            <Button
+              className={styles.inlineToolbarButton}
+              appearance="subtle"
+              size="small"
+              icon={<Open20Regular />}
+              aria-label="Open in Semantic Search"
+              onClick={handleOpenViewer}
+            />
+          </Tooltip>
+        </div>
         {hasSearched && !isLoading && totalCount > 0 && (
           <Text size={200} style={{ color: tokens.colorNeutralForeground3, marginTop: '4px' }}>
             {filters.associatedOnly
@@ -1752,7 +1837,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.72 • Built 2026-06-01</Text>
+        <Text size={100}>v1.1.76 • Built 2026-06-10</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so

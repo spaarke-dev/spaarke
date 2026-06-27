@@ -1,0 +1,94 @@
+<task id="R4-071" project="smart-todo-r4">
+  <metadata>
+    <title>F — Persist orientation preference via sprk_userpreference</title>
+    <phase>Phase 2: Wave 2b</phase>
+    <workstream>F</workstream>
+    <status>complete</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>smart-todo, dataverse, user-preference, react</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>R4-070</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/hooks/useUserPreferences.ts (extended)</file>
+      <file>src/solutions/SmartTodo/src/components/KanbanBoard.tsx (consumes hook)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Persist user's vertical/horizontal orientation choice via `sprk_userpreference.preferencetype = "SmartTodoOrientation"`. Restored on next visit. Reuses R3 pattern in `useUserPreferences` hook (and may share preferencetype handling with task 033 view toggle).
+  </prompt>
+
+  <role>React + Dataverse engineer.</role>
+
+  <goal>Orientation preference round-trips through `sprk_userpreference`; user's last selection restored on next visit.</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="hook">src/solutions/SmartTodo/src/hooks/useUserPreferences.ts</file>
+    <file purpose="target">src/solutions/SmartTodo/src/components/KanbanBoard.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-30">Preference type = "SmartTodoOrientation"; persists per-user; restored on next visit</constraint>
+    <constraint source="ADR-026">Code Page React 19</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/user-preference</topic>
+    <files>
+      <file>.claude/adr/ADR-026-code-page-build-standard.md</file>
+    </files>
+    <patterns>
+      <pattern name="useUserPreferences hook extension" location="src/solutions/SmartTodo/src/hooks/useUserPreferences.ts">
+        Add another preferencetype to the existing hook pattern.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R4-070" status="must-complete">Orientation toggle UI in place</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 033 may already extend `useUserPreferences` with SmartTodoView preferencetype; coordinate to avoid hook-shape drift.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Extend useUserPreferences hook">Add `SmartTodoOrientation` preferencetype.</step>
+    <step order="2" name="Wire KanbanBoard to hook">Read on mount; write on change. Default = horizontal on first visit.</step>
+    <step order="3" name="Build + test">`npm run build:prod`; tests for round-trip + default.</step>
+    <step order="4" name="Smoke test">Toggle; reload; verify restored.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="ui-test">Persistence smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/hooks/useUserPreferences.ts (extended)</output>
+    <output type="code">src/solutions/SmartTodo/src/components/KanbanBoard.tsx (consumes hook)</output>
+    <output type="test">Round-trip + default tests</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Orientation persists per-user">
+      <steps>
+        <step>Open SmartTodo Code Page; default = horizontal</step>
+        <step>Toggle to vertical</step>
+        <step>Reload</step>
+        <step>Verify vertical orientation restored</step>
+      </steps>
+      <expected>Preference round-trips via `sprk_userpreference`</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Orientation persists via `sprk_userpreference.preferencetype = "SmartTodoOrientation"`</criterion>
+    <criterion testable="true">Default = horizontal on first visit</criterion>
+    <criterion testable="true">Restored on next visit</criterion>
+    <criterion testable="true">Tests pass</criterion>
+  </acceptance-criteria>
+</task>

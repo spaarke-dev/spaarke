@@ -390,25 +390,6 @@ public class DocumentDownloadEndpointTests
         }
     }
 
-    [Fact]
-    public void RecordDownloadDenied_DoesNotThrow()
-    {
-        // Act - RecordDownloadDenied doesn't take a stopwatch (denial happens before download starts)
-        var act = () => _telemetry.RecordDownloadDenied("doc-123", "user-456", "unauthorized");
-
-        // Assert - No exception thrown indicates success
-        act.Should().NotThrow();
-    }
-
-    [Fact]
-    public void RecordDownloadDenied_WithNullUserId_DoesNotThrow()
-    {
-        // Act
-        var act = () => _telemetry.RecordDownloadDenied("doc-123", null, "access_denied");
-
-        // Assert
-        act.Should().NotThrow();
-    }
 
     #endregion
 

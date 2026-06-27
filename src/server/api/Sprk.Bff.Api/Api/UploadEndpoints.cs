@@ -1,10 +1,11 @@
 using System.Security.Claims;
-using Microsoft.Graph;
-using Microsoft.Graph.Models.ODataErrors;
+using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Infrastructure.Validation;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -16,7 +17,9 @@ public static class UploadEndpoints
 {
     public static IEndpointRouteBuilder MapUploadEndpoints(this IEndpointRouteBuilder app)
     {
-        // PUT /api/containers/{id}/files/{*path} - Upload small file (MI)
+        // PUT /api/containers/{id}/files/{*path} - Upload small file (MI). Post-upload
+        // RAG indexing is triggered by the client via `@spaarke/sdap-client.SdapApiClient.indexFile()`
+        // after a successful PUT — see `sdap-client-shared-library-fix-r1` project.
         app.MapPut("/api/containers/{containerId}/files/{*path}", async (
             string containerId,
             string path,
@@ -51,7 +54,9 @@ public static class UploadEndpoints
                 logger.LogInformation("Uploading file {Path} to container {ContainerId}", path, containerId);
 
                 // Stream directly to Graph SDK (no memory buffering)
-                var item = await speFileStore.UploadSmallAsync(containerId, path, req.Body, ct);
+                var item = await GraphCallScope.Run(
+                    () => speFileStore.UploadSmallAsync(containerId, path, req.Body, ct),
+                    "upload.small");
 
                 // Fire-and-forget: create notification for the uploading user (must not block response)
                 var userOid = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
@@ -84,10 +89,10 @@ public static class UploadEndpoints
 
                 return TypedResults.Ok(item);
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Failed to upload file");
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception ex)
             {
@@ -129,14 +134,16 @@ public static class UploadEndpoints
 
                 logger.LogInformation("Creating upload session for {Path} in container {ContainerId}", path, containerId);
 
-                var session = await speFileStore.CreateUploadSessionAsync(containerId, path, ct);
+                var session = await GraphCallScope.Run(
+                    () => speFileStore.CreateUploadSessionAsync(containerId, path, ct),
+                    "upload.session.create");
 
                 return TypedResults.Ok(session);
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Failed to create upload session");
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception ex)
             {

@@ -1,0 +1,149 @@
+<task id="R4-020" project="smart-todo-r4">
+  <metadata>
+    <title>A — Rebuild SmartToDo workspace widget against sprk_todo</title>
+    <phase>Phase 2: Wave 2a</phase>
+    <workstream>A</workstream>
+    <status>complete</status>
+    <estimated-effort>2-3 days</estimated-effort>
+    <tags>widget, smart-todo, react, fluent-v9, dataverse, spaarkeai, deploy</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-001</dependencies>
+    <relevant-files>
+      <file>per-audit (R4-001 outcome): src/solutions/LegalWorkspace/src/components/SmartToDo/ OR new @spaarke/smart-todo-components peer package OR Spaarke.AI.Widgets workspace dir</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Rebuild the SmartToDo workspace widget per the archetype chosen in task 001 audit. Query `sprk_todo` (not `sprk_event`). Eliminate the `sprk_todoflag` legacy query everywhere. Rebuild + redeploy affected solutions. Coordinate with PR #372 file ownership.
+  </prompt>
+
+  <role>
+React + Fluent v9 widget engineer with `@spaarke/ui-components` familiarity.
+  </role>
+
+  <goal>
+SmartToDo widget mounts cleanly in BOTH "system widget" load AND user-added widget contexts of the SpaarkeAi workspace; query targets `sprk_todo` filtered by current workspace's regarding context AND `statuscode in {Open, In Progress}`; 0 OData errors; deployed to spaarkedev1.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="project-plan">projects/smart-todo-r4/plan.md</file>
+    <file purpose="audit-outcome">projects/smart-todo-r4/notes/widget-surface-audit.md</file>
+    <file purpose="widget-pattern">docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    <file purpose="architecture">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    <file purpose="architecture">docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    <file purpose="architecture">docs/architecture/spaarke-todo-architecture.md</file>
+    <file purpose="canonical-pattern-d">Calendar widget in @spaarke/events-components (see audit)</file>
+    <file purpose="pattern">.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    <file purpose="pattern">.claude/patterns/dataverse/polymorphic-resolver.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + Griffel mandatory</constraint>
+    <constraint source="ADR-012">Shared primitives MUST hoist to `@spaarke/ui-components` (or peer `@spaarke/smart-todo-components` if Pattern D)</constraint>
+    <constraint source="ADR-030">If widget dispatches workspace events, MUST use PaneEventBus typed contract</constraint>
+    <constraint source="spec FR-02">0 OData $select hits for `sprk_todoflag`; query targets `sprk_todo` filtered by regarding context + statuscode in {Open, In Progress}</constraint>
+    <constraint source="spec FR-03">Archetype MUST follow BUILD-A-NEW-WORKSPACE-WIDGET decision tree (per task 001 audit recommendation)</constraint>
+    <constraint source="spec FR-04">Widget mounts cleanly under all 6 workspace layouts; no a11y regressions</constraint>
+    <constraint source="spec FR-05">Rebuild + redeploy; UAT widget error gone</constraint>
+    <constraint source="spec NFR-09">PR description identifies deployed surface(s) + confirms rebuild + redeploy</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>workspace/widget</topic>
+    <files>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="Calendar widget Pattern D" location="docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md §2A">
+        Shared-lib widget + thin LegalWorkspace shim. Canonical worked example. If A audit chose Pattern D, follow this structure.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R3 retired the `sprk_todoflag` field on `sprk_event` when `sprk_todo` was decoupled. A stale deployed widget bundle still queries the old shape. Task 001 audit confirms WHICH source surface(s) need rebuilding.</background>
+    <dependencies>
+      <dependency task="R4-001" status="must-complete">Widget surface audit complete; archetype chosen.</dependency>
+    </dependencies>
+    <related-work>
+      <item>PR #372 (`feature/ai-spaarke-ai-workspace-UI-r1`) overlaps this area — coordinate per audit's coordination plan.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 70%.</step>
+    <step order="1" name="Load audit outcome">Read `notes/widget-surface-audit.md`; confirm archetype + target files.</step>
+    <step order="2" name="Coordinate with PR #372">Check if PR #372 has merged or modified target files since audit. Rebase if needed.</step>
+    <step order="3" name="Implement widget">Build the new widget per chosen archetype. Query `sprk_todo` via `Xrm.WebApi.retrieveMultipleRecords` (or equivalent) filtered by regarding context + statuscode. Render via Fluent v9 + shared-lib primitives.</step>
+    <step order="4" name="Apply PaneEventBus if needed">If widget dispatches `widget_load` or other workspace events, use ADR-030 typed bus.</step>
+    <step order="5" name="A11y review">Verify keyboard nav, focus rings, ARIA labels match neighboring widgets.</step>
+    <step order="6" name="Build">`npm run build` (relevant package).</step>
+    <step order="7" name="Unit tests">Cover query construction + render states (loading, empty, populated, error).</step>
+    <step order="8" name="Rebuild + redeploy affected solutions">Use `dataverse-deploy` / `code-page-deploy` / `pcf-deploy` skill per affected surface. Verify zero `sprk_todoflag` hits in deployed bundles.</step>
+    <step order="9" name="Quality gates (FULL rigor)">Run `code-review` + `adr-check` per task-execute Step 9.5.</step>
+    <step order="10" name="Smoke test in spaarkedev1">Open SpaarkeAi workspace; verify widget mounts; verify 0 console / OData errors; verify cards render.</step>
+    <step order="11" name="Update task status">Mark complete; document deployed surface(s) in PR.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="git">Stage + commit</tool>
+    <tool name="dataverse-deploy">Deploy affected solutions</tool>
+    <tool name="ui-test">Smoke test in spaarkedev1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">per audit outcome — likely src/solutions/LegalWorkspace/src/components/SmartToDo/ AND/OR @spaarke/smart-todo-components peer package</output>
+    <output type="test">Unit tests covering query + render</output>
+    <output type="deploy">Solutions redeployed to spaarkedev1</output>
+    <output type="docs">PR description identifies deployed surface(s)</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Widget mounts in SpaarkeAi workspace">
+      <url>spaarkedev1 SpaarkeAi workspace (configured environment)</url>
+      <steps>
+        <step>Open SpaarkeAi workspace in spaarkedev1</step>
+        <step>Verify SmartToDo widget is visible in default layout</step>
+        <step>Check browser console for any errors</step>
+        <step>Confirm zero OData errors mentioning sprk_todoflag</step>
+      </steps>
+      <expected>Widget renders cards; console clean; no OData errors</expected>
+    </test>
+    <test name="Widget mounts when user-added">
+      <url>spaarkedev1 SpaarkeAi workspace (configured environment) — pane add UI</url>
+      <steps>
+        <step>Add SmartToDo widget via user pane configuration</step>
+        <step>Verify widget mounts</step>
+        <step>Check console</step>
+      </steps>
+      <expected>Widget mounts cleanly in user-added context</expected>
+    </test>
+    <test name="A11y check">
+      <steps>
+        <step>Tab through widget controls</step>
+        <step>Verify focus rings + ARIA labels</step>
+      </steps>
+      <expected>Keyboard accessible per WCAG 2.1 AA</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Widget mounts cleanly in BOTH system + user-added contexts</criterion>
+    <criterion testable="true">grep for `sprk_todoflag` in built bundle returns 0 hits</criterion>
+    <criterion testable="true">OData query targets `sprk_todo` filtered by regarding context + statuscode in {Open, In Progress}</criterion>
+    <criterion testable="true">Archetype chosen matches task 001 audit recommendation</criterion>
+    <criterion testable="true">All 6 workspace layouts render widget without breakage</criterion>
+    <criterion testable="true">A11y: no regressions vs neighboring widgets</criterion>
+    <criterion testable="true">PR description identifies deployed surface(s) + rebuild/redeploy confirmation</criterion>
+  </acceptance-criteria>
+</task>

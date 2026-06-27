@@ -1,0 +1,43 @@
+{
+  "_comment_top": "chat-routing-redesign-r1 task 118b / FR-57 — seed row for the GetWorkspaceTabContentHandler chat tool. Single LLM-facing function: get_workspace_tab_content(tabId, sectionName?). READ-ONLY closure of the T2 workspace-output → AI-memory round-trip per architecture §6.5 + §11.1: composed widget state (sections + values) for an existing workspace tab becomes AI-readable on subsequent chat turns. Sibling write tool is update_workspace_tab (task 055).",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'GetWorkspaceTabContentHandler' (= nameof handler class). Auto-discovered via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) — ZERO new top-level DI line; ZERO if-flag block (CLAUDE.md §10 F.1 asymmetric-registration anti-pattern kept clear).",
+  "_comment_architecture_binding": "architecture/stateful-chat-architecture.md §6.5 (workspace state read/write) + §11.1 (R6 carry-forward — DO NOT REBUILD WorkspaceStateService). This handler is a READ-ONLY projection over the existing Pillar 6b plumbing (IWorkspaceStateService.GetTabsAsync). NO new state-storage path. The T2 round-trip is closed by reusing what R6 already shipped.",
+  "_comment_t2_roundtrip": "spec.md FR-57 binding: workspace output landed by a playbook (e.g., summarize-document-for-workspace@v1 with 4 sections tldr/summary/keywords/entities per task 118R) is reachable via this tool on subsequent turns. UX flow: user uploads NDA → /summarize lands 4 sections in workspace tab → 'make the summary shorter' → agent invokes get_workspace_tab_content(tabId, sectionName='summary' OR omitted) → re-reads CURRENT composed state → reasons about the target.",
+  "_comment_decoupling": "POML 118b binding: DO NOT couple this handler to DeliverComposite shape — it should work for any workspace tab content (composite OR legacy single-action). The handler's ProjectComposedSections switches on WidgetType discriminator and projects per-variant fields (Summary | DocumentViewer | Dashboard | Table). Future variants extend additively.",
+  "_comment_readonly_invariant": "NFR-A1 explicit T2→T3 promotion binding: this handler is READ-ONLY. It MUST NOT mutate tab state, MUST NOT bump LastUserEditAt, MUST NOT write to long-term memory, MUST NOT promote to any cross-session tier. Mutation is the exclusive responsibility of UpdateWorkspaceTabHandler (Q8 USER WINS) — see task 055. Unit test verifies no UpsertTabAsync / PinTabAsync / CloseTabAsync calls.",
+  "_comment_security": "sprk_requiredcapability = null (intentional). Reading the current workspace tab content is a default user affordance available in every chat session. The handler's own gates (TenantId required, tab MUST exist in session, defensive tenant-mismatch check on the resolved row) are the authorization surface.",
+  "_comment_tenant_isolation": "ADR-014 binding: the chat session's TenantId is forwarded into IWorkspaceStateService.GetTabsAsync (Redis key + Cosmos partition key). Cross-tenant reads are structurally impossible. The handler ALSO asserts current.TenantId == context.TenantId as defense in depth in case a future cache-layer bug surfaces a foreign-tenant tab.",
+  "_comment_adr015": "ADR-015 data governance: telemetry logs handler name + decision (ok | not_found | section_missing | validation_failed | cancelled | exception) + tabId + sectionName PRESENCE flag (not value) + sectionCount + tenantId + duration ONLY. NEVER the projected widget body, NEVER section text content, NEVER user message text. The Data payload IS the response body returned to the LLM (which is the whole point — composed widget state is the read), but it MUST NOT appear in app-logs.",
+  "_comment_description_loadbearing": "sprk_description is LOAD-BEARING per NFR-12: the LLM uses the description text to decide WHEN to invoke this tool. The phrasing makes the read-only nature explicit (vs update_workspace_tab) and the 'composed widget state, NOT raw streaming chunks' framing makes the FR-54 multi-node Output composition semantics visible to the agent.",
+  "_comment_pane_event_bus": "ADR-030 binding: NO new SSE channel or PaneEventBus event type introduced by this handler. Pure read; no state change to broadcast.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter; UPSERTs.",
+  "sprk_name": "SYS-Get Workspace Tab Content",
+  "sprk_toolcode": "GET-WORKSPACE-TAB-CONTENT",
+  "sprk_description": "Read the composed widget state of an existing workspace tab. Use this when the user refers to content they can see in a workspace tab (e.g., 'make the summary shorter', 'change the tldr') and you need the CURRENT state to reason about what to modify. Returns the composed sections + values from the tab's widget data — NOT raw streaming chunks. Inputs: tabId (required); sectionName (optional, scope read to one section). Outputs: status discriminator (ok | not_found | section_missing), widgetType, sections map (section name → value), sectionCount, message. Read-only — this tool NEVER mutates tab state; for edits use update_workspace_tab. When the tab is not in the current workspace state OR the sectionName is missing, the response is a structured re-readable status — never an error. Architecture §6.5 / §11.1.",
+  "sprk_handlerclass": "GetWorkspaceTabContentHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only. Workspace tab content is a chat-session affordance — playbook nodes write to sprk_analysisoutput, not the chat-session per-tenant workspace tab list. Mirrors the chat-only scoping of UpdateWorkspaceTabHandler (task 055) and SendWorkspaceArtifactHandler (task 054).",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "GetWorkspaceTabContentHandler Request",
+    "description": "Argument shape for chat-driven invocation of the get_workspace_tab_content tool. Reads the composed widget state of an existing workspace tab via IWorkspaceStateService.GetTabsAsync. READ-ONLY.",
+    "type": "object",
+    "required": ["tabId"],
+    "properties": {
+      "tabId": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Stable workspace tab identifier (matches WorkspaceTab.id from the system-prompt snapshot)."
+      },
+      "sectionName": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Optional section name to scope the read to a single composed section (e.g., 'summary'). Omit to return all sections. When supplied but not present in the tab, the response carries a 'section_missing' status with the list of available section names — never an error."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — this row exposes a single LLM-facing function. Empty object reserved for future per-row defaults (e.g., per-tenant section-name allowlists)."
+  }
+}

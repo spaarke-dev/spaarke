@@ -1,0 +1,91 @@
+<task id="R4-081" project="smart-todo-r4">
+  <metadata>
+    <title>G — Add Visual Host "Upcoming To Dos" to Matter main form</title>
+    <phase>Phase 2: Wave 2c</phase>
+    <workstream>G</workstream>
+    <status>complete</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>dataverse, form-designer, visual-host, deploy, matter</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-051, R4-080</dependencies>
+    <relevant-files>
+      <file>Dataverse sprk_matter main form (form-designer change)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Add Visual Host control bound to the Matter chart def (`Upcoming To Dos — Matter`) on the sprk_matter main form. New section labeled "Upcoming To Dos". Drill-through opens SmartTodo Code Page modal pre-filtered to current Matter.
+  </prompt>
+
+  <role>Dataverse form-designer + solution manager.</role>
+
+  <goal>Open a Matter record in spaarkedev1; "Upcoming To Dos" section renders Visual Host card; drill-through opens SmartTodo Code Page modal with `?regardingType=sprk_matter&regardingId=<currentId>` pre-filter.</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="chart-def">infrastructure/dataverse/charts/upcoming-todos-matter.json (from task 080)</file>
+    <file purpose="spike">projects/smart-todo-r4/notes/drill-through-spike.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-36">Visual Host added to Matter main form</constraint>
+    <constraint source="spec FR-34">Drill-through opens SmartTodo Code Page modal (NOT entity list view)</constraint>
+    <constraint source="spec NFR-09">PR description identifies the deployed form change</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/form-designer</topic>
+    <files>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R4-080" status="must-complete">Matter chart def record exists</dependency>
+      <dependency task="R4-051" status="must-complete">Resolver on To Do form (drill-through pre-filter depends on regarding shape — see plan.md Phase 2c rationale)</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Open sprk_matter main form">In form designer.</step>
+    <step order="2" name="Add "Upcoming To Dos" section">Place above or below the most appropriate existing section.</step>
+    <step order="3" name="Add Visual Host control">Bind to the Matter chart def. Configure context = current record id.</step>
+    <step order="4" name="Publish form">Save + Publish.</step>
+    <step order="5" name="Export + commit solution XML">Solution-as-code.</step>
+    <step order="6" name="Smoke test in spaarkedev1">Open a Matter; verify card renders; drill through; verify modal opens with pre-filter.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-deploy">Solution operations</tool>
+    <tool name="pac">Solution export</tool>
+    <tool name="ui-test">Card render + drill-through</tool>
+  </tools>
+
+  <outputs>
+    <output type="form-update">sprk_matter main form modified</output>
+    <output type="solution-xml">Updated solution XML committed</output>
+    <output type="deploy">Deployed to spaarkedev1</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Card renders + drill-through opens modal">
+      <steps>
+        <step>Open a Matter record in spaarkedev1</step>
+        <step>Verify "Upcoming To Dos" section visible with Visual Host card</step>
+        <step>Click a card → modal opens with SmartTodo Code Page</step>
+        <step>Verify Kanban is pre-filtered to this Matter (regardingType=sprk_matter, regardingId=current)</step>
+      </steps>
+      <expected>Card renders; drill-through opens pre-filtered modal</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">"Upcoming To Dos" section visible on sprk_matter main form</criterion>
+    <criterion testable="true">Visual Host card renders with current Matter's to-dos</criterion>
+    <criterion testable="true">Drill-through opens SmartTodo Code Page modal (NOT entity list view)</criterion>
+    <criterion testable="true">Pre-filter to current Matter id works</criterion>
+    <criterion testable="true">Solution XML committed</criterion>
+  </acceptance-criteria>
+</task>

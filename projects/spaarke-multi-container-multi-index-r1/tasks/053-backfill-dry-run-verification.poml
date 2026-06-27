@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Backfill — test-environment dry run + INV-5-safety verification</title>
+    <phase>F: PowerShell Backfill</phase>
+    <status>not-started</status>
+    <estimated-hours>2-3</estimated-hours>
+    <dependencies>050, 051, 052</dependencies>
+    <blocks>090</blocks>
+    <tags>backfill, testing, integration-test, operations</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Testing-only task — runs existing scripts (050/051/052) against a test environment + verifies behavior. Does not create new code. Has explicit constraints (INV-5, NFR-04) and integration-test scope.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequentially runs three scripts against the same Dataverse test environment; concurrent runs would interfere with each other's read/write state.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Run the three backfill scripts produced by tasks 050, 051, 052 against a Dataverse **test environment**. Verify all four sub-criteria of FR-BF-04: INV-5 honored (no overwrites of existing non-null values), halt-loud behavior (synthetic unmapped container triggers exit), resumability (kill mid-run at 5K of 10K, re-run, final state matches single-pass), and NFR-04 throughput (10K records in a single run).
+  </prompt>
+
+  <role>
+    Spaarke operator running operator-facing scripts in a test environment. Validates behavior empirically; captures evidence in audit logs.
+  </role>
+
+  <goal>
+    All three backfill scripts run end-to-end in a test environment. INV-5, halt-loud, resumability, and NFR-04 (10K throughput) each verified empirically with captured evidence. Audit logs and verification notes saved to `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/053-backfill-verification.md`.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 050/051/052 produced the scripts; this task validates them under realistic test conditions. The four sub-criteria of FR-BF-04 are the binding contract — each is verified by a specific empirical procedure documented below.
+
+      Test environment is intentional: this is NOT production. Inject synthetic data (unmapped container reference) for the halt-loud test; do not introduce non-production data into a production environment.
+    </background>
+    <relevant-files>
+      <file>scripts/backfill-multi-container-multi-index/Backfill-MultiContainerMultiIndex-ParentRecords.ps1</file>
+      <file>scripts/backfill-multi-container-multi-index/Backfill-MultiContainerMultiIndex-Documents.ps1</file>
+      <file>scripts/backfill-multi-container-multi-index/Audit-MultiContainerMultiIndex-Drift.ps1</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-BF-04">Idempotent + resumable + paged + never overwrite existing non-null values (INV-5). Manual test: 10K records; kill at 5K; re-run; final state matches single-pass.</constraint>
+    <constraint source="spec.md NFR-04">Process at least 10K records in a single run without throttling or memory pressure.</constraint>
+    <constraint source="design.md INV-5">Never overwrite existing non-null values — verify by sampling records pre/post and confirming all non-null pre-values are preserved.</constraint>
+    <constraint source="project">Run in test environment only. Synthetic data (unmapped container) used only here, never in production.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Connect to the Dataverse test environment. Snapshot pre-run state for ~50 random records (each entity type, mix of populated/empty fields) via MCP. Save snapshot to notes for post-run comparison.</step>
+    <step order="2">Run `Backfill-MultiContainerMultiIndex-ParentRecords.ps1 -DryRun` against the test env. Capture audit log. Inspect for: expected fills (empty fields would be filled), zero overwrites (INV-5 — no `would-overwrite-aborted` entries on populated fields), no halts. Then run WITHOUT `-DryRun` and capture the real-run audit log.</step>
+    <step order="3">Same pattern for `Backfill-MultiContainerMultiIndex-Documents.ps1`: dry-run then real-run.</step>
+    <step order="4">Run `Audit-MultiContainerMultiIndex-Drift.ps1` (read-only). Inspect output for classification correctness — sanity check at least 3 rows in each classification bucket (override, drift, anomaly).</step>
+    <step order="5">Verify INV-5: re-query the 50 sample records from Step 1; confirm every pre-non-null value is unchanged. Document each in the verification notes.</step>
+    <step order="6">Halt-loud verification: temporarily inject a synthetic Document with an unmapped `sprk_graphdriveid` (e.g., `b!SYNTHETIC_TEST_DO_NOT_USE`). Re-run task 051 script; verify it halts with the surfaceable error referencing the synthetic container id + the record id + the instruction to extend `$ContainerIndexMap`. Clean up the synthetic record after verification.</step>
+    <step order="7">Resumability + NFR-04 verification: if a 10K-record synthetic dataset is available (or generate one), run task 050 script against it; kill the process at ~5K records via Ctrl-C; re-run from checkpoint; verify the final state matches a clean single-pass run (compare row counts + sample row values). Document timings (NFR-04: completes without throttling/memory pressure).</step>
+    <step order="8">Capture all evidence (snapshots, audit logs, verification observations, timings) to `projects/spaarke-multi-container-multi-index-r1/notes/handoffs/053-backfill-verification.md`. Update TASK-INDEX: 🔲 &#8594; ✅; update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run each .ps1 script with PowerShell</tool>
+    <tool name="mcp__dataverse__read_query">Pre/post record snapshots for INV-5 verification</tool>
+    <tool name="mcp__dataverse__update_record">Insert/clean up the synthetic test record for halt-loud verification</tool>
+    <tool name="Write">Capture verification notes</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarke-multi-container-multi-index-r1/notes/handoffs/053-backfill-verification.md (includes pre/post snapshots, audit logs, verification observations)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-BF-04 sub-criterion 1 (idempotent): re-running each script produces the same end-state (zero `filled` actions on the second pass).</criterion>
+    <criterion testable="true">FR-BF-04 sub-criterion 2 (resumable): kill at 5K of 10K + resume; final state matches single-pass.</criterion>
+    <criterion testable="true">FR-BF-04 sub-criterion 3 (paged): script runs at default 500 batch size without timeout.</criterion>
+    <criterion testable="true">FR-BF-04 sub-criterion 4 (INV-5): sample of 50 records pre/post shows zero non-null values overwritten.</criterion>
+    <criterion testable="true">NFR-04: 10K-record run completes without throttling or memory pressure; timings captured.</criterion>
+    <criterion testable="true">Halt-loud: synthetic unmapped container triggers script exit with surfaceable error.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Sequential by necessity — three scripts hit the same Dataverse environment, and the synthetic-data injection for halt-loud testing must be cleaned up before subsequent steps. Run in this order: parent (050) &#8594; document (051) &#8594; audit (052) &#8594; halt-loud injection + cleanup &#8594; resumability.
+
+    If a 10K-record synthetic dataset is not available, document the scaled-down test (e.g., 1K records) and note the throughput projection; explicit operator acceptance required to defer the 10K test to a later phase.
+
+    The synthetic record cleanup is non-negotiable — DO NOT leave test-only data in any environment after this task completes.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load spec.md FR-BF-04, NFR-04 + design.md INV-5 before starting. Follow task-execute Step 0 (STANDARD rigor — testing-only) before any script run. Capture every result to the verification notes file as you go (in-flight evidence is the deliverable).
+    </protocol>
+  </execution>
+</task>

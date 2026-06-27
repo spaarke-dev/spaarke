@@ -1,0 +1,103 @@
+<task id="R4-033" project="smart-todo-r4">
+  <metadata>
+    <title>B — List / Card view toggle with per-user persistence</title>
+    <phase>Phase 2: Wave 2a</phase>
+    <workstream>B</workstream>
+    <status>complete</status>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>code-page, smart-todo, ui, fluent-v9, user-preference, dataverse</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-012, R4-030</dependencies>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/App.tsx (modified)</file>
+      <file>src/solutions/SmartTodo/src/hooks/useUserPreferences.ts (extended)</file>
+      <file>src/solutions/SmartTodo/src/components/CardGrid/ (existing)</file>
+      <file>src/solutions/SmartTodo/src/components/ListView/ (new)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Add List / Card view toggle to the SmartTodo header (consumes task 012's `<ViewToggle>`). Persist user's choice via `sprk_userpreference` reusing the R3 pattern in `useUserPreferences` hook. Default to Card view on first visit.
+  </prompt>
+
+  <role>React + Dataverse engineer; familiar with R3 `sprk_userpreference` pattern.</role>
+
+  <goal>Toolbar has list/card icon toggle; clicking re-renders cards vs rows; preference round-trips through `sprk_userpreference` and is restored on next visit.</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="shared-toggle">src/client/shared/Spaarke.UI.Components/src/components/ViewToggle/</file>
+    <file purpose="user-pref-hook">src/solutions/SmartTodo/src/hooks/useUserPreferences.ts</file>
+    <file purpose="target">src/solutions/SmartTodo/src/App.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + Griffel; no v8; no inline styles</constraint>
+    <constraint source="ADR-012">Consume `<ViewToggle>` from `@spaarke/ui-components`</constraint>
+    <constraint source="spec FR-09">View toggle present; matches `SemanticSearchControl` icon set; view persists per-user via `sprk_userpreference`</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/user-preference</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+    </files>
+    <patterns>
+      <pattern name="sprk_userpreference round-trip" location="src/solutions/SmartTodo/src/hooks/useUserPreferences.ts">
+        R3 pattern: hook reads from Dataverse on mount, writes on change. Add `SmartTodoView` preferencetype.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R3 didn't have a list view at all; only card grid. R4 adds list view as an option for users who prefer dense list rendering, matching SemanticSearchControl's view toggle.</background>
+    <dependencies>
+      <dependency task="R4-012" status="must-complete">ViewToggle primitive hoisted</dependency>
+      <dependency task="R4-030" status="must-complete">4-row layout in place</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Read existing useUserPreferences hook">Identify pattern for adding new preferencetype.</step>
+    <step order="2" name="Extend hook with SmartTodoView preferencetype">Read/write through existing pattern.</step>
+    <step order="3" name="Implement ListView component">Dense row layout for card data; uses Fluent v9 `<Table>` or `<DataGrid>`.</step>
+    <step order="4" name="Wire ViewToggle to App.tsx">Toggle re-renders CardGrid ↔ ListView via state; state writes to preference.</step>
+    <step order="5" name="Default to Card view on first visit">If no preference exists, render Card; persist on first toggle.</step>
+    <step order="6" name="Build + test">`npm run build:prod`; tests for preference round-trip + render switching.</step>
+    <step order="7" name="Smoke test in spaarkedev1">Toggle, reload, verify preference restored.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="ui-test">Persistence smoke test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/App.tsx (modified)</output>
+    <output type="code">src/solutions/SmartTodo/src/components/ListView/ListView.tsx (new)</output>
+    <output type="code">src/solutions/SmartTodo/src/hooks/useUserPreferences.ts (extended)</output>
+    <output type="test">Tests for preference round-trip + view switching</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="View toggle persists per-user">
+      <steps>
+        <step>Open SmartTodo Code Page; default = Card</step>
+        <step>Click toggle to List</step>
+        <step>Reload page</step>
+        <step>Verify List view is the default now</step>
+      </steps>
+      <expected>Preference round-trips through `sprk_userpreference`</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">View toggle present in toolbar; icon set matches SemanticSearchControl</criterion>
+    <criterion testable="true">Toggle switches between Card and List render</criterion>
+    <criterion testable="true">Preference persists via `sprk_userpreference.preferencetype = "SmartTodoView"`</criterion>
+    <criterion testable="true">Default = Card on first visit (no preference record)</criterion>
+    <criterion testable="true">Tests pass for round-trip + view switching</criterion>
+  </acceptance-criteria>
+</task>

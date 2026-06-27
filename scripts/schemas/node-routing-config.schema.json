@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/node-routing-config.v1.json",
+  "title": "Node Routing Config",
+  "description": "Schema for sprk_playbooknode.sprk_configjson routing fields (chat-routing-redesign-r1 FR-14a / FR-14e). The C# source of truth is Sprk.Bff.Api.Models.Ai.NodeRoutingConfig (src/server/api/Sprk.Bff.Api/Models/Ai/NodeRoutingConfig.cs). If the NodeDestination enum changes in C#, this schema must update in lockstep. The wire-format values are kebab-case per NodeDestinationJsonConverter. Additional properties are permitted for forward-compatibility because sprk_configjson is a shared blob also read by DeliverOutputNodeExecutor (deliveryType, template, outputFormat, etc.).",
+  "type": "object",
+  "required": ["destination"],
+  "additionalProperties": true,
+  "properties": {
+    "destination": {
+      "type": "string",
+      "description": "Per-node routing destination. Wire values match NodeDestinationJsonConverter. 'both' was added in chat-routing-redesign-r1 task 045 (FR-14a).",
+      "enum": ["chat", "workspace", "both", "form-prefill", "side-effect"]
+    },
+    "widgetType": {
+      "type": "string",
+      "description": "Workspace widget type. Conditionally required when destination = 'workspace' or 'both' (enforced by NodeRoutingConfig.Validate at parse time, not by this schema).",
+      "maxLength": 64
+    }
+  }
+}

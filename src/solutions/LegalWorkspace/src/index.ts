@@ -93,3 +93,30 @@ export const LegalWorkspaceRenderer: WorkspaceRenderer = _LegalWorkspaceApp;
  * byte-identical).
  */
 export { setRuntimeConfig as setLegalWorkspaceRuntimeConfig } from "./config/runtimeConfig";
+
+/**
+ * Section registry composition factory (R2 Option D, 2026-06-18).
+ *
+ * Post-Option D: the legacy `setLegalWorkspaceDailyBriefingNotificationLoader`
+ * setter is gone. Embedding consumers (SpaarkeAi) build a custom registry via
+ *   `createLegalWorkspaceSectionRegistry({ dailyBriefing: { loadNotificationContext } })`
+ * and pass it to `<LegalWorkspaceApp sections={...} />` via a wrapper renderer
+ * registered through the existing `setDefaultWorkspaceRenderer` slot.
+ *
+ * Standalone LegalWorkspace uses `SECTION_REGISTRY` (the no-options default) —
+ * byte-identical behavior preserved (FR-25 / NFR-10).
+ *
+ * See `projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md`
+ * for the full design rationale and cookbook for adding a new widget.
+ */
+export {
+  SECTION_REGISTRY,
+  createLegalWorkspaceSectionRegistry,
+  getSectionById,
+  getSectionsByCategory,
+} from "./sectionRegistry";
+export type { LegalWorkspaceSectionRegistryOptions } from "./sectionRegistry";
+
+// Ergonomic re-export so consumers building a custom registry can type their
+// own `sections` prop without re-importing from `@spaarke/ui-components`.
+export type { SectionRegistration } from "@spaarke/ui-components";

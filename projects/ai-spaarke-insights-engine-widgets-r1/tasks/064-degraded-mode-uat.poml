@@ -1,0 +1,54 @@
+<task id="064" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Degraded-mode UAT (SC-14 empty index)</title>
+    <status>completed</status>
+    <estimated-effort>1.5h</estimated-effort>
+    <phase>6</phase>
+    <tags>uat, degraded, sc-14</tags>
+    <dependencies>060</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Per FR-26 / SC-14: simulate empty `spaarke-insights-index` (files-index pipeline unhealthy scenario). Verify narrative is produced from KPI roll-up + assessment text alone; document-grounded citations are empty. User-facing limitation documented.
+  </prompt>
+
+  <role>Degraded-path UAT engineer.</role>
+
+  <goal>
+    Narrative renders without document citations; limitation visible to user; SC-14 pass.
+  </goal>
+
+  <inputs>
+    <file purpose="scenario">projects/ai-spaarke-insights-engine-widgets-r1/notes/uat-scenarios.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-26">Narrative still useful in degraded mode</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>spaarke-insights-index, degraded mode</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Simulate empty index">Or use Matter with no document grounding</step>
+    <step order="2" name="Invoke widget">Verify narrative still produced</step>
+    <step order="3" name="Verify citations">Empty document[] expected; assessment[] populated</step>
+    <step order="4" name="Verify user-facing limitation">In UI help or footer</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/uat-results/scenario-degraded-mode.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Narrative renders in degraded mode</criterion>
+    <criterion testable="true">Document citations empty but no error</criterion>
+    <criterion testable="true">Limitation surfaced to user</criterion>
+  </acceptance-criteria>
+</task>

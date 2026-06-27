@@ -101,7 +101,11 @@ import type { ContextWidgetProps } from '../../types/widget-types';
 import { useDispatchPaneEvent, type DispatchPaneEvent } from '../../events/useDispatchPaneEvent';
 import { usePaneEvent } from '../../events/usePaneEvent';
 import type { WorkspacePaneEvent } from '../../events/PaneEventTypes';
-import { SUMMARIZE_SCHEMA, type StructuredOutputStreamWidgetData } from '../workspace/StructuredOutputStreamWidget';
+import {
+  SUMMARIZE_SCHEMA,
+  SUM_CHAT_OUTPUT_SCHEMA,
+  type StructuredOutputStreamWidgetData,
+} from '../workspace/StructuredOutputStreamWidget';
 import { STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE } from '../workspace/register-structured-output-stream-widget';
 
 // ---------------------------------------------------------------------------
@@ -622,6 +626,15 @@ export function dispatchSummarizeOnly(
   } = {
     mode: 'streaming',
     schema: SUMMARIZE_SCHEMA,
+    // R6 Hotfix Wave B-G9a (2026-06-10): `outputSchema` is REQUIRED for the
+    // schema-aware dispatch added by tasks 040 (array-of-string) + 041
+    // (object). Without it, `tldr` renders as a bold paragraph (legacy
+    // `displayHint: 'heading'`) and `entities` renders as comma-split bullets
+    // (legacy `displayHint: 'list'` + `splitListContent` comma fallback) —
+    // both of which were the production symptoms observed during the Phase B
+    // walkthrough. The constant mirrors SUM-CHAT@v1's action `outputSchema`
+    // verbatim (see `summarize-document-for-chat.playbook.json` actions[0]).
+    outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     correlationId,
     title: `Summary: ${fileName}`,
     sessionId,

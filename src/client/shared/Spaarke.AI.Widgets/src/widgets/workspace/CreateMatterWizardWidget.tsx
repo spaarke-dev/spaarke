@@ -45,8 +45,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { makeStyles, mergeClasses, Spinner, Text, tokens } from '@fluentui/react-components';
 
-import { CreateMatterWizard } from '@spaarke/ui-components/src/components/CreateMatterWizard';
-import type { ICreateMatterWizardProps } from '@spaarke/ui-components/src/components/CreateMatterWizard';
+import { CreateMatterWizard } from '@spaarke/ui-components/components/CreateMatterWizard';
+import type { ICreateMatterWizardProps } from '@spaarke/ui-components/components/CreateMatterWizard';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import type { WidgetState } from '../../types/shared';

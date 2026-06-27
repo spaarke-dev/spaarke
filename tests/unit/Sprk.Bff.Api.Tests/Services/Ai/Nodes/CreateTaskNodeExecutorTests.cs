@@ -1,8 +1,8 @@
-using System.Net;
-using System.Text;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Xrm.Sdk;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Nodes;
@@ -15,76 +15,36 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Nodes;
 /// Tests validation, template substitution, and task creation.
 /// </summary>
 /// <remarks>
-/// 2026-05-31 (task 054 / P23.M Ai/Nodes): trait-tagged per §6.2 taxonomy (`repaired`).
-/// Production drift absorbed: `CreateTaskNodeExecutor.ExecuteAsync` now performs a Dataverse
-/// Web API `POST tasks` via `IHttpClientFactory.CreateClient("DataverseApi")` (commit chain
-/// added the HTTP call after the original tests were written). The original tests didn't
-/// configure the `IHttpClientFactory` mock, so `CreateClient` returned `null` and the outer
-/// try/catch turned the NRE into `Success=false` with `NodeErrorCodes.InternalError`.
-/// Repair (additive, well under NFR-02's 50% line-replacement ceiling): configure the
-/// factory mock to return an `HttpClient` backed by a fake handler that returns `204
-/// NoContent` with an `OData-EntityId` header so `taskId` parses cleanly. Pure test-stale
-/// classification; no production code touched (NFR-01).
+/// 2026-06-23 (daily-briefing R2.3 refactor): production was refactored to use the canonical
+/// <see cref="IGenericEntityService"/> shared library instead of the orphan-named
+/// <c>IHttpClientFactory.CreateClient("DataverseApi")</c> (which was never registered in DI).
+/// Tests updated to mock <see cref="IGenericEntityService"/>; the prior MockHttpMessageHandler
+/// scaffolding is no longer required. Trait kept as `repaired` to preserve the audit trail.
 /// </remarks>
 [Trait("status", "repaired")]
 public class CreateTaskNodeExecutorTests
 {
     private readonly Mock<ITemplateEngine> _templateEngineMock;
-    private readonly Mock<IHttpClientFactory> _httpClientFactoryMock;
+    private readonly Mock<IGenericEntityService> _entityServiceMock;
     private readonly Mock<ILogger<CreateTaskNodeExecutor>> _loggerMock;
     private readonly CreateTaskNodeExecutor _executor;
 
     public CreateTaskNodeExecutorTests()
     {
         _templateEngineMock = new Mock<ITemplateEngine>();
-        _httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        _entityServiceMock = new Mock<IGenericEntityService>();
         _loggerMock = new Mock<ILogger<CreateTaskNodeExecutor>>();
 
-        // 2026-05-31 repair: production now POSTs to Dataverse via the "DataverseApi" named
-        // client. Return a fake HttpClient by default so executor calls succeed; specific
-        // tests can override via _httpClientFactoryMock.Reset() + custom setup if needed.
-        _httpClientFactoryMock
-            .Setup(f => f.CreateClient(It.IsAny<string>()))
-            .Returns(() => CreateFakeDataverseClient());
+        // Default: CreateAsync returns a fresh GUID so executors that exercise the create
+        // path get a parseable result. Specific tests can override via _entityServiceMock.Reset().
+        _entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Guid.NewGuid());
 
         _executor = new CreateTaskNodeExecutor(
             _templateEngineMock.Object,
-            _httpClientFactoryMock.Object,
+            _entityServiceMock.Object,
             _loggerMock.Object);
-    }
-
-    private static HttpClient CreateFakeDataverseClient(
-        HttpStatusCode statusCode = HttpStatusCode.NoContent)
-    {
-        var handler = new MockHttpMessageHandler(statusCode);
-        return new HttpClient(handler)
-        {
-            BaseAddress = new Uri("https://fake-dataverse.local/api/data/v9.2/")
-        };
-    }
-
-    private sealed class MockHttpMessageHandler : HttpMessageHandler
-    {
-        private readonly HttpStatusCode _statusCode;
-
-        public MockHttpMessageHandler(HttpStatusCode statusCode)
-        {
-            _statusCode = statusCode;
-        }
-
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
-            var response = new HttpResponseMessage(_statusCode);
-            // Provide an OData-EntityId header so the executor can parse a taskId cleanly.
-            // Production parses Headers.Location?.AbsoluteUri or OData-EntityId.
-            var fakeId = Guid.NewGuid();
-            response.Headers.TryAddWithoutValidation(
-                "OData-EntityId",
-                $"https://fake-dataverse.local/api/data/v9.2/tasks({fakeId})");
-            return Task.FromResult(response);
-        }
     }
 
     #region SupportedActionTypes Tests

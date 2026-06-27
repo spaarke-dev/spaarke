@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="085" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>RecallSessionFileHandler (T2 + T5) — 6 purposes × 5 scopes, requireCitations default true</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4d)</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>080</dependencies>
+    <blocks>091</blocks>
+    <tags>bff-api, services, handlers, tool-handler, ai, azure-search</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'ai' + 'azure-search'; creates new `.cs` handler; load-bearing for legal-domain trust framing (architecture §2 P3); ADR-013/ADR-015/ADR-033 binding</rigor-reason>
+    <parallel-group>4-G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author `RecallSessionFileHandler` (NEW) at `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/RecallSessionFileHandler.cs` implementing the T2+T5 `recall_session_file` tool per architecture §6.3 + §8.1 + §8.3. Six `purpose` enum values (`answer_question`, `quote`, `compare`, `summarize`, `extract_dates`, `verify`) and five `scope` values (`summary`, `relevant_sections`, `full_text`, `tables`, `citations`); `requireCitations: true` is the default (FR-30 + architecture §8.3 trust framing); returns `{ content, citations[{page, paragraph?, section?, text}], scope_truncated, truncation_reason }`. Reads `spaarke-session-files` index for section/sections mode — **NOT `spaarke-insights-index`** per architecture §5.2.1. Implements FR-30 + FR-31 (per-purpose retrieval semantics).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in chat tool-handler authoring + Azure AI Search wrapper patterns + RAG retrieval semantics.</role>
+
+  <goal>
+    `RecallSessionFileHandler` lives at `Services/Ai/Handlers/RecallSessionFileHandler.cs` implementing `IToolHandler`. Mode dispatch per architecture §6.3: `summary` → reads `ChatSession.UploadedFiles[fileId].PrecomputedSummary` (5ms hot); `relevant_sections` → calls `RagService.SearchAsync` against `spaarke-session-files` index (filter `session_file_id = fileId`, query = `sectionQuery`, topK = 3); `full_text` → returns concatenated chunks ≤8K tokens, else summary + first 2K chars + `truncation_reason: "exceeded_8K"`. Marks file as recently-discussed via `IRecentlyDiscussedTracker` after successful recall. `requireCitations: true` default enforces citation-bearing response (architecture §2 P3). Telemetry tier-1 safe (no recall content). Unit tests cover all 6 purposes × all 5 scopes plus the `not_found` + `exceeded_8K` truncation paths.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §6.3 (recall flow), §8.1 (recall_session_file schema), §8.3 (citation enforcement model). The handler is the LOAD-BEARING tool for the legal-domain trust framing — its `requireCitations: true` default + the persona instruction injected by `TrustFrameInstructionInjector` (task 077) ensure the agent uses citations rather than quoting the precomputed (NOT authoritative) summary. Architecture §5.2.1 binds: this handler MUST use `spaarke-session-files` index NOT `spaarke-insights-index`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ManagePinnedContextHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IRagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">No new endpoint.</constraint>
+    <constraint source="ADR-010">Auto-discovered handler; no manual DI line here.</constraint>
+    <constraint source="ADR-013">Reads `IRagService` (BFF-internal) + T2 session storage directly. NO PublicContracts facade required for BFF-internal chat path.</constraint>
+    <constraint source="ADR-015">Telemetry payload carries: handlerName + sessionId + fileId + purpose + scope + scope_truncated + truncation_reason + durationMs ONLY. NEVER content, citations text, query strings, summary text.</constraint>
+    <constraint source="ADR-029">≤+0.2 MB publish-size delta.</constraint>
+    <constraint source="ADR-033">SINGLE `ToolResult` return; no streaming. Memory tools are non-streaming.</constraint>
+    <constraint source="architecture">§5.2.1 — MUST use `spaarke-session-files` (and optionally `spaarke-files-index` for matter-bound chunks); MUST NOT use `spaarke-insights-index` for chat memory.</constraint>
+    <constraint source="architecture">§6.3 — mode dispatch matches the flow diagram (summary fast path, relevant_sections via RagService TopK=3, full_text with 8K truncation).</constraint>
+    <constraint source="architecture">§8.3 — `requireCitations: true` default; citation array shape includes `page, paragraph?, section?, text` keys verbatim.</constraint>
+    <constraint source="architecture">§9.2 — `fileId` not in session returns structured `{ scope_truncated: true, truncation_reason: "not_found" }`; do NOT throw.</constraint>
+    <constraint source="spec">FR-30 + FR-31 — purpose enum biases retrieval; each purpose has documented semantics asserted by unit tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §6.3 (recall flow diagram), §8.1 (schema), §8.3 (trust framing), §5.2.1 (NOT spaarke-insights-index), §9.2 (graceful errors).</step>
+    <step order="2">Read `RagService.cs` to confirm the SearchAsync signature + filter syntax for `spaarke-session-files` index.</step>
+    <step order="3">Author `Services/Ai/Handlers/RecallSessionFileHandler.cs` implementing `IToolHandler`. Parameters: `fileId` (required), `purpose` (required enum), `query` (required), `scope` (required enum, default `relevant_sections`), `maxTokens` (optional), `requireCitations` (optional, DEFAULT true).</step>
+    <step order="4">Implement mode dispatch per §6.3:
+      (a) `summary` → read `ChatSession.UploadedFiles[fileId].PrecomputedSummary` (hot path);
+      (b) `relevant_sections` / `tables` / `citations` → `RagService.SearchAsync(index: "spaarke-session-files", filter: $"session_file_id eq '{fileId}'", query, topK: 3)` — bias by `purpose` per FR-31;
+      (c) `full_text` → if total ≤8K tokens, concat chunks; else return summary + first 2K chars + `truncation_reason: "exceeded_8K"`.
+    </step>
+    <step order="5">After successful recall (any mode except not_found), mark `IRecentlyDiscussedTracker.Mark(sessionId, fileId)` — task 091 ensures this dependency is registered.</step>
+    <step order="6">Emit `context.tool_call_completed` event for T6 audit per architecture §6.3 — tier-1 safe (no content).</step>
+    <step order="7">Add Dataverse seed-row JSON `infra/dataverse/sprk_analysistool-recall-session-file-row.json` with full parameter schema in `sprk_parameterschema`.</step>
+    <step order="8">Author unit tests covering: 6 purposes × 5 scopes (matrix), not_found path, exceeded_8K truncation path, recentlyDiscussed mark side-effect, ADR-015 telemetry safety, `requireCitations: true` default verified via metadata.</step>
+    <step order="9">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="10">Run grep across the new handler file: `grep -i "spaarke-insights-index"` must return ZERO matches (architecture §5.2.1 enforcement).</step>
+    <step order="11">Measure BFF publish-size delta; write `notes/handoffs/085-bff-publish-delta.md`.</step>
+    <step order="12">Run code-review + adr-check (Step 9.5).</step>
+    <step order="13">Update TASK-INDEX.md: 085 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">RagService.cs, ChatSession model, exemplar handler</tool>
+    <tool name="Write">Handler + tests + seed-row JSON</tool>
+    <tool name="Grep">Verify zero references to spaarke-insights-index</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/RecallSessionFileHandler.cs</output>
+    <output type="code">infra/dataverse/sprk_analysistool-recall-session-file-row.json</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/RecallSessionFileHandlerTests.cs</output>
+    <output type="docs">notes/handoffs/085-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler exists at the specified path and implements `IToolHandler`.</criterion>
+    <criterion testable="true">Single `ToolResult` return; no streaming.</criterion>
+    <criterion testable="true">`requireCitations` parameter has DEFAULT value `true` in the tool metadata + handler signature.</criterion>
+    <criterion testable="true">`grep -i "spaarke-insights-index"` returns ZERO matches in the new handler file (architecture §5.2.1 enforcement).</criterion>
+    <criterion testable="true">All 6 purposes × 5 scopes unit-tested; matrix passes.</criterion>
+    <criterion testable="true">`not_found` returns structured payload (NOT exception); `exceeded_8K` truncation returns the documented summary + first 2K chars shape.</criterion>
+    <criterion testable="true">`IRecentlyDiscussedTracker.Mark` is called once per successful recall.</criterion>
+    <criterion testable="true">Telemetry payload carries no content/citation text — assertion against captured log events.</criterion>
+    <criterion testable="true">BFF publish delta reported; ≤+0.2 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the LOAD-BEARING tool for legal-domain accuracy (architecture §2 P3). The `requireCitations: true` default is non-negotiable. If `IRecentlyDiscussedTracker` is not yet registered (its registration is part of task 091), add a null-safe defensive call so this task can land green; task 091 then makes it functional.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

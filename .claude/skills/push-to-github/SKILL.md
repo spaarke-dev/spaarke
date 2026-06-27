@@ -183,7 +183,7 @@ CHECK for untracked source files:
     → DO NOT proceed to Step 2 until resolved
 
   IF no untracked source files:
-    → Continue to Step 2
+    → Continue to Step 1.6
 
 RATIONALE: Untracked source files are a common cause of "missing code after merge"
 issues. This check ensures all source files are explicitly handled before push.
@@ -196,6 +196,46 @@ issues. This check ensures all source files are explicitly handled before push.
 - `.ps1` - PowerShell scripts
 - `.json` - Configuration files (in src/ directories)
 - `.md` - Documentation (in docs/ or project directories)
+
+### Step 1.6: Defer / Issue Tracking Audit (MANDATORY when inside a project)
+
+**Pairs with the `/project-defer-issue-tracking` skill. Catches entries that were added to project notes but never filed as GitHub Issues — the whole point of the two-write rule is visibility.**
+
+```
+DETECT if we are inside a project:
+  project_path = projects/{name} that contains the current working dir
+                 OR matches the git branch name (work/{project-name})
+
+IF inside a project:
+  notes_path = projects/{name}/notes/defer-issues.md
+
+  IF notes_path exists:
+    SCAN for entries with empty or placeholder GitHub Issue URL:
+      grep -E "^\| \*\*GitHub Issue\*\* \| (\{URL\}|\s*\|)" $notes_path
+      OR look for entries where the GitHub Issue row contains the literal `{URL}` placeholder
+
+    IF unfiled entries found:
+      → 🚨 WARNING: N defer/issue entries in `notes/defer-issues.md` have no GitHub Issue URL.
+      → List the entries (ID + title)
+      → ASK: "These tracking entries are not visible to the team. Actions:"
+        1. File them now via /project-defer-issue-tracking (recommended)
+        2. Continue push without filing (NOT recommended — they'll be invisible)
+        3. Abort and review the entries
+      → IF user picks 1: invoke /project-defer-issue-tracking for each unfiled entry
+      → IF user picks 2: warn explicitly + log the choice in commit message footer
+      → DO NOT silently proceed
+
+    IF all entries have GitHub Issue URLs:
+      → Continue to Step 2
+
+  IF notes_path does NOT exist:
+    → No tracking file yet — continue to Step 2 (nothing to audit)
+
+IF NOT inside a project (ad-hoc work at repo root):
+  → Skip this step (deferral protocol is project-scoped)
+```
+
+**Why this step exists**: deferred work hidden in a project's `notes/` folder is invisible to anyone working on other projects. Surfacing entries as GitHub Issues at push time is the latest-possible reliable hook for visibility. See `/project-defer-issue-tracking` skill for the full protocol.
 
 ### Step 2: Review Changes
 

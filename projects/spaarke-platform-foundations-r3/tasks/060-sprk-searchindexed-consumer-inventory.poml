@@ -1,0 +1,40 @@
+<task id="R3-060" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>P7.0 — Inventory all consumers of `sprk_searchindexed`</title>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>Inventory authored at `projects/spaarke-platform-foundations-r3/notes/sprk-searchindexed-consumer-inventory.md`. Headline: 24 in-repo files reference the field. Writers: 3 upstream call-sites (RagIndexingJobHandler.cs:211, RagEndpoints.cs:558+702) via Spaarke.Dataverse.Models.SearchIndexed property → mapped to `sprk_searchindexed` string in 2 mapping-layer files (DataverseWebApiService.cs, DataverseServiceClientImpl.cs). Readers: ZERO in-repo (UI cluster 0, API cluster 0, PCF cluster 0) — the field is write-mostly today. Recommend (a) task 062 concentrate dual-write in the Spaarke.Dataverse mapping layer (single change covers all 3 upstream writers), (b) tasks 063/064 re-scope to "verify-empty + escalate maker-side solution audit" mode since no in-repo readers exist. Documentation hits (9 files) deferred to P10 sweep. Test fixture (DataverseEntitySchemaTests.cs:85) extension folded into task 062. Risks called out: no current "enqueue" timestamp source — task 062 must instrument enqueue site for sprk_searchindexqueuedon. Migration order: 061 → 062 → (063 ‖ 064 ‖ 065 parallel).</completion-notes>
+    <phase>P7.0</phase>
+    <parallel-group>M (sequential — main-session only)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1-2h</estimated-effort>
+    <tags>discovery,inventory,h3</tags>
+    <relevant-files>
+      <file>projects/spaarke-platform-foundations-r3/notes/sprk-searchindexed-consumer-inventory.md (new)</file>
+    </relevant-files>
+    <dependencies>none</dependencies>
+  </metadata>
+  <prompt>Grep all references to `sprk_searchindexed` across the repo: C# code, TypeScript, FetchXML, OData filters, UI tiles, code-pages, PCF controls, plugins. Produce checklist for downstream migration tasks (061-065).</prompt>
+  <goal>Complete inventory of `sprk_searchindexed` consumers documented in `notes/sprk-searchindexed-consumer-inventory.md`. Each consumer cluster identified for downstream migration. AC-H3.2 prerequisite.</goal>
+  <constraints>
+    <constraint source="spec FR-3H3.3">Inventory MUST precede migration (P7.0 → P7.1)</constraint>
+  </constraints>
+  <knowledge>
+    <topic>codebase-grep-discovery</topic>
+    <files>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-3H3.3</step>
+    <step order="1">Grep `sprk_searchindexed` recursively (case-insensitive)</step>
+    <step order="2">Categorize hits: writer (DeliverToIndexNodeExecutor), readers (UI tiles, queries, OData filters), schema (Dataverse metadata)</step>
+    <step order="3">Group readers by cluster (UI vs API vs PCF) for parallel migration in P7.1</step>
+    <step order="4">Author inventory doc + recommended migration order</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Inventory doc exists with categorized list</criterion>
+    <criterion testable="true">Each consumer's migration owner identified (UI / API / PCF cluster)</criterion>
+  </acceptance-criteria>
+</task>

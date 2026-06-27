@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>BFF publish-size verification + E2E manual MDA bell test note (P3)</title>
+    <phase>P3: MDA Bell Deep-Links</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>041</dependencies>
+    <blocks>060</blocks>
+    <tags>bff-api, deploy, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification + post-deploy E2E plan; closes §10 NFR-01/NFR-06</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 041</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per BFF §10 NFR-01 + NFR-06: capture publish-size + CVE status post-P3 modification. Author an E2E test note for task 062 (post-deploy verification): trigger a notification (e.g., upload a document), open MDA bell, verify "Open" button is clickable and routes correctly.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF hygiene rule §10 + E2E test design for MDA-native UX.</role>
+
+  <goal>Documented publish-size delta + CVE-clean confirmation; E2E test note for task 062.</goal>
+
+  <context>
+    <background>
+      P3 modifies `Services/Ai/Nodes/CreateNotificationNodeExecutor.cs`. Pure-code change; expected size delta ≈ 0 KB. The MDA bell E2E verification must happen post-deploy (task 060 deploys, task 062 verifies).
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r2/notes/bff-baseline.md</file>
+      <file>projects/spaarke-daily-update-service-r2/notes/bff-size-p3.md</file>
+      <file>projects/spaarke-daily-update-service-r2/notes/p3-e2e-test-plan.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">CLAUDE.md §10 bullets 4–5.</constraint>
+    <constraint source="project">Spec NFR-04 + NFR-06.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`.</step>
+    <step order="2">Measure compressed size; compare to baseline; record delta.</step>
+    <step order="3">Run `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="4">Write `notes/bff-size-p3.md` with absolute size + delta + CVE status.</step>
+    <step order="5">Write `notes/p3-e2e-test-plan.md` describing the post-deploy MDA bell verification steps (trigger a notification → open bell → confirm "Open" button clickable + routes correctly).</step>
+    <step order="6">Update TASK-INDEX.md: change task 042 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + publish + list packages.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r2/notes/bff-size-p3.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r2/notes/p3-e2e-test-plan.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Publish-size delta vs. baseline recorded.</criterion>
+    <criterion testable="true">Delta ≤ +1 MB compressed.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE.</criterion>
+    <criterion testable="true">E2E test plan for MDA bell documented for task 062.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Consider combining `bff-size-p2b.md` + `bff-size-p3.md` into a single `bff-size-combined.md` post-implementation for cleaner PR documentation.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

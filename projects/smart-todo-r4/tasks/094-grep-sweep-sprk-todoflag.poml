@@ -1,0 +1,68 @@
+<task id="R4-094" project="smart-todo-r4">
+  <metadata>
+    <title>Phase 3 — Final grep sweep: zero sprk_todoflag hits (graduation criterion 12)</title>
+    <phase>Phase 3: Deployment</phase>
+    <workstream>cross-cutting</workstream>
+    <status>completed</status>
+    <estimated-effort>0.25 day</estimated-effort>
+    <tags>regression, grep-sweep, graduation-criterion</tags>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>R4-092</dependencies>
+    <relevant-files>
+      <file>projects/smart-todo-r4/notes/grep-sweep-result.md (new)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Final grep sweep: `grep -i sprk_todoflag src/**/*.{ts,tsx,cs}` MUST return zero functional hits per spec graduation criterion 12. Capture result in `notes/grep-sweep-result.md`.
+  </prompt>
+
+  <role>Engineer running grep sweep.</role>
+
+  <goal>Zero functional hits documented. Any non-functional hits (comments, archived files) explicitly noted.</goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec graduation criterion 12">grep returns 0 functional hits</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>regression/grep-sweep</topic>
+    <files></files>
+  </knowledge>
+
+  <context>
+    <dependencies>
+      <dependency task="R4-092" status="must-complete">All affected solutions deployed</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Run grep sweep">`grep -ri sprk_todoflag src/` — capture all hits.</step>
+    <step order="2" name="Classify hits">For each hit: functional (code path) or non-functional (comment, archive, doc, test naming). Functional MUST be 0.</step>
+    <step order="3" name="If functional hits found">Fix in same PR. Re-run sweep.</step>
+    <step order="4" name="Document in notes/grep-sweep-result.md">Run timestamp, command, results, classification table.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Source grep</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/smart-todo-r4/notes/grep-sweep-result.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">0 functional `sprk_todoflag` hits in src/</criterion>
+    <criterion testable="true">Any non-functional hits documented + classified</criterion>
+    <criterion testable="true">notes/grep-sweep-result.md captures evidence</criterion>
+  </acceptance-criteria>
+
+  <notes>
+Completed 2026-06-12 (STANDARD rigor). Sweep run on `work/smart-todo-r4-wave2` @ 651426d6 (post PR #377 + #384 content). 50 matching lines across 33 files: 41 lines = legacy-removal comments/docstrings; 4 lines = absence-guard test assertions (intentional, keep); 5 lines = stale checked-in SpeDocumentViewer solution bundle.js (v1.0.16, built 2026-05-11 pre-R3 removal — contains live `entity['sprk_todoflag'] = true` write path). Functional source hits per criterion 12 glob (ts/tsx/cs): ZERO — PASS. Follow-up filed: rebuild/repack SpeDocumentViewer against current shared libs before next deploy (fold into R4-092 master-side deploy). Evidence: notes/grep-sweep-result.md. Note: POML listed R4-092 as must-complete dependency, but 092 was deferred per user decision (master-only deploy post-merge); 094 re-sequenced first per current-task.md plan.
+  </notes>
+</task>

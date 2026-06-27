@@ -121,7 +121,7 @@ export const App: React.FC = () => {
   if (mode === "todo") {
     return (
       <FluentProvider theme={theme} style={{ height: "100%" }}>
-        <FeedTodoSyncProvider webApi={webApi}>
+        <FeedTodoSyncProvider>
           <div className={styles.root}>
             <SmartToDo webApi={webApi} userId={userId} useDialogForDetail />
           </div>
@@ -132,7 +132,7 @@ export const App: React.FC = () => {
 
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
-      <FeedTodoSyncProvider webApi={webApi}>
+      <FeedTodoSyncProvider>
         <div className={styles.root}>
           <PageHeader
             activeLayout={headerState?.activeLayout}

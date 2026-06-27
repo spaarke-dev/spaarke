@@ -20,6 +20,8 @@
     "@lexical/rich-text": "^0.42.0",
     "@lexical/selection": "^0.42.0",
     "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
+    "@spaarke/sdap-client": "file:../../client/shared/Spaarke.SdapClient",
+    "@spaarke/smart-todo-components": "file:../../client/shared/Spaarke.SmartTodo.Components",
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
     "d3-force": "^3.0.0",
     "diff": "^8.0.4",

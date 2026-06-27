@@ -1,0 +1,101 @@
+<task id="060" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-13 — Additive `workspace.*` PaneEventBus event types (reverse-flow workspace → assistant + context)</title>
+    <status>completed</status>
+    <outcome-note>TS work landed via sub-agent before stream timeout at ~3.6h; main session closeout 2026-06-09 completed evidence note + POML + TASK-INDEX. 4 new variants on `WorkspacePaneEvent.type`: user_selection (200-char selectionText cap; user-visible-by-design per FR-38 + Pillar 9), tab_edited (editedFields = NAMES not values), tab_focused, tab_provenance_clicked. ADR-015 distinction (selectionText user-content vs telemetry-prohibited content on context.*) documented inline. Type-check 0 errors. ADR-030 4-channel preserved. Same pattern as task 034 (sub-agent timeout closeout from main session). Full evidence: notes/task-060-workspace-pane-events-evidence.md.</outcome-note>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>Phase C — Tri-directional Workspace (Pillar 6c)</phase>
+    <wave>C-G2 (parallel after 6a)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>053 (workspace state wired)</dependencies>
+    <tags>frontend, typescript, ai-widgets</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Event-type definitions consumed by workspace tab manager + assistant + context pane; reverse-flow contract correctness gates the tri-directional model.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Add the following additive event types on the existing `workspace` channel of
+    PaneEventBus (per ADR-030 — additive types only on existing channel; NO 5th channel):
+    `workspace.user_selection`, `workspace.tab_edited`, `workspace.tab_focused`,
+    `workspace.tab_provenance_clicked`.
+
+    These reverse-flow events let the workspace dispatch state changes that the assistant
+    + context pane consume. Payloads carry deterministic IDs only (tabId, sessionId,
+    columnId, etc.). User-selection MAY carry a brief `selectionText` field (necessary
+    for "what does the user have selected?" agent prompts) — but it MUST be capped at
+    a reasonable length (200 chars) and the field MUST be flagged in JSDoc as
+    user-visible-by-design (different from ADR-015 telemetry-prohibited content). The
+    `tab_provenance_clicked` event lets users navigate back to the originating chat
+    message or playbook node.
+  </prompt>
+
+  <role>
+    Senior TypeScript engineer familiar with PaneEventBus contract + reverse-flow event
+    design patterns.
+  </role>
+
+  <goal>
+    Four new event variants on `workspace` channel. Type-check passes. JSDoc cites FR-38.
+    Consumers can import + handle.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="pane-event-types">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared lib `@spaarke/ai-widgets`; Fluent v9 conventions.</constraint>
+    <constraint source="ADR-015">User selection text is user-visible-by-design (per FR-38 + Pillar 9 visibility contract) — NOT a telemetry event. Telemetry separately must NOT log selection text.</constraint>
+    <constraint source="ADR-030">4 channels closed; additive types only on existing `workspace` channel; no 5th channel.</constraint>
+    <constraint source="spec FR-38">Additive `workspace.*` event types on existing channel.</constraint>
+    <constraint source="project R6 Pillar 6c">Reverse-flow events let workspace inform assistant + context pane of state changes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/pane-event-bus</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — Reverse-flow event-type definition; consumed by 3 panes."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 053 complete.</step>
+    <step order="2" name="Gather Resources">Read existing PaneEventTypes.ts; map shape pattern.</step>
+    <step order="3" name="Define New Types">Add 4 discriminated-union variants to `workspace` channel.</step>
+    <step order="4" name="Export + Document">JSDoc each variant citing FR-38; flag `selectionText` field as user-visible-by-design.</step>
+    <step order="5" name="Type-Check">tsc --noEmit.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check (ADR-012/015/030).</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 060 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">tsc + lint</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts (modified — 4 new workspace variants)</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">4 new variants added to `workspace` channel: `user_selection`, `tab_edited`, `tab_focused`, `tab_provenance_clicked`.</criterion>
+    <criterion testable="true">`selectionText` field capped at 200 chars; JSDoc flags user-visible-by-design distinction.</criterion>
+    <criterion testable="true">No new channel introduced (ADR-030 preserved).</criterion>
+    <criterion testable="true">Discriminated-union exhaustive matching compiles correctly.</criterion>
+    <criterion testable="true">tsc --noEmit passes.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,134 @@
+<task id="028" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>Phase A Integration Test — Vertical-Slice of All 4 Pillars</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>not-started</status>
+    <estimated-effort>5 hours</estimated-effort>
+    <dependencies>005, 013, 023, 025</dependencies>
+    <blocks>029</blocks>
+    <tags>bff-api, integration-test, ai, chat</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration test only; new test files; tags include `integration-test`; per CLAUDE.md §8 STANDARD rigor for testing tasks.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Gate task; runs after all Phase A pillars complete; sequential before exit gate (029).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build a vertical-slice integration test exercising all 4 Phase A pillars end-to-end:
+    persona scope resolution (Pillar 1), data-driven tools (Pillar 2), generic
+    `invoke_playbook` (Pillar 3), and chat /summarize routing through
+    `PlaybookExecutionEngine` (Pillar 4).
+
+    Critical-path context: this test is the integration gate before Phase A exit (task 029).
+    It validates that all 4 pillars compose correctly — not just individually, but
+    together in a realistic chat session. Per spec §6 Vertical-Slice Validation Target,
+    Phase D's full vertical-slice ALSO exercises every Phase A pillar; this Phase A test
+    is the early canary.
+
+    Test scenario: in a single chat session, (a) tenant CUST- persona resolves correctly
+    via `IScopeResolverService` (Pillar 1); (b) chat-agent tool list includes the data-driven
+    rows (Pillar 2 incl. 10 migrated tools); (c) `/summarize` user input invokes the
+    generic `invoke_playbook` tool (Pillar 3); (d) the invocation routes through
+    `PlaybookExecutionEngine.ExecuteAsync("summarize-document-for-chat@v1", ...)` (Pillar 4);
+    (e) the FK chain `playbook → node → action` traverses cleanly; (f) safety pipeline
+    middleware applied; (g) conversational primacy preserved.
+
+    No new code beyond tests. No new ADRs. No deployment changes.
+  </prompt>
+
+  <role>
+    Senior BFF QA engineer experienced with vertical-slice integration tests + the Spaarke
+    chat-agent pipeline.
+  </role>
+
+  <goal>
+    Vertical-slice integration test exercises all 4 Phase A pillars in a single chat
+    session. Test passes; evidence recorded; Phase A exit gate unblocked.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="chat-architecture">docs/architecture/chat-architecture.md</file>
+    <file purpose="playbook-architecture">docs/architecture/playbook-architecture.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-015">Test verifies telemetry payloads contain only tool/playbook/node IDs + decisions + timestamps; no user message content.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB (tests only).</constraint>
+    <constraint source="spec NFR-01">Conversational primacy preserved through Phase A vertical slice.</constraint>
+    <constraint source="spec NFR-13">Safety pipeline middleware chain applied at every step.</constraint>
+    <constraint source="spec NFR-08">11 production node executors unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/integration-test</topic>
+    <files>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: STANDARD — vertical-slice integration test; tests-only addition".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 005 ✅ + 013 ✅ + 023 ✅ + 025 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Author Integration Test">
+      In `tests/integration/`, add `PhaseAVerticalSliceTests.cs`. Test scenario covers all 4 pillars in sequence (per &lt;prompt&gt; scenario). Use real DI graph + staged Dataverse rows.
+    </step>
+    <step order="3" name="Verify Each Pillar Step">
+      The test asserts at each step: (Pillar 1) persona resolved from `sprk_aipersona` row; (Pillar 2) tool list includes data-driven rows; (Pillar 3) `/summarize` triggers `invoke_playbook`; (Pillar 4) routes through engine (no alternate-key lookup).
+    </step>
+    <step order="4" name="Verify Cross-Cutting Concerns">
+      Assert: safety pipeline middleware applied at every step (NFR-13); conversational primacy retained (NFR-01); 11 node executors unchanged (NFR-08); telemetry ADR-015-compliant.
+    </step>
+    <step order="5" name="Run Test">
+      Execute test in CI environment. MUST pass. If fails: report which pillar's step broke; do NOT continue to 029 until fixed.
+    </step>
+    <step order="6" name="Verify Acceptance Criteria">
+      Walk each criterion; record evidence.
+    </step>
+    <step order="7" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 028 ✅. Reset `current-task.md` to 029. Report Phase A vertical-slice readiness.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">test (integration)</tool>
+    <tool name="git">stage + commit test additions</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests/PhaseAVerticalSliceTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (028 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset to 029)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-028-vertical-slice-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Integration test exercises all 4 Phase A pillars in a single chat session.</criterion>
+    <criterion testable="true">Pillar 1: persona resolved from `sprk_aipersona` (with appropriate scope hierarchy).</criterion>
+    <criterion testable="true">Pillar 2: chat-agent tool list comes from `sprk_analysistool` rows (data-driven).</criterion>
+    <criterion testable="true">Pillar 3: `/summarize` invokes generic `invoke_playbook` tool.</criterion>
+    <criterion testable="true">Pillar 4: invocation routes through `PlaybookExecutionEngine` (no alternate-key lookup).</criterion>
+    <criterion testable="true">Safety pipeline middleware chain applied (NFR-13).</criterion>
+    <criterion testable="true">Conversational primacy preserved (NFR-01).</criterion>
+    <criterion testable="true">11 production node executors unchanged (NFR-08).</criterion>
+    <criterion testable="true">Telemetry payloads ADR-015-compliant (no user content).</criterion>
+    <criterion testable="true">Test passes in CI; evidence captured.</criterion>
+  </acceptance-criteria>
+</task>

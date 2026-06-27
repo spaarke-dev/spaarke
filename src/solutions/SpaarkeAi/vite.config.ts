@@ -35,6 +35,9 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // standalone EventsPage code page AND the Calendar workspace widget
     // (task 115). Wiring done here so task 115 can immediately import.
     path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+    // R4 task 020 (2026-06-10): @spaarke/smart-todo-components hoist for the
+    // LegalWorkspace todo section + future SpaarkeAi Direct widget (Pattern D).
+    path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
     // Round 4 Fix 4 (2026-05-21): @spaarke/legal-workspace is aliased to the
     // LegalWorkspace solution source so SpaarkeAi can embed the full
     // workspace experience as a tab widget without copying section factories.
@@ -102,6 +105,9 @@ export default defineConfig({
         // @spaarke/events-components alias (Calendar widget — task 115).
         path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.ts"),
+        // R4 task 020 (2026-06-10): transpile Spaarke.SmartTodo.Components source.
+        path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src/**/*.ts"),
         // Round 4 Fix 4 (2026-05-21): transpile LegalWorkspace source so
         // SpaarkeAi can embed LegalWorkspaceApp via the @spaarke/legal-workspace alias.
         path.resolve(__dirname, "../LegalWorkspace/src/**/*.tsx"),
@@ -136,6 +142,23 @@ export default defineConfig({
       // immediately without further vite/tsconfig plumbing.
       "@spaarke/events-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
       "@spaarke/events-components": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+      // R4 task 020 (2026-06-10): @spaarke/smart-todo-components consumed by the
+      // LegalWorkspace todo section (Pattern D dual-use).
+      "@spaarke/smart-todo-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
+      "@spaarke/smart-todo-components": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
+      // R2.1 hotfix (2026-06-19): @spaarke/daily-briefing-components hosts the
+      // full DailyBriefingApp + the new createDailyBriefingRegistration factory
+      // (Fix A retired the narrative-only DailyBriefingSection in
+      // @spaarke/ui-components). Both the root and /widgets subpath aliases
+      // are needed because consumers import via the subpath specifier.
+      "@spaarke/daily-briefing-components/widgets": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/widgets"),
+      "@spaarke/daily-briefing-components/components": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/components"),
+      "@spaarke/daily-briefing-components/hooks": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/hooks"),
+      "@spaarke/daily-briefing-components/services": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/services"),
+      "@spaarke/daily-briefing-components/types": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/types"),
+      "@spaarke/daily-briefing-components/utils": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/utils"),
+      "@spaarke/daily-briefing-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
+      "@spaarke/daily-briefing-components": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
       // Round 4 Fix 4 (2026-05-21): alias the LegalWorkspace solution source as
       // a "package" so SpaarkeAi can embed the full workspace experience inside
       // a workspace pane tab via `import { LegalWorkspaceApp } from "@spaarke/legal-workspace"`.
@@ -143,6 +166,17 @@ export default defineConfig({
       // (FR-25 / NFR-10 — only NEW exports added to LegalWorkspace).
       "@spaarke/legal-workspace/src": path.resolve(__dirname, "../LegalWorkspace/src"),
       "@spaarke/legal-workspace": path.resolve(__dirname, "../LegalWorkspace/src"),
+      // R4 task 102 (E-1, 2026-06-18): @spaarke/sdap-client — pulled in
+      // transitively via @spaarke/ui-components/services/EntityCreationService.ts
+      // (Phase G of multi-container-multi-index-r1 / PR #369). Mirrors the
+      // alias already present in CreateMatter/Project/Event/WorkAssignmentWizard
+      // + SmartTodo + LegalWorkspace + CreateTodoWizard. SpaarkeAi is the
+      // 7th surface needing this workaround; the project-wide tsconfig refs
+      // fix is tracked in `current-task.md` follow-ups (deferred to task 092/098).
+      "@spaarke/sdap-client": path.resolve(
+        __dirname,
+        "../../client/shared/Spaarke.SdapClient/src",
+      ),
     },
     // Prefer .ts/.tsx over .js so stale tsc-emit siblings (if any escape
     // .gitignore) never silently shadow source. See Task 112 (2026-05-22).

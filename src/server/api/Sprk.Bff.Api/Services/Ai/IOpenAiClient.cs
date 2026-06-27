@@ -148,6 +148,16 @@ public interface IOpenAiClient
     /// <param name="schemaName">A name identifying the schema (e.g., "prompt_response").</param>
     /// <param name="model">Optional model override. Defaults to configured SummarizeModel.</param>
     /// <param name="maxOutputTokens">Optional per-call MaxOutputTokens override. Defaults to configured value.</param>
+    /// <param name="temperature">
+    /// Optional per-call temperature override (0.0–2.0). When null, defaults to <c>0.0f</c>
+    /// for deterministic structured output — matching the sibling
+    /// <c>GetStructuredCompletionAsync&lt;T&gt;</c> and <c>StreamStructuredCompletionAsync</c>
+    /// hardcoded Temperature=0 behavior. Wave B-G9c1 (B6) fix; previously this method used
+    /// the global <c>_options.Temperature</c> (default 0.3) which produced non-deterministic
+    /// structured tool handler output. Callers needing creative variation (rare for structured
+    /// schemas) pass an explicit non-zero value sourced from the per-action
+    /// <c>sprk_analysisaction.sprk_temperature</c> column.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The raw JSON string response conforming to the schema.</returns>
     Task<string> GetStructuredCompletionRawAsync(
@@ -156,6 +166,7 @@ public interface IOpenAiClient
         string schemaName,
         string? model = null,
         int? maxOutputTokens = null,
+        float? temperature = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -2,14 +2,23 @@
  * TodoSection - Related to-do display/edit for Event Detail Side Pane
  *
  * Fixed section (not config-driven) shown at the bottom of every side pane.
- * Queries sprk_eventtodo by _sprk_regardingevent_value.
+ * Queries sprk_todo by _sprk_regardingevent_value.
  * - If to-do exists: shows card with checkbox, name, assigned to, due date
  * - If no to-do: shows "+ Add To Do" button
  *
- * Entity: sprk_eventtodo
- * Fields: sprk_name, sprk_regardingevent, sprk_assignedto, sprk_duedate,
- *         statecode, statuscode, sprk_graphtaskid, sprk_graphsyncedat
+ * R3 single-entity model (FR-09 / OS-1): the legacy two-entity
+ * (`sprk_event` + `sprk_eventtodo`) shape has been retired. A To Do is now
+ * a standalone `sprk_todo` row whose `sprk_regardingevent` lookup points at
+ * the source event. The query filters on `_sprk_regardingevent_value` (the FK
+ * column form of that lookup, which now lives on `sprk_todo`).
  *
+ * Entity: sprk_todo
+ * Fields: sprk_name, sprk_regardingevent (lookup → sprk_event),
+ *         sprk_assignedto, sprk_duedate, sprk_priorityscore, sprk_effortscore,
+ *         statecode, statuscode
+ *
+ * @see src/solutions/SmartTodo/src/services/DataverseService.ts createTodo (canonical record body)
+ * @see src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts (TODO_REGARDING_CATALOG)
  * @see approach-a-dynamic-form-renderer.md
  */
 
@@ -138,12 +147,12 @@ export const TodoSection: React.FC<TodoSectionProps> = ({
   const [isSaving, setIsSaving] = React.useState(false);
 
   const todo = useRelatedRecord({
-    entityName: "sprk_eventtodo",
+    entityName: "sprk_todo",
     parentLookupField: "sprk_regardingevent",
     parentId: eventId,
     selectFields:
-      "sprk_eventtodoid,sprk_name,sprk_duedate,statecode,statuscode," +
-      "_sprk_assignedto_value,sprk_graphtaskid",
+      "sprk_todoid,sprk_name,sprk_duedate,sprk_priorityscore,sprk_effortscore," +
+      "statecode,statuscode,_sprk_assignedto_value",
   });
 
   // Extract values from record

@@ -1,0 +1,172 @@
+<task id="009" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-09 Split Execution Context: `ToolExecutionContext` (playbook) + `ChatInvocationContext` (chat) (Pillar 2)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      Implemented `ToolInvocationContextBase` (abstract record with shared
+      InvocationId/TenantId/UserContext/MaxTokens/Temperature/ModelDeploymentId/CorrelationId/CreatedAt
+      fields). `ToolExecutionContext` refactored to derive from base; `AnalysisId` preserved via
+      delegating accessor (init forwards to base.InvocationId) so existing 4 handlers
+      (GenericAnalysisHandler, DocumentClassifierHandler, SummaryHandler, SemanticSearchToolHandler)
+      compile unchanged — verified by full BFF build (0 errors) + 85 passing tests.
+      `ChatInvocationContext` added with chat-session semantics (ChatSessionId delegates to
+      base.InvocationId symmetric to AnalysisId; DecisionId per-tool-call; ConversationHistoryRef
+      handle only per ADR-015; RequestedToolName + ToolArgumentsJson + MatterId).
+      `IToolHandler` extended via C# 8 default interface methods: SupportedInvocationContexts
+      (defaults to Playbook for backward compat), ValidateChat (defaults to Failure),
+      ExecuteChatAsync (defaults to throw NotSupportedException). Added InvocationContextKind
+      [Flags] enum (None/Playbook/Chat/Both). Existing 4 handlers do not implement chat methods
+      and inherit the safe defaults. Task 010 adapter pattern: inspect SupportedInvocationContexts
+      before invoking ExecuteChatAsync.
+      Publish-size delta: +0.027 MB (28 KB) — well under +5 MB R6 budget.
+      Unit tests added in InvocationContextTests.cs (9 tests, all passing): derivation,
+      field forwarding, default values preservation, polymorphic dispatch, ADR-015 reflection
+      check (no UserMessage/MessageBody/ConversationHistory content fields).
+    </completion-notes>
+    <estimated-effort>5 hours</estimated-effort>
+    <dependencies>006</dependencies>
+    <blocks>010</blocks>
+    <tags>bff-api, refactoring, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.cs` files in `Services/Ai/` ; refactors core handler context type; downstream blocker for adapter; tags `bff-api` + `ai`.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Different files from 007 (DTO) and 008 (DTO); can run alongside.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Split the existing handler execution context into two derived types sharing a common
+    base: `ToolExecutionContext` keeps playbook-node semantics (existing nodeContext,
+    playbookId, action, etc.); new `ChatInvocationContext` adds chat-session semantics
+    (chatSessionId, conversationHistory ref, LLM-parameter-passing). Both inherit a shared
+    base `ToolInvocationContextBase` so handlers receive the appropriate type.
+
+    Critical-path context: this split is what lets one handler (e.g.,
+    `EntityExtractorHandler` after task H-G2 ships) be invoked from both a playbook node
+    AND a chat tool — and access the context appropriate to the invocation. The adapter
+    in task 010 wraps an `IToolHandler` and feeds it the `ChatInvocationContext`; the
+    existing playbook pipeline continues to feed `ToolExecutionContext`.
+
+    Backward-compat is binding: existing handlers (`GenericAnalysisHandler`,
+    `DocumentClassifierHandler`, `SummaryHandler`, `SemanticSearchToolHandler`) MUST
+    continue to compile + work unchanged. If they reference `ToolExecutionContext`
+    explicitly, the rename of the existing type preserves them; the new
+    `ChatInvocationContext` is additive.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with deep understanding of `IAnalysisToolHandler` /
+    `ToolExecutionContext` and the playbook-node execution model.
+  </role>
+
+  <goal>
+    `ToolInvocationContextBase` exists; `ToolExecutionContext` derives (playbook-node
+    semantics preserved); `ChatInvocationContext` is new (chat-session semantics).
+    All existing handlers + playbook pipeline + tests pass unchanged. Build green;
+    publish-size delta reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="existing-context">src/server/api/Sprk.Bff.Api/Services/Ai/ToolExecutionContext.cs</file>
+    <file purpose="handler-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IToolHandler.cs</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">No new top-level Program.cs lines.</constraint>
+    <constraint source="ADR-013">Refactor purely internal to `Services/Ai/`; no facade-boundary change.</constraint>
+    <constraint source="ADR-015">No user message content logged in context fields; `ChatInvocationContext` exposes only IDs + scoped state.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; ≤+5 MB R6 budget.</constraint>
+    <constraint source="spec FR-09">Both contexts inherit a shared base; handlers receive the appropriate type; existing handlers remain functional.</constraint>
+    <constraint source="NFR-08">All 11 production node executors preserved — `ToolExecutionContext` semantics for playbook nodes MUST be unchanged.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/handler-context</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — handler context refactor + downstream blocker + NFR-08 preservation".
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 006 ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge. Capture baseline publish size.
+    </step>
+    <step order="3" name="Inspect Existing Context Type">
+      Open `ToolExecutionContext.cs`; enumerate fields. Identify which are playbook-specific (nodeContext, playbookId, action) vs which are shared (tenantId, requestId, cancellation token).
+    </step>
+    <step order="4" name="Author Base Type">
+      Add `ToolInvocationContextBase` containing the shared fields. Preserve names for source compatibility.
+    </step>
+    <step order="5" name="Refactor `ToolExecutionContext`">
+      Make it derive from `ToolInvocationContextBase`; retain playbook-specific fields. Existing handlers + node-executor pipeline see the same `ToolExecutionContext` type with same fields.
+    </step>
+    <step order="6" name="Add `ChatInvocationContext`">
+      New type deriving from base; adds `ChatSessionId`, `ConversationHistory` reference (handle only, not content per ADR-015), LLM-parameter-passing fields.
+    </step>
+    <step order="7" name="Build + Test">
+      `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors. `dotnet test` → all existing tests green; existing handlers compile unchanged.
+    </step>
+    <step order="8" name="Add Unit Tests">
+      Unit tests: base + derived types serialize correctly; field set per type matches expected.
+    </step>
+    <step order="9" name="Verify Publish Size + Acceptance Criteria">
+      `dotnet publish -c Release` → measure delta vs baseline; report ≤+5 MB R6 budget. Walk each criterion below.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check` against changed files. Verify ADR-010 / ADR-013 / ADR-015 / ADR-029 + NFR-08 + FR-09 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 009 ✅. Reset `current-task.md`. Report.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, test, publish</tool>
+    <tool name="git">stage + commit changes</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ToolInvocationContextBase.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ToolExecutionContext.cs (modified — derives from base)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ChatInvocationContext.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/InvocationContextTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (009 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-009-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ToolInvocationContextBase` exists with shared fields (tenantId, requestId, cancellation).</criterion>
+    <criterion testable="true">`ToolExecutionContext` derives from base; playbook-node fields preserved.</criterion>
+    <criterion testable="true">`ChatInvocationContext` exists with chat-session fields; no user message content stored.</criterion>
+    <criterion testable="true">All existing handlers + tests pass unchanged.</criterion>
+    <criterion testable="true">11 production node executors unaffected (NFR-08).</criterion>
+    <criterion testable="true">Facade boundary preserved (ADR-013).</criterion>
+    <criterion testable="true">BFF publish-size delta reported; ≤+5 MB R6 budget.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+  </acceptance-criteria>
+</task>

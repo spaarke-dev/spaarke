@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Thread `SearchIndexName` through `RagService.cs`</title>
+    <phase>B: BFF resolver extension</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>010, 011</dependencies>
+    <blocks>016</blocks>
+    <tags>bff-api, api, services, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include `bff-api`; modifies .cs service code that directly invokes the resolver. Backward-compat invariant.</rigor-reason>
+    <parallel-group>B2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>File-disjoint with tasks 013 (SemanticSearchService) and 015 (RecordSearchService) — different service files, independent edits.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Thread `searchIndexName` (from `RagSearchRequest.SearchIndexName`) through `RagService.cs` to its call into `IKnowledgeDeploymentService.GetSearchClientAsync(searchIndexName)`. Existing callers passing no value continue to fall through to the existing 2-tier chain (NFR-02 — backward-compat).
+  </prompt>
+
+  <role>
+    BFF developer familiar with `Sprk.Bff.Api/Services/Ai/`. Read `.claude/constraints/bff-extensions.md` for the binding pre-merge checklist.
+  </role>
+
+  <goal>
+    `RagService` receives `searchIndexName` from the request DTO and passes it to `_knowledgeDeployment.GetSearchClientAsync(searchIndexName)`. Existing tests pass unmodified.
+  </goal>
+
+  <context>
+    <background>
+      One of three parallel thread-through tasks (013, 014, 015). `RagService` is the RAG (retrieval-augmented generation) consumer of the resolver; same pattern as `SemanticSearchService`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IKnowledgeDeploymentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/.../RagSearchRequest.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-BFF-07">Search endpoint MUST thread `SearchIndexName` from request DTO into resolver call. This task delivers the RAG-service thread-through.</constraint>
+    <constraint source="spec.md NFR-02">Backward-compat — existing tests pass UNMODIFIED.</constraint>
+    <constraint source="ADR-001">Minimal-API service conventions; pass parameters explicitly through call chain.</constraint>
+    <constraint source="ADR-013">AI architecture — service stays within `Services/Ai/`.</constraint>
+    <constraint source=".claude/constraints/bff-extensions.md">Binding pre-merge checklist for any BFF addition.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-001-bff-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Thread-through" location="ADR-001">
+        Accept the new optional parameter at the public service method; pass it explicitly to the resolver call. Do not stash in field state.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `RagService.cs` and identify the public method(s) that invoke the resolver (likely `SearchAsync(RagSearchRequest request, ...)` or `RetrieveAsync(...)`).</step>
+    <step order="2">In that method, read `request.SearchIndexName` and pass it to `_knowledgeDeployment.GetSearchClientAsync(request.SearchIndexName)`. Thread to all resolver call sites if multiple.</step>
+    <step order="3">Verify existing callers (without `searchIndexName` set) continue to work — null/empty falls through to the existing chain (FR-BFF-04).</step>
+    <step order="4">Add a unit test confirming the thread-through (mock `IKnowledgeDeploymentService`, call with explicit `SearchIndexName`, verify mock received the value).</step>
+    <step order="5">Run `dotnet build` + `dotnet test`; verify existing tests pass unmodified.</step>
+    <step order="6">Update `TASK-INDEX.md` status: 🔲 → ✅. Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read existing service code</tool>
+    <tool name="Edit">Thread parameter through</tool>
+    <tool name="Bash">Build + test verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-BFF-07 (part 2 of 3): `RagService` passes `searchIndexName` through to the resolver call. Verified by unit test with mocked `IKnowledgeDeploymentService`.</criterion>
+    <criterion testable="true">NFR-02: Existing test suite passes UNMODIFIED.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel with tasks 013 + 015 (same pattern, different services). All three converge into task 016 (endpoint wiring).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files in &lt;knowledge&gt;&lt;files&gt;. Follow task-execute Step 0 (rigor declaration: FULL) before any code change.
+    </protocol>
+  </execution>
+</task>

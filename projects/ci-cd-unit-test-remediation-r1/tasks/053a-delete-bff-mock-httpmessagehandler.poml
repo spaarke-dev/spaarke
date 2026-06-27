@@ -1,0 +1,55 @@
+<task id="CICD-053a" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>DELETE PR 3a/3c: BFF.Api.Tests files using Mock&lt;HttpMessageHandler&gt; (38 occurrences in 9 files + dependency closure)</title>
+    <status>complete-merged</status>
+    <completion-note>2026-06-26: Per inventory (task 020) finding of only 11 DELETE files total, sub-slicing 053a/b/c collapsed into a single 053 PR. This task's scope (9 Mock&lt;HttpMessageHandler&gt; files) was executed inline with 053b's scope (2 DI-registration files) as a single 11-file deletion. Build verified green (0 errors).</completion-note>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>2 - Stream B</phase>
+    <stream>B - Test reset</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>052</dependencies>
+    <blocks>053b</blocks>
+    <tags>testing, deletion, sliced-PR, bff-api, http-mocking</tags>
+  </metadata>
+
+  <prompt>
+    Third sliced-deletion PR (first sub-slice). Delete BFF.Api.Tests files containing `Mock&lt;HttpMessageHandler&gt;` (38 occurrences across 9 files, plus dependency closure). This is the canonical wiring-test antipattern per spec FR-B01 — landed first as forcing example for the remaining sub-slices.
+  </prompt>
+
+  <role>Test architecture engineer executing the canonical-antipattern slice.</role>
+
+  <goal>All BFF.Api.Tests files using Mock&lt;HttpMessageHandler&gt; removed; their dependency-closure helpers also removed if exclusively used by these tests.</goal>
+
+  <inputs>
+    <file purpose="inventory">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory.csv (DELETE rows tagged HttpMessageHandler-mock)</file>
+    <file purpose="grep-source">tests/unit/Sprk.Bff.Api.Tests/ (grep for Mock&lt;HttpMessageHandler&gt;)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B01">Mock&lt;HttpMessageHandler&gt; is a binding ban — this slice REMOVES all instances.</constraint>
+    <constraint source="spec FR-B06">Path-check at Step 9.5.</constraint>
+    <constraint source="project autonomous">FULL rigor; this is canonical-antipattern slice and sets the precedent for 053b/c.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Rebase on master (52 should have merged)</step>
+    <step order="2">Grep `tests/unit/Sprk.Bff.Api.Tests/` for `Mock&lt;HttpMessageHandler&gt;` — confirm 38 occurrences / 9 files (cross-check vs inventory)</step>
+    <step order="3">Identify dependency closure: any helpers/fixtures/factories exclusively used by these 9 files</step>
+    <step order="4">`git rm` the 9 files + dependency-closure files</step>
+    <step order="5">Run `dotnet build` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`; verify remaining tests pass</step>
+    <step order="6">Step 9.5; commit + PR (title: "test(b-phase2): delete BFF.Api.Tests Mock&lt;HttpMessageHandler&gt; wiring tests per FR-B01 [slice 3a/3c]")</step>
+  </steps>
+
+  <outputs>
+    <output type="test-deletion">~9 files + dependency-closure helpers from tests/unit/Sprk.Bff.Api.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -r "Mock&lt;HttpMessageHandler&gt;" tests/unit/Sprk.Bff.Api.Tests/` returns zero matches</criterion>
+    <criterion testable="true">No protected-path violations</criterion>
+    <criterion testable="true">Surviving tests pass</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+  </acceptance-criteria>
+</task>

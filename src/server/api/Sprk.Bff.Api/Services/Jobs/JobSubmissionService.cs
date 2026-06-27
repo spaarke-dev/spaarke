@@ -40,7 +40,10 @@ public class JobSubmissionService
     /// </summary>
     /// <param name="job">The job to submit (must follow ADR-004 contract)</param>
     /// <param name="ct">Cancellation token</param>
-    public async Task SubmitJobAsync(JobContract job, CancellationToken ct = default)
+    /// <remarks>
+    /// Virtual to enable unit-test overriding via <c>Mock&lt;JobSubmissionService&gt;</c>.
+    /// </remarks>
+    public virtual async Task SubmitJobAsync(JobContract job, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(job);
 

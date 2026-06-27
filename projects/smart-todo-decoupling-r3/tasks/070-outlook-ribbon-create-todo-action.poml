@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Outlook ribbon action "Create To Do" — save email + open CreateTodo wizard pre-filled to `sprk_regardingcommunication`</title>
+    <phase>Phase 8: Outlook Add-in</phase>
+    <status>not-started</status>
+    <estimated-effort>4-5 hours</estimated-effort>
+    <dependencies>030, 031, 032</dependencies>
+    <blocks>072</blocks>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New Outlook add-in surface action with email-save integration. FULL rigor.</rigor-reason>
+    <parallel-group>P8-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a "Create To Do" ribbon action to the Outlook add-in (email-read context). On click: (1) if the email is not already saved to Spaarke as `sprk_communication`, run the existing save flow; (2) once saved (or already saved), open the CreateTodo wizard taskpane with `sprk_regardingcommunication` pre-filled to the saved/found communication id. Wizard completes and creates `sprk_todo` with correct regarding.
+  </prompt>
+
+  <role>Spaarke Office Add-in developer with Office.js + React + Fluent v9 expertise.</role>
+
+  <goal>Ribbon action visible in Outlook web + desktop. Click sequence: save-if-needed → wizard with pre-filled regarding → todo created.</goal>
+
+  <constraints>
+    <constraint source="FR-27">Ribbon action in email-read context; if email not saved, run save flow first; then wizard with `sprk_regardingcommunication` pre-filled; wizard creates `sprk_todo`.</constraint>
+    <constraint source="NFR-01">Fluent v9 only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/office-addins/outlook/</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/office-addins-deploy/SKILL.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateTodo/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Add ribbon button definition to `manifest.xml` (email-read context). Label: "Create To Do"; icon per Spaarke add-in convention.</step>
+    <step order="2">Implement button click handler: check existing `sprk_communication` save state; invoke existing save flow if not saved.</step>
+    <step order="3">After save (or if already saved), open wizard taskpane passing `initialRegarding={ entityType: "sprk_communication", recordId: commId, recordName: subject }`.</step>
+    <step order="4">Verify wizard creates `sprk_todo` with correct `sprk_regardingcommunication` lookup populated (via `applyResolverFields` from task 030).</step>
+    <step order="5">Manual test in Outlook web; manual test in Outlook desktop.</step>
+    <step order="6">Unit tests for the click handler logic (mock Office.js + REST calls).</step>
+    <step order="7">Run `npm run build`. Fluent v9 lint pass.</step>
+    <step order="8">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/client/office-addins/outlook/` (manifest + click handler + integration)</output>
+    <output type="test">Unit tests for click handler</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Ribbon action visible in Outlook web + desktop.</criterion>
+    <criterion testable="true">Click on un-saved email triggers save flow first, then wizard.</criterion>
+    <criterion testable="true">Click on already-saved email opens wizard directly.</criterion>
+    <criterion testable="true">Wizard pre-fills regarding to `sprk_regardingcommunication` with the correct id.</criterion>
+    <criterion testable="true">Resulting `sprk_todo` has the regarding lookup populated; resolver fields populated atomically.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

@@ -198,6 +198,13 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     width: '100%',
     height: '100%',
+    // min-width: 0 is required on EVERY ancestor of an overflow:auto element
+    // so the flex chain can shrink below its content's intrinsic width. Without
+    // this, a wide FluentDataGrid inside gridScroll forces every ancestor to
+    // grow to fit the columns (operator round 5 feedback: grid is 1548px wide
+    // and the section card grew to 1548px instead of constraining to its tab
+    // width). Same fix applied to innerCard + gridScroll below.
+    minWidth: 0,
     minHeight: 0,
     position: 'relative',
     backgroundColor: tokens.colorNeutralBackground2,
@@ -211,6 +218,7 @@ const useStyles = makeStyles({
   gridScroll: {
     flex: 1,
     minHeight: 0,
+    minWidth: 0,
     overflow: 'auto',
     position: 'relative',
     // Inset the rows away from the inner-card border so per-row bottom borders
@@ -255,6 +263,21 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
     ...shorthands.padding(tokens.spacingVerticalM),
+  },
+  // ai-spaarke-ai-workspace-UI-r1 iter 2 round 8 (2026-06-09):
+  // Override FluentDataGrid's hardcoded `min-width: fit-content` inline style.
+  // The Fluent v9 DataGrid sets that inline on its <div role="grid"> root —
+  // confirmed via DOM inspector — which forces the table to expand to its
+  // column-sum width regardless of parent constraints. Without overriding it,
+  // every min-width:0 fix in the ancestor chain (rounds 6+7) was undone at
+  // the table itself. CSS class with `!important` beats inline style; we use
+  // Griffel's child-selector escape so the class targets the FluentDataGrid
+  // inside our scroll container precisely.
+  gridTableOverride: {
+    '& > [role="grid"]': {
+      minWidth: '0 !important',
+      maxWidth: '100% !important',
+    },
   },
   emptyState: {
     // Sits inside gridScroll BELOW the (always-rendered) FluentDataGrid header
@@ -347,6 +370,7 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     flex: 1,
     minHeight: 0,
+    minWidth: 0,
     backgroundColor: tokens.colorNeutralBackground1,
     ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke3),
     borderRadius: tokens.borderRadiusMedium,
@@ -973,17 +997,115 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     theme,
   ]);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Responsive column sizing (ai-spaarke-ai-workspace-UI-r1 iteration 2,
+  // 2026-06-09; refined 2026-06-09 round 2). Operator feedback round 1:
+  // horizontal scrollbar always visible because columns rendered at the
+  // fixed sum-of-widths regardless of container width. Round 1 fix scaled
+  // UP only. Round 2 feedback (this round): the grid still overflows
+  // because sum-of-widths > container width, so the grid renders wider
+  // than its container with a permanent scrollbar. Fix: scale columns to
+  // FIT the container in BOTH directions — up when container > baseSum
+  // (fill dead space) and down when container < baseSum (avoid scroll),
+  // bounded by a per-column minimum so columns don't collapse to nothing.
+  // If even the minimums sum to more than the container, horizontal
+  // scroll appears as a last resort (correct).
+  // ─────────────────────────────────────────────────────────────────────────
+  const [containerWidth, setContainerWidth] = React.useState<number>(0);
+  // Synchronous initial measurement BEFORE FluentDataGrid's first commit, so
+  // its initial `columnSizingOptions` already reflect the container width
+  // (round 2 feedback found that ResizeObserver firing AFTER mount didn't
+  // re-apply column sizing — Fluent treats `columnSizingOptions` as initial
+  // values, not live-tracked). useLayoutEffect runs synchronously after the
+  // DOM is laid out but before paint, so the column sizes are correct on
+  // the very first visible frame.
+  React.useLayoutEffect(() => {
+    const el = scrollContainerRef.current;
+    if (el) {
+      setContainerWidth(el.clientWidth);
+    }
+  }, []);
+  React.useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const columnSizingOptions: TableColumnSizingOptions = React.useMemo(() => {
     const options: TableColumnSizingOptions = {};
+    if (visibleColumns.length === 0) return options;
+    const baseSum = visibleColumns.reduce((s, c) => s + c.width, 0);
+    // Reserve space for selection cell (~44px when multiselect), gridScroll
+    // horizontal padding (24px = 12+12), and a small scrollbar safety
+    // buffer (10px). Anything left over is shared across the columns.
+    const selectionWidth = resolved && resolved.behavior.selectionMode === 'multi' ? 44 : 0;
+    // ai-spaarke-ai-workspace-UI-r1 iter 2 round 11 (2026-06-09):
+    // Subtract per-cell horizontal padding (~24px = 12+12 spacingHorizontalM)
+    // from each column's available width. Without this, hosts that haven't
+    // declared `*, *::before, *::after { box-sizing: border-box }` in their
+    // index.html render every cell `+24px` wider than its declared width
+    // (content-box adds padding on top of width), causing the columns to
+    // sum past `available` even when the column math is otherwise correct.
+    // Operator round 10 diagnostic confirmed exactly this for the SpaarkeAi
+    // surface (col[1] declared 150px → rendered 174px). The box-sizing reset
+    // has now been added to SpaarkeAi/index.html (the primary fix), but this
+    // subtraction is the defensive layer for any future surface that misses
+    // it.
+    const perColPaddingReserve = visibleColumns.length * 24;
+    const available = Math.max(0, containerWidth - selectionWidth - 24 - 10 - perColPaddingReserve);
+    // Bidirectional scale: when `available` < `baseSum`, scale < 1 shrinks
+    // the columns to fit (down to each column's minimum); when `available`
+    // > `baseSum`, scale > 1 expands them to fill. Skip the no-op when the
+    // ResizeObserver hasn't fired yet (containerWidth === 0).
+    const scale = available > 0 && baseSum > 0 ? available / baseSum : 1;
+    // ai-spaarke-ai-workspace-UI-r1 iter 2 round 10 (2026-06-09):
+    // Pass 1 — initial per-column scale + minWidth floor. Some columns will
+    // hit their minWidth floor and stop shrinking; others stay scaled. The
+    // total may overshoot `available` because of that asymmetry.
+    const targets: number[] = [];
+    const mins: number[] = [];
+    let sum = 0;
     for (const col of visibleColumns) {
-      options[col.name] = {
-        defaultWidth: col.width,
-        minWidth: Math.max(80, Math.round(col.width * 0.5)),
-        idealWidth: col.width,
+      const minW = Math.max(80, Math.round(col.width * 0.5));
+      const target = Math.max(minW, Math.round(col.width * scale));
+      targets.push(target);
+      mins.push(minW);
+      sum += target;
+    }
+    // Pass 2 — if pass 1's sum exceeds `available` (caused by minWidth floors
+    // refusing to shrink some columns while others were free to), redistribute
+    // the overflow by proportionally shrinking columns that are STILL above
+    // their minimum. The columns at minWidth stay put. This is the exact
+    // step that prevents the operator round 8 symptom (table scrollWidth >
+    // gridScroll clientWidth → horizontal scrollbar appears even though
+    // column-by-column math looked fine).
+    if (sum > available && available > 0) {
+      const overflow = sum - available;
+      const slackPerCol: number[] = targets.map((t, i) => t - mins[i]);
+      const totalSlack = slackPerCol.reduce((s, x) => s + x, 0);
+      if (totalSlack > 0) {
+        const shrinkFactor = Math.min(1, overflow / totalSlack);
+        for (let i = 0; i < targets.length; i++) {
+          const shrink = Math.round(slackPerCol[i] * shrinkFactor);
+          targets[i] = targets[i] - shrink;
+        }
+      }
+    }
+    for (let i = 0; i < visibleColumns.length; i++) {
+      options[visibleColumns[i].name] = {
+        defaultWidth: targets[i],
+        minWidth: mins[i],
+        idealWidth: targets[i],
       };
     }
     return options;
-  }, [visibleColumns]);
+  }, [visibleColumns, containerWidth, resolved]);
 
   // Items with stable row ids (primaryId-derived, so selection survives reorder).
   const items: GridItem[] = React.useMemo(() => {
@@ -1126,7 +1248,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
            * row instead.
            */}
 
-          <div className={styles.gridScroll} ref={scrollContainerRef}>
+          <div className={mergeClasses(styles.gridScroll, styles.gridTableOverride)} ref={scrollContainerRef}>
             {/*
              * The FluentDataGrid is ALWAYS rendered (even when there are zero
              * rows) so the column-header row — which hosts the chevron menus
@@ -1135,8 +1257,25 @@ export const DataGrid: React.FC<DataGridProps> = props => {
              * would leave the user with no way back to clear the filter.
              * Power Apps OOB pattern: header always visible, body empty,
              * empty-state message sits below the (empty) body.
+             *
+             * ai-spaarke-ai-workspace-UI-r1 iter 2 round 4 (2026-06-09):
+             * FluentDataGrid treats `columnSizingOptions` as INITIAL-only —
+             * once mounted, prop changes to those options do not re-flow
+             * the columns. To get responsive sizing in containers whose
+             * width changes (workspace section embeds; window resize), we
+             * use a key bucket (every 50px) so significant width changes
+             * force a remount with fresh column widths. We do NOT gate the
+             * mount on a non-zero width — that would collapse gridScroll's
+             * flex:1 layout (no children) and prevent the initial width
+             * measurement, leaving an empty pane. Instead the grid mounts
+             * immediately with the baseline (containerWidth=0) widths and
+             * remounts ~one frame later when useLayoutEffect measures.
+             * Selection state lives in DataGrid's React state above this
+             * FluentDataGrid, so remount only loses Fluent's internal
+             * sort/filter-popover UI state — acceptable trade-off.
              */}
             <FluentDataGrid
+              key={`fg-${Math.floor((containerWidth || 0) / 50)}`}
               items={items}
               columns={tableColumns}
               selectionMode={
@@ -1154,7 +1293,16 @@ export const DataGrid: React.FC<DataGridProps> = props => {
               focusMode="composite"
               size={density}
               getRowId={(item: GridItem) => item._rowId}
-              style={{ width: '100%' }}
+              // CSS belt-and-suspenders: maxWidth caps the FluentDataGrid at
+              // the container width even if `columnSizingOptions` failed to
+              // apply (Fluent treats it as initial-only). Without this, when
+              // sum-of-column-widths > container width, the grid renders past
+              // the container's right edge with a permanent horizontal scroll
+              // (round 2 testing feedback).
+              style={{
+                width: '100%',
+                maxWidth: containerWidth > 0 ? `${containerWidth}px` : undefined,
+              }}
               aria-label={contextValue.currentView}
             >
               <DataGridHeader>

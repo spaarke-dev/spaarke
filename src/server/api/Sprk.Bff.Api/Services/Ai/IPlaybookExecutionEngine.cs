@@ -1,4 +1,6 @@
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -55,7 +57,101 @@ public interface IPlaybookExecutionEngine
         Guid playbookId,
         bool hasCanvasState,
         bool hasDocuments);
+
+    /// <summary>
+    /// Execute a chat-session Summarize playbook (R6 Pillar 4 / D-A-17).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Resolves the playbook → node → action FK chain (no alternate-key lookup; the FK chain
+    /// became valid post-R6 task 024 / D-A-16) and runs the chat-Summarize streaming pipeline:
+    /// session-scoped RAG retrieval → Azure OpenAI Structured Outputs streaming →
+    /// <see cref="Streaming.IncrementalJsonParser"/> per-field deltas →
+    /// <see cref="AnalysisChunk"/> SSE chunks.
+    /// </para>
+    /// <para>
+    /// <b>Preserved external behaviors (from the pre-Pillar-4
+    /// <c>SessionSummarizeOrchestrator</c> contract)</b>:
+    /// <list type="bullet">
+    ///   <item>Returns <see cref="AnalysisChunk"/> — byte-equivalent envelope (text /
+    ///         delta / complete / error events) consumed by the chat /summarize
+    ///         endpoint and the wizard pre-fill flow per NFR-07.</item>
+    ///   <item>Session-files filter forwarded to <see cref="IRagService"/> via
+    ///         <see cref="RagSearchOptions.SessionId"/> (ADR-014 tenant+session isolation).</item>
+    ///   <item>FR-04 multi-file combined-summary interjection emitted as
+    ///         <see cref="AnalysisChunk.FromContent"/> BEFORE the Structured Outputs stream
+    ///         when <paramref name="request"/> resolves to ≥2 files.</item>
+    ///   <item>NFR-02 ≤20 files per session cap.</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// <b>FR-26 invariant</b>: this method MUST NOT load the action by alternate key
+    /// (<c>sprk_actioncode</c>). Resolution is FK-only via
+    /// <see cref="INodeService.GetNodesAsync"/> + <see cref="Spaarke.Dataverse.IGenericEntityService.RetrieveAsync"/>
+    /// on the FK-resolved action ID.
+    /// </para>
+    /// <para>
+    /// <b>ADR-013</b>: this is an AI-internal interface method (NOT a public-facing facade in
+    /// <c>Services/Ai/PublicContracts/</c>). Additive extension — existing 3 methods + their
+    /// consumers (InsightsOrchestrator, AgentEndpoints, et al.) are unaffected.
+    /// </para>
+    /// </remarks>
+    /// <param name="playbookId">
+    /// Dataverse <c>sprk_analysisplaybook</c> ID. Engine traverses
+    /// playbook → node (via <see cref="INodeService.GetNodesAsync"/>) → action
+    /// (via <see cref="PlaybookNodeDto.ActionId"/>) to resolve the action seed's
+    /// <c>sprk_systemprompt</c> + <c>sprk_outputschemajson</c>.
+    /// For the chat /summarize flow, this is the <c>summarize-document-for-chat@v1</c>
+    /// playbook ID (see project CLAUDE.md Pillar 4 / R6 task 024 evidence).
+    /// </param>
+    /// <param name="request">Chat-session Summarize request (tenant + session + file selection + style).</param>
+    /// <param name="cancellationToken">Cancellation token (mid-stream OperationCanceledException is propagated).</param>
+    /// <returns>
+    /// SSE-shaped chunks in order: optional FR-04 interjection → zero or more
+    /// <see cref="AnalysisChunk.FromDelta"/> field-delta events → terminal
+    /// <see cref="AnalysisChunk.Completed(DocumentAnalysisResult)"/> (or
+    /// <see cref="AnalysisChunk.FromError"/> on failure).
+    /// </returns>
+    IAsyncEnumerable<AnalysisChunk> ExecuteChatSummarizeAsync(
+        Guid playbookId,
+        ChatSummarizeRequest request,
+        CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Request shape for <see cref="IPlaybookExecutionEngine.ExecuteChatSummarizeAsync"/>
+/// (R6 Pillar 4 / D-A-17). Carries tenant + session identity, the optional file-IDs
+/// subset, the optional style hint, and the chat-session uploaded-files manifest the
+/// engine uses to build the RAG query.
+/// </summary>
+/// <param name="TenantId">Tenant ID (ADR-014). Required.</param>
+/// <param name="SessionId">Chat session ID (ADR-014; task 004 manifest key). Required.</param>
+/// <param name="FileIds">
+/// Optional subset of session-uploaded file IDs to summarize. When null/empty, defaults to
+/// all files in <paramref name="UploadedFiles"/>. Cap: 20 (spec NFR-02).
+/// </param>
+/// <param name="StyleHint">
+/// Optional natural-language style hint passed through to the system prompt
+/// (e.g., <c>executive</c>, <c>detailed</c>, <c>bullet-points</c>).
+/// </param>
+/// <param name="UploadedFiles">
+/// The chat session's uploaded-files manifest (passed by the orchestrator so the engine
+/// doesn't need to re-fetch the session). Used to resolve file names + content metadata
+/// and as the source-of-truth for default file selection.
+/// </param>
+/// <param name="Path">
+/// Invocation-path discriminator (DirectEndpoint or AgentTool); drives the
+/// <c>path</c> dimension on <see cref="Telemetry.R5SummarizeTelemetry.RecordSummarizeInvocation"/>.
+/// </param>
+/// <param name="CorrelationId">Optional correlation ID propagated to the tracing span.</param>
+public sealed record ChatSummarizeRequest(
+    string TenantId,
+    string SessionId,
+    IReadOnlyList<string>? FileIds,
+    string? StyleHint,
+    IReadOnlyList<ChatSessionFile> UploadedFiles,
+    SummarizeInvocationPath Path,
+    string? CorrelationId = null);
 
 /// <summary>
 /// Execution mode for the playbook engine.

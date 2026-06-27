@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>BFF refactor: RAG pipeline services (RagService, RagIndexingPipeline, IndexRetrieveNode) (FR-13)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>046</blocks>
+    <tags>bff-api, refactoring, ai, rag</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation: BFF services with explicit constraints (FR-13); modifies .cs files</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Refactor RAG pipeline services per FR-13: replace `spaarke-knowledge-index-v2` references with `spaarke-files-index` in RagService.cs, RagIndexingPipeline.cs, IndexRetrieveNode.cs.
+  </prompt>
+
+  <role>
+    Spaarke platform .NET 8 BFF developer with AI/RAG expertise.
+  </role>
+
+  <goal>
+    All 3 files use `spaarke-files-index` as canonical index name.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/IndexRetrieveNode.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">Replace all spaarke-knowledge-index-v2 references with spaarke-files-index</constraint>
+    <constraint source="ADR-013">Preserve SemaphoreSlim bounded concurrency patterns</constraint>
+    <constraint source="NFR-04">Publish-size delta ≤ 0 MB</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>.claude/adr/ADR-013-ai-bounded-concurrency.md</file>
+      <file>.claude/patterns/ai/indexing-pipeline.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep within 3 files for `spaarke-knowledge-index-v2` to enumerate exact lines</step>
+    <step order="2">Edit each file to replace with `spaarke-files-index`</step>
+    <step order="3">Build BFF: `dotnet build src/server/api/Sprk.Bff.Api/` — must succeed</step>
+    <step order="4">Update TASK-INDEX.md: task 031 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Find references</tool>
+    <tool name="Edit">Replace strings</tool>
+    <tool name="dotnet">Build BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/RagIndexingPipeline.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/IndexRetrieveNode.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep within 3 files for `spaarke-knowledge-index-v2` returns zero matches</criterion>
+    <criterion testable="true">BFF builds successfully</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+
+  <notes-results>
+    <completed-on>2026-06-26</completed-on>
+    <summary>
+      POML scope diverged from actual state. Grep audit of the 3 named files found ZERO live `spaarke-knowledge-index-v2` references — all 3 already use the Options pattern (`_aiSearchOptions.KnowledgeIndexName`), refactored by earlier R5 work. Real scope surfaced via 5 CS0618 [Obsolete] warnings from task 030's DiscoveryIndexName deprecation: STRUCTURAL dual-index code path (RagIndexingPipeline writes to BOTH indexes; RagService.GetIndexHealthAsync queries BOTH; KnowledgeIndexHealthResult exposes BOTH names on the BuilderAdmin API contract).
+
+      USER DECISION (2026-06-26 via AskUserQuestion): "Let's build the discovery index if it is provided for in the bff.api; use our standard naming e.g., spaarke- etc." → reactivate as canonical `spaarke-discovery-index`.
+
+      RESOLUTION: New schema file created (`infrastructure/ai-search/spaarke-discovery-index.json`, mirrors `spaarke-files-index.json`); AiSearchOptions.DiscoveryIndexName default = `spaarke-discovery-index` ([Obsolete] removed); Deploy-AllIndexes.ps1 catalog adds 8th entry; AI-SEARCH-INDEX-CATALOG.md §4 = 8 active indexes (new entry 1b); §5 retired = 4 (discovery moved out); operator guide updated; spec FR-14 reframed.
+
+      NO BFF code changes required — consumers via Options pattern automatically pick up new value. Build clean: 0 errors, 5 CS0618 warnings cleared.
+    </summary>
+    <verification>
+      <evidence>infrastructure/ai-search/spaarke-discovery-index.json (created)</evidence>
+      <evidence>AiSearchOptions.cs DiscoveryIndexName = `spaarke-discovery-index`; [Obsolete] removed</evidence>
+      <evidence>Deploy-AllIndexes.ps1 -DryRun: 8-index plan</evidence>
+      <evidence>AI-SEARCH-INDEX-CATALOG.md §4 = 8 active; §5 = 4 retired</evidence>
+      <evidence>spec.md FR-14 reframed; task 046 step 10 retired</evidence>
+      <evidence>dotnet build: 0 errors, 18 warnings (5 CS0618 cleared)</evidence>
+    </verification>
+  </notes-results>
+</task>

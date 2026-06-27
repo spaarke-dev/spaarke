@@ -1,0 +1,72 @@
+<task id="R4-115" project="smart-todo-r4">
+  <metadata>
+    <title>FU-6 — SpeDocumentViewer stale bundle verification + cleanup</title>
+    <phase>Closeout (UAT round 14)</phase>
+    <workstream>tech-debt hygiene</workstream>
+    <status>partial — source confirmed REMOVED by pcf-orphan-cleanup-r1; orphan deployed v1.0.16 still needs Dataverse cleanup from master</status>
+    <verification-2026-06-25>
+      Worktree audit confirms: `src/client/pcf/SpeDocumentViewer/` directory does NOT exist. The only remaining references in the repo are:
+      - `projects/pcf-orphan-cleanup-r1/backups-2026-06-22/baseline-SpaarkeSpeDocumentViewer-pre-cleanup-2026-06-22.zip` (backup ZIP from the cleanup project)
+      - `projects/file-preview-dialog-with-auth-enhancements/tasks/060-migrate-spe-document-viewer-pcf-auth.poml` (planning doc, pre-cleanup)
+      - `projects/x-document-checkout-viewer/PROPOSED-SpeDocumentViewer-DesignSpec.md` (proposed design)
+      Functional source: ZERO files. The pcf-orphan-cleanup-r1 project removed the PCF entirely (per backup naming "pre-cleanup").
+
+      `sprk_todoflag` grep on remaining source = ONLY comments noting "no longer using" + 2 regression-guard assertions (`expect.not.toHaveProperty('sprk_todoflag')`) per R4-094 grep-sweep-result.md §1-2. Zero functional writes.
+
+      Owed to master: delete the orphan SpeDocumentViewer web resource(s) + bundle.js v1.0.16 from spaarkedev1 Dataverse (MCP delete_record on webresource entity). Coordinate with pcf-orphan-cleanup-r1 owner who handled the source cleanup.
+    </verification-2026-06-25>
+    <estimated-effort>30 min (was 1-2 hrs; source-side already done by sibling project; only Dataverse cleanup remains)</estimated-effort>
+    <tags>cleanup, legacy, stale-bundle, sprk_todoflag</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>(none)</dependencies>
+    <relevant-files>
+      <file>solution/SpeDocumentViewer/.../bundle.js (v1.0.16, build date 2026-05-11, contains legacy entity['sprk_todoflag'] = true)</file>
+      <file>projects/smart-todo-r4/notes/grep-sweep-result.md §3 (original finding from R4-094)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+The R4-094 grep sweep found a checked-in solution bundle (`solution/SpeDocumentViewer/.../bundle.js`) that still contains the legacy `entity['sprk_todoflag'] = true` write path from the pre-R3 era. The deployed v1.0.16 carries the same latent code.
+
+User reports another project has already removed this (or addressed it). Verify:
+1. Is the source still in the codebase, or removed?
+2. Is the deployed v1.0.16 still on Dataverse?
+3. If source is clean but bundle is stale, rebuild + redeploy.
+4. If both are still legacy, the OTHER project may have addressed it differently; investigate first.
+
+Goal: no legacy `sprk_todoflag` write path in any deployed bundle. Confirm via Dataverse query (download bundle, grep).
+  </prompt>
+
+  <role>Cleanup + verification.</role>
+
+  <goal>
+1. Locate the SpeDocumentViewer source — is the legacy `entity['sprk_todoflag']` write still there or removed?
+2. Query Dataverse for the deployed `bundle.js` web resource; check the bytes for the legacy string.
+3. If stale: rebuild + redeploy the SpeDocumentViewer solution.
+4. If both source and deploy clean: close the follow-up as resolved.
+5. If unclear: ask the user about which other project handled this.
+  </goal>
+
+  <constraints>
+    <constraint source="R4-094 finding">Source notes are in `projects/smart-todo-r4/notes/grep-sweep-result.md §3`. Read those for context.</constraint>
+    <constraint source="user note">"think this is removed as per other project" — verify before working.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0">Read `grep-sweep-result.md §3` for original finding details.</step>
+    <step order="1">Grep current source for `sprk_todoflag` in any SpeDocumentViewer-related files.</step>
+    <step order="2">Query Dataverse for SpeDocumentViewer web resource(s); download + grep deployed bundle bytes.</step>
+    <step order="3">Decision tree:
+      - Source clean + deploy clean → close follow-up, document.
+      - Source clean + deploy stale → rebuild + redeploy.
+      - Source still has legacy → check other projects' history to understand intent; either fix or escalate.
+    </step>
+    <step order="4">Commit any source/doc updates.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">No `sprk_todoflag` writes in current source for SpeDocumentViewer.</criterion>
+    <criterion testable="true">Deployed bundle on spaarkedev1 verified clean of `sprk_todoflag` writes.</criterion>
+    <criterion testable="true">Follow-up FU-6 closed in R4 wrap-up notes.</criterion>
+  </acceptance-criteria>
+</task>

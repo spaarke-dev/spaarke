@@ -1,0 +1,60 @@
+<task id="R4-113" project="smart-todo-r4">
+  <metadata>
+    <title>NEW-1 — DELETE sprk_todo_dirty_check.js (user decision 2026-06-24 — "no shims")</title>
+    <phase>Closeout (UAT round 14)</phase>
+    <workstream>tech-debt hygiene</workstream>
+    <status>not-started</status>
+    <decision>DELETE (per user 2026-06-24). Parent-side `Xrm.Page.ui.close` workaround in SmartTodoModal.tsx keeps save/close working; no dirty-check feature was ever live in production.</decision>
+    <estimated-effort>1 hr (was 1-2; decision already made)</estimated-effort>
+    <tags>form-script, audit, cleanup, no-shims</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>(none)</dependencies>
+    <relevant-files>
+      <file>src/client/webresources/js/sprk_todo_dirty_check.js (deployed v1.1.0, never registered)</file>
+      <file>projects/smart-todo-r4/notes/c-dirty-check-bind-instructions.md (registration instructions, never executed)</file>
+      <file>src/solutions/SmartTodo/src/components/Modal/SmartTodoModal.tsx (parent-side workaround that bypassed the unregistered script)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+The form script `sprk_/js/sprk_todo_dirty_check.js` was deployed to Dataverse (v1.1.0 with both dirty-check protocol AND ui.close monkey-patch) but **was NEVER REGISTERED** on the sprk_todo main form's OnLoad handler via form designer. User confirmed via browser console diagnostics (no `[SmartTodo.DirtyCheck]` log messages on form load) that the script never runs.
+
+The save/close functionality is currently provided by a PARENT-SIDE workaround in `SmartTodoModal.tsx` (round 9): `iframe.contentWindow.Xrm.Page.ui.close = onClose` patches from the Code Page side. This works.
+
+Per "no shims" rule: either register the script properly (defense in depth — parent-side AND form-side both fire) OR delete the dead script + bind-instructions doc. Don't leave a dead web resource in Dataverse.
+
+Decision matrix:
+- **Register**: requires form-designer change (manual step per `notes/c-dirty-check-bind-instructions.md`). Gives back the dirty-check feature (prev/next nav warns about unsaved changes). Defense-in-depth for save/close.
+- **Delete**: removes the web resource + the bind-instructions doc. No dirty-check feature. Save/close still works via parent-side patch.
+  </prompt>
+
+  <role>Dataverse admin + frontend.</role>
+
+  <goal>
+1. Decide: register OR delete (recommend asking user).
+2. If register: execute the bind-instructions steps in form designer; verify console logs appear on form load; test dirty-check (open record, edit field, click prev/next — should prompt).
+3. If delete: delete the web resource from Dataverse (via MCP delete_record); delete the JS file + bind-instructions doc from source; remove the parent-side workaround comments that reference v1.1.0 of the script.
+4. Update SmartTodoModal.tsx comment: either confirm dirty-check protocol active OR clean up references to the script.
+  </goal>
+
+  <constraints>
+    <constraint source="user feedback feedback_no-shims-clean-up-dead-code">No shims — complete or delete. Don't leave a dead web resource as a future landmine.</constraint>
+    <constraint source="save/close currently works">Whichever path is chosen, save/close must continue to work via the parent-side workaround (do not remove that).</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0">Context check + ask user: register or delete?</step>
+    <step order="1a (if register)">Walk through `notes/c-dirty-check-bind-instructions.md` form-designer steps. Verify console logs `[SmartTodo.DirtyCheck v1.1.0]` appear on form load.</step>
+    <step order="1b (if delete)">Query Dataverse for the web resource ID; delete via MCP `delete_record('webresource', id)` with user approval. Delete source JS file + bind-instructions doc.</step>
+    <step order="2">Update SmartTodoModal.tsx comment block to reflect the chosen path.</step>
+    <step order="3">Test save/close end-to-end (must still work).</step>
+    <step order="4">Commit + PR.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Either: form-script registered AND fires on load (console verification), OR: web resource deleted from Dataverse AND source files deleted.</criterion>
+    <criterion testable="true">No dead web resources remain in Dataverse (audit via MCP read_query for webresource table).</criterion>
+    <criterion testable="true">Save/close in modal still works (regression check).</criterion>
+    <criterion testable="true">No reference to the v1.1.0 script in source comments if path = delete.</criterion>
+  </acceptance-criteria>
+</task>

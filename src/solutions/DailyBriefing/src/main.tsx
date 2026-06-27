@@ -9,12 +9,27 @@
 import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
-import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components";
+import {
+  resolveCodePageTheme,
+  setupCodePageThemeListener,
+  AppErrorBoundary,
+  AppInsightsService,
+} from "@spaarke/ui-components";
+
+// ai-spaarke-ai-workspace-UI-r1 brittleness Phase D (2026-06-09):
+// Initialize Application Insights so AppErrorBoundary.componentDidCatch can
+// route errors to the "Failures" pane via reportClientError(). Key is sourced
+// from a build-time Vite env var; absent in dev → no-op (boundary still logs
+// to console). Override: VITE_APP_INSIGHTS_KEY=<key> npm run build
+const _appInsightsKey: string = import.meta.env.VITE_APP_INSIGHTS_KEY ?? "";
+if (_appInsightsKey) {
+  AppInsightsService.initialize(_appInsightsKey);
+}
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { resolveRuntimeConfig, getAuthProvider } from "@spaarke/auth";
+import { DailyBriefingApp } from "@spaarke/daily-briefing-components/components";
 import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
-import { App } from "./App";
 
 /**
  * Bootstrap auth (config + MSAL + tenant ID). Non-blocking — called from
@@ -50,7 +65,9 @@ function Root() {
 
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
-      <App params={params} />
+      <AppErrorBoundary surfaceName="Daily Briefing">
+        <DailyBriefingApp params={params} />
+      </AppErrorBoundary>
     </FluentProvider>
   );
 }

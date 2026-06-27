@@ -1,9 +1,9 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -34,8 +34,21 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// </summary>
 public sealed class DynamicCommandResolver
 {
-    /// <summary>Cache key prefix for command catalog entries.</summary>
-    internal const string CacheKeyPrefix = "cmd-catalog:";
+    /// <summary>Tenant-cache resource name for command catalog payloads (FR-05).</summary>
+    internal const string CacheResource = "cmd-catalog";
+
+    /// <summary>Tenant-cache schema version for command catalog payloads.</summary>
+    internal const int CacheVersion = 1;
+
+    /// <summary>Legacy alias retained for tests that referenced the pre-FR-05 prefix constant.</summary>
+    internal const string CacheKeyPrefix = "tenant:";
+
+    /// <summary>
+    /// Reproduces the on-wire cache key produced by <see cref="ITenantCache"/> for legacy
+    /// test consumers. Format: <c>tenant:{tenantId}:cmd-catalog:{entityType ?? "global"}:v1</c>.
+    /// </summary>
+    internal static string BuildCacheKey(string tenantId, string? entityType)
+        => $"tenant:{tenantId}:{CacheResource}:{entityType ?? "global"}:v{CacheVersion}";
 
     /// <summary>Absolute TTL for command catalog cache entries (ADR-009).</summary>
     internal static readonly TimeSpan CatalogCacheTtl = TimeSpan.FromMinutes(5);
@@ -44,7 +57,7 @@ public sealed class DynamicCommandResolver
     private const int MaxTriggerLength = 50;
 
     private readonly IGenericEntityService _entityService;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ILogger<DynamicCommandResolver> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -85,7 +98,7 @@ public sealed class DynamicCommandResolver
 
     public DynamicCommandResolver(
         IGenericEntityService entityService,
-        IDistributedCache cache,
+        ITenantCache cache,
         ILogger<DynamicCommandResolver> logger)
     {
         _entityService = entityService;
@@ -118,12 +131,13 @@ public sealed class DynamicCommandResolver
         CancellationToken cancellationToken = default)
     {
         var entityType = hostContext?.EntityType;
-        var cacheKey = BuildCacheKey(tenantId, entityType);
+        var cacheId = BuildCacheId(entityType);
 
-        // Hot path: Redis cache check (ADR-009 — Redis first)
+        // Hot path: Redis cache check (ADR-009 — Redis first). Tenant-scoped via ITenantCache (FR-05).
         try
         {
-            var cachedJson = await _cache.GetStringAsync(cacheKey, cancellationToken);
+            var cachedJson = await _cache.GetStringAsync(
+                tenantId, CacheResource, cacheId, CacheVersion, ct: cancellationToken);
             if (cachedJson is not null)
             {
                 _logger.LogDebug(
@@ -156,11 +170,9 @@ public sealed class DynamicCommandResolver
         try
         {
             var json = JsonSerializer.Serialize(catalog, JsonOptions);
-            var options = new DistributedCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = CatalogCacheTtl
-            };
-            await _cache.SetStringAsync(cacheKey, json, options, cancellationToken);
+            await _cache.SetStringAsync(
+                tenantId, CacheResource, cacheId, CacheVersion,
+                json, ttl: CatalogCacheTtl, ct: cancellationToken);
         }
         catch (Exception ex)
         {
@@ -173,12 +185,13 @@ public sealed class DynamicCommandResolver
     }
 
     /// <summary>
-    /// Builds the cache key for a command catalog lookup.
-    /// Format: <c>cmd-catalog:{tenantId}:{entityType}</c>
-    /// When entityType is null, uses "global" as the suffix.
+    /// Builds the tenant-cache <c>id</c> component for a command catalog lookup.
+    /// Combined with the tenant and resource by <see cref="ITenantCache"/>.
+    /// When entityType is null, uses "global" so a tenant's null-entityType catalog
+    /// has its own cache entry distinct from per-entity catalogs.
     /// </summary>
-    internal static string BuildCacheKey(string tenantId, string? entityType)
-        => $"{CacheKeyPrefix}{tenantId}:{entityType ?? "global"}";
+    internal static string BuildCacheId(string? entityType)
+        => entityType ?? "global";
 
     // =========================================================================
     // Private: Catalog Assembly

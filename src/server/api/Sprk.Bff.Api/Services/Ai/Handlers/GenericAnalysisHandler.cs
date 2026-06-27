@@ -300,6 +300,7 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                     schemaName,
                     model: actionModel,
                     maxOutputTokens: actionMaxTokens,
+                    temperature: (float)context.Temperature,
                     cancellationToken: cancellationToken);
             }
             else
@@ -475,6 +476,7 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler
                 schemaName,
                 model: actionModel,
                 maxOutputTokens: actionMaxTokens,
+                temperature: (float)context.Temperature,
                 cancellationToken: cancellationToken);
 
             yield return new ToolStreamEvent.Token(response);

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Hoist `KanbanBoard`, `KanbanColumn`, `KanbanCard` from SmartTodo-local to `@spaarke/ui-components/Kanban/`</title>
+    <phase>Phase 2: Shared-Lib Hoist</phase>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>001</dependencies>
+    <blocks>020, 021, 022</blocks>
+    <tags>react, typescript, frontend, fluent-ui, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.tsx` files; tags include `fluent-ui`; will shift imports across consumers (SmartTodo + LegalWorkspace). FULL rigor with Step 9.5 quality gates.</rigor-reason>
+    <parallel-group>P2-W1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocks 011 (TodoDetail simplify shares barrel updates) within Phase 2. Sequential within Phase 2 prevents barrel-export conflicts.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Move `KanbanBoard.tsx`, `KanbanColumn.tsx`, `KanbanCard.tsx` and their supporting types from `src/solutions/SmartTodo/src/components/shared/` to `src/client/shared/Spaarke.UI.Components/src/components/Kanban/`. Add exports to the lib barrel (`Spaarke.UI.Components/src/index.ts`). Update SmartTodo + LegalWorkspace embedded SmartToDo widget to import from the shared lib. Verify accessibility behavior (NFR-10) matches the R2 baseline.
+  </prompt>
+
+  <role>Spaarke shared-UI developer with Fluent UI v9 + Griffel expertise.</role>
+
+  <goal>Kanban primitives compile and unit-test in `Spaarke.UI.Components`. Lib barrel exports `KanbanBoard`, `KanbanColumn`, `KanbanCard`. SmartTodo + LegalWorkspace embedded widget import from `@spaarke/ui-components/Kanban`. Zero local Kanban imports remain in `src/solutions/SmartTodo/`. A11y snapshot matches R2 baseline.</goal>
+
+  <context>
+    <background>The Kanban primitives are already Fluent-v9-compliant and domain-agnostic in SmartTodo-local. R3 makes them a shared-library asset for reuse by LegalWorkspace and future surfaces.</background>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/components/shared/KanbanBoard.tsx</file>
+      <file>src/solutions/SmartTodo/src/components/shared/KanbanColumn.tsx</file>
+      <file>src/solutions/SmartTodo/src/components/shared/KanbanCard.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/Kanban/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>src/solutions/LegalWorkspace/src/components/SmartToDo/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-01">Fluent v9 only: `@fluentui/react-components`, semantic tokens, Griffel `makeStyles`. No Fluent v8, no inline `style={{}}`, no CSS modules.</constraint>
+    <constraint source="NFR-02">Kanban primitives MUST live in `@spaarke/ui-components`. SmartTodo Code Page is a thin consumer.</constraint>
+    <constraint source="NFR-10">No a11y regression vs. R2 — keyboard navigation, screen-reader labels, high-contrast theme preserved.</constraint>
+    <constraint source="FR-08">Lib barrel exports `KanbanBoard`, `KanbanColumn`, `KanbanCard`; SmartTodo + LegalWorkspace consume from shared.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="shared-component-hoist" location="src/client/shared/Spaarke.UI.Components/src/components/">Existing hoisted components (e.g., AssociateToStep) as a reference structure.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Create `src/client/shared/Spaarke.UI.Components/src/components/Kanban/` with subdirectories for component + types + tests.</step>
+    <step order="2">Move `KanbanBoard.tsx` + `KanbanColumn.tsx` + `KanbanCard.tsx` and their type definitions from SmartTodo-local to the new shared location. Preserve Fluent v9 implementations exactly.</step>
+    <step order="3">Add exports to `Spaarke.UI.Components/src/components/Kanban/index.ts` and the top-level barrel `Spaarke.UI.Components/src/index.ts`.</step>
+    <step order="4">Write unit tests for the hoisted components if not already present. Snapshot test for keyboard navigation + screen-reader labels (a11y baseline lock per NFR-10).</step>
+    <step order="5">Update SmartTodo to import from `@spaarke/ui-components` (kanban path). Delete the local copies.</step>
+    <step order="6">Update LegalWorkspace embedded SmartToDo widget to consume the shared version.</step>
+    <step order="7">Run `npm run build` in `Spaarke.UI.Components`, SmartTodo, and LegalWorkspace. Fix any import path or type errors.</step>
+    <step order="8">Run Fluent v9 lint (per `fluent-v9-component` skill) on changed files. Verify zero v8 / inline-style / CSS-module violations.</step>
+    <step order="9">Capture an a11y snapshot (axe-core or manual keyboard-only walk-through); compare to R2 baseline.</step>
+    <step order="10">Repo grep for local `KanbanBoard`/`KanbanColumn`/`KanbanCard` imports in `src/solutions/SmartTodo/`. Confirm zero hits.</step>
+    <step order="11">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript projects</tool>
+    <tool name="grep">Reference verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">`src/client/shared/Spaarke.UI.Components/src/components/Kanban/` populated</output>
+    <output type="code">`src/client/shared/Spaarke.UI.Components/src/index.ts` updated with new exports</output>
+    <output type="code">`src/solutions/SmartTodo/src/components/shared/Kanban*` deleted</output>
+    <output type="test">Unit tests for Kanban primitives in Spaarke.UI.Components</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`npm run build` in Spaarke.UI.Components, SmartTodo, LegalWorkspace all succeed.</criterion>
+    <criterion testable="true">Fluent v9 lint passes on changed files.</criterion>
+    <criterion testable="true">Repo grep returns zero local Kanban imports in `src/solutions/SmartTodo/`.</criterion>
+    <criterion testable="true">A11y snapshot (keyboard nav + SR labels + high-contrast) matches R2 baseline.</criterion>
+    <criterion testable="true">Lib barrel exports `KanbanBoard`, `KanbanColumn`, `KanbanCard`.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Load `fluent-v9-component` skill. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

@@ -68,6 +68,19 @@ public sealed class NullRagService : IRagService
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 
+    // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — 3-arg overload mirrors
+    // the 2-arg behavior (fail-fast P3 Null-Object pattern). The kill-switch is engaged so
+    // any caller — including new searchIndexName-aware ones — surfaces the disabled state
+    // distinctly via FeatureDisabledException (mapped to 503 ProblemDetails by endpoints).
+    public Task<IReadOnlyList<IndexResult>> IndexDocumentsBatchAsync(
+        IEnumerable<KnowledgeDocument> documents,
+        string? searchIndexName,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(IndexDocumentsBatchAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
     public Task<bool> DeleteDocumentAsync(
         string documentId,
         string tenantId,

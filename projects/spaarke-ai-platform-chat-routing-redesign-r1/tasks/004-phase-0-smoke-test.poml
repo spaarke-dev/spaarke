@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Phase 0 smoke test — verify deletions don't break consumers</title>
+    <phase>0: §1.7 Pattern C Cleanup</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001,002,003</dependencies>
+    <blocks>010,011,012</blocks>
+    <tags>testing, integration-test, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tags include 'testing' + 'integration-test'; STANDARD per Step 0.5</rigor-reason>
+    <parallel-group>0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Run Phase 0 smoke test verifying tasks 001 + 002 + 003 didn't break any consumer. Build BFF and at least one client surface; run existing integration tests; grep for any stale references introduced by the cleanup.
+  </prompt>
+
+  <role>SPAARKE platform developer / QA engineer.</role>
+
+  <goal>Phase 0 cleanup confirmed safe — BFF builds, SpaarkeAi builds, no integration test regressions, no stale references in production code.</goal>
+
+  <context>
+    <background>
+      Phase 0 deleted dead code (tasks 001 + 002) and scrubbed comments (003). This task is the safety net before Phase 1 begins migrating real production consumers. Catches any accidental over-deletion or broken imports.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/solutions/LegalWorkspace/</file>
+      <file>src/client/pcf/UniversalQuickCreate/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Run existing test suite — do not author new tests in this task.</constraint>
+    <constraint source="project">Check publish size baseline pre-Phase-1 per NFR-01.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Build BFF: `dotnet build src/server/api/Sprk.Bff.Api/` — must exit 0.</step>
+    <step order="2">Build LegalWorkspace: `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build` in `src/solutions/LegalWorkspace/`.</step>
+    <step order="3">Build UniversalQuickCreate PCF: `npm run build:prod` in `src/client/pcf/UniversalQuickCreate/`.</step>
+    <step order="4">Run existing BFF unit tests: `dotnet test tests/unit/Sprk.Bff.Api.Tests/`.</step>
+    <step order="5">Grep for any references to deleted files in `src/` — verify zero matches.</step>
+    <step order="6">Measure BFF publish size for baseline: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` and record compressed size in notes/handoffs/phase-0-baseline.md.</step>
+    <step order="7">If all green, update TASK-INDEX.md: task 004 → ✅; Phase 0 exit gate cleared.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">dotnet build, dotnet test, npm run build, dotnet publish, du for size</tool>
+    <tool name="Grep">Verify zero broken references</tool>
+    <tool name="Edit">Update TASK-INDEX + create baseline note</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/phase-0-baseline.md (BFF publish size + test pass count)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All builds exit 0; no compilation errors.</criterion>
+    <criterion testable="true">All existing unit tests pass.</criterion>
+    <criterion testable="true">No broken import references remain.</criterion>
+    <criterion testable="true">BFF publish size baseline recorded for NFR-01 tracking (expected ~45.65 MB).</criterion>
+  </acceptance-criteria>
+
+  <notes>This task gates Phase 1. If anything fails, STOP and document failure in notes/debug/ before proceeding.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Follow STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

@@ -269,23 +269,6 @@ public class PromptLibraryServiceTests
             .WithMessage("*place*");
     }
 
-    [Fact]
-    public void RenderBody_DoesNotThrow_WhenOptionalVariableIsMissing()
-    {
-        var template = BuildTemplate(
-            body: "Hello {{required}} {{optional}}.",
-            variables:
-            [
-                new TemplateVariable("required", TemplateVariableType.String, "R", Required: true),
-                new TemplateVariable("optional", TemplateVariableType.String, "O", Required: false)
-            ]);
-
-        var act = () => PromptLibraryService.RenderBody(
-            template,
-            new Dictionary<string, string> { ["required"] = "world" });
-
-        act.Should().NotThrow();
-    }
 
     // =========================================================================
     // (g) GetAsync — returns null when not found

@@ -1,0 +1,229 @@
+<task id="106" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-H-06 `ClauseAnalyzerHandler` (FR-14, Wave 2 — LLM-Assisted)</title>
+    <phase>Parallel — 8 Typed Tool Handlers</phase>
+    <status>not-started</status>
+    <estimated-effort>8 hours</estimated-effort>
+    <dependencies>104</dependencies>
+    <blocks>109</blocks>
+    <tags>bff-api, ai, azure-openai, handler</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New LLM-assisted handler; contract clause structuring has high blast radius; FULL quality gates required.</rigor-reason>
+    <parallel-group>H-G2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Wave 2 LLM-assisted handler; independent of 105/107/108; each touches its own files.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build `ClauseAnalyzerHandler` — an LLM-assisted `IToolHandler` implementation per
+    FR-14 that performs contract clause structuring with structural diff. Pipeline:
+    input clause text → LLM structured-output call → produces typed clause representation
+    (e.g., `{ type: "indemnification", parties: [...], scope: "...", carveOuts: [...],
+    monetaryCap: "...", terminationConditions: [...] }`) → optional structural diff
+    against a reference template if provided.
+
+    Configurable via `sprk_analysistool.sprk_configuration`: `clauseTypes` (allow-list
+    of recognized types — e.g., Indemnification, LimitationOfLiability, Confidentiality,
+    Termination, Assignment, GoverningLaw, ForceMajeure); `referenceTemplate` (optional
+    template clause to diff against); `modelDeployment` override.
+
+    Handler registers via auto-discovery per task 100 — implements `IToolHandler`;
+    `HandlerId = "ClauseAnalyzerHandler"`; lives in
+    `Services/Ai/Handlers/ClauseAnalyzerHandler.cs`. Requires `sprk_analysistool` row
+    with `sprk_handlerclass = "ClauseAnalyzerHandler"`.
+
+    LLM call uses existing structured-outputs pattern; respects per-tenant cache (ADR-014)
+    + `ai-context` rate limit (ADR-016) + safety pipeline (NFR-13).
+
+    Distinct from `ClauseComparisonHandler` (task 103, deterministic) which DIFFS two
+    clauses. This handler STRUCTURES a single clause + optionally diffs against a
+    reference template.
+
+    Tests use mocked `IOpenAiClient`. Cover: contract test + positive (each supported
+    clauseType structures correctly per mocked LLM response) + error (clauseType not in
+    allow-list, LLM returns invalid JSON) + config-driven (clauseTypes subset filters
+    output) + cache test.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with .NET 8 + Azure OpenAI structured-outputs + legal-domain
+    schema experience. Familiar with `IOpenAiClient` patterns + per-tenant cache key
+    discipline + the existing safety pipeline contract.
+  </role>
+
+  <goal>
+    `ClauseAnalyzerHandler.cs` implemented in `Services/Ai/Handlers/`; auto-discovered;
+    `sprk_analysistool` row deployed with `sprk_handlerclass = "ClauseAnalyzerHandler"`;
+    unit tests cover positive + error + config-driven + cache cases; LLM call uses
+    existing structured-outputs pattern + respects cache (ADR-014) + rate limit (ADR-016)
+    + safety pipeline (NFR-13); BFF publish-size delta ≤+0.6 MB; `code-review` +
+    `adr-check` green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="handler-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+    <file purpose="existing-llm-handler-example">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    <file purpose="handler-conventions">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/HandlerRegistrationConventions.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — auto-discovery; ZERO manual DI line.</constraint>
+    <constraint source="ADR-013">Handler lives in `Services/Ai/Handlers/`; AI internals stay internal.</constraint>
+    <constraint source="ADR-014">AI caching — handler uses per-tenant cache key pattern; `tenantId` mandatory in cache key.</constraint>
+    <constraint source="ADR-015">Telemetry logs handler name + execution outcome + timestamp ONLY; never clause text content.</constraint>
+    <constraint source="ADR-016">Rate limiting — respects existing `ai-context` policy.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta measured + reported; per-task ≤+0.6 MB.</constraint>
+    <constraint source="spec FR-14">LLM-assisted contract clause structuring with structural diff; clauseTypes configurable.</constraint>
+    <constraint source="spec NFR-13">Safety pipeline preserved unchanged.</constraint>
+    <constraint source="spec NFR-02">R6 BFF publish-size budget ≤+5 MB total.</constraint>
+    <constraint source="project CLAUDE.md Pillar 2">Implements `IToolHandler`; auto-discovered; `sprk_analysistool` row required.</constraint>
+    <constraint source="LLM-assisted binding">Uses existing OpenAI structured-outputs pattern; respects `ai-context` rate limit per ADR-016.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/typed-handler-llm-assisted</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      `ClauseAnalyzerHandler` STRUCTURES a single clause — the input is unstructured
+      contract text, the output is a typed schema describing the clause. Combined with
+      `ClauseComparisonHandler` (task 103), this enables full contract-review workflows:
+      analyzer structures each clause, comparison diffs against precedent/template.
+
+      Distinct intent from `ClauseComparisonHandler` (deterministic) — this handler
+      requires LLM to UNDERSTAND the clause; deterministic diff cannot do that.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ClauseAnalyzerHandler.cs (NEW)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/ClauseAnalyzerHandlerTests.cs (NEW)</file>
+      <file>infra/dataverse/sprk_analysistool-clause-analyzer-row.json (NEW)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-106-deployment-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Task 100 — handler infrastructure. Hard dependency.</item>
+      <item>Wave 1 complete (104) gates Wave 2 start.</item>
+      <item>Sibling Wave 2 tasks 105, 107, 108 — parallel-safe.</item>
+      <item>Task 103 — deterministic `ClauseComparisonHandler` (different intent).</item>
+      <item>Task 109 — dispatch test exercises this handler.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. If &gt;70%, run `context-handoff` then `/compact`. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: New LLM-assisted handler; ADR-013/014/016 + NFR-13 binding; FR-14
+      📖 PROTOCOL STEPS TO EXECUTE: all 11 steps below including Step 9.5 quality gates
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX; confirm 106 is 🔲; dependency 104 (last Wave 1 task) complete.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every &lt;inputs&gt; + &lt;knowledge&gt; file. Extract LLM structured-output
+      pattern from `GenericAnalysisHandler.cs`.
+    </step>
+    <step order="3" name="Design Handler Surface + Output Schema">
+      Define `HandlerId = "ClauseAnalyzerHandler"`; output schema for typed clause
+      representation per type (Indemnification, LimitationOfLiability, etc.); `ConfigSchema`
+      with `clauseTypes`, `referenceTemplate`, `modelDeployment`. Inject `IOpenAiClient`,
+      cache, `IScopeResolverService`.
+    </step>
+    <step order="4" name="Implement Handler">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ClauseAnalyzerHandler.cs`.
+      Pattern: validate input → check per-tenant cache → on miss, call LLM via structured
+      outputs with type-specific schema → validate result → if `referenceTemplate`
+      provided, compute structural diff between structured clause + template → emit
+      `ToolResult`. Telemetry per ADR-015 (no clause text in logs).
+    </step>
+    <step order="5" name="Author Unit Tests">
+      Create `ClauseAnalyzerHandlerTests.cs` using `TypedToolHandlerTestFixture`. Mock
+      `IOpenAiClient`. Cover: contract; positive (each supported clauseType); error
+      (clauseType not allow-listed, LLM invalid JSON); config-driven (clauseTypes
+      subset); cache (second identical call hits cache); telemetry (no clause text in
+      logs).
+    </step>
+    <step order="6" name="Seed sprk_analysistool Row">
+      Create `infra/dataverse/sprk_analysistool-clause-analyzer-row.json` with
+      `sprk_handlerclass = "ClauseAnalyzerHandler"`, `sprk_toolcode = "CLAUSE-ANALYZE@v1"`,
+      sample `sprk_configuration`, `AvailableInContexts = "Both"`. Deploy to Spaarke
+      Dev. Capture evidence.
+    </step>
+    <step order="7" name="Verify Build + Tests + Vuln Check">
+      `dotnet build` + `dotnet test --filter "ClauseAnalyzerHandler"`. Run vuln check.
+    </step>
+    <step order="8" name="Verify BFF Publish-Size Delta">
+      `dotnet publish -c Release ...`. Report absolute + diff. Target ≤+0.6 MB.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through criteria; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Both MUST pass. Confirm ADR-013/014/015/016 + NFR-13.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update status `complete`; TASK-INDEX 106 🔲 → ✅; reset `current-task.md`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF + run tests + publish + vuln check</tool>
+    <tool name="pac">Deploy seed row</tool>
+    <tool name="git">Commit</tool>
+    <tool name="dataverse-deploy">Deploy seed row</tool>
+    <tool name="code-review">FULL-rigor quality gate</tool>
+    <tool name="adr-check">FULL-rigor quality gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ClauseAnalyzerHandler.cs (NEW)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/ClauseAnalyzerHandlerTests.cs (NEW)</output>
+    <output type="infrastructure">infra/dataverse/sprk_analysistool-clause-analyzer-row.json (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-106-deployment-evidence.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (106 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ClauseAnalyzerHandler.cs` exists, implements `IToolHandler`, uses existing `IOpenAiClient` structured-outputs pattern.</criterion>
+    <criterion testable="true">Handler auto-discovered.</criterion>
+    <criterion testable="true">`sprk_analysistool` row deployed with `sprk_handlerclass = "ClauseAnalyzerHandler"`, `AvailableInContexts = "Both"`.</criterion>
+    <criterion testable="true">Cache key includes `tenantId` per ADR-014.</criterion>
+    <criterion testable="true">Unit tests pass: contract, positive (each clauseType), error (not allow-listed + invalid JSON), config-driven (clauseTypes subset), cache (second call hits cache), telemetry (no clause text in logs).</criterion>
+    <criterion testable="true">Safety pipeline (NFR-13) preserved — no bypass.</criterion>
+    <criterion testable="true">Rate limit policy (ADR-016) respected.</criterion>
+    <criterion testable="true">BFF build succeeds.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤+0.6 MB; recorded.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` both pass.</criterion>
+  </acceptance-criteria>
+</task>

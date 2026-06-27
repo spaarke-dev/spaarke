@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Code page — `App.tsx` removes void-discards + seeds filter state (FR-CP-02 + FR-CP-03)</title>
+    <phase>E: SemanticSearch Code Page</phase>
+    <status>not-started</status>
+    <estimated-hours>3-5</estimated-hours>
+    <dependencies>040</dependencies>
+    <blocks>043</blocks>
+    <tags>react, typescript, frontend, code-page, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies code-page `.tsx` (App.tsx — root component); removes intentional void-discards; rewires hooks; seeds filter state which is consumed by the auto-search effect. Carries ADR-021 (Fluent v9 + tokens) / ADR-022 (React 18) / ADR-026 / ADR-028 obligations.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches App.tsx, the same module as the hooks initializations. Sequential after 040.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Remove the `void initialScope; void initialEntityId;` lines from `App.tsx` (FR-CP-02). Pass `scope` and `entityId` to `useSemanticSearch` and `useRecordSearch` at construction time. Seed the `filters` state (`fileTypes`, `dateRange`, `threshold`, `searchMode`, `associatedOnly`) AND `selectedTags` state from the initial URL params BEFORE the auto-search effect fires (FR-CP-03). Verify the very first network POST uses URL-derived filters.
+  </prompt>
+
+  <role>
+    Code-page developer with familiarity with `src/client/code-pages/SemanticSearch/src/App.tsx`, React 18 hooks ordering, Fluent v9 styling (ADR-021), and ADR-026 (full-page code-page standard). The auto-search-effect-fires-after-state-seeded ordering is the load-bearing detail.
+  </role>
+
+  <goal>
+    `App.tsx` no longer discards `initialScope` / `initialEntityId`; both are passed to `useSemanticSearch` + `useRecordSearch` at hook construction. `filters` and `selectedTags` are seeded from URL params BEFORE the auto-search effect runs, so the first network POST sends the URL-derived filter shape. Verified by network trace of the first POST in UAT.
+  </goal>
+
+  <context>
+    <background>
+      Today's `App.tsx` parses URL params but discards `initialScope` and `initialEntityId` with `void` statements — the hooks fall back to defaults. Result: the auto-search runs with default scope/entity, then a second search runs with the correct values after state hydrates. This task fixes the discards (FR-CP-02) and seeds the filter state up front (FR-CP-03) so there's exactly one network POST and it uses the URL-derived shape.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/SemanticSearch/src/App.tsx</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useSemanticSearch.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useRecordSearch.ts</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-CP-02">`App.tsx` MUST stop discarding `initialScope` and `initialEntityId` (remove the `void initialScope; void initialEntityId;` lines). Wire them into `useSemanticSearch` and `useRecordSearch` hook scope.</constraint>
+    <constraint source="spec.md FR-CP-03">`App.tsx` MUST seed `filters` state (fileTypes, dateRange, threshold, searchMode, associatedOnly) AND `selectedTags` state from the initial URL params BEFORE the auto-search effect fires. The very first search MUST use those filters.</constraint>
+    <constraint source="ADR-021">Fluent v9 + `tokens.*` only. Any new styling must use semantic tokens; no hex / no `var(--…)` / no rgb literals. Dark-mode compliant.</constraint>
+    <constraint source="ADR-022">Code Page uses React 18. Hooks ordering matters — initial state passed to `useState` is the seed; effects that depend on filter state must list filter state in their deps.</constraint>
+    <constraint source="ADR-026">Full-page Code Page standard — `App.tsx` is the canonical root component.</constraint>
+    <constraint source="ADR-028">All BFF calls (via hooks) use `authenticatedFetch`. This task does not introduce new BFF calls but must not break the existing auth wiring.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/adr/ADR-026-fullpage-codepage-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="useState with URL-seeded initial value" location="React 18">
+        Pass the URL-derived value as the initial argument to `useState`: `const [filters, setFilters] = useState(() =&gt; buildInitialFilters(urlParams))`. Lazy initialization with a function ensures the seed runs once on mount.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/client/code-pages/SemanticSearch/src/App.tsx` to locate the `void initialScope; void initialEntityId;` lines and the current `useSemanticSearch` / `useRecordSearch` instantiations + filter state initializations.</step>
+    <step order="2">Remove the `void initialScope; void initialEntityId;` lines (FR-CP-02). Pass `initialScope` and `initialEntityId` as arguments to `useSemanticSearch` and `useRecordSearch` at construction time. If the hook signatures need an extension, coordinate with task 042 (same wave).</step>
+    <step order="3">Build a small helper `buildInitialFilters(urlParams)` that maps the URL params (parsed by task 040's `parseUrlParams`) into the `filters` state shape: `{ fileTypes, dateRange: { from: dateFrom, to: dateTo }, threshold, searchMode, associatedOnly }`. Apply sensible defaults when URL values are `undefined`.</step>
+    <step order="4">Seed `filters` state via lazy initialization: `const [filters, setFilters] = useState(() =&gt; buildInitialFilters(urlParams));`. Same pattern for `selectedTags`: `useState(() =&gt; urlParams.tags ?? [])`.</step>
+    <step order="5">Verify the auto-search effect (likely `useEffect` with `filters` + `query` + `scope` in deps) fires AFTER state is seeded — since lazy `useState` seeds on first render and `useEffect` runs after first render commit, this is satisfied by ordering naturally. Confirm by tracing the deps array.</step>
+    <step order="6">If any default styling/tokens in App.tsx need adjustment, use `tokens.*` (ADR-021); never hex/rgb. Verify dark-mode compatibility.</step>
+    <step order="7">Run `npm run build` (validation only — production deploy is task 044) and confirm clean TypeScript compile. Run any existing App.tsx tests; add integration test placeholder for "first network POST uses seeded filters" if not already covered.</step>
+    <step order="8">Run code-review + adr-check skills at Step 9.5 (FULL rigor requirement). Update `TASK-INDEX.md` status: 🔲 → ✅. Update `current-task.md` to reflect completion and advance to next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read App.tsx + hook source</tool>
+    <tool name="Edit">Remove void-discards + seed filter state</tool>
+    <tool name="Bash">Run `npm run build` and tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/App.tsx (void-discards removed; filter state seeded)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-CP-02: `void initialScope; void initialEntityId;` lines are gone. Verified by code review. `useSemanticSearch` and `useRecordSearch` receive scope and entityId at construction time.</criterion>
+    <criterion testable="true">FR-CP-03: `filters` state (fileTypes, dateRange, threshold, searchMode, associatedOnly) AND `selectedTags` state are seeded from URL params via lazy `useState` initialization. Verified by code review.</criterion>
+    <criterion testable="true">FR-CP-03: First network POST uses URL-derived filters. Verified by network-trace UI test (below).</criterion>
+    <criterion testable="true">ADR-021: Any new styling uses Fluent v9 semantic tokens. Verified by code review.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The "exactly one network POST on first load" is the operational acceptance — today's behavior causes a default search to flash before the seeded one runs. UAT in task 043 includes the network-trace check.
+
+    If `buildInitialFilters` is conditionally-undefined-safe (e.g. when no URL params are present), the code page still works as today (no regression). The change is additive on top of today's defaults.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-021 / ADR-022 / ADR-026 / ADR-028 + .claude/constraints/auth.md + .claude/patterns/pcf/theme-management.md before Step 1. Declare rigor (FULL) per task-execute Step 0. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

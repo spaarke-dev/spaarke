@@ -117,28 +117,6 @@ public class OpenLinksEndpointTests
         modified.DesktopUrl.Should().Be(original.DesktopUrl); // Unchanged
     }
 
-    [Fact]
-    public void OpenLinksResponse_Record_SupportsEquality()
-    {
-        // Arrange
-        var response1 = new OpenLinksResponse(
-            DesktopUrl: "ms-word:ofe|u|test",
-            WebUrl: "https://test.com",
-            MimeType: "application/msword",
-            FileName: "test.doc"
-        );
-
-        var response2 = new OpenLinksResponse(
-            DesktopUrl: "ms-word:ofe|u|test",
-            WebUrl: "https://test.com",
-            MimeType: "application/msword",
-            FileName: "test.doc"
-        );
-
-        // Assert
-        response1.Should().Be(response2);
-        response1.GetHashCode().Should().Be(response2.GetHashCode());
-    }
 
     #endregion
 

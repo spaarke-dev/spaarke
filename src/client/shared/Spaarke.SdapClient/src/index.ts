@@ -16,4 +16,8 @@ export type {
   UploadProgressCallback,
   SdapApiError,
   Container,
+  AuthenticatedFetchFn,
+  ParentEntityContext,
+  IndexFileRequest,
+  IndexFileResult,
 } from './types';

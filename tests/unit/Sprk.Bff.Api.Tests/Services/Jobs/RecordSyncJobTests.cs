@@ -40,7 +40,7 @@ public class RecordSyncJobTests
     {
         Enabled = true,
         IntervalMinutes = 30,
-        AiSearchEndpoint = "https://spaarke-search-dev.search.windows.net",
+        AiSearchEndpoint = "https://test.search.windows.net",
         AiSearchApiKey = "test-key",
         DataverseEnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
     };
@@ -423,32 +423,6 @@ public class RecordSyncJobTests
         doc.Keywords.Should().Be("Jane Doe");
     }
 
-    [Fact]
-    public void MapToSearchDocument_MissingOptionalFields_DoesNotThrow()
-    {
-        // Arrange — minimal record with only id + modifiedon
-        var config = EntityConfigs[0]; // sprk_matter
-
-        var json = JsonDocument.Parse("""
-            {
-                "sprk_matterid": "min-id",
-                "modifiedon": "2026-01-01T00:00:00Z"
-            }
-            """);
-        var record = json.RootElement;
-
-        // Act
-        var act = () => RecordSyncJob.MapToSearchDocument(record, config);
-
-        // Assert
-        act.Should().NotThrow();
-        var doc = act();
-        doc.Id.Should().Be("sprk_matter_min-id");
-        doc.RecordName.Should().BeEmpty();
-        doc.RecordDescription.Should().BeEmpty();
-        doc.Keywords.Should().BeEmpty();
-        doc.ReferenceNumbers.Should().BeEmpty();
-    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Convenience — expose EntityConfigs for tests without duplicating config

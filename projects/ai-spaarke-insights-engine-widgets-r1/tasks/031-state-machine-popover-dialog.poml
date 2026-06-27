@@ -1,0 +1,103 @@
+<task id="031" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>State machine (5+ states; compose Popover + Dialog)</title>
+    <status>completed</status>
+    <estimated-effort>6h</estimated-effort>
+    <phase>3</phase>
+    <tags>ui, fluent-ui, state-machine, portal-gotcha</tags>
+    <dependencies>030</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+  </metadata>
+
+  <prompt>
+    Implement the 5+ state machine per FR-06: idle / loading / loaded / error / decline / stale. Compose Fluent v9 Popover (inline expand) + Dialog (modal expand for long narratives). Apply `.claude/patterns/ui/fluent-v9-portal-gotcha.md` — MANDATORY because Popover and Dialog both portal-render. Reuse `AiSummaryPopover` lazy-load callback shape.
+  </prompt>
+
+  <role>Fluent v9 state-machine developer.</role>
+
+  <goal>
+    `InsightSummaryCard` renders all 6 states correctly; expand-to-modal works via Popover footer button; portal-gotcha pattern applied (theme provider re-wrap).
+  </goal>
+
+  <inputs>
+    <file purpose="scaffold">Task 030 output</file>
+    <file purpose="reference">src/client/shared/Spaarke.UI.Components/src/components/AiSummaryPopover/AiSummaryPopover.tsx</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-02, FR-06)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="fluent-v9-portal-gotcha">MUST re-wrap Popover and Dialog content in FluentProvider with current theme</constraint>
+    <constraint source="ADR-021">Semantic tokens only; light + dark verified</constraint>
+    <constraint source="spec-FR-06">All 6 states reachable + acceptance-criteria-verifiable</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent v9 popover dialog, state machine, portal gotcha</topic>
+    <files>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AiSummaryPopover/AiSummaryPopover.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Define InsightCardState union">'idle' | 'loading' | 'loaded' | 'error' | 'decline' | 'stale'</step>
+    <step order="2" name="useReducer state machine">Transitions: idle → loading → loaded/error/decline; loaded → stale (after TTL); stale → loading (refresh)</step>
+    <step order="3" name="Popover inline render">For loaded/decline/stale</step>
+    <step order="4" name="Dialog modal expand">"Expand to modal" affordance in Popover footer</step>
+    <step order="5" name="Apply portal-gotcha pattern">Re-wrap Popover + Dialog content in FluentProvider</step>
+    <step order="6" name="Loading skeleton">Per FR-06</step>
+    <step order="7" name="Error state">"AI summaries unavailable in this environment" + ops diagnostic logging</step>
+    <step order="8" name="Decline state">"Insufficient data is available to provide Insights Analysis" + recommended action</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/InsightSummaryCard.tsx (updated)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/components/InsightSummaryCard/state.ts (state machine)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 6 states reachable in dev environment</criterion>
+    <criterion testable="true">Popover content wrapped in FluentProvider (portal-gotcha)</criterion>
+    <criterion testable="true">Dialog content wrapped in FluentProvider (portal-gotcha)</criterion>
+    <criterion testable="true">Expand-to-modal works from Popover footer</criterion>
+    <criterion testable="true">Light + dark theme both render correctly (manual verification)</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="All states reachable">
+      <steps>
+        <step>Mount with mock data triggering each state</step>
+        <step>Verify state-specific UI per FR-06</step>
+      </steps>
+      <expected>All 6 states render expected content</expected>
+    </test>
+    <test name="Dark mode portal-gotcha">
+      <steps>
+        <step>Toggle dark theme</step>
+        <step>Open Popover</step>
+        <step>Verify Popover renders in dark theme</step>
+        <step>Open Dialog from Popover</step>
+        <step>Verify Dialog renders in dark theme</step>
+      </steps>
+      <expected>All surfaces honor active theme; no light fragments in dark mode</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Completed 2026-06-10. 6-state machine implemented via useReducer in state.ts
+    (idle / loading / loaded / error / decline / stale). InsightSummaryCard.tsx
+    composes Popover (inline expand from trigger button) + Dialog (modal expand
+    from Popover footer button). Both portal surfaces re-wrapped in
+    FluentProvider with `theme` prop per fluent-v9-portal-gotcha.md (Option A).
+    `InsightDeclineError` helper added for hosts to signal insufficient-evidence
+    outcomes via callback rejection. FR-06 exact text for error / decline
+    encoded as DEFAULT_ERROR_MESSAGE / DEFAULT_DECLINE_MESSAGE constants.
+    Q-U3 honoured (no onFeedback). Q-U1 honoured (no @v vernacular). ADR-021
+    semantic-token discipline verified (zero hex / rgba / var(--)). Strict tsc
+    passes on the four InsightSummaryCard files (package-wide build errors are
+    pre-existing baseline from unbuilt workspace deps — @spaarke/auth,
+    @spaarke/ai-context, etc. — not touched by this task).
+  </notes>
+</task>

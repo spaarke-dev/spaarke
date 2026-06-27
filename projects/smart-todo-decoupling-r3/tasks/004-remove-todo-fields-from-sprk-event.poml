@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Remove four to-do fields from `sprk_event` (`sprk_todoflag`, `sprk_todostatus`, `sprk_todocolumn`, `sprk_todopinned`)</title>
+    <phase>Phase 1: Dataverse Schema</phase>
+    <status>not-started</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <dependencies>001</dependencies>
+    <blocks>005</blocks>
+    <tags>dataverse, solution, fields, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Schema removal of fields actively referenced across code. Tags include `dataverse` + `refactoring`; reference-audit (001) must precede; blocks the entity-delete (005); FULL rigor.</rigor-reason>
+    <parallel-group>P1-W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Remove the four to-do fields from `sprk_event`: `sprk_todoflag`, `sprk_todostatus`, `sprk_todocolumn`, `sprk_todopinned`. **Keep** `sprk_priorityscore`, `sprk_effortscore`, `sprk_duedate` (per design D-4 — events retain prioritization for their own use cases). Pre-removal: ensure tasks 001 audit is complete and that all `src/` references have been removed in the consumer phases (any straggler references must be cleaned before the schema cut).
+  </prompt>
+
+  <role>Spaarke Dataverse schema developer.</role>
+
+  <goal>Four named attributes absent from `sprk_event`; three retained attributes (`sprk_priorityscore`, `sprk_effortscore`, `sprk_duedate`) still present. Solution import succeeds. Zero `src/` references to the four removed fields remain.</goal>
+
+  <context>
+    <background>The four removed fields encoded "this event is also a to-do" — superseded by `sprk_todo` as a first-class entity. Per FR-03 + design D-4, the three score/date fields remain on `sprk_event` because events have prioritization needs independent of to-dos.</background>
+    <relevant-files>
+      <file>projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md</file>
+      <file>solutions/{spaarke-core}/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-03">Remove four named attributes; keep three named attributes.</constraint>
+    <constraint source="FR-29">Zero `src/` references to removed attributes after this task.</constraint>
+    <constraint source="OS-1">No compat shims.</constraint>
+    <constraint source="project">Pre-removal verification: confirm task 001 audit lists all references and that downstream consumer phases have removed them (or have explicit pending tasks to do so).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify task 001 audit doc lists every reference to the four fields. If unresolved references remain in `src/`, STOP and escalate.</step>
+    <step order="2">Drop dependencies first: any saved query, view, form, or ribbon that references the four fields must be unbound or updated before the field-drop.</step>
+    <step order="3">Use `dataverse-create-schema` skill (Web API DELETE on column metadata) to remove `sprk_todoflag`, `sprk_todostatus`, `sprk_todocolumn`, `sprk_todopinned` from `sprk_event`.</step>
+    <step order="4">Verify `sprk_priorityscore`, `sprk_effortscore`, `sprk_duedate` are still present (regression guard).</step>
+    <step order="5">Pack solution; import to target environment; verify clean import.</step>
+    <step order="6">Run repo grep for each removed field. Confirm zero hits in `src/` outside `.claude/archive/`.</step>
+    <step order="7">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-mcp">Schema describe + metadata operations</tool>
+    <tool name="pac">Solution pack/import</tool>
+    <tool name="grep">Reference verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">`sprk_event` with four named fields removed; three named fields retained</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Solution import succeeds without errors.</criterion>
+    <criterion testable="true">`sprk_todoflag`, `sprk_todostatus`, `sprk_todocolumn`, `sprk_todopinned` absent from `sprk_event` metadata.</criterion>
+    <criterion testable="true">`sprk_priorityscore`, `sprk_effortscore`, `sprk_duedate` still present on `sprk_event`.</criterion>
+    <criterion testable="true">Repo grep returns zero hits in `src/` (excluding `.claude/archive/`) for the four removed field names.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Pre-cut grep verification gates the schema delete. Step 9.5 runs adr-check + code-review on solution XML.</protocol>
+  </execution>
+</task>

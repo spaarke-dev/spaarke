@@ -1,0 +1,134 @@
+<task id="R4-012" project="smart-todo-r4">
+  <metadata>
+    <title>Hoist toolbar primitives to @spaarke/ui-components (SelectionAwareToolbar, ViewToggle, OrientationToggle)</title>
+    <phase>Phase 1: Shared-lib hoist</phase>
+    <workstream>B (foundation)</workstream>
+    <status>complete</status>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>shared-lib, ui-components, fluent-v9, hoist, toolbar, smart-todo</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <blocks>R4-030, R4-032, R4-033, R4-070</blocks>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SelectionAwareToolbar/ (new)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ViewToggle/ (new)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/OrientationToggle/ (new)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (exports)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Hoist three new shared toolbar primitives to `@spaarke/ui-components` ahead of SmartTodo Code Page consumption (tasks 030-033, 060, 070-071):
+1. `<SelectionAwareToolbar>` — visible only when ≥1 row selected; slot-based action API (Open / Delete / Email / Pin or arbitrary).
+2. `<ViewToggle>` — List vs Card view toggle; matches `SemanticSearchControl` icon set.
+3. `<OrientationToggle>` — horizontal columns ↔ vertical sections (`LayoutColumnTwo20Regular` ↔ `LayoutRowTwoSplit20Regular`).
+
+All three must be Fluent v9 + Griffel; no v8; tested; exported from library index.
+  </prompt>
+
+  <role>
+React + Fluent v9 engineer building shared-lib primitives. You reference `SemanticSearchControl` for visual style.
+  </role>
+
+  <goal>
+Three new components in `@spaarke/ui-components`:
+- `<SelectionAwareToolbar selected={number} actions={ToolbarAction[]} />` — hides at selected===0; renders action buttons + icons.
+- `<ViewToggle mode="list" | "card" onChange={fn} />` — segmented control with two icons matching SemanticSearchControl.
+- `<OrientationToggle orientation="horizontal" | "vertical" onChange={fn} />` — toggle icon button.
+
+All three exported, tested, eslint-clean.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="visual-reference">src/client/pcf/SemanticSearchControl/SemanticSearchControl/SemanticSearchControl.tsx</file>
+    <file purpose="library-index">src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    <file purpose="package-claude">src/client/shared/CLAUDE.md</file>
+    <file purpose="pattern">.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + Griffel `makeStyles` + semantic tokens. NO v8 components. NO inline styles.</constraint>
+    <constraint source="ADR-012">MUST live in `@spaarke/ui-components`. MUST export from library index.</constraint>
+    <constraint source="spec FR-08">Selection-aware toolbar exposes Open / Delete / Email / Pin (or arbitrary action set via slot API)</constraint>
+    <constraint source="spec FR-09">View toggle matches `SemanticSearchControl` icon set</constraint>
+    <constraint source="spec FR-28">Orientation toggle uses `LayoutColumnTwo20Regular` ↔ `LayoutRowTwoSplit20Regular` (or equivalent)</constraint>
+    <constraint source="spec NFR-07">WCAG 2.1 AA — keyboard activation, focus rings, ARIA labels</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>shared-lib/fluent-v9-toolbar</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+    </files>
+    <patterns>
+      <pattern name="Slot-based action API" location="Fluent v9 Toolbar pattern">
+        Pass `actions: { id, label, icon, onClick, disabled? }[]` as prop; component maps to `<ToolbarButton>` per item.
+      </pattern>
+      <pattern name="Segmented control" location="SemanticSearchControl view toggle">
+        Two `<Tab>` or `<ToggleButton>` instances with mutually-exclusive selection; reference SemanticSearchControl styling.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>SmartTodo Code Page overhaul (tasks 030-033) and orientation toggle (task 070-071) all need these primitives. Hoisting first avoids inline duplication in solution-specific source (NFR-02 violation).</background>
+    <dependencies></dependencies>
+    <related-work>
+      <item>Task 030: SmartTodo 4-row layout consumes all three primitives.</item>
+      <item>Task 032: Selection-aware toolbar consumed for Open/Delete/Email/Pin.</item>
+      <item>Task 033: List/Card view toggle.</item>
+      <item>Task 070: Orientation toggle on toolbar.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 70%.</step>
+    <step order="1" name="Read SemanticSearchControl">Identify toolbar visual style, icon choices, layout for view toggle.</step>
+    <step order="2" name="Design APIs">Define types for `ToolbarAction`, `SelectionAwareToolbarProps`, `ViewToggleProps`, `OrientationToggleProps`. JSDoc each.</step>
+    <step order="3" name="Implement SelectionAwareToolbar">`SelectionAwareToolbar.tsx` + styles + types. Visible only when selected≥1; action slot.</step>
+    <step order="4" name="Implement ViewToggle">`ViewToggle.tsx` + styles. Two icon buttons; mutually exclusive selection state controlled by parent.</step>
+    <step order="5" name="Implement OrientationToggle">`OrientationToggle.tsx` + styles. Single toggle icon button; icon swaps on state change.</step>
+    <step order="6" name="Write unit tests for all three">Selection visibility, action click round-trip, view-mode change, orientation toggle.</step>
+    <step order="7" name="Export from library index">Add 3 exports to `src/index.ts`.</step>
+    <step order="8" name="Build verification">`npm run build` clean.</step>
+    <step order="9" name="Run tests">`npm test` — all new + existing tests green.</step>
+    <step order="10" name="A11y manual check">Tab through controls; verify focus rings + ARIA labels.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="git">Stage + commit shared-lib changes</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SelectionAwareToolbar/SelectionAwareToolbar.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SelectionAwareToolbar/SelectionAwareToolbar.styles.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SelectionAwareToolbar/types.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SelectionAwareToolbar/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ViewToggle/ViewToggle.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ViewToggle/ViewToggle.styles.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ViewToggle/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/OrientationToggle/OrientationToggle.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/OrientationToggle/OrientationToggle.styles.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/OrientationToggle/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SelectionAwareToolbar/__tests__/SelectionAwareToolbar.test.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/ViewToggle/__tests__/ViewToggle.test.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/OrientationToggle/__tests__/OrientationToggle.test.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (added exports)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3 components exported from `@spaarke/ui-components` index</criterion>
+    <criterion testable="true">Selection-aware toolbar hidden at selected===0; visible at selected≥1</criterion>
+    <criterion testable="true">View toggle changes mode; callback fires correct argument</criterion>
+    <criterion testable="true">Orientation toggle swaps icon + state per click</criterion>
+    <criterion testable="true">No v8 imports; no inline styles; eslint clean</criterion>
+    <criterion testable="true">All new unit tests pass</criterion>
+    <criterion testable="true">Keyboard nav + ARIA labels verified</criterion>
+  </acceptance-criteria>
+</task>

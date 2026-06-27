@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="100" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>Schema: add `sprk_aisearchindexid` lookup column on 7 entities</title>
+    <phase>G: Lookup-driven multi-index</phase>
+    <status>not-started</status>
+    <estimated-hours>1-2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>102, 106</blocks>
+    <tags>dataverse, schema</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema-only change via Power Apps maker. No `.cs`/`.ts`/`.tsx` modifications. Reversible (drop column). No quality-gate code-review needed.</rigor-reason>
+    <parallel-group>G2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent of catalog seeding (101) — different operation surface (column add vs row insert).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add `sprk_aisearchindexid` lookup column referencing `sprk_aisearchindex` to 7 entities: `businessunit`, `sprk_matter`, `sprk_project`, `sprk_invoice`, `sprk_event`, `sprk_workassignment`, `sprk_document`. Keep the existing `sprk_searchindexname` text column intact on all 7 entities (side-by-side during migration; dropped in task 110 post-soak). Add the new lookup field to each entity's Main form (visible to users for inspection).
+  </prompt>
+
+  <role>
+    Dataverse maker with admin access to the Spaarke environment. Familiar with Power Apps customizations and solution management.
+  </role>
+
+  <goal>
+    7 entities have both `sprk_searchindexname` (existing text) and `sprk_aisearchindexid` (new lookup → `sprk_aisearchindex`) columns. Lookup is added to each entity's Main form. No data modifications yet — that's task 104.
+  </goal>
+
+  <context>
+    <background>
+      Phase G replaces the string-based `sprk_searchindexname` field with a lookup to the new `sprk_aisearchindex` master-data table (created in earlier conversation, schema confirmed in spec §4). The 7 entities listed are all sites where index routing is per-record (BU is the cascade root; sprk_document is queried first in BFF resolver chain).
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md §3">7 entities to receive the lookup column: businessunit, sprk_matter, sprk_project, sprk_invoice, sprk_event, sprk_workassignment, sprk_document.</constraint>
+    <constraint source="spec.md §10">Schema change is the FIRST step in the deploy order. Keep text column alongside; no drops yet.</constraint>
+    <constraint source="spec.md §11">Migration must be reversible at this stage — dropping the lookup column with zero data loss must be possible until task 104 runs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-multi-container-multi-index-r1/notes/phase-g/spec.md</file>
+      <file>docs/guides/DATAVERSE-MCP-INTEGRATION-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">For each of the 7 entities, open the entity in Power Apps maker → Columns → New column. Display name "AI Search Index" → schema name `sprk_aisearchindexid` → type **Lookup** → related table `sprk_aisearchindex`. Searchable, not required.</step>
+    <step order="2">Save and publish the column for each entity.</step>
+    <step order="3">Add the new lookup field to each entity's Main form (place it adjacent to existing `sprk_searchindexname` for visual comparison during migration).</step>
+    <step order="4">Verify via Dataverse MCP `describe` that the column exists on each of the 7 entities and that both columns coexist.</step>
+    <step order="5">Update `TASK-INDEX.md`: 100 🔲 → ✅. Mark `current-task.md` complete.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Optional: query Dataverse MCP to verify column presence post-add</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">7 entities with new `sprk_aisearchindexid` lookup column + form placement</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`describe tables/sprk_matter` shows both `sprk_searchindexname` (text) AND `sprk_aisearchindexid` (LOOKUP) columns.</criterion>
+    <criterion testable="true">Same verification for businessunit, sprk_project, sprk_invoice, sprk_event, sprk_workassignment, sprk_document.</criterion>
+    <criterion testable="true">Opening a Matter/Project/Invoice/etc. record in the model-driven app shows the new "AI Search Index" lookup field on the form.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 101 (catalog seeding) — different operation surface. Run in the same maker session for efficiency.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

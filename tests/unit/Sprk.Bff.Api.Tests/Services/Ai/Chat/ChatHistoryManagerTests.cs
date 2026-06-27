@@ -1,9 +1,10 @@
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -39,7 +40,7 @@ public class ChatHistoryManagerTests
         public ChatSession? LastCachedSession { get; private set; }
 
         public FakeChatSessionManager(
-            IDistributedCache cache,
+            ITenantCache cache,
             IChatDataverseRepository repo,
             ILogger<ChatSessionManager> logger)
             : base(cache, repo, logger)
@@ -69,12 +70,11 @@ public class ChatHistoryManagerTests
 
     public ChatHistoryManagerTests()
     {
-        var cacheMock = new Mock<IDistributedCache>();
         var sessionRepoMock = new Mock<IChatDataverseRepository>();
         var sessionLoggerMock = new Mock<ILogger<ChatSessionManager>>();
 
         _fakeSessionManager = new FakeChatSessionManager(
-            cacheMock.Object,
+            new InMemoryTenantCache(),
             sessionRepoMock.Object,
             sessionLoggerMock.Object);
 

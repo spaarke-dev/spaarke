@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -502,7 +503,8 @@ public class MultiDocumentContextTests
             scopeResolverMock.Object,
             playbookServiceMock.Object,
             dataverseServiceMock.Object,
-            loggerMock.Object);
+            loggerMock.Object,
+            Mock.Of<IMatterMemoryService>());
 
         return (sut, scopeResolverMock, playbookServiceMock, dataverseServiceMock);
     }

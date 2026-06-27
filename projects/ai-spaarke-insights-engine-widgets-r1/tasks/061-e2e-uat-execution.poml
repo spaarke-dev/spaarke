@@ -1,0 +1,54 @@
+<task id="061" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>End-to-end UAT (SC-05 + SC-06 cache hit)</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <phase>6</phase>
+    <tags>uat, e2e-test, sc-05</tags>
+    <dependencies>060</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Execute Scenario A on real dev Matter with ≥3 assessments per area. Verify SC-05 (sparkle click → narrative + citations → envelope persisted) and SC-06 (second click cache hit &lt;100ms).
+  </prompt>
+
+  <role>UAT executor.</role>
+
+  <goal>
+    `notes/uat-results/scenario-a-real-matter.md` with screenshots, telemetry references, pass/fail per SC.
+  </goal>
+
+  <inputs>
+    <file purpose="scenario">projects/ai-spaarke-insights-engine-widgets-r1/notes/uat-scenarios.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="SC-06">Cache hit &lt;100ms p95</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>e2e uat, telemetry verification</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/notes/uat-scenarios.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Open Matter form">Scenario A target</step>
+    <step order="2" name="Click sparkle">Verify card renders 7-dimension narrative + citations</step>
+    <step order="3" name="Verify envelope on record">GET sprk_matter; sprk_performancesummary contains envelope</step>
+    <step order="4" name="Second click">Verify cache hit telemetry + sub-100ms response</step>
+    <step order="5" name="Document">Screenshots + telemetry refs</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ai-spaarke-insights-engine-widgets-r1/notes/uat-results/scenario-a-real-matter.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SC-05 pass</criterion>
+    <criterion testable="true">SC-06 pass with sub-100ms cache hit</criterion>
+  </acceptance-criteria>
+</task>

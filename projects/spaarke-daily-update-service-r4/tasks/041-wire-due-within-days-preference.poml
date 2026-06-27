@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Wire dueWithinDays preference to fetchNotifications filter (FR-17b)</title>
+    <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>Wired dueWithinDays preference (FR-17b) as post-fetch client filter since Dataverse OData cannot filter on nested customData.dueDate. Items with null dueDate kept. Test coverage in notificationService.test.ts. Agent execution timed out mid-stream; work recovered from git stash and verified — 41 Jest tests pass.</completion-notes>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>049</blocks>
+    <tags>pcf, react, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation modifying .ts service; client-side filter logic on JSON payload requires care</rigor-reason>
+    <parallel-group>E1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Edit `notificationService.ts` to apply the `dueWithinDays` preference as a post-fetch client filter (since `customData.dueDate` is nested JSON and not OData-filterable). Setting value drives the boundary.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 + React hooks + Xrm.WebApi.</role>
+  <goal>After fetchNotifications returns, results are filtered client-side to retain only notifications whose `customData.dueDate` is within `now + dueWithinDays`. Notifications without `dueDate` are passed through unchanged.</goal>
+  <context>
+    <background>FR-17b: `dueWithinDays` preference must actually constrain visible notifications. Dataverse OData cannot `$filter` on nested JSON, so post-fetch client filter is the only option.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; dark mode required</constraint>
+    <constraint source="ADR-024">Preserve useInlineTodoCreate + TODO_REGARDING_CATALOG in Add to To Do</constraint>
+    <constraint source="project">R3 PR #451 file overlap — see notes/risks.md R1; run conflict-check before merge</constraint>
+    <constraint source="project">Preserve R3 deliverables: schema, TTL=604800, read-state, 3 actions (now via overflow menu)</constraint>
+    <constraint source="project">Dataverse OData does NOT support `$filter` on nested JSON — use client-side filter on `customData.dueDate` only</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-024-sprk-todo-polymorphic-resolver.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Open `notificationService.ts`; locate post-fetch transform stage in `fetchNotifications`</step>
+    <step order="2">Add a `filterByDueWithinDays(items, days)` helper: keep item if `customData.dueDate` ≤ (now + days) OR `dueDate` missing/null</step>
+    <step order="3">Wire helper after the OData fetch returns, before items returned to caller</step>
+    <step order="4">Read `dueWithinDays` from preferences; default to no filter (or large value like 365) if missing</step>
+    <step order="5">Add Jest test: 3 items, dueDates {1 day, 10 days, 60 days, no dueDate}; setting=7 retains items 1+no-dueDate; setting=14 retains all four</step>
+    <step order="6">Run `npm test`; ensure pass</step>
+    <step order="7">Run `npm run build` to verify TypeScript compiles</step>
+    <step order="8">Update TASK-INDEX.md ✅</step>
+    <step order="9">Document deviations in notes/</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/services/notificationService.ts</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/src/services/__tests__/notificationService.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Setting change to dueWithinDays produces visible difference in rendered content (FR-17b / AC-17b)</criterion>
+    <criterion testable="true">Items without `customData.dueDate` are not filtered out — they pass through</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test>Set dueWithinDays=7; verify only items with dueDate within 7d or no dueDate render</test>
+    <test>Set dueWithinDays=30; verify additional items now appear</test>
+    <test>Dark Mode Compliance: render dropdown + filtered list in dark theme; verify ADR-021 semantic tokens used</test>
+    <test>Console Errors: no errors during fetch + filter + render</test>
+  </ui-tests>
+  <notes>Parallel-safe with task 040 (different function/helper, same file). Coordinate via small atomic helpers to avoid merge churn. R3 PR #451 file overlap — run conflict-check.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

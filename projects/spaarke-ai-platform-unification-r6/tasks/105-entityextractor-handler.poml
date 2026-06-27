@@ -1,0 +1,246 @@
+<task id="105" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-H-05 `EntityExtractorHandler` (FR-13, Wave 2 — LLM-Assisted NER)</title>
+    <phase>Parallel — 8 Typed Tool Handlers</phase>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      Wave 2 H-G2. EntityExtractorHandler.cs (LLM-assisted NER with code-based validation +
+      normalization for 8 entity types: organization/person/location/date/money/email/phone/url).
+      32 tests pass; per-tenant cache verified (ADR-014); ADR-015 telemetry hygiene enforced
+      (input text + entity values blocked from logs); Structured Outputs via
+      IOpenAiClient.GetStructuredCompletionRawAsync. Zero new NuGet. Seed row deployed via
+      ENT-EXT@v1 (10-char toolcode). Both Playbook + Chat contexts supported.
+      adr-check: PASSED. code-review: PASSED. See task-105-completion.md.
+    </completion-notes>
+    <estimated-effort>8 hours</estimated-effort>
+    <dependencies>104</dependencies>
+    <blocks>109</blocks>
+    <tags>bff-api, ai, azure-openai, handler</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New BFF handler with LLM integration; structured-outputs + caching + rate-limit + safety-pipeline interactions; FULL quality gates required.</rigor-reason>
+    <parallel-group>H-G2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Wave 2 LLM-assisted handler; independent of 106/107/108; each touches its own files; LLM mocking eliminates shared test infrastructure.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build `EntityExtractorHandler` — an LLM-assisted `IToolHandler` implementation per
+    FR-13 that performs Named Entity Recognition (NER) with code-based validation +
+    normalization. Pipeline: input text → LLM structured-output call (per existing
+    structured-outputs pattern in `GenericAnalysisHandler`) → deterministic post-processing
+    (validate confidence ≥ threshold, normalize casing/whitespace, deduplicate) →
+    structured `ToolResult` with extracted entities grouped by type.
+
+    Configurable via `sprk_analysistool.sprk_configuration`: `entityTypes` (e.g.,
+    Person, Organization, Date, Money, Location, EmailAddress, PhoneNumber);
+    `confidenceThreshold` (0.0–1.0); `normalizationRules` (case, whitespace, format);
+    `modelDeployment` override (else default from `ModelSelectorOptions`).
+
+    Handler registers via auto-discovery per task 100 — implements `IToolHandler`;
+    `HandlerId = "EntityExtractorHandler"`; lives in
+    `Services/Ai/Handlers/EntityExtractorHandler.cs`. Requires corresponding
+    `sprk_analysistool` row with `sprk_handlerclass = "EntityExtractorHandler"`.
+
+    LLM call uses existing OpenAI structured-outputs pattern; respects existing AI cache
+    (per-tenant cache keys per ADR-014) + `ai-context` rate limit policy (per ADR-016).
+    Safety pipeline (NFR-13) preserved — handler calls run through existing
+    `SafetyPipelineMiddleware`.
+
+    Tests use mocked `IOpenAiClient` from `TypedToolHandlerTestFixture`. Cover: contract
+    test + positive (text with mixed entity types → structured output with correct
+    grouping) + error (LLM returns invalid JSON, confidence below threshold filters out
+    entity) + config-driven (different entityTypes produces different extraction sets) +
+    cache test (second identical call hits cache, no LLM invoke).
+  </prompt>
+
+  <role>
+    Senior BFF engineer with .NET 8 + Azure OpenAI structured-outputs experience.
+    Familiar with `IOpenAiClient` patterns in `Services/Ai/`, JSON-schema constrained
+    decoding, per-tenant cache key patterns (ADR-014), and the `ai-context` rate-limit
+    policy (ADR-016).
+  </role>
+
+  <goal>
+    `EntityExtractorHandler.cs` implemented in `Services/Ai/Handlers/`; auto-discovered;
+    `sprk_analysistool` row deployed with `sprk_handlerclass = "EntityExtractorHandler"`;
+    unit tests cover positive + error + config-driven + cache cases using mocked LLM
+    client; LLM call uses existing structured-outputs pattern + respects cache (ADR-014)
+    + rate limit (ADR-016) + safety pipeline (NFR-13); BFF publish-size delta ≤+0.6 MB;
+    `code-review` + `adr-check` green.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="handler-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+    <file purpose="existing-llm-handler-example">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    <file purpose="handler-conventions">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/HandlerRegistrationConventions.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — auto-discovery; ZERO manual DI line.</constraint>
+    <constraint source="ADR-013">Handler lives in `Services/Ai/Handlers/`; no direct CRUD-side injection. AI internals (`IOpenAiClient`) stay internal.</constraint>
+    <constraint source="ADR-014">AI caching — handler uses existing per-tenant cache key pattern (`{tenantId}` in cache key); MUST include `tenantId` per binding rule. Reuse existing `IEmbeddingCache` / cache infrastructure where applicable.</constraint>
+    <constraint source="ADR-015">Telemetry logs handler name + execution outcome + timestamp ONLY; never input text or extracted entity values (PII risk).</constraint>
+    <constraint source="ADR-016">Rate limiting — handler dispatch path respects existing `ai-context` policy; do NOT bypass rate limits.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta measured + reported; per-task ≤+0.6 MB (LLM-assisted handlers slightly larger due to schema/prompt embedding).</constraint>
+    <constraint source="spec FR-13">LLM-assisted NER with code-based validation/normalization; configurable via `sprk_analysistool.sprk_configuration` (entityTypes, confidenceThreshold).</constraint>
+    <constraint source="spec NFR-13">Safety pipeline preserved — `SafetyPipelineMiddleware` chain (PromptShield + Groundedness + Citations + Privilege + Cross-matter) unchanged; handler LLM calls flow through it.</constraint>
+    <constraint source="spec NFR-02">R6 BFF publish-size budget ≤+5 MB total. This handler counts against budget.</constraint>
+    <constraint source="project CLAUDE.md Pillar 2">Implements `IToolHandler`; auto-discovered; `sprk_analysistool` row required.</constraint>
+    <constraint source="LLM-assisted binding">Uses existing OpenAI structured-outputs pattern from `GenericAnalysisHandler`; respects `ai-context` rate limit per ADR-016.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/typed-handler-llm-assisted</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      `EntityExtractorHandler` is the first Wave 2 LLM-assisted handler — used heavily
+      by chat-bound "extract entities from this doc" workflows + invoice/contract analysis
+      playbooks. The handler is a thin orchestration layer: prompt the LLM with a
+      structured-output schema, then deterministically validate + normalize the response
+      so downstream consumers (workspace widget, JPS pipeline) get clean data.
+
+      LLM call shape mirrors `GenericAnalysisHandler` — same `IOpenAiClient` pattern,
+      same structured-output JSON-schema constraint, same per-tenant cache keys, same
+      rate-limit policy, same safety pipeline middleware chain.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/EntityExtractorHandler.cs (NEW)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/EntityExtractorHandlerTests.cs (NEW)</file>
+      <file>infra/dataverse/sprk_analysistool-entity-extractor-row.json (NEW)</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-105-deployment-evidence.md (NEW)</file>
+    </relevant-files>
+    <related-work>
+      <item>Task 100 — handler infrastructure. Hard dependency.</item>
+      <item>Wave 1 (101–104) — must be complete to gate Wave 2 start (per H-G2 group definition).</item>
+      <item>Sibling Wave 2 tasks 106, 107, 108 — parallel-safe.</item>
+      <item>Task 109 — dispatch test exercises this handler.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check + RIGOR LEVEL">
+      Check context. If &gt;70%, run `context-handoff` then `/compact`. Declare:
+
+      ```
+      🔒 RIGOR LEVEL: FULL
+      📋 REASON: New LLM-assisted handler; ADR-013/014/016 + NFR-13 binding; FR-13
+      📖 PROTOCOL STEPS TO EXECUTE: all 11 steps below including Step 9.5 quality gates
+      Proceeding with Step 0...
+      ```
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX; confirm 105 is 🔲; dependency 104 (last Wave 1 task) is complete
+      (Wave 1 gates Wave 2 start).
+    </step>
+    <step order="2" name="Gather Resources">
+      Read every &lt;inputs&gt; + &lt;knowledge&gt; file. Extract from
+      `GenericAnalysisHandler.cs` the LLM structured-output pattern + cache integration
+      + rate-limit pattern. Read ADR-014 + ADR-016 in full.
+    </step>
+    <step order="3" name="Design Handler Surface + Output Schema">
+      Define `HandlerId = "EntityExtractorHandler"`; output JSON schema for structured
+      output (entities grouped by type, each with text + confidence + normalizedValue);
+      `ConfigSchema` with `entityTypes`, `confidenceThreshold`, `normalizationRules`,
+      `modelDeployment`. Inject `IOpenAiClient` + existing cache service + `IScopeResolverService`.
+    </step>
+    <step order="4" name="Implement Handler">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/EntityExtractorHandler.cs`.
+      Pattern: validate input → check cache (per-tenant key per ADR-014) → on miss, call
+      LLM via structured outputs → validate JSON shape → filter by confidence threshold →
+      normalize per config → emit `ToolResult`. Telemetry per ADR-015 (handler name +
+      outcome + timestamp; NO input text, NO entity values).
+    </step>
+    <step order="5" name="Author Unit Tests">
+      Create `EntityExtractorHandlerTests.cs` using `TypedToolHandlerTestFixture`.
+      Mock `IOpenAiClient`. Cover: contract; positive (mocked LLM returns mixed entity
+      types → handler produces grouped output); error (LLM returns invalid JSON →
+      handled gracefully; entity below confidence threshold → filtered); config-driven
+      (entityTypes subset changes output); cache (second identical call hits cache → LLM
+      mock NOT invoked twice); telemetry (no input text in logs).
+    </step>
+    <step order="6" name="Seed sprk_analysistool Row">
+      Create `infra/dataverse/sprk_analysistool-entity-extractor-row.json` with
+      `sprk_handlerclass = "EntityExtractorHandler"`, `sprk_toolcode = "ENT-EXTRACT@v1"`,
+      sample `sprk_configuration`, `AvailableInContexts = "Both"` (usable in playbook +
+      chat). Deploy to Spaarke Dev. Capture evidence.
+    </step>
+    <step order="7" name="Verify Build + Tests + Vuln Check">
+      `dotnet build` + `dotnet test --filter "EntityExtractorHandler"`. Run
+      `dotnet list package --vulnerable --include-transitive`; report no new HIGH-severity
+      CVE per CLAUDE.md §10 binding rule.
+    </step>
+    <step order="8" name="Verify BFF Publish-Size Delta">
+      `dotnet publish -c Release ...`. Report absolute + diff vs baseline. Target ≤+0.6 MB.
+    </step>
+    <step order="9" name="Verify Acceptance Criteria">
+      Walk through criteria; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check`. Both MUST pass. Confirm ADR-013/014/015/016
+      compliance + NFR-13 (safety pipeline unchanged).
+    </step>
+    <step order="10" name="Document + Complete">
+      Update status `complete`; TASK-INDEX 105 🔲 → ✅; reset `current-task.md`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build BFF + run tests + publish + vuln check</tool>
+    <tool name="pac">Deploy seed row</tool>
+    <tool name="git">Commit</tool>
+    <tool name="dataverse-deploy">Deploy seed row</tool>
+    <tool name="code-review">FULL-rigor quality gate</tool>
+    <tool name="adr-check">FULL-rigor quality gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/EntityExtractorHandler.cs (NEW)</output>
+    <output type="code">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/EntityExtractorHandlerTests.cs (NEW)</output>
+    <output type="infrastructure">infra/dataverse/sprk_analysistool-entity-extractor-row.json (NEW)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-105-deployment-evidence.md</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (105 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`EntityExtractorHandler.cs` exists, implements `IToolHandler`, uses existing `IOpenAiClient` structured-outputs pattern.</criterion>
+    <criterion testable="true">Handler auto-discovered per `AutoDiscoveryVerificationTests`.</criterion>
+    <criterion testable="true">`sprk_analysistool` row deployed with `sprk_handlerclass = "EntityExtractorHandler"`, `AvailableInContexts = "Both"`.</criterion>
+    <criterion testable="true">Cache key includes `tenantId` per ADR-014 binding rule — grep verifiable.</criterion>
+    <criterion testable="true">Unit tests pass: contract, positive (mixed entity types), error (invalid JSON + below-threshold filter), config-driven (entityTypes subset), cache (second call hits cache), telemetry (no input text in logs per ADR-015).</criterion>
+    <criterion testable="true">Handler flows through existing `SafetyPipelineMiddleware` (NFR-13) — no bypass; verified by test or code review.</criterion>
+    <criterion testable="true">Handler respects `ai-context` rate limit policy (ADR-016) — no rate-limit bypass.</criterion>
+    <criterion testable="true">BFF build succeeds.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤+0.6 MB; recorded.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable` shows no new HIGH-severity CVE.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` both pass.</criterion>
+  </acceptance-criteria>
+</task>

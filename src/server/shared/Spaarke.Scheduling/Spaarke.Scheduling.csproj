@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>Spaarke.Scheduling</AssemblyName>
+    <RootNamespace>Spaarke.Scheduling</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Cronos: cron expression parsing for in-process scheduling (R3 FR-2.1).
+         Verified latest stable on nuget.org 2026-06-21: 0.13.0 (POML suggested 0.7.x;
+         skipping legacy series — 0.13.0 is the current GA from HangfireIO).
+         Adds ~50KB compressed to BFF publish. -->
+    <PackageReference Include="Cronos" Version="0.13.0" />
+
+    <!-- BackgroundService base + DI / logging abstractions for ScheduledJobHost (task 013) -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Spaarke.Core\Spaarke.Core.csproj" />
+  </ItemGroup>
+
+</Project>

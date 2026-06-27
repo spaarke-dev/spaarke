@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="ai-spaarke-action-engine-r1">
+  <metadata>
+    <title>Action Template — "Find similar matters" (Hybrid: Azure AI Search semantic + Deterministic Dataverse hydration)</title>
+    <phase>Phase 5: Surfaces + Templates</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>040, 041, 052, 016</dependencies>
+    <blocks>060</blocks>
+    <tags>dataverse, ai, azure-search, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>JPS Action JSON authoring + Dataverse seed for the "Conservative 3" Template #3 per spec.md FR-21. Wires the Hybrid invocation pattern (semantic search via Azure AI Search + deterministic Dataverse hydration). No new C# code; deliverable is JPS-validated JSON + AI Search index reference + deploy invocation. Has explicit ADR constraints (013, 015, 018) and dependencies on the AI Search index from task 016.</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent JPS JSON authoring; writes to `infra/insights/schemas/template-find-similar-matters.json` — no file overlap with tasks 053, 054. Same prerequisite set (040 + 041 + 052) plus task 016 (AI Search index for Tool Registry — semantic-search infrastructure is reusable for matter-summary similarity). Safe for parallel sub-agent execution.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author the "Find similar matters" Action Template as a JPS-compliant JSON definition at `infra/insights/schemas/template-find-similar-matters.json` and seed it into Dataverse (`sprk_actiontemplate` entity). Per spec.md FR-21 + design.md "Conservative 3", this is a **Hybrid** Action: takes a Matter record id + optional similarity dimensions (practice area, counterparty type, amount range); (Step 1) semantic search via Azure AI Search over a matter-summary semantic index returns ranked candidate matter ids; (Step 2) Deterministic Dataverse hydration of the top results enriches each candidate with metadata; output is a ranked list with citations and similarity rationale. Output routes to SpaarkeAi chat with hyperlinks back to matter records. Validates via `jps-validate` skill before deployment.
+  </prompt>
+
+  <role>
+    Spaarke AI Template author with deep familiarity with the JPS Action format, Azure AI Search semantic-search invocation (the `SearchSemantic` Tool registered in task 023 or equivalent — verify the Tool id before authoring), the Tool Registry's `EvidenceRequired` runtime guard (design.md §7.4.5 guardrail #3), citation discipline (guardrail #7), and the default `Spaarke Assistant — General` playbook from task 052.
+  </role>
+
+  <goal>
+    Three concrete outcomes:
+    1. **JPS Action JSON** — `infra/insights/schemas/template-find-similar-matters.json` with `instruction`, `scopes` (sourceMatterId), `templateParams` (`similarityDimensions`, `topK`, `minConfidence`), `steps`:
+       - Step 1: `SearchSemantic` Tool against the matter-summary semantic index (Azure AI Search; the index may be `spaarke-matter-summary-index` or piggyback on `spaarke-resource-registry-index` — verify with task 016 / AI-ARCHITECTURE.md)
+       - Step 2: `QueryDataverse` Tool hydrates the top-K results with metadata (practice area, counterparty, amount, status, partner)
+       - Step 3: optional AI `ExplainSimilarity` Tool composes a short rationale per match
+       , `output` schema with ranked candidates + citations + similarity rationale, `governance.featureFlag` reference.
+    2. **Dataverse seed** — upsert `sprk_actiontemplate` row keyed by `sprk_name = 'find-similar-matters'`. Idempotent.
+    3. **Verification** — invoke manually via BFF `/run` AND via SpaarkeAi conversational invocation. Confirm:
+       - Search returns ranked candidates with confidence scores
+       - Hydration enriches each with metadata
+       - Output includes `sourceCitations` referring to the dev-environment matter records
+       - Result renders in SpaarkeAi chat with hyperlinks to the candidate matter forms (Dataverse deep links)
+       - `EvidenceRequired: true` on the optional `ExplainSimilarity` step is honored (dispatch carries the Step 1 + Step 2 outputs as evidence)
+
+    Deliverable: the JSON file, a deploy log at `notes/deploys/055-template-find-similar-matters.md`, and a verification of both the manual `/run` AND conversational invocation paths.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md FR-21 mandates the "Find similar matters" Template. Design.md "Conservative 3" decision confirms it as MVP Template #3. This Template is the **Hybrid invocation** demonstrator: it combines a probabilistic search step (semantic AI Search) with a deterministic hydration step (Dataverse query), validating that the Tool Registry's `Classification: Hybrid` (vs `Deterministic` / `AI`) properly supports multi-classification orchestration.
+
+      The matter-summary semantic index is referenced as a dependency. Task 016 created the `spaarke-resource-registry-index` for Tool Registry discovery; the matter-summary index is either a separate index on the same `spaarke-search-dev` service OR (more likely for MVP) piggybacks on the existing `spaarke-file-index` with a tenant-scoped filter over matter records. Verify via `docs/architecture/AI-ARCHITECTURE.md` + the task 016 deploy output BEFORE authoring this Template — the Tool id and index name must match what's actually deployed.
+
+      Per spec.md FR-21 acceptance: "Invocation from a Matter form returns 3-5 ranked candidates with similarity rationale; results render in chat with hyperlinks back to matter records." Two invocation paths exercise this:
+      - **Manual / explicit-path**: ribbon button on Matter form (task 051) → opens SpaarkeAi side pane with pre-populated `actionTemplateId=find-similar-matters` and `entityId={matter}` → user clicks "Run" in result tile
+      - **Conversational**: SpaarkeAi chat → "Find matters similar to {matter name}" → `FindResources` → `find-similar-matters` Template → resolves params → runs
+
+      Both paths invoke the SAME Template; the Tool Registry doesn't care about path (design.md §4.5.1 "All three paths share the same runtime, the same Tool Registry, ..."). This Template is the proof point for that claim.
+
+      Per design.md §7.4.5 guardrail #7 (citation discipline): the output's `sourceCitations` array MUST include a citation for each candidate matter (the matter id + URL). The UI renders these as hyperlinks.
+
+      Per ADR-018, governance block references `feature.actionEngine.template.findSimilarMatters`.
+
+      Per ADR-015, every Tool dispatch this Template makes writes audit (Tier 2 hash + Tier 3 work history).
+    </background>
+    <relevant-files>
+      <file>infra/insights/schemas/template-find-similar-matters.json</file>
+      <file>infra/insights/schemas/playbook-spaarke-assistant-general.json</file>
+      <file>scripts/Seed-JpsActions.ps1</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/notes/deploys/055-template-find-similar-matters.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">AI placement: Template lives in Dataverse + `infra/insights/schemas/`. No CRUD-side caller injects orchestration internals.</constraint>
+    <constraint source="ADR-015">Audit on every Tool dispatch this Template makes. Search query strings hashed in Tier 2 (not plaintext); hydrated matter ids stored as work-history record references in Tier 3.</constraint>
+    <constraint source="ADR-018">Feature flag `feature.actionEngine.template.findSimilarMatters` referenced in governance block.</constraint>
+    <constraint source="ADR-029">Publish size impact: zero — JSON + Dataverse seed only.</constraint>
+    <constraint source="project">Validate via `jps-validate` before deployment.</constraint>
+    <constraint source="project">Verify the matter-summary semantic index name + Tool id BEFORE authoring. Read `docs/architecture/AI-ARCHITECTURE.md` and task 016's deploy notes. If the index does not exist in dev, escalate as a dependency (do NOT author against a non-existent index).</constraint>
+    <constraint source="project">`EvidenceRequired: true` on the optional `ExplainSimilarity` AI step. Tool dispatch layer enforces.</constraint>
+    <constraint source="project">Output's `sourceCitations` includes a citation per candidate (matter id + deep-link URL). Citation discipline per design.md §7.4.5 guardrail #7.</constraint>
+    <constraint source="project">Default `humanGate.required = false` — this Template only reads data, no side effects. No gate needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/plugins.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-018-feature-flags.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/spec.md</file>
+      <file>projects/ai-spaarke-action-engine-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="JPS Action authoring with Hybrid classification" location=".claude/skills/jps-action-create/SKILL.md">Same format as task 053/054; the Template's overall classification is `Hybrid` (one AI step + one Deterministic step + one optional AI step).</pattern>
+      <pattern name="Semantic search Tool invocation" location="docs/architecture/AI-ARCHITECTURE.md">Use the `SearchSemantic` Tool (or equivalent) with a `topK` + `minConfidence` parameter set. Returns ranked candidates with confidence scores.</pattern>
+      <pattern name="Citation discipline" location="projects/ai-spaarke-action-engine-r1/design.md §7.4.5">Output schema's `sourceCitations` is non-optional for any Tool that returns evidence-backed results. UI renders citations as hyperlinks.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0">Context check: confirm working tree clean, dependencies (tasks 040 + 041 + 052 + 016) marked ✅ in `TASK-INDEX.md`. Verify the matter-summary semantic index exists in the dev `spaarke-search-dev` Azure AI Search service via `az search index show` or equivalent. If absent, halt and escalate.</step>
+    <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;` — especially spec.md FR-21, design.md §7.4.5 (citation discipline), `docs/architecture/AI-ARCHITECTURE.md` (search infrastructure layout), and task 016's deploy output to confirm the actual Tool id + index name.</step>
+    <step order="2">Use the `jps-action-create` skill to scaffold the Template JSON. Populate:
+      - `instruction`: brief LLM-facing description: "Find matters semantically similar to a given matter, optionally filtered by practice area, counterparty type, or amount range. Returns a ranked list with similarity rationale and hyperlinks to each matter record."
+      - `scopes`: `[{name: "sourceMatterId", type: "guid", required: true, sourceHints: ["surface", "ask"]}]`
+      - `templateParams`: `[{name: "similarityDimensions", type: "stringArray", values: ["practiceArea","counterpartyType","amountRange","status"], default: ["practiceArea","counterpartyType"]}, {name: "topK", type: "int", default: 5, min: 3, max: 10}, {name: "minConfidence", type: "float", default: 0.7}]`
+      - `steps`:
+        - Step 1: `{tool: "SearchSemantic", params: {indexName: "&lt;verified-index-name-from-task-016&gt;", queryFromRecord: "{sourceMatterId}", topK: "{topK}", minConfidence: "{minConfidence}", filterDimensions: "{similarityDimensions}"}}` — Hybrid (AI classification)
+        - Step 2: `{tool: "QueryDataverse", params: {entity: "sprk_matter", ids: "{step1.output.candidateIds}", fields: ["sprk_name","sprk_practicearea","sprk_counterpartytype","sprk_amount","sprk_status","sprk_partner","sprk_pm"]}}` — Deterministic
+        - Step 3 (optional): `{tool: "ExplainSimilarity", params: {sourceMatter: "{step2.output.sourceMatter}", candidates: "{step2.output.candidates}", dimensions: "{similarityDimensions}"}, evidenceRequired: true, optional: true}` — AI, requires evidence from Step 2
+      - `output`: `{candidates: [{matterId, name, confidence, similarityRationale, citation: {url, recordId}}], queryEcho: string, totalCandidates: int}`
+      - `governance.featureFlag`: `"feature.actionEngine.template.findSimilarMatters"`
+      - `humanGate.required`: `false` (read-only Template)
+    </step>
+    <step order="3">Run `jps-validate` skill. Halt and fix on schema violations.</step>
+    <step order="4">Deploy via `scripts/Seed-JpsActions.ps1` (or equivalent): upsert `sprk_actiontemplate` row keyed by `sprk_name = 'find-similar-matters'`. Capture stdout/stderr.</step>
+    <step order="5">**Manual `/run` verification** — invoke via BFF `/run` endpoint: POST `/api/actions/run` with `{templateId: 'find-similar-matters', parameters: {sourceMatterId: '&lt;dev-matter-guid&gt;', topK: 5}}`. Confirm:
+      - Run record created with status `Completed`
+      - Step 1 (SearchSemantic) audit row present; query hashed in Tier 2
+      - Step 2 (QueryDataverse) audit row present
+      - Step 3 (ExplainSimilarity, optional) audit row present IF the step ran (depends on Template's `optional` semantics — verify with task 041 orchestrator)
+      - Output contains 3-5 candidates with `confidence ≥ 0.7`, populated metadata, `similarityRationale` strings, and `sourceCitations` with hyperlink URLs to each matter form
+    </step>
+    <step order="6">**Conversational invocation verification** — in SpaarkeAi chat (no-context landing), type "Find matters similar to {matter name}" using a real dev-environment matter name. Confirm:
+      - Agent calls `FindResources("find similar matters")` → returns `find-similar-matters` Template with high confidence
+      - Agent calls `GetResourceDetail` → returns parameter schema with `sourceMatterId` source hint of "surface" or "ask"
+      - Agent resolves `sourceMatterId` via a `QueryDataverse` lookup by matter name (or asks the user to disambiguate if multiple match)
+      - Agent calls `InvokeResource` → runs the Template
+      - Output rendered in chat as a list with hyperlinks to candidate matter forms
+    </step>
+    <step order="7">**Explicit-path verification** (ribbon launcher from Matter form per task 051) — open a dev Matter, click "Open Spaarke AI" ribbon button, in the side pane invoke "Find similar matters" via the result tile (or via chat with entity context). Confirm the `sourceMatterId` is auto-populated from the surface context (no user input needed). Same output behavior as step 6.</step>
+    <step order="8">**Idempotency verification**: re-run the seed script. Confirm record count = 1.</step>
+    <step order="9">Capture all verification evidence in `notes/deploys/055-template-find-similar-matters.md`.</step>
+    <step order="10">Update `current-task.md`; checkpoint via `context-handoff`. Update `tasks/TASK-INDEX.md`: mark task 055 ✅. If deviations, document in `notes/handoffs/055-deviations.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="jps-action-create">Scaffold the JPS Action JSON</tool>
+    <tool name="jps-validate">Validate JSON against JPS schema</tool>
+    <tool name="dataverse-deploy">Upsert `sprk_actiontemplate` row</tool>
+    <tool name="powershell">Run Seed-JpsActions.ps1</tool>
+    <tool name="curl">Invoke BFF `/run` endpoint for manual verification</tool>
+    <tool name="azure-cli">Verify AI Search index existence + state</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">infra/insights/schemas/template-find-similar-matters.json</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/notes/deploys/055-template-find-similar-matters.md</output>
+    <output type="dataverse-record">`sprk_actiontemplate` row `find-similar-matters` in dev environment</output>
+    <output type="evidence">Manual `/run` verification (3+ candidates with citations)</output>
+    <output type="evidence">Conversational invocation verification (`FindResources` → `find-similar-matters` end-to-end)</output>
+    <output type="evidence">Explicit-path verification (ribbon launcher → surface context → auto-populated sourceMatterId)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/current-task.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`infra/insights/schemas/template-find-similar-matters.json` exists and passes `jps-validate`.</criterion>
+    <criterion testable="true">The Template's Step 1 (`SearchSemantic`) references the actual matter-summary semantic index name verified against task 016's deploy output.</criterion>
+    <criterion testable="true">The Template's optional Step 3 (`ExplainSimilarity`) has `EvidenceRequired: true` referring to Step 2's output.</criterion>
+    <criterion testable="true">The Template's `governance.featureFlag` references `feature.actionEngine.template.findSimilarMatters`.</criterion>
+    <criterion testable="true">After deployment, exactly one `sprk_actiontemplate` row with `sprk_name='find-similar-matters'` exists. Re-running the seed yields no duplicate.</criterion>
+    <criterion testable="true">**Manual `/run` verification**: invocation returns 3-5 candidates with `confidence ≥ minConfidence`, hydrated metadata, and `sourceCitations` containing hyperlinks. Evidence in `notes/deploys/055-*.md`.</criterion>
+    <criterion testable="true">**Conversational verification**: SpaarkeAi chat "Find matters similar to {matter name}" resolves to this Template via `FindResources` and runs end-to-end. Evidence captured.</criterion>
+    <criterion testable="true">**Explicit-path verification**: ribbon-launched side pane auto-populates `sourceMatterId` from surface context (no user input). Evidence captured.</criterion>
+    <criterion testable="true">Output schema's `sourceCitations` array is populated for every candidate; UI hyperlinks resolve to the candidate matter forms.</criterion>
+    <criterion testable="true">Publish-size delta zero.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The matter-summary semantic index may not exist as a standalone index in MVP. Verify with task 016's deploy notes:
+      (a) If task 016 created `spaarke-resource-registry-index` AND a separate `spaarke-matter-summary-index`, use the matter-summary one.
+      (b) If task 016 only created the Tool Registry index AND the matter-summary similarity reuses `spaarke-file-index` with a tenant + entityType filter, use that.
+      (c) If neither exists, escalate — this Template's verification path is broken without the index.
+
+    Per design.md §4.5.1: "The same Action ("Send weekly task digest to Smith Co") can be invoked all three ways". This Template is the proof point for the conversational + explicit paths (the system / scheduled path is exercised by task 054). Both invocation paths exercise the SAME Template definition.
+
+    The `SearchSemantic` Tool id is referenced indirectly — verify the actual Tool name registered in task 023 / 022 (always-on tool registration) before authoring. If it's called `SemanticSearch` or `AzureSearchHybridQuery`, use that exact id. Mismatched Tool ids will fail dispatch.
+
+    The `similarityRationale` text is generated by the optional Step 3 (`ExplainSimilarity` AI Tool). If Step 3 is skipped (no AI Tool available in dev), the output should fall back to a deterministic rationale like "Same practice area + same counterparty type" — verify the orchestrator (task 041) handles `optional: true` steps correctly.
+
+    Per ADR-015 data governance: the search query text MUST be hashed in Tier 2 audit (not plaintext). Verify via the dispatch audit row that the query hash (not the query) appears in the persisted record.
+
+    Per spec.md Success Criteria #2 (G2 gate): this Template ALSO exercises the conversational invocation path. Task 053 records the canonical G2 evidence (Summarize Matter X); this Template's evidence is supplementary — proof that G2 generalizes beyond a single Template.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Declare RIGOR LEVEL: STANDARD with the reason from `&lt;rigor-reason&gt;`. Use the `jps-action-create` skill for scaffolding, `jps-validate` for schema checks, and `dataverse-deploy` for the upsert. Verify the AI Search index existence BEFORE authoring (Step 0). Follow the task-execute skill for proactive checkpointing. Skip Step 9.5 quality gate (STANDARD rigor — no .cs/.ts changes), but record the manual `/run` + conversational + explicit-path verification evidence carefully.
+    </protocol>
+  </execution>
+</task>

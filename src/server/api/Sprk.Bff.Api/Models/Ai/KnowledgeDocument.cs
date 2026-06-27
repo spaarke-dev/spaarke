@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Models.Ai;
 /// Used for RAG (Retrieval-Augmented Generation) with hybrid search.
 /// </summary>
 /// <remarks>
-/// This model maps to the "spaarke-knowledge-index-v2" in Azure AI Search.
+/// This model maps to the "spaarke-files-index" in Azure AI Search.
 /// Supports 3 deployment models: Shared (filtered by tenantId), Dedicated (per-customer index), CustomerOwned.
 /// Vector dimensions: 1536 (text-embedding-3-small) and 3072 (text-embedding-3-large) during migration.
 /// </remarks>
@@ -128,9 +128,16 @@ public class KnowledgeDocument
     /// <summary>
     /// Zero-based index of this chunk within the document.
     /// </summary>
+    /// <remarks>
+    /// Made nullable 2026-06-10 (Phase G UAT hot-fix). Some indexes
+    /// (notably <c>spaarke-files-index</c>) contain chunks where this
+    /// field is null/missing, breaking deserialization to <c>int</c> with
+    /// "JSON value could not be converted to System.Int32" at $.chunkIndex.
+    /// Read sites coalesce with <c>?? 0</c> when arithmetic is required.
+    /// </remarks>
     [SimpleField(IsSortable = true)]
     [JsonPropertyName("chunkIndex")]
-    public int ChunkIndex { get; set; }
+    public int? ChunkIndex { get; set; }
 
     /// <summary>
     /// Total number of chunks for this document.

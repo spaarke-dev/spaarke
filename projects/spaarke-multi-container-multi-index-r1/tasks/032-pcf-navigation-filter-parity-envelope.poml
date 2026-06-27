@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-multi-container-multi-index-r1">
+  <metadata>
+    <title>PCF — `NavigationService` includes `searchIndexName` + full filter parity envelope (FR-PCF-03 + FR-PARITY-01)</title>
+    <phase>D + D.1: PCF v1.1.74</phase>
+    <status>not-started</status>
+    <estimated-hours>3-5</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>033</blocks>
+    <tags>pcf, react, typescript, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies PCF `.ts` code in NavigationService; defines the full filter-parity envelope contract consumed by code-page tasks 040-042; carries ADR-006 / ADR-022 / ADR-026 obligations.</rigor-reason>
+    <parallel-group>D1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>File-disjoint from task 031 (SemanticSearchApiService.ts). Both can run after 030 in parallel.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `NavigationService.openSemanticSearchPage()` to build a full filter-parity envelope passed to `Xrm.Navigation.navigateTo({pageType:"webresource", data:"..."})`. The envelope MUST include (when set): `query`, `scope` (when non-`all`), `entityId`, `threshold`, `searchMode` (`hybrid`/`vectorOnly`/`keywordOnly`), `fileTypes` (CSV), `dateFrom` (ISO string), `dateTo` (ISO string), `tags` (CSV), `associatedOnly` (boolean), `theme`, and `searchIndexName`. Empty / default values MUST be omitted to keep the URL short.
+  </prompt>
+
+  <role>
+    PCF developer with deep familiarity with `src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/NavigationService.ts`, ADR-006 (PCF over webresources), ADR-022 (PCF stays React 16), ADR-026 (full-page Code Page standard for `sprk_semanticsearch`). Envelope encoding must be safe for `Xrm.Navigation.navigateTo` data parameter.
+  </role>
+
+  <goal>
+    `NavigationService.openSemanticSearchPage()` builds a complete filter envelope from the PCF's current filter state and passes it as the `data` parameter to `Xrm.Navigation.navigateTo`. Decoded envelope contains every set parameter from the full list; empty/default values are omitted. Unit tests cover the envelope shape for each parity field individually + the omit-when-empty behavior.
+  </goal>
+
+  <context>
+    <background>
+      Phase D.1 (folded into Phase D per design §10.1) extends the "Open in Semantic Search" experience so the launched modal shows the EXACT same documents the PCF was showing. This requires sending ALL PCF filter state through the navigateTo envelope. Today's envelope sends only a subset; this task fills the gap. Phase E (tasks 040-043) consumes the envelope on the code-page side.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/NavigationService.ts</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-PCF-03">`NavigationService.openSemanticSearchPage()` MUST include `searchIndexName` in the data envelope passed via `Xrm.Navigation.navigateTo`.</constraint>
+    <constraint source="spec.md FR-PARITY-01">Envelope MUST include ALL PCF current filter state: query, scope (when non-`all`), entityId, threshold, searchMode, fileTypes (CSV), dateFrom (ISO), dateTo (ISO), tags (CSV), associatedOnly (boolean), theme, searchIndexName.</constraint>
+    <constraint source="spec.md FR-PARITY-01">Empty / default values MUST be omitted to keep the URL short.</constraint>
+    <constraint source="ADR-006">PCF only — `Xrm.Navigation.navigateTo({pageType:"webresource", data})` is the supported launch mechanism for full-page code pages.</constraint>
+    <constraint source="ADR-022">PCF stays React 16-safe. No React 18-only APIs.</constraint>
+    <constraint source="ADR-026">`sprk_semanticsearch` is the canonical full-page Code Page target — do not introduce a different launch surface.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-022-react-version-boundaries.md</file>
+      <file>.claude/adr/ADR-026-fullpage-codepage-standard.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>projects/spaarke-multi-container-multi-index-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="navigateTo envelope encoding" location="src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/NavigationService.ts">
+        The existing envelope uses URL-style key=value pairs joined by `&amp;`. Keep that convention. Encode each value via `encodeURIComponent` to handle special chars. Omit keys whose values are empty/default (zero, false, empty array, empty string, undefined).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `NavigationService.openSemanticSearchPage()` to identify the current envelope-building site and the PCF filter-state object shape (the source of `query`, `scope`, `entityId`, `threshold`, `searchMode`, `fileTypes`, `dateFrom`, `dateTo`, `tags`, `associatedOnly`, `theme`).</step>
+    <step order="2">Define an internal helper `buildEnvelope(filterState, theme, searchIndexName)` that returns the URL-encoded envelope string. For each field: include only when non-empty / non-default. Use these "default" rules: `scope === "all"` omit; `entityId` empty omit; `threshold` matches current default omit; `searchMode` empty omit; `fileTypes` empty array omit; `dateFrom`/`dateTo` undefined omit; `tags` empty omit; `associatedOnly === false` omit; `theme` empty omit; `searchIndexName` empty omit.</step>
+    <step order="3">Encode each set value with `encodeURIComponent` to handle special characters; join key=value pairs with `&amp;`.</step>
+    <step order="4">Replace the current envelope-building code with the new helper. Pass the resulting string as the `data` parameter to `Xrm.Navigation.navigateTo({pageType:"webresource", data:envelope})`. Confirm the page name (`sprk_semanticsearch` per ADR-026) is unchanged.</step>
+    <step order="5">Add unit tests for the envelope decoder: (a) every parity field included when set; (b) every parity field omitted when at its default/empty value; (c) `searchIndexName` round-trips; (d) `dateFrom`/`dateTo` round-trip as ISO strings; (e) `tags` and `fileTypes` round-trip as CSV; (f) `associatedOnly` round-trips as boolean. Mock `Xrm.Navigation.navigateTo` to capture the `data` argument.</step>
+    <step order="6">Run code-review + adr-check skills at Step 9.5 (FULL rigor requirement). Update `TASK-INDEX.md` status: 🔲 → ✅. Update `current-task.md` to reflect completion and advance to next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read NavigationService.ts</tool>
+    <tool name="Edit">Add the full filter-parity envelope helper</tool>
+    <tool name="Bash">Run unit tests via `npm run test`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/NavigationService.ts (full envelope)</output>
+    <output type="tests">Unit tests for envelope round-trip per parity field</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-PCF-03: Decoded envelope contains `searchIndexName` when set. Verified by unit test.</criterion>
+    <criterion testable="true">FR-PARITY-01: Decoded envelope contains EVERY set parameter from the full list (`query`, `scope`, `entityId`, `threshold`, `searchMode`, `fileTypes`, `dateFrom`, `dateTo`, `tags`, `associatedOnly`, `theme`, `searchIndexName`). Verified by per-field unit tests.</criterion>
+    <criterion testable="true">FR-PARITY-01: Empty / default values are OMITTED from the envelope (not sent as empty string or false). Verified by unit test.</criterion>
+    <criterion testable="true">`Xrm.Navigation.navigateTo` is called with `pageType:"webresource"` and the envelope as the `data` parameter; page name remains `sprk_semanticsearch` per ADR-026.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Open in Semantic Search launches modal with seeded filters">
+      <description>End-to-end verification that the full filter-parity envelope is consumed by the code page and seeds the modal with identical filters.</description>
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn={entity}&amp;id={record-id}</url>
+      <steps>
+        <step>Open a model-driven form hosting SemanticSearchControl on a record (e.g. a Matter).</step>
+        <step>In the PCF, set Threshold=50%, Search Mode=Hybrid, Associated Only=true, File Types=pdf,docx, and apply a tag filter.</step>
+        <step>Execute a search to populate results.</step>
+        <step>Click "Open in Semantic Search".</step>
+        <step>In the launched modal/full-page, inspect the filter pane and result set.</step>
+      </steps>
+      <expected>Modal opens with Threshold=50%, Mode=Hybrid, Associated Only=true, File Types=pdf,docx, tag filter present. Result document set is identical to the PCF's set (same titles, same order, same count).</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Parallel-safe with task 031 (SemanticSearchApiService.ts). The two files are independent; both can run after task 030 in the same wave.
+
+    The default values for each field must match what the PCF treats as "no filter applied" — verify against the existing filter-state initialization. The omit rule is critical for URL length (Dataverse `navigateTo` data is bounded).
+
+    Phase E (task 040) parses this exact envelope on the code-page side. Keep the parameter names consistent; the unit tests in 032 + 040 + 043 are the contract.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load ADR-006 / ADR-022 / ADR-026 + .claude/constraints/pcf.md before Step 1. Declare rigor (FULL) per task-execute Step 0. Run code-review + adr-check at Step 9.5.
+    </protocol>
+  </execution>
+</task>

@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Document List</title>
     <style>
+      /* Box-sizing reset — REQUIRED for DataGrid framework hosting per
+       * docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md §2. Without it, every
+       * grid cell renders +24px wider than its declared width (content-box
+       * adds 12+12 padding) and the grid overflows the page. Backfilled
+       * 2026-06-09 as part of the box-sizing audit cleanup. */
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
       html, body, #root {
         margin: 0;
         padding: 0;

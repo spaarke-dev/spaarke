@@ -15,6 +15,24 @@
  *   - ALL colours from Fluent UI v9 semantic tokens — zero hardcoded hex/rgb
  *   - makeStyles (Griffel) only for custom styles
  *   - Dark mode + high-contrast supported automatically via token system
+ *
+ * ── Launch-context contract (smart-todo-decoupling-r3 task 032 / FR-16) ──────
+ *
+ * AddTodoBar is the kanban "Add To Do" entry point. Per FR-16, when this entry
+ * point opens the full `CreateTodoWizard` (today: a quick title-only create path
+ * via `onAdd`; future: a wizard launch path on richer-add), it MUST pass
+ * `initialRegarding={undefined}` — the kanban context has no implicit parent
+ * record. The user picks a regarding (or skips) inside the wizard.
+ *
+ * The constant `KANBAN_WIZARD_INITIAL_REGARDING` is exported as the binding
+ * value for any future wiring; tests assert wizard launches via this constant
+ * remain undefined.
+ *
+ * Sibling entry-point contracts (per the launch-context note):
+ *   - Parent-form ribbon (task 040)  → wizard launched with the launch record triple
+ *   - Outlook "Create To Do" (task 070) → wizard launched with the sprk_communication triple
+ *
+ * See: projects/smart-todo-decoupling-r3/notes/createtodo-launch-contract.md
  */
 
 import * as React from "react";
@@ -25,6 +43,31 @@ import {
   Button,
 } from "@fluentui/react-components";
 import { AddRegular } from "@fluentui/react-icons";
+
+// ---------------------------------------------------------------------------
+// Launch-context contract export (FR-16 — kanban entry has NO regarding pre-fill)
+// ---------------------------------------------------------------------------
+
+/**
+ * Binding value for the kanban "Add To Do" launch context.
+ *
+ * Per FR-16, the kanban entry has no parent record context — when the kanban
+ * opens the `CreateTodoWizard`, it MUST pass `initialRegarding` as this value
+ * (i.e. `undefined`). This makes the contract explicit at the call site rather
+ * than relying on prop omission.
+ *
+ * Future kanban wizard wiring should use:
+ * ```tsx
+ * import { KANBAN_WIZARD_INITIAL_REGARDING } from './AddTodoBar';
+ * <CreateTodoWizard
+ *   open={open}
+ *   onClose={onClose}
+ *   initialRegarding={KANBAN_WIZARD_INITIAL_REGARDING}
+ *   // ...other props
+ * />
+ * ```
+ */
+export const KANBAN_WIZARD_INITIAL_REGARDING: undefined = undefined;
 
 // ---------------------------------------------------------------------------
 // Styles

@@ -1,16 +1,29 @@
 /**
  * CreateTodoStep.tsx
- * Entity-specific form for "Create New To Do" wizard.
+ * Entity-specific form for "Create New To Do" wizard (R3 — targets `sprk_todo`).
  *
- * Simpler form than Event: Title, Due Date, Priority, Description.
+ * Fields:
+ *   - Title         (required, sprk_name)
+ *   - Due Date      (optional, sprk_duedate)
+ *   - Priority Score (0-100 slider, sprk_priorityscore)
+ *   - Effort Score   (0-100 slider, sprk_effortscore)
+ *   - Assignee      (optional, OOB contact lookup → sprk_assignedto)
+ *                   UAT 2026-06-21: migrated from systemuser to contact
+ *   - Notes         (optional, multi-line, sprk_notes)
  *
- * Accepts IDataService (not IWebApi) for shared library portability.
+ * Per smart-todo-decoupling-r3 spec FR-15: This form writes to `sprk_todo`,
+ * not to `sprk_event` with `todoflag=true`.
+ *
+ * @see formTypes.ts for the form-state shape
+ * @see todoService.ts for the create handler
  */
 import * as React from 'react';
-import { Text, Input, Textarea, Dropdown, Option, Field, makeStyles, tokens } from '@fluentui/react-components';
+import { Text, Input, Textarea, Slider, Field, makeStyles, tokens } from '@fluentui/react-components';
 import type { ICreateTodoFormState } from './formTypes';
 import { EMPTY_TODO_FORM } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
+import { LookupField } from '../LookupField/LookupField';
+import type { ILookupItem } from '../../types/LookupTypes';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -18,21 +31,17 @@ import type { IDataService } from '../../types/serviceInterfaces';
 
 export interface ICreateTodoStepProps {
   dataService: IDataService;
+  /**
+   * Search callback for the Assignee LookupField. Should return matching
+   * OOB `contact` records (UAT 2026-06-21 — `sprk_assignedto` migrated from
+   * systemuser to contact). Prop name retained for back-compat with the
+   * generic CreateRecordWizard pattern.
+   */
+  onSearchUsers: (query: string) => Promise<ILookupItem[]>;
   onValidChange: (isValid: boolean) => void;
   onFormValues: (values: ICreateTodoFormState) => void;
   initialFormValues?: ICreateTodoFormState;
 }
-
-// ---------------------------------------------------------------------------
-// Priority options
-// ---------------------------------------------------------------------------
-
-const PRIORITY_OPTIONS = [
-  { key: 100000000, text: 'Low' },
-  { key: 100000001, text: 'Normal' },
-  { key: 100000002, text: 'High' },
-  { key: 100000003, text: 'Urgent' },
-];
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -57,6 +66,16 @@ const useStyles = makeStyles({
     gridTemplateColumns: '1fr 1fr',
     gap: tokens.spacingHorizontalM,
   },
+  scoreRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+  },
+  scoreLabel: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    color: tokens.colorNeutralForeground2,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -65,6 +84,7 @@ const useStyles = makeStyles({
 
 export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
   dataService: _dataService,
+  onSearchUsers,
   onValidChange,
   onFormValues,
   initialFormValues,
@@ -87,16 +107,29 @@ export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
     setFormValues(prev => ({ ...prev, dueDate: e.target.value }));
   }, []);
 
-  const handlePriorityChange = React.useCallback((_e: unknown, data: { optionValue?: string }) => {
-    const val = parseInt(data.optionValue ?? '100000001', 10);
-    setFormValues(prev => ({ ...prev, priority: val }));
+  const handlePriorityChange = React.useCallback((_e: unknown, data: { value: number }) => {
+    setFormValues(prev => ({ ...prev, priorityScore: data.value }));
   }, []);
 
-  const handleDescriptionChange = React.useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setFormValues(prev => ({ ...prev, description: e.target.value }));
+  const handleEffortChange = React.useCallback((_e: unknown, data: { value: number }) => {
+    setFormValues(prev => ({ ...prev, effortScore: data.value }));
   }, []);
 
-  const selectedPriorityText = PRIORITY_OPTIONS.find(o => o.key === formValues.priority)?.text ?? 'Normal';
+  const handleNotesChange = React.useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setFormValues(prev => ({ ...prev, notes: e.target.value }));
+  }, []);
+
+  const handleAssigneeChange = React.useCallback((item: ILookupItem | null) => {
+    setFormValues(prev => ({
+      ...prev,
+      assignedToId: item?.id ?? '',
+      assignedToName: item?.name ?? '',
+    }));
+  }, []);
+
+  const assigneeValue: ILookupItem | null = formValues.assignedToId
+    ? { id: formValues.assignedToId, name: formValues.assignedToName }
+    : null;
 
   return (
     <div className={styles.form}>
@@ -122,27 +155,44 @@ export const CreateTodoStep: React.FC<ICreateTodoStepProps> = ({
         <Field label="Due Date">
           <Input type="date" value={formValues.dueDate} onChange={handleDueDateChange} />
         </Field>
-        <Field label="Priority">
-          <Dropdown
-            value={selectedPriorityText}
-            selectedOptions={[String(formValues.priority)]}
-            onOptionSelect={handlePriorityChange}
-          >
-            {PRIORITY_OPTIONS.map(opt => (
-              <Option key={opt.key} value={String(opt.key)}>
-                {opt.text}
-              </Option>
-            ))}
-          </Dropdown>
+        <LookupField
+          label="Assigned To"
+          value={assigneeValue}
+          onChange={handleAssigneeChange}
+          onSearch={onSearchUsers}
+          placeholder="Search contacts..."
+        />
+      </div>
+
+      <div className={styles.row}>
+        <Field label="Priority Score">
+          <div className={styles.scoreRow}>
+            <Slider min={0} max={100} step={1} value={formValues.priorityScore} onChange={handlePriorityChange} />
+            <div className={styles.scoreLabel}>
+              <Text size={200}>0</Text>
+              <Text size={200}>{formValues.priorityScore}</Text>
+              <Text size={200}>100</Text>
+            </div>
+          </div>
+        </Field>
+        <Field label="Effort Score">
+          <div className={styles.scoreRow}>
+            <Slider min={0} max={100} step={1} value={formValues.effortScore} onChange={handleEffortChange} />
+            <div className={styles.scoreLabel}>
+              <Text size={200}>0</Text>
+              <Text size={200}>{formValues.effortScore}</Text>
+              <Text size={200}>100</Text>
+            </div>
+          </div>
         </Field>
       </div>
 
-      <Field label="Description">
+      <Field label="Notes">
         <Textarea
-          value={formValues.description}
-          onChange={handleDescriptionChange}
+          value={formValues.notes}
+          onChange={handleNotesChange}
           placeholder="Add notes or details..."
-          rows={3}
+          rows={4}
           resize="vertical"
         />
       </Field>

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Ensure sprk_category column dual-write (audit + fix if missing)</title>
+    <phase>3: W1 Producer — customData + stubs + membership (PR 3)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022, 023, 024, 025, 028</blocks>
+    <completion-notes>Audit confirmed `sprk_category` column dual-write was ALREADY PRESENT in `BuildNotificationEntity` (lines 554–557) — introduced pre-R4 for idempotency check in `CheckForDuplicateNotificationAsync`. Same write satisfies FR-17c. Both code paths (standard at line 271, iterate-items at line 421) call the shared `BuildNotificationEntity` and pass the rendered category. Null/empty category gracefully OMITS the column attribute (no empty-string write). No production code change required. Added 4 new xUnit test methods (10 test executions counting Theory cases) to lock the invariant explicitly — `BuildNotificationEntity_PopulatesSprkCategory`, `BuildNotificationEntity_HandlesNullCategory`, `BuildNotificationEntity_SprkCategoryMatchesCustomDataCategory_Always [Theory × 7]`, `BuildNotificationEntity_IterateItemsPath_PopulatesSprkCategory`. All 15 active tests pass. Publish size: 47.14 MB (+0.83 MB tooling-variance vs task 020's 46.31 MB; test code does not ship). CVE: Kiota 1.21.2 GHSA-7j59-v9qr-6fq9 pre-existing in master, no new HIGH. Unblocks tasks 022/023/024/025/028 + PR 5 task 042.</completion-notes>
+    <tags>bff-api, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies BFF NodeExecutor C# (CreateNotificationNodeExecutor.cs). Load-bearing for FR-17c server-side `$filter` (consumer cannot exclude disabled channels server-side without this). Touches BFF — CLAUDE.md §10 publish-size + CVE applies.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Audit `CreateNotificationNodeExecutor.BuildNotificationEntity` (modified by task 020): confirm the `appnotification` entity has the `sprk_category` standalone Dataverse column set to mirror `customData.category`. If missing, add the assignment. This is required for FR-17c server-side `$filter` on `sprk_category not in (…)` because Dataverse OData does NOT support `$filter` on nested JSON fields.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF NodeExecutor specialist with knowledge of Dataverse OData query semantics (no nested-JSON $filter support).</role>
+
+  <goal>Every `appnotification` row produced by R4-migrated playbooks has the `sprk_category` Dataverse column populated (mirroring `customData.category`). Build + tests pass. Publish-size delta documented.</goal>
+
+  <context>
+    <background>Per owner clarification 2026-06-25, Dataverse OData does NOT support `$filter` on nested JSON. FR-17c (consumer disabledChannels filter) needs a standalone `sprk_category` column to filter on. The producer MUST dual-write both `customData.category` (existing; consumed by widget) AND `sprk_category` column (NEW; consumed by query filters). The two stay in sync. AC-6d binds: every R4-produced notification has `sprk_category` populated.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateNotificationNodeExecutorTests.cs</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">BFF AI placement — extension within existing NodeExecutor; no new endpoint or service.</constraint>
+    <constraint source="ADR-029">BFF publish hygiene — publish-size + CVE per task.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — publish-size + CVE per task. Placement decision: dual-write stays in CreateNotificationNodeExecutor (single canonical write path).</constraint>
+    <constraint source="project">sprk_category column value MUST mirror customData.category exactly (string equality). Producer is the single writer of both fields — they stay in sync by construction.</constraint>
+    <constraint source="FR-6 AC-6d">Every appnotification row produced by R4-migrated playbooks has sprk_category populated.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load knowledge files. Re-read FR-6 AC-6d + the 2026-06-25 owner clarification in CLAUDE.md ("Use `sprk_category` column for query filters").</step>
+    <step order="2">Read `CreateNotificationNodeExecutor.cs` (post task-020 state). Locate the entity-attribute assignment block in BuildNotificationEntity (lines ~471-546). Grep for `sprk_category` — confirm whether the column is already being written.</step>
+    <step order="3">If `sprk_category` IS already written: verify it mirrors `customData.category`. If divergent, fix the mirror. If absent: add the assignment `entity["sprk_category"] = category;` (or executor's local variable name) right next to where `customData.category` is set.</step>
+    <step order="4">Confirm column exists in Dataverse `appnotification` schema (query metadata via `mcp__dataverse__describe` or read existing R3 migration scripts).</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/` — fix any compile errors.</step>
+    <step order="6">Run existing tests `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter FullyQualifiedName~CreateNotificationNodeExecutor` to confirm no regression.</step>
+    <step order="7">Run publish-size check: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` — record delta vs prior baseline (post-task-020).</step>
+    <step order="8">Run CVE check: `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: change task 021 status to ✅.</step>
+    <step order="10">Document audit finding ("column was already written" vs "column was missing — added") and publish-size delta in `projects/spaarke-daily-update-service-r4/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="mcp-dataverse">describe — verify sprk_category column exists on appnotification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CreateNotificationNodeExecutor writes the sprk_category Dataverse column on every produced appnotification entity.</criterion>
+    <criterion testable="true">sprk_category value equals customData.category (string equality) for every produced row.</criterion>
+    <criterion testable="true">dotnet build succeeds; existing tests pass.</criterion>
+    <criterion testable="true">Publish-size delta recorded; no new HIGH CVE.</criterion>
+    <criterion testable="true">Audit finding documented in notes/ (was-present-already vs was-added).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-6 line 136 dual-write clause; AC-6d (line 140); 2026-06-25 owner clarification in project CLAUDE.md. Hint: this is a tiny but critical change — the audit may show the column was already being written in R3 or earlier, in which case the task is just verification + documentation. If the column doesn't exist in the schema, escalate (CLAUDE.md §6 Human Escalation) because R4 spec assumes it does. Separate task from 020 to keep the diffs reviewable (data shape vs column write are different concerns).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

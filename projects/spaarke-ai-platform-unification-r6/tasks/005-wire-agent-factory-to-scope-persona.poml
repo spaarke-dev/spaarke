@@ -1,0 +1,210 @@
+<task id="005" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-05 Wire `SprkChatAgentFactory.CreateAgentAsync` to Scope-Resolved Persona (Pillar 1)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+      Pillar 1 closeout: Replaced hardcoded `BuildDefaultSystemPrompt(null)` in
+      `PlaybookChatContextProvider.GetContextAsync` standalone-mode branch with
+      `_scopeResolver.ResolvePersonaForChatAsync(tenantId, playbookId, ct)`. The
+      factory's call chain (`SprkChatAgentFactory.CreateAgentAsync` →
+      `IChatContextProvider.GetContextAsync` → provider) now produces a
+      byte-identical system prompt when no tenant CUST- override exists (FR-04
+      binding via the seeded SYS-DEFAULT row from task 004).
+
+      Decision (smallest change to meet FR-04 per parent agent guidance): only
+      the standalone-mode branch (playbookId==null) was cut over to the resolver.
+      The named-playbook branches (lines 178/186) continue to call
+      `BuildDefaultSystemPrompt(playbookName)` because that text is runtime-dynamic
+      (interpolates playbook name). Wiring those to the playbook-attached persona
+      variant is out of scope for Pillar 1 closure.
+
+      Decision (legacy method retention): `BuildDefaultSystemPrompt()` is RETAINED
+      as a null-safety/exception fallback ONLY. When the resolver throws
+      `InvalidOperationException` (catastrophic SYS- seed-data failure per task
+      003's contract) OR returns null/empty (contract violation), the provider
+      emits a CRITICAL log and falls back to the legacy text to preserve chat
+      availability while loudly signaling the deployment gap. This satisfies
+      project CLAUDE.md "MUST NOT hardcode persona text" — the static text is
+      no longer the primary source; it's a deployment-failure safety net.
+
+      Files: 1 production (`PlaybookChatContextProvider.cs`), 1 new test file
+      (`SprkChatAgentFactoryPersonaTests.cs`, 4 tests). Build: 0 errors, 16
+      pre-existing warnings. Tests: 4/4 new + 35/35 existing PlaybookChatContextProvider
+      + 18/18 SprkChatAgentFactory + 92/92 related = all green. Publish-size
+      delta: +1,968 bytes (~0.002 MB) vs task-002 baseline (well under ≤+5 MB
+      R6 budget; 45.50 MB current vs 60 MB ceiling per NFR-02).
+
+      ADR/NFR compliance: ADR-010 (no new DI), ADR-013 (facade boundary
+      preserved — resolver is AI-internal), ADR-015 (no user message content
+      logged), ADR-029 (publish hygiene), NFR-01 (conversational primacy —
+      ChatContext shape unchanged by persona swap), NFR-10 (8K budget
+      unchanged), NFR-13 (safety pipeline untouched), FR-03 (most-specific-wins
+      via task 003 resolver), FR-04 (byte-identical with no override). All
+      verified via tests + manual code review.
+
+      Completion notes: `projects/spaarke-ai-platform-unification-r6/notes/task-005-completion.md`
+    </completion-notes>
+    <estimated-effort>5 hours</estimated-effort>
+    <dependencies>002, 003, 004</dependencies>
+    <blocks>028</blocks>
+    <tags>bff-api, ai, chat, scope</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.cs` in chat-agent core path; removes hardcoded `BuildDefaultSystemPrompt()` call site (binding cutover); NFR-01 conversational primacy bound; multi-task dependency.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent factory file; no contention with other Phase A tasks at this point.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Replace the hardcoded `BuildDefaultSystemPrompt()` call site in
+    `SprkChatAgentFactory.CreateAgentAsync` with a call to
+    `IScopeResolverService.ResolvePersonaForChatAsync(tenantId, playbookId?)` (added in
+    task 003). The resolver returns the most-specific-wins persona; the factory uses its
+    `systemPrompt` field in the system-prompt assembly. With the SYS-DEFAULT row seeded
+    (task 004), behavior MUST be identical to today for tenants with no override (FR-04
+    binding).
+
+    Critical-path context: this task is the Pillar 1 cutover. After it lands, tenant admins
+    can change the chat-agent voice by creating a CUST- persona row in Power Apps — no
+    code deploy required. NFR-01 conversational primacy binding: the resolver augments the
+    system prompt but the agent ALWAYS retains conversational ability regardless of which
+    persona is resolved. Persona is the voice; conversation flow is intrinsic.
+
+    Per project CLAUDE.md "MUST NOT hardcode persona text in C# after Pillar 1 lands" —
+    `BuildDefaultSystemPrompt()` MUST be either deleted OR retained ONLY as a dev-time
+    fallback that asserts the resolver returned non-null (with a CRITICAL log + bug report).
+    Decide which path during implementation; document in task notes.
+
+    Regression test required: side-by-side comparison of CreateAgentAsync output before
+    and after the cutover, with no overrides in place, MUST produce byte-identical system
+    prompts.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with deep familiarity with `SprkChatAgentFactory.CreateAgentAsync`,
+    the chat-agent system prompt assembly, NFR-01 conversational primacy contract, and the
+    `IScopeResolverService` resolver pattern.
+  </role>
+
+  <goal>
+    `SprkChatAgentFactory.CreateAgentAsync` invokes `ResolvePersonaForChatAsync` and uses
+    the returned `systemPrompt`. With no tenant or playbook override in place, the
+    assembled system prompt is byte-identical to pre-cutover output. A regression test
+    asserts the equality. Build green; publish-size delta reported; ADR + NFR compliance
+    verified.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="chat-factory">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="resolver">src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs</file>
+    <file purpose="context-provider">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs</file>
+    <file purpose="chat-architecture">docs/architecture/chat-architecture.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">No new top-level Program.cs lines; resolver already registered in `AnalysisServicesModule`.</constraint>
+    <constraint source="ADR-013">Factory remains AI-internal; CRUD-side callers don't see the resolver.</constraint>
+    <constraint source="ADR-015">No user message content logged when persona resolution emits telemetry.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; ≤+5 MB R6 budget per NFR-02.</constraint>
+    <constraint source="spec NFR-01">Conversational primacy — scopes augment but NEVER replace conversational ability. Even with a strict CUST- persona, the agent still responds conversationally to any turn.</constraint>
+    <constraint source="spec NFR-10">8K system prompt budget preserved. Resolved persona text must fit within the existing `PlaybookChatContextProvider` budget.</constraint>
+    <constraint source="spec NFR-13">Safety pipeline (PromptShield + Groundedness + Citations + Privilege + Cross-matter middleware chain) unchanged.</constraint>
+    <constraint source="spec FR-03">Resolution order = global SYS- → tenant CUST- → playbook-attached (most specific wins per Q1).</constraint>
+    <constraint source="spec FR-04">With no override, system prompt MUST be byte-identical to pre-cutover output.</constraint>
+    <constraint source="project CLAUDE.md MUST NOT">MUST NOT hardcode persona text in C# after this task lands (data-driven only).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/chat-agent-factory</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/patterns/ai/streaming-endpoints.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>docs/architecture/scope-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="System prompt assembly" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs">
+        Identify the call site of `BuildDefaultSystemPrompt()`. The persona text feeds the
+        opening of the system prompt; the rest of the assembly (memory, workspace state if
+        any, knowledge context) follows unchanged.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — chat-agent core cutover + NFR-01 binding + binding cutover of hardcoded text". Read project CLAUDE.md + spec.md FR-03/04 + NFR-01/10/13.
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 002 ✅ + 003 ✅ + 004 ✅. Update `current-task.md` to task 005.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read all inputs + knowledge. Capture baseline publish size for delta calc. Capture the exact byte sequence of today's `CreateAgentAsync` system prompt with no overrides (use a test or temporary log) as the regression target.
+    </step>
+    <step order="3" name="Locate Call Site">
+      Open `SprkChatAgentFactory.cs`; identify `BuildDefaultSystemPrompt()` invocation. Plan the swap: inject `IScopeResolverService`, call `ResolvePersonaForChatAsync(tenantId, playbookId?)`, substitute returned `systemPrompt` text.
+    </step>
+    <step order="4" name="Implement Cutover">
+      Inject `IScopeResolverService` (constructor; module DI already registered). In `CreateAgentAsync`, replace `BuildDefaultSystemPrompt()` call with the resolver call. Decide on `BuildDefaultSystemPrompt()` fate: delete OR retain as null-safety assertion (CRITICAL log if resolver returns null + return the legacy text once as emergency fallback). Document the choice in task notes.
+    </step>
+    <step order="5" name="Add Regression Test">
+      Add unit test asserting: with no tenant CUST- and no playbook persona, `CreateAgentAsync` produces a system prompt byte-identical to the captured baseline from Step 2. This is the FR-04 binding contract.
+    </step>
+    <step order="6" name="Add Conversational-Primacy Test">
+      Add test asserting: even when a CUST- persona is resolved (mock), the agent retains the conversational layer (safety pipeline middleware chain still applied; chat history still consumed; no tool gate suppresses conversation). NFR-01 binding.
+    </step>
+    <step order="7" name="Build + Verify Publish Size">
+      `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors. `dotnet publish -c Release` → measure delta vs baseline; report ≤+5 MB R6 budget.
+    </step>
+    <step order="8" name="Verify Acceptance Criteria">
+      Walk each criterion below; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check` against changed `.cs` + new tests. Verify ADR-010 / ADR-013 / ADR-015 / NFR-01 / NFR-10 / NFR-13 / FR-04 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 005 ✅. Reset `current-task.md`. Report publish-size delta + Pillar 1 closeout summary.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, publish, test</tool>
+    <tool name="git">stage + commit changes on R6 worktree</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (modified — resolver wired)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SprkChatAgentFactoryPersonaTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (005 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-005-cutover-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SprkChatAgentFactory.CreateAgentAsync` injects + uses `IScopeResolverService.ResolvePersonaForChatAsync`.</criterion>
+    <criterion testable="true">With no tenant/playbook override, assembled system prompt is byte-identical to pre-cutover output (FR-04 regression test passes).</criterion>
+    <criterion testable="true">With CUST- override mocked, persona text used; conversational layer intact (NFR-01 test passes).</criterion>
+    <criterion testable="true">`BuildDefaultSystemPrompt()` either removed OR retained as null-safety assertion only (data-driven cutover binding per project CLAUDE.md MUST NOT).</criterion>
+    <criterion testable="true">8K system prompt budget unchanged (NFR-10).</criterion>
+    <criterion testable="true">Safety pipeline middleware chain unchanged (NFR-13).</criterion>
+    <criterion testable="true">No user message content logged in telemetry (ADR-015).</criterion>
+    <criterion testable="true">BFF publish-size delta reported; ≤+5 MB R6 total budget verified.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass at Step 9.5.</criterion>
+    <criterion testable="true">Pillar 1 complete: tenant admin can change agent voice by creating CUST- row in Power Apps — no code deploy.</criterion>
+  </acceptance-criteria>
+</task>

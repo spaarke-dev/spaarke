@@ -1,0 +1,141 @@
+<task id="088" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-D-09 Lightweight Eval Baseline (Q10) — Markdown Conversation Transcripts per Persona + Playbook</title>
+    <phase>Phase D — Command Router + Integration + Closeout</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>087</dependencies>
+    <blocks>089</blocks>
+    <tags>docs, integration-test, ai</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation + regression-reference capture per Q10 (R6 lightweight; full harness deferred R7). No code change; MINIMAL per task-create Step 0 rigor tree.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after vertical-slice; transcripts are best captured from the vertical-slice scenario output.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Capture the lightweight eval baseline per Q10 — markdown conversation transcripts per
+    persona + playbook combination, captured as regression references for R6. Full eval harness
+    with metrics + CI integration is explicitly deferred to R7 per the spec's Owner Clarifications
+    table.
+
+    For each significant persona × playbook combination exercised in R6, capture a markdown
+    transcript with the following sections:
+    - **Title** (e.g., "SYS-DEFAULT persona × summarize-document-for-chat playbook")
+    - **Persona used** (cite `sprk_aipersona` row by name + ID)
+    - **Playbook invoked** (cite `sprk_analysisplaybook` row by playbook ID)
+    - **User messages** (verbatim conversation user side)
+    - **Expected response shape** (per persona + outputSchema)
+    - **Actual response (snapshot)** (capture at vertical-slice scenario time)
+
+    Minimum coverage:
+    - SYS-DEFAULT persona × `summarize-document-for-chat@v1` (the vertical-slice scenario from
+      task 087)
+    - SYS-DEFAULT persona × `summarize-document-for-workspace@v1`
+    - SYS-DEFAULT persona × matter-prefill playbook (NFR-07 binding regression evidence)
+    - SYS-DEFAULT persona × project-prefill playbook (NFR-07 binding regression evidence)
+    - At least one CUST- persona variant if seeded in any Phase test
+
+    Transcripts live in `projects/spaarke-ai-platform-unification-r6/notes/eval-baseline/`.
+    Each file is named `{persona}-{playbook}.md`.
+
+    These are reference baselines, not automated tests. R7 will build the full eval harness on
+    top of these markdown files (parse them as test fixtures; compute metrics; integrate CI).
+
+    Frontend/BFF code-change delta = 0; BFF publish-size delta = 0 MB.
+  </prompt>
+
+  <role>
+    Documentation + light QA engineer with familiarity with the R6 vertical-slice output +
+    persona / playbook combinations. Comfortable with markdown transcript capture conventions.
+  </role>
+
+  <goal>
+    `projects/spaarke-ai-platform-unification-r6/notes/eval-baseline/` directory exists with at
+    least 4 markdown transcripts covering SYS-DEFAULT × the 4 migrated playbooks (summarize-chat,
+    summarize-workspace, matter-prefill, project-prefill). Each transcript follows the standard
+    shape (title, persona, playbook, user messages, expected shape, actual snapshot). Q10
+    deliverable met; R7 eval-harness team has a working reference baseline.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="vertical-slice-evidence">projects/spaarke-ai-platform-unification-r6/notes/task-087-vertical-slice-evidence.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec Q10 (Owner Clarifications)">R6 ships lightweight eval baseline (markdown transcripts per persona + playbook); full harness deferred to R7.</constraint>
+    <constraint source="ADR-015">Transcripts MUST NOT include any sensitive user message text beyond what's captured in the vertical-slice scenario. Synthesize generic user messages where actual messages would expose PII.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB (docs-only task).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>docs/eval-baseline</topic>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/notes/task-087-vertical-slice-evidence.md</file>
+    </files>
+    <patterns>
+      <pattern name="Transcript file shape" location="projects/spaarke-ai-platform-unification-r6/notes/eval-baseline/{persona}-{playbook}.md (new)">
+        Markdown sections: Title, Persona, Playbook, User Messages, Expected Response Shape, Actual Response Snapshot. Front-matter optional (YAML for future programmatic parsing).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context. Output: "🔒 RIGOR LEVEL: MINIMAL — Lightweight eval baseline per Q10; documentation-only".
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 088 status is 🔲, dep 087 is ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read task-087-vertical-slice-evidence.md (vertical-slice snapshot data). Read spec Q10 to confirm scope. Identify the 4 migrated actions from Pillar 5 (summarize-chat, summarize-workspace, matter-prefill, project-prefill).
+    </step>
+    <step order="3" name="Author 4+ Transcripts">
+      Create `projects/spaarke-ai-platform-unification-r6/notes/eval-baseline/` directory. Author 4 transcripts:
+      - `sys-default-summarize-chat.md` (from vertical-slice snapshot)
+      - `sys-default-summarize-workspace.md`
+      - `sys-default-matter-prefill.md` (NFR-07 binding evidence)
+      - `sys-default-project-prefill.md` (NFR-07 binding evidence)
+      Each follows the standard shape. Use SYNTHETIC user messages where actual would expose PII per ADR-015.
+    </step>
+    <step order="4" name="Cite Q10 in Each File">
+      Each transcript MUST include a front-line note: "Captured per R6 Q10 (lightweight eval baseline; full harness deferred R7). Reference file for future eval harness consumption."
+    </step>
+    <step order="5" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below.
+    </step>
+    <step order="6" name="Document + Complete">
+      Update task POML status. Update TASK-INDEX.md: 088 🔲 → ✅. Reset `current-task.md`. Report completion + downstream unblock (089).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Stage + commit eval-baseline transcripts</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/notes/eval-baseline/sys-default-summarize-chat.md (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/notes/eval-baseline/sys-default-summarize-workspace.md (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/notes/eval-baseline/sys-default-matter-prefill.md (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/notes/eval-baseline/sys-default-project-prefill.md (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 088 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/eval-baseline/` directory exists with at least 4 transcript files.</criterion>
+    <criterion testable="true">Each transcript follows standard shape: Title, Persona, Playbook, User Messages, Expected Response Shape, Actual Response Snapshot.</criterion>
+    <criterion testable="true">Coverage includes SYS-DEFAULT × summarize-chat, summarize-workspace, matter-prefill, project-prefill (Pillar 5 migrated actions).</criterion>
+    <criterion testable="true">Each transcript cites Q10 (R6 lightweight; full harness deferred R7).</criterion>
+    <criterion testable="true">No PII in transcripts — synthetic user messages used where actual would expose data per ADR-015.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (docs-only task).</criterion>
+  </acceptance-criteria>
+</task>

@@ -50,6 +50,16 @@ Load when:
 - ✅ **MUST** cache UAC snapshots per-request only (not across requests)
 - ✅ **MUST** include machine-readable deny codes (e.g., `sdap.access.deny.team_mismatch`)
 
+### SPE File Access — Writer-Identity Matching (binding — Pattern 4, 2026-06-08)
+
+- ✅ **MUST** match the identity that reads an SPE file with the identity that wrote it. The Spaarke MI is intentionally NOT registered as a guest app on the SPE container type — it is on its own writes' ACLs only.
+- ✅ **MUST** dispatch post-upload RAG indexing synchronously in the OBO request scope via `IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync(request, httpContext, ct)` for **any user-OBO-uploaded file** (Create* wizard uploads, SprkChat persist, PCF/Code Page uploads). A Service Bus job that runs under MI later will 403 on the SPE download.
+- ✅ **MUST** use `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct)` (Service Bus enqueue) ONLY when the file was written by MI itself (Office Add-in finalize, Email-to-Document, post-analysis re-index).
+- ❌ **MUST NOT** enqueue a Service Bus job that reads an SPE file written by a different identity than the job handler runs under. Background-job handlers run under MI (`_factory.ForApp()`); they cannot read user-OBO-uploaded files.
+- ❌ **MUST NOT** wire new post-upload pipelines through `JobSubmissionService.SubmitJobAsync(RagIndexingJobPayload)` from request-scoped endpoints. Use the helper's OBO method.
+
+> See: [`docs/architecture/sdap-auth-patterns.md` § Pattern 4 — Writer-Identity Matching Rule](../../docs/architecture/sdap-auth-patterns.md#writer-identity-matching-rule-binding--2026-06-08-post-phase-3a-uat-incident)
+
 ---
 
 ## MUST NOT Rules

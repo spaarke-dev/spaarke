@@ -22,6 +22,7 @@ export { CreateTaskNode } from './CreateTaskNode';
 export { SendEmailNode } from './SendEmailNode';
 export { CreateNotificationNode } from './CreateNotificationNode';
 export { WaitNode } from './WaitNode';
+export { EntityNameValidatorNode } from './EntityNameValidatorNode';
 
 // Import components for registry
 import { StartNode } from './StartNode';
@@ -35,6 +36,7 @@ import { CreateTaskNode } from './CreateTaskNode';
 import { SendEmailNode } from './SendEmailNode';
 import { CreateNotificationNode } from './CreateNotificationNode';
 import { WaitNode } from './WaitNode';
+import { EntityNameValidatorNode } from './EntityNameValidatorNode';
 
 /**
  * Node type registry for @xyflow/react v12.
@@ -55,4 +57,8 @@ export const nodeTypes: NodeTypes = {
   sendEmail: SendEmailNode,
   createNotification: CreateNotificationNode,
   wait: WaitNode,
+  // R4 hotfix #2 (2026-06-26): task 004 left this missing — canvas fell back to
+  // the default plain box. EntityNameValidator is a post-LLM Tool node; the
+  // component renders icon + "Tool" type label + output preview to match peers.
+  entityNameValidator: EntityNameValidatorNode,
 };

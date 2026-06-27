@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES5",
+    "module": "None",
+    "lib": ["ES2017", "DOM"],
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noEmitOnError": true,
+    "removeComments": false,
+    "sourceMap": false,
+    "declaration": false,
+    "outDir": ".",
+    "rootDir": ".",
+    "skipLibCheck": true,
+    "types": []
+  },
+  "files": ["insightWidgetOnLoad.ts", "insightCardMount.ts"]
+}

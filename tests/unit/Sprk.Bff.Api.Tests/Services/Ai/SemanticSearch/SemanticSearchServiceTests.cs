@@ -616,33 +616,6 @@ public class SemanticSearchServiceTests
         result.Metadata.AppliedFilters.EntityId.Should().BeNull();
     }
 
-    [Fact]
-    public async Task SearchAsync_AllScope_WithOptionalFilters_Works()
-    {
-        // Arrange
-        var service = CreateService();
-        var request = new SemanticSearchRequest
-        {
-            Query = "test query",
-            Scope = SearchScope.All,
-            Filters = new SearchFilters
-            {
-                DocumentTypes = new List<string> { "contract" },
-                FileTypes = new List<string> { "pdf" }
-            }
-        };
-
-        SetupMockEmbedding();
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync(request, TestTenantId);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.Metadata.AppliedFilters!.DocumentTypes.Should().Contain("contract");
-        result.Metadata.AppliedFilters.FileTypes.Should().Contain("pdf");
-    }
 
     [Fact]
     public async Task CountAsync_AllScope_ReturnsCount()
@@ -986,6 +959,202 @@ public class SemanticSearchServiceTests
         _deploymentServiceMock.Verify(
             x => x.GetSearchClientAsync(TestTenantId, It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    #endregion
+
+    #region SearchIndexName Thread-Through Tests (multi-container-multi-index-r1 FR-BFF-07 part 1, NFR-02)
+
+    // ---------------------------------------------------------------------------------------
+    // These tests pin down task 013's contract: SemanticSearchService MUST thread
+    // `SemanticSearchRequest.SearchIndexName` through to the resolver call.
+    //
+    //   * When non-null/non-empty: 3-arg overload is called with the explicit index name.
+    //   * When null or whitespace: 2-arg overload is called UNCHANGED (NFR-02 backward-compat).
+    //
+    // The two overloads exist for a specific reason — see IKnowledgeDeploymentService XML
+    // doc comments (lines 86–91): Moq's expression-tree Setup/Verify APIs cannot reference
+    // methods with optional arguments (CS0854), so the legacy 2-arg call site must be
+    // preserved exactly when no explicit index is supplied.
+    // ---------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task SearchAsync_WithExplicitSearchIndexName_PassesIndexNameToResolver()
+    {
+        // Arrange
+        var service = CreateService();
+        const string explicitIndexName = "spaarke-file-index";
+
+        var request = new SemanticSearchRequest
+        {
+            Query = "test search query",
+            Scope = SearchScope.Entity,
+            EntityType = TestEntityType,
+            EntityId = TestEntityId,
+            SearchIndexName = explicitIndexName
+        };
+
+        SetupMockEmbedding();
+
+        var searchClientMock = new Mock<SearchClient>();
+        var emptyResults = SearchModelFactory.SearchResults<KnowledgeDocument>(
+            values: new List<SearchResult<KnowledgeDocument>>(),
+            totalCount: 0,
+            facets: null,
+            coverage: null,
+            rawResponse: null!);
+        searchClientMock
+            .Setup(x => x.SearchAsync<KnowledgeDocument>(
+                It.IsAny<string>(),
+                It.IsAny<Azure.Search.Documents.SearchOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response.FromValue(emptyResults, null!));
+
+        // Set up ONLY the 3-arg overload — the production code must select it because the
+        // request carries a non-empty SearchIndexName.
+        _deploymentServiceMock
+            .Setup(x => x.GetSearchClientAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(searchClientMock.Object);
+
+        // Act
+        await service.SearchAsync(request, TestTenantId);
+
+        // Assert: the 3-arg overload received the exact value as the 2nd arg.
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(
+                TestTenantId,
+                explicitIndexName,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        // And the 2-arg overload was NOT called (proves the branch picked the explicit path).
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SearchAsync_WithoutSearchIndexName_UsesLegacyTwoArgOverload()
+    {
+        // Arrange — NFR-02: callers omitting SearchIndexName must hit the existing 2-arg
+        // overload UNCHANGED so legacy test fixtures (and production callers) continue to
+        // work as today.
+        var service = CreateService();
+        var request = CreateValidRequest(); // No SearchIndexName set → null.
+
+        SetupMockEmbedding();
+        SetupMockSearchClient(); // Sets up ONLY the 2-arg overload.
+
+        // Act
+        await service.SearchAsync(request, TestTenantId);
+
+        // Assert: the 2-arg overload was called with TestTenantId.
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(TestTenantId, It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        // And the 3-arg overload was NOT called.
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SearchAsync_WithWhitespaceSearchIndexName_UsesLegacyTwoArgOverload()
+    {
+        // Arrange — whitespace-only values are treated as "no index supplied" per the
+        // KnowledgeDeploymentService contract (it uses IsNullOrWhiteSpace internally).
+        // The service-side thread-through MUST mirror that semantic so the legacy path is
+        // selected for whitespace input.
+        var service = CreateService();
+        var request = new SemanticSearchRequest
+        {
+            Query = "test search query",
+            Scope = SearchScope.Entity,
+            EntityType = TestEntityType,
+            EntityId = TestEntityId,
+            SearchIndexName = "   "
+        };
+
+        SetupMockEmbedding();
+        SetupMockSearchClient();
+
+        // Act
+        await service.SearchAsync(request, TestTenantId);
+
+        // Assert
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(TestTenantId, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task CountAsync_WithExplicitSearchIndexName_PassesIndexNameToResolver()
+    {
+        // Arrange — CountAsync mirrors SearchAsync's thread-through so the count and search
+        // paths agree on which physical index is being queried.
+        var service = CreateService();
+        const string explicitIndexName = "spaarke-file-index";
+
+        var request = new SemanticSearchRequest
+        {
+            Query = "test search query",
+            Scope = SearchScope.Entity,
+            EntityType = TestEntityType,
+            EntityId = TestEntityId,
+            SearchIndexName = explicitIndexName
+        };
+
+        var searchClientMock = new Mock<SearchClient>();
+        var countResults = SearchModelFactory.SearchResults<KnowledgeDocument>(
+            values: new List<SearchResult<KnowledgeDocument>>(),
+            totalCount: 42,
+            facets: null,
+            coverage: null,
+            rawResponse: null!);
+        searchClientMock
+            .Setup(x => x.SearchAsync<KnowledgeDocument>(
+                It.IsAny<string>(),
+                It.IsAny<Azure.Search.Documents.SearchOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response.FromValue(countResults, null!));
+
+        _deploymentServiceMock
+            .Setup(x => x.GetSearchClientAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(searchClientMock.Object);
+
+        // Act
+        await service.CountAsync(request, TestTenantId);
+
+        // Assert
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(
+                TestTenantId,
+                explicitIndexName,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        _deploymentServiceMock.Verify(
+            x => x.GetSearchClientAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     #endregion

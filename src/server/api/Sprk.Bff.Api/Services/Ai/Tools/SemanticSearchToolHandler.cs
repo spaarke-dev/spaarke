@@ -351,6 +351,7 @@ public sealed class SemanticSearchToolHandler : IAnalysisToolHandler
                     prompt,
                     schemaBinaryData,
                     schemaName,
+                    temperature: (float)context.Temperature,
                     cancellationToken: cancellationToken);
             }
             else

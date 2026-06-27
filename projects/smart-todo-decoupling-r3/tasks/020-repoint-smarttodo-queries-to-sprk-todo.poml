@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Repoint SmartTodo kanban queries from `sprk_event` to `sprk_todo`</title>
+    <phase>Phase 3: SmartTodo Code Page Repoint</phase>
+    <status>not-started</status>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <dependencies>002, 010, 011, 012</dependencies>
+    <blocks>021, 022, 023, 024</blocks>
+    <tags>react, typescript, frontend, fluent-ui, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Refactors core kanban data path; tags include `fluent-ui` + `frontend`; modifies multiple `.tsx` files. FULL rigor.</rigor-reason>
+    <parallel-group>P3-W1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocks 021–023 within Phase 3 because they layer on top of the new query path.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update SmartTodo Code Page to query `sprk_todo` as the kanban data source. Remove the `todoflag=true` filter and all references to `sprk_event` in the kanban path. Update column rendering to use the new entity's attribute names (already mirrors prior shape — `sprk_todocolumn`, `sprk_todopinned`, etc.). Verify network trace shows only `/api/data/v9.x/sprk_todos` requests from the kanban path.
+  </prompt>
+
+  <role>Spaarke Code Page developer with Fluent v9 + Dataverse Web API expertise.</role>
+
+  <goal>All kanban data queries hit `/api/data/v9.x/sprk_todos`. Zero queries to `sprk_events` from the kanban path. Existing kanban behavior (drag, pin, threshold scoring) preserved.</goal>
+
+  <context>
+    <background>The SmartTodo Code Page was the original event-coupled surface. Phase 3 is its first-class repoint. The `sprk_todo` entity has the same kanban-behavior fields (mirrored from `sprk_event`), so the UI logic carries over with only the entity name changing.</background>
+    <relevant-files>
+      <file>src/solutions/SmartTodo/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-11">All kanban queries hit `sprk_todo`; no `todoflag=true` filter remains.</constraint>
+    <constraint source="NFR-01">Fluent v9 + semantic tokens + Griffel only.</constraint>
+    <constraint source="OS-1">No compat shims (no parallel `sprk_event` query path "just in case").</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>projects/smart-todo-decoupling-r3/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify every data-fetching call in SmartTodo Code Page (likely a hook or service file).</step>
+    <step order="2">Replace `sprk_event?$filter=sprk_todoflag eq true` with `sprk_todos` queries; preserve attribute selection and ordering logic.</step>
+    <step order="3">Update column/card rendering to use `sprk_todo`-prefixed attribute names where they differ from the prior shape.</step>
+    <step order="4">Remove any `sprk_event` imports / type definitions from the kanban path.</step>
+    <step order="5">Run `npm run build` + `npm test`. Verify clean build + test pass.</step>
+    <step order="6">Capture a browser network trace while loading the kanban; verify only `sprk_todos` requests from the kanban path.</step>
+    <step order="7">Fluent v9 lint pass on changed files.</step>
+    <step order="8">Update TASK-INDEX.md status to ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="grep">Reference verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">`src/solutions/SmartTodo/src/` — updated query and rendering paths</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`npm run build` clean.</criterion>
+    <criterion testable="true">Network trace shows requests to `/api/data/v9.x/sprk_todos`; zero requests to `sprk_events` from kanban path.</criterion>
+    <criterion testable="true">Repo grep returns zero `sprk_event` references in the kanban path of `src/solutions/SmartTodo/`.</criterion>
+    <criterion testable="true">Fluent v9 lint passes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

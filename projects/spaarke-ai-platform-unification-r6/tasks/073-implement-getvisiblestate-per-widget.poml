@@ -1,0 +1,109 @@
+<task id="073" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-C-28 — Implement `getAgentVisibleState()` per widget type (Summary / DocumentViewer / Dashboard / Table)</title>
+    <status>pending</status>
+    <estimated-effort>1 day</estimated-effort>
+    <phase>Phase C — Widget Visibility Contract (Pillar 9)</phase>
+    <wave>C-G2 (sequential after 072)</wave>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>072 (registry extension)</dependencies>
+    <tags>frontend, react, ai-widgets</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>4 distinct widget implementations; each contributes to agent prompt; data-shape choices have governance implications.</rigor-reason>
+    <parallel-group>C-G2</parallel-group>
+  </metadata>
+
+  <prompt>
+    Implement `getAgentVisibleState()` per spec FR-57 for each widget type:
+    - **Summary**: `{ widgetType: "Summary", summary, tldr, hasUserEdits }`
+    - **DocumentViewer**: `{ widgetType: "DocumentViewer", filename, mimeType, sizeBytes,
+      hasSelection, selectionText? }` (selectionText capped at 200 chars when present)
+    - **Dashboard**: `{ widgetType: "Dashboard", dashboardName, lastViewedSection }`
+      (NOT full chart data — privacy / size discipline)
+    - **Table**: `{ widgetType: "Table", rowCount, sortColumn, filteredColumns,
+      selectedRows[] }` (selectedRows are row IDs, NOT cell content)
+
+    Register each `getVisibleState` in the widget registry per task 072. All implementations
+    favor metadata over content (privacy default). selectionText in DocumentViewer is the
+    only content-bearing field + capped + opt-in per user "Add to Assistant" toggle.
+  </prompt>
+
+  <role>
+    Senior React/Fluent-v9 engineer familiar with each of the 4 widget implementations +
+    Pillar 9 visibility design intent.
+  </role>
+
+  <goal>
+    All 4 widgets implement `getAgentVisibleState`; registered correctly; output adheres
+    to FR-57 spec; privacy-default discipline followed.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="dashboard-widget-model">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    <file purpose="serialized-state-iface">src/client/shared/Spaarke.AI.Widgets/src/types/SerializedWidgetState.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared lib widget implementations.</constraint>
+    <constraint source="ADR-015">Each widget chooses what to expose; favor metadata over content; selectionText capped + opt-in.</constraint>
+    <constraint source="spec FR-57">Specific field set per widget type (Summary / DocumentViewer / Dashboard / Table).</constraint>
+    <constraint source="project R6 Pillar 9">Privacy default: don't expose chart data, cell content, full text.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/widget-visibility-impl</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">"🔒 RIGOR LEVEL: FULL — 4 widget impls; governance design."</step>
+    <step order="1" name="Review Progress">Read TASK-INDEX; confirm 072 complete.</step>
+    <step order="2" name="Gather Resources">Read each widget implementation + serialized state interface.</step>
+    <step order="3" name="Implement Summary getVisibleState">Per FR-57 shape.</step>
+    <step order="4" name="Implement DocumentViewer getVisibleState">Per FR-57 shape; selectionText cap 200 chars.</step>
+    <step order="5" name="Implement Dashboard getVisibleState">Per FR-57 shape; NO chart data.</step>
+    <step order="6" name="Implement Table getVisibleState">Per FR-57 shape; selectedRows = IDs not content.</step>
+    <step order="7" name="Register in Registry">All 4 via task 072 extension.</step>
+    <step order="8" name="Tests + UI Tests">Unit test each impl; verify schema-typed output; verify cap on selectionText.</step>
+    <step order="9.5" name="Quality Gates (FULL)">code-review + adr-check.</step>
+    <step order="10" name="Document + Complete">TASK-INDEX 073 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + type-check + lint</tool>
+    <tool name="git">Stage + commit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Each widget file modified to add getAgentVisibleState + register in WorkspaceWidgetRegistry</output>
+    <output type="tests">Unit tests for each impl</output>
+    <output type="docs">TASK-INDEX.md, current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Summary widget exposes `{ widgetType, summary, tldr, hasUserEdits }`.</criterion>
+    <criterion testable="true">DocumentViewer exposes `{ widgetType, filename, mimeType, sizeBytes, hasSelection, selectionText? }` with selectionText capped at 200 chars.</criterion>
+    <criterion testable="true">Dashboard exposes `{ widgetType, dashboardName, lastViewedSection }` — NO chart data.</criterion>
+    <criterion testable="true">Table exposes `{ widgetType, rowCount, sortColumn, filteredColumns, selectedRows[] }` — selectedRows are IDs.</criterion>
+    <criterion testable="true">All 4 registered via task 072 registry extension.</criterion>
+    <criterion testable="true">Unit tests cover shape conformance + cap enforcement.</criterion>
+    <criterion testable="true">code-review + adr-check pass.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test>Mount each widget with realistic state; call getAgentVisibleState; verify output matches FR-57 shape.</test>
+    <test>DocumentViewer with selection &gt;200 chars: verify selectionText truncated to 200.</test>
+  </ui-tests>
+</task>

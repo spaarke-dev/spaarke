@@ -1,10 +1,9 @@
-using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Microsoft.Identity.Client;
 using Microsoft.PowerBI.Api;
 using Microsoft.PowerBI.Api.Models;
 using Microsoft.Rest;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Api.Reporting;
 
@@ -52,24 +51,26 @@ public sealed class ReportingEmbedService
     /// </summary>
     private const double ClientRefreshFraction = 0.80;
 
-    /// <summary>JSON options used to serialize/deserialize <see cref="CachedEmbedEntry"/> to/from Redis.</summary>
-    private static readonly JsonSerializerOptions CacheJsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
+    // Resource identifier for ITenantCache (FR-05). Embed tokens are user-bound Power BI
+    // tokens, not authorization decisions — caching is permitted by ADR-009.
+    private const string ReportingEmbedResource = "reporting-embed";
+    private const int CacheVersion = 1;
 
     private readonly PowerBiOptions _options;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<ReportingEmbedService> _logger;
     private readonly IConfidentialClientApplication _cca;
 
     public ReportingEmbedService(
         IOptions<PowerBiOptions> options,
-        IDistributedCache cache,
+        ITenantCache cache,
+        IHttpContextAccessor httpContextAccessor,
         ILogger<ReportingEmbedService> logger)
     {
         _options = options.Value;
         _cache = cache;
+        _httpContextAccessor = httpContextAccessor;
         _logger = logger;
 
         // Build MSAL ConfidentialClientApplication once; MSAL manages the in-process token cache.
@@ -123,15 +124,16 @@ public sealed class ReportingEmbedService
         Guid? profileId = null,
         CancellationToken ct = default)
     {
-        var cacheKey = BuildEmbedCacheKey(workspaceId, reportId, username);
+        var tenantId = ExtractTenantId();
+        var idComponent = BuildEmbedCacheId(workspaceId, reportId, username);
 
-        // --- Cache-aside: check Redis first ---
-        try
+        // --- Cache-aside: check Redis first (only when tenant claim is available) ---
+        if (!string.IsNullOrEmpty(tenantId))
         {
-            var cached = await _cache.GetStringAsync(cacheKey, ct);
-            if (cached != null)
+            try
             {
-                var entry = JsonSerializer.Deserialize<CachedEmbedEntry>(cached, CacheJsonOptions);
+                var entry = await _cache.GetAsync<CachedEmbedEntry>(
+                    tenantId, ReportingEmbedResource, idComponent, CacheVersion, ct: ct);
                 if (entry != null)
                 {
                     var remaining = entry.Expiry - DateTimeOffset.UtcNow;
@@ -154,45 +156,59 @@ public sealed class ReportingEmbedService
                         "threshold {ThresholdPct}%) — regenerating proactively",
                         reportId, remaining.TotalSeconds, (int)(FreshThresholdFraction * 100));
                 }
+                else
+                {
+                    _logger.LogDebug("Embed token cache MISS for report {ReportId}", reportId);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                _logger.LogDebug("Embed token cache MISS for report {ReportId}", reportId);
+                // Cache read failure must never block token generation (ADR-009: graceful degradation).
+                _logger.LogWarning(ex, "Redis read failed for embed token (report {ReportId}); falling through to PBI API", reportId);
             }
-        }
-        catch (Exception ex)
-        {
-            // Cache read failure must never block token generation (ADR-009: graceful degradation).
-            _logger.LogWarning(ex, "Redis read failed for embed cache key {CacheKey}; falling through to PBI API", cacheKey);
         }
 
         // --- Cache MISS or near-expiry: generate a fresh token from Power BI ---
         var config = await GenerateFreshEmbedConfigAsync(workspaceId, reportId, username, roles, profileId, ct);
 
         // --- Store fresh token in Redis ---
-        try
+        if (!string.IsNullOrEmpty(tenantId))
         {
-            var ttl = config.Expiry - DateTimeOffset.UtcNow;
-            if (ttl > TimeSpan.Zero)
+            try
             {
-                var entry = CachedEmbedEntry.FromEmbedConfig(config);
-                var json = JsonSerializer.Serialize(entry, CacheJsonOptions);
-                await _cache.SetStringAsync(cacheKey, json,
-                    new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = ttl },
-                    ct);
+                var ttl = config.Expiry - DateTimeOffset.UtcNow;
+                if (ttl > TimeSpan.Zero)
+                {
+                    var entry = CachedEmbedEntry.FromEmbedConfig(config);
+                    await _cache.SetAsync(
+                        tenantId, ReportingEmbedResource, idComponent, CacheVersion,
+                        entry, ttl, ct: ct);
 
-                _logger.LogDebug(
-                    "Cached embed token for report {ReportId} with TTL {TtlSeconds:F0}s",
-                    reportId, ttl.TotalSeconds);
+                    _logger.LogDebug(
+                        "Cached embed token for report {ReportId} with TTL {TtlSeconds:F0}s",
+                        reportId, ttl.TotalSeconds);
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            // Cache write failure must never surface to the caller (ADR-009: graceful degradation).
-            _logger.LogWarning(ex, "Redis write failed for embed cache key {CacheKey}; token will not be cached", cacheKey);
+            catch (Exception ex)
+            {
+                // Cache write failure must never surface to the caller (ADR-009: graceful degradation).
+                _logger.LogWarning(ex, "Redis write failed for embed token (report {ReportId}); token will not be cached", reportId);
+            }
         }
 
         return config;
+    }
+
+    /// <summary>
+    /// Extracts the Azure AD tenant ID ('tid' claim) from the current HttpContext.
+    /// Returns null when no claim is present (in which case caching is skipped).
+    /// </summary>
+    private string? ExtractTenantId()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user is null) return null;
+        return user.FindFirst("tid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
     }
 
     /// <summary>
@@ -265,12 +281,12 @@ public sealed class ReportingEmbedService
     // -----------------------------------------------------------------------------------------
 
     /// <summary>
-    /// Builds the Redis cache key for an embed token.
-    /// Format: <c>pbi:embed:{workspaceId}:{reportId}:{userId}</c>.
+    /// Builds the ITenantCache id component for an embed token.
+    /// Format: <c>{workspaceId}:{reportId}:{userId}</c> (tenant prefix is added by the wrapper).
     /// Uses "anonymous" when no username is provided (unauthenticated / no-RLS scenario).
     /// </summary>
-    private static string BuildEmbedCacheKey(Guid workspaceId, Guid reportId, string? username) =>
-        $"pbi:embed:{workspaceId}:{reportId}:{username ?? "anonymous"}";
+    private static string BuildEmbedCacheId(Guid workspaceId, Guid reportId, string? username) =>
+        $"{workspaceId}:{reportId}:{username ?? "anonymous"}";
 
     /// <summary>
     /// Internal cache entry that stores the full embed config plus the token issue time so that

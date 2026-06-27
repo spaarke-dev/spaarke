@@ -34,14 +34,31 @@ public sealed class MatterPreFillService
 {
     private readonly SpeFileStore _speFileStore;
     private readonly ITextExtractor _textExtractor;
+    private readonly IPlaybookLookupService _playbookLookup;
+    private readonly IConsumerRoutingService _consumerRouting;
     private readonly IWorkspacePrefillAi? _prefillAi;
     private readonly WorkspaceOptions _workspaceOptions;
     private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<MatterPreFillService> _logger;
 
-    // Default: "Create New Matter Pre-Fill" playbook (Extract Matter Fields — ACT-008, gpt-4o)
-    private static readonly Guid DefaultPreFillPlaybookId =
-        Guid.Parse("2d660cad-d418-f111-8343-7ced8d1dc988");
+    // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c / Pattern A):
+    // Phase 1R replaces the prior WorkspaceOptions.MatterPreFillPlaybookId env-var
+    // binding with the sprk_playbookconsumer Dataverse routing table queried through
+    // IConsumerRoutingService.ResolveAsync(ConsumerTypes.MatterPreFill, ...). The
+    // env-var value remains readable as a deprecation-window fallback (FR-1R-06):
+    // when ResolveAsync returns null we fall through to the legacy
+    // _workspaceOptions.MatterPreFillPlaybookId read so existing config keeps working
+    // while admins migrate to the table.
+    //
+    // FR-05 (chat-routing-redesign-r1 task 016 / Pattern A — historical): the prior
+    // hardcoded "Create New Matter Pre-Fill" playbook GUID
+    // (2d660cad-d418-f111-8343-7ced8d1dc988) was already removed in Phase 1; this
+    // task 028c migration only changes the routing-resolution step (env var →
+    // sprk_playbookconsumer table) ahead of IPlaybookLookupService.GetByIdAsync.
+    //
+    // NFR-07 BINDING preserved: pre-fill flow signature, 45s timeout, useAiPrefill
+    // consumer contract, and $choices output shape are unchanged — only the
+    // internal playbook-ID lookup mechanism has been migrated.
 
     // Supported MIME types for the pre-fill endpoint
     private static readonly HashSet<string> AllowedExtensions =
@@ -67,6 +84,8 @@ public sealed class MatterPreFillService
     public MatterPreFillService(
         SpeFileStore speFileStore,
         ITextExtractor textExtractor,
+        IPlaybookLookupService playbookLookup,
+        IConsumerRoutingService consumerRouting,
         IOptions<WorkspaceOptions> workspaceOptions,
         IOptions<SharePointEmbeddedOptions> speOptions,
         ILogger<MatterPreFillService> logger,
@@ -74,6 +93,8 @@ public sealed class MatterPreFillService
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
+        _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
+        _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
         _workspaceOptions = (workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions))).Value;
         _speOptions = (speOptions ?? throw new ArgumentNullException(nameof(speOptions))).Value;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -294,11 +315,58 @@ public sealed class MatterPreFillService
             documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
         }
 
-        // Resolve playbook ID from configuration (allows per-environment override)
-        var playbookIdStr = _workspaceOptions.PreFillPlaybookId;
-        var playbookId = !string.IsNullOrEmpty(playbookIdStr) && Guid.TryParse(playbookIdStr, out var parsed)
-            ? parsed
-            : DefaultPreFillPlaybookId;
+        // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c / Pattern A):
+        // Primary lookup is now IConsumerRoutingService.ResolveAsync(ConsumerTypes.MatterPreFill)
+        // which queries sprk_playbookconsumer with 5-min TTL (ADR-014). When the table has no
+        // matching row, ResolveAsync returns null and we fall back to the legacy
+        // WorkspaceOptions.MatterPreFillPlaybookId env-var (typed-options per ADR-018) for the
+        // FR-1R-06 deprecation window — preserving every pre-task-028c behavior so admins can
+        // migrate to the table without breaking existing deployments. Hardening (code-review S-5):
+        // ConsumerTypes.MatterPreFill is the compile-time constant — never use a literal string.
+        //
+        // NFR-07 BINDING preserved: the 45s timeout below, useAiPrefill consumer contract, and
+        // $choices output schema are unchanged — only the internal routing mechanism has been
+        // migrated.
+        Guid? routedPlaybookId = await _consumerRouting
+            .ResolveAsync(ConsumerTypes.MatterPreFill, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        string? configuredPlaybookId = routedPlaybookId?.ToString();
+        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+        {
+            // Fallback to legacy env var during the FR-1R-06 deprecation window.
+            configuredPlaybookId = _workspaceOptions.MatterPreFillPlaybookId;
+        }
+
+        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+        {
+            _logger.LogError(
+                "Matter pre-fill playbook is not configured. Neither sprk_playbookconsumer " +
+                "(consumerType='{ConsumerType}') nor Workspace:MatterPreFillPlaybookId returned a " +
+                "playbook id. RequestId={RequestId}. Configure the routing table or set the " +
+                "per-environment env var as a fallback.",
+                ConsumerTypes.MatterPreFill, requestId);
+            return PreFillResponse.Empty(
+                "CONFIG_MISSING: Workspace:MatterPreFillPlaybookId is not configured");
+        }
+
+        Guid playbookId;
+        try
+        {
+            var playbook = await _playbookLookup
+                .GetByIdAsync(configuredPlaybookId, cancellationToken)
+                .ConfigureAwait(false);
+            playbookId = playbook.Id;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to resolve matter pre-fill playbook by stable ID '{StableId}'. " +
+                "RequestId={RequestId}",
+                configuredPlaybookId, requestId);
+            return PreFillResponse.Empty(
+                $"PLAYBOOK_LOOKUP_FAILED: {ex.Message}");
+        }
 
         _logger.LogInformation(
             "Invoking playbook for matter field extraction. PlaybookId={PlaybookId}, " +

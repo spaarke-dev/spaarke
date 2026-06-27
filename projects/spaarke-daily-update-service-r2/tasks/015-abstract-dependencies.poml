@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Abstract dependencies — props/parameters; remove solution-local imports (FR-07)</title>
+    <phase>P2: Pattern D Hoist</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>014</dependencies>
+    <blocks>016</blocks>
+    <tags>frontend, react, refactoring, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tightens shared-lib boundary; prevents solution-coupling regressions</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 014; consolidates surface API</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per FR-07: every hoisted component and hook accepts abstracted dependencies as props/parameters: `authenticatedFetch`, `webApi`, `userId`, `tenantId`, optional callbacks (`onRateLimitError`, `onRecordOpen`). Grep of `@spaarke/daily-briefing-components/src/` must show ZERO imports from `src/solutions/LegalWorkspace`, `src/solutions/DailyBriefing`, or `src/solutions/SpaarkeAi`.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in shared-lib boundary hygiene and dependency-injection patterns for hooks/components.</role>
+
+  <goal>Zero solution-local imports inside the new package; all dependencies passed as props/parameters; clean architectural boundary.</goal>
+
+  <context>
+    <background>
+      Per FR-07: shared package must not import from any solution. This task closes any remaining transitive coupling left over from tasks 011–014.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared package boundary; no consumer-direction imports.</constraint>
+    <constraint source="project">All hoisted components/hooks must accept `authenticatedFetch`, `webApi`, `userId`, `tenantId` + optional callbacks as props/parameters.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `grep -r "from '../../../../solutions" src/client/shared/Spaarke.DailyBriefing.Components/src/` (or equivalent path traversal) — list every violating import.</step>
+    <step order="2">For each violation: refactor the import out by surfacing the dependency as a prop or hook parameter.</step>
+    <step order="3">Update `types/index.ts` with shared dep-injection interfaces (e.g., `BriefingDependencies = { authenticatedFetch, webApi, userId, tenantId, onRateLimitError?, onRecordOpen? }`).</step>
+    <step order="4">Verify components accept abstracted deps via composition (typically passed down from `DailyBriefingApp`).</step>
+    <step order="5">Run `npm run build` on new package; verify build green.</step>
+    <step order="6">Re-run grep — confirm zero solution-local imports remain.</step>
+    <step order="7">Update TASK-INDEX.md: change task 015 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript packages.</tool>
+    <tool name="terminal">Grep + file ops.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/types/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -r "solutions/" src/client/shared/Spaarke.DailyBriefing.Components/src/ --include="*.ts" --include="*.tsx"` returns zero matches.</criterion>
+    <criterion testable="true">All component and hook signatures accept abstracted dependencies as props/parameters.</criterion>
+    <criterion testable="true">Build green on new package.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is hygiene work. If you find an unfixable solution-local coupling (e.g., a singleton from `LegalWorkspace`), surface in `notes/` and propose a hoist of that singleton.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

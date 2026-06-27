@@ -297,7 +297,25 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
       },
 
       // -----------------------------------------------------------------------
-      // My To Do List — SmartToDo (height: 560px, 50% width)
+      // My To Do List — SmartToDo
+      //
+      // R4-110 (2026-06-23) — chain audit cleanup: the `calc(100vh - 200px)`
+      // sizing override was a defensive workaround during UAT rounds 8/9
+      // when the parent chain (WorkspaceLayoutWidget.root + WorkspaceShell.row)
+      // didn't reliably deliver determinate height to the SectionPanel.
+      // Rounds 11 + 12 restored that chain at the source; R4-110 added
+      // chain robustness at WorkspaceTabManagerComponent.content. The
+      // SectionPanel now stretches via the grid row's `alignItems: stretch`
+      // and the widget fills via its own `height: 100%` root.
+      //
+      // `minHeight: 560px` is retained as a floor so this default 5-section
+      // dashboard remains usable on small viewports; it matches todoRegistration
+      // .defaultHeight = "560px" used by the dynamic workspace layouts
+      // (`@spaarke/ui-components` buildDynamicWorkspaceConfig path).
+      //
+      // To make SmartTodo dominate a workspace tab visually, create a
+      // single-section workspace layout via the WorkspaceLayoutWizard rather
+      // than overriding the height here.
       // -----------------------------------------------------------------------
       {
         id: "todo",
@@ -305,7 +323,7 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
         title: "My To Do List",
         badgeCount: p.todoCount,
         toolbar: todoToolbar,
-        style: { height: "560px" },
+        style: { minHeight: "560px" },
         renderContent: () => (
           <SmartToDo
             embedded

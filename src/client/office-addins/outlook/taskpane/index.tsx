@@ -5,7 +5,7 @@ import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
 import { authService, apiClient } from '@shared/services';
 
 // Version information - synced with manifest version
-const APP_VERSION = '1.0.6';
+const APP_VERSION = '1.0.18';
 const BUILD_DATE = process.env.BUILD_DATE || 'Jan 23, 2026';
 
 // Configuration from environment or build-time injection
@@ -14,7 +14,55 @@ const CONFIG = {
   tenantId: process.env.TENANT_ID || 'a221a95e-6abc-4434-aecc-e48338a1b2f2',
   bffApiClientId: process.env.BFF_API_CLIENT_ID || '1e40baad-e065-4aea-a8d4-4b7ab273458c',
   bffApiBaseUrl: process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net',
+  // SmartTodo Code Page URL (smart-todo-decoupling-r3 FR-27 / task 070).
+  // When set, the "Create To Do" ribbon action opens the wizard from this URL
+  // with the launch context query params. Empty string disables the action.
+  smartTodoCodePageUrl: process.env.SMARTTODO_CODEPAGE_URL || '',
 };
+
+/**
+ * Read the `?action=` query param from the taskpane URL. Used by the Outlook
+ * "Create To Do" ribbon (smart-todo-decoupling-r3 FR-27 / task 070): the manifest
+ * button opens the taskpane with `?action=createTodo` which routes the App
+ * to render CreateTodoView instead of the default tabs.
+ */
+function readInitialAction(): 'createTodo' | undefined {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const action = params.get('action');
+    return action === 'createTodo' ? 'createTodo' : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Build the createTodoConfig wiring for the App, including the save-flow
+ * adapter. When the user clicks "Create To Do" and the email isn't yet saved
+ * to Spaarke, the CreateTodoView calls this callback. Until task 072 wires
+ * the in-taskpane SaveView orchestration, this returns null (signalling "save
+ * was not completed") so the view surfaces a clear "save first" message.
+ *
+ * @see projects/smart-todo-decoupling-r3/notes/outlook-ribbon-create-todo.md
+ */
+function buildCreateTodoConfig() {
+  if (!CONFIG.smartTodoCodePageUrl) {
+    // Action disabled — the App falls through to the default tabs.
+    return undefined;
+  }
+  return {
+    codePageBaseUrl: CONFIG.smartTodoCodePageUrl,
+    saveEmailToSpaarke: async () => {
+      // Initial wiring: the host save-flow integration is intentionally a stub
+      // here. The CreateTodoView's "save first" path surfaces a clear message
+      // pointing users to the Save view. A follow-up task can replace this
+      // with a richer in-taskpane orchestrator (open SaveView programmatically,
+      // await job completion, re-look up). For task 070 (code-only), the
+      // stub keeps the contract intact without requiring cross-view coupling.
+      return null;
+    },
+  };
+}
 
 // Global root for error rendering
 let reactRoot: Root | null = null;
@@ -138,9 +186,18 @@ async function init() {
 
   try {
     reactRoot = createRoot(container);
+    const initialAction = readInitialAction();
+    const createTodoConfig = buildCreateTodoConfig();
     reactRoot.render(
       <React.StrictMode>
-        <App hostAdapter={hostAdapter} title="Spaarke for Outlook" version={APP_VERSION} buildDate={BUILD_DATE} />
+        <App
+          hostAdapter={hostAdapter}
+          title="Spaarke for Outlook"
+          version={APP_VERSION}
+          buildDate={BUILD_DATE}
+          {...(initialAction ? { initialAction } : {})}
+          {...(createTodoConfig ? { createTodoConfig } : {})}
+        />
       </React.StrictMode>
     );
     console.log('[Spaarke] React app rendered successfully');

@@ -1,0 +1,118 @@
+<task id="R3-062" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Update `DeliverToIndexNodeExecutor` to write new fields (dual-write)</title>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+RE-TARGETED per task 060 inventory §6.2/§6.3 + task 061 completion notes: the POML named
+`DeliverToIndexNodeExecutor.cs`, but that file does NOT contain `sprk_searchindexed` references.
+The ACTUAL writer call-sites + mapping layer were updated instead (single-choke-point per
+inventory recommendation §6.2 — covers all 3 upstream writers with one model+mapping change).
+
+FILES MODIFIED (5 production + 2 test):
+  - src/server/shared/Spaarke.Dataverse/Models.cs
+    Added `SearchIndexQueuedOn` + `SearchIndexCompletedOn` (DateTime?) to both `UpdateDocumentRequest`
+    (line 187+) and `DocumentEntity` (line 298+); annotated legacy SearchIndexed + SearchIndexedOn
+    as "PRESERVED for dual-write transition per spec line 366" with XML doc cross-references.
+  - src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs
+    Extended PATCH payload mapping (lines 611-620) and GET MapToDocumentEntity (lines 786-797)
+    to include sprk_searchindex{queued,completed}on alongside legacy sprk_searchindexed +
+    sprk_searchindexedon.
+  - src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs
+    Extended GET column select-list (lines 120-125), UPDATE entity attribute writes (lines 530-548),
+    and MapToDocumentEntityWithLookups (lines 1093-1100) for the same 2 new attributes.
+  - src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs (line ~211)
+    Completion path: dual-writes `SearchIndexCompletedOn = UtcNow` AND legacy `SearchIndexed=true`
+    + `SearchIndexedOn = UtcNow` (single `completedAt` capture for consistency).
+  - src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs (lines ~558 + ~702)
+    IndexFile + SendToIndex endpoints: same dual-write pattern as the handler.
+  - tests/unit/Sprk.Bff.Api.Tests/Integration/DataverseEntitySchemaTests.cs
+    Extended ExpectedFieldMappings with 2 new entries (Field Count test auto-extends);
+    added new region "Search-Index Lifecycle Dual-Write (R3 FR-3H3.2 / AC-H3.2)" with 4 tests:
+    - UpdateDocumentRequest_HasSearchIndexLifecycleProperties
+    - UpdateDocumentRequest_LegacySearchIndexFieldsPreservedForDualWrite
+    - BuildEntity_WithSearchIndexQueuedOnOnly_RepresentsEnqueueState
+    - BuildEntity_OnCompletion_DualWritesNewAndLegacyFields
+  - tests/unit/Sprk.Bff.Api.Tests/Services/Jobs/Handlers/RagIndexingJobHandlerTests.cs
+    Added new region "Search-Index Lifecycle Dual-Write (R3 FR-3H3.2 / AC-H3.2 — task 062)" with 3 tests:
+    - ProcessAsync_SuccessfulIndexing_DualWritesNewAndLegacySearchIndexFields (captures UpdateDocumentRequest
+      passed to IDocumentDataverseService; asserts SearchIndexCompletedOn set within
+      before/after UtcNow window; legacy SearchIndexed=true; SearchIndexedOn mirrors
+      CompletedOn; SearchIndexQueuedOn null; SearchIndexName unchanged)
+    - ProcessAsync_IndexingFailure_DoesNotWriteCompletionFields (failure path leaves both
+      new + legacy completion fields untouched — the long-standing pitfall fix)
+    - ProcessAsync_DataverseUpdateFails_StillReportsSuccessfulOutcome (resilience: indexing
+      success not held hostage by tracking-field write failure)
+
+DUAL-WRITE SEMANTICS (per spec FR-3H3.2 + AC-H3.2 + spec assumption line 366):
+  - ENQUEUE path: writers may set `SearchIndexQueuedOn = UtcNow`; do NOT touch `SearchIndexed`
+    or `SearchIndexCompletedOn` (state = "in progress"). [Note: no current code path enqueues
+    a separate "queued" stamp — the existing writers only fire on completion. The model
+    supports the enqueue stamp for future Service Bus publish-site instrumentation per inventory §6.4.]
+  - COMPLETION path: writers MUST dual-write — `SearchIndexCompletedOn = UtcNow` AND
+    `SearchIndexed = true` AND `SearchIndexedOn = UtcNow` (single captured `completedAt`
+    timestamp shared across all three for consistency). `SearchIndexName` is the routing
+    field and is unchanged by this migration.
+  - FAILURE path: writers leave `SearchIndexCompletedOn` null + `SearchIndexed` false/null
+    (mirrors the existing failure convention — failure exits before reaching the Update call,
+    or the try/catch around the Dataverse update logs warning and swallows non-fatal errors).
+  - IDEMPOTENCY: PATCH semantics — re-running the completion write re-stamps both new and
+    legacy fields atomically.
+
+QUALITY GATES:
+  - Build (Sprk.Bff.Api): 0 errors / 16 pre-existing warnings (unchanged vs baseline)
+  - Build (test project):  0 errors / 1 pre-existing warning
+  - Tests (focused — RagIndexingJobHandlerTests + DataverseEntitySchemaTests): 64/64 PASS
+  - Tests (full BFF suite — 7603 total): 7493 passed / 0 failed / 110 skipped (zero regressions)
+  - Publish-size (BFF): 46.21 MB compressed; delta vs 46.21 MB post-Wave 14 baseline = 0 MB
+    (no new packages, only 2 new DateTime? properties + comment additions). NFR-01 PASS.
+  - CVE: no new HIGH. Microsoft.Kiota.Abstractions 1.21.2 HIGH is pre-existing baseline.
+  - ADR-check: ADR-001/007/008/010/013/024/029/032 all clean — no new endpoints, no new
+    interfaces, no new DI registrations, mapping layer single-choke-point preserved per
+    inventory recommendation §6.2.
+  - bff-extensions §A: no new packages; existing IDocumentDataverseService used (ISP-segregated
+    per shared CLAUDE.md); test-update obligation §F satisfied (5 new tests across 2 files).
+
+COORDINATION WITH PARALLEL SIBLING:
+  - 094 ran in parallel; touches `src/client/code-pages/PlaybookBuilder/` (frontend). Zero overlap
+    with BFF/Dataverse code paths.
+    </completion-notes>
+    <phase>P7.1</phase>
+    <parallel-group>N (with 061)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>2h</estimated-effort>
+    <tags>bff-api,playbook,indexing,h3</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeliverToIndexNodeExecutor.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/DeliverToIndexNodeExecutorTests.cs</file>
+    </relevant-files>
+    <dependencies>061</dependencies>
+  </metadata>
+  <prompt>Rewrite DeliverToIndexNodeExecutor to: (a) write `sprk_searchindexqueuedon` when enqueued; (b) write `sprk_searchindexcompletedon` when index callback confirms completion; (c) keep dual-writing old `sprk_searchindexed` boolean during transition.</prompt>
+  <goal>Index queueing + completion correctly recorded in new datetime fields. Old field still set for backward compat.</goal>
+  <constraints>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+    <constraint source="spec FR-3H3.2">Update writer to use new fields</constraint>
+  </constraints>
+  <knowledge>
+    <topic>node-executor-dataverse-write</topic>
+    <files>
+      <file>.claude/patterns/ai/indexing-pipeline.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeliverToIndexNodeExecutor.cs</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-3H3.2</step>
+    <step order="1">Update executor enqueue path: write queuedon = UtcNow</step>
+    <step order="2">Update completion path (callback from AI Search): write completedon = UtcNow</step>
+    <step order="3">Dual-write sprk_searchindexed = true at completion (transition)</step>
+    <step order="4">Unit tests for both paths</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Queued doc has sprk_searchindexqueuedon set</criterion>
+    <criterion testable="true">Completed doc has sprk_searchindexcompletedon AND sprk_searchindexed=true (dual)</criterion>
+    <criterion testable="true">Unit tests pass</criterion>
+  </acceptance-criteria>
+</task>

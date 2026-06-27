@@ -1,9 +1,8 @@
-using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -32,8 +31,21 @@ public class AnalysisChatContextResolver
     /// <summary>Absolute TTL for analysis context cache entries (ADR-009).</summary>
     internal static readonly TimeSpan ContextCacheTtl = TimeSpan.FromMinutes(30);
 
-    /// <summary>Cache key prefix. Must match the pattern expected by any eviction logic.</summary>
-    internal const string CacheKeyPrefix = "chat-context:";
+    /// <summary>Tenant-cache resource name for analysis-context payloads (FR-05).</summary>
+    internal const string CacheResource = "analysis-chat-context";
+
+    /// <summary>Tenant-cache schema version for analysis-context payloads.</summary>
+    internal const int CacheVersion = 1;
+
+    /// <summary>Legacy alias retained for tests that referenced the pre-FR-05 prefix constant.</summary>
+    internal const string CacheKeyPrefix = "tenant:";
+
+    /// <summary>
+    /// Reproduces the on-wire cache key produced by <see cref="ITenantCache"/> for legacy
+    /// test consumers. Format: <c>tenant:{tenantId}:analysis-chat-context:{analysisId}:v1</c>.
+    /// </summary>
+    internal static string BuildCacheKey(string tenantId, string analysisId)
+        => $"tenant:{tenantId}:{CacheResource}:{analysisId}:v{CacheVersion}";
 
     /// <summary>
     /// Static mapping from <c>sprk_playbookcapabilities</c> Dataverse option set integer values
@@ -111,20 +123,13 @@ public class AnalysisChatContextResolver
     internal const string TestStubConfigKey = "Analysis:UseStubResolver";
 
     private readonly IGenericEntityService _entityService;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ILogger<AnalysisChatContextResolver> _logger;
     private readonly bool _testStubEnabled;
 
-    /// <summary>
-    /// Builds the Redis cache key for an analysis context lookup.
-    /// Key format: <c>chat-context:{tenantId}:{analysisId}</c> (ADR-014 — tenant-scoped).
-    /// </summary>
-    internal static string BuildCacheKey(string tenantId, string analysisId)
-        => $"{CacheKeyPrefix}{tenantId}:{analysisId}";
-
     public AnalysisChatContextResolver(
         IGenericEntityService entityService,
-        IDistributedCache cache,
+        ITenantCache cache,
         ILogger<AnalysisChatContextResolver> logger,
         IConfiguration? configuration = null)
     {
@@ -183,23 +188,17 @@ public class AnalysisChatContextResolver
             return BuildCannedTestStubResponse(analysisId);
         }
 
-        var cacheKey = BuildCacheKey(tenantId, analysisId);
-
-        // Hot path: Redis cache (ADR-009 — Redis first)
+        // Hot path: Redis cache (ADR-009 — Redis first). Tenant-scoped via ITenantCache (FR-05).
         try
         {
-            var cachedBytes = await _cache.GetAsync(cacheKey, ct);
-            if (cachedBytes is not null)
+            var cached = await _cache.GetAsync<AnalysisChatContextResponse>(
+                tenantId, CacheResource, analysisId, CacheVersion, ct: ct);
+            if (cached is not null)
             {
                 _logger.LogDebug(
                     "Cache HIT for analysis context (tenant={TenantId}, analysis={AnalysisId})",
                     tenantId, analysisId);
-
-                var cached = JsonSerializer.Deserialize<AnalysisChatContextResponse>(cachedBytes);
-                if (cached is not null)
-                {
-                    return cached;
-                }
+                return cached;
             }
         }
         catch (Exception ex)
@@ -222,7 +221,7 @@ public class AnalysisChatContextResolver
         }
 
         // Cache the result with a 30-minute absolute TTL (ADR-009)
-        await CacheContextAsync(cacheKey, response, ct);
+        await CacheContextAsync(tenantId, analysisId, response, ct);
 
         return response;
     }
@@ -673,27 +672,31 @@ public class AnalysisChatContextResolver
     /// <summary>
     /// Serialises the context response to JSON and stores it in Redis with a 30-minute
     /// absolute TTL (ADR-009 — no sliding expiration to prevent stale data accumulation).
+    /// Tenant-scoped via <see cref="ITenantCache"/> per FR-05.
     /// </summary>
     private async Task CacheContextAsync(
-        string cacheKey,
+        string tenantId,
+        string analysisId,
         AnalysisChatContextResponse response,
         CancellationToken ct)
     {
         try
         {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(response);
-            var options = new DistributedCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = ContextCacheTtl
-            };
-            await _cache.SetAsync(cacheKey, bytes, options, ct);
+            await _cache.SetAsync(
+                tenantId,
+                CacheResource,
+                analysisId,
+                CacheVersion,
+                response,
+                ContextCacheTtl,
+                ct: ct);
         }
         catch (Exception ex)
         {
             // Redis failure should not block context resolution — degrade gracefully
             _logger.LogWarning(ex,
-                "Redis cache write failed for analysis context (key={CacheKey}); result will not be cached",
-                cacheKey);
+                "Redis cache write failed for analysis context (tenant={TenantId}, analysis={AnalysisId}); result will not be cached",
+                tenantId, analysisId);
         }
     }
 }

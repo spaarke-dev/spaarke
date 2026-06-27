@@ -43,6 +43,8 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 
 5. **MUST** verify the addition follows feature-module DI conventions per ADR-010 — register through a focused `Add{Feature}Module()` extension, not as a flat blob of `Program.cs` registrations.
 
+6. **MUST** verify any new config field (column, JSON property, scope entry) is on the right entity per the [Action/Node/Playbook config boundary decision tree](../../docs/architecture/ai-architecture-actions-nodes-scopes.md) — Home A (Action row) vs Home B (Playbook header columns) vs Home C (Node row + `sprk_configjson`) vs Home D (N:N scope relationships). See §G below. PR description MUST state the chosen home + why it does not belong in any of the other three. Added 2026-06-26 (R4 canonical-truth loop).
+
 ### B. New Package References (Binding)
 
 - **MUST** check `dotnet list package --vulnerable --include-transitive` before adding any package. New packages MUST NOT introduce HIGH-severity CVEs into the transitive graph.
@@ -62,6 +64,10 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 - **MUST** use the ADR-004 Job Contract pattern (`IJobHandler<T>`) for new async work — not a free-form `IHostedService`
 - **MUST** keep AI-coupled job handlers in `Services/Ai/Jobs/` (post-Outcome E reorganization) — NOT in `Services/Jobs/Handlers/`
 - **MUST NOT** add new direct LLM/Azure-OpenAI calls outside `Services/Ai/`
+- **MUST** if the background work reads an SPE file, verify the SPE writer-identity rule (Pattern 4):
+  - **File written by USER (OBO upload)** → dispatch SYNC INLINE in the OBO request scope via `IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync(request, httpContext, ct)` (or directly call `IFileIndexingService.IndexFileAsync(request, httpContext, ct)`). A Service Bus job that runs later under MI will 403.
+  - **File written by MI** (Office Add-in finalize, Email-to-Document, post-analysis re-index) → dispatch via `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct)` (Service Bus + `RagIndexingJobHandler` under MI). MI is on its own writes' ACLs.
+  - See [`.claude/patterns/auth/spe-writer-identity-matching.md`](../patterns/auth/spe-writer-identity-matching.md) for the decision matrix and the 2026-06-08 Phase 3a UAT incident that motivated this rule.
 
 ### E. AI Feature Additions
 
@@ -115,6 +121,22 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 - r2 evidence — [`projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/phase4-track-e-anti-drift-report-2026-06-01.md) §2.1 + Appendix A
 - Phase 5 procedure-doc codification — [`docs/procedures/testing-and-code-quality.md`](../../docs/procedures/testing-and-code-quality.md) §18.1
 - Per-service inventory — [`projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md`](../../projects/sdap.bff.api-test-suite-repair-r2/baseline/asymmetric-registration-inventory-2026-06-01.md)
+- **2026-06-05 audit reinforcement** — [`bff-ai-architecture-audit-r1` LATENT BUG #1](../../projects/bff-ai-architecture-audit-r1/decisions/DR-003-public-contracts-facade.md) surfaced a **transitive** instance of this anti-pattern (`IInsightsAi` registered unconditionally, but ctor-resolved deps `IPlaybookOrchestrationService` + `IOpenAiClient` + `IInsightsPlaybookExecutionCache` conditional behind compound-AI gate → 500 instead of 503 under OFF). Fix: PR #351 moved facade registration into the compound-ON helper + added 4 Null peers in the compound-OFF helper. **Static scan extension**: the static scan must ALSO be applied transitively to the ctor dep chain of every conditional service.
+
+##### F.1-runtime — Runtime-verifiable detection fixture (W4-2 / NEW 2026-06-05)
+
+The static scan above catches the obvious case. The audit W4-2 finding recommends a complementary **runtime fixture** that boots the host with all 4 compound-gate combinations and resolves every public endpoint's ctor params:
+
+```csharp
+[Theory]
+[InlineData(analysisEnabled: true,  docIntelEnabled: true)]   // ON × ON
+[InlineData(analysisEnabled: true,  docIntelEnabled: false)]  // ON × OFF
+[InlineData(analysisEnabled: false, docIntelEnabled: true)]   // OFF × ON
+[InlineData(analysisEnabled: false, docIntelEnabled: false)]  // OFF × OFF
+public async Task EveryPublicEndpoint_ResolvesItsHandlerCtorParams(bool analysisEnabled, bool docIntelEnabled) { /* ... */ }
+```
+
+When all 4 combinations resolve without `InvalidOperationException`, the §F.1 anti-pattern is empirically blocked. **Implementation queued** as Migration PR #8 per [`migration-plan.md` §2.8](../../projects/bff-ai-architecture-audit-r1/notes/migration-plan.md); Insights team owns. Until that fixture ships, the static-scan rule + explicit reviewer discipline remain the only enforcement.
 
 #### F.2 Fixture-Config-FIRST Inspection Protocol (Binding per r2 task 081 / D-13)
 
@@ -168,6 +190,58 @@ DO NOT collapse fixture-config gaps into "upstream cluster fix subsumes it" — 
 4. **After merge to master, watch the auto-deploy**: it triggers immediately on push-to-master with matching path filter. `gh run watch` confirms the deploy completes successfully before the next project's merge can run cleanly.
 
 **Cross-reference**: [`docs/guides/bff-deploy-coordination.md`](../../docs/guides/bff-deploy-coordination.md) (referenced; expand here if/when a longer narrative is needed). For solo-deploy mechanics see [`.claude/skills/bff-deploy/SKILL.md`](../skills/bff-deploy/SKILL.md).
+
+### G. Action / Node / Playbook Config Boundary (Binding per R4 canonical-truth loop, 2026-06-26)
+
+**Codified 2026-06-26** from the spaarke-daily-update-service-r4 canonical-truth loop after surfacing a design smell where playbook config gets stuffed into the wrong column (node-level wire-up onto Action row, playbook-level scope decisions in node configjson, or node-graph data in `sprk_analysisplaybook.sprk_configjson` — which the runtime ignores).
+
+**Binding rule**: every new config field added to the playbook surface (column on `sprk_analysisaction`, `sprk_analysisplaybook`, `sprk_playbooknode`; JSON property inside `sprk_canvaslayoutjson` or any `sprk_configjson`; N:N scope entry) MUST be placed in the correct "home" per the decision tree in [`docs/architecture/ai-architecture-actions-nodes-scopes.md`](../../docs/architecture/ai-architecture-actions-nodes-scopes.md):
+
+| Home | What lives here |
+|---|---|
+| **A. Action row** | Action-intrinsic behaviour: prompt, temperature, output schema, ActionType FK |
+| **B. Playbook row direct columns** | Playbook header metadata: name, type, capabilities, builder hints, canvas JSON |
+| **C. Node row** (incl. `sprk_configjson`) | Per-node runtime config: action FK, input bindings, dependencies, output variable, position, executor-specific input shape |
+| **D. N:N scope relationships** | Declarative resource scope: which Actions/Skills/Knowledge/Tools the playbook is allowed/expected to use |
+
+**Specifically MUST NOT** (anti-patterns identified by code-archaeology §7):
+
+- ❌ **Stuff node-level wire-up into `sprk_analysisaction.sprk_configjson`** — defeats Action reusability across playbooks. (Note: `sprk_configurationjson` with "uration" does NOT exist on `sprk_analysisaction`; the canonical column is `sprk_configjson` on node + playbook.)
+- ❌ **Stuff playbook-level scope decisions into `sprk_playbooknode.sprk_configjson`** — bypasses `jps-playbook-audit` + `jps-scope-refresh` tooling.
+- ❌ **Use `sprk_analysisplaybook.sprk_configjson` to carry node-graph data when `sprk_playbooknode` rows exist** — runtime reads node rows, not playbook configjson. This was the R4 deploy bug.
+- ❌ **Routing config (destination, widgetType, deliveryType) in node configJson** — current state per `node-routing-config.schema.json`; flagged as tech debt for R5/R6 promotion to first-class columns. Acceptable for now but call out in `design.md` Placement Justification.
+
+**Pre-merge check**: the PR description's Placement Justification section MUST state, for each new config field: (1) which Home the field belongs to; (2) why it does NOT belong to any of the other three Homes; (3) if it lives in `sprk_configjson` (per-node), why first-class columns weren't justified.
+
+**Cross-reference**: [`docs/architecture/ai-architecture-actions-nodes-scopes.md`](../../docs/architecture/ai-architecture-actions-nodes-scopes.md) — the canonical decision tree + worked examples (R4 surfaces).
+
+---
+
+### G. Hot-Path Declaration (Binding per ci-cd-unit-test-remediation-r1 FR-C04, added 2026-06-26)
+
+Any project that touches BFF (`src/server/api/Sprk.Bff.Api/**`, `src/server/shared/Spaarke.Core/**`, or `src/server/shared/Spaarke.Dataverse/**`) — or that touches the parallel SpaarkeAi code page at `src/solutions/SpaarkeAi/**` — MUST include a `<hot-path-declaration>` XML block in its `design.md`. The block enumerates the project's hot-path touches across five surfaces so concurrent projects can coordinate ordering.
+
+**Required block format**:
+
+```xml
+<hot-path-declaration>
+  <bff-api>YES | NO — describe what's touched if YES</bff-api>
+  <spaarke-ai>YES | NO — describe what's touched if YES</spaarke-ai>
+  <ci-workflows>YES | NO — describe which workflows if YES</ci-workflows>
+  <skill-directives>YES | NO — describe which .claude/skills/* if YES</skill-directives>
+  <root-CLAUDE-md>YES | NO — describe which sections if YES</root-CLAUDE-md>
+</hot-path-declaration>
+```
+
+**Enforcement points**:
+
+- **`/project-pipeline` Step 3** (modified by ci-cd-unit-test-remediation-r1 task CICD-061): emits HARD WARNING if a new BFF/SpaarkeAi-touching project's design.md is missing this block. Pipeline proceeds (informational only) but flags for backfill.
+- **`/task-execute` Step 0.5** (modified by ci-cd-unit-test-remediation-r1 task CICD-060): cross-references `projects/INDEX.md` against the project's hot-path declaration; auto-invokes `/conflict-check` if changed files match the watchlist in `.claude/skills/conflict-check/SKILL.md`.
+- **Code review**: PR reviewer checks the block exists and matches the actual changes. Discrepancy = update one or the other.
+
+**Why this rule exists** (evidence): the 2026-06-26 sweep by `ci-cd-unit-test-remediation-r1` task CICD-030 found **17 active worktrees** with **13 touching BFF** and **8 touching SpaarkeAi**. Without coordination, concurrent edits to `Program.cs`, `Services/Ai/*Module.cs`, widget/route registries, and `package.json` produce avoidable rebase pain and deploy reordering. The declaration is the cheap up-front signal that lets the operator sequence merges intelligently.
+
+**Cross-reference**: [`projects/INDEX.md`](../../projects/INDEX.md) (the live registry of active worktrees + their hot-path declarations). The pipeline appends rows; task-execute reads rows.
 
 ---
 

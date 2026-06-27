@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Migrate `external-spa` to consume `sprk_todo` (rewrite `api/web-api-client.ts` + `EventsCalendar.tsx` + `SmartTodo.tsx`)</title>
+    <phase>Phase 1: Dataverse Schema (audit-surfaced prerequisite)</phase>
+    <status>not-started</status>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <dependencies>002, 007</dependencies>
+    <blocks>004, 005</blocks>
+    <tags>react, typescript, frontend, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Migrates an external-portal SPA from one entity contract to another. Modifies multiple `.ts`/`.tsx` files; FULL rigor.</rigor-reason>
+    <parallel-group>P1-W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on task 007's DTO contract change.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Migrate `src/client/external-spa/` to consume the `sprk_todo` contract from task 007. Three files surface in the audit: `src/api/web-api-client.ts` (DTOs + queries with `sprk_todoflag` + `$select=...sprk_eventid,sprk_name,sprk_duedate,sprk_status,sprk_todoflag,...`); `src/components/EventsCalendar.tsx` (renders `event.sprk_todoflag` badge + creates events with `sprk_todoflag: false`); `src/components/SmartTodo.tsx` (the SPA's task list — queries `sprk_event` filtered by `_sprk_projectid_value` AND `sprk_todoflag eq true`). Rewrite all three to consume `sprk_todo` records. Update mocks. Verify build + manual smoke test against the deployed BFF.
+  </prompt>
+
+  <role>Spaarke external-portal frontend developer.</role>
+
+  <goal>External-spa uses `sprk_todo` throughout. `SmartTodo.tsx` queries `sprk_todos` filtered by the matching `sprk_regardingproject` resolver field. `EventsCalendar.tsx` separates event-rendering from todo-rendering (no more `event.sprk_todoflag` conditional). Build clean; manual smoke test against the BFF endpoints (after task 007 deploy) passes.</goal>
+
+  <context>
+    <background>The external-spa is the external-portal SPA hosted on Power Pages. The audit (task 001) found it directly queries `sprk_event` with the `todoflag=true` filter and renders todo badges based on `event.sprk_todoflag`. Decision (user, 2026-06-07): refactor/migrate — this is important. Task 007 provides the new BFF DTO contract; this task consumes it.</background>
+    <relevant-files>
+      <file>src/client/external-spa/src/api/web-api-client.ts</file>
+      <file>src/client/external-spa/src/components/EventsCalendar.tsx</file>
+      <file>src/client/external-spa/src/components/SmartTodo.tsx</file>
+      <file>src/client/external-spa/src/mocks/ (mocks to update)</file>
+      <file>projects/smart-todo-decoupling-r3/notes/external-access-contract-change.md (from task 007)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-29">Zero `sprk_todoflag` + `sprk_eventtodo` references in `src/client/external-spa/` after this task.</constraint>
+    <constraint source="OS-1">No compat shim.</constraint>
+    <constraint source="project">Product portability: `external-spa` must NOT hardcode `https://spaarkedev1.crm.dynamics.com/` or any tenant-specific URL. All Dataverse endpoint construction goes through `config.ts` env vars / runtime config.</constraint>
+    <constraint source="A-7 dep">Task 007's contract doc is the authoritative shape for the new DTOs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/smart-todo-decoupling-r3/notes/external-access-contract-change.md</file>
+      <file>projects/smart-todo-decoupling-r3/notes/eventtodo-reference-audit.md</file>
+      <file>src/client/external-spa/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 007's contract doc + the three target files end-to-end. Map every legacy reference.</step>
+    <step order="2">Update `api/web-api-client.ts`: replace the `sprk_event` query with a `sprk_todo` query (filter: matching regarding resolver field for the current project); update DTOs to the new shape (per task 007's contract doc).</step>
+    <step order="3">Update `SmartTodo.tsx`: query for `sprk_todos` filtered by `_sprk_regardingproject_value eq '{projectId}'`; remove all `sprk_todoflag` references.</step>
+    <step order="4">Update `EventsCalendar.tsx`: separate event-rendering from todo-rendering. If the calendar needs to show project to-dos alongside events, fetch from `sprk_todos` separately (two collections) instead of overloading `sprk_event` with a flag. Remove the `event.sprk_todoflag` conditional badge — render a dedicated todo badge sourced from the new collection.</step>
+    <step order="5">Update mocks in `src/mocks/` to reflect the new contract.</step>
+    <step order="6">Run `npm run build` in `src/client/external-spa/` — clean.</step>
+    <step order="7">Manual smoke test against a deployed BFF (after task 007 completes): load the SPA, switch to a project, verify the SmartTodo list loads from `sprk_todos`, verify the calendar renders events without `sprk_todoflag` references in the DOM/Network tab.</step>
+    <step order="8">Repo grep `src/client/external-spa/` for `sprk_todoflag`, `sprk_eventtodo`. Confirm zero hits.</step>
+    <step order="9">Update TASK-INDEX.md to ✅.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/client/external-spa/src/api/web-api-client.ts` (refactored)</output>
+    <output type="code">`src/client/external-spa/src/components/EventsCalendar.tsx` (refactored)</output>
+    <output type="code">`src/client/external-spa/src/components/SmartTodo.tsx` (refactored)</output>
+    <output type="code">`src/client/external-spa/src/mocks/*` (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Build clean (`npm run build`).</criterion>
+    <criterion testable="true">Zero `sprk_todoflag` + `sprk_eventtodo` references in `src/client/external-spa/`.</criterion>
+    <criterion testable="true">SmartTodo list loads from `sprk_todos` (verified via browser Network tab or manual smoke test).</criterion>
+    <criterion testable="true">No hardcoded env URLs / tenant IDs in source code.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

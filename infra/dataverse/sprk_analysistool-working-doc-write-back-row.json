@@ -1,0 +1,39 @@
+{
+  "_comment_top": "R6 Wave 9 — seed row for the WorkingDocumentHandler 'WriteBackToWorkingDocument' method. Replaces one of the three legacy hardcoded LLM functions previously registered on WorkingDocumentTools (removed from SprkChatAgentFactory.ResolveTools lines ~811-843 in Stage 4).",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'WorkingDocumentHandler'. The handler reads sprk_configuration.method = 'WriteBackToWorkingDocument' to dispatch to the Dataverse persistence pipeline.",
+  "_comment_method_dispatch": "Three rows (WORKING-DOC-EDIT / WORKING-DOC-APPEND-SECTION / WORKING-DOC-WRITE-BACK) share one handler class — same pattern as CodeInterpreterHandler (Wave 8) and KnowledgeRetrievalHandler (Wave 7c). Each row's sprk_configuration.method discriminator selects the internal method.",
+  "_comment_security": "sprk_requiredcapability = 'write_back' (= PlaybookCapabilities.WriteBack) gates this tool to playbooks whose capability set includes 'write_back'. Standalone chat (no playbook) does NOT include 'write_back', so this handler is unreachable from standalone chat — preserving the pre-Wave-9 security boundary.",
+  "_comment_plan_gate": "Spec FR-11 PLAN-PREVIEW-GATED: this tool name is listed in CompoundIntentDetector.WriteBackToolNames, which ALWAYS triggers a plan preview gate before execution. The tool should only be called from an approved plan execution (POST /api/ai/chat/sessions/{sessionId}/plan/approve). This is enforced upstream of the handler — the handler simply persists when invoked.",
+  "_comment_safety": "Spec FR-12 SAFETY CONSTRAINT: this method ONLY writes to the Dataverse field sprk_analysisoutput.sprk_workingdocument via IWorkingDocumentService.UpdateWorkingDocumentAsync (routing through IGenericEntityService → Dataverse SDK). It MUST NEVER call SpeFileStore, GraphServiceClient write methods, UploadContent, PutContent, UpdateFile, or any SharePoint Embedded write operation. This boundary is enforced in the handler implementation (verified by the wave-09-working-document-migration.md bookkeeping note) and asserted in WorkingDocumentHandlerTests.WriteBack_Never_Touches_SharePoint_Embedded.",
+  "_comment_streaming": "ADR-033 binding: this method ALSO emits document-stream SSE side-channel events (Start → N×Token → End) via ChatInvocationContext.DocumentStreamWriter — but the tokens are the SUPPLIED content chunked into 100-char segments, NOT inner LLM streaming output. This preserves the legacy WorkingDocumentTools.WriteBackToWorkingDocumentAsync behavior where the client can display write-back progress. Persistence (the actual Dataverse update) happens after the End event is emitted.",
+  "_comment_adr015": "ADR-015 data governance: content is supplied by the LLM (typically the result of a preceding EditWorkingDocument or AppendSection call the user reviewed). Telemetry logs content LENGTH + analysisId + operation GUIDs + token COUNTS only — never the content itself, never tokens.",
+  "_comment_adr014": "ADR-014: streaming tokens are TRANSIENT — never persisted to Redis / Cosmos. The persisted content lives in Dataverse only (sprk_analysisoutput.sprk_workingdocument); the per-call ContentHash returned in DocumentStreamEndEvent is the cacheable artifact.",
+  "_comment_description_loadbearing": "sprk_description is LOAD-BEARING per NFR-12: the LLM uses the description text to decide WHEN to invoke this tool. The exact phrasing below is preserved verbatim from the legacy hardcoded registration so the LLM's tool-selection behavior is unchanged after migration. The PLAN-PREVIEW-GATED + SAFETY annotations are part of the description so the LLM understands the user-approval boundary and the FR-12 safety scope.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_toolcode + sprk_name 'SYS-%' filter; UPSERTs.",
+  "sprk_name": "SYS-Working Document Write Back",
+  "sprk_toolcode": "WORKING-DOC-WRITE-BACK",
+  "sprk_description": "Write AI-generated content back to the analysis working document in Dataverse (sprk_analysisoutput.sprk_workingdocument). PLAN-PREVIEW-GATED: this tool always requires user approval before execution. SAFETY: writes ONLY to Dataverse — never modifies the SharePoint source file. Use this after the user approves a previewed edit (typically the output of EditWorkingDocument or AppendSection) to persist the result. Streams the supplied content as progress tokens to the editor, then commits to Dataverse.",
+  "sprk_handlerclass": "WorkingDocumentHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only. The legacy WorkingDocumentTools was registered exclusively for chat; document mutation tools must not be invocable from playbook orchestration per spec FR-12 — playbook write-back routes through the 11 production node executors per NFR-08, not through chat tools.",
+  "sprk_requiredcapability": "write_back",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "WorkingDocumentHandler.WriteBackToWorkingDocument Request",
+    "description": "Argument shape for chat-driven invocation of the WriteBackToWorkingDocument method. The 'content' is the complete AI-generated content to persist to sprk_analysisoutput.sprk_workingdocument.",
+    "type": "object",
+    "required": ["content"],
+    "properties": {
+      "content": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The complete content to write back to sprk_analysisoutput.sprk_workingdocument. Typically the output of a preceding EditWorkingDocument or AppendSection call that the user has reviewed and approved via the plan preview gate."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "method = 'WriteBackToWorkingDocument' is the dispatch discriminator. This row exposes only the Dataverse-persistence method.",
+    "method": "WriteBackToWorkingDocument"
+  }
+}

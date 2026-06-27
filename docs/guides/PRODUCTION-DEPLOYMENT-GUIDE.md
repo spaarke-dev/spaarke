@@ -1140,11 +1140,10 @@ SpaarkeCore (Tier 1 — base entities, option sets, security roles)
         ├── EventCommands (Tier 3)
         ├── EventDetailSidePane (Tier 3)
         ├── EventsPage (Tier 3)
-        ├── LegalWorkspace (Tier 3)
-        └── TodoDetailSidePane (Tier 3)
+        └── LegalWorkspace (Tier 3)
 ```
 
-All 10 solutions are imported by `Deploy-DataverseSolutions.ps1` in this dependency order.
+All 9 solutions are imported by `Deploy-DataverseSolutions.ps1` in this dependency order.
 
 ### Dev → Production Pipeline
 

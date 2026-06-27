@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Update SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL + BUILD-A-NEW-WORKSPACE-WIDGET for registry-as-composition</title>
+    <phase>Phase7b: Documentation Alignment (post-Option D)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>070</dependencies>
+    <blocks>072</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation update; surgical edits to existing docs</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 070 (pattern doc must exist for cross-referencing)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Update two architecture docs to describe Option D's registry-as-composition pattern + the cookbook for adding a new widget under it:
+
+    1. `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` — add a new subsection describing the registry-as-composition factory pattern. Reference how SpaarkeAi customizes per-widget construction (via `createLegalWorkspaceSectionRegistry({...})` + a wrapper renderer) vs how standalone LegalWorkspace uses the default `SECTION_REGISTRY` const. Cross-reference the pattern file from task 070.
+
+    2. `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` — add the registry-customization cookbook to §1 (or wherever the dual-use pattern cookbook lives). Steps:
+       a. Author the widget's factory
+       b. Wrap it in a LegalWorkspace shim
+       c. Add an entry to `LegalWorkspaceSectionRegistryOptions`
+       d. Thread through `createLegalWorkspaceSectionRegistry`
+       e. Test the threading
+  </prompt>
+
+  <role>SPAARKE platform developer. Surgical edits to architecture/guide docs following existing tone + structure.</role>
+
+  <goal>Both docs now describe the Option D pattern + cookbook. Reviewers + future task authors find the canonical doc when looking up "how do I customize a widget per host?"</goal>
+
+  <context>
+    <background>
+      Wave 7 task 063 already added R2's hoist + Pattern D dual-use updates to these docs. This task layers ON TOP, adding the per-host customization pattern that Option D introduces.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>.claude/patterns/ui/workspace-section-registry-composition.md</file>
+      <file>projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">SURGICAL edits — don't re-author entire docs. Insert/update only the registry-customization section.</constraint>
+    <constraint source="project">Cross-references must resolve (the pattern file from task 070 must exist).</constraint>
+    <constraint source="project">Match existing doc tone + structure.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read both target docs to find the right insertion point (likely §1.1 dual-use archetypes in BUILD-A-NEW-WORKSPACE-WIDGET; the "Composition + customization" section in SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL).</step>
+    <step order="2">Read `option-d-registry-as-composition.md` for the canonical content.</step>
+    <step order="3">Insert/update SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md with a "Per-host customization via registry-as-composition" subsection. Reference SpaarkeAi as the canonical example, LegalWorkspace standalone as the no-customization baseline.</step>
+    <step order="4">Insert the cookbook into BUILD-A-NEW-WORKSPACE-WIDGET.md.</step>
+    <step order="5">Verify cross-references resolve (pattern file path, design-rationale path).</step>
+    <step order="6">Update TASK-INDEX.md: change task 071 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">File ops.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</output>
+    <output type="docs">docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md has a section describing registry-as-composition (≤30 lines added).</criterion>
+    <criterion testable="true">BUILD-A-NEW-WORKSPACE-WIDGET.md has the 5-step cookbook for customizing a widget per host.</criterion>
+    <criterion testable="true">Both docs cross-reference the pattern file + design-rationale.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task 063 (Wave 7) already updated these docs for R2's Pattern D hoist. This task is a layered addition on top — don't duplicate task 063's content; layer the customization story above it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

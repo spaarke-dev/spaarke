@@ -1,10 +1,39 @@
 # Spaarke AI Architecture
 
-> **Last Updated**: May 17, 2026
-> **Last Reviewed**: 2026-05-17
-> **Reviewed By**: ai-platform-unification-r2
+> **Last Updated**: 2026-06-26 (canonical-truth loop step 3: scope statement added; Tool Handler / Scope Resolution / Known Pitfalls sections moved out)
+> **Last Reviewed**: 2026-06-26
+> **Reviewed By**: spaarke-daily-update-service-r4 canonical-truth loop
 > **Status**: Current
-> **Purpose**: Technical reference for the Spaarke AI platform — scope library, tool framework, execution runtime, and infrastructure.
+> **Purpose**: Technical reference for the Spaarke AI 4-tier platform overview — scope library, infrastructure, capability router, safety pipeline, Cosmos persistence, facade boundary.
+
+---
+
+## Scope of this document
+
+This doc covers the **4-tier AI platform overview only**. After the canonical-truth loop (2026-06-26), runtime detail has been moved out:
+
+- **Playbook runtime** (dispatch shapes, mode detection, action lookup, three config columns, scope-array semantics, empty-payload contract, Legacy-mode log catalog, the two parallel orchestrators) → `ai-architecture-playbook-runtime.md` (LOAD-BEARING)
+- **Consumer routing & Path A.5** (`sprk_playbookconsumer`, `IConsumerRoutingService`, `IInvokePlaybookAi`) → `ai-architecture-consumer-routing.md`
+- **Where new config fields belong** (Action vs Node vs Playbook decision tree; `sprk_configjson` boundary) → `ai-architecture-actions-nodes-scopes.md`
+- **Deploy procedure** (`Deploy-Playbook.ps1` recipe) → `ai-guide-playbook-deploy-recipe.md`
+
+---
+
+## 🆕 Audit findings — bff-ai-architecture-audit-r1 (2026-06-05)
+
+The Spaarke BFF AI Architecture Audit r1 completed 2026-06-04. Four binding architectural decisions now apply to this doc; full evidence is in [`projects/bff-ai-architecture-audit-r1/notes/canonical-architecture-decisions.md`](../../projects/bff-ai-architecture-audit-r1/notes/canonical-architecture-decisions.md):
+
+| Decision | Where codified | Migration PR |
+|---|---|---|
+| **Spaarke Public-Contracts Facade DI Fascia** — external CRUD code consumes AI only through `PublicContracts/` facades (per refined ADR-013) | [`.claude/patterns/ai/public-contracts-facade.md`](../../.claude/patterns/ai/public-contracts-facade.md) + [DR-003](../../projects/bff-ai-architecture-audit-r1/decisions/DR-003-public-contracts-facade.md) | PR #351 (LATENT BUG #1 fix + 4 Null peers) |
+| **Endpoint↔DI Registration Conditionality Symmetry Rule** — NEW load-bearing rule preventing the LATENT BUG #1 anti-pattern (facade unconditional, transitive deps conditional → 500 instead of 503) | [`.claude/patterns/ai/endpoint-di-symmetry.md`](../../.claude/patterns/ai/endpoint-di-symmetry.md) + [DR-008](../../projects/bff-ai-architecture-audit-r1/decisions/DR-008-di-configuration.md) + [`.claude/constraints/bff-extensions.md` §F.1](../../.claude/constraints/bff-extensions.md) | PR #351 |
+| **BFF Canonical Cache Stack** — `IDistributedCache` + `GetOrCreateAsync<T>` only; `EmbeddingCache` canonical model; `MemoryCache` requires explicit ADR-009 exception XML doc | [DR-002](../../projects/bff-ai-architecture-audit-r1/decisions/DR-002-cache-patterns.md) | Phased PR #5+ (26 sites; per-team) |
+| **3140 LOC of dead AI code removed** — 3 lookup orphans, intent classifier cascade, 5th orphan, 3 Cat 10 tool handlers, PlaybookBuilderSystemPrompt 800-LOC dead bulk | — | PR #353 + PR #357 |
+
+REJECTED options the audit explicitly considered and locked:
+- Generic `IIntentClassifier<TResult>` interface — REJECTED (3 canonicals KEEP, no forced consolidation)
+- 4-substrate search consolidation — REJECTED (each substrate justified by different index; KEEP all 4)
+- Forced DI module consolidation — REJECTED (31 per-concern modules KEEP)
 
 ---
 
@@ -109,107 +138,13 @@ Two handler interface hierarchies coexist: `IAnalysisToolHandler` for the tool h
 
 ## Tool Handler Framework (Tier 3 Detail)
 
-### Handler Registration
-
-`ToolFrameworkExtensions.AddToolFramework()` is called at startup:
-1. Configures `ToolFrameworkOptions` from `appsettings.json`
-2. Registers `PromptSchemaRenderer` (singleton) and `LookupChoicesResolver` (scoped)
-3. Assembly-scans for all `IAnalysisToolHandler` implementations and registers them as Scoped
-4. Registers `ToolHandlerRegistry` as Scoped (receives `IEnumerable<IAnalysisToolHandler>` via DI)
-
-### Handler Resolution Chain
-
-```
-Tier 1: Configuration (Dataverse)
-  sprk_analysistool.sprk_handlerclass → handler name (optional)
-         │
-         ▼
-Tier 2: GenericAnalysisHandler (95% of cases)
-  If handlerclass is NULL or not found → GenericAnalysisHandler
-  Configuration-driven: operation, prompt_template, output_schema, temperature
-  No code deployment required for new tools
-         │
-         ▼
-Tier 3: Custom Handlers (complex scenarios)
-  Registered in DI at startup via ToolFrameworkExtensions assembly scanning
-```
-
-### ToolHandlerRegistry Internals
-
-- Receives all `IAnalysisToolHandler` instances via constructor injection
-- Indexes by `HandlerId` (case-insensitive `ConcurrentDictionary`) and by `ToolType`
-- `ToolFrameworkOptions.DisabledHandlers` suppresses specific handlers without removing code
-- `GetHandler(handlerId)` returns null (not exception) when handler is missing or disabled
-- `GetAllHandlerInfo()` returns `ToolHandlerInfo` records with metadata, supported types, and enabled state
-
-### IAnalysisToolHandler Contract
-
-Every handler must provide:
-- `HandlerId` — matches `sprk_analysistool.sprk_handlerclass` in Dataverse
-- `Metadata` — `ToolHandlerMetadata` record with Name, Description, Version, SupportedInputTypes, Parameters, optional ConfigurationSchema (JSON Schema Draft 07)
-- `SupportedToolTypes` — list of `ToolType` enum values (EntityExtractor, ClauseAnalyzer, DocumentClassifier, Summary, RiskDetector, ClauseComparison, DateExtractor, FinancialCalculator, Custom)
-- `Validate(context, tool)` — returns `ToolValidationResult` (fail fast before execution)
-- `ExecuteAsync(context, tool, ct)` — returns `ToolResult`
-
-### Streaming Handlers
-
-Handlers that implement `IStreamingAnalysisToolHandler` (extends `IAnalysisToolHandler`) provide:
-- `StreamExecuteAsync(context, tool, ct)` — yields `IAsyncEnumerable<ToolStreamEvent>`
-- Events: `ToolStreamEvent.Token(text)` for each token, then `ToolStreamEvent.Completed(result)` with final `ToolResult`
-- Tokens are forwarded immediately to SSE — no buffering (ADR-014)
-- Non-streaming handlers continue to work unchanged via `ExecuteAsync`
-
-### GenericAnalysisHandler
-
-The default handler for 95% of tools. Implements `IStreamingAnalysisToolHandler`:
-- Reads tool configuration from `AnalysisTool.Configuration` JSON
-- Supported operations: `extract`, `classify`, `validate`, `generate`, `transform`, `analyze`
-- Resolves JPS (JSON Prompt Schema) or flat-text prompts from Action.SystemPrompt
-- Uses `PromptSchemaRenderer` for JPS rendering with `$choices` injection
-- Calls `IOpenAiClient.GetStructuredCompletionRawAsync` for structured output or `StreamCompletionAsync` for text
-- Model selection via `ModelSelectorOptions.DefaultModel` (default: gpt-4o)
+> **Moved**: Tool Handler Framework, handler registration, resolution chain, and `IAnalysisToolHandler` contract have been consolidated into the runtime canonical doc. See [`ai-architecture-playbook-runtime.md`](ai-architecture-playbook-runtime.md) §1 (Component model — Layer E) and §5 (Action lookup precedence) for canonical content. See `.claude/patterns/ai/` for code-pointer files.
 
 ---
 
 ## Scope Resolution
 
-`IScopeResolverService` loads AI primitives from Dataverse:
-
-| Method | Resolution Source |
-|--------|-------------------|
-| `ResolveScopesAsync(skillIds, knowledgeIds, toolIds)` | Explicit IDs |
-| `ResolvePlaybookScopesAsync(playbookId)` | Playbook N:N relationships |
-| `ResolveNodeScopesAsync(nodeId)` | Node-level N:N + single tool lookup |
-
-### Scope Types
-
-| Scope | Entity | Purpose |
-|-------|--------|---------|
-| **Actions** | `sprk_analysisaction` | System prompt templates (flat text or JPS) |
-| **Skills** | `sprk_analysisskill` | Prompt fragments appended as instructions |
-| **Knowledge** | `sprk_analysisknowledge` | RAG context: Inline, Document, or RagIndex |
-| **Tools** | `sprk_analysistool` | Handler class + configuration for execution |
-
-### Scope Ownership
-
-| Prefix | OwnerType | Mutable | Description |
-|--------|-----------|---------|-------------|
-| `SYS-` | System | No | Spaarke-provided, immutable |
-| `CUST-` | Customer | Yes | Customer-created or extended |
-
-Scopes support inheritance via `ParentScopeId` (extends parent) and `BasedOnId` (cloned via SaveAs).
-
-### $choices — Dynamic Enum Resolution
-
-JPS output fields declare `"$choices"` to auto-inject valid enum values at render time, constraining AI output via JSON Schema `"enum"`:
-
-| Prefix | Resolution Source |
-|--------|-------------------|
-| `lookup:` | Active records from Dataverse reference entity |
-| `optionset:` | Single-select choice/picklist metadata labels |
-| `multiselect:` | Multi-select picklist metadata labels |
-| `boolean:` | Two-option boolean field labels |
-| `downstream:` | Downstream UpdateRecord node field mapping options |
+> **Moved**: scope resolution methods, scope types, ownership prefixes, and `$choices` resolution detail have been moved. Runtime semantics (advisory-not-enforcing) live in [`ai-architecture-playbook-runtime.md`](ai-architecture-playbook-runtime.md) §6. Config-bag boundary (where scopes belong: Home D N:N relationships, not inline JSON) lives in [`ai-architecture-actions-nodes-scopes.md`](ai-architecture-actions-nodes-scopes.md). `$choices` schema reference lives in [`ai-guide-jps-authoring.md`](../guides/ai-guide-jps-authoring.md).
 
 ---
 
@@ -234,6 +169,24 @@ Retrieval mode is configured per-node via `ConfigJson` (`auto`/`always`/`never`,
 **Search indexes**:
 - `spaarke-knowledge-index-v2` — Customer documents (3072-dim, HNSW, cosine)
 - `spaarke-rag-references` — Golden reference knowledge (3072-dim, HNSW, cosine)
+
+---
+
+## AI Search Consumer Map
+
+> **Canonical source**: [`AI-SEARCH-INDEX-CATALOG.md`](AI-SEARCH-INDEX-CATALOG.md) — single source of truth for per-index schema, naming convention, property policy, vector config, retired-index history, and post-deploy invariants. **This section is the consumer-map view only**; it does NOT duplicate catalog content. If consumer info here disagrees with the catalog, the catalog wins — open a PR to update this table.
+
+The seven active Spaarke AI Search indexes and their primary BFF consumers (services + endpoints) and data-flow direction. Flow direction = `inbound` (write-only from BFF), `outbound` (read-only from BFF), or `bidirectional`.
+
+| Index name | Primary consumers (services + endpoints) | Data flow direction |
+|---|---|---|
+| `spaarke-files-index` | `RagService`, `RagIndexingPipeline`, `FileIndexingService`, `IndexRetrieveNode`, `KnowledgeBaseEndpoints`, `BulkRagIndexingJobHandler`, `RagIndexingJobHandler` · endpoints `POST /api/ai/rag/query`, `POST /api/ai/rag/index-file`, semantic search endpoints | bidirectional |
+| `spaarke-records-index` | `DataverseIndexSyncService`, `RecordSyncJob`, `RecordSearchAuthorizationFilter` · endpoint `POST /api/ai/search` (scope=entity) | bidirectional |
+| `spaarke-rag-references` | `ReferenceIndexingService`, `ReferenceRetrievalService` · ingestion via PowerShell `scripts/ai-search/Add-ReferenceToIndex.ps1` + `Index-AllReferences.ps1` (KNW-*.md golden references); read path via L1 knowledge retrieval | bidirectional |
+| `spaarke-insights-index` | `PrecedentProjectionSync` + insights projection pipeline · endpoint `POST /api/ai/insights/search` | bidirectional |
+| `spaarke-session-files` | `SessionFilesCleanupJob` (cleanup only) · schema-only in this project per FR-18 (no ingestion path) | outbound (cleanup reads only) |
+| `spaarke-invoices-index` | `InvoiceIndexingJobHandler`, `InvoiceSearchService` · schema-only in this project per FR-18 (no ingestion) | outbound (search reads only) |
+| `spaarke-playbook-embeddings` | `PlaybookEmbeddingService`, `PlaybookIndexingService`, `PlaybookIndexingBackgroundService`, `PlaybookIndexDriftDetectionJob` · consumed by playbook dispatch routing | bidirectional |
 
 ---
 
@@ -420,15 +373,7 @@ All queries are tenant-scoped (partition key = `/tenantId`). Aggregation queries
 
 ## Known Pitfalls
 
-1. **HttpContext not propagated to node executors** — `AiAnalysisNodeExecutor` is Singleton but `IToolHandlerRegistry` is Scoped. The executor creates a new DI scope per execution (`_serviceProvider.CreateScope()`). HttpContext is **not** available in this child scope. Any handler that needs user identity must receive it via `NodeExecutionContext`/`ToolExecutionContext`, not from `IHttpContextAccessor`.
-
-2. **Missing tool handler registration** — If a new `IAnalysisToolHandler` implementation is added but not in the scanned assembly, or its class is abstract, `ToolFrameworkExtensions.AddToolHandlersFromAssembly` silently skips it. The node executor logs a detailed error: `"Tool handler '{HandlerClass}' not found. Available handlers: [...]"`.
-
-3. **SSE flush timing** — The streaming endpoints in `AnalysisEndpoints` iterate `IAsyncEnumerable<AnalysisStreamChunk>` and write each chunk as an SSE event. If the response stream is not flushed after each write, tokens buffer at the HTTP layer and appear in bursts rather than streaming. The working document update triggers every 500 characters regardless of flush state.
-
-4. **Scoped registry vs Singleton executor** — `ToolHandlerRegistry` is registered as Scoped (to match handler lifetimes that may inject scoped services like `IScopeResolverService`). `AiAnalysisNodeExecutor` is Singleton (required by `NodeExecutorRegistry`). The executor **must** create a scope to resolve the registry — injecting `IToolHandlerRegistry` directly into a Singleton would cause a captive dependency.
-
-5. **GenericAnalysisHandler fallback** — When `sprk_analysistool.sprk_handlerclass` is NULL or empty, `AnalysisToolService.GetToolAsync` defaults it to `"GenericAnalysisHandler"`. This means tools created without a handler class silently use the generic handler. This is by design but can mask misconfiguration.
+> **Moved**: tool-handler-specific pitfalls (HttpContext propagation, missing handler registration, SSE flush timing, Scoped-vs-Singleton DI captive dependency, `GenericAnalysisHandler` fallback) and playbook runtime pitfalls G1-G12 have been consolidated into [`ai-architecture-playbook-runtime.md`](ai-architecture-playbook-runtime.md) §10. G12 (Spaarke `sprk_event`/`sprk_communication` rule, not OOB activity entities) was added 2026-06-25.
 
 ---
 

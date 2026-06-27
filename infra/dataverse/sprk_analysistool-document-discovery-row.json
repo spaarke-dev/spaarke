@@ -1,0 +1,40 @@
+{
+  "_comment_top": "R6 Wave 8 — seed row for the DocumentSearchHandler 'SearchDiscovery' method. Replaces the second of the two legacy hardcoded LLM functions previously registered on DocumentSearchTools (removed from SprkChatAgentFactory.ResolveTools).",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'DocumentSearchHandler'. The handler reads sprk_configuration.method = 'SearchDiscovery' to dispatch to the broad tenant-wide (or parent-entity-scoped) discovery pipeline.",
+  "_comment_method_dispatch": "Two rows (DOCUMENT-SEARCH / DOCUMENT-DISCOVERY) share one handler class — same pattern as KnowledgeRetrievalHandler (Wave 7c). Each row's sprk_configuration.method discriminator selects the internal method.",
+  "_comment_design": "Capability gate: NOT set. DocumentDiscovery was always-available pre-Wave-7b (gated only by IRagService presence) and remains so per Wave 8 design. Leave sprk_requiredcapability null (default — always-available per Wave 7b filter semantics).",
+  "_comment_scope": "Intentionally NOT knowledge-scoped — discovery casts a wider net than SearchDocuments. When ChatInvocationContext.KnowledgeScope carries ParentEntityType + ParentEntityId (host-context bound), discovery is constrained to that parent-entity boundary; otherwise discovery remains tenant-wide. Uses MinScore=0.5 (lower than SearchDocuments) and truncates excerpts to 300 chars for preview.",
+  "_comment_widget": "This method emits an output_pane SearchResults widget via ToolResult.Metadata.widget with isDiscovery=true (R6 Wave 7b adapter post-processing). The widget rendering is unchanged from the pre-R6 DocumentSearchTools.SearchDiscoveryAsync behavior (Gap-1 fix preserved).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_toolcode + sprk_name 'SYS-%' filter; UPSERTs.",
+  "sprk_name": "SYS-Document Discovery",
+  "sprk_toolcode": "DOCUMENT-DISCOVERY",
+  "sprk_description": "Performs a broad discovery search across all indexed documents for the tenant. Use this when exploring what documents are available or finding related content across the entire document corpus — not limited to a specific knowledge source. When the chat session has a host-context parent entity (e.g., matter, project), discovery is automatically constrained to that entity's boundary. Returns ranked excerpts with preview snippets and citation markers; the UI receives a SearchResults output-pane widget (with isDiscovery=true) alongside the text response.",
+  "sprk_handlerclass": "DocumentSearchHandler",
+  "sprk_availableincontexts": 100000002,
+  "_comment_availableincontexts": "100000002 = Both (Playbook + Chat). FR-12 acceptance: invocable from both playbook orchestration and chat-driven function calling.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "DocumentSearchHandler.SearchDiscovery Request",
+    "description": "Argument shape for chat-driven invocation of the SearchDiscovery method. The 'query' is the broad discovery search text; optional 'topK' caps the number of results returned.",
+    "type": "object",
+    "required": ["query"],
+    "properties": {
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Broad discovery search across all documents. Uses a lower relevance threshold than SearchDocuments to cast a wider net."
+      },
+      "topK": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20,
+        "description": "Maximum number of results to return. Defaults to 10 if omitted; clamped to [1, 20]."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "method = 'SearchDiscovery' is the dispatch discriminator. This row exposes only the broad discovery method.",
+    "method": "SearchDiscovery"
+  }
+}

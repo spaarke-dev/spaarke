@@ -90,6 +90,38 @@ public record ToolResult
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
 
     /// <summary>
+    /// Optional side-channel metadata for cross-cutting post-processing by chat infrastructure
+    /// (R6 Wave 7b). Handlers return well-known keys; the
+    /// <see cref="Chat.ToolHandlerToAIFunctionAdapter"/> reads them and performs side effects
+    /// (citation accumulation, SSE widget event emission) so handlers remain pure-input/pure-output.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Well-known keys (see <see cref="ToolResultMetadataKeys"/>):
+    /// </para>
+    /// <list type="bullet">
+    /// <item>
+    /// <see cref="ToolResultMetadataKeys.Citations"/> — array of citation envelopes the adapter
+    /// forwards into the per-chat-turn <see cref="Models.Ai.Chat.CitationContext"/>. Each envelope
+    /// MUST carry deterministic source identifiers (<c>chunkId</c>, <c>sourceName</c>) + optional
+    /// excerpt/url/snippet. ADR-015: NEVER user message content.
+    /// </item>
+    /// <item>
+    /// <see cref="ToolResultMetadataKeys.Widget"/> — pane-type + widget-type + widget-data envelope
+    /// the adapter emits as a <c>source_pane</c> or <c>output_pane</c> SSE event. ADR-015: widget
+    /// data SHOULD be deterministic identifiers + display metadata only — never raw user text.
+    /// </item>
+    /// </list>
+    /// <para>
+    /// Backward-compat: Existing handlers do not set <see cref="Metadata"/>; the adapter handles
+    /// null gracefully (no post-processing performed). Values are JSON-serializable so they
+    /// round-trip cleanly through the function-calling protocol if a future handler emits them
+    /// upstream of the adapter.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyDictionary<string, object?>? Metadata { get; init; }
+
+    /// <summary>
     /// Deserializes the Data property to the specified type.
     /// </summary>
     /// <typeparam name="T">The type to deserialize to.</typeparam>
@@ -228,6 +260,96 @@ public record ToolExecutionMetadata
         CompletedAt = completed
     };
 }
+
+/// <summary>
+/// Well-known keys for <see cref="ToolResult.Metadata"/> recognized by the
+/// chat-tool adapter (R6 Wave 7b infrastructure).
+/// </summary>
+/// <remarks>
+/// <para>
+/// Handlers running in chat context (via <see cref="IToolHandler.ExecuteChatAsync"/>) MAY
+/// populate <see cref="ToolResult.Metadata"/> using these keys to trigger adapter-side
+/// post-processing (citation accumulation, SSE widget emission). The adapter handles missing
+/// or malformed values resiliently — see
+/// <see cref="Chat.ToolHandlerToAIFunctionAdapter"/>.
+/// </para>
+/// <para>
+/// Backward-compat: handlers that do NOT emit metadata get null-treated and the adapter
+/// performs no post-processing. The 8 typed handlers (Wave 1 / Wave 2) and the newly migrated
+/// chat tools (AnalysisQuery, TextRefinement) do not require metadata.
+/// </para>
+/// </remarks>
+public static class ToolResultMetadataKeys
+{
+    /// <summary>
+    /// Metadata key for citation envelopes. Value SHOULD be an
+    /// <see cref="IEnumerable{T}"/> of <see cref="ToolResultCitation"/> (or a JSON-serializable
+    /// equivalent: array of objects with <c>chunkId</c>, <c>sourceName</c>, optional
+    /// <c>pageNumber</c>, optional <c>excerpt</c>, optional <c>sourceType</c>, optional
+    /// <c>url</c>, optional <c>snippet</c>).
+    /// </summary>
+    /// <remarks>
+    /// The adapter forwards each entry into the constructor-supplied
+    /// <see cref="Models.Ai.Chat.CitationContext"/> via
+    /// <see cref="Models.Ai.Chat.CitationContext.AddCitation"/>. When the accumulator is null
+    /// (e.g., non-chat path), citations are dropped silently.
+    /// </remarks>
+    public const string Citations = "citations";
+
+    /// <summary>
+    /// Metadata key for a single widget event envelope. Value SHOULD be a
+    /// <see cref="ToolResultWidget"/> (or JSON-serializable equivalent with <c>paneType</c>,
+    /// <c>widgetType</c>, optional <c>citationId</c>, and <c>data</c>).
+    /// </summary>
+    /// <remarks>
+    /// The adapter emits a corresponding
+    /// <see cref="Chat.SseEventTypes.ChatSseEventFactory.CreateSourcePaneEvent"/> or
+    /// <see cref="Chat.SseEventTypes.ChatSseEventFactory.CreateOutputPaneEvent"/> via the
+    /// constructor-supplied SSE writer delegate. When the writer is null, the widget event is
+    /// dropped silently.
+    /// </remarks>
+    public const string Widget = "widget";
+}
+
+/// <summary>
+/// Citation envelope used in <see cref="ToolResult.Metadata"/> under
+/// <see cref="ToolResultMetadataKeys.Citations"/>. Shape mirrors
+/// <see cref="Models.Ai.Chat.CitationMetadata"/> but excludes the citation ID
+/// (the accumulator assigns IDs deterministically in tool-call order).
+/// </summary>
+/// <param name="ChunkId">Unique chunk identifier from the source index.</param>
+/// <param name="SourceName">Display name of the source document or article.</param>
+/// <param name="PageNumber">Optional page number in the source document.</param>
+/// <param name="Excerpt">Short content excerpt (capped to 200 chars by the accumulator).</param>
+/// <param name="SourceType">Optional discriminator: null/"document" or "web".</param>
+/// <param name="Url">Optional URL for web citations.</param>
+/// <param name="Snippet">Optional short snippet for web citations.</param>
+public sealed record ToolResultCitation(
+    string ChunkId,
+    string SourceName,
+    int? PageNumber = null,
+    string Excerpt = "",
+    string? SourceType = null,
+    string? Url = null,
+    string? Snippet = null);
+
+/// <summary>
+/// Widget event envelope used in <see cref="ToolResult.Metadata"/> under
+/// <see cref="ToolResultMetadataKeys.Widget"/>. The adapter routes by
+/// <see cref="PaneType"/> to the matching SSE factory method.
+/// </summary>
+/// <param name="PaneType">"source_pane" or "output_pane". Any other value is ignored.</param>
+/// <param name="WidgetType">Frontend widget-registry key (e.g., "DocumentViewer", "SearchResults").</param>
+/// <param name="Data">Widget data payload — JSON-serializable; frontend owns schema interpretation.</param>
+/// <param name="CitationId">
+/// Optional citation ID linking the source-pane widget to a [N] marker. Used only when
+/// <see cref="PaneType"/> = "source_pane".
+/// </param>
+public sealed record ToolResultWidget(
+    string PaneType,
+    string WidgetType,
+    object Data,
+    string? CitationId = null);
 
 /// <summary>
 /// Common error codes for tool execution failures.

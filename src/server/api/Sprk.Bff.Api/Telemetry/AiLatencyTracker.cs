@@ -48,7 +48,7 @@ public sealed class AiLatencyTracker
     /// Marks the start of the streaming request.
     /// Must be called before <see cref="RecordFirstToken"/>.
     /// </summary>
-    /// <param name="model">Model deployment name selected by the CapabilityRouter.</param>
+    /// <param name="model">Model deployment name selected by the router.</param>
     /// <param name="routingLayer">Routing tier that produced the model selection (1, 2, or 3).</param>
     public void StartRequest(string model = "unknown", int routingLayer = 1)
     {

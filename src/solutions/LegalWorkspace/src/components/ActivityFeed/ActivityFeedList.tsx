@@ -13,8 +13,11 @@
  * Each item is rendered as a FeedItemCard (task 011) which provides the full
  * interactive card UI including:
  *   - Unread dot + type icon + title + priority badge + timestamp
- *   - Flag toggle (wired to FeedTodoSyncContext — task 012)
  *   - AI Summary button (task 013)
+ *
+ * Per R3 FR-14 / FR-29 / OS-1: the legacy "Flag as To Do" toggle was removed
+ * because `sprk_event.sprk_todoflag` no longer exists. Todos are first-class
+ * `sprk_todo` records and are created via the shared CreateTodoWizard.
  *
  * The PlaceholderFeedItem below is retained as a fallback/dev aid but is no
  * longer used in the main render path.

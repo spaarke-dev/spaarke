@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>`ParseChannelBullets` validates `primaryEntityId`; nulls invalid + logs (FR-17)</title>
+    <phase>P2b: BFF /narrate Fix</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>032</blocks>
+    <tags>bff-api, api, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api triggers FULL; defense-in-depth validation; binding constraint</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 030 (shares DailyBriefingEndpoints.cs)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Per FR-17: after `ParseChannelBullets`, validate each bullet's `primaryEntityId` against the union of supplied `item.RegardingId` values for the channel. If no match: null out `primaryEntityType` + `primaryEntityId` + `primaryEntityName` on that bullet (frontend will render no link) and log a warning with the offending bullet content.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF Minimal API + LLM-response validation + structured logging.</role>
+
+  <goal>Hallucinated `primaryEntityId` values are nulled out server-side; warning logged with bullet context for monitoring; no broken links reach the client.</goal>
+
+  <context>
+    <background>
+      Per FR-17: defense in depth. Even with the FR-15/FR-16 prompt improvements, the LLM may still hallucinate occasionally. Server-side validation guarantees no broken links reach the client.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">BFF Minimal API.</constraint>
+    <constraint source="ADR-013">AI in BFF; defense-in-depth validation.</constraint>
+    <constraint source="project">FR-17: null `primaryEntityType` + `primaryEntityId` + `primaryEntityName` on validation failure; log warning.</constraint>
+    <constraint source="project">CLAUDE.md §10: test update obligation — add unit test in `tests/unit/Sprk.Bff.Api.Tests/` (task 032).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">In `DailyBriefingEndpoints.cs`, locate `ParseChannelBullets` and the post-parse code path.</step>
+    <step order="2">Build a `HashSet&lt;Guid&gt;` (or string set) of supplied `item.RegardingId` values for the channel.</step>
+    <step order="3">For each parsed bullet: if `primaryEntityId` is non-null AND not in the set, null out `primaryEntityType`, `primaryEntityId`, `primaryEntityName`; log a structured warning with bullet content + the offending ID.</step>
+    <step order="4">Build the project; verify green.</step>
+    <step order="5">Update TASK-INDEX.md: change task 031 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build .NET project.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Server-side validation rejects `primaryEntityId` values not in the supplied set.</criterion>
+    <criterion testable="true">Invalid bullets have nulled `primaryEntityType` + `primaryEntityId` + `primaryEntityName`.</criterion>
+    <criterion testable="true">Warning is logged with bullet content for monitoring.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Don't add the unit test here — task 032. Keep this task focused on production code.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

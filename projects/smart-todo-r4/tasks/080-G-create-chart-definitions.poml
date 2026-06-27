@@ -1,0 +1,107 @@
+<task id="R4-080" project="smart-todo-r4">
+  <metadata>
+    <title>G — Create 4 sprk_chartdefinition records (Matter / Project / Invoice / WorkAssignment)</title>
+    <phase>Phase 2: Wave 2a</phase>
+    <workstream>G</workstream>
+    <status>complete</status>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>dataverse-schema, chart-definition, deploy, powershell, scripts</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-003</dependencies>
+    <relevant-files>
+      <file>scripts/Deploy-ChartDefinitionEntity.ps1 (existing helper)</file>
+      <file>scripts/Create-UpcomingTodosChartDefinitions.ps1 (new — or reuse generic helper)</file>
+      <file>infrastructure/dataverse/charts/*.json (new — chart def JSON definitions)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Create 4 new `sprk_chartdefinition` records in spaarkedev1 — one per parent entity (Matter / Project / Invoice / WorkAssignment) — modeled on the existing "UPCOMING TASKS" chart def `154bd4a4-f359-f111-a825-3833c5d9bcab`. Each targets `sprk_todo` filtered by current parent record via the corresponding `sprk_regarding<X>` lookup.
+  </prompt>
+
+  <role>Dataverse + PowerShell engineer using existing `Deploy-ChartDefinitionEntity.ps1` infrastructure.</role>
+
+  <goal>
+4 chart def records present in spaarkedev1:
+- sprk_entitylogicalname = "sprk_todo"
+- sprk_contextfieldname = "sprk_regarding<X>" (varies per record)
+- sprk_drillthroughtarget = navigation payload opening sprk_smarttodo Code Page modal (per task 003 spike outcome)
+- sprk_visualtype = `100000009` "Due Date Card List"
+- fetchxml: sprk_todo WHERE statecode=0 AND statuscode IN {1, 659490001} AND (sprk_duedate next-5-days OR sprk_todopinned=true)
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/smart-todo-r4/spec.md</file>
+    <file purpose="spike-outcome">projects/smart-todo-r4/notes/drill-through-spike.md</file>
+    <file purpose="existing-script">scripts/Deploy-ChartDefinitionEntity.ps1</file>
+    <file purpose="reference">scripts/Check-ChartDefinitionEntity.ps1</file>
+    <file purpose="pattern-chart-def">154bd4a4-f359-f111-a825-3833c5d9bcab in spaarkedev1 (read via Web API for fetchxml shape)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-31">4 new records cloned from `154bd4a4-f359-f111-a825-3833c5d9bcab`</constraint>
+    <constraint source="spec FR-32">FetchXML: sprk_todo WHERE statecode=0 AND statuscode in {1, 659490001} AND (sprk_duedate next-5-days OR sprk_todopinned=true)</constraint>
+    <constraint source="spec FR-33">sprk_contextfieldname = corresponding sprk_regarding&lt;X&gt; lookup per parent entity</constraint>
+    <constraint source="spec FR-34">sprk_drillthroughtarget opens sprk_smarttodo Code Page modal — payload per task 003 spike</constraint>
+    <constraint source="spec FR-35">sprk_visualtype = "Due Date Card List" (id 100000009)</constraint>
+    <constraint source="spec NFR-03">Multi-environment portable; no hardcoded environment values</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/chart-definition</topic>
+    <files>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md (for similar config-record pattern)</file>
+    </files>
+    <patterns>
+      <pattern name="Existing chart def helper" location="scripts/Deploy-ChartDefinitionEntity.ps1">
+        Use as-is or extend with a new wrapper script that knows the 4 R4 chart def payloads.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>VisualHost PCF renders sprk_chartdefinition records on forms. R4 G adds 4 new chart defs (one per parent entity) so VisualHost can render "Upcoming To Dos" cards on Matter / Project / Invoice / WorkAssignment main forms.</background>
+    <dependencies>
+      <dependency task="R4-003" status="must-complete">Drill-through URL signature confirmed by spike (or fallback documented)</dependency>
+    </dependencies>
+    <related-work>
+      <item>Tasks 081-084: add Visual Host control to each parent form (consumes one chart def each)</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">&lt; 70%.</step>
+    <step order="1" name="Read existing UPCOMING TASKS chart def">Use `Check-ChartDefinitionEntity.ps1` or Web API to fetch the `154bd4a4-...` record. Capture fetchxml + visual config as reference.</step>
+    <step order="2" name="Author 4 JSON chart def definitions">For each entity (Matter, Project, Invoice, WorkAssignment), create a JSON definition with: `sprk_name = "Upcoming To Dos — &lt;Entity&gt;"`, `sprk_entitylogicalname = "sprk_todo"`, `sprk_contextfieldname = "sprk_regarding&lt;X&gt;"`, `sprk_drillthroughtarget` per spike, `sprk_visualtype = 100000009`, fetchxml per FR-32. Store in `infrastructure/dataverse/charts/upcoming-todos-{entity}.json`.</step>
+    <step order="3" name="Write or extend PowerShell deploy script">`scripts/Create-UpcomingTodosChartDefinitions.ps1` calls `Deploy-ChartDefinitionEntity.ps1` (or equivalent) for each JSON file. Idempotent (upsert).</step>
+    <step order="4" name="Run script against spaarkedev1">Deploy all 4 chart def records.</step>
+    <step order="5" name="Verify via Web API">Use Check-ChartDefinitionEntity.ps1 or Web API: confirm 4 records present with correct field values.</step>
+    <step order="6" name="Commit JSON + script to repo">Solution-as-code pattern.</step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">Run PowerShell deploy script</tool>
+    <tool name="dataverse-deploy">Solution-related operations</tool>
+    <tool name="git">Commit JSON definitions + new script</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Create-UpcomingTodosChartDefinitions.ps1 (new)</output>
+    <output type="code">infrastructure/dataverse/charts/upcoming-todos-matter.json (new)</output>
+    <output type="code">infrastructure/dataverse/charts/upcoming-todos-project.json (new)</output>
+    <output type="code">infrastructure/dataverse/charts/upcoming-todos-invoice.json (new)</output>
+    <output type="code">infrastructure/dataverse/charts/upcoming-todos-workassignment.json (new)</output>
+    <output type="deploy">4 sprk_chartdefinition records deployed to spaarkedev1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">4 sprk_chartdefinition records present in spaarkedev1</criterion>
+    <criterion testable="true">Each record has correct sprk_entitylogicalname = "sprk_todo"</criterion>
+    <criterion testable="true">Each record's sprk_contextfieldname matches the parent entity's regarding lookup</criterion>
+    <criterion testable="true">Each record's sprk_drillthroughtarget matches task 003 spike payload</criterion>
+    <criterion testable="true">Each record's sprk_visualtype = 100000009 "Due Date Card List"</criterion>
+    <criterion testable="true">FetchXML matches FR-32 spec (statecode=0, statuscode in {1,659490001}, sprk_duedate next-5-days OR sprk_todopinned=true)</criterion>
+    <criterion testable="true">JSON definitions + PowerShell script committed to repo</criterion>
+  </acceptance-criteria>
+</task>

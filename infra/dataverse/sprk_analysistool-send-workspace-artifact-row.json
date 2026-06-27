@@ -1,0 +1,61 @@
+{
+  "_comment_top": "R6 Pillar 6b / D-C-05 / task 054 — seed row for the SendWorkspaceArtifactHandler chat tool. Surfaces a single LLM-visible 'send_workspace_artifact(widgetType, title, widgetData, matterId?)' function that dispatches a finished agent artifact to the user's workspace pane as a new tab via IWorkspaceStateService.UpsertTabAsync.",
+  "_comment_routing": "Runtime invocation routes to the C# class via sprk_handlerclass = 'SendWorkspaceArtifactHandler' (= nameof handler class). Auto-discovered via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) — ZERO new top-level DI line.",
+  "_comment_placement_boundary": "ADR-013 binding: the handler injects IWorkspaceStateService directly (BFF-internal workspace plumbing) — NOT through a PublicContracts facade. This mirrors task 053's SprkChatAgentFactory.ResolveTools system-prompt block which also reads IWorkspaceStateService directly from the per-turn scope. Workspace state is a chat-session state primitive owned by Pillar 6a, not an AI capability — facade indirection would add no boundary value.",
+  "_comment_security": "sprk_requiredcapability = null (intentional). Sending an artifact to the workspace pane is a default user affordance — every chat session, standalone or playbook-bound, can dispatch artifacts. The 4-variant widgetType enum (Summary | DocumentViewer | Dashboard | Table) is the authorization surface — there is no 'free text widget' escape hatch, so the LLM cannot smuggle arbitrary payloads into the workspace outside the closed union.",
+  "_comment_tenant_isolation": "ADR-014 binding: the chat session's TenantId is forwarded into the tab's TenantId + the underlying Redis key + Cosmos partition key. Cross-tenant dispatch is structurally impossible — WorkspaceStateService.UpsertTabAsync enforces a tenant match between the arg tenantId and the WorkspaceTab.TenantId, throwing InvalidOperationException on mismatch (caught by the handler + surfaced as ValidationFailed).",
+  "_comment_adr015": "ADR-015 data governance: telemetry logs handler name + decision GUID + tabId GUID + widgetType discriminator + matter scope present/absent + title LENGTH + duration ONLY. NEVER the LLM-supplied widgetData body content; NEVER the title text; NEVER the user's chat message. The tab's SourceProvenance.CreatedBy is the deterministic 'agent:{chatSessionId}' sentinel — never user message text.",
+  "_comment_description_loadbearing": "sprk_description is LOAD-BEARING per NFR-12: the LLM uses the description text to decide WHEN to invoke this tool. The phrasing emphasizes (1) the four widget archetypes the LLM can produce, (2) the conversational-primacy invariant (chat reply stays conversational; artifact materializes on the tab strip), and (3) the user-pin-to-matter follow-up affordance. Pillar 9 (task 074) will refine the description with per-widget visible-state semantics if needed.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter; UPSERTs.",
+  "sprk_name": "SYS-Send Workspace Artifact",
+  "sprk_toolcode": "SEND-WORKSPACE-ARTIFACT",
+  "sprk_description": "Send a finished artifact (Summary, DocumentViewer, Dashboard, or Table) to the user's workspace pane as a new tab. Use this when you have produced a structured result the user should be able to inspect, share, or pin to a matter — for example: a generated executive summary (Summary), a previewed contract or knowledge source (DocumentViewer), a portfolio overview (Dashboard), or a sortable result set (Table). The artifact materializes on the workspace tab strip; the chat reply remains conversational. Agent-created tabs default to visible-to-assistant so you can reference them in subsequent turns; the user can pin a tab to a matter via the workspace UI.",
+  "sprk_handlerclass": "SendWorkspaceArtifactHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only. Workspace tab dispatch is a chat-surface affordance — playbook nodes write to sprk_analysisoutput + sprk_workingdocument, not the chat-session per-tenant workspace tab list. Future R7+ work MAY extend this to Both (100000002) if cross-context artifact dispatch becomes a coherent flow.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "SendWorkspaceArtifactHandler Request",
+    "description": "Argument shape for chat-driven invocation of the send_workspace_artifact tool. Constructs a WorkspaceTab and persists it via IWorkspaceStateService.UpsertTabAsync.",
+    "type": "object",
+    "required": ["widgetType", "title", "widgetData"],
+    "properties": {
+      "widgetType": {
+        "type": "string",
+        "enum": ["Summary", "DocumentViewer", "Dashboard", "Table"],
+        "description": "Closed enum selecting the workspace tab variant. The 'widgetData.kind' field MUST equal this value."
+      },
+      "title": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Display title for the workspace tab — shown on the tab strip and in tooltips. Should be short and matter-relevant. NEVER raw user message text — author a concise headline that summarizes the artifact."
+      },
+      "widgetData": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["kind"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["Summary", "DocumentViewer", "Dashboard", "Table"],
+            "description": "Discriminator — MUST equal widgetType. Per-variant fields below are validated structurally by the handler via System.Text.Json polymorphism."
+          }
+        },
+        "description": "Per-variant payload. Summary requires {body, tldr?}; DocumentViewer requires {documentId, filename, mimeType, sizeBytes, hasSelection?, selectionText?}; Dashboard requires {layoutId, dashboardName, lastViewedSection?}; Table requires {rowCount, filteredColumns[], selectedRows[], sortColumn?, sortDirection?, dataSourceId?}. Deterministic identifiers + display metadata only — ADR-015 binding: NEVER raw user message text."
+      },
+      "matterId": {
+        "type": "string",
+        "format": "uuid",
+        "description": "Optional Dataverse sprk_matter GUID to anchor the tab to. When omitted, the chat session's MatterId is used; when neither is present the tab is anchored to a synthetic 'unattached' context (Guid.Empty) that the user can later pin to a real matter via the workspace UI."
+      },
+      "matterName": {
+        "type": "string",
+        "description": "Optional display name for the matter — shown in the tab tooltip when matterId is supplied. When omitted the GUID is used as the display name."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — this row exposes a single LLM-facing function. Empty object reserved for future per-row defaults (e.g., default widget-type override, per-tenant 'always-pin' policy)."
+  }
+}

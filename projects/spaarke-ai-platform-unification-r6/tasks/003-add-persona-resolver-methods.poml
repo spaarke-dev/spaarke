@@ -1,0 +1,205 @@
+<task id="003" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-A-03 Add Persona Resolution Methods to `IScopeResolverService` (Pillar 1)</title>
+    <phase>Phase A — Data-driven Foundation</phase>
+    <status>completed</status>
+    <completed>2026-06-07</completed>
+    <completion-notes>
+Implemented R6 Pillar 1 D-A-03 persona resolution methods following Q1 most-specific-wins
+precedence (playbook-attached > tenant CUST- > global SYS-). Reused the canonical
+DataverseHttpServiceBase pattern from AnalysisActionService/Skill/Knowledge/Tool.
+
+Files modified:
+  - src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs (+62 lines):
+    added ResolvePersonaForChatAsync + GetEffectivePersonaAsync interface methods
+    with full XML docs explaining FR-03/FR-04/NFR-01/NFR-14 bindings.
+  - src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisPersonaService.cs (+140 lines):
+    extended task 002's skeleton with ResolvePersonaForChatAsync (throws on missing SYS-
+    default per FR-04) + GetEffectivePersonaAsync (returns null on full miss) +
+    QueryFirstByScopeTypeAsync helper. Three precedence layers query Dataverse with explicit
+    sprk_scopetype + NFR-14 SYS-/CUST- prefix filters as defense-in-depth.
+  - src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs (modified):
+    replaced task 002's NotImplementedException stubs (lines 390-404) with delegating calls
+    to _personaService.
+  - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PersonaResolutionTests.cs (NEW, 409 lines):
+    13 unit tests covering: no overrides → SYS- default (FR-04); tenant override wins
+    (FR-03); playbook override wins over tenant + SYS- (FR-03); fall-through when
+    playbook bound but missing; NFR-14 query filter URL inspection (CUST- + SYS- prefix);
+    no-playbookId skips playbook query; null at every layer returns null; throws on no
+    SYS- default; argument validation (blank + null tenantId). All 13 PASSED in 29 ms.
+
+DI: AnalysisPersonaService already registered by task 002 in AnalysisServicesModule
+    (services.AddHttpClient&lt;AnalysisPersonaService&gt;()), so no DI changes needed
+    in this task.
+
+Parallel coordination with task 002 (ListPersonasAsync endpoint owner): clean — task 002
+added the DTO (AnalysisPersona record + PersonaScopeType enum), ListPersonasAsync interface
+method + AnalysisPersonaService skeleton + DI registration + ScopeResolverService stubs.
+Task 003 added the resolver interface methods + the resolver implementations + tests.
+Zero file-overlap on method signatures.
+
+Build: dotnet build src/server/api/Sprk.Bff.Api/ -c Release → 0 errors, 16 warnings
+(baseline). Tests: 13/13 PASSED.
+
+BFF publish-size: compressed 45.50 MB vs 45.65 MB baseline (CLAUDE.md 2026-05-26) =
+−0.15 MB delta. Well under R6 +5 MB total budget per NFR-02; ceiling 60 MB unaffected.
+
+Quality gates (Step 9.5):
+  - code-review: PASS (0 critical, 0 warning, 0 suggestion, 0 AI smells)
+  - adr-check: PASS (17 ADRs/NFRs verified compliant; ADR-010/-013/-014/NFR-01/NFR-14
+    explicitly checked; BFF §10 hygiene checklist complete with placement justification
+    + facade-boundary verification)
+
+Downstream: task 005 (SprkChatAgentFactory wiring) can now call
+ScopeResolverService.ResolvePersonaForChatAsync(tenantId, playbookId, ct) to replace the
+hardcoded BuildDefaultSystemPrompt() call. Pending tasks 002 (endpoint) + 004 (SYS- seed
+row) are parallel siblings — Wave A-G1 main session reconciles after all three close.
+    </completion-notes>
+    <estimated-effort>6 hours</estimated-effort>
+    <dependencies>001</dependencies>
+    <blocks>005</blocks>
+    <tags>bff-api, services, ai, scope</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.cs` files in `Services/Ai/`; implements most-specific-wins inheritance logic (Q1 binding); tagged `bff-api` + `ai`; gates Pillar 1 agent factory wiring.</rigor-reason>
+    <parallel-group>A-G1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent service file from 002 (endpoint) and 004 (seed row); all three unblocked by 001 and parallel-safe.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `IScopeResolverService` with persona resolution methods that implement Q1
+    most-specific-wins inheritance: global SYS- &lt; tenant CUST- &lt; playbook-attached.
+    Reuse the existing inheritance-chain query path used by Action / Skill / Knowledge /
+    Tool scopes — do NOT invent a parallel resolver. The methods are
+    `GetPersonasAsync(...)` (list for endpoint 002) and `ResolvePersonaForChatAsync(tenantId, playbookId?)`
+    (most-specific-wins for agent factory wiring in task 005).
+
+    Critical-path context: this resolver implements the Pillar 1 decision contract. Task 005
+    wires `SprkChatAgentFactory.CreateAgentAsync` to call `ResolvePersonaForChatAsync` instead
+    of `BuildDefaultSystemPrompt()`. The resolver MUST return the seeded SYS- default
+    (task 004) when no tenant or playbook override exists — preserving identical behavior
+    to today per FR-04. NFR-01 binding: persona augments the conversational system prompt
+    but never replaces conversational ability.
+
+    Implementation pattern: clone the existing resolver method for one of the 4 scopes
+    (e.g., `ResolveActionAsync`); swap entity to `sprk_aipersona`. Inheritance chain query
+    walks `parentScopeId` up to root; first non-null match wins per Q1 most-specific-wins.
+  </prompt>
+
+  <role>
+    Senior BFF engineer with Spaarke `IScopeResolverService` + Dataverse Web API client
+    experience. Familiar with scope inheritance chain queries and `polymorphic-resolver`
+    pattern.
+  </role>
+
+  <goal>
+    `IScopeResolverService` has two new methods: `GetPersonasAsync` (paged list) and
+    `ResolvePersonaForChatAsync` (single most-specific-wins persona). Implementation reuses
+    existing inheritance-chain query. Unit tests cover all resolution cases (no override,
+    tenant override, playbook override, missing parent). Build green; publish-size delta
+    reported.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="resolver-service">src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs</file>
+    <file purpose="canonical-pattern">docs/architecture/scope-architecture.md</file>
+    <file purpose="bff-claude">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Implementation registered inside existing `AnalysisServicesModule` (no new top-level Program.cs lines).</constraint>
+    <constraint source="ADR-013">Resolver remains an AI-internal service; CRUD-side consumers route via PublicContracts facades only.</constraint>
+    <constraint source="ADR-014">If caching resolution results, include `tenantId` in the cache key.</constraint>
+    <constraint source="ADR-029">Verify BFF publish-size delta; ≤+5 MB R6 total budget per NFR-02.</constraint>
+    <constraint source="spec NFR-01">Conversational primacy: persona resolution augments the system prompt but the chat agent NEVER loses conversational ability when persona is resolved/changed.</constraint>
+    <constraint source="spec FR-03">Resolution order = global SYS- → tenant CUST- → playbook-attached (most specific wins per Q1).</constraint>
+    <constraint source="spec FR-04">When no tenant/playbook override exists, the resolver MUST return the seeded SYS- default such that behavior is identical to today's `BuildDefaultSystemPrompt()`.</constraint>
+    <constraint source="spec NFR-14">SYS-/CUST- ownership boundary honored in queries.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/scope-resolver</topic>
+    <files>
+      <file>.claude/patterns/api/service-registration.md</file>
+      <file>.claude/patterns/dataverse/relationship-navigation.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>docs/architecture/scope-architecture.md</file>
+      <file>docs/guides/SCOPE-CONFIGURATION-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing scope resolver method" location="src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs">
+        Clone a resolver method (e.g., `ResolveActionAsync`); swap entity to `sprk_aipersona`. Apply the same inheritance-chain traversal logic for `parentScopeId`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Output: "🔒 RIGOR LEVEL: FULL — `.cs` modification + binding Q1 resolution logic + downstream blocker for task 005". Read project CLAUDE.md + spec.md FR-03/FR-04.
+    </step>
+    <step order="1" name="Review Progress">
+      Verify 001 ✅. Update `current-task.md` to task 003.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read inputs + knowledge files. Capture baseline publish size for delta calc.
+    </step>
+    <step order="3" name="Inspect Existing Resolver">
+      Open `IScopeResolverService` + implementation. Identify the canonical method shape for inheritance-chain resolution. Note: parent-walk logic, tenant filter, query batching.
+    </step>
+    <step order="4" name="Add Resolution Methods">
+      Extend interface with `GetPersonasAsync(tenantId, paging)` and `ResolvePersonaForChatAsync(tenantId, playbookId?) → AnalysisPersona`. Implement most-specific-wins: query playbook-attached first; fall through to tenant CUST-; fall through to global SYS-. Cache resolution with `tenantId`-keyed cache key per ADR-014 if caching is applied.
+    </step>
+    <step order="5" name="Add Unit Tests">
+      Comprehensive unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/`: (a) no overrides → SYS- default; (b) tenant override → CUST- wins; (c) playbook override → playbook-attached wins; (d) playbook missing parent → falls through; (e) tenant isolation (different tenant cannot see another tenant's CUST-); (f) cache key includes tenantId.
+    </step>
+    <step order="6" name="Build + Verify Publish Size">
+      `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors. `dotnet publish -c Release` → measure delta vs baseline; report ≤+5 MB R6 budget.
+    </step>
+    <step order="7" name="Verify Acceptance Criteria">
+      Walk each criterion below; record evidence.
+    </step>
+    <step order="9.5" name="Quality Gates (FULL rigor)">
+      Run `code-review` + `adr-check` against changed `.cs` files. Verify ADR-010 / ADR-013 / ADR-014 / NFR-01 / NFR-14 compliance. Both gates MUST pass.
+    </step>
+    <step order="10" name="Document + Complete">
+      Update task POML status complete. TASK-INDEX 003 ✅. Reset `current-task.md`. Report.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">build, publish, test</tool>
+    <tool name="git">stage + commit on R6 worktree</tool>
+    <tool name="code-review">Quality gate Step 9.5</tool>
+    <tool name="adr-check">ADR compliance gate Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs (modified)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs (modified — implementation)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PersonaResolutionTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (003 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md (reset)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-platform-unification-r6/notes/task-003-publish-size-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IScopeResolverService` exposes `GetPersonasAsync` + `ResolvePersonaForChatAsync` methods.</criterion>
+    <criterion testable="true">Most-specific-wins logic: tests prove playbook-attached &gt; tenant CUST- &gt; global SYS- ordering (FR-03).</criterion>
+    <criterion testable="true">When no override exists, SYS- default returned — preserves identical behavior to current `BuildDefaultSystemPrompt()` (FR-04).</criterion>
+    <criterion testable="true">Tenant isolation enforced: different tenants cannot see each other's CUST- personas (NFR-14).</criterion>
+    <criterion testable="true">Cache key (if used) includes `tenantId` per ADR-014.</criterion>
+    <criterion testable="true">Service registered inside existing `AnalysisServicesModule` per ADR-010.</criterion>
+    <criterion testable="true">No CRUD-side injection of `IOpenAiClient` / `IPlaybookOrchestrationService` introduced — facade boundary preserved per ADR-013.</criterion>
+    <criterion testable="true">BFF publish-size delta reported in task notes; ≤+5 MB R6 total budget verified.</criterion>
+    <criterion testable="true">`code-review` + `adr-check` quality gates pass.</criterion>
+  </acceptance-criteria>
+</task>

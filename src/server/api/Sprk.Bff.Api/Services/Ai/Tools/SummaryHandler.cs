@@ -374,6 +374,7 @@ public sealed class SummaryHandler : IAnalysisToolHandler
                     prompt,
                     schemaBinaryData,
                     schemaName,
+                    temperature: (float)context.Temperature,
                     cancellationToken: cancellationToken);
             }
             else

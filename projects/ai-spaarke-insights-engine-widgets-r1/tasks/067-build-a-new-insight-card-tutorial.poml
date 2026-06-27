@@ -1,0 +1,60 @@
+<task id="067" project="ai-spaarke-insights-engine-widgets-r1">
+  <metadata>
+    <title>Author docs/guides/BUILD-A-NEW-INSIGHT-CARD.md tutorial (SC-13)</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <phase>6</phase>
+    <tags>docs, tutorial, sc-13</tags>
+    <dependencies>061, 062, 063, 064, 065, 066</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+  </metadata>
+
+  <prompt>
+    Per FR-27 + SC-13: author the BUILD-A-NEW-INSIGHT-CARD tutorial in `docs/guides/`. Walk through: (a) author a JPS playbook + action prompt (Phase 2 recap), (b) add a row to `sprk_aitopicregistry` (Phase 1 recap), (c) drop `InsightSummaryCard` onto a host form (Phase 4 recap), (d) verify end-to-end (Phase 6 recap). Targets developers + SMEs. Q-U7: same engineer as component author writes this — single owner end to end.
+  </prompt>
+
+  <role>Technical writer (same engineer per Q-U7).</role>
+
+  <goal>
+    `docs/guides/BUILD-A-NEW-INSIGHT-CARD.md` published; walk-through validated by SME smoke read.
+  </goal>
+
+  <inputs>
+    <file purpose="phase-deliverables">Tasks 020-025, 010-014, 030-044</file>
+    <file purpose="spec">projects/ai-spaarke-insights-engine-widgets-r1/spec.md (FR-27)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="Q-U7">Single engineer writes both component + tutorial</constraint>
+    <constraint source="Q-U1">No `@v1`/`@vN` syntax in code samples</constraint>
+    <constraint source="audit-DR-007 / canonical-architecture-decisions.md §2.7">Show prompt in sprk_analysisaction, NOT .txt file (audit-codified pattern; NOT ADR-014 — citation corrected 2026-06-10)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>technical writing, insight card authoring tutorial</topic>
+    <files>
+      <file>projects/ai-spaarke-insights-engine-widgets-r1/spec.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md (inspiration)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Section 1 — Author playbook">Phase 2 recap with code examples</step>
+    <step order="2" name="Section 2 — Register topic">Phase 1 recap with Power Apps form screenshots</step>
+    <step order="3" name="Section 3 — Wire to form">Phase 4 recap (or workspace context for r2+)</step>
+    <step order="4" name="Section 4 — Verify end-to-end">Phase 6 recap</step>
+    <step order="5" name="Section 5 — Troubleshooting">FAQ + common errors</step>
+    <step order="6" name="SME smoke read">Get one SME to follow the tutorial; capture friction</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">docs/guides/BUILD-A-NEW-INSIGHT-CARD.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 sections complete</criterion>
+    <criterion testable="true">No `@v1`/`@vN` in any code sample</criterion>
+    <criterion testable="true">SME smoke read passes</criterion>
+  </acceptance-criteria>
+</task>

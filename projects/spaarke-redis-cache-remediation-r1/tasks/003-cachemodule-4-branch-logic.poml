@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>CacheModule: AbortOnConnectFail=true + 4-branch logic + fail-fast</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>005,009</blocks>
+    <tags>bff-api, cache, redis, di, startup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + modifies CacheModule.cs (.cs) + core startup logic + ADR-032 symmetric DI requirement</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Change `CacheModule.cs:31` `AbortOnConnectFail = false` → `true`, and replace the current Redis-on/Redis-off two-branch logic with the 4-branch logic per FR-01..03: Redis-on (real connection, fail-fast), Redis-off + AllowInMemoryFallback + Development (in-memory + Null-Object), Redis-off + AllowInMemoryFallback + NOT Development (throw at startup), Redis-off + no fallback opt-in (throw at startup). Error messages must name the connection-string source (KV secret URI vs App Setting) and what the operator should check.
+  </prompt>
+
+  <role>
+    Spaarke .NET developer with deep DI + StackExchange.Redis familiarity. Apply ADR-032 symmetric registration. Preserve existing AI service cache interactions.
+  </role>
+
+  <goal>
+    `CacheModule.AddCachingServices(...)` implements the 4-branch decision logic with `AbortOnConnectFail = true` for the Redis-on path. Throw paths produce ergonomic error messages naming the configuration source. Distinct startup-log entries identify which branch was taken (Redis-on, dev-in-memory, throw-deployed, throw-no-opt-in).
+  </goal>
+
+  <context>
+    <background>
+      The drift that caused this project: dev BFF had `Redis:Enabled=false` and `AbortOnConnectFail=false`. When Redis was deleted, BFF silently fell back to in-memory — undetectable from outside. This task hardens the module so future drift cannot occur: deployed environments throw rather than fall back; dev requires explicit opt-in; AbortOnConnectFail=true means even transient failures surface immediately.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/RedisOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/NullObjects/NullConnectionMultiplexer.cs (created by task 004)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-009">Redis-first caching; preserve existing MUSTs (no L1; no authz caching).</constraint>
+    <constraint source="ADR-010">DI minimalism — symmetric registration; no asymmetric anti-pattern.</constraint>
+    <constraint source="ADR-029">Publish-size delta ≤+1 MB across this and subsequent Phase 1 tasks; this task is mostly logic changes — expected near-zero delta.</constraint>
+    <constraint source="ADR-032">Null-Object symmetric registration. `IConnectionMultiplexer` MUST be registered in BOTH the Redis-on path and the dev-fallback path; selection by config, not by `if (flag) { register }` asymmetry.</constraint>
+    <constraint source="spec">FR-01, FR-02, FR-03 acceptance criteria.</constraint>
+    <constraint source="project">Preserve existing AI service cache interactions; existing `IDistributedCache` consumers continue to work (the wrapper migration is task 010+).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/NullMembershipCacheInvalidator.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current `CacheModule.cs`. Understand existing Redis-on branch (Connect, register `IConnectionMultiplexer`, `AddStackExchangeRedisCache`) and Redis-off branch (in-memory + warning log).</step>
+    <step order="2">Verify `IHostEnvironment` is available in the DI registration scope (typically via `WebApplicationBuilder.Environment`); plumb if necessary.</step>
+    <step order="3">Implement 4-branch logic. Switch on `(redisOptions.Enabled, redisOptions.AllowInMemoryFallback, env.IsDevelopment())`:
+      (a) `Enabled=true`: `ConfigurationOptions.AbortOnConnectFail = true`; `Connect()`; register real `IConnectionMultiplexer`; `AddStackExchangeRedisCache`. On failure: rethrow with `InvalidOperationException` wrapping with message naming KV secret name / App Setting path.
+      (b) `Enabled=false`, `AllowInMemoryFallback=true`, `IsDevelopment()=true`: `AddDistributedMemoryCache`; register `NullConnectionMultiplexer` (from task 004) for `IConnectionMultiplexer`; log distinct WARN line "Distributed cache: In-memory mode enabled (Development only). NOT suitable for multi-instance deployment."
+      (c) `Enabled=false`, `AllowInMemoryFallback=true`, NOT Development: throw `InvalidOperationException` with message: "AllowInMemoryFallback is restricted to Development environments. ASPNETCORE_ENVIRONMENT={env}. Set Redis:Enabled=true."
+      (d) `Enabled=false`, `AllowInMemoryFallback=false`: throw `InvalidOperationException` "Redis is disabled and in-memory fallback not opted in. Set Redis:Enabled=true (recommended) or Redis:AllowInMemoryFallback=true (Development only)."</step>
+    <step order="4">Update startup-log Redis-on success line: `"Distributed cache: Redis enabled with instance name '{InstanceName}'"`. This exact string is verified by Phase 3 cutover task 034.</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/`; verify no warnings.</step>
+    <step order="6">Run any existing CacheModule tests (likely none pre-existing; task 009 adds them).</step>
+    <step order="7">Update `TASK-INDEX.md` — mark 003 ✅. Update `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect CacheModule.cs + RedisOptions.cs + NullMembershipCacheInvalidator.cs reference</tool>
+    <tool name="Edit">Modify CacheModule.cs</tool>
+    <tool name="Bash">dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ConfigurationOptions.AbortOnConnectFail = true` in the Redis-on path (no longer `false`).</criterion>
+    <criterion testable="true">All four branches (Redis-on, dev-in-memory, deployed-throw, no-opt-in-throw) implemented; throw branches surface clear error messages naming what the operator should check.</criterion>
+    <criterion testable="true">Startup log line exactly matches `"Distributed cache: Redis enabled with instance name '{InstanceName}'"` (no extra text on the same line) — Success Criterion #1 verifies this in Phase 3.</criterion>
+    <criterion testable="true">`dotnet build` succeeds with no new warnings.</criterion>
+    <criterion testable="true">No asymmetric registration of `IConnectionMultiplexer` — task 005 will verify via static-scan recipe.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task 004 (NullConnectionMultiplexer) and this task are scheduled in parallel-group A. If you run them in parallel, the dev-in-memory branch in this task needs a forward reference; either implement task 004 first or stub the registration with `NullConnectionMultiplexer` as a name-only reference and complete after task 004 lands. Recommend sequential within Group A: 002 → 003 + 004 → 005.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Quality gates code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

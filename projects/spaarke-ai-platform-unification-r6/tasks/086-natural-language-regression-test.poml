@@ -1,0 +1,133 @@
+<task id="086" project="spaarke-ai-platform-unification-r6">
+  <metadata>
+    <title>D-D-07 Natural Language Regression Test — Existing CapabilityRouter Behavior Preserved Alongside Slashes</title>
+    <phase>Phase D — Command Router + Integration + Closeout</phase>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <dependencies>080</dependencies>
+    <blocks>087</blocks>
+    <tags>frontend, integration-test, command-router</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Regression suite verifying NFR-11 backward compat; no new code surface; STANDARD per task-create Step 0 rigor tree (validation-only).</rigor-reason>
+    <parallel-group>D-G2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Test-only; runs alongside 084 + 085 in disjoint files.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Build the natural-language regression test suite per spec FR-54 + NFR-11: confirm
+    natural-language requests still work alongside slashes. The CommandRouter parser MUST
+    return `command: null` for non-slash input, and the existing `CapabilityRouter` Layer 1/2/3
+    classification path MUST remain unchanged.
+
+    This is the binding regression gate for Pillar 8's backward-compat promise. R5
+    `CapabilityRouter` behavior is production-mature; R6 Pillar 8 adds the CommandRouter layer
+    in front but MUST NOT break existing natural-language routing.
+
+    Test surface:
+    - "summarize this document" (natural-language equivalent of `/summarize`) → routes via
+      CapabilityRouter to SUM-CHAT playbook; no `commandIntent` metadata set.
+    - "draft a reply to the opposing counsel" (natural-language equivalent of `/draft`) →
+      routes via CapabilityRouter to draft tools.
+    - "what's the matter status?" (general conversational query) → no playbook; agent
+      responds conversationally (NFR-01).
+    - "make it shorter" (refinement, no slashes, follows up on prior summary) → agent stays
+      conversational.
+
+    Tests assert: (a) `Intent.command === null` for each natural-language input; (b) chat-endpoint
+    payload has `commandIntent: null` (or omitted); (c) CapabilityRouter logs Layer 1/2 classification
+    matches expected pre-Pillar-8 behavior (use existing telemetry); (d) conversational follow-ups
+    work (NFR-01).
+
+    Frontend-only task; BFF publish-size delta = 0 MB.
+  </prompt>
+
+  <role>
+    Frontend integration-test engineer with familiarity with CapabilityRouter 3-tier classification
+    and the SpaarkeAi conversation pane. Comfortable with regression-test design that asserts
+    "behavior X must continue to work despite change Y".
+  </role>
+
+  <goal>
+    Regression test file exists; covers 4+ natural-language inputs; asserts CommandRouter parser
+    returns `command: null` and CapabilityRouter path unchanged. NFR-11 + NFR-01 verifiable
+    via test suite.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarke-ai-platform-unification-r6/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-platform-unification-r6/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="command-router">src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts</file>
+    <file purpose="chat-architecture">docs/architecture/chat-architecture.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-54">Natural language still works alongside slashes via existing CapabilityRouter.</constraint>
+    <constraint source="spec NFR-11">Backward compatibility — existing chat tools + CapabilityRouter behavior continues to work during/after R6.</constraint>
+    <constraint source="spec NFR-01">Conversational primacy — agent stays conversational for non-slash inputs.</constraint>
+    <constraint source="ADR-029">BFF publish-size delta = 0 MB (test-only).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/regression-test-nfr-11</topic>
+    <files>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>docs/architecture/chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r6/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Regression test shape" location="src/solutions/SpaarkeAi/src/components/conversation/__tests__/natural-language.regression.test.ts (new)">
+        For each natural-language input: parse → assert `command: null` + `references: []`. Then mock BFF payload + assert `commandIntent` is null/absent. Then mock CapabilityRouter response + assert behavior matches pre-Pillar-8 baseline.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context Check + Rigor Declaration">
+      Check context. Output: "🔒 RIGOR LEVEL: STANDARD — NFR-11 backward-compat regression; test-only; no new code surface".
+    </step>
+    <step order="1" name="Review Progress">
+      Read TASK-INDEX.md; confirm 086 status is 🔲, dep 080 is ✅. Update `current-task.md`.
+    </step>
+    <step order="2" name="Gather Resources">
+      Read CommandRouter.ts (080). Read chat-architecture.md to understand existing CapabilityRouter behavior on natural language. Identify 4+ representative natural-language inputs that should preserve baseline behavior.
+    </step>
+    <step order="3" name="Author Regression Test Suite">
+      Create `src/solutions/SpaarkeAi/src/components/conversation/__tests__/natural-language.regression.test.ts`. Tests: (a) "summarize this document" → parse returns command:null; payload has no commandIntent; (b) "draft a reply" → same; (c) "what's the matter status?" → conversational response expected; (d) "make it shorter" (refinement after prior response) → conversational follow-up works.
+    </step>
+    <step order="4" name="Run + Verify Green">
+      Run test suite. Confirm all tests green. Confirm no regression in existing tests.
+    </step>
+    <step order="5" name="Verify Acceptance Criteria">
+      Walk through every &lt;acceptance-criterion&gt; below.
+    </step>
+    <step order="6" name="Document + Complete">
+      Update task POML status. Update TASK-INDEX.md: 086 🔲 → ✅. Reset `current-task.md`. Report completion + downstream unblock (087).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Frontend test runner</tool>
+    <tool name="git">Stage + commit regression test file</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/solutions/SpaarkeAi/src/components/conversation/__tests__/natural-language.regression.test.ts (NEW)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/tasks/TASK-INDEX.md (status: 086 🔲 → ✅)</output>
+    <output type="docs">projects/spaarke-ai-platform-unification-r6/current-task.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Regression test file exists; covers 4+ natural-language inputs.</criterion>
+    <criterion testable="true">For each input, CommandRouter parser returns `command: null` + `references: []`.</criterion>
+    <criterion testable="true">For each input, chat-endpoint payload has no `commandIntent` set (verified via mock fixture).</criterion>
+    <criterion testable="true">Conversational follow-up ("make it shorter" after prior response) works without invoking any tool (NFR-01 preserved).</criterion>
+    <criterion testable="true">All tests green via `npm run test`.</criterion>
+    <criterion testable="true">No regression in existing test suite.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB.</criterion>
+  </acceptance-criteria>
+</task>

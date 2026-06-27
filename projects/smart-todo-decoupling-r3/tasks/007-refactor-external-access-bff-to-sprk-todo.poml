@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="smart-todo-decoupling-r3">
+  <metadata>
+    <title>Refactor `ExternalAccess` BFF surface (`ExternalDataService` + `ExternalProjectDtos`) to use `sprk_todo`</title>
+    <phase>Phase 1: Dataverse Schema (audit-surfaced prerequisite)</phase>
+    <status>not-started</status>
+    <estimated-effort>4-5 hours</estimated-effort>
+    <dependencies>002</dependencies>
+    <blocks>004, 005, 008</blocks>
+    <tags>bff-api, api, backend, refactoring, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies BFF DTOs + a public-facing-ish data service consumed by external-spa. Breaking contract change; FULL rigor with downstream coordination (task 008).</rigor-reason>
+    <parallel-group>P1-W2.5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Refactor the BFF's `ExternalAccess` data surface to use `sprk_todo` instead of `sprk_event` + `sprk_todoflag`. Three files in scope: `Infrastructure/ExternalAccess/ExternalDataService.cs` (query path + `body["sprk_todoflag"]` writes), `Api/ExternalAccess/Dtos/ExternalProjectDtos.cs` (three DTOs with `[JsonPropertyName("sprk_todoflag")]` properties). Replace `sprk_todoflag` boolean toggles with first-class `sprk_todo` create/read/update; eliminate the `sprk_event.todoflag=true` semantic from the external portal contract. Coordinate the DTO contract change with the external-spa migration in task 008.
+  </prompt>
+
+  <role>Spaarke BFF API developer with DTO contract + external-portal integration expertise.</role>
+
+  <goal>`ExternalAccess` data surface uses `sprk_todo` throughout: DTOs reflect `sprk_todo` fields; query path retrieves `sprk_todo` records (no `sprk_event?$filter=sprk_todoflag eq true`); writes go to `sprk_todo`. external-spa migration (task 008) consumes the new contract.</goal>
+
+  <context>
+    <background>The audit (task 001) found `ExternalAccess` exposes `sprk_event.todoflag=true` semantics directly to external portals. Decision (user, 2026-06-07): include in scope — refactor BFF (this task) + migrate external-spa (task 008) before tasks 004/005 can run.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ExternalProjectDtos.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/*Endpoint.cs (callers)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ + Infrastructure/ExternalAccess/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">When DTOs carry regarding context, use the four resolver fields + the matching specific lookup. Do NOT add a regarding-object polymorphic lookup to the DTO.</constraint>
+    <constraint source="FR-29">Zero `sprk_todoflag` references in `Infrastructure/ExternalAccess/` and `Api/ExternalAccess/` after this task.</constraint>
+    <constraint source="OS-1">No compat shim. Breaking contract change is acceptable per pre-release rule; coordinate with task 008.</constraint>
+    <constraint source="CLAUDE.md §10">BFF publish-size verification mandatory.</constraint>
+    <constraint source="bff-extensions.md §F">Test obligation: update unit tests for changed DTOs + service.</constraint>
+    <constraint source="project">Product portability: DTOs and queries are environment-agnostic. No hardcoded org URLs / tenant IDs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `ExternalDataService.cs` and `ExternalProjectDtos.cs`. Map every `sprk_todoflag` + `sprk_event` reference. Identify which external-spa endpoints (in `Api/ExternalAccess/*Endpoint.cs`) call this surface.</step>
+    <step order="2">Design new DTO shape: drop `SprkTodoflag` properties; add corresponding `sprk_todo`-shaped DTO (or extend an existing one) carrying `sprk_name`, `sprk_notes`, `sprk_duedate`, state/status, owner, assignee, and resolver-field context.</step>
+    <step order="3">Rewrite `ExternalDataService` query path: replace `sprk_event?$filter=...sprk_todoflag eq true` with `sprk_todos?$filter=...` (filter by regarding for the project / matter context the SPA needs).</step>
+    <step order="4">Rewrite `ExternalDataService` writes: `body["sprk_todoflag"] = ...` becomes a `sprk_todo` create or update operation.</step>
+    <step order="5">Update endpoint callers in `Api/ExternalAccess/*Endpoint.cs` to use the new DTO shape.</step>
+    <step order="6">Update unit tests for `ExternalDataService` + the affected endpoints. Add a "DTO contract" test asserting the new shape (round-trip serialize/deserialize).</step>
+    <step order="7">Document the breaking DTO contract change in `projects/smart-todo-decoupling-r3/notes/external-access-contract-change.md` so task 008 (external-spa) has a single source of truth for the new shape.</step>
+    <step order="8">`dotnet build` + `dotnet test` — clean.</step>
+    <step order="9">Repo grep for `sprk_todoflag` in `Infrastructure/ExternalAccess/` + `Api/ExternalAccess/`. Confirm zero hits.</step>
+    <step order="10">BFF publish-size check + CVE scan.</step>
+    <step order="11">Update TASK-INDEX.md to ✅.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs` (refactored)</output>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ExternalProjectDtos.cs` (DTOs updated)</output>
+    <output type="code">`src/server/api/Sprk.Bff.Api/Api/ExternalAccess/*Endpoint.cs` (caller updates)</output>
+    <output type="test">Updated unit tests for service + endpoints</output>
+    <output type="docs">`projects/smart-todo-decoupling-r3/notes/external-access-contract-change.md` (for task 008)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DTOs reflect `sprk_todo` shape; no `SprkTodoflag` property remains.</criterion>
+    <criterion testable="true">Service queries `sprk_todos` (not `sprk_events?$filter=sprk_todoflag eq true`).</criterion>
+    <criterion testable="true">Writes go to `sprk_todo` create/update.</criterion>
+    <criterion testable="true">Tests pass; no regressions.</criterion>
+    <criterion testable="true">Contract-change doc exists for task 008.</criterion>
+    <criterion testable="true">BFF publish-size delta ≤+5 MB; zero new HIGH CVEs.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Step 9.5 runs adr-check + code-review.</protocol>
+  </execution>
+</task>

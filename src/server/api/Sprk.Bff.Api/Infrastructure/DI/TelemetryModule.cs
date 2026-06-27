@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Caching.Distributed;
+using OpenTelemetry.Trace;
 using Sprk.Bff.Api.Configuration;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -33,6 +34,9 @@ public static class TelemetryModule
                 // R5 Summarize meter (D1-08 task 008): r5.summarize.invocation + r5.session_files.index_size
                 // Stable downstream contract for Phase 3 D3-03 dashboards.
                 metrics.AddMeter(Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry.MeterName);
+                // Insights Engine Widgets r1 meter (project ai-spaarke-insights-engine-widgets-r1 task 050):
+                // widget.insightcard.invoked + widget.insightcard.duration with bounded dimensions per NFR-06.
+                metrics.AddMeter(Sprk.Bff.Api.Telemetry.InsightWidgetsTelemetry.MeterName);
             })
             .WithTracing(tracing =>
             {
@@ -41,6 +45,17 @@ public static class TelemetryModule
                 tracing.AddSource("Sprk.Bff.Api.Finance");
                 // R5 Summarize ActivitySource (D1-08 task 008): distributed-trace spans for Summarize-for-Chat invocations.
                 tracing.AddSource(Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry.MeterName);
+                // Insights Engine Widgets r1 ActivitySource (task 050): distributed-trace spans for
+                // InsightSummaryCard invocations through /api/insights/ask.
+                tracing.AddSource(Sprk.Bff.Api.Telemetry.InsightWidgetsTelemetry.MeterName);
+                // spaarke-redis-cache-remediation-r1 task 040 closure: capture
+                // StackExchange.Redis dependency calls so App Insights "Dependencies"
+                // surfaces Redis traffic. Without this, the default App Insights SDK
+                // does NOT auto-instrument StackExchange.Redis. The Redis instrumentation
+                // resolves `IConnectionMultiplexer` from DI at startup; in dev-fallback
+                // mode it picks up `NullConnectionMultiplexer` (per ADR-032 symmetric
+                // registration) and emits no spans, which is the intended no-op.
+                tracing.AddRedisInstrumentation();
             });
 
         // Circuit Breaker Registry

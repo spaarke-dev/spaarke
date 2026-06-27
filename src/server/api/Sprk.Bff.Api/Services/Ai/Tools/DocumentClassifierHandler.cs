@@ -409,6 +409,7 @@ public sealed class DocumentClassifierHandler : IAnalysisToolHandler
                     prompt,
                     schemaBinaryData,
                     schemaName,
+                    temperature: (float)context.Temperature,
                     cancellationToken: cancellationToken);
             }
             else

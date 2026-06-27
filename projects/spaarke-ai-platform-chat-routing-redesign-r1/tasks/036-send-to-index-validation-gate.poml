@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Validation gate on send-to-index endpoint (description / documentTypes / destinationHint required)</title>
+    <phase>2: WP1.5 Index Governance</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>032,033</dependencies>
+    <blocks>039</blocks>
+    <tags>bff-api, validation, ADR-019, ADR-029</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; modifies `.cs` file; new behavior with explicit ProblemDetails 400 shape — STANDARD per Step 0.5 (validation, not architecture-touching)</rigor-reason>
+    <parallel-group>2-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add a validation gate on the BFF send-to-index endpoint that rejects requests where any of `description`, `sprk_jpsmatchingmetadata.documentTypes`, or `sprk_jpsmatchingmetadata.outputDestination` (destinationHint) is empty. Returns 400 ProblemDetails per ADR-019 with `MissingFields: string[]` extension property naming each missing field. Implements spec FR-12.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in Minimal API endpoint filters + ProblemDetails shaping per ADR-019.</role>
+
+  <goal>
+    Send-to-index endpoint enforces presence of `description`, `documentTypes` (in JPS metadata), and `outputDestination` (destinationHint). Missing-field requests return HTTP 400 with `application/problem+json` body including `MissingFields` array. Unit test covers each missing-field permutation + success case. Telemetry counts validation-failure events.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-12 + design §1.4 "Validation gate". Prevents indexing of un-curated playbooks that would dilute search-result quality. The 3 required fields anchor matching: description (primary embed signal), documentTypes (file-aware pre-filter), and destinationHint (routing semantic).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEmbeddingEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">400 returns ProblemDetails shape with `title`, `status`, `detail` + `extensions["missingFields"]: string[]`.</constraint>
+    <constraint source="ADR-013">Validation lives in `Services/Ai/` (AI-internal); endpoint filter is the thin gate.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="spec">FR-12 acceptance: missing-description returns 400 with `MissingFields: ["description"]`.</constraint>
+    <constraint source="project">CLAUDE.md §10 test obligation — add unit tests for endpoint behavior.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate the send-to-index endpoint (likely in `PlaybookEmbeddingEndpoints.cs` or similar).</step>
+    <step order="2">Add validation logic: read the playbook entity, check `description` non-empty, JSON-parse `sprk_jpsmatchingmetadata` and check `documentTypes` non-empty + `outputDestination` non-empty.</step>
+    <step order="3">On failure, return `Results.Problem(...)` with `extensions["missingFields"]` array per ADR-019.</step>
+    <step order="4">Unit tests for: missing description; missing documentTypes; missing outputDestination; all-three missing (full array); valid request (200).</step>
+    <step order="5">Run `dotnet build` + tests; measure publish delta.</step>
+    <step order="6">Quality gates per task-execute Step 9.5 (STANDARD rigor — quality gates skipped per CLAUDE.md §8 unless explicit ADR-driven need).</step>
+    <step order="7">Update TASK-INDEX.md: task 036 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookEmbeddingEndpoints.cs</tool>
+    <tool name="Edit">Add validation + tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEmbeddingEndpoints.cs — extended with validation</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/PlaybookSendToIndexValidationTests.cs</output>
+    <output type="docs">notes/handoffs/036-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Missing-description POST returns 400 with `MissingFields = ["description"]`.</criterion>
+    <criterion testable="true">Missing-documentTypes POST returns 400 with `MissingFields` containing "documentTypes".</criterion>
+    <criterion testable="true">Missing-destinationHint POST returns 400 with `MissingFields` containing "destinationHint".</criterion>
+    <criterion testable="true">All three missing → `MissingFields` array has all 3 entries.</criterion>
+    <criterion testable="true">Valid POST returns 200 / 202 (whichever current endpoint contract).</criterion>
+    <criterion testable="true">Unit tests pass.</criterion>
+    <criterion testable="true">BFF publish delta within NFR-01 thresholds.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    "destinationHint" maps to `sprk_jpsmatchingmetadata.outputDestination` per spec §1.4 — keep the user-facing field name "destinationHint" in the `MissingFields` payload (matches spec FR-12 acceptance wording).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,59 @@
+<task id="R3-030" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>`MembershipFieldDiscoveryService` — metadata query + filtering + role-name strategy</title>
+    <status>completed</status>
+    <phase>P4</phase>
+    <parallel-group>G (with 031, 032)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>FULL</rigor>
+    <estimated-effort>4-6h</estimated-effort>
+    <tags>bff-api,membership,dataverse-metadata,discovery</tags>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IMembershipFieldDiscoveryService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipFieldDiscoveryService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Models/MembershipDescriptor.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipFieldDiscoveryServiceTests.cs</file>
+    </relevant-files>
+    <dependencies>005, 012</dependencies>
+  </metadata>
+  <prompt>Implement metadata-driven Lookup-field discovery per spec.md FR-1A.1 through FR-1A.4 + FR-1A.7. Queries Dataverse EntityDefinitions API; filters to Lookups whose Targets include configured identity tables; applies global exclusions + per-entity overrides; derives role name via CamelCase strategy; caches per-entity descriptors with 1h TTL.</prompt>
+  <goal>Service returns ordered list of MembershipDescriptor for any entity type. Discovery for sprk_matter includes owner, owningteam, owningbusinessunit, sprk_assignedattorney1/2 (Contact), sprk_assignedparalegal1/2 (Contact), sprk_assignedlawfirm1/2 (sprk_organization per Q4), sprk_assignedtointernal, sprk_assignedtoexternal. Excludes createdby/modifiedby/etc.</goal>
+  <constraints>
+    <constraint source="ADR-013">AI architecture — service lives under Services/Ai/Membership/</constraint>
+    <constraint source="ADR-009">Redis cache for metadata (1h TTL)</constraint>
+    <constraint source="ADR-010">Inject as concrete; interface allowed (testing seam)</constraint>
+    <constraint source="spec Q4">sprk_assignedlawfirm1/2 target = sprk_organization → identityType: Organization</constraint>
+    <constraint source="bff-extensions.md §A">BFF pre-merge checklist</constraint>
+  </constraints>
+  <knowledge>
+    <topic>dataverse-metadata-discovery</topic>
+    <files>
+      <file>docs/adr/ADR-009-redis-caching.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + FR-1A.1 through FR-1A.4 + Q4</step>
+    <step order="1">Define MembershipDescriptor model (field, role, identityType, source)</step>
+    <step order="2">Implement IMembershipFieldDiscoveryService.DiscoverAsync(entityType) — query EntityDefinitions API</step>
+    <step order="3">Filter to Lookups whose Targets contain configured identity tables (per MembershipOptions.IncludedIdentityTables)</step>
+    <step order="4">Apply GlobalFieldExclusions</step>
+    <step order="5">Apply EntityOverrides (ExcludedFields, IncludedFields, FieldRoleOverrides)</step>
+    <step order="6">Derive role name via CamelCase strategy (strip sprk_ + strip trailing digits + camelCase)</step>
+    <step order="7">Cache result in Redis with 1h TTL</step>
+    <step order="8">Unit tests: each filter step, role-name strategy, override application, cache hit/miss</step>
+    <step order="9">Integration test: discover sprk_matter against spaarkedev1 → assert AC-1A.1 expected fields</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Discovery for sprk_matter returns expected fields per AC-1A.1</criterion>
+    <criterion testable="true">Role-name strategy: sprk_AssignedAttorney1 → "assignedAttorney"</criterion>
+    <criterion testable="true">sprk_assignedlawfirm1/2 resolves to identityType=Organization (per Q4)</criterion>
+    <criterion testable="true">Per-entity overrides applied (e.g., sprk_assignedlawfirm1 → role "assignedLawFirm")</criterion>
+    <criterion testable="true">Metadata cache hit on second call (no Dataverse re-query)</criterion>
+    <criterion testable="true">Unit + integration tests pass</criterion>
+  </acceptance-criteria>
+</task>

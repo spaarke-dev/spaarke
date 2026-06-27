@@ -1,20 +1,18 @@
 /**
  * useTodoItems — React hook for fetching and managing Smart To Do list items.
  *
- * Queries sprk_event records where sprk_todoflag=true AND sprk_todostatus != Dismissed.
- * Integrates with FeedTodoSyncContext so that flag toggles from the Updates Feed
- * (Block 3) are reflected in real time without a page refresh.
+ * Per R3 FR-09 / FR-11, queries `sprk_todo` records (statecode=0, statuscode
+ * in (Open, In Progress)). The legacy `sprk_event` + `sprk_todoflag` path is
+ * removed (OS-1: no compat shims).
+ *
+ * Integrates with FeedTodoSyncContext so todo lifecycle notifications from
+ * elsewhere (e.g. Updates Feed in LegalWorkspace) are reflected in real time
+ * without a page refresh. In standalone SmartTodo the sync context is a no-op
+ * (see useFeedTodoSync.ts).
  *
  * Sort order (FR-07):
- *   1. sprk_priorityscore DESC (highest priority first)
- *   2. sprk_duedate ASC (earliest due date first within same priority)
- *
- * FeedTodoSyncContext integration:
- *   - On mount, subscribes to flag change notifications.
- *   - When an event is flagged (true), fetches its full details and inserts
- *     it into the local list, then re-sorts.
- *   - When an event is unflagged (false), removes it from the local list.
- *   - This gives instant UI feedback without waiting for a full re-fetch.
+ *   1. computed To Do Score DESC (priority/effort/urgency composite)
+ *   2. sprk_duedate ASC (earliest due date first within same score)
  *
  * Usage:
  *   const { items, isLoading, error, refetch } = useTodoItems({ webApi, userId });
@@ -22,7 +20,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { DataverseService } from '../services/DataverseService';
-import { IEvent } from '../types/entities';
+import { ITodo } from '../types/entities';
 import { useFeedTodoSync } from './useFeedTodoSync';
 import { computeTodoScore } from '../utils/todoScoreUtils';
 import type { IWebApi } from '../types/xrm';
@@ -40,7 +38,7 @@ import type { IWebApi } from '../types/xrm';
  *
  * Returns a NEW array — does not mutate the original.
  */
-function sortTodoItems(items: IEvent[]): IEvent[] {
+function sortTodoItems(items: ITodo[]): ITodo[] {
   return [...items].sort((a, b) => {
     // Primary: To Do Score DESC (higher is more important)
     const scoreA = computeTodoScore(a).todoScore;
@@ -62,18 +60,23 @@ function sortTodoItems(items: IEvent[]): IEvent[] {
 export interface IUseTodoItemsOptions {
   /** Xrm.WebApi reference from the PCF framework context */
   webApi: IWebApi;
-  /** GUID of the current user (context.userSettings.userId) */
+  /**
+   * UAT 2026-06-19: param semantic changed from systemuser GUID to
+   * sprk_contact GUID. Caller must resolve via useCurrentContactId.
+   * The field name stays `userId` for back-compat with legacy callers
+   * (they pass whatever value they have; field renaming is deferred).
+   */
   userId: string;
   /**
    * Optional mock items for local development / testing.
    * When provided, bypasses Xrm.WebApi.
    */
-  mockItems?: IEvent[];
+  mockItems?: ITodo[];
 }
 
 export interface IUseTodoItemsResult {
   /** Sorted active to-do items (excludes Dismissed) */
-  items: IEvent[];
+  items: ITodo[];
   /** True while the initial fetch is in progress */
   isLoading: boolean;
   /** User-friendly error message, null when healthy */
@@ -89,7 +92,7 @@ export interface IUseTodoItemsResult {
 export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult {
   const { webApi, userId, mockItems } = options;
 
-  const [items, setItems] = useState<IEvent[]>([]);
+  const [items, setItems] = useState<ITodo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [fetchKey, setFetchKey] = useState<number>(0);
@@ -101,7 +104,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
   }, [webApi]);
 
   // Keep items ref for synchronous reads inside the subscribe callback
-  const itemsRef = useRef<IEvent[]>([]);
+  const itemsRef = useRef<ITodo[]>([]);
   useEffect(() => {
     itemsRef.current = items;
   }, [items]);
@@ -168,48 +171,50 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
   }, [userId, mockItems, fetchKey]);
 
   // -------------------------------------------------------------------------
-  // FeedTodoSyncContext subscription — react to cross-block flag changes
+  // FeedTodoSyncContext subscription — react to cross-block todo lifecycle
+  // changes (R3 FR-14 / task 023 contract).
   // -------------------------------------------------------------------------
 
   const { subscribe } = useFeedTodoSync();
 
   useEffect(() => {
-    const unsubscribe = subscribe(async (eventId: string, flagged: boolean) => {
-      if (flagged) {
-        // Event was flagged in the Updates Feed.
-        // Check if it already exists in our list to avoid duplicates.
+    // The listener payload is `(todoId, isActive)` per R3 FR-14:
+    //   - todoId is a sprk_todoid GUID
+    //   - isActive=true  → todo became Open / In Progress
+    //   - isActive=false → todo became Completed / Dismissed / deleted
+    // In the standalone SmartTodo Code Page the bus is a no-op stub
+    // (see useFeedTodoSync.ts) so this callback only fires when the hook is
+    // re-hosted inside LegalWorkspace where a FeedTodoSyncProvider is mounted.
+    const unsubscribe = subscribe(async (todoId: string, isActive: boolean) => {
+      if (isActive) {
+        // Todo became active externally — check for duplicates and re-fetch.
         const alreadyInList = itemsRef.current.some(
-          (item) => item.sprk_eventid === eventId
+          (item) => item.sprk_todoid === todoId
         );
         if (alreadyInList) return;
 
-        // Fetch full event details and add to list
         if (!userId) return;
 
         try {
-          // We don't have a single-record helper, so fetch with an eventId filter.
-          // Using retrieveMultipleRecords with a filter is the cleanest approach
-          // with Xrm.WebApi (no retrieveRecord equivalent in ComponentFramework.WebApi
-          // without the entity type — and we have it: sprk_event).
           const result = await serviceRef.current.getActiveTodos(userId);
           if (!result.success) return;
 
-          // Find the newly flagged event in the refreshed list
-          const newItem = result.data.find((e) => e.sprk_eventid === eventId);
+          // Find the newly active todo in the refreshed list
+          const newItem = result.data.find((t) => t.sprk_todoid === todoId);
           if (!newItem) return;
 
           setItems((prev) => {
-            // Double-check for race condition: event might have been added already
-            if (prev.some((item) => item.sprk_eventid === eventId)) return prev;
+            // Double-check for race condition: item might have been added already
+            if (prev.some((item) => item.sprk_todoid === todoId)) return prev;
             return sortTodoItems([...prev, newItem]);
           });
         } catch {
           // Silently ignore — the item will appear on next manual refetch
         }
       } else {
-        // Event was unflagged — remove from the to-do list immediately
+        // Todo became inactive (dismissed/deleted) — remove from the list immediately
         setItems((prev) => {
-          const filtered = prev.filter((item) => item.sprk_eventid !== eventId);
+          const filtered = prev.filter((item) => item.sprk_todoid !== todoId);
           // Only update if something actually changed
           if (filtered.length === prev.length) return prev;
           return filtered;
