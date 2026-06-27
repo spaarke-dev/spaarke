@@ -1,0 +1,434 @@
+[
+  {
+    "issue": 17,
+    "title": "Extend UAC to support contact based access",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfeuWM",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 18,
+    "title": "Production Testing Environment and Strategy",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfexXE",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 19,
+    "title": "Office.js Add-in for SDAP",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfe1l0",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 20,
+    "title": "Teams SDAP App",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfe1qY",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 21,
+    "title": "Spaarke Custom UI Design File",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfe18M",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 22,
+    "title": "Custom Side Pane Control",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfe5Ak",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 23,
+    "title": "Custom Email Main Form for AI",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfe5fo",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 24,
+    "title": "Spaarke Copilot Platform",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfe5mo",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 28,
+    "title": "Document classification",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgffWpQ",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 25,
+    "title": "Documentation: How Access Control Works for Documents and SharePoint Embedded",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgffBiQ",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 26,
+    "title": "Tooling: Create Dataverse MPC Server",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgffWeQ",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 27,
+    "title": "Tooling: Review, Streamline, and Cleanup the Repo Structure and Files",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgffWjc",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 29,
+    "title": "Dataset Grid:  Add Enhancements for Configuration",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgffXnI",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 30,
+    "title": "Tooling: Coding Agent Suite",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgff92U",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 31,
+    "title": "Email: Create Email 'Save to SPE' process",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfhDkY",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 32,
+    "title": "Dataset Grid:  Add large query virtualization scroll",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfhEjc",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 33,
+    "title": "Documents: Document Preview Control",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfhY44",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 34,
+    "title": "Document:  File Edit PCF Control",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfhY7w",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 37,
+    "title": "Dataset Grid:  Add 'Version\" label in the UI",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfixGE",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 38,
+    "title": "Workflow: Build Front End UX On Top of Power Automate",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfjCh4",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 39,
+    "title": "Configuration: Entity to Entity Field Mapping",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfl7qU",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 40,
+    "title": "Configuration: Field Auto Settings",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgfl8CE",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 416,
+    "title": "New test Idea",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwl5_0",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 421,
+    "title": "[Epic]: AI Platform & Chat",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwoku8",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 422,
+    "title": "[Epic]: Insights Engine",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwokwo",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 423,
+    "title": "[Epic]: Smart Todo",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwokx4",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 424,
+    "title": "[Epic]: Document Intelligence",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwokzM",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 425,
+    "title": "[Epic]: BFF & Test Hygiene",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwok0M",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 426,
+    "title": "[Epic]: Auth & SSO",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwok1Y",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 427,
+    "title": "[Epic]: Code Quality",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwok2M",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 428,
+    "title": "[Epic]: Procedures & Knowledge",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwok3s",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 429,
+    "title": "[Epic]: CI/CD & Tooling",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwok4o",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 430,
+    "title": "[Epic]: Insights/Widgets/Search",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwok6E",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 431,
+    "title": "[Epic]: Communications",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwok7c",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 432,
+    "title": "[Epic]: Multi-tenant",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwok8k",
+    "status": null,
+    "status_option_id": null,
+    "project_status": null,
+    "project_status_option_id": null
+  },
+  {
+    "issue": 435,
+    "title": "[Project]: ai-spaarke-action-engine-r1",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp0zo",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  },
+  {
+    "issue": 436,
+    "title": "[Project]: ai-spaarke-insights-engine-r2",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp01I",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  },
+  {
+    "issue": 437,
+    "title": "[Project]: ai-spaarke-insights-engine-widgets-r1",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp02o",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  },
+  {
+    "issue": 438,
+    "title": "[Project]: customer-provisioning-orchestration-r1",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp03w",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  },
+  {
+    "issue": 439,
+    "title": "[Project]: email-communication-solution-r3",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp05M",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  },
+  {
+    "issue": 440,
+    "title": "[Project]: smart-todo-decoupling-r3",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp07E",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  },
+  {
+    "issue": 441,
+    "title": "[Project]: smart-todo-r4",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp08o",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  },
+  {
+    "issue": 442,
+    "title": "[Project]: spaarke-ai-platform-chat-routing-redesign-r1",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp098",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  },
+  {
+    "issue": 443,
+    "title": "[Project]: spaarke-ai-platform-unification-r6",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp0_Q",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  },
+  {
+    "issue": 444,
+    "title": "[Project]: spaarke-daily-update-service-r2",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp1AQ",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  },
+  {
+    "issue": 445,
+    "title": "[Project]: spaarke-devops-project-tracking-r1",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp1C4",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  },
+  {
+    "issue": 446,
+    "title": "[Project]: spaarke-multi-container-multi-index-r1",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp1D8",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  },
+  {
+    "issue": 447,
+    "title": "[Project]: spaarke-platform-foundations-r3",
+    "item_id": "PVTI_lAHODW0Pv84BEgWuzgwp1Fg",
+    "status": null,
+    "status_option_id": null,
+    "project_status": "In Progress",
+    "project_status_option_id": "70a2088a"
+  }
+]

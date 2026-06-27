@@ -137,14 +137,14 @@ mutation {
 
 Same for `Project Folder` field with value `projects/<folder_name>`.
 
-If `Project Status` is `Planned`, change to `In Progress` (since worktree now exists).
+If `Status` is `Planned`, change to `In Progress` (since worktree now exists).
 
 ### Step 6: Write portfolio pointer block in local README.md
 
 Render:
 
 ```markdown
-> **Portfolio**: GitHub Issue [#N](url) · Epic: [#E](url) · Project Status: In Progress · [Portfolio board view](https://github.com/users/spaarke-dev/projects/2)
+> **Portfolio**: GitHub Issue [#N](url) · Epic: [#E](url) · Status: In Progress · [Portfolio board view](https://github.com/users/spaarke-dev/projects/2)
 
 # {Project Title}
 
@@ -164,7 +164,7 @@ Project scaffolded:
   Folder:    projects/{folder_name}/
   Worktree:  c:/code_files/spaarke-wt-{folder_name}
   Branch:    work/{folder_name}
-  Issue:     #N (Project Status: In Progress; fields populated)
+  Issue:     #N (Status: In Progress; fields populated)
 
 Next step: cd projects/{folder_name} && /design-to-spec
 ```
@@ -173,7 +173,7 @@ Next step: cd projects/{folder_name} && /design-to-spec
 
 - `projects/<folder_name>/` (new folder, README + design.md)
 - `c:/code_files/spaarke-wt-<folder_name>/` (new git worktree on branch `work/<folder_name>`)
-- Project Issue #N: Worktree Path + Project Folder + Project Status fields populated
+- Project Issue #N: Worktree Path + Project Folder + Status fields populated
 - `notes/spikes/project-start-{date}.md` log entry (for replay/debug)
 
 ## Failure Modes
