@@ -1,8 +1,8 @@
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Ai.Memory;
 using Xunit;
@@ -73,7 +73,7 @@ public sealed class RecallSessionFileHandlerResolvableTests
         services.AddSingleton(Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.IRagService>());
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.ChatSessionManager>(sp =>
             new Sprk.Bff.Api.Services.Ai.Chat.ChatSessionManager(
-                cache: sp.GetRequiredService<IDistributedCache>(),
+                cache: sp.GetRequiredService<ITenantCache>(),
                 dataverseRepository: Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.Chat.IChatDataverseRepository>(),
                 logger: sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Ai.Chat.ChatSessionManager>>(),
                 persistence: null,
