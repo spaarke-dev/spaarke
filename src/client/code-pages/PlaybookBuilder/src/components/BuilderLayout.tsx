@@ -124,6 +124,16 @@ const NODE_PALETTE: NodePaletteItem[] = [
     description: 'Pause for duration or condition',
     color: tokens.colorPaletteMagentaBackground2,
   },
+  // R4 hotfix 2026-06-26: Task 004 left this palette entry missing despite
+  // BaseNode.tsx (line 141) + types/playbook.ts (PlaybookNodeType.EntityNameValidator)
+  // both wiring the type. Without this entry the Tool is never draggable from the
+  // palette. Closes AC-3c "PlaybookBuilder UI palette displays the Tool" gap.
+  {
+    type: 'entityNameValidator',
+    label: 'Entity Name Validator',
+    description: 'Scrub LLM-emitted entity names against allow-list',
+    color: tokens.colorPaletteMagentaBackground2,
+  },
 ];
 
 // ---------------------------------------------------------------------------

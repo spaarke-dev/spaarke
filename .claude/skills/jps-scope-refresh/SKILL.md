@@ -23,6 +23,22 @@ last-reviewed: 2026-05-16
 - If the index is stale, Claude Code won't know about newly created scopes
 - Running the refresh manually is error-prone — this skill ensures consistency
 
+## What This Skill DOES NOT Do (BINDING per canonical-truth loop 2026-06-26)
+
+**The scope catalog is ADVISORY for authoring, not runtime enforcement.** Per [`docs/architecture/ai-architecture-playbook-runtime.md`](../../../docs/architecture/ai-architecture-playbook-runtime.md) §6:
+
+- The BFF runtime does NOT cross-check that a node's action references a Skill in `playbook.scopes.skills`. Scope arrays are pre-fetch hints, not gates.
+- This skill refreshes `.claude/catalogs/scope-model-index.json` — which is consumed by `jps-playbook-design` and the PCF PlaybookBuilder UI dropdowns for **authoring hints**, not by the orchestrator at runtime.
+- The model-driven app form's Node Type OptionSet is a **separate authoring surface** (Dataverse-side) — this skill does NOT update that OptionSet. If a new NodeType is added to `INodeExecutor.cs`, the OptionSet must be updated independently via Dataverse customization (R4 UAT discovery 2026-06-26).
+
+**Two authoring surfaces, one catalog**:
+| Surface | What it shows | Updated by |
+|---|---|---|
+| PlaybookBuilder UI dropdowns (Code Page) | actions/skills/knowledge/tools from scope-model-index.json | This skill (after Refresh-ScopeModelIndex.ps1) |
+| Node Type OptionSet (Model-Driven App form) | NodeType values (AIAnalysis, Output, Control, Workflow, DeliverComposite) | Manual Dataverse customization — NOT this skill |
+
+If a UAT user reports "new NodeType missing from the form OptionSet," this skill cannot fix it — escalate to the Dataverse customizer.
+
 ## Applies When
 
 - User says "refresh scope index", "update scope catalog", "sync scopes"

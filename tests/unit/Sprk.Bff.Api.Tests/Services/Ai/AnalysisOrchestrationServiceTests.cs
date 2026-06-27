@@ -554,6 +554,44 @@ public class AnalysisOrchestrationServiceTests
             .WithMessage("*not found*");
     }
 
+    [Fact]
+    public async Task ExecutePlaybookAsync_EmptyDocumentIds_YieldsErrorChunk_Hotfix_2026_06_26()
+    {
+        // R4 hotfix regression test (narrate-503): empty DocumentIds reaches legacy mode
+        // when a playbook has no nodes (DAILY-BRIEFING-NARRATE in spaarkedev1). Prior
+        // behavior was IndexOutOfRangeException at `request.DocumentIds[0]`. New behavior
+        // is a clean error chunk that the orchestrator wrapper translates to RunFailed →
+        // PLAYBOOK_INVOCATION_FAILED → 503 ProblemDetails. See projects/spaarke-daily-update-
+        // service-r4/notes/uat/narrate-503-hotfix.md for the post-mortem.
+        // Arrange
+        var playbookId = Guid.NewGuid();
+        var request = new PlaybookExecuteRequest
+        {
+            PlaybookId = playbookId,
+            DocumentIds = Array.Empty<Guid>()
+        };
+
+        // Act
+        var chunks = new List<AnalysisStreamChunk>();
+        await foreach (var chunk in _service.ExecutePlaybookAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            chunks.Add(chunk);
+        }
+
+        // Assert: one error chunk, no crash.
+        chunks.Should().HaveCount(1);
+        chunks[0].Type.Should().Be("error");
+        chunks[0].Done.Should().BeTrue();
+        chunks[0].Error.Should().NotBeNullOrEmpty();
+        chunks[0].Error.Should().Contain("legacy mode");
+        chunks[0].Error.Should().Contain("nodes");
+
+        // Verify playbook was NOT loaded (we fail-fast before any Dataverse lookup).
+        _playbookServiceMock.Verify(
+            x => x.GetPlaybookAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     [Fact(Skip = "Requires complete mock setup for playbook execution pipeline including skill and knowledge scope resolution")]
     public async Task ExecutePlaybookAsync_WithSkillsAndKnowledge_ResolvesAllScopes()
     {

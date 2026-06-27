@@ -1,8 +1,9 @@
 # Playbook Author Guide
 
-> **Status**: Updated for R3 (2026-06-22) — new `LookupUserMembership` node + Handlebars helpers + Builder UI safety affordances.
+> **Status**: Updated for R3 (2026-06-22) — new `LookupUserMembership` node + Handlebars helpers + Builder UI safety affordances. Scope statement added 2026-06-26 (R4 canonical-truth loop).
 > **Audience**: Spaarke makers + operators authoring playbooks in PlaybookBuilder. Plain-language guide — assumes you know your way around Power Apps but NOT around .NET or React internals.
-> **Companion technical reference**: [`docs/architecture/playbook-architecture.md`](../architecture/playbook-architecture.md).
+>
+> **Scope of this guide**: maker-facing recipe for authoring `sprk_event`-based notification playbooks via the visual canvas (PlaybookBuilder). For the script-based deployment contract (`Deploy-Playbook.ps1` input file format + 12-step procedure), see [`ai-guide-playbook-deploy-recipe.md`](ai-guide-playbook-deploy-recipe.md). For runtime semantics (mode detection, dispatch shapes), see [`../architecture/ai-architecture-playbook-runtime.md`](../architecture/ai-architecture-playbook-runtime.md). For "where does this config field belong" decisions, see [`../architecture/ai-architecture-actions-nodes-scopes.md`](../architecture/ai-architecture-actions-nodes-scopes.md).
 
 ---
 
