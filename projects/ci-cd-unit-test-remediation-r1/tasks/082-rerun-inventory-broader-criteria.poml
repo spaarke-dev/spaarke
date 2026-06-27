@@ -1,0 +1,61 @@
+<task id="CICD-082" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Re-run test inventory with broader build-vs-maintain criteria — expect 1,500-3,000 DELETE candidates</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2.5 - Deep cleanup</phase>
+    <stream>B - Test reset (extended)</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>080</dependencies>
+    <blocks>083, 084, 085</blocks>
+    <tags>testing, inventory, audit, build-vs-maintain</tags>
+  </metadata>
+
+  <prompt>
+    Per spec FR-B10: re-run the test inventory using the broader build-vs-maintain criteria codified in task 080 (ADR-038 extension). The original task 020 inventory used strict signature-match criteria and found only 11 DELETE candidates (179 tests, 2.4% reduction). The broader criteria should find 1,500-3,000 additional DELETE candidates from the ~6,695 surviving BFF unit tests. Output: notes/test-inventory-broader.csv + notes/test-inventory-broader-summary.md with bucket sizes for slicing.
+  </prompt>
+
+  <role>Test architecture engineer doing broader-criteria classification.</role>
+
+  <goal>CSV inventory of all BFF unit tests classified against the new ADR-038 criteria; summary recommends DELETE slicing for tasks 083/084/085.</goal>
+
+  <inputs>
+    <file purpose="criteria-source">docs/adr/ADR-038-testing-strategy.md (post-080 — broader criteria)</file>
+    <file purpose="constraint">.claude/constraints/testing.md (post-080)</file>
+    <file purpose="existing-inventory">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory.csv (narrow criteria; reference)</file>
+    <file purpose="target">tests/unit/Sprk.Bff.Api.Tests/ (425 .cs files, ~6695 test methods post-053)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B10">Target: identify 1,500-3,000 DELETE candidates (so post-cleanup count drops from ~6,695 to ≤3,500).</constraint>
+    <constraint source="spec FR-B06">Deletion-safety: no file under the 4 protected KEEP paths (auth, regression, data-mutation, tenant) flagged DELETE without same-PR replacement plan.</constraint>
+    <constraint source="ADR-038 §Build-vs-Maintain">Use the ≥10 new ban criteria from task 080's codification (not just the 3 narrow original criteria).</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Read updated ADR-038 build-vs-maintain criteria (output of 080).</step>
+    <step order="2">Enumerate every .cs test file in tests/unit/Sprk.Bff.Api.Tests/ (425 files, ~6695 test methods).</step>
+    <step order="3">For each test file: apply broader criteria — grep for patterns + read sample of test methods to classify per ADR-038 categories. Classify each TEST METHOD (not just file) into: KEEP-maintain / DELETE-scaffolding / AMBIGUOUS.</step>
+    <step order="4">For DELETE-scaffolding methods: tag with specific antipattern bucket (mirror-test / all-mocks-trivial / coverage-filler / internal-method / pass-through / etc.) for slicing.</step>
+    <step order="5">Compute totals per bucket. Target ≥1,500 DELETE methods. If total &lt; 1,500: criteria may be too conservative — surface to operator with sample of borderline cases.</step>
+    <step order="6">Write notes/test-inventory-broader.csv with columns: file_path, test_method_name, classification, antipattern_bucket, rationale, file_lines, method_lines.</step>
+    <step order="7">Write notes/test-inventory-broader-summary.md with: totals per bucket, sub-slicing recommendation for 083/084/085 (highest-confidence first, e.g., 083 = mirror-tests + all-mocks-trivial; 084 = coverage-fillers + pass-through; 085 = remaining), file count vs test method count distinction (some files may have mixed maintain + scaffolding methods — those go to "AMBIGUOUS" for partial-delete with care).</step>
+    <step order="8">Spot-check: pick 10 random DELETE-tagged test methods and verify they match the criteria. Adjust criteria sensitivity if many false positives.</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory-broader.csv</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory-broader-summary.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CSV covers all ~6,695 test methods in tests/unit/Sprk.Bff.Api.Tests/</criterion>
+    <criterion testable="true">Each method classified KEEP-maintain / DELETE-scaffolding / AMBIGUOUS</criterion>
+    <criterion testable="true">DELETE-scaffolding count is in the 1,500-3,000 range (target per FR-B10); if not, operator-surfaceable explanation</criterion>
+    <criterion testable="true">Summary recommends 3-PR slicing for tasks 083/084/085 with concrete bucket assignments</criterion>
+    <criterion testable="true">Spot-check confirms ≥80% of sampled DELETE tags match criteria</criterion>
+    <criterion testable="true">No KEEP-protected-path files in DELETE list (or each flagged for same-PR replacement)</criterion>
+  </acceptance-criteria>
+</task>

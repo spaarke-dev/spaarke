@@ -1,8 +1,8 @@
 using System.Security.Claims;
 using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.Filters;
@@ -110,8 +110,12 @@ public class OfficeRateLimitFilter : IEndpointFilter
             userId = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         }
 
+        // Extract tenant ID for cache scoping (FR-05). Fall back to "anonymous" when no tid claim
+        // (unauthenticated paths above use IP-as-userId; preserves rate-limit isolation per IP).
+        var tenantId = ExtractTenantId(httpContext.User);
+
         // Check and increment rate limit
-        var result = await _rateLimitService.CheckAndIncrementAsync(userId, _category);
+        var result = await _rateLimitService.CheckAndIncrementAsync(tenantId, userId, _category);
 
         // Add rate limit headers to response
         httpContext.Response.Headers["X-RateLimit-Limit"] = result.Limit.ToString();
@@ -149,6 +153,16 @@ public class OfficeRateLimitFilter : IEndpointFilter
             traceId);
 
         return await next(context);
+    }
+
+    /// <summary>
+    /// Extracts tenant ID from Entra ID claims for cache scoping (FR-05).
+    /// </summary>
+    private static string ExtractTenantId(ClaimsPrincipal user)
+    {
+        var tid = user.FindFirst("tid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+        return string.IsNullOrWhiteSpace(tid) ? "anonymous" : tid;
     }
 
     /// <summary>
@@ -216,10 +230,11 @@ public interface IOfficeRateLimitService
     /// <summary>
     /// Checks the rate limit for a user and category, and increments the counter if allowed.
     /// </summary>
+    /// <param name="tenantId">The tenant identifier for tenant-scoped cache keys (FR-05).</param>
     /// <param name="userId">The user identifier for rate limit partitioning.</param>
     /// <param name="category">The endpoint category for limit determination.</param>
     /// <returns>The rate limit result including whether the request is allowed.</returns>
-    Task<RateLimitResult> CheckAndIncrementAsync(string userId, OfficeRateLimitCategory category);
+    Task<RateLimitResult> CheckAndIncrementAsync(string tenantId, string userId, OfficeRateLimitCategory category);
 }
 
 /// <summary>
@@ -228,12 +243,12 @@ public interface IOfficeRateLimitService
 /// </summary>
 public class OfficeRateLimitService : IOfficeRateLimitService
 {
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly OfficeRateLimitOptions _options;
     private readonly ILogger<OfficeRateLimitService> _logger;
 
     public OfficeRateLimitService(
-        IDistributedCache cache,
+        ITenantCache cache,
         IOptions<OfficeRateLimitOptions> options,
         ILogger<OfficeRateLimitService> logger)
     {
@@ -242,7 +257,7 @@ public class OfficeRateLimitService : IOfficeRateLimitService
         _logger = logger;
     }
 
-    public async Task<RateLimitResult> CheckAndIncrementAsync(string userId, OfficeRateLimitCategory category)
+    public async Task<RateLimitResult> CheckAndIncrementAsync(string tenantId, string userId, OfficeRateLimitCategory category)
     {
         if (!_options.Enabled)
         {
@@ -263,13 +278,14 @@ public class OfficeRateLimitService : IOfficeRateLimitService
         var now = DateTimeOffset.UtcNow;
         var currentSegment = now.ToUnixTimeSeconds() / segmentSeconds;
 
-        // Build cache key for this user, category, and segment
-        var cacheKey = $"{_options.KeyPrefix}{userId}:{category}";
+        // Build cache id (user + category); tenant scope is applied by ITenantCache wrapper (FR-05).
+        var cacheId = $"{userId}:{category}";
+        var effectiveTenantId = string.IsNullOrWhiteSpace(tenantId) ? "anonymous" : tenantId;
 
         try
         {
             // Get current window state from cache
-            var windowState = await GetWindowStateAsync(cacheKey);
+            var windowState = await GetWindowStateAsync(effectiveTenantId, cacheId);
 
             // Calculate total count across the sliding window
             var windowStartSegment = currentSegment - _options.SegmentsPerWindow + 1;
@@ -310,7 +326,7 @@ public class OfficeRateLimitService : IOfficeRateLimitService
                 }
 
                 // Save updated state
-                await SetWindowStateAsync(cacheKey, windowState, TimeSpan.FromSeconds(windowSeconds * 2));
+                await SetWindowStateAsync(effectiveTenantId, cacheId, windowState, TimeSpan.FromSeconds(windowSeconds * 2));
             }
 
             // Calculate reset timestamp (end of current window)
@@ -365,34 +381,25 @@ public class OfficeRateLimitService : IOfficeRateLimitService
         };
     }
 
-    private async Task<SlidingWindowState> GetWindowStateAsync(string cacheKey)
+    private async Task<SlidingWindowState> GetWindowStateAsync(string tenantId, string cacheId)
     {
-        var cached = await _cache.GetStringAsync(cacheKey);
-        if (string.IsNullOrEmpty(cached))
-        {
-            return new SlidingWindowState();
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<SlidingWindowState>(cached) ?? new SlidingWindowState();
-        }
-        catch
-        {
-            return new SlidingWindowState();
-        }
+        var cached = await _cache.GetAsync<SlidingWindowState>(
+            tenantId,
+            resource: "office-rate-limit",
+            id: cacheId,
+            version: 1);
+        return cached ?? new SlidingWindowState();
     }
 
-    private async Task SetWindowStateAsync(string cacheKey, SlidingWindowState state, TimeSpan expiry)
+    private async Task SetWindowStateAsync(string tenantId, string cacheId, SlidingWindowState state, TimeSpan expiry)
     {
-        var json = JsonSerializer.Serialize(state);
-        await _cache.SetStringAsync(
-            cacheKey,
-            json,
-            new DistributedCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = expiry
-            });
+        await _cache.SetAsync<SlidingWindowState>(
+            tenantId,
+            resource: "office-rate-limit",
+            id: cacheId,
+            version: 1,
+            value: state,
+            ttl: expiry);
     }
 
     /// <summary>

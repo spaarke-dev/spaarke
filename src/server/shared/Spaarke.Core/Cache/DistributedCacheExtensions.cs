@@ -164,11 +164,11 @@ public static class DistributedCacheExtensions
     }
 
     /// <summary>
-    /// Creates a cache key with standard SDAP prefix and formatting.
+    /// Creates a cache key with standard Spaarke prefix and formatting.
     /// </summary>
     public static string CreateKey(string category, string identifier, params string[] parts)
     {
-        var keyParts = new[] { "sdap", category, identifier }.Concat(parts);
+        var keyParts = new[] { "spaarke", category, identifier }.Concat(parts);
         return string.Join(":", keyParts);
     }
 

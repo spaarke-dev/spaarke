@@ -82,16 +82,6 @@ public class AnalysisExecutionToolsTests
         action.Should().Throw<ArgumentNullException>().WithParameterName("chatClient");
     }
 
-    [Fact]
-    public void Constructor_AcceptsNullOptionalParameters()
-    {
-        // Act -- analysisId, documentId, httpContext, sseWriter are all optional
-        var action = () => new AnalysisExecutionTools(
-            _analysisService, _chatClient);
-
-        // Assert
-        action.Should().NotThrow();
-    }
 
     // ====================================================================
     // RerunAnalysisAsync — Happy Path

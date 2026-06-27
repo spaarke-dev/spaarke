@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Decommission legacy spe-redis-dev-67e2xz</title>
+    <phase>3: Dev environment cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>038</blocks>
+    <tags>azure, deploy, infrastructure</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Irreversible Azure delete (or tag) operation</rigor-reason>
+    <parallel-group>Phase3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Phase 3 cutover sequence — strictly serial</parallel-reason>
+  </metadata>
+  <prompt>Per FR-15: after 24-hr window passes, EITHER delete `spe-redis-dev-67e2xz` OR tag it with `decommission=YYYY-MM-DD`. Default to TAG (safer; allows reversal during a longer cooling-off if needed); delete only if explicit owner sign-off captured in cutover record.</prompt>
+  <role>Spaarke operator.</role>
+  <goal>Legacy resource either deleted OR tagged. Decision and timestamp documented.</goal>
+  <context><background>Legacy was empty per spec — no data to migrate. Verification window passed. Now retire it.</background><relevant-files><file>spe-redis-dev-67e2xz (Azure resource)</file></relevant-files></context>
+  <constraints><constraint source="spec">FR-15.</constraint><constraint source="project">Default to TAG; delete only with explicit owner sign-off.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/24hr-window-report.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Default path: `az resource tag -g spe-infrastructure-westus2 -n spe-redis-dev-67e2xz --resource-type Microsoft.Cache/Redis --tags decommission=YYYY-MM-DD`.</step>
+    <step order="2">Capture pre-delete inventory (size, key count if any — expected zero) for the record.</step>
+    <step order="3">If owner sign-off captured: `az redis delete -g spe-infrastructure-westus2 -n spe-redis-dev-67e2xz --yes`.</step>
+    <step order="4">Append decommission record to `notes/cutover-deploy-log.md`.</step>
+    <step order="5">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">az resource tag OR az redis delete</tool><tool name="Write">log</tool></tools>
+  <outputs><output type="azure">spe-redis-dev-67e2xz tagged or deleted</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">EITHER `az redis show -g spe-infrastructure-westus2 -n spe-redis-dev-67e2xz` returns NotFound, OR the resource has tag `decommission=YYYY-MM-DD`.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>

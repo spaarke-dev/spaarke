@@ -1,0 +1,209 @@
+{
+  "$comment": "Phase 5R Wave 5-E task 118R — multi-node migration target for summarize-document-for-workspace@v1 (FR-58 / ADR-037). This deployment file replaces the legacy single-action Output node with FOUR Action nodes (one per outputSchema section) feeding ONE DeliverComposite Output Node keyed by sectionName. The playbook row itself (sprk_analysisplaybookid 302e6da6-f363-f111-ab0c-7ced8ddc4cc6, sprk_name 'summarize-document-for-workspace@v1') is PRESERVED — only its child nodes are rewritten. The chat sibling summarize-document-for-chat@v1 stays single-action (ADR-037 / FR-58 binding); this file does NOT modify it.",
+
+  "$comment-action-reuse": "All four Action nodes reference the EXISTING SUM-CHAT@v1 action (sprk_analysisaction id eeb05bfd-1260-f111-ab0b-70a8a59455f4, sprk_outputschemajson populated with tldr/summary/keywords/entities). Per the R6 Q5 RE-SHAPED principle (outputSchema is INTRINSIC to the action; destination + widgetType + per-section focus are PER-NODE config), the same action can be invoked N times with different per-node configJson template parameters — the action's JPS system prompt branches on 'focus' to produce just one section per invocation. NO new sprk_analysisaction rows are created.",
+
+  "$comment-schema-blocker": "BLOCKER: The Dataverse choice column sprk_playbooknode.sprk_nodetype currently includes ONLY {AI Analysis: 100000000, Output: 100000001, Control: 100000002, Workflow: 100000003}. DeliverComposite (100000004) is registered in C# (NodeType.DeliverComposite from task 114R) but the Dataverse option-set has NOT been extended. Until the option-set is updated (via PATCH against EntityDefinitions(LogicalName='sprk_playbooknode')/Attributes(LogicalName='sprk_nodetype')), Deploy-Playbook.ps1 will fail when posting the DeliverComposite node. See notes/handoffs/118R-pre-migration-snapshot.json schemaGapBlocker section for the remediation path. This file is the AUTHORITATIVE TARGET STATE; it is ready to deploy once the schema gap is closed.",
+
+  "$comment-deploy": "Deploy via: scripts/Deploy-Playbook.ps1 -DefinitionFile infra/dataverse/playbooks/summarize-document-for-workspace-v1-multinode.json -Force (Force required because the playbook already exists by name; the harness's skip-by-name idempotency would otherwise no-op). The harness will need a small extension to recognize 'DeliverComposite' as a valid nodeType string mapping to choice value 100000004 — this is a known follow-up after the option-set add.",
+
+  "actions": [],
+  "$comment-actions-empty": "Intentionally empty. This playbook does NOT seed any new action — all four AI Analysis nodes reuse the existing SUM-CHAT@v1 action (seeded by summarize-document-for-chat.playbook.json in R5). The DeliverComposite node is a structural node and does not require an action FK (similar to existing Output nodes that use only configJson + actionType).",
+
+  "playbook": {
+    "name": "summarize-document-for-workspace@v1",
+    "$comment-name": "UNCHANGED slug. Vector match in Phase B (PlaybookDispatcher.RunPhaseBVectorMatchAsync, task 112) routes 'summarize this document' queries to this playbook via sprk_jpsmatchingmetadata / playbook embeddings. Preserving the slug means the embedding regeneration step (POST /api/ai/playbooks/{id}/index) is OPTIONAL — only required if the playbook description text changes (and it does not below). Phase B vector match continues to find this playbook unchanged.",
+    "description": "Workspace-destination Summarize playbook (Phase 5R task 118R multi-node migration per FR-58 / ADR-037). Four Action nodes each invoke the existing SUM-CHAT@v1 action with a focused per-section prompt template, producing one outputSchema field per node (tldr, summary, keywords, entities). One DeliverComposite Output Node aggregates the four outputs into a sectionName-keyed composite for the workspace surface. Replaces the legacy single-Action+Output model from R6 task 033. Per-section SSE streaming flows via PlaybookOrchestrationService.EmitDeliverCompositeSectionEventsAsync (task 114a). Chat sibling summarize-document-for-chat@v1 STAYS single-action (FR-58 / ADR-037 binding).",
+    "isPublic": false,
+    "isSystemPlaybook": true,
+    "sprk_playbooktype": 0,
+    "$comment-type": "sprk_playbooktype=0 (AiAnalysis) — UNCHANGED from R6 task 033. System-owned, not user-authored.",
+    "sprk_configjson": {
+      "mode": "workspace-summarize-multinode",
+      "tier": "inference",
+      "cacheTtlSeconds": 0,
+      "$comment-cacheTtl": "Cache TTL = 0 — per-session and per-file-set; the file set changes mid-session as users upload/remove files. UNCHANGED from R6 task 033.",
+      "parameterSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "required": ["sessionId", "tenantId"],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "description": "Chat session GUID. Scopes retrieval to the spaarke-session-files index slice for this session. Required for tenant + session isolation per ADR-014."
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "Tenant ID for multi-tenant isolation per ADR-014. Required on every spaarke-session-files index query."
+          },
+          "fileIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "OPTIONAL — subset of session-uploaded files to summarize. When absent, all files in ChatSession.UploadedFiles are summarized."
+          },
+          "style": {
+            "type": "string",
+            "description": "OPTIONAL — natural-language style hint passed through to the action's system prompt."
+          },
+          "workspaceTabId": {
+            "type": "string",
+            "description": "OPTIONAL — pre-existing workspace tab id to stream into. When absent, the workspace shell opens a new tab via allowMultiple=true per FR-06."
+          }
+        }
+      }
+    },
+    "scopes": {
+      "actions": [],
+      "skills": [],
+      "knowledge": [],
+      "tools": []
+    },
+    "$comment-scopes": "UNCHANGED from R6 task 033 — node-level actionCode='SUM-CHAT@v1' on each Action node is sufficient for resolution; per-playbook scope binding is not needed for SUM-CHAT@v1."
+  },
+
+  "nodes": [
+    {
+      "name": "extract-tldr",
+      "nodeType": "AIAnalysis",
+      "actionCode": "SUM-CHAT@v1",
+      "$comment-actionCode": "REUSES existing SUM-CHAT@v1 action (sprk_analysisactionid eeb05bfd-1260-f111-ab0b-70a8a59455f4). Same action invoked four times across the four Action nodes; per-node configJson.templateParameters.focus directs the action's JPS prompt to produce ONLY the tldr section.",
+      "actionType": 0,
+      "$comment-actionType": "ActionType.AiAnalysis = 0; handled by AiAnalysisNodeExecutor (existing platform executor — no new node executor needed).",
+      "outputVariable": "tldrSection",
+      "$comment-outputVariable": "Matches the DeliverComposite node's sections[0].inputVariable below. The executor (DeliverCompositeNodeExecutor.cs line 154-156) reads context.GetPreviousOutput('tldrSection') to resolve this section's content.",
+      "positionX": 200,
+      "positionY": 100,
+      "configJson": {
+        "sessionIdFrom": "parameters.sessionId",
+        "tenantIdFrom": "parameters.tenantId",
+        "fileIdsFrom": "parameters.fileIds",
+        "styleFrom": "parameters.style",
+        "templateParameters": {
+          "focus": "tldr",
+          "$comment-focus": "Directs SUM-CHAT@v1's JPS system prompt to produce ONLY the tldr section (1-3 bullet takeaways, each ≤140 chars per R5 task 010 output schema). The action's prompt branches on {{focus}}; when present, it emits a single-property JSON { tldr: [...] } instead of the full four-field schema. This preserves per-section semantic ownership at the prompt layer."
+        }
+      }
+    },
+    {
+      "name": "extract-summary",
+      "nodeType": "AIAnalysis",
+      "actionCode": "SUM-CHAT@v1",
+      "$comment-actionCode": "Second of four invocations of SUM-CHAT@v1. focus='summary' directs the prompt to produce the narrative summary section (≤2 paragraphs, ≤2000 chars per R5 task 010 output schema).",
+      "actionType": 0,
+      "outputVariable": "summarySection",
+      "positionX": 200,
+      "positionY": 300,
+      "configJson": {
+        "sessionIdFrom": "parameters.sessionId",
+        "tenantIdFrom": "parameters.tenantId",
+        "fileIdsFrom": "parameters.fileIds",
+        "styleFrom": "parameters.style",
+        "templateParameters": {
+          "focus": "summary"
+        }
+      }
+    },
+    {
+      "name": "extract-keywords",
+      "nodeType": "AIAnalysis",
+      "actionCode": "SUM-CHAT@v1",
+      "$comment-actionCode": "Third of four invocations. focus='keywords' directs the prompt to produce the comma-separated keyword string (5-15 terms per R5 task 010 output schema).",
+      "actionType": 0,
+      "outputVariable": "keywordsSection",
+      "positionX": 200,
+      "positionY": 500,
+      "configJson": {
+        "sessionIdFrom": "parameters.sessionId",
+        "tenantIdFrom": "parameters.tenantId",
+        "fileIdsFrom": "parameters.fileIds",
+        "templateParameters": {
+          "focus": "keywords"
+        }
+      }
+    },
+    {
+      "name": "extract-entities",
+      "nodeType": "AIAnalysis",
+      "actionCode": "SUM-CHAT@v1",
+      "$comment-actionCode": "Fourth of four invocations. focus='entities' directs the prompt to produce the entities object { organizations: string[], persons: string[] } per R5 task 010 output schema.",
+      "actionType": 0,
+      "outputVariable": "entitiesSection",
+      "positionX": 200,
+      "positionY": 700,
+      "configJson": {
+        "sessionIdFrom": "parameters.sessionId",
+        "tenantIdFrom": "parameters.tenantId",
+        "fileIdsFrom": "parameters.fileIds",
+        "templateParameters": {
+          "focus": "entities"
+        }
+      }
+    },
+    {
+      "name": "deliverComposite",
+      "nodeType": "DeliverComposite",
+      "$comment-nodeType": "NEW node type (100000004) added by task 114R. Composes the four Action nodes' outputs into a single section map for the workspace surface. Requires the Dataverse sprk_nodetype choice column to include option 100000004 — see notes/handoffs/118R-pre-migration-snapshot.json#schemaGapBlocker.",
+      "actionType": 42,
+      "$comment-actionType": "ActionType.DeliverComposite = 42; handled by DeliverCompositeNodeExecutor (task 114R). Reads sprk_configjson.sections and emits ONE CompositeOutputPayload with section map + destination + widgetType routing.",
+      "outputVariable": "composite",
+      "positionX": 600,
+      "positionY": 400,
+      "dependsOn": ["extract-tldr", "extract-summary", "extract-keywords", "extract-entities"],
+      "$comment-dependsOn": "Declares the four Action nodes as upstream — the orchestrator runs them all (potentially in parallel within the engine's scheduler) before invoking DeliverComposite. Per the executor's contract (DeliverCompositeNodeExecutor.cs ExecuteAsync), each section's inputVariable is looked up in context.PreviousOutputs; missing inputs are dropped silently (FR-52: a partial composite is still valid).",
+      "configJson": {
+        "destination": "workspace",
+        "widgetType": "structured-output-stream",
+        "$comment-routing": "destination=workspace (kebab-case per NodeDestinationJsonConverter — matches the legacy node's routing) + widgetType=structured-output-stream (registry key from src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-structured-output-stream-widget.ts:30, unchanged from R6 task 033). Workspace widget renders identically post-migration per NFR-02 (production-bound playbook preservation).",
+        "sections": [
+          {
+            "sectionName": "tldr",
+            "inputVariable": "tldrSection",
+            "displayLabel": "TL;DR",
+            "$comment-order": "FIRST per R5 task 006 spike + spec FR-02 — TL;DR populates the workspace pane within ~300-500ms of stream start. The orchestrator's EmitDeliverCompositeSectionEventsAsync (task 114a) emits section_started/section_data/section_completed in declaration order; the widget (task 114b) renders in sectionIndex order with insertion-order fallback."
+          },
+          {
+            "sectionName": "summary",
+            "inputVariable": "summarySection",
+            "displayLabel": "Summary",
+            "$comment-order": "SECOND. Multi-sentence narrative (≤2 paragraphs, ≤2000 chars)."
+          },
+          {
+            "sectionName": "keywords",
+            "inputVariable": "keywordsSection",
+            "displayLabel": "Keywords",
+            "$comment-order": "THIRD. Comma-separated keyword string."
+          },
+          {
+            "sectionName": "entities",
+            "inputVariable": "entitiesSection",
+            "displayLabel": "Entities",
+            "$comment-order": "LAST. Named entities object."
+          }
+        ]
+      }
+    }
+  ],
+
+  "dependsOnGraph": {
+    "$comment": "Four independent Action edges into one DeliverComposite terminal node. The dependsOn metadata on the DeliverComposite node above is the authoritative source; this section mirrors it for tooling consistency with multi-node playbooks like matter-health-single.",
+    "edges": [
+      { "from": "extract-tldr", "to": "deliverComposite" },
+      { "from": "extract-summary", "to": "deliverComposite" },
+      { "from": "extract-keywords", "to": "deliverComposite" },
+      { "from": "extract-entities", "to": "deliverComposite" }
+    ]
+  },
+
+  "acceptanceCriteria": {
+    "$comment": "Mirrors task 118R POML <acceptance-criteria>. Verifiable post-deployment.",
+    "criteria": [
+      "Playbook row UNCHANGED — sprk_analysisplaybookid 302e6da6-f363-f111-ab0c-7ced8ddc4cc6 still exists; sprk_name 'summarize-document-for-workspace@v1' preserved.",
+      "Four NEW Action nodes (extract-tldr, extract-summary, extract-keywords, extract-entities) created on the playbook; each references the existing SUM-CHAT@v1 action by actionCode FK.",
+      "One NEW DeliverComposite Output Node ('deliverComposite') created; sprk_nodetype=100000004; sprk_configjson contains sections array with the four sectionName/inputVariable bindings.",
+      "Legacy single-action 'summarize' node (sprk_playbooknodeid e35cbcd3-026c-f111-ab0e-7ced8ddc4a05) DEACTIVATED (statecode=1) — NOT deleted, per ADR-037 audit-trail preservation + 118R rollback path.",
+      "Chat sibling summarize-document-for-chat@v1 (sprk_analysisplaybookid 44285d15-1360-f111-ab0b-70a8a59455f4) UNTOUCHED — verified by post-migration MCP read_query.",
+      "Phase B vector match continues to route 'summarize this document' to this playbook — playbook name + description text both unchanged so embedding regeneration is OPTIONAL.",
+      "BFF publish-size delta ~0 MB (data-only authoring; no .cs/.csproj/.NuGet change). Verified per NFR-01 per-task rule."
+    ]
+  }
+}

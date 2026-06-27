@@ -155,8 +155,8 @@ $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 # error (intentional — silent default would hide misalignment).
 # -----------------------------------------------------------------------------
 $ContainerIndexMap = @{
-    'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50' = 'spaarke-knowledge-index-v2'  # Spaarke Demo BU container
-    'b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh' = 'spaarke-file-index'           # Spaarke BU container
+    'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50' = 'spaarke-files-index'  # Spaarke Demo BU container
+    'b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh' = 'spaarke-files-index'           # Spaarke BU container
 }
 
 # -----------------------------------------------------------------------------

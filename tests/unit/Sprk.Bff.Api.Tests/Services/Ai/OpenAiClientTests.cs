@@ -17,15 +17,6 @@ public class OpenAiClientTests
         _loggerMock = new Mock<ILogger<OpenAiClient>>();
     }
 
-    [Fact]
-    public void Constructor_WithValidOptions_CreatesClient()
-    {
-        var options = CreateValidOptions();
-
-        var client = new OpenAiClient(options, _loggerMock.Object);
-
-        client.Should().NotBeNull();
-    }
 
     [Fact]
     public void Constructor_WithEmptyEndpoint_ThrowsException()
@@ -126,56 +117,6 @@ public class OpenAiClientTests
         await act.Should().ThrowAsync<Exception>();
     }
 
-    [Fact]
-    public void StreamCompletionAsync_UsesConfiguredModel_WhenNoModelOverride()
-    {
-        var options = Options.Create(new DocumentIntelligenceOptions
-        {
-            OpenAiEndpoint = "https://test.openai.azure.com/",
-            OpenAiKey = "test-key",
-            SummarizeModel = "custom-model"
-        });
-
-        var client = new OpenAiClient(options, _loggerMock.Object);
-
-        // Client should be created with the custom model configured
-        // The actual model usage is verified through the API call which we can't easily test here
-        client.Should().NotBeNull();
-    }
-
-    [Fact]
-    public void StreamVisionCompletionAsync_UsesImageModel_WhenConfigured()
-    {
-        var options = Options.Create(new DocumentIntelligenceOptions
-        {
-            OpenAiEndpoint = "https://test.openai.azure.com/",
-            OpenAiKey = "test-key",
-            SummarizeModel = "gpt-4o-mini",
-            ImageSummarizeModel = "gpt-4o" // Different model for vision
-        });
-
-        var client = new OpenAiClient(options, _loggerMock.Object);
-
-        // Client should be created with the image model configured
-        client.Should().NotBeNull();
-    }
-
-    [Fact]
-    public void StreamVisionCompletionAsync_FallsBackToSummarizeModel_WhenImageModelNotConfigured()
-    {
-        var options = Options.Create(new DocumentIntelligenceOptions
-        {
-            OpenAiEndpoint = "https://test.openai.azure.com/",
-            OpenAiKey = "test-key",
-            SummarizeModel = "gpt-4o-mini",
-            ImageSummarizeModel = null // Not configured
-        });
-
-        var client = new OpenAiClient(options, _loggerMock.Object);
-
-        // Client should be created - will fall back to SummarizeModel
-        client.Should().NotBeNull();
-    }
 
     private static IOptions<DocumentIntelligenceOptions> CreateValidOptions()
     {

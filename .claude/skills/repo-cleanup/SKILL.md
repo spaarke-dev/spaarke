@@ -51,6 +51,28 @@ ELSE:
   MODE = full-audit
 ```
 
+### Step 1.5: Invoke /test-diet (project-completion mode only) — BINDING per spec FR-B09
+
+**Added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-081.**
+
+```
+IF MODE == project-completion:
+  CHECK if `projects/{project-name}/notes/test-diet-report.md` already exists for this run
+  IF report missing OR stale (older than the most recent test-file commit on the branch):
+    → INVOKE `/test-diet projects/{project-name}`
+    → BLOCK on completion (the diet report is a binding artifact for the wrap-up PR)
+    → If `/test-diet` reports DELETE candidates: surface them to user; reviewer applies the `git rm` commands BEFORE Step 2
+
+  IF user explicitly skips `/test-diet` with rationale:
+    → LOG the skip + rationale in `projects/{project-name}/current-task.md` Decisions section
+    → Continue, BUT mark the wrap-up PR description with "test-diet: SKIPPED (rationale required)"
+
+IF MODE == full-audit:
+  → SKIP this step (`/test-diet` is project-scoped only)
+```
+
+`/test-diet` is read-only (emits `git rm` / `git mv` commands; reviewer applies them). The classifier is the 17-ban B1-B17 list from [`docs/adr/ADR-038-testing-strategy.md`](../../../docs/adr/ADR-038-testing-strategy.md) §7. Skipping the gate is a HARD WARNING per spec FR-B09.
+
 ### Step 2: Load Repository Standards
 
 ```

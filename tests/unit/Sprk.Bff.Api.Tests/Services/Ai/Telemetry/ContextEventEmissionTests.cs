@@ -22,7 +22,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Telemetry;
 /// <c>Sprk.Bff.Api.Ai.ContextEvents</c> meter and capture every counter increment with its
 /// tag values. The pattern matches task 058's <c>ConflictResolutionTests</c> which proved
 /// MeterListener-based ADR-015 anti-leakage verification works in this repo. Direct emitter
-/// invocation (vs. wiring through CapabilityRouter / RagService / etc.) keeps the test
+/// invocation (vs. wiring through RagService / etc.) keeps the test
 /// surgical and fast — the per-site wiring is validated by build + diff
 /// (NFR-08 verification documented in <c>task-063-adr015-emission-audit.md</c>).
 /// </para>

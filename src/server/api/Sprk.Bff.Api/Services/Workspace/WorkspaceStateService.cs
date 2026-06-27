@@ -2,7 +2,7 @@ using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Azure.Cosmos;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Workspace;
 
 namespace Sprk.Bff.Api.Services.Workspace;
@@ -12,7 +12,9 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// Redis hot tier (24h TTL) + Cosmos durable tier (pin / matter-attach).
 ///
 /// <para>
-/// Redis key: <c>workspace:{tenantId}:{sessionId}</c> (ADR-014 + NFR-16 binding).
+/// Redis key (post-task-014 migration): wrapper-produced
+/// <c>tenant:{tenantId}:workspace-state:{sessionId}:v1</c> (ADR-014 + NFR-16 binding;
+/// FR-05 tenant-scoping enforced by <see cref="ITenantCache"/>).
 /// Value: a JSON dictionary mapping <c>tabId → WorkspaceTab</c>. Per-tab writes
 /// perform a read-modify-write inside the JSON value.
 /// </para>
@@ -33,16 +35,22 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// </para>
 ///
 /// <para>
-/// Lifetime: Scoped — matches consumer endpoint scopes. <see cref="IDistributedCache"/> and
+/// Lifetime: Scoped — matches consumer endpoint scopes. <see cref="ITenantCache"/> and
 /// <see cref="CosmosClient"/> are Singleton (injected); the scoped wrapper is stateless.
 /// </para>
 /// </summary>
 public sealed class WorkspaceStateService : IWorkspaceStateService
 {
-    /// <summary>Redis cache-key prefix per NFR-16 (binding).</summary>
-    internal const string RedisKeyPrefix = "workspace";
+    /// <summary>Cache resource name (per FR-05 tenant-scoped key — produces
+    /// <c>tenant:{tenantId}:workspace-state:{sessionId}:v1</c>).</summary>
+    internal const string CacheResource = "workspace-state";
 
-    /// <summary>Redis hot-tier TTL (24h per FR-32 / spec).</summary>
+    /// <summary>Cache schema version (per ADR-009 key versioning).</summary>
+    internal const int CacheVersion = 1;
+
+    /// <summary>Redis hot-tier TTL (24h per FR-32 / spec). Migrated from
+    /// <c>SlidingExpiration</c> to <c>AbsoluteExpirationRelativeToNow</c> per ITenantCache wrapper
+    /// contract (the wrapper only exposes absolute TTL; spec-required 24h preserved).</summary>
     internal static readonly TimeSpan RedisTtl = TimeSpan.FromHours(24);
 
     /// <summary>Cosmos container name (reused — see placement justification).</summary>
@@ -65,13 +73,13 @@ public sealed class WorkspaceStateService : IWorkspaceStateService
         PropertyNameCaseInsensitive = true,
     };
 
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly CosmosClient _cosmosClient;
     private readonly string _databaseName;
     private readonly ILogger<WorkspaceStateService> _logger;
 
     public WorkspaceStateService(
-        IDistributedCache cache,
+        ITenantCache cache,
         CosmosClient cosmosClient,
         IConfiguration configuration,
         ILogger<WorkspaceStateService> logger)
@@ -253,15 +261,17 @@ public sealed class WorkspaceStateService : IWorkspaceStateService
     }
 
     // =========================================================================
-    // Redis helpers
+    // Redis helpers (via ITenantCache wrapper — FR-05 tenant-scoped keys)
     // =========================================================================
 
     /// <summary>
-    /// Builds the Redis hot-tier key — <c>workspace:{tenantId}:{sessionId}</c>.
-    /// Per-tenant isolation per ADR-014 + NFR-16 (binding).
+    /// Builds the (legacy) Redis hot-tier key — kept for documentation / test-name
+    /// continuity. The wrapper produces <c>tenant:{tenantId}:workspace-state:{sessionId}:v1</c>
+    /// on the wire; this helper is retained because external tests reference the legacy
+    /// <c>workspace:{tenantId}:{sessionId}</c> shape.
     /// </summary>
     internal static string BuildRedisKey(string tenantId, string sessionId)
-        => $"{RedisKeyPrefix}:{tenantId}:{sessionId}";
+        => $"tenant:{tenantId}:{CacheResource}:{sessionId}:v{CacheVersion}";
 
     private async Task<Dictionary<string, WorkspaceTab>> LoadHotAsync(
         string tenantId,
@@ -270,14 +280,8 @@ public sealed class WorkspaceStateService : IWorkspaceStateService
     {
         try
         {
-            var key = BuildRedisKey(tenantId, sessionId);
-            var bytes = await _cache.GetAsync(key, ct);
-            if (bytes is null || bytes.Length == 0)
-            {
-                return new Dictionary<string, WorkspaceTab>(StringComparer.Ordinal);
-            }
-
-            var deserialized = JsonSerializer.Deserialize<Dictionary<string, WorkspaceTab>>(bytes, JsonOpts);
+            var deserialized = await _cache.GetAsync<Dictionary<string, WorkspaceTab>>(
+                tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
             return deserialized ?? new Dictionary<string, WorkspaceTab>(StringComparer.Ordinal);
         }
         catch (Exception ex)
@@ -295,19 +299,14 @@ public sealed class WorkspaceStateService : IWorkspaceStateService
         Dictionary<string, WorkspaceTab> tabs,
         CancellationToken ct)
     {
-        var key = BuildRedisKey(tenantId, sessionId);
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(tabs, JsonOpts);
-
-        // 24h TTL per FR-32. SlidingExpiration keeps actively-touched sessions alive,
-        // AbsoluteExpirationRelativeToNow caps total lifetime so abandoned sessions decay.
-        var options = new DistributedCacheEntryOptions
-        {
-            SlidingExpiration = RedisTtl,
-        };
-
         try
         {
-            await _cache.SetAsync(key, bytes, options, ct);
+            // 24h absolute TTL per FR-32. NOTE: original implementation used SlidingExpiration;
+            // ITenantCache wrapper exposes AbsoluteExpirationRelativeToNow only. Acceptable
+            // trade-off — most workspace sessions are touched well within 24h; abandoned
+            // sessions decay at the same horizon.
+            await _cache.SetAsync(
+                tenantId, CacheResource, sessionId, CacheVersion, tabs, RedisTtl, ct: ct);
         }
         catch (Exception ex)
         {
@@ -321,7 +320,7 @@ public sealed class WorkspaceStateService : IWorkspaceStateService
     {
         try
         {
-            await _cache.RemoveAsync(BuildRedisKey(tenantId, sessionId), ct);
+            await _cache.RemoveAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
         }
         catch (Exception ex)
         {

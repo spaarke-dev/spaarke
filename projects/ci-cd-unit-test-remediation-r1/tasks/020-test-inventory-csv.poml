@@ -1,0 +1,57 @@
+<task id="CICD-020" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Produce transient test inventory CSV (KEEP/DELETE category per test file)</title>
+    <status>complete</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1 - Stream B</phase>
+    <stream>B - Test reset</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>testing, inventory, audit</tags>
+    <blocks>050, 051, 052, 053a, 053b, 053c</blocks>
+  </metadata>
+
+  <prompt>
+    Inventory all .NET test files in `tests/unit/**` and `tests/integration/**`. Per spec FR-B05, this CSV is a transient Phase 1 work artifact (NOT canonical — path conventions are canonical at runtime). For each file, classify: KEEP (which of 6 categories: regression / security-auth / data-mutation / tenant-isolation / endpoint-contract / domain-logic) OR DELETE (with antipattern subcategory: HttpMessageHandler-mock / DI-registration / constructor-null-check / wiring-other). Doubt = KEEP.
+  </prompt>
+
+  <role>Test architecture engineer doing systematic categorization.</role>
+
+  <goal>A CSV at `notes/test-inventory.csv` with columns: file_path, current_path, suggested_target_path, classification, category_or_antipattern, rationale, file_size_loc.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+    <file purpose="design">projects/ci-cd-unit-test-remediation-r1/design.md</file>
+    <file purpose="existing-pre-rewrite">tests/CLAUDE.md</file>
+    <file purpose="existing-pre-rewrite">.claude/constraints/testing.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B05">CSV is transient. Path conventions become canonical at runtime; do NOT assume the CSV ships in any form to production code.</constraint>
+    <constraint source="spec §38">Binary KEEP/DELETE only — no quarantine category. Doubt = KEEP.</constraint>
+    <constraint source="spec FR-B06">Deletion-safety: tests under future KEEP paths (1-4: regression, security-auth, data-mutation, tenant-isolation) require same-PR replacement if marked DELETE.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Enumerate every `.cs` test file in `tests/unit/Sprk.Bff.Api.Tests/`, `tests/unit/Spaarke.Plugins.Tests/`, `tests/unit/Spaarke.Scheduling.Tests/`, `tests/unit/Spaarke.Core.Tests/`, `tests/integration/Spe.Integration.Tests/`</step>
+    <step order="2">For each file, grep for antipattern signatures: `Mock&lt;HttpMessageHandler&gt;`, DI-container access, constructor argument null tests, single-method-call setup-assert pairs</step>
+    <step order="3">Read the first ~30 lines of each test class to classify intent</step>
+    <step order="4">Classify each file. If KEEP: assign 1-6 category + suggested target path under one of the 6 KEEP conventions. If DELETE: assign antipattern subcategory.</step>
+    <step order="5">Compute totals: KEEP count by category, DELETE count by antipattern, total file count, estimated test count by category</step>
+    <step order="6">Write `notes/test-inventory.csv` (UTF-8, with header)</step>
+    <step order="7">Write `notes/test-inventory-summary.md` with totals + sub-slicing recommendation for tasks 053a/b/c</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory.csv</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory-summary.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CSV covers every .cs file under tests/unit/** and tests/integration/**</criterion>
+    <criterion testable="true">Summary recommends sub-slicing strategy for BFF.Api.Tests deletion (gives concrete file counts for 053a/b/c)</criterion>
+    <criterion testable="true">No file left unclassified</criterion>
+  </acceptance-criteria>
+</task>

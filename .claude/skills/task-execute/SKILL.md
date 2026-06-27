@@ -125,6 +125,15 @@ ELSE (single task invocation):
 
 ### Step 0.5: Determine Required Rigor Level (MANDATORY)
 
+> **Pre-step (added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-060 per spec FR-C03)**: Before determining rigor level, perform the **Hot-Path Auto-Invoke check**:
+>
+> 1. Read the task POML's `<inputs>`, `<outputs>`, and `<tags>` sections.
+> 2. Cross-reference against the Hot-Path Watchlist in [`.claude/skills/conflict-check/SKILL.md`](../conflict-check/SKILL.md) (BFF, SpaarkeAi, ci-workflows, skill-directives, root-CLAUDE.md, BFF entry/DI).
+> 3. **If ANY watchlist trigger fires** (POML output/input file matches a watchlist glob, OR task tags include `bff-api`/`spaarke-ai`/`ci-workflows`/`skill-directive`/`root-claude`), invoke `/conflict-check` skill immediately. Read its output before proceeding to the rigor decision below.
+> 4. If `/conflict-check` reports a hard warn (file overlap with another active worktree), pause and escalate to user. Soft warns and silent passes proceed normally.
+>
+> The Hot-Path Auto-Invoke check is binding for all tasks that touch the watchlist surfaces. The check itself takes seconds; the value is preventing concurrent edits on the same hot files.
+
 **BEFORE executing any task, determine rigor level using this decision tree:**
 
 ```
@@ -655,6 +664,15 @@ SKIP quality gates IF:
   - Task is configuration-only (no logic changes)
   - User explicitly requests skip (with documented reason)
 
+**BINDING OVERRIDE — Test-modifying tasks ALWAYS run quality gates** (added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-060 per spec FR-B07):
+
+  - IF task modifies any file under `tests/**` OR task POML `<tags>` include `testing`, `test-reset`, `deletion`, `integration-test`:
+    → Quality gates (code-review + adr-check) are MANDATORY regardless of rigor level.
+    → The SKIP block above does NOT apply.
+    → Reason: prevents wiring-test antipatterns and KEEP-path violations per ADR-038 + spec FR-B07.
+    → This override is binding for ≥6 months from 2026-06-26 (cultural reset window).
+    → Path-check enforcement: any deletion under `tests/integration/{auth,regression,data-mutation,tenant}/**` requires a same-PR replacement (FR-B06).
+
 UPDATE current-task.md:
   - Add "Quality Gates" section:
     - Code Review: ✅ Passed (or issues found/fixed)
@@ -840,7 +858,17 @@ TRANSITION current-task.md:
    IF no more tasks (project complete):
      - Task ID: "none"
      - Status: "none"
-     - Next Action: "Project complete. Run /repo-cleanup"
+     - Next Action: "Project complete. Run /test-diet then /repo-cleanup"
+
+   **BINDING — Test Diet Gate at Project Close** (added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-081 per spec FR-B09):
+
+   IF the just-completed task is a `090-wrapup-*` task AND `/test-diet` was NOT invoked during the task:
+     → 🚨 **HARD WARNING**: "Wrap-up task completed without running /test-diet. Spec FR-B09 requires test diet pass before project close. Run /test-diet now to reconcile build-vs-maintain tests per ADR-038 §7."
+     → If user proceeds without `/test-diet`: log warning in `current-task.md` Decisions section and continue, BUT the wrap-up PR description MUST include "test-diet: SKIPPED (rationale required)".
+     → Test diet output (`notes/test-diet-report.md`) is the binding artifact — reviewer judgment on each DELETE/MAINTAIN/AMBIGUOUS classification belongs in the wrap-up PR.
+
+   IF wrap-up task was completed AND `/test-diet` was invoked AND `notes/test-diet-report.md` exists:
+     → Confirm reconciliation: "✅ Test diet executed; report at notes/test-diet-report.md. {D} delete candidates / {B} ambiguous / {M} confirmed maintain."
 
 5. REPORT to user:
    "✅ Task {completed_id} complete.

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -200,6 +201,34 @@ public record PlaybookStreamEvent
     /// </summary>
     public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
 
+    /// <summary>
+    /// Optional section-stream payload for per-section composite delivery events
+    /// (FR-53 / chat-routing-redesign-r1 task 114a). Populated only when
+    /// <see cref="Type"/> is one of
+    /// <see cref="PlaybookEventType.SectionStarted"/>,
+    /// <see cref="PlaybookEventType.SectionData"/>, or
+    /// <see cref="PlaybookEventType.SectionCompleted"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The discriminated payload mirrors the <c>section_*</c> SSE event data records
+    /// (<see cref="SectionStartedSseEventData"/> / <see cref="SectionDataSseEventData"/> /
+    /// <see cref="SectionCompletedSseEventData"/>). The downstream SSE writer
+    /// (<see cref="Api.Ai.PlaybookRunEndpoints"/> / chat SSE writer) is responsible for
+    /// projecting the active branch onto the wire as a <see cref="Api.Ai.ChatSseEvent"/>
+    /// using <see cref="ChatSseEventFactory"/>.
+    /// </para>
+    /// <para>
+    /// <b>Backward compat</b>: existing consumers that filter on
+    /// <c>NodeCompleted / RunCompleted / NodeFailed</c> ignore section events naturally
+    /// (the discriminated union default arm). The
+    /// <see cref="AnalysisOrchestrationService.BridgePlaybookEventToStreamChunk"/> bridge
+    /// returns <c>null</c> for unknown event types, so section events do NOT leak into
+    /// the legacy <c>AnalysisStreamChunk</c> text path.
+    /// </para>
+    /// </remarks>
+    public SectionStreamPayload? SectionPayload { get; init; }
+
     // Factory methods for common event types
 
     /// <summary>Creates a RunStarted event.</summary>
@@ -322,6 +351,124 @@ public record PlaybookStreamEvent
             NodeName = nodeName,
             Content = sample
         };
+
+    /// <summary>
+    /// Creates a <see cref="PlaybookEventType.SectionStarted"/> event announcing that a
+    /// section in a composite output payload has begun composition (FR-53 /
+    /// chat-routing-redesign-r1 task 114a). Carries a
+    /// <see cref="SectionStartedSseEventData"/> payload for the SSE writer to project
+    /// onto the wire as a <c>section_started</c> <see cref="Api.Ai.ChatSseEvent"/>.
+    /// </summary>
+    public static PlaybookStreamEvent SectionStarted(
+        Guid runId,
+        Guid playbookId,
+        Guid nodeId,
+        string nodeName,
+        SectionStartedSseEventData data) => new()
+        {
+            Type = PlaybookEventType.SectionStarted,
+            RunId = runId,
+            PlaybookId = playbookId,
+            NodeId = nodeId,
+            NodeName = nodeName,
+            SectionPayload = SectionStreamPayload.FromStarted(data)
+        };
+
+    /// <summary>
+    /// Creates a <see cref="PlaybookEventType.SectionData"/> event carrying section content
+    /// (FR-53 / chat-routing-redesign-r1 task 114a). Carries a
+    /// <see cref="SectionDataSseEventData"/> payload for the SSE writer to project
+    /// onto the wire as a <c>section_data</c> <see cref="Api.Ai.ChatSseEvent"/>.
+    /// </summary>
+    public static PlaybookStreamEvent SectionData(
+        Guid runId,
+        Guid playbookId,
+        Guid nodeId,
+        string nodeName,
+        SectionDataSseEventData data) => new()
+        {
+            Type = PlaybookEventType.SectionData,
+            RunId = runId,
+            PlaybookId = playbookId,
+            NodeId = nodeId,
+            NodeName = nodeName,
+            SectionPayload = SectionStreamPayload.FromData(data)
+        };
+
+    /// <summary>
+    /// Creates a <see cref="PlaybookEventType.SectionCompleted"/> event announcing that a
+    /// section's composition is finalized (FR-53 / chat-routing-redesign-r1 task 114a).
+    /// Carries a <see cref="SectionCompletedSseEventData"/> payload for the SSE writer
+    /// to project onto the wire as a <c>section_completed</c>
+    /// <see cref="Api.Ai.ChatSseEvent"/>.
+    /// </summary>
+    public static PlaybookStreamEvent SectionCompleted(
+        Guid runId,
+        Guid playbookId,
+        Guid nodeId,
+        string nodeName,
+        SectionCompletedSseEventData data) => new()
+        {
+            Type = PlaybookEventType.SectionCompleted,
+            RunId = runId,
+            PlaybookId = playbookId,
+            NodeId = nodeId,
+            NodeName = nodeName,
+            SectionPayload = SectionStreamPayload.FromCompleted(data)
+        };
+}
+
+/// <summary>
+/// Discriminated payload for the three per-section composite SSE events
+/// (FR-53 / chat-routing-redesign-r1 task 114a). Exactly ONE of the three Data fields
+/// is populated; the active field corresponds to the parent
+/// <see cref="PlaybookStreamEvent.Type"/>'s section variant.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why a wrapper record instead of three separate fields on PlaybookStreamEvent</b>:
+/// keeps the section-event-specific surface isolated and self-documenting. Future
+/// section-event payload changes (e.g., adding a confidence field) don't require
+/// modifying <see cref="PlaybookStreamEvent"/>'s primary shape.
+/// </para>
+/// <para>
+/// <b>ADR-015 tier-1</b>: the payload references the section data records which carry
+/// section name + content. Section name is a deterministic configuration identifier;
+/// content is the LLM-generated response being sent to the user (equivalent to a chat
+/// token — not user-uploaded content / not internal diagnostic data).
+/// </para>
+/// </remarks>
+public sealed record SectionStreamPayload
+{
+    /// <summary>
+    /// <c>section_started</c> payload. Non-null only when the parent event Type is
+    /// <see cref="PlaybookEventType.SectionStarted"/>.
+    /// </summary>
+    public SectionStartedSseEventData? Started { get; init; }
+
+    /// <summary>
+    /// <c>section_data</c> payload. Non-null only when the parent event Type is
+    /// <see cref="PlaybookEventType.SectionData"/>.
+    /// </summary>
+    public SectionDataSseEventData? Data { get; init; }
+
+    /// <summary>
+    /// <c>section_completed</c> payload. Non-null only when the parent event Type is
+    /// <see cref="PlaybookEventType.SectionCompleted"/>.
+    /// </summary>
+    public SectionCompletedSseEventData? Completed { get; init; }
+
+    /// <summary>Wraps a <see cref="SectionStartedSseEventData"/>.</summary>
+    public static SectionStreamPayload FromStarted(SectionStartedSseEventData data) =>
+        new() { Started = data };
+
+    /// <summary>Wraps a <see cref="SectionDataSseEventData"/>.</summary>
+    public static SectionStreamPayload FromData(SectionDataSseEventData data) =>
+        new() { Data = data };
+
+    /// <summary>Wraps a <see cref="SectionCompletedSseEventData"/>.</summary>
+    public static SectionStreamPayload FromCompleted(SectionCompletedSseEventData data) =>
+        new() { Completed = data };
 }
 
 /// <summary>
@@ -361,7 +508,36 @@ public enum PlaybookEventType
     /// indicating a Handlebars template leaked unrendered into the output.
     /// Non-fatal warning (R3 FR-3H1.4 / AC-H1.2); execution continues.
     /// </summary>
-    UnrenderedTemplateDetected
+    UnrenderedTemplateDetected,
+
+    /// <summary>
+    /// A section in a composite output payload has begun composition
+    /// (FR-53 / chat-routing-redesign-r1 task 114a). Emitted by
+    /// <see cref="PlaybookOrchestrationService"/> for each
+    /// <see cref="Nodes.CompositeSectionResult"/> in a completed
+    /// <see cref="Nodes.NodeType.DeliverComposite"/> node's output. The accompanying
+    /// <see cref="PlaybookStreamEvent.SectionPayload"/>.<see cref="SectionStreamPayload.Started"/>
+    /// carries the section name + position metadata.
+    /// </summary>
+    SectionStarted,
+
+    /// <summary>
+    /// A section in a composite output payload has content available
+    /// (FR-53 / chat-routing-redesign-r1 task 114a). In Phase A this is emitted once per
+    /// section with the consolidated content; future incremental phases emit multiple
+    /// per section. The accompanying
+    /// <see cref="PlaybookStreamEvent.SectionPayload"/>.<see cref="SectionStreamPayload.Data"/>
+    /// carries the text delta + structured data.
+    /// </summary>
+    SectionData,
+
+    /// <summary>
+    /// A section in a composite output payload is finalized
+    /// (FR-53 / chat-routing-redesign-r1 task 114a). The accompanying
+    /// <see cref="PlaybookStreamEvent.SectionPayload"/>.<see cref="SectionStreamPayload.Completed"/>
+    /// carries the final consolidated text + structured data (idempotent re-emission).
+    /// </summary>
+    SectionCompleted
 }
 
 /// <summary>

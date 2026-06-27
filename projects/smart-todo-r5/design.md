@@ -166,6 +166,76 @@ R4 UAT 5-6 burned multiple deploy rounds because the spaarke-prototype harness m
 
 ---
 
+## R-9 — Ribbon expansion: "Create To Do" on all parent entities (deferred from R4-118)
+
+**Surface**: parent record main forms (Project, Event, Invoice, WorkAssignment, Communication) — currently missing the command bar button. Matter has it but uses a generic OOB icon.
+
+**Background**: R4-118 (2026-06-25) deployed the underlying infrastructure (sprk_wizard_commands.js + 2 icon SVGs) but the ribbon-XML expansion was deferred for time/complexity. The R4 Matter button works today with the OOB `/_imgs/ribbon/newrecord32.png` icon. The new MS-To-Do-style icons (sprk_ToDoCheckmark16.svg + 32.svg, blue #0078D4 + white check) are deployed and ready to reference.
+
+**Scope**:
+1. Update `src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml` lines 48-50 to reference `$webresource:sprk_ToDoCheckmark32.svg` + `sprk_ToDoCheckmark16.svg` + add `ModernImage="$webresource:sprk_ToDoCheckmark32.svg"`. Re-deploy `spaarke_insights` solution.
+2. Create 5 NEW dedicated entity-ribbon solutions (per `/ribbon-edit` skill convention — small dedicated solution per entity, NOT added to spaarke_insights or SpaarkeCore):
+   - `ProjectRibbons` → sprk_project + RibbonDiff with CreateTodo button → `Spaarke.Commands.Wizards.openCreateTodoWizard`
+   - `EventRibbons` → sprk_event + RibbonDiff with CreateTodo button
+   - `InvoiceRibbons` → sprk_invoice + RibbonDiff with CreateTodo button
+   - `WorkAssignmentRibbons` → sprk_workassignment + RibbonDiff with CreateTodo button
+   - `CommunicationRibbons` → sprk_communication + RibbonDiff with CreateTodo button
+3. Each solution cloned from the Matter pattern (CustomAction + CommandDefinition + LocLabels). JS handler is shared — all 6 entities call the same `openCreateTodoWizard(primaryControl)` function which extracts entity context via `getEntityContext(primaryControl)`.
+4. Smoke-test each: open record → click "Create To Do" → wizard opens with correct entity context (entityType + entityId visible in wizard's regarding field).
+
+**Effort**: 2-3 hrs. Each solution needs maker portal creation step (5 min × 5) OR programmatic XML scaffold (15-30 min × 5 with risk of XSD validation errors per entity).
+
+**Why R5 / not R4 closeout**: Infrastructure (JS + icons) is shipped and Matter button works today. This is a polish/expansion item, not a fix. The user kanban + parent-form subgrid path (alternative entry point for creating To Dos from parent records) is functional today.
+
+**References**:
+- `projects/smart-todo-r4/tasks/118-deploy-wizard-commands-js.poml` (R4 work this expands)
+- `src/client/webresources/js/sprk_wizard_commands.js:221` (openCreateTodoWizard handler — already deployed)
+- `src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml` lines 48 + 145 (Matter template to clone)
+- `src/client/assets/icons/sprk_ToDoCheckmark16.svg` + `32.svg` (deployed icons to reference)
+- `.claude/skills/ribbon-edit/SKILL.md` (deploy workflow)
+
+---
+
+## R-10 — ToolbarActions + RegardingResolver test-honesty + defensive fixes (deferred from R4-114 code review)
+
+**Surface**:
+- `src/solutions/SmartTodo/src/components/Toolbar/ToolbarActions.ts handleEmail`
+- `src/solutions/SmartTodo/src/components/Toolbar/__tests__/ToolbarActions.test.ts` (1 `.skip`'d test from R4-114)
+- `src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx handleSelectRecord` (race-condition guard + console-severity normalization)
+
+**Background**: R4-114 wired jest for SmartTodo (77 tests passing) but had to `.skip` one test — `handleEmail composes a mailto:` — because the test relies on stubbing `window.location.href`, which jsdom v22+ blocks ("Cannot redefine property: location"). The fix path documented in the skip comment is correct but was deferred. Per "no shims" rule, the skip can't be permanent.
+
+The R4-112 code review (2026-06-25) also surfaced two defensive items in the RegardingResolver Bug-1 fix that don't block but should be cleaned up: a theoretical race condition (S1) and one console.warn that should be console.error for severity symmetry (N1).
+
+**Scope**:
+
+1. **Make `handleEmail` testable** (un-skip the jsdom-blocked test):
+   - Add an injectable navigation seam to `ToolbarActions.ts`: pass `navigate: (href: string) => void = (h) => { window.location.href = h; }` as part of the context. Default behavior identical; tests can inject `jest.fn()`.
+   - Update `ToolbarActions.test.ts` to construct the context with `navigate: jest.fn()`, then assert call args. Remove `.skip`.
+   - Verify jest run: 78/78 passing (was 77 + 1 skip).
+   - Document the seam in the function's docstring as "test-injectable navigation; production uses window.location.href to avoid popup blockers."
+
+2. **RegardingResolver defensive cleanup** (no user-visible change; ship next time PCF redeploys for a real reason):
+   - **S1 race-condition guard**: `RegardingResolverApp.tsx handleSelectRecord` — capture `selectionGeneration` on entry, bail if state changed by the time `resolveRecordType` resolves. Currently the lookup dialog is modal so this is unreachable, but if anyone ever makes the picker non-modal this becomes a real bug.
+   - **N1 console severity**: line 381 `console.warn(...)` → `console.error(...)` for symmetry with adjacent error logs (lines 386-387).
+
+3. **No PCF version bump needed for #2 alone** — these are defensive/cosmetic and have no user-facing impact. Bundle into the NEXT version bump when a real PCF change ships (e.g., when CREATE-mode UAT surfaces something, or when a new HOST entity needs to be added).
+
+**Effort**: ~1 hr total. #1 is ~30 min (small refactor + test update + jest re-run). #2 is ~15 min (two edits in one file).
+
+**Why R5 / not R4 closeout**:
+- The `.skip`'d test does NOT change runtime behavior — handleEmail works in production, only the test couldn't stub jsdom's `window.location`. Fixing it improves test coverage but doesn't fix a bug.
+- The S1 race condition is unreachable in current usage (modal lookup dialog blocks reselection).
+- The N1 console severity is cosmetic.
+- All three are good hygiene items but don't block any user flow.
+
+**References**:
+- `projects/smart-todo-r4/tasks/114-fu4-wire-vitest-smart-todo.poml` (R4 work this builds on)
+- Code-review report 2026-06-25 (findings S1, S2, N1)
+- `src/solutions/SmartTodo/src/components/Toolbar/__tests__/ToolbarActions.test.ts:273-281` (skip rationale documented at the test site)
+
+---
+
 ## Out-of-scope candidates (mention only — defer to R6+)
 
 - Mobile / responsive (< 768px viewport, touch-drag for kanban, sheet modals)

@@ -1,6 +1,6 @@
 # Current Task State — smart-todo-r4
 
-> **Last Updated**: 2026-06-23 (R4-110 in progress — 4-step chain audit fix applied to source + docs; build/deploy next)
+> **Last Updated**: 2026-06-24 (by /context-handoff — R4-110 COMPLETE + merged + worktree current with master)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,88 +9,80 @@
 
 | Field | Value |
 |-------|-------|
-| **Project** | smart-todo-r4 — closeout wave (rounds 110-117) post UAT rounds 4-13 |
-| **Phase** | **Closeout Wave 14** — 8 tasks tasked + ready to execute. R4 main scope ALREADY MERGED (PR #406 squash commit `80f70a1d4` on master, 2026-06-23T13:21:19Z). |
-| **Worktree branch** | `work/smart-todo-r4-closeout` (NEW — created from master after PR #406 merge). Pushed to origin. |
-| **Active task** | **R4-110 — Structural Workspace height-chain audit + fix** — ✅ **COMPLETE**. UAT-validated (8-section checklist + multi-widget overlap re-test). Ready for PR + merge to master. |
-| **Next Action** | Commit follow-up → /push-to-github → /merge-to-master. After merge, redeploy from master per "spaarkedev1 deploys are master-only" durable rule. Next closeout task: R4-111 (remove widget Expand-to-Code-Page modal). |
-| **Pre-execution context** | The per-section `style: { height: 'calc(100vh - 200px)', minHeight: '560px' }` in `LegalWorkspace/workspaceConfig.tsx` is a workaround for an unresolved structural break in the workspace height chain above `WorkspaceShell.shell`. Round 7 of UAT attempted the fix and collapsed the workspace to 40px — that attempt and the working tactical-fix (round 11/12) are documented in `notes/handoffs/` and the git log on the merged work/smart-todo-r4-uat4-fixes branch (now deleted locally but findable via `git log master`). |
+| **Project** | smart-todo-r4 — closeout wave (110-117) post UAT rounds 4-13 |
+| **Phase** | **Closeout Wave**. R4-110 ✅ COMPLETE. 6 tasks remaining: R4-111 → R4-117. |
+| **Worktree branch** | `work/smart-todo-r4-closeout` at `cc1391c9a` (= origin/master) — fully current; pushed to origin |
+| **Active task** | **NONE** (between tasks). R4-110 just shipped via PR #419 → master at `b26ac56b7` (2026-06-23T20:10:31Z). |
+| **Next Action** | Say "work on task 111" (or 112/113/114/115 in any order — see "Execution order" below). Task POMLs are at `tasks/111-117.poml`. Each task uses `task-execute` skill per root CLAUDE.md §4. |
+| **Working tree** | Clean except 1 untracked researcher MD (intentionally ignored per project handoff). 0 commits ahead of origin/master; 0 behind. |
 
-### What just shipped (PR #406 on master)
+### What just shipped (PR #419 on master)
 
-13 UAT rounds + structural workspace fixes + documentation:
-- Contact entity migration (sprk_contact → OOB contact) — entity name + nav-prop PascalCase bind-key (`sprk_AssignedTo@odata.bind`)
-- Modal save/close interceptor (parent-side `Xrm.Page.ui.close` patch in SmartTodoModal)
-- Widget responsive layout (`display: flex` on body wrapper) + WorkspaceLayoutWidget.root `height: 100%` + WorkspaceShell.row `flex: 1 1 0 + alignItems: stretch`
-- Date-based bucketing (Today/Tomorrow/Future by due-date, not score)
-- Widget default orientation = vertical (rows); Code Page = horizontal (columns)
-- Refresh button wiring (TodoContext.refetch was a no-op placeholder)
-- Assigned To typeahead picker (widget + Code Page Header)
-- Quick-add 400 Bad Request fix (PascalCase nav-prop name)
-- Documentation: `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` §7.2 (HEIGHT chain contract) + `.claude/patterns/ui/embedded-widget-sizing.md` extended
+**R4-110 — Structural Workspace height-chain audit + fix** (merge commit `b26ac56b7`):
 
-### Closeout Wave (110-117) — execution order
+- `WorkspaceTabManagerComponent.content` — added `display:flex; flexDirection:column; minHeight:0` so future widget roots can use either `flex:1` OR `height:100%` (R4-110 chain robustness)
+- `workspaceConfig.tsx` — removed per-section `style:{height:'calc(100vh-200px)',minHeight:'560px'}` on SmartTodo; kept `minHeight:560` floor parity with `todoRegistration.defaultHeight`
+- `SmartTodoWidget.kanbanContainer` — removed vestigial `minHeight:400px` pixel floor
+- `WorkspaceShell.row` — removed `minHeight:0` (R4-110 follow-up after UAT revealed multi-widget dashboard overlap)
+- `SectionPanel.tsx` — refreshed round-7 comment
+- `BUILD-A-NEW-WORKSPACE-WIDGET.md §7.2` — rewritten chain map + per-section sizing guidance + anti-patterns
+- `.claude/patterns/ui/embedded-widget-sizing.md` — HEIGHT contract simplified (3 author-rules → 2)
+- 8 closeout-wave POMLs (R4-111–R4-117) + R5 design backlog (incl. F-6 filter/search label, F-7 inner-modal sizing, F-8 inner-modal Save&Close)
 
-1. **R4-110** — Structural Workspace height-chain audit + fix (FOUNDATIONAL, 1-2 days). Removes per-section calc(100vh-200px) workaround. Updates pattern docs as canonical reference. **← START HERE**
-2. **R4-111** — Remove widget "Expand to Code Page modal" path (1-2 hrs). User decision: ONLY modal from widget is the record modal.
-3. **R4-112** — PCF CREATE-mode bridge (FU-1, 2-3 hrs). Originally R4-scoped; deferred. Without it, NEW sprk_todo creates have empty regarding fields.
-4. **R4-113** — Form-script audit (NEW-1, 1-2 hrs). `sprk_/js/sprk_todo_dirty_check.js` was deployed but never registered on form OnLoad. Per user's "no shims" rule: register or delete.
-5. **R4-114** — Wire vitest for SmartTodo Code Page (FU-4, 2-3 hrs). 22 test spec files exist but no runner. Per "no shims": wire vitest, make tests real.
-6. **R4-115** — SpeDocumentViewer stale bundle cleanup (FU-6, 1-2 hrs). Legacy `sprk_todoflag` write path may still be in deployed bundle.
-7. **R4-116** — R4-092 final deploy notes + flip to ✅ (30 min, serial after 110-115).
-8. **R4-117** — R4-098 wrap-up + lessons-learned + repo-cleanup (2-3 hrs, serial after 116).
+**UAT validation**: 8-section checklist + multi-widget overlap re-test all passed. Console height-chain diagnostic showed 943px widget root, chain consistent across 14 layers.
 
-### R4-110 audit findings + 4-step plan (executing now)
+### Deploy state (spaarkedev1)
 
-**Static chain audit finding**: Post UAT rounds 11/12, the height chain from `App.appRoot` (`100vh` anchor) down through every layer to `SectionPanel.card` (grid-stretched via row `alignItems: stretch`) is structurally intact. The per-section `calc(100vh - 200px)` workaround on SmartTodo was not the root issue — it was forcing dominance over peers in the legacy LegalWorkspace 5-section dashboard. **One latent fragility remained**: `WorkspaceTabManagerComponent.content` was `display:block` with `flex:1`, which silently ignores child flex — meaning future widget authors who use `flex:1` instead of `height:100%` on their root would trip the same trap as smart-todo-r4 rounds 4-10.
+| Web Resource | Source | State |
+|---|---|---|
+| `sprk_smarttodo` | ✅ Built + deployed from main repo **master** (2026-06-24 16:32 local), bundle 1721 KB | Fully current with master |
+| `sprk_spaarkeai` | ⚠️ Last deploy was from worktree iteration (R4-110 follow-up code, 3854 KB) | Has R4-110 changes (UAT-validated) but missing master-only work since. Master build was broken at deploy time (`@spaarke/daily-briefing-components/widgets` missing). **PR #417 (`fix(daily-briefing): unbreak master CI`) is now on master and likely fixes it.** Owner of the daily-briefing project (or whoever ships next) should redeploy from master to bring spaarkedev1 fully current. |
+| `sprk_createtodowizard` | 2026-06-20 22:35Z | Unchanged from PR #406 |
+| `sprk_/js/sprk_todo_dirty_check.js` v1.1.0 | 2026-06-22 12:41Z | NEVER REGISTERED on form OnLoad — R4-113 will audit |
 
-**4-step plan (user approved)**:
-1. ✅ `WorkspaceTabManagerComponent.content` — add `display:flex; flexDirection:column; minHeight:0` (chain robustness — future widgets can now use either `flex:1` or `height:100%`)
-2. ✅ `workspaceConfig.tsx` (LegalWorkspace default dashboard, Path B) — remove `style: { height: "calc(100vh - 200px)", minHeight: "560px" }`; keep `style: { minHeight: "560px" }` floor parity with todoRegistration.defaultHeight (Path A)
-3. ✅ `SmartTodoWidget.styles.ts` kanbanContainer — remove vestigial `minHeight: 400px` pixel floor (chain now delivers determinate height)
-4. ✅ Pattern docs (`BUILD-A-NEW-WORKSPACE-WIDGET.md §7.2` + `embedded-widget-sizing.md` HEIGHT contract + `SectionPanel.tsx` card comment) — updated to reflect post-R4-110 forgiving chain
+### Closeout Wave execution order (remaining: 111-117)
 
-**Files modified (this task)**:
-- `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManagerComponent.tsx`
-- `src/solutions/LegalWorkspace/src/workspaceConfig.tsx`
-- `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.styles.ts`
-- `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/SectionPanel.tsx` (comment refresh only)
-- `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` (§7.2 chain map + §7.2.3 + §7.2.5 anti-patterns)
-- `.claude/patterns/ui/embedded-widget-sizing.md` (HEIGHT contract + failure modes table)
+| Task | Title | Est | Parallel-safe? |
+|---|---|---|---|
+| ~~R4-110~~ | Structural height-chain audit + fix | DONE | — |
+| **R4-111** | Remove widget "Expand to Code Page modal" path | 1-2 hrs | Yes |
+| **R4-112** | PCF CREATE-mode bridge (FU-1) | 2-3 hrs | Yes (different surface) |
+| **R4-113** | Form-script audit (NEW-1) — register or delete `sprk_todo_dirty_check.js` | 1-2 hrs | Yes |
+| **R4-114** | Wire vitest for SmartTodo Code Page (FU-4) | 2-3 hrs | Yes |
+| **R4-115** | SpeDocumentViewer stale bundle cleanup (FU-6) | 1-2 hrs | Yes |
+| **R4-116** | R4-092 final deploy notes + flip to ✅ | 30 min | No (serial after 111-115) |
+| **R4-117** | R4-098 wrap-up + lessons-learned + repo-cleanup | 2-3 hrs | No (serial after 116) |
 
-**Next**: build affected packages → deploy `sprk_spaarkeai` + `sprk_smarttodo` → user runs console diagnostic to verify chain holds.
+### Files Modified This Session (R4-110)
 
-### Files Modified This Session (closeout planning)
+**Committed to `work/smart-todo-r4-closeout` and MERGED to master via PR #419 (`b26ac56b7`):**
 
-**Committed to `work/smart-todo-r4-closeout` (commit `26e0befe3`):**
-- `projects/smart-todo-r5/design.md` — NEW: R5 backlog + user's R5 design items
-- `projects/smart-todo-r4/tasks/110-new2-structural-workspace-layout-audit.poml` — NEW
-- `projects/smart-todo-r4/tasks/111-remove-widget-expand-codepage-modal.poml` — NEW
-- `projects/smart-todo-r4/tasks/112-fu1-pcf-create-mode-bridge.poml` — NEW
-- `projects/smart-todo-r4/tasks/113-new1-form-script-audit.poml` — NEW
-- `projects/smart-todo-r4/tasks/114-fu4-wire-vitest-smart-todo.poml` — NEW
-- `projects/smart-todo-r4/tasks/115-fu6-spedocumentviewer-cleanup.poml` — NEW
-- `projects/smart-todo-r4/tasks/116-r4-092-final-deploy-notes.poml` — NEW
-- `projects/smart-todo-r4/tasks/117-r4-098-wrap-up.poml` — NEW
-- `projects/smart-todo-r4/tasks/TASK-INDEX.md` — header updated, closeout wave section added
+- `40ff12224` fix(workspace-layout): R4-110 — chain robustness + remove SmartTodo calc workaround (7 files)
+- `222ddae3f` fix(workspace-shell): R4-110 follow-up — remove row minHeight:0 (4 files)
+- `a222bf2e3` Merge origin/master into work/smart-todo-r4-closeout (181 files — master sync; 7 conflicts resolved "ours")
 
-**Uncommitted (NOT smart-todo-r4 related — DO NOT include in any commit):**
-- `.claude/agent-memory/researcher/MEMORY.md` + new researcher file (unrelated subagent work)
-- `.husky/_/*` (auto-regenerated husky shims, ignore)
-- `projects/smart-todo-r4/current-task.md` (this file — context-handoff updates it)
+After PR #419 merged, the worktree fast-forwarded to `cc1391c9a` (current master HEAD, which includes 17 more commits from other projects: PCF cleanup, CI fixes, daily-briefing test repair).
 
-**Memory updates this session (persistent, NOT in git):**
-- `~/.claude/projects/c--code-files-spaarke-wt-smart-todo-r4/memory/feedback_no-shims-clean-up-dead-code.md` — NEW
-- `~/.claude/projects/c--code-files-spaarke-wt-smart-todo-r4/memory/feedback_elevate-to-shared-component-library.md` — NEW
-- `~/.claude/projects/c--code-files-spaarke-wt-smart-todo-r4/memory/MEMORY.md` — index updated
+**Uncommitted (NOT smart-todo-r4 — DO NOT include in any commit):**
+
+- `.claude/agent-memory/researcher/MEMORY.md` (now matches master — resolved during pull)
+- `.claude/agent-memory/researcher/spaarke-pcf-client-quality-eslint-2026-06.md` (untracked, researcher subagent's PCF ESLint research)
 
 ### Critical Context for resumption
 
-1. **R4-110 is foundational** — it informs how every future widget mounts in the Workspace. The per-section `calc(100vh - 200px)` is a workaround for an unresolved structural break above `WorkspaceShell.shell`. Round 7 tried the structural fix and collapsed the workspace to 40px; round 11/12 fixed it tactically via `WorkspaceLayoutWidget.root { height: 100% }` + `WorkspaceShell.row { flex: 1 1 0, alignItems: stretch }`. The proper fix needs an audit of the chain from `SpaarkeAi App` down through every layer, identifying the topmost break. **Use the console diagnostic scripts** documented in BUILD-A-NEW-WORKSPACE-WIDGET.md §7.2.4 to test changes BEFORE deploying.
-2. **R4-111 simplifies R4-110** — once the widget no longer launches the Code Page as a modal, the nested-modal complexity disappears. May want to do 111 BEFORE 110 to reduce surface area, but 110 is the higher-impact foundation work.
-3. **R4-112 is independent** — PCF CREATE-mode bridge can be done in parallel with anything else. Different surface (PCF + OnSave form script).
-4. **R4-113 form-script audit** — `sprk_/js/sprk_todo_dirty_check.js` v1.1.0 lives at Dataverse `webresourceid: 4c6e8319-c069-f111-ab0d-7ced8ddc4cc6`. Confirm via MCP that it's still there. Decision needed from user before executing: register or delete.
-5. **R5 worktree** — DEFERRED until R4 closes. R5 design.md captured all R5 items so context doesn't leak.
+1. **R4-110 is DONE and on master.** The shell-side height chain is now forgiving — widget authors can use either `flex:1` OR `height:100%` on their roots, and intermediate wrappers must be `display:flex` (or `grid`). Per-section `style.height` is no longer needed; minHeight floors only (matches `defaultHeight` in registrations).
+
+2. **R4-111 simplifies R4-110.** Once the widget no longer launches the Code Page as a modal, the nested-modal complexity (F-7, F-8 in R5 backlog) is reduced.
+
+3. **R4-112 is independent** — PCF CREATE-mode bridge can run in parallel with 111/113-115.
+
+4. **R4-113 form-script audit** — `sprk_/js/sprk_todo_dirty_check.js` v1.1.0 lives at Dataverse `webresourceid: 4c6e8319-c069-f111-ab0d-7ced8ddc4cc6`. Decision needed from user before executing: register on form OnLoad, or delete per "no shims" rule.
+
+5. **R5 worktree** — DEFERRED until R4 closes (after R4-117). R5 design.md captured all R5 items so context doesn't leak.
+
+6. **sprk_spaarkeai deploy is owed to spaarkedev1** — once the daily-briefing project (or whoever ships next) deploys from master, spaarkedev1 will be fully current. NOT this worktree's responsibility per the durable "spaarkedev1 deploys are master-only" rule.
+
+7. **MUST invoke `task-execute` skill** to start any task (per root CLAUDE.md §4). DO NOT read POML files directly + implement manually.
 
 ---
 
@@ -98,18 +90,11 @@
 
 ### Project repository state
 
-- **PR #406**: MERGED at squash commit `80f70a1d4` on master (2026-06-23T13:21:19Z). Source branch `work/smart-todo-r4-uat4-fixes` deleted (per gh merge default).
-- **Closeout branch**: `work/smart-todo-r4-closeout` created from master post-merge. Pushed to origin. NO PR open yet — will be created when closeout work is committable.
-- **Master state**: 11 commits behind branch was reconciled via merge before PR #406 closed; master is now at 80f70a1d4.
-
-### Deployed surfaces (spaarkedev1)
-
-| Web Resource | Modified | Carries |
-|---|---|---|
-| `sprk_smarttodo` | 2026-06-22 23:36Z | All Code Page-side R4 work (Header chrome, useCurrentContactId, columnOrders, orientation prop, contact filter, refresh wiring, modal listener) |
-| `sprk_spaarkeai` | 2026-06-22 23:38Z | All widget-side R4 work (3-field quick-add, Filter slide, contact resolution, kanban responsive fill, modal close intercept, structural layout fixes) |
-| `sprk_createtodowizard` | 2026-06-20 22:35Z | Wizard `/contacts(...)` bind + searchContactsAsLookup picker + PascalCase nav-prop fallbacks |
-| `sprk_/js/sprk_todo_dirty_check.js` v1.1.0 | 2026-06-22 12:41Z | NEVER REGISTERED on form OnLoad — see R4-113 |
+- **PR #406**: MERGED at squash commit `80f70a1d4` on master (2026-06-23T13:21:19Z) — R4 main scope.
+- **PR #419**: MERGED at merge commit `b26ac56b7` on master (2026-06-23T20:10:31Z) — R4-110.
+- **Master HEAD now**: `cc1391c9a` (R4-110 + 17 commits from PCF cleanup, CI fixes, daily-briefing test repair PR #417).
+- **Worktree HEAD**: `cc1391c9a` (= master via fast-forward + push 2026-06-24).
+- **Working tree**: Clean except 1 untracked researcher MD (intentional).
 
 ### Data state on spaarkedev1
 
@@ -125,8 +110,12 @@
 - F-3 filter pane redesign (Priority/Status/Due/Assigned-To categories)
 - F-4 NEW `sprk_priority` choice + priority icon + auto-set score
 - F-5 NEW `sprk_effort` choice + auto-set score
+- **F-6 NEW** — SmartTodo widget toolbar 'Search' label (should be Filter, also broken) — surfaced during R4-110 UAT, pre-existing
+- **F-7 NEW** — Open-To-Do inner-modal sizing (nested modals at 80% vs outer 85%) — surfaced during R4-110 UAT, pre-existing
+- **F-8 NEW** — Open-To-Do inner-modal Save&Close routing (inner dialog Save lands user on SpaarkeAi instead of refreshing parent) — surfaced during R4-110 UAT, pre-existing
 - FU-2 RecordNavigationModalShell chromeMode
 - FU-5 LW Kanban rich-feature hoist (IMPORTANT per shared-lib elevation philosophy)
+- NEW-2 Structural Workspace height-chain fix → ✅ Closed in R4-110 (delete this entry once R4 PR fully closes)
 - TEST-1/TEST-2 test infrastructure
 - PROC-1 real-Dataverse smoke before merge (cross-cutting; affects all UI projects)
 - R5 worktree creation deferred until R4 closes
@@ -139,4 +128,4 @@
 
 ---
 
-*Updated by `/context-handoff` at 2026-06-23 14:15Z. To resume: say "work on task 110" or "continue".*
+*Updated by `/context-handoff` 2026-06-24. To resume: say "work on task 111" (or 112/113/114/115 in any order — they're parallel-safe). Each task uses `task-execute` skill per root CLAUDE.md §4.*

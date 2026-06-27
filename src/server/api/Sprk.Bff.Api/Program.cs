@@ -1,3 +1,4 @@
+using Azure.Monitor.OpenTelemetry.AspNetCore;      // R7-S7: UseAzureMonitor() extension
 using Sprk.Bff.Api.Api.Membership;                 // R3 task 035 — AddMembershipApi() pairing
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Dataverse;                  // Dataverse passthrough endpoints (Phase B)
@@ -12,8 +13,22 @@ builder.Services.AddConfigurationModule(builder.Configuration);
 
 // ---- Services Registration ----
 
-// Application Insights telemetry
-builder.Services.AddApplicationInsightsTelemetry();
+// OpenTelemetry → Azure Monitor (replaces classic Application Insights SDK).
+// Per spaarke-redis-cache-remediation-r1 R7-S7 (2026-06-26): the classic SDK
+// didn't auto-instrument StackExchange.Redis and the OTel pipeline had no
+// exporter — neither Redis dependency telemetry nor the 12 Sprk.Bff.Api.* Meters
+// reached App Insights. UseAzureMonitor() wires both pipelines to the same
+// App Insights resource pointed at by APPLICATIONINSIGHTS_CONNECTION_STRING.
+//
+// Guard: UseAzureMonitor() throws at host start if no connection string is
+// present (unlike the classic SDK, which silently no-op'd). Skip in test /
+// local-dev hosts where the connection string is not configured.
+var aiConnString = builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]
+    ?? Environment.GetEnvironmentVariable("APPLICATIONINSIGHTS_CONNECTION_STRING");
+if (!string.IsNullOrWhiteSpace(aiConnString))
+{
+    builder.Services.AddOpenTelemetry().UseAzureMonitor();
+}
 
 // Core module (AuthorizationService, RequestCache)
 builder.Services.AddSpaarkeCore();
@@ -98,13 +113,20 @@ builder.Services.AddOfficeServiceBus(builder.Configuration);
 builder.Services.AddOfficeWorkers(builder.Configuration);
 
 // Distributed cache (Redis or in-memory)
-builder.Services.AddCacheModule(builder.Configuration, builder.Logging);
+builder.Services.AddCacheModule(builder.Configuration, builder.Logging, builder.Environment);
 
 // Graph API resilience, client factory, and Dataverse service
 builder.Services.AddGraphModule(builder.Configuration);
 
 // Document Intelligence, Analysis, Playbook, Builder, RAG, and Record Matching services
 builder.Services.AddAnalysisServicesModule(builder.Configuration);
+
+// Consumer→playbook routing (Phase 1R per chat-routing-redesign-r1 spec FR-1R-02).
+// Replaces Workspace__*PlaybookId env vars with Dataverse-backed `sprk_playbookconsumer`
+// routing table. Registered UNCONDITIONALLY: routing is always-on (no kill-switch); on
+// Dataverse error the impl returns null and the caller falls back to typed-options env
+// var during the FR-1R-06 deprecation window. See Infrastructure/DI/RoutingModule.cs.
+builder.Services.AddRoutingModule();
 
 // Spaarke Insights Engine — Zone A extraction post-processing primitives per SPEC §3.5.
 // Phase 1: D-P10 confidence-threshold gating + per-field Observation emission
@@ -135,9 +157,6 @@ builder.Services.AddInsightsFacadeModule();
 
 // AI Platform R2: safety perimeter (content safety, prompt shield, groundedness)
 builder.Services.AddAiSafetyModule(builder.Configuration);
-
-// AI Platform R2: multi-provider capabilities (search, summarization, citations)
-builder.Services.AddAiCapabilitiesModule(builder.Configuration);
 
 // AI Platform R2: Cosmos DB persistence (sessions, prompts, audit, memory, feedback)
 builder.Services.AddAiPersistenceModule(builder.Configuration);

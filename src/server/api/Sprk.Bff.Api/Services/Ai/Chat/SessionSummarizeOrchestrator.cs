@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -71,6 +72,16 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// hardcoded fallback at this convergence point per FR-26.
 /// </para>
 /// <para>
+/// <b>FR-1R-05 routing-table migration</b> (chat-routing-redesign-r1 task 028d): the
+/// resolution path now prefers <see cref="IConsumerRoutingService.ResolveAsync"/> with
+/// <see cref="ConsumerTypes.ChatSummarize"/>, falling back to
+/// <see cref="WorkspaceOptions.ChatSummarizePlaybookId"/> when the routing table returns
+/// null (graceful-degrade for the FR-1R-06 deprecation window). FR-26 / FR-30 convergence
+/// invariants preserved — both slash <c>/summarize</c> and NL agent-tool dispatch end up
+/// here with the same resolved Guid; the typed-options fallback preserves the pre-028d
+/// behavior verbatim when no routing-table row matches.
+/// </para>
+/// <para>
 /// <b>ADR-010</b>: concrete class with NO orchestrator-authored interface (unit tests target the
 /// concrete type per ADR-010 — interface-for-testability-alone is explicitly forbidden).
 /// Non-sealed to permit the <see cref="NullSessionSummarizeOrchestrator"/> kill-switch subclass
@@ -83,6 +94,7 @@ public class SessionSummarizeOrchestrator
     private readonly ChatSessionManager _sessionManager;
     private readonly IPlaybookExecutionEngine _executionEngine;
     private readonly IPlaybookLookupService _playbookLookup;
+    private readonly IConsumerRoutingService _consumerRouting;
     private readonly IOptions<WorkspaceOptions> _workspaceOptions;
     private readonly ILogger<SessionSummarizeOrchestrator> _logger;
 
@@ -90,12 +102,14 @@ public class SessionSummarizeOrchestrator
         ChatSessionManager sessionManager,
         IPlaybookExecutionEngine executionEngine,
         IPlaybookLookupService playbookLookup,
+        IConsumerRoutingService consumerRouting,
         IOptions<WorkspaceOptions> workspaceOptions,
         ILogger<SessionSummarizeOrchestrator> logger)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _executionEngine = executionEngine ?? throw new ArgumentNullException(nameof(executionEngine));
         _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
+        _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
         _workspaceOptions = workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -114,6 +128,7 @@ public class SessionSummarizeOrchestrator
         _sessionManager = null!;
         _executionEngine = null!;
         _playbookLookup = null!;
+        _consumerRouting = null!;
         _workspaceOptions = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -168,32 +183,58 @@ public class SessionSummarizeOrchestrator
 
         var uploadedFiles = session.UploadedFiles ?? Array.Empty<ChatSessionFile>();
 
-        // FR-05 stable-ID resolution (chat-routing-redesign-r1 task 015):
-        // Resolve the chat-summarize playbook GUID at runtime via the stable-ID alternate key
-        // (sprk_playbookid) per Q&A 2026-06-22 Q1, replacing the prior hardcoded
-        // 44285d15-1360-f111-ab0b-70a8a59455f4 GUID. The lookup service caches results
-        // for 1 hour (ADR-014); per-environment values come from WorkspaceOptions.
-        // Fail-fast on missing config — there is no hardcoded fallback at the orchestrator
-        // boundary (this is the chat /summarize convergence point per R6 FR-26 and must
-        // not silently downgrade). Matches the InvoiceExtractionJobHandler empty-string
-        // guard pattern (commit 34aef1d01) adapted to throw rather than mark-failed.
-        var configuredPlaybookId = _workspaceOptions.Value.ChatSummarizePlaybookId;
-        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
-        {
-            _logger.LogError(
-                "Workspace:ChatSummarizePlaybookId is not configured. Cannot resolve chat-summarize " +
-                "playbook for tenant={TenantId} session={SessionId}. Configure the per-environment " +
-                "GUID (mirrors sprk_analysisplaybookid PK) for the summarize-document-for-chat@v1 row.",
-                request.TenantId, request.SessionId);
-            throw new InvalidOperationException(
-                "Workspace:ChatSummarizePlaybookId is not configured. Chat /summarize cannot resolve " +
-                "its playbook without per-environment configuration.");
-        }
-
-        var playbook = await _playbookLookup
-            .GetByIdAsync(configuredPlaybookId, cancellationToken)
+        // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028d):
+        // Prefer IConsumerRoutingService.ResolveAsync(ConsumerTypes.ChatSummarize) which
+        // reads the owner-managed sprk_playbookconsumer Dataverse table (5-min TTL cache
+        // per ADR-014). When the routing table returns null (no matching row), fall back
+        // to the FR-05 stable-ID resolution path (WorkspaceOptions.ChatSummarizePlaybookId
+        // via IPlaybookLookupService.GetByIdAsync) for the FR-1R-06 deprecation window.
+        // When BOTH are unavailable, fail fast — this is the chat /summarize convergence
+        // point per R6 FR-26 / FR-30 and must not silently downgrade.
+        //
+        // Hardening (code-review S-5): pass ConsumerTypes.ChatSummarize, NEVER the literal
+        // string "chat-summarize" — compile-time typo defense.
+        Guid resolvedPlaybookId;
+        var routedPlaybookId = await _consumerRouting
+            .ResolveAsync(ConsumerTypes.ChatSummarize, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
-        var resolvedPlaybookId = playbook.Id;
+        if (routedPlaybookId.HasValue && routedPlaybookId.Value != Guid.Empty)
+        {
+            resolvedPlaybookId = routedPlaybookId.Value;
+            _logger.LogDebug(
+                "FR-1R-05: SessionSummarizeOrchestrator resolved chat-summarize playbook via " +
+                "IConsumerRoutingService (playbookId={PlaybookId})",
+                resolvedPlaybookId);
+        }
+        else
+        {
+            // Graceful-degrade to FR-05 typed-options path. 028e will tag this fallback
+            // with deprecation telemetry; for now, the behavior matches pre-028d verbatim.
+            var configuredPlaybookId = _workspaceOptions.Value.ChatSummarizePlaybookId;
+            if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+            {
+                _logger.LogError(
+                    "FR-1R-05 fallback: IConsumerRoutingService returned null AND " +
+                    "Workspace:ChatSummarizePlaybookId is not configured. Cannot resolve " +
+                    "chat-summarize playbook for tenant={TenantId} session={SessionId}. " +
+                    "Either seed a sprk_playbookconsumer row for consumertype='chat-summarize', " +
+                    "or configure the per-environment GUID (mirrors sprk_analysisplaybookid PK) " +
+                    "for the summarize-document-for-chat@v1 row.",
+                    request.TenantId, request.SessionId);
+                throw new InvalidOperationException(
+                    "Chat /summarize cannot resolve its playbook: routing-table lookup returned " +
+                    "null and Workspace:ChatSummarizePlaybookId fallback is not configured.");
+            }
+
+            var playbook = await _playbookLookup
+                .GetByIdAsync(configuredPlaybookId, cancellationToken)
+                .ConfigureAwait(false);
+            resolvedPlaybookId = playbook.Id;
+            _logger.LogDebug(
+                "FR-1R-05 fallback: SessionSummarizeOrchestrator resolved chat-summarize playbook via " +
+                "WorkspaceOptions.ChatSummarizePlaybookId + IPlaybookLookupService (playbookId={PlaybookId})",
+                resolvedPlaybookId);
+        }
 
         var engineRequest = new ChatSummarizeRequest(
             TenantId: request.TenantId,

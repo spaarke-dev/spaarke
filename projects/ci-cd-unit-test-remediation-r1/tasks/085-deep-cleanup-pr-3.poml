@@ -1,0 +1,66 @@
+<task id="CICD-085" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Deep cleanup PR 3/3 — final sweep (remaining DELETE-tagged tests + AMBIGUOUS resolution) + full dotnet test verification — unblocks Phase 3 cutover</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>2.5 - Deep cleanup</phase>
+    <stream>B - Test reset (extended)</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>084</dependencies>
+    <blocks>071</blocks>
+    <tags>testing, deletion, deep-cleanup, sliced-PR, build-vs-maintain, gates-cutover</tags>
+  </metadata>
+
+  <prompt>
+    Third and final deep-cleanup PR per spec FR-B10. Delete remaining DELETE-tagged tests from broader inventory. Resolve AMBIGUOUS bucket via judgment (each ambiguous test: read + decide keep or delete; document rationale). Run FULL dotnet test on surviving suite (not just a sample) to verify zero regressions vs pre-cleanup. Confirm final BFF unit test count is ≤3,500 (≥48% reduction from ~6,695). This PR's merge UNBLOCKS task 071 cutover.
+  </prompt>
+
+  <role>Test architecture engineer executing final deep-cleanup slice + verification.</role>
+
+  <goal>All FR-B10 deletion complete; final BFF unit test count ≤3,500; full dotnet test green; cutover gate cleared.</goal>
+
+  <inputs>
+    <file purpose="inventory">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory-broader.csv (from 082)</file>
+    <file purpose="prior-prs">projects/ci-cd-unit-test-remediation-r1/notes/deep-cleanup-pr-{1,2}-summary.md</file>
+    <file purpose="criteria">docs/adr/ADR-038-testing-strategy.md §Build-vs-Maintain (from 080)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B06">Path-check at Step 9.5.</constraint>
+    <constraint source="spec FR-B10">Final BFF unit test count MUST be ≤3,500 (≥48% reduction from ~6,695). If actual count exceeds threshold after this PR, surface to operator (don't auto-extend scope).</constraint>
+    <constraint source="spec FR-B07">FULL rigor binding.</constraint>
+    <constraint source="spec MUST NOT">MUST NOT restore Release matrix until 7-day soak post-cutover (FR-B07 binding) — but this task does NOT touch Release matrix.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Rebase worktree branch on origin/master (084 should have merged)</step>
+    <step order="2">Compute remaining DELETE inventory: subtract 083 + 084 deletions</step>
+    <step order="3">Execute remaining file/method deletions</step>
+    <step order="4">For AMBIGUOUS bucket: read each ambiguous test; apply judgment per ADR-038 criteria; decide keep or delete; document rationale in notes/ambiguous-decisions.md</step>
+    <step order="5">Path-check + dotnet build verify</step>
+    <step order="6">RUN FULL dotnet test on surviving suite (this is the slow gate — ~10-15 min): `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --no-build`. Capture pass/fail/skip counts.</step>
+    <step order="7">Verify pass count matches expected post-cleanup count (cumulative survivors from inventory). If pass count is materially lower → some KEEP tests broke; investigate.</step>
+    <step order="8">Count test methods post-cleanup: `grep -rE "^\s*\[(Fact|Theory|SkippableFact)\b" tests/unit/Sprk.Bff.Api.Tests | wc -l`. Verify ≤3,500.</step>
+    <step order="9">Write notes/deep-cleanup-final-summary.md: cumulative deletion count (across 053 + 083 + 084 + 085), final test count, % reduction from original ~6,874, AMBIGUOUS decisions made + rationale, gates-cutover confirmation</step>
+    <step order="10">Step 9.5: code-review + adr-check</step>
+    <step order="11">Commit + PR: title "test(b-phase2.5)(deep-cleanup-3-final): final sweep + full dotnet test verification per FR-B10 — unblocks Phase 3 cutover"</step>
+  </steps>
+
+  <outputs>
+    <output type="test-deletion">remaining DELETE-tagged + AMBIGUOUS-resolved-delete test methods removed</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/ambiguous-decisions.md</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/deep-cleanup-final-summary.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All remaining inventory DELETE rows removed</criterion>
+    <criterion testable="true">AMBIGUOUS bucket fully resolved with documented per-test rationale</criterion>
+    <criterion testable="true">Final BFF unit test count ≤ 3,500 (verified via grep)</criterion>
+    <criterion testable="true">FULL dotnet test on Sprk.Bff.Api.Tests passes (allowing for pre-existing flakes; net regressions = 0)</criterion>
+    <criterion testable="true">No KEEP-protected-path violations</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+    <criterion testable="true">PR opens; merge unblocks task 071 cutover</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 
@@ -133,8 +132,8 @@ public static class SecurityEndpoints
                     });
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var alerts = await graphService.GetSecurityAlertsAsync(graphClient, maxAlerts, ct);
+            var alerts = await graphService.GetSecurityAlertsForConfigAsync(
+                config, maxAlerts, ct);
 
             // Map Graph service domain models → API response DTOs (ADR-007)
             var dtos = alerts.Select(a => new SecurityAlertDto
@@ -149,8 +148,8 @@ public static class SecurityEndpoints
 
             return TypedResults.Ok(new SecurityAlertsResponse(dtos, dtos.Count));
         }
-        catch (ODataError ex)
-            when (ex.ResponseStatusCode == StatusCodes.Status403Forbidden)
+        catch (SpaarkeStorageException ex)
+            when (ex.StatusCode == StatusCodes.Status403Forbidden)
         {
             logger.LogWarning(
                 "Graph Security API access denied for configId {ConfigId}. " +
@@ -242,8 +241,8 @@ public static class SecurityEndpoints
                     });
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var scoreResult = await graphService.GetSecureScoreAsync(graphClient, ct);
+            var scoreResult = await graphService.GetSecureScoreForConfigAsync(
+                config, ct);
 
             if (scoreResult is null)
             {
@@ -267,8 +266,8 @@ public static class SecurityEndpoints
 
             return TypedResults.Ok(dto);
         }
-        catch (ODataError ex)
-            when (ex.ResponseStatusCode == StatusCodes.Status403Forbidden)
+        catch (SpaarkeStorageException ex)
+            when (ex.StatusCode == StatusCodes.Status403Forbidden)
         {
             logger.LogWarning(
                 "Graph Security API access denied for secure score (configId {ConfigId}). " +

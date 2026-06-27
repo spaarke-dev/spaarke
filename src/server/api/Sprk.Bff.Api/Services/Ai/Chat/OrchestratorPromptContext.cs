@@ -2,11 +2,11 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 
 /// <summary>
 /// Contextual metadata about the current session and user, supplied to
-/// <see cref="IOrchestratorPromptBuilder.BuildSystemPrompt"/> alongside the routing result.
+/// <see cref="IOrchestratorPromptBuilder.BuildSystemPrompt"/> alongside the active tool list.
 ///
 /// All fields are consumed only by the stable prefix section of the prompt
 /// (persona / entity enrichment). Fields that change per-turn (tool schemas,
-/// retrieved context) are carried by <see cref="Capabilities.CapabilityRoutingResult"/>.
+/// retrieved context) are carried by the activeToolNames argument.
 /// </summary>
 /// <param name="UserDisplayName">
 /// Display name of the authenticated user (e.g. "Jane Smith"). Injected into the

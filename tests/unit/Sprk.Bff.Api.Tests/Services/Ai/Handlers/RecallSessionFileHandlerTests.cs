@@ -1,7 +1,7 @@
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
@@ -66,7 +66,7 @@ public sealed class RecallSessionFileHandlerTests
         // Castle Proxy needs explicit values via reflection — pass null! to satisfy both the
         // nullability check and the params object[] signature.
         var sessionManagerMock = new Mock<ChatSessionManager>(
-            Mock.Of<IDistributedCache>(),
+            Mock.Of<ITenantCache>(),
             Mock.Of<IChatDataverseRepository>(),
             NullLogger<ChatSessionManager>.Instance,
             null!,  // ISessionPersistenceService (optional)
@@ -442,6 +442,7 @@ public sealed class RecallSessionFileHandlerTests
 
         _recentlyDiscussedTracker.Verify(
             t => t.MarkAsync(
+                It.IsAny<string>(),
                 chatSessionId.ToString("N"),
                 DefaultFileId,
                 It.IsAny<CancellationToken>()),
@@ -465,6 +466,7 @@ public sealed class RecallSessionFileHandlerTests
 
         _recentlyDiscussedTracker.Verify(
             t => t.MarkAsync(
+                It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()),

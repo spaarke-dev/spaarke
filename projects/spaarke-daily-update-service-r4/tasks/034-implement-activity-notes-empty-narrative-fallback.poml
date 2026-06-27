@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Implement ActivityNotesSection empty-narrative fallback (FR-16)</title>
+    <phase>4: W2 Consumer — /narrate dispatch + cache + fallback (PR 4)</phase>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>FR-16 fallback rendering branch added to ActivityNotesSection.tsx. When channelNarratives is empty AND raw notifications exist, the component now renders an "AI summary unavailable. Showing raw notifications below." Fluent v9 MessageBar (intent="warning") above per-channel ChannelHeading + minimal RawNotificationCard rows (title + body + regarding link + timestamp). Both-empty case preserves null-return behavior. Errored + "system" channels are skipped (matches narrative-branch system filter). All styling uses semantic tokens (ADR-021) — verified via grep `#[0-9a-fA-F]{3,8}` → 0 raw hex matches in modified file (the single grep hit is `&#8599;` HTML entity for the ↗ arrow, not a color). Jest tests added at `test/ActivityNotesSection.fallback.test.tsx` (5 tests: RendersFallbackWhenNarrativesEmpty, RendersNarrativesWhenAvailable, HidesEverythingWhenZeroNotifications, SkipsErroredAndSystemChannels, DarkModeCompliance) — ALL PASS. Both ActivityNotesSection test files pass together (8/8). `npm run build` has 5 pre-existing peer-dep errors (none touch ActivityNotesSection.tsx, identical count before and after this change); documented at `notes/debug/034-test-infrastructure.md`. R3 PR #451 file overlap is RESOLVED (risks.md R1 closed 2026-06-25).</completion-notes>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>035</blocks>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>TypeScript/React component change with new UI surface; FULL per CLAUDE.md §8 (modifying .tsx, new fallback behavior).</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Edit `src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx`. When `channelNarratives.length === 0`, render raw notification cards grouped by category instead of returning `null`. Show banner: "AI summary unavailable. Showing raw notifications below." (assumed copy — see CLAUDE.md Decisions for copy revisions). Defense-in-depth: still works if /narrate playbook itself fails. Watch out for R3 PR #451 file overlap.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent UI v9 React component + defensive UX fallback rendering.</role>
+  <goal>`ActivityNotesSection.tsx` renders raw notification cards grouped by category with a banner when `channelNarratives.length === 0`. Component returns null ONLY when there are no raw notifications either. Dark mode compliant. `npm run build --workspace=@spaarke/daily-briefing-components` succeeds.</goal>
+  <context>
+    <background>R3 UAT defect: When /narrate returns empty channelNarratives (LLM failure, prompt error, empty corpus), ActivityNotesSection currently returns null and the user sees nothing despite having actual notification data. R4 FR-16 requires a defense-in-depth fallback that surfaces the raw notification cards with an "AI summary unavailable" banner. This is independent of task 031's playbook-dispatch refactor — it must work even if /narrate fails entirely. R3 PR #451 file overlap risk applies.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingNarration.ts</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-013">BFF AI placement — /narrate is thin wrapper dispatching to existing playbook engine</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — publish-size + CVE per task; placement justification in PR description</constraint>
+    <constraint source="project">Response shape backward compat — existing widget parser must work unchanged (NFR-05)</constraint>
+    <constraint source="project">No hardcoded LLM prompt strings remain in DailyBriefingEndpoints.cs (FR-12)</constraint>
+    <constraint source="project">Fluent UI v9 only; dark mode compliant; no custom colors outside theme tokens</constraint>
+    <constraint source="project">R3 PR #451 file overlap risk — coordinate via `/conflict-check`</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read `notes/risks.md` R1 — check R3 PR #451 overlap status</step>
+    <step order="2">Run `/conflict-check` against R3 PR #451 for `ActivityNotesSection.tsx`</step>
+    <step order="3">Read current `ActivityNotesSection.tsx`; identify the `channelNarratives.length === 0 → return null` branch</step>
+    <step order="4">Confirm raw notifications data is available in props/context for the fallback render</step>
+    <step order="5">Implement fallback branch: render `<MessageBar intent="warning">AI summary unavailable. Showing raw notifications below.</MessageBar>` (Fluent v9) above grouped raw notification cards</step>
+    <step order="6">Group raw notifications by category in the fallback rendering</step>
+    <step order="7">Confirm component returns null ONLY when both channelNarratives.length === 0 AND raw notifications.length === 0</step>
+    <step order="8">Apply Fluent v9 theme tokens for banner + cards; verify dark mode</step>
+    <step order="9">Run `npm run build --workspace=@spaarke/daily-briefing-components`</step>
+    <step order="9.5">Run code-review + adr-check skills (FULL rigor quality gates)</step>
+    <step order="10">Update TASK-INDEX.md ✅</step>
+    <step order="11">Document deviations + copy approval status in notes/</step>
+  </steps>
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">AC-16: When channelNarratives is empty + raw notifications present, banner + grouped cards render</criterion>
+    <criterion testable="true">When both are empty, component returns null (unchanged behavior)</criterion>
+    <criterion testable="true">Fallback rendering uses Fluent v9 theme tokens; passes dark mode visual check</criterion>
+    <criterion testable="true">`npm run build --workspace=@spaarke/daily-briefing-components` succeeds</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <ui-test>Mock narration failure (channelNarratives = []); verify banner + raw notifications render grouped by category</ui-test>
+    <ui-test>Dark mode compliance: switch widget theme to dark; verify banner readable + cards correctly themed</ui-test>
+    <ui-test>Both-empty case: empty channelNarratives + empty raw notifications → component returns null</ui-test>
+  </ui-tests>
+  <notes>**Banner copy** — "AI summary unavailable. Showing raw notifications below." is the assumed copy. Per project CLAUDE.md Decisions section, defer to that if revised. **R3 PR #451 overlap warning** — risks.md R1 flags this file family. Run `/conflict-check` BEFORE editing. The fallback must function even if /narrate fails entirely (defense-in-depth — independent of task 031).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

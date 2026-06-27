@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="118a" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Session continuity test — UploadedFiles[] retained across turns</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>118R</dependencies>
+    <blocks>119</blocks>
+    <tags>testing, integration-test, binding-invariant</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test-only addition with no production code change unless a drop is discovered; binding-invariant verification; STANDARD per task-execute Step 0.5. Escalates to FULL only if a per-turn drop bug is found (production fix required).</rigor-reason>
+    <parallel-group>5-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Test addition in `tests/integration/`; isolated test file; parallel with 118b (BFF handler addition).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author an integration test that uploads a file via `POST /api/chat/document-upload`, then sends 5+ chat turns via `POST /api/ai/chat/stream`, and asserts `ChatSession.UploadedFiles.Count` is unchanged across all 5 turns. Asserts FR-26 enriched fields preserved on every turn: `PrecomputedSummary`, `Manifest`, `ClassifiedDocType`, `ClassifiedConfidence`, `Sections`. Per architecture §6.1 (T2 upload pipeline) and FR-56, files MUST persist for the active session TTL without implicit eviction. If the test reveals a per-turn drop, file a P1 bug with reproduction steps AND fix in the same task — graceful-degrade is NOT acceptable for this binding invariant.
+  </prompt>
+
+  <role>SPAARKE platform integration-test engineer. Expert in chat session lifecycle, T2 storage invariants, and binding-invariant verification per FR-56.</role>
+
+  <goal>
+    A new integration test `ChatSessionContinuityTests.UploadedFiles_RetainedAcross5Turns` lives in `tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/`. Test bootstraps a chat session, uploads a fixture document (small NDA-like PDF), sends 5 user messages via `POST /api/ai/chat/stream`, and after each turn asserts (a) `ChatSession.UploadedFiles.Count == 1` (or whatever was uploaded), (b) the per-file FR-26 enriched fields are unchanged, (c) file ID stable across turns. If a drop is observed, file P1 with the offending service + reproduction steps and ship the production fix in this same task (no graceful-degrade per FR-56).
+  </goal>
+
+  <context>
+    <background>
+      Phase 5R revised scope (spec.md §"Phase 5+7 Revised Scope" FR-56). Architecture §6.1 (T2 upload pipeline) defines `ChatSession.UploadedFiles[]` as the binding-invariant storage for in-session attachments; FR-56 makes the no-eviction-during-session-TTL guarantee binding. Phase 5R UAT 2026-06-24 identified the symptom "document not in session" on NL paths — root cause is suspected per-turn drop or vector match failure to find the session-scoped file. This task is the verification test; the FR-46 hybrid routing path covers the vector-match symptom separately. If this test ALSO reveals an actual drop, fix it here.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionPersistenceService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Ai/Chat/ChatStreamEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Ai/Chat/DocumentUploadEndpoint.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Test stays in `tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/`; uses existing test fixture pattern.</constraint>
+    <constraint source="ADR-015">Test fixtures use synthetic content; no real customer data; telemetry tier-1 safe.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect ~0 MB delta unless a production fix is required.</constraint>
+    <constraint source="architecture binding">[arch §6.1] T2 upload pipeline + `ChatSession.UploadedFiles[]` is the binding storage; this test asserts the no-implicit-eviction invariant.</constraint>
+    <constraint source="FR-56">No graceful-degrade — if a per-turn drop is observed, it MUST be fixed in this task with a production code change; the test is NOT allowed to skip or tolerate the drop.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimal-api.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-033-multinode-output-composition.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `ChatSession.cs` + `SessionPersistenceService.cs` + `ChatSessionManager.cs` to understand the `UploadedFiles[]` lifecycle (where it is read, where it is written, when it could be cleared).</step>
+    <step order="2">Read architecture/stateful-chat-architecture.md §6.1 to confirm the T2 upload pipeline contract and the FR-26 enriched fields (`PrecomputedSummary`, `Manifest`, `ClassifiedDocType`, `ClassifiedConfidence`, `Sections`).</step>
+    <step order="3">Locate the existing integration-test base class + fixture pattern in `tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/`; identify the test-fixture setup for chat sessions (likely a `ChatSessionTestFixture` or similar).</step>
+    <step order="4">Create `tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/ChatSessionContinuityTests.cs` with the test `UploadedFiles_RetainedAcross5Turns`.</step>
+    <step order="5">Test body: (a) bootstrap chat session via fixture; (b) upload synthetic NDA-like PDF (small fixture, ~5KB) via `POST /api/chat/document-upload`; capture `fileId` + initial `ChatSession.UploadedFiles[0]` snapshot including FR-26 enriched fields; (c) loop 5 user turns, each via `POST /api/ai/chat/stream` with a simple prompt ("turn N — what document is attached?"); (d) after each turn, GET the session state and assert `UploadedFiles.Count == 1`, `UploadedFiles[0].FileId == fileId`, and all FR-26 enriched fields equal the initial snapshot.</step>
+    <step order="6">Add a separate assertion case `UploadedFiles_RetainedAcross5Turns_MultipleFiles` covering 2 uploaded files across 5 turns (catches index-shift / overwrite bugs).</step>
+    <step order="7">Run the test against the dev BFF. If it PASSES: document outcome in `notes/handoffs/118a-session-continuity-verification.md`; close task.</step>
+    <step order="8">If the test FAILS (drop observed): file P1 bug entry in `notes/bugs/118a-uploadedfiles-drop.md` with reproduction steps + which service/method is the offender (via debugger or trace logs). Identify the root cause (e.g., `ChatSessionManager` re-reads from Redis with a stale doc; `SessionPersistenceService` overwrites without merging).</step>
+    <step order="9">Apply the production fix in the responsible service. NO graceful-degrade — fix MUST restore the invariant. Add a focused unit test in `tests/unit/Sprk.Bff.Api.Tests/` covering the offending code path.</step>
+    <step order="10">Re-run integration test until green. Run full `dotnet test tests/` to verify no regression.</step>
+    <step order="11">Measure BFF publish size; report delta vs current baseline (~45.65 MB) — expect ~0 MB (test-only) unless a production fix landed.</step>
+    <step order="12">Update TASK-INDEX.md: task 118a → ✅; current-task.md → ready for 119 (Phase 5R exit gate).</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">ChatSession + SessionPersistenceService + existing integration fixtures</tool>
+    <tool name="Edit">New integration test file; if drop found, production fix + unit test</tool>
+    <tool name="Bash">dotnet test / dotnet build / publish measurement</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/Ai/Chat/ChatSessionContinuityTests.cs</output>
+    <output type="test">tests/fixtures/chat/nda-fixture-small.pdf (if a new fixture is needed)</output>
+    <output type="docs">notes/handoffs/118a-session-continuity-verification.md</output>
+    <output type="docs">notes/bugs/118a-uploadedfiles-drop.md (ONLY if a drop is found)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/... (ONLY if a production fix is required)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ChatSessionContinuityTests.UploadedFiles_RetainedAcross5Turns` passes — `UploadedFiles.Count` unchanged across all 5 turns.</criterion>
+    <criterion testable="true">FR-26 enriched fields (`PrecomputedSummary`, `Manifest`, `ClassifiedDocType`, `ClassifiedConfidence`, `Sections`) preserved per turn.</criterion>
+    <criterion testable="true">Multi-file case (`UploadedFiles_RetainedAcross5Turns_MultipleFiles`) also passes.</criterion>
+    <criterion testable="true">No graceful-degrade — if a drop was found, it was fixed in production code, not silenced in the test.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative within NFR-01.</criterion>
+    <criterion testable="true">Full `dotnet test tests/` green — no regression introduced.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Wave 5-F entry. FR-56 is a binding invariant — if this test discovers a drop, the production fix lands in this same task (escalate rigor to FULL). Reference architecture/stateful-chat-architecture.md §6.1 (T2 upload pipeline) for the invariant contract. After 118a + 118b both land, task 119 (Phase 5R exit gate) runs the full acceptance test including this continuity assertion.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol. Escalates to FULL if a production fix is required (per FR-56 no-graceful-degrade rule).</protocol>
+  </execution>
+</task>

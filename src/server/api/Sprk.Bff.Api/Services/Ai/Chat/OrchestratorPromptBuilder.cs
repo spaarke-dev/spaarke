@@ -1,7 +1,6 @@
 using System.Runtime.Caching;
 using System.Text;
 using System.Text.Json;
-using Sprk.Bff.Api.Services.Ai.Capabilities;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -10,35 +9,32 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///
 /// Constructs a two-layer system prompt for the orchestrator LLM:
 ///
-///   Layer 1 — Stable prefix (target ~2000 tokens, cached by manifest hash):
-///     Persona section, capability index (name + 1-line description for each enabled
-///     capability), standing instructions (tool usage rules, citation requirements,
+///   Layer 1 — Stable prefix (target ~2000 tokens, cached per playbook context):
+///     Persona section, standing instructions (tool usage rules, citation requirements,
 ///     safety reminders, matter-isolation notice), and optional entity enrichment.
 ///
 ///   Layer 2 — Per-turn suffix (target 0–3000 tokens, never cached):
-///     JSON block containing the full schema definitions of the 6–8 tools selected
-///     by the capability router for the current turn. The chat client reads
+///     JSON block containing the schema definitions of the tools selected by per-playbook
+///     tool filtering (FR-23) for the current turn. The chat client reads
 ///     <see cref="OrchestratorPrompt.ToolSchemaNames"/> to activate the correct
 ///     function-calling definitions.
 ///
 /// Token budget enforcement (total 9000 tokens, chars / 4 heuristic):
-///   - Capability index:  max 500 tokens
 ///   - Active tool schemas: max 3000 tokens (limits to MaxToolsPerTurn tools)
 ///   - Persona + standing instructions: max 1500 tokens
-///   - Residual (history + response headroom): ~4000 tokens reserved by caller
+///   - Residual (history + response headroom): ~4500 tokens reserved by caller
 ///
-/// When prefix + suffix would exceed the budget the builder trims capability index
-/// descriptions (names only, no descriptions) and reduces <see cref="MaxToolsPerTurn"/>
-/// by 2, then logs a warning.
+/// When prefix + suffix would exceed the budget the builder reduces
+/// <see cref="MaxToolsPerTurn"/> by 2, then logs a warning.
 ///
 /// Prefix caching:
-///   The prefix is keyed by <c>{LastRefreshedUtc.Ticks}:{capabilityCount}</c>.
+///   The prefix is keyed by the active playbook name (or constant "_default_" when none).
 ///   Cached for 20 minutes using <see cref="MemoryCache"/> (in-process, ADR-009 exception).
 ///   Cache hit → prefix reused without recomputation (byte-identical string = Azure OpenAI
 ///   prompt cache hit on the service side).
 ///
 /// ADR-009 exception: prefix cache is in-process (MemoryCache), not Redis.
-///   The prefix is structural metadata computed from the manifest and context;
+///   The prefix is structural metadata computed from the playbook context;
 ///   sharing it across instances would not reduce LLM cost because Azure OpenAI
 ///   caching is per-connection, not cross-instance.
 ///
@@ -51,9 +47,6 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
 
     /// <summary>Total token budget for prefix + suffix.</summary>
     internal const int TotalTokenBudget = 9_000;
-
-    /// <summary>Maximum tokens for the capability index section.</summary>
-    internal const int MaxCapabilityIndexTokens = 500;
 
     /// <summary>Maximum tokens for the active tool schemas section.</summary>
     internal const int MaxToolSchemasTokens = 3_000;
@@ -70,19 +63,18 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
     /// <summary>Prefix cache lifetime.</summary>
     private static readonly TimeSpan PrefixCacheExpiry = TimeSpan.FromMinutes(20);
 
+    /// <summary>Cache key sentinel for sessions without an active playbook.</summary>
+    private const string NoPlaybookCacheKey = "_default_";
+
     // ── Dependencies ──────────────────────────────────────────────────────────
 
-    private readonly ICapabilityManifest _manifest;
     private readonly ILogger<OrchestratorPromptBuilder> _logger;
 
     // In-process prefix cache (ADR-009 exception: structural metadata, not business data).
     private readonly MemoryCache _prefixCache = new("OrchestratorPromptBuilder.PrefixCache");
 
-    public OrchestratorPromptBuilder(
-        ICapabilityManifest manifest,
-        ILogger<OrchestratorPromptBuilder> logger)
+    public OrchestratorPromptBuilder(ILogger<OrchestratorPromptBuilder> logger)
     {
-        _manifest = manifest;
         _logger = logger;
     }
 
@@ -90,17 +82,17 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
 
     /// <inheritdoc />
     public OrchestratorPrompt BuildSystemPrompt(
-        CapabilityRoutingResult routing,
+        IReadOnlyList<string> activeToolNames,
         OrchestratorPromptContext context)
     {
-        ArgumentNullException.ThrowIfNull(routing);
+        ArgumentNullException.ThrowIfNull(activeToolNames);
         ArgumentNullException.ThrowIfNull(context);
 
         // 1. Build (or retrieve cached) stable prefix.
         var (prefix, cacheHit) = GetOrBuildPrefix(context);
 
-        // 2. Resolve tool names for this turn.
-        var toolNames = ResolveToolNames(routing);
+        // 2. Resolve tool names for this turn (dedup + cap).
+        var toolNames = NormalizeToolNames(activeToolNames);
 
         // 3. Build per-turn suffix.
         var (suffix, activeTools) = BuildPerTurnSuffix(toolNames);
@@ -114,14 +106,8 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
         {
             _logger.LogWarning(
                 "OrchestratorPromptBuilder: token budget exceeded ({Total} > {Budget}). " +
-                "Trimming capability index to names-only and reducing MaxToolsPerTurn to {ReducedCap}.",
+                "Reducing MaxToolsPerTurn to {ReducedCap}.",
                 total, TotalTokenBudget, ReducedToolsPerTurn);
-
-            // Re-build prefix with compact (names-only) capability index.
-            prefix = BuildPrefixInternal(context, compactCapabilityIndex: true);
-            // Evict stale cache entry so next call also gets the trimmed version.
-            // (Budget overflow is rare; not worth a separate cache key.)
-            _prefixCache.Remove(ManifestHash());
 
             // Re-build suffix with reduced tool cap.
             var reducedTools = toolNames.Take(ReducedToolsPerTurn).ToList();
@@ -155,17 +141,30 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
     // ── Prefix: caching ───────────────────────────────────────────────────────
 
     /// <summary>
-    /// Returns the stable prefix from cache when the manifest hash matches,
-    /// or builds and caches a fresh one.
+    /// Returns the stable prefix from cache when the playbook context matches,
+    /// or builds and caches a fresh one. Cache key varies per playbook AND per tenant
+    /// so each tenant's prefix (which embeds a `Data isolation` notice with the
+    /// `TenantId`) does NOT leak across tenants in the shared singleton cache.
     /// </summary>
+    /// <remarks>
+    /// Task 147 code-review fix (chat-routing-redesign-r1, 2026-06-25):
+    /// previously the cache key was only `ActivePlaybookName ?? "_default_"`. Because
+    /// the persona section embeds <see cref="OrchestratorPromptContext.TenantId"/>
+    /// verbatim via <see cref="AppendStandingInstructions"/>, the FIRST tenant's
+    /// TenantId would persist in the cached string and leak into every subsequent
+    /// tenant's system prompt — a tenant-isolation violation. Adding TenantId to the
+    /// cache key keeps prefixes per-tenant (and per-playbook).
+    /// </remarks>
     private (string Prefix, bool CacheHit) GetOrBuildPrefix(OrchestratorPromptContext context)
     {
-        var cacheKey = ManifestHash();
+        var playbookKey = context.ActivePlaybookName ?? NoPlaybookCacheKey;
+        var tenantKey = string.IsNullOrWhiteSpace(context.TenantId) ? NoPlaybookCacheKey : context.TenantId;
+        var cacheKey = $"{tenantKey}|{playbookKey}";
 
         if (_prefixCache.Get(cacheKey) is string cached)
             return (cached, true);
 
-        var prefix = BuildPrefixInternal(context, compactCapabilityIndex: false);
+        var prefix = BuildPrefixInternal(context);
 
         _prefixCache.Set(
             cacheKey,
@@ -175,29 +174,13 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
         return (prefix, false);
     }
 
-    /// <summary>
-    /// Computes the manifest hash key used for prefix caching.
-    /// Format: <c>{LastRefreshedUtc.Ticks}:{capabilityCount}</c>.
-    /// Changes whenever the manifest is refreshed (new timestamp) or the capability
-    /// count changes (added/removed capability).
-    /// </summary>
-    private string ManifestHash()
-    {
-        var all = _manifest.GetAll();
-        return $"{_manifest.LastRefreshedUtc.Ticks}:{all.Count}";
-    }
-
     // ── Prefix: construction ──────────────────────────────────────────────────
 
     /// <summary>
     /// Builds the full stable prefix string.
     /// </summary>
     /// <param name="context">Session context for persona personalisation.</param>
-    /// <param name="compactCapabilityIndex">
-    /// When <c>true</c>, the capability index lists names only (no descriptions)
-    /// to save tokens after a budget overflow.
-    /// </param>
-    private string BuildPrefixInternal(OrchestratorPromptContext context, bool compactCapabilityIndex)
+    private string BuildPrefixInternal(OrchestratorPromptContext context)
     {
         var sb = new StringBuilder(4096);
 
@@ -209,15 +192,7 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
             "OrchestratorPromptBuilder: component budget — Persona={PersonaTokens} tokens",
             personaTokens);
 
-        // ── Section 2: Capability index ───────────────────────────────────────
-        var beforeCapIndex = sb.Length;
-        AppendCapabilityIndex(sb, compactCapabilityIndex);
-        var capIndexTokens = EstimateTokens(sb.ToString().Substring(beforeCapIndex));
-        _logger.LogDebug(
-            "OrchestratorPromptBuilder: component budget — CapabilityIndex={CapIndexTokens} tokens (compact={Compact})",
-            capIndexTokens, compactCapabilityIndex);
-
-        // ── Section 3: Standing instructions ─────────────────────────────────
+        // ── Section 2: Standing instructions ─────────────────────────────────
         var beforeStanding = sb.Length;
         AppendStandingInstructions(sb, context);
         var standingTokens = EstimateTokens(sb.ToString().Substring(beforeStanding));
@@ -225,7 +200,7 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
             "OrchestratorPromptBuilder: component budget — StandingInstructions={StandingTokens} tokens",
             standingTokens);
 
-        // ── Section 4: Entity enrichment (optional) ───────────────────────────
+        // ── Section 3: Entity enrichment (optional) ───────────────────────────
         var beforeEnrichment = sb.Length;
         AppendEntityEnrichment(sb, context);
         var enrichmentTokens = EstimateTokens(sb.ToString().Substring(beforeEnrichment));
@@ -238,9 +213,9 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
 
         var totalPrefixTokens = EstimateTokens(sb.ToString());
         _logger.LogDebug(
-            "OrchestratorPromptBuilder: prefix total — Persona={PersonaTokens} + CapIndex={CapIndexTokens} + " +
+            "OrchestratorPromptBuilder: prefix total — Persona={PersonaTokens} + " +
             "Standing={StandingTokens} + Enrichment={EnrichmentTokens} = {TotalPrefixTokens} tokens",
-            personaTokens, capIndexTokens, standingTokens, enrichmentTokens, totalPrefixTokens);
+            personaTokens, standingTokens, enrichmentTokens, totalPrefixTokens);
 
         return sb.ToString();
     }
@@ -273,49 +248,6 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
                 "You have access to a set of tools listed below. Always select the most relevant " +
                 "tool for the user's request. When in doubt, use search tools to ground your " +
                 "response in the user's actual data before answering.");
-        }
-    }
-
-    private void AppendCapabilityIndex(StringBuilder sb, bool compact)
-    {
-        var capabilities = _manifest.GetAll();
-        if (capabilities.Count == 0)
-            return;
-
-        sb.AppendLine();
-        sb.AppendLine("## Available Capabilities");
-        sb.AppendLine("The following capabilities are active in this session:");
-        sb.AppendLine();
-
-        var indexTokens = 0;
-        var i = 1;
-
-        foreach (var cap in capabilities)
-        {
-            string line;
-            if (compact)
-            {
-                line = $"{i}. {cap.CapabilityName}";
-            }
-            else
-            {
-                // CapabilityManifestEntry.Description is ≤120 chars by contract.
-                line = $"{i}. **{cap.CapabilityName}** — {cap.Description}";
-            }
-
-            var lineTokens = EstimateTokens(line);
-            if (indexTokens + lineTokens > MaxCapabilityIndexTokens)
-            {
-                _logger.LogDebug(
-                    "OrchestratorPromptBuilder: capability index capped at {Count} of {Total} entries " +
-                    "({Tokens} tokens limit).",
-                    i - 1, capabilities.Count, MaxCapabilityIndexTokens);
-                break;
-            }
-
-            sb.AppendLine(line);
-            indexTokens += lineTokens;
-            i++;
         }
     }
 
@@ -360,43 +292,12 @@ public sealed class OrchestratorPromptBuilder : IOrchestratorPromptBuilder
     // ── Per-turn suffix ───────────────────────────────────────────────────────
 
     /// <summary>
-    /// Resolves the ordered list of tool names to inject this turn.
-    ///
-    /// When the routing result is confident, the tool names are derived from the
-    /// selected capabilities' <see cref="CapabilityManifestEntry.ToolNames"/>.
-    /// In broad mode (no confident selection), all registered tools are used up to
-    /// <see cref="MaxToolsPerTurn"/>.
-    /// The list is de-duplicated and capped at <see cref="MaxToolsPerTurn"/>.
+    /// Normalises the caller-supplied tool list: filters blanks, de-duplicates
+    /// case-insensitively, and caps at <see cref="MaxToolsPerTurn"/>.
     /// </summary>
-    private IReadOnlyList<string> ResolveToolNames(CapabilityRoutingResult routing)
+    private static IReadOnlyList<string> NormalizeToolNames(IReadOnlyList<string> toolNames)
     {
-        var allCapabilities = _manifest.GetAll();
-
-        IEnumerable<string> rawToolNames;
-
-        if (routing.IsConfident && routing.SelectedCapabilities.Length > 0)
-        {
-            // Confident routing: expand capability names → tool names.
-            rawToolNames = routing.SelectedCapabilities
-                .SelectMany(capName =>
-                {
-                    if (_manifest.TryGet(capName, out var entry) && entry is not null)
-                        return entry.ToolNames;
-
-                    _logger.LogDebug(
-                        "OrchestratorPromptBuilder: selected capability '{CapabilityName}' " +
-                        "not found in manifest; skipping.",
-                        capName);
-                    return Enumerable.Empty<string>();
-                });
-        }
-        else
-        {
-            // Broad / fallback mode: include all registered tool names.
-            rawToolNames = allCapabilities.SelectMany(c => c.ToolNames);
-        }
-
-        return rawToolNames
+        return toolNames
             .Where(t => !string.IsNullOrWhiteSpace(t))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(MaxToolsPerTurn)

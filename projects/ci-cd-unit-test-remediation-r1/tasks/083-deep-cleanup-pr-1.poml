@@ -1,0 +1,61 @@
+<task id="CICD-083" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Deep cleanup PR 1/3 — highest-confidence DELETE bucket (mirror-tests + all-mocks-trivial; ~500-1000 tests expected)</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>2.5 - Deep cleanup</phase>
+    <stream>B - Test reset (extended)</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>082</dependencies>
+    <blocks>084</blocks>
+    <tags>testing, deletion, deep-cleanup, sliced-PR, build-vs-maintain</tags>
+  </metadata>
+
+  <prompt>
+    First deep-cleanup PR per spec FR-B10. Delete the highest-confidence DELETE bucket from task 082's broader inventory — typically mirror-tests (test code 1:1 with production code) + all-mocks-trivial (every collaborator mocked, ≤2 assertions). Concrete file/method list comes from notes/test-inventory-broader-summary.md slicing recommendation. Run dotnet build after deletion; verify surviving tests intact. Bucket assignment can be revised at task start based on 082's actual output.
+  </prompt>
+
+  <role>Test architecture engineer executing first deep-cleanup slice.</role>
+
+  <goal>Highest-confidence DELETE bucket removed; dotnet build green; no KEEP-protected-path file removed without replacement.</goal>
+
+  <inputs>
+    <file purpose="inventory">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory-broader.csv (from 082)</file>
+    <file purpose="slicing-recommendation">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory-broader-summary.md (from 082)</file>
+    <file purpose="criteria">docs/adr/ADR-038-testing-strategy.md §Build-vs-Maintain (from 080)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B06">Path-check at Step 9.5 — no KEEP-protected-path file deleted without same-PR replacement.</constraint>
+    <constraint source="spec FR-B10">Combined 083+084+085 target: BFF unit test count ~6,695 → ≤3,500.</constraint>
+    <constraint source="spec FR-B07">FULL rigor binding.</constraint>
+    <constraint source="practical">If a test file has MIXED scaffolding + maintain methods, do partial deletion (remove specific method bodies, not whole file). If file is wholly scaffolding, delete the file.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Rebase worktree branch on origin/master</step>
+    <step order="2">Read notes/test-inventory-broader-summary.md slicing recommendation; identify exact files/methods for this PR's bucket</step>
+    <step order="3">Per-file: if whole file is scaffolding → `git rm`; if mixed → use Edit tool to remove specific [Fact]/[Theory] methods + their setup helpers if exclusively used</step>
+    <step order="4">Path-check: verify NO file under tests/integration/{auth,regression,data-mutation,tenant}/** removed (those don't exist post-050 scaffold anyway, but verify)</step>
+    <step order="5">Run `dotnet build tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj` — must succeed</step>
+    <step order="6">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --no-build --filter "Category!=Flaky"` on a sample (don't run full suite — too slow); verify no compilation errors in surviving code</step>
+    <step order="7">Step 9.5: code-review + adr-check; verify path-check + deletion-safety</step>
+    <step order="8">Commit + PR: title "test(b-phase2.5)(deep-cleanup-1): delete mirror-tests + all-mocks-trivial wiring per FR-B10 ADR-038"</step>
+  </steps>
+
+  <outputs>
+    <output type="test-deletion">~500-1000 test methods removed (file count varies; mixed files may keep partial)</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/deep-cleanup-pr-1-summary.md (what was removed, count delta, surviving test count)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All inventory-broader DELETE rows in this PR's bucket removed (file or method-level)</criterion>
+    <criterion testable="true">dotnet build passes</criterion>
+    <criterion testable="true">Sample dotnet test (e.g., one passing class) confirms suite still runs</criterion>
+    <criterion testable="true">No KEEP-protected-path violations</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+    <criterion testable="true">PR opens for review</criterion>
+  </acceptance-criteria>
+</task>
