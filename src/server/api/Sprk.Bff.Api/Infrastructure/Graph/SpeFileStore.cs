@@ -215,4 +215,34 @@ public class SpeFileStore : ISpeFileOperations
         string containerId,
         CancellationToken ct = default)
         => _userOps.GetUserCapabilitiesAsync(ctx, containerId, ct);
+
+    // =========================================================================
+    // OBO-context facades for FileAccessEndpoints (CICD-088b — ADR-007 §1)
+    // Delegate to DriveItemOperations so the Microsoft.Graph types stay in
+    // Infrastructure.Graph and never appear in endpoint IL.
+    // Added 2026-06-26 by ci-cd-unit-test-remediation-r1 task CICD-088b.
+    // =========================================================================
+
+    public Task<string?> GetPreviewUrlAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        IDictionary<string, object>? additionalData = null,
+        CancellationToken ct = default)
+        => _driveItemOps.GetPreviewUrlAsUserAsync(ctx, driveId, itemId, additionalData, ct);
+
+    public Task<SpeDriveItemSummary?> GetDriveItemAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        IEnumerable<string>? selectFields = null,
+        CancellationToken ct = default)
+        => _driveItemOps.GetDriveItemAsUserAsync(ctx, driveId, itemId, selectFields, ct);
+
+    public Task<Stream?> GetContentStreamAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => _driveItemOps.GetContentStreamAsUserAsync(ctx, driveId, itemId, ct);
 }
