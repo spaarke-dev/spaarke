@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>Close GitHub Issues #462 / DEF-007 / DEF-008 / DEF-009 + flip R1 defer-issues.md</title>
+    <phase>4: Deploy + verify + close-out</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>032</blocks>
+    <tags>github, issues, close-out</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Issue close + R1 defer-issues update.</rigor-reason>
+    <parallel-group>Phase 4 serial</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on task 030 success (PR not yet merged at this point — issues close on PR merge).</parallel-reason>
+  </metadata>
+  <prompt>(1) Close GitHub Issue #462 (DEF-001) with comment linking to the R2 PR's Theme B automation. (2) Confirm DEF-007 / DEF-008 / DEF-009 GitHub Issues were created during R2 execution and close them with links to the corresponding Theme A items in the R2 PR. (3) Update R1 `projects/spaarke-redis-cache-remediation-r1/notes/defer-issues.md` — flip DEF-001 entry from "Superseded" to "Closed (Done by R2 PR #N)".</prompt>
+  <role>Project close-out operator with `gh` CLI familiarity. Apply `task-execute` skill at MINIMAL rigor.</role>
+  <goal>4 GitHub Issues closed (#462 + DEF-007/008/009); R1 defer-issues.md updated. PR description (separate prep step) links these.</goal>
+  <context>
+    <background>Spec G-13 + G-14. R1's `notes/defer-issues.md` is the source-of-truth for what was deferred from R1. R2's close-out updates the entries so future audits trace the lineage correctly.</background>
+    <relevant-files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/defer-issues.md (UPDATE — flip DEF-001 entry)</file>
+      <file>GitHub Issue #462 (CLOSE via gh)</file>
+      <file>DEF-007 / DEF-008 / DEF-009 issues (CONFIRM EXIST then CLOSE)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">G-13 — Issues #462 + DEF-007/008/009 closed by R2 PR.</constraint>
+    <constraint source="spec">G-14 — R1 defer-issues.md DEF-001 flipped Superseded → Closed.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/defer-issues.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Verify DEF-007 / DEF-008 / DEF-009 issues exist: `gh issue list --search "DEF-00 in:title"`. If any missing, file before closing (spec G-13 requires they be created AND closed by R2).</step>
+    <step order="2">After R2 PR merges, comment + close #462 with the PR URL + reference to Theme B automation.</step>
+    <step order="3">Comment + close DEF-007 / DEF-008 / DEF-009 similarly.</step>
+    <step order="4">Edit R1 `notes/defer-issues.md` — flip DEF-001 entry from "Superseded" to "Closed (Done by R2 PR #N)" with date.</step>
+    <step order="5">Update TASK-INDEX 🔲 → ✅.</step>
+  </steps>
+  <tools>
+    <tool name="Bash">gh issue commands</tool>
+    <tool name="Edit">R1 defer-issues.md</tool>
+  </tools>
+  <outputs>
+    <output type="github">4 issues closed with links to R2 PR</output>
+    <output type="docs">projects/spaarke-redis-cache-remediation-r1/notes/defer-issues.md (DEF-001 entry updated)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">gh issue view #462 shows state=closed with R2 PR comment.</criterion>
+    <criterion testable="true">DEF-007 / DEF-008 / DEF-009 all closed with R2 PR comment.</criterion>
+    <criterion testable="true">R1 defer-issues.md DEF-001 entry says "Closed (Done by R2 PR #N)".</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor.</protocol>
+  </execution>
+</task>

@@ -26,7 +26,6 @@ public class CachedAccessDataSource : IAccessDataSource
     private readonly IAccessDataSource _inner;
     private readonly IDistributedCache _cache;
     private readonly ILogger<CachedAccessDataSource> _logger;
-    private readonly CacheMetrics? _metrics;
 
     /// <summary>TTL for user roles cache (security-sensitive, keep short).</summary>
     private static readonly TimeSpan RolesTtl = TimeSpan.FromMinutes(2);
@@ -45,13 +44,11 @@ public class CachedAccessDataSource : IAccessDataSource
     public CachedAccessDataSource(
         IAccessDataSource inner,
         IDistributedCache cache,
-        ILogger<CachedAccessDataSource> logger,
-        CacheMetrics? metrics = null)
+        ILogger<CachedAccessDataSource> logger)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _metrics = metrics; // Optional: metrics can be null if not configured
     }
 
     /// <inheritdoc />
@@ -81,7 +78,7 @@ public class CachedAccessDataSource : IAccessDataSource
                     _logger.LogDebug(
                         "[AUTH-CACHE] HIT resource access: UserId={UserId}, ResourceId={ResourceId}, Latency={LatencyMs}ms",
                         userId, resourceId, sw.ElapsedMilliseconds);
-                    _metrics?.RecordHit(sw.Elapsed.TotalMilliseconds, "auth-access");
+                    CacheMetrics.RecordHit(sw.Elapsed.TotalMilliseconds, "auth-access");
 
                     return cached.ToAccessSnapshot();
                 }
@@ -90,7 +87,7 @@ public class CachedAccessDataSource : IAccessDataSource
             _logger.LogDebug(
                 "[AUTH-CACHE] MISS resource access: UserId={UserId}, ResourceId={ResourceId}, Latency={LatencyMs}ms",
                 userId, resourceId, sw.ElapsedMilliseconds);
-            _metrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, "auth-access");
+            CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, "auth-access");
         }
         catch (Exception ex)
         {
@@ -98,7 +95,7 @@ public class CachedAccessDataSource : IAccessDataSource
             _logger.LogWarning(ex,
                 "[AUTH-CACHE] Error reading resource access cache: UserId={UserId}, ResourceId={ResourceId}. Falling through to Dataverse.",
                 userId, resourceId);
-            _metrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, "auth-access");
+            CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, "auth-access");
         }
 
         // Cache miss or error - fetch from Dataverse

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>NEW scripts/Rotate-RedisKey.ps1 — safe-window rotation algorithm</title>
+    <phase>2: Theme B — Redis key rotation automation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>011,013,030</blocks>
+    <tags>script, azure, devops, rotation, security</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New PowerShell script + irreversible Azure operations + safety gates required (NFR-05). FULL would also be defensible; STANDARD with empirical-reproduction verification covers it.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct file domain from Phase 1 and Phase 3.</parallel-reason>
+  </metadata>
+  <prompt>Create NEW `scripts/Rotate-RedisKey.ps1` — idempotent PowerShell script parameterized by environment (`dev`, `staging`, `prod`). Implements the safe-window rotation algorithm: rotate Secondary → update KV (CONN_NEW with Secondary key) → restart BFF → poll `/healthz` for HTTP 200 within 120s → ON SUCCESS rotate Primary → log success to App Insights as `RedisKeyRotation` custom event. ON HEALTHZ FAILURE: rollback (update KV back to CONN_OLD via KV version history; restart BFF; exit non-zero). Reject `prod`/`staging` without explicit `-Force` (NFR-05). Mirror `Deploy-RedisCache.ps1` patterns.</prompt>
+  <role>Spaarke infrastructure developer with PowerShell + Az CLI + Azure Cache for Redis familiarity. Apply `script-aware` skill (load `scripts/README.md` first).</role>
+  <goal>`Rotate-RedisKey.ps1 -Environment dev -WhatIf` plans without changes; live `-Environment dev` rotation produces 2 KV secret versions + BFF restart + `/healthz` 200 + `customEvent.RedisKeyRotation` with `outcome=success`. Prod/staging without `-Force` exits non-zero.</goal>
+  <context>
+    <background>Spec FR-07: replaces the historically-slipping 90-day manual key rotation procedure documented in `docs/guides/redis-cache-azure-setup.md` §6. Mirrors `Deploy-RedisCache.ps1` (R1 task 025) for env-safety + idempotency + post-deploy verification patterns. Closes DEF-001 / Issue #462 without paying +$485/mo for ACR Premium Entra ID.</background>
+    <relevant-files>
+      <file>scripts/Rotate-RedisKey.ps1 (NEW)</file>
+      <file>scripts/Deploy-RedisCache.ps1 (REFERENCE PATTERN)</file>
+      <file>scripts/README.md (CONVENTIONS)</file>
+      <file>docs/guides/redis-cache-azure-setup.md (REFERENCE — current manual procedure §6 being replaced)</file>
+      <file>tests/manual/RedisValidationTests.ps1 (REUSE — invariant verification)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-07 — full safe-window algorithm with safe partial failure; rollback path mandatory.</constraint>
+    <constraint source="spec">NFR-05 — reject prod/staging without explicit -Force (mirrors R1 Deploy-RedisCache.ps1).</constraint>
+    <constraint source="ADR-028">KV reference pattern preserved: `@Microsoft.KeyVault(VaultName=...;SecretName=Redis-ConnectionString)`. Script updates the SECRET; App Settings KV reference resolves automatically.</constraint>
+    <constraint source="azure-deployment.md">Idempotent; clear error messages; non-zero exit on failure.</constraint>
+    <constraint source="spec">Acceptance: -WhatIf plans for all 3 envs without changes; dry-run on dev produces 2 KV secret versions + BFF restart + /healthz 200 + customEvent.RedisKeyRotation with outcome=success.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>scripts/Deploy-RedisCache.ps1</file>
+      <file>scripts/README.md</file>
+      <file>docs/guides/redis-cache-azure-setup.md</file>
+      <file>tests/manual/RedisValidationTests.ps1</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read Deploy-RedisCache.ps1 for header doc-comment shape, params block, env-safety gate.</step>
+    <step order="2">Read scripts/README.md for Spaarke conventions.</step>
+    <step order="3">Read redis-cache-azure-setup.md §6 (current manual procedure) so the automation matches expected operator behavior.</step>
+    <step order="4">Author Rotate-RedisKey.ps1 with `[CmdletBinding(SupportsShouldProcess)]`. Parameters: `-Environment {dev|staging|prod}`, `-Force`, `-WhatIf`, `-VerboseLog`.</step>
+    <step order="5">Env-to-resource mapping: dev → spaarke-bff-redis-dev / KV `spaarke-spekvcert` / App Service `spaarke-bff-dev` / RG `rg-spaarke-dev`. Staging + prod params TBD by operator at task 030 deploy time — script reads from a config block (or pre-flight prompts).</step>
+    <step order="6">Pre-flight: verify Redis + KV + App Service exist via `az` queries; verify operator has required permissions (probe `az keyvault secret set --dry-run` equivalent).</step>
+    <step order="7">Algorithm step 1: read current connection string from KV (`az keyvault secret show`) — call it CONN_OLD.</step>
+    <step order="8">Algorithm step 2: `az redis regenerate-key --key-type Secondary` against target Redis. Build CONN_NEW using the NEW Secondary key.</step>
+    <step order="9">Algorithm step 3: `az keyvault secret set` to upsert `Redis-ConnectionString` with CONN_NEW (creates new secret version; App Settings KV reference resolves automatically on next config refresh).</step>
+    <step order="10">Algorithm step 4: `az webapp restart` against the BFF App Service.</step>
+    <step order="11">Algorithm step 5: poll `https://{bff-host}/healthz` for HTTP 200 with 120s timeout.</step>
+    <step order="12">Algorithm step 6 (success): `az redis regenerate-key --key-type Primary` — eliminates the unused old primary.</step>
+    <step order="13">Algorithm step 7 (failure): rollback — `az keyvault secret set` with CONN_OLD; restart BFF; exit non-zero with clear message.</step>
+    <step order="14">Log every step to App Insights as `RedisKeyRotation` custom event with `outcome`, `environment`, `duration_ms`. Use App Insights ingestion endpoint or `az monitor app-insights events` (or scriptable approach).</step>
+    <step order="15">PSScriptAnalyzer pass if configured.</step>
+    <step order="16">-WhatIf smoke verification for all 3 envs.</step>
+    <step order="17">Update TASK-INDEX 🔲 → ✅.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Deploy-RedisCache.ps1 + README + manual procedure</tool>
+    <tool name="Write">Rotate-RedisKey.ps1</tool>
+    <tool name="Bash">PowerShell -WhatIf execution + PSScriptAnalyzer</tool>
+  </tools>
+  <outputs>
+    <output type="script">scripts/Rotate-RedisKey.ps1 (NEW)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Script accepts -Environment {dev|staging|prod}, -WhatIf, -Force, -VerboseLog.</criterion>
+    <criterion testable="true">-Environment prod without -Force exits non-zero with clear message.</criterion>
+    <criterion testable="true">-WhatIf for all 3 envs plans without changes.</criterion>
+    <criterion testable="true">PSScriptAnalyzer passes (or absent — note in PR).</criterion>
+    <criterion testable="true">Live dry-run on dev (deferred to task 030) succeeds end-to-end with customEvent.RedisKeyRotation outcome=success.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

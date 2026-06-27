@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>SPAARKE-DEPLOYMENT-GUIDE.md §4.6 strikethrough/footnote cleanup</title>
+    <phase>3: Theme C — R1 implementation gap closure</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>030</blocks>
+    <tags>docs, cleanup</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Docs-only.</rigor-reason>
+    <parallel-group>D-cont</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct file from tasks 020/021.</parallel-reason>
+  </metadata>
+  <prompt>Clean up `docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md` §4.6 — remove the strikethrough row referencing `customer.bicep:181` and the associated footnote (R1 added these as an explicit gap acknowledgment). Replace with a clean table excluding Redis from per-customer resources.</prompt>
+  <role>Technical writer. Apply `task-execute` skill at MINIMAL rigor.</role>
+  <goal>§4.6 table contains no strikethrough rows + no footnote about `customer.bicep:181`. Reader of the cleaned guide will not see the now-closed gap.</goal>
+  <context>
+    <background>Spec FR-14. The strikethrough was R1's honest acknowledgment that the IaC gap remained even after the runtime fix; R2's task 020 closes the gap, so the acknowledgment is now stale.</background>
+    <relevant-files>
+      <file>docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md (§4.6 CLEANUP)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-14 — clean §4.6 of strikethrough + footnote.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read current §4.6 to locate strikethrough + footnote.</step>
+    <step order="2">Replace with clean per-customer-resources table (no Redis row, no footnote).</step>
+    <step order="3">Update TASK-INDEX 🔲 → ✅.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Current §4.6</tool>
+    <tool name="Edit">SPAARKE-DEPLOYMENT-GUIDE.md</tool>
+  </tools>
+  <outputs>
+    <output type="docs">docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md (§4.6 CLEANED)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">grep `~~` (markdown strikethrough) + `customer.bicep:181` in §4.6 returns 0 matches.</criterion>
+    <criterion testable="true">Table reads as natural list of per-customer resources excluding Redis.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor.</protocol>
+  </execution>
+</task>

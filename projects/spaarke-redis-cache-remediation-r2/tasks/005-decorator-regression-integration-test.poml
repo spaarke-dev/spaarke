@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>Decorator regression integration test — MetricsDistributedCacheRegistrationTests</title>
+    <phase>1: Theme A — Cache observability hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>030</blocks>
+    <tags>testing, integration-test, bff-api, otel</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>TEST-MODIFYING override row (ADR-038, binding ≥6 months from 2026-06-26): any task modifying tests/** uses FULL unconditionally — code-review + adr-check at Step 9.5.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Depends on 002 (asserts Meter count = 1 after canonical static class). Distinct file from 003.</parallel-reason>
+  </metadata>
+  <prompt>Create NEW integration test class `tests/integration/Sprk.Bff.Api.Tests.Integration/Cache/MetricsDistributedCacheRegistrationTests.cs`. After the full DI graph builds (via the existing WAF fixture pattern), assert: (a) `IDistributedCache` resolves to `MetricsDistributedCache` wrapping the expected inner type (`RedisCache` when Redis enabled, `MemoryDistributedCache` when in dev-fallback); (b) exactly ONE `Meter("Sprk.Bff.Api.Cache")` instance exists at runtime, verified via `MeterListener` enumeration. Test runs as part of `dotnet test`.</prompt>
+  <role>Senior .NET developer with xUnit + WebApplicationFactory + OTel Metrics experience. Apply `task-execute` skill at FULL rigor (TEST-MODIFYING override).</role>
+  <goal>New test class passes both branches; runs in CI as part of `dotnet test`. Net new tests: 2 (one for decorator resolution, one for Meter count assertion).</goal>
+  <context>
+    <background>Spec FR-05: prevent future DI regressions where decorator isn't wrapped or a second Meter is reintroduced. R1 task 003 + 009 had a 337-test fixture fallout from CacheModule changes; an explicit decorator-registration test would have caught it.</background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.Tests.Integration/Cache/MetricsDistributedCacheRegistrationTests.cs (NEW)</file>
+      <file>tests/integration/Sprk.Bff.Api.Tests.Integration/CustomWebAppFactory.cs (REFERENCE — fixture pattern; if it lives at different path, find via grep)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/MetricsDistributedCache.cs (REFERENCE — type under test)</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/CacheMetrics.cs (REFERENCE — canonical static class from task 002)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-05 — integration test verifying decorator + single Meter at runtime.</constraint>
+    <constraint source="ADR-038">Integration-heavy pyramid; 6 KEEP categories. This is "DI graph integration" — a KEEP category.</constraint>
+    <constraint source="bff-extensions.md">§F.2 Fixture-Config-FIRST applies — if test fixture config breaks the new test, inspect fixture first.</constraint>
+    <constraint source="testing.md">No `Mock&lt;HttpMessageHandler&gt;`; no DI-registration-only tests with no behavior. This test verifies BEHAVIOR (decorator wraps + Meter count) after the full DI graph builds.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/MetricsDistributedCache.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/CacheMetrics.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Locate existing integration test project + fixture: `find tests/integration -name "CustomWebAppFactory*"` or similar.</step>
+    <step order="2">Read fixture config (per §F.2) — confirm WAF setup matches what works in BFF tests (`Redis:Enabled=true` or dev-fallback flag).</step>
+    <step order="3">Author `MetricsDistributedCacheRegistrationTests.cs` with class fixture using the existing WAF.</step>
+    <step order="4">Test 1: `Decorator_Resolves_To_MetricsDistributedCache_Wrapping_Inner` — resolve `IDistributedCache` from `Services`; assert runtime type is `MetricsDistributedCache`; reflect/access inner; assert inner type matches expected branch.</step>
+    <step order="5">Test 2: `Exactly_One_Meter_Named_Sprk_Bff_Api_Cache_Exists` — use `MeterListener` to enumerate published Meters; filter by name `"Sprk.Bff.Api.Cache"`; assert count == 1.</step>
+    <step order="6">Run `dotnet test tests/integration/Sprk.Bff.Api.Tests.Integration/` — both tests pass.</step>
+    <step order="7">Confirm overall test baseline: `dotnet test` totals ≥7885 pass / 2 pre-existing fail / 135 skip + 2 new (≥7887 pass).</step>
+    <step order="8">Update TASK-INDEX 🔲 → ✅.</step>
+    <step order="9">Step 9.5 quality gates: code-review + adr-check.</step>
+  </steps>
+  <tools>
+    <tool name="Glob">Locate test project + fixture</tool>
+    <tool name="Read">Existing fixture + types under test</tool>
+    <tool name="Write">MetricsDistributedCacheRegistrationTests.cs</tool>
+    <tool name="Bash">dotnet test</tool>
+  </tools>
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests.Integration/Cache/MetricsDistributedCacheRegistrationTests.cs (NEW)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Test class compiles + 2 tests defined.</criterion>
+    <criterion testable="true">Test 1 (decorator resolution) passes against current DI graph.</criterion>
+    <criterion testable="true">Test 2 (Meter count = 1) passes ONLY after task 002 completes (validates task 002 outcome).</criterion>
+    <criterion testable="true">Overall `dotnet test` baseline maintained per NFR-02 + 2 new tests.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor (TEST-MODIFYING override).</protocol>
+  </execution>
+</task>

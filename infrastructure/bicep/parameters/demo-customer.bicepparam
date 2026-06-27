@@ -56,14 +56,6 @@ param storageSku = 'Standard_LRS'
 param serviceBusSku = 'Standard'
 
 // ============================================================================
-// REDIS
-// ============================================================================
-
-// Basic tier for demo (upgrade to Standard/Premium for production customers)
-param redisSku = 'Basic'
-param redisCapacity = 0
-
-// ============================================================================
 // TAGS
 // ============================================================================
 

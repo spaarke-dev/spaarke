@@ -10,7 +10,6 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Caching;
 using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -62,8 +61,9 @@ public static class SpaarkeCore
             var inner = sp.GetRequiredService<DataverseAccessDataSource>();
             var cache = sp.GetRequiredService<IDistributedCache>();
             var logger = sp.GetRequiredService<ILogger<CachedAccessDataSource>>();
-            var metrics = sp.GetService<CacheMetrics>(); // Optional
-            return new CachedAccessDataSource(inner, cache, logger, metrics);
+            // FR-02 of spaarke-redis-cache-remediation-r2: CacheMetrics is now a static class
+            // (Sprk.Bff.Api.Telemetry.CacheMetrics). The consumer references it directly; no DI.
+            return new CachedAccessDataSource(inner, cache, logger);
         });
 
         // Authorization rules

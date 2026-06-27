@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>UseAzureMonitor() fails-open guard in Program.cs — throw in non-Development env</title>
+    <phase>1: Theme A — Cache observability hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>030</blocks>
+    <tags>bff-api, startup, telemetry, fail-fast</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag + .cs modification + startup behavior change.</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct file (Program.cs) from tasks 001/002/003/004/005.</parallel-reason>
+  </metadata>
+  <prompt>Modify `src/server/api/Sprk.Bff.Api/Program.cs:21-30` `UseAzureMonitor()` guard to THROW `InvalidOperationException` in non-Development environments when `APPLICATIONINSIGHTS_CONNECTION_STRING` is missing or empty. Today silently skips. Throw must mirror the existing `CacheModule` 4-branch fail-fast pattern (R1 FR-03). Development env continues to start with null conn string.</prompt>
+  <role>Senior .NET developer with ASP.NET Core minimal API + Azure Monitor exporter familiarity. Apply `task-execute` skill at FULL rigor.</role>
+  <goal>BFF startup in Production env with missing APPLICATIONINSIGHTS_CONNECTION_STRING throws `InvalidOperationException` with actionable message. Development env continues to start with null conn string. Unit test added covering both branches.</goal>
+  <context>
+    <background>Spec FR-06: today the guard silently skips `UseAzureMonitor()` if the conn string is missing. In Production this is invisible failure — App Insights pipeline dead, no telemetry, no one notices until someone queries customMetrics and sees nothing. Fail-fast mirrors `CacheModule` 4-branch pattern from R1 FR-03 (R1 task 003).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs (MODIFY — lines ~21-30 UseAzureMonitor block)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/CacheModule.cs (REFERENCE — 4-branch fail-fast pattern)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Startup/ (target dir for new unit test)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-06 — throw in non-Development envs when APPLICATIONINSIGHTS_CONNECTION_STRING is missing/empty.</constraint>
+    <constraint source="spec">Development env preserved: null conn string → continue startup.</constraint>
+    <constraint source="ADR-009 R1 amendment">Fail-fast pattern (no silent in-memory fallback) generalized to other telemetry/startup concerns.</constraint>
+    <constraint source="bff-extensions.md">§F.3 — empirical reproduction: simulate the throw locally before merging.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/CacheModule.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read Program.cs:21-30 current UseAzureMonitor block.</step>
+    <step order="2">Read CacheModule.cs 4-branch fail-fast pattern for reference shape.</step>
+    <step order="3">Implement: `if (env != "Development" &amp;&amp; string.IsNullOrEmpty(connectionString)) throw new InvalidOperationException("APPLICATIONINSIGHTS_CONNECTION_STRING is required in non-Development environments. Set via App Service config or KV reference.");`. Development branch unchanged.</step>
+    <step order="4">Add unit test in `tests/unit/Sprk.Bff.Api.Tests/Startup/` or appropriate location verifying both branches (Production throws; Development passes through).</step>
+    <step order="5">§F.3 empirical reproduction: run BFF locally with `ASPNETCORE_ENVIRONMENT=Production` + unset conn string; verify it throws on startup.</step>
+    <step order="6">Build clean.</step>
+    <step order="7">Run unit tests including new ones.</step>
+    <step order="8">Update TASK-INDEX 🔲 → ✅.</step>
+    <step order="9">Step 9.5 quality gates: code-review + adr-check.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Program.cs + CacheModule.cs</tool>
+    <tool name="Edit">Program.cs</tool>
+    <tool name="Write">New unit test file</tool>
+    <tool name="Bash">dotnet build + dotnet test</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (MODIFIED)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Startup/UseAzureMonitorGuardTests.cs (NEW)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Production env + missing conn string → throws InvalidOperationException with actionable message.</criterion>
+    <criterion testable="true">Development env + null conn string → starts successfully.</criterion>
+    <criterion testable="true">Unit test covers both branches.</criterion>
+    <criterion testable="true">dotnet build clean; tests at baseline + new.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor.</protocol>
+  </execution>
+</task>

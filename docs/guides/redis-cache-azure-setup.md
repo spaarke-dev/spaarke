@@ -256,7 +256,211 @@ If post-cutover verification fails (`/healthz` returns non-200, startup log show
 
 Rotate the Redis primary key with minimal downtime. Frequency: per organizational policy (typical: every 90 days).
 
-### Steps
+### 6.1 Per-Environment OIDC Service-Principal Provisioning (one-time setup, per FR-09)
+
+**Operator must complete this section BEFORE enabling the automated rotation workflow** ([`.github/workflows/redis-key-rotation.yml`](../../.github/workflows/redis-key-rotation.yml), provisioned by task 011 of `spaarke-redis-cache-remediation-r2`). The workflow consumes three distinct GitHub Environment secrets — one per Azure environment — each backed by a separate Azure AD service principal scoped to ONLY that environment's resources.
+
+#### Rationale (why three SPs, not one)
+
+- **Blast-radius isolation**: a compromised prod SP MUST NOT be able to rotate dev (and vice versa). A single shared SP with org-wide write across all three envs collapses the blast radius of any credential leak to "all envs at once."
+- **Compliance posture**: per-env separation of duties is a standard audit expectation (SOC 2 CC6.1, ISO 27001 A.9.2). Per-env SPs make the access boundary auditable via a single `az role assignment list` per principal.
+- **Least privilege**: each SP holds only the three role assignments needed to rotate one env (KV secret write, Redis key regenerate, App Service restart). No cross-env grants.
+
+#### Step 1 — Create one service principal per environment
+
+Replace `{SUB_ID}` with the target Azure subscription ID for each env (dev/staging/prod may share a subscription or use separate ones; commands below are per-env regardless).
+
+```bash
+# Dev
+az ad sp create-for-rbac \
+  --name "sp-spaarke-redis-rotation-dev" \
+  --role "Reader" \
+  --scopes "/subscriptions/{SUB_ID_DEV}/resourceGroups/rg-spaarke-dev" \
+  --query "{clientId:appId, tenantId:tenant}" -o json
+# Record output clientId → AZURE_CLIENT_ID_DEV
+
+# Staging
+az ad sp create-for-rbac \
+  --name "sp-spaarke-redis-rotation-staging" \
+  --role "Reader" \
+  --scopes "/subscriptions/{SUB_ID_STAGING}/resourceGroups/rg-spaarke-staging" \
+  --query "{clientId:appId, tenantId:tenant}" -o json
+# Record output clientId → AZURE_CLIENT_ID_STAGING
+
+# Prod
+az ad sp create-for-rbac \
+  --name "sp-spaarke-redis-rotation-prod" \
+  --role "Reader" \
+  --scopes "/subscriptions/{SUB_ID_PROD}/resourceGroups/rg-spaarke-prod" \
+  --query "{clientId:appId, tenantId:tenant}" -o json
+# Record output clientId → AZURE_CLIENT_ID_PROD
+```
+
+The `Reader` grant at RG scope is a placeholder so `create-for-rbac` succeeds; the operationally meaningful grants are the three narrow role assignments in Step 3. The Reader grant MAY be removed after Step 3 completes if your security policy prefers a strict "only the three rotation roles" posture.
+
+#### Step 2 — Configure federated identity credentials (OIDC, no client secrets)
+
+For each SP, add a federated identity credential that trusts GitHub Actions running in the corresponding GitHub Environment. Repeat per env (replace `{APP_ID}` with the SP's appId from Step 1, `{ENV}` with `dev`/`staging`/`prod`):
+
+```bash
+az ad app federated-credential create \
+  --id {APP_ID} \
+  --parameters '{
+    "name": "github-spaarke-redis-rotation-{ENV}",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:spaarke-dev/spaarke:environment:{ENV}",
+    "audiences": ["api://AzureADTokenExchange"]
+  }'
+```
+
+The `subject` claim binds the credential to the specific GitHub Environment, so a workflow job running in env `dev` cannot mint a token for the `prod` SP even if it knows the prod clientId.
+
+#### Step 3 — Assign narrowly-scoped roles (env-specific resource IDs only)
+
+For each env, run all three assignments. **Critical**: scopes MUST be the env-specific resource ID, not the RG or subscription. Replace `{SUB_ID}`, `{KV_NAME}`, `{REDIS_NAME}`, `{APP_SERVICE_NAME}`, `{SP_OBJECT_ID}` (the SP's objectId — get via `az ad sp show --id {APP_ID} --query id -o tsv`).
+
+```bash
+# (a) Key Vault Secrets Officer — write Redis-ConnectionString secret
+az role assignment create \
+  --assignee {SP_OBJECT_ID} \
+  --role "Key Vault Secrets Officer" \
+  --scope "/subscriptions/{SUB_ID}/resourceGroups/rg-spaarke-{ENV}/providers/Microsoft.KeyVault/vaults/{KV_NAME}"
+
+# (b) Redis cache contributor — regenerate primary key
+# Built-in "Redis Cache Contributor" includes Microsoft.Cache/redis/regenerateKey/action and listKeys/action.
+# If your security policy disallows the built-in (it also grants write/delete on the cache resource),
+# create a custom role "spaarke-redis-key-rotator" with ONLY:
+#   - Microsoft.Cache/redis/listKeys/action
+#   - Microsoft.Cache/redis/regenerateKey/action
+#   - Microsoft.Cache/redis/read
+# and assign that instead.
+az role assignment create \
+  --assignee {SP_OBJECT_ID} \
+  --role "Redis Cache Contributor" \
+  --scope "/subscriptions/{SUB_ID}/resourceGroups/rg-spaarke-{ENV}/providers/Microsoft.Cache/Redis/{REDIS_NAME}"
+
+# (c) Website Contributor — restart App Service so the new KV reference is picked up
+# "Website Contributor" includes Microsoft.Web/sites/restart/action. A tighter custom role
+# limited to restart/action only is acceptable if preferred.
+az role assignment create \
+  --assignee {SP_OBJECT_ID} \
+  --role "Website Contributor" \
+  --scope "/subscriptions/{SUB_ID}/resourceGroups/rg-spaarke-{ENV}/providers/Microsoft.Web/sites/{APP_SERVICE_NAME}"
+```
+
+For env `dev`, the resource names per current cutover baseline are: `{KV_NAME}=spaarke-spekvcert`, `{REDIS_NAME}=spaarke-bff-redis-dev`, `{APP_SERVICE_NAME}=spaarke-bff-dev`. Staging and prod names follow the same `{prefix}-{env}` pattern (confirm against env-specific cutover records).
+
+#### Step 4 — Publish the clientId to the corresponding GitHub Environment
+
+Create the three GitHub Environments first (if they do not already exist) at `https://github.com/spaarke-dev/spaarke/settings/environments` — names: `dev`, `staging`, `prod`. Add required reviewers + deployment branch rules on `prod` per organizational policy.
+
+Then publish each SP's clientId as an environment-scoped secret (per spec FR-09 naming):
+
+```bash
+gh secret set AZURE_CLIENT_ID_DEV     --env dev     --body "{APP_ID_DEV}"
+gh secret set AZURE_CLIENT_ID_STAGING --env staging --body "{APP_ID_STAGING}"
+gh secret set AZURE_CLIENT_ID_PROD    --env prod    --body "{APP_ID_PROD}"
+```
+
+Also publish `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` per env (these may be repo-level secrets if all envs share the same tenant/sub, or env-scoped if they differ).
+
+#### Step 5 — Verify isolation
+
+For each SP, list ALL role assignments across ALL subscriptions and confirm the only env-meaningful grants are scoped to that SP's env.
+
+```bash
+az role assignment list --assignee {SP_OBJECT_ID_DEV}     --all -o table
+az role assignment list --assignee {SP_OBJECT_ID_STAGING} --all -o table
+az role assignment list --assignee {SP_OBJECT_ID_PROD}    --all -o table
+```
+
+Expected shape per SP (three rows, plus the placeholder `Reader` from Step 1 if retained):
+
+```
+Principal                                Role                          Scope
+--------------------------------------   ---------------------------   -----------------------------------------------------------------------------
+sp-spaarke-redis-rotation-{env}          Key Vault Secrets Officer     /subscriptions/.../rg-spaarke-{env}/providers/Microsoft.KeyVault/vaults/...
+sp-spaarke-redis-rotation-{env}          Redis Cache Contributor       /subscriptions/.../rg-spaarke-{env}/providers/Microsoft.Cache/Redis/...
+sp-spaarke-redis-rotation-{env}          Website Contributor           /subscriptions/.../rg-spaarke-{env}/providers/Microsoft.Web/sites/...
+```
+
+**FR-09 acceptance**: every Scope column value MUST contain the SP's own env name (`rg-spaarke-{env}`) and MUST NOT reference any other env's resources. If `az role assignment list --assignee {SP_OBJECT_ID_PROD}` shows any scope under `rg-spaarke-dev` or `rg-spaarke-staging`, isolation is broken — remove the cross-env assignment before enabling the workflow.
+
+#### Operator one-time setup checklist
+
+- [ ] 1. Create three SPs via Step 1 (`sp-spaarke-redis-rotation-{dev|staging|prod}`); record each appId + objectId.
+- [ ] 2. Add federated identity credential per SP, bound to `repo:spaarke-dev/spaarke:environment:{env}` (Step 2).
+- [ ] 3. Assign three narrow roles per SP — KV Secrets Officer, Redis Cache Contributor, Website Contributor — at env-specific resource scopes (Step 3).
+- [ ] 4. Create three GitHub Environments (`dev`, `staging`, `prod`) with required reviewers on prod; publish `AZURE_CLIENT_ID_{ENV}` as env-scoped secret (Step 4).
+- [ ] 5. Verify isolation per SP via `az role assignment list --assignee {SP_OBJECT_ID} --all` (Step 5); confirm no cross-env scopes.
+- [ ] 6. Enable the cron schedule in [`.github/workflows/redis-key-rotation.yml`](../../.github/workflows/redis-key-rotation.yml) (the workflow is dormant until these SPs exist).
+
+Once this section is complete, the automated rotation workflow (task 011) consumes these SPs via OIDC token exchange — no client secrets stored anywhere.
+
+### 6.2 Automated rotation (primary path, per FR-10)
+
+**This is the canonical rotation path.** The 90-day rotation is performed by the GitHub Actions workflow [`.github/workflows/redis-key-rotation.yml`](../../.github/workflows/redis-key-rotation.yml) (provisioned by task 011 of `spaarke-redis-cache-remediation-r2`), which invokes [`scripts/Rotate-RedisKey.ps1`](../../scripts/Rotate-RedisKey.ps1) (provisioned by task 010) under the per-env OIDC service principal configured in §6.1.
+
+#### How the cron fires
+
+The workflow is scheduled (per the YAML `on.schedule.cron` value) to run automatically every 90 days against each environment in turn. Each scheduled invocation:
+
+1. Selects the matching GitHub Environment (`dev` / `staging` / `prod`) so OIDC mints a token for the env-specific SP.
+2. Runs `scripts/Rotate-RedisKey.ps1 -Environment {env}` (with `-Force` for staging/prod per NFR-05).
+3. The script executes the safe-window algorithm: regenerate Secondary → upsert KV secret → restart BFF → poll `/healthz` for 120s → on success, regenerate Primary (eliminating the old key); on failure, roll back by restoring the previous KV secret version and restart BFF.
+4. Every step emits a `RedisKeyRotation` customEvent to Application Insights (see §6.4 for the verification query).
+
+#### Manually trigger an out-of-band rotation
+
+For ad-hoc rotation (e.g., scheduled maintenance window, post-incident, or compliance attestation):
+
+```bash
+# Trigger rotation against dev
+gh workflow run redis-key-rotation.yml --ref master -f environment=dev
+
+# Trigger rotation against staging (requires environment approvers per §6.1 Step 4)
+gh workflow run redis-key-rotation.yml --ref master -f environment=staging
+
+# Trigger rotation against prod (requires environment approvers per §6.1 Step 4)
+gh workflow run redis-key-rotation.yml --ref master -f environment=prod
+```
+
+Follow the run via `gh run watch` or in the Actions UI. The workflow's environment-approval gate (prod, optionally staging) enforces dual-control per organizational policy.
+
+#### Local invocation (developer / operator pre-prod testing)
+
+The same script can be invoked locally for dev-environment rotation by an operator with the appropriate Azure CLI login:
+
+```powershell
+# Plan only — no Azure mutations, shows planned actions
+./scripts/Rotate-RedisKey.ps1 -Environment dev -WhatIf
+
+# Execute against dev (no -Force required)
+./scripts/Rotate-RedisKey.ps1 -Environment dev
+
+# Execute against staging/prod (NFR-05 gate)
+./scripts/Rotate-RedisKey.ps1 -Environment staging -Force
+./scripts/Rotate-RedisKey.ps1 -Environment prod -Force
+```
+
+Local invocation is operationally identical to the workflow invocation; the workflow simply hosts the same script under OIDC auth. Prefer the workflow for production rotations so the run is auditable in Actions.
+
+### 6.3 Emergency fallback — manual rotation
+
+> **Use ONLY when the automated path cannot run.** The automated workflow (§6.2) is the canonical rotation path. Reach for this section only in the scenarios below — every routine 90-day rotation MUST go through §6.2 so the App Insights audit trail (§6.4) is preserved.
+
+#### When to use this fallback
+
+Use the manual procedure if AND ONLY IF one of the following applies:
+
+- [ ] **Suspected key compromise** requiring immediate rotation faster than the workflow can be triggered or approved (e.g., out-of-band incident response while environment approvers are unavailable).
+- [ ] **Workflow disabled or broken** — `.github/workflows/redis-key-rotation.yml` is disabled, deleted, or failing in a way that blocks even manual `gh workflow run` invocation.
+- [ ] **SP expired or de-provisioned** — the per-env OIDC service principal (§6.1) is expired, has lost a required role assignment, or has been deleted, and rotation must proceed before §6.1 can be re-completed.
+- [ ] **Tenant-level GitHub outage** preventing Actions from running.
+
+If none of these apply, STOP and use §6.2 instead. The manual procedure lacks the App Insights audit trail and the safe-window automatic rollback that the script provides.
+
+#### Manual steps (preserved from pre-automation procedure)
 
 1. **Verify current state** — capture current secret version: `az keyvault secret show --vault-name <kv> --name Redis-ConnectionString --query attributes.version -o tsv`. Record in cutover/rotation log.
 2. **Regenerate primary key** in Azure: `az redis regenerate-key -g <rg> -n spaarke-bff-redis-<env> --key-type Primary`.
@@ -267,16 +471,31 @@ Rotate the Redis primary key with minimal downtime. Frequency: per organizationa
    - **Option B (background)**: Let KV reference TTL expire naturally over ~24 hours. Zero downtime but each instance picks up new value at staggered times.
 6. **Verify** — after BFF picks up new value, hit `/healthz` and confirm a fresh chat-session creates a key in Redis (verifies the new connection string works).
 7. **Decommission previous key** — `az redis regenerate-key --key-type Secondary` is a separate, optional step to invalidate any lingering use of the OLD primary (now-secondary) key. Do AFTER verifying step 6.
-8. **Audit** — record rotation in `notes/cutover-deploy-log.md` with timestamps + KV secret version + which option (A/B) was used + downtime observed.
+8. **Audit** — record rotation in `notes/cutover-deploy-log.md` with timestamps + KV secret version + which option (A/B) was used + downtime observed. **Additionally**: file a follow-up to restore the automated path (re-provision SP per §6.1 / re-enable workflow / re-trigger §6.2) so the next rotation returns to the canonical path.
 
-### Expected Downtime
+#### Expected Downtime
 
 - Option A: ~30 seconds per BFF instance during restart.
 - Option B: 0 downtime; rotation completes within ~24 hours.
 
-### Failure Recovery
+#### Failure Recovery
 
 - If new connection string is wrong or KV upsert fails: revert by restoring the previous secret version (`az keyvault secret set` with the old value, captured in step 1) and restart BFF.
+
+### 6.4 Verification (post-rotation)
+
+After EITHER the automated (§6.2) or manual (§6.3) procedure completes, the operator confirms the last successful rotation by running the following KQL query against the env-specific App Insights workspace (`spaarke-{env}-appi`):
+
+```kusto
+customEvents
+| where name == 'RedisKeyRotation' and outcome == 'success'
+| top 1 by timestamp desc
+| project environment, timestamp, duration_ms
+```
+
+Expected result: exactly one row showing the target `environment`, the rotation `timestamp`, and `duration_ms` (typical end-to-end safe-window rotation: ~60-180 seconds depending on App Service restart time).
+
+> **Note**: The `RedisKeyRotation` customEvent is emitted by `scripts/Rotate-RedisKey.ps1` (every step → `RedisKeyRotation` with `step` / `outcome` properties). Manual rotations performed via §6.3 will NOT produce this event, so the query will return the most-recent automated rotation only. If the latest automated timestamp is older than the rotation cadence (90 days for routine; same day for incident-response), investigate via Actions run history and §6.2 + §6.1 health.
 
 ---
 

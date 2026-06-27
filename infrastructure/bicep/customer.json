@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "16794645690077472302"
+      "templateHash": "4628116456404325806"
     }
   },
   "parameters": {
@@ -101,23 +101,11 @@
         "description": "Service Bus queue names to create"
       }
     },
-    "redisSku": {
+    "bffPrincipalId": {
       "type": "string",
-      "defaultValue": "Basic",
-      "allowedValues": [
-        "Basic",
-        "Standard",
-        "Premium"
-      ],
+      "defaultValue": "",
       "metadata": {
-        "description": "Redis Cache SKU"
-      }
-    },
-    "redisCapacity": {
-      "type": "int",
-      "defaultValue": 0,
-      "metadata": {
-        "description": "Redis Cache capacity (family size: 0-6)"
+        "description": "Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually."
       }
     },
     "tags": {
@@ -139,8 +127,7 @@
     "baseName": "[format('sprk{0}{1}', parameters('customerId'), parameters('environmentName'))]",
     "storageAccountName": "[take(toLower(replace(format('{0}sa', variables('baseName')), '-', '')), 24)]",
     "keyVaultName": "[take(format('sprk-{0}-{1}-kv', parameters('customerId'), parameters('environmentName')), 24)]",
-    "serviceBusName": "[format('spaarke-{0}-{1}-sbus', parameters('customerId'), parameters('environmentName'))]",
-    "redisName": "[format('spaarke-{0}-{1}-cache', parameters('customerId'), parameters('environmentName'))]"
+    "serviceBusName": "[format('spaarke-{0}-{1}-sbus', parameters('customerId'), parameters('environmentName'))]"
   },
   "resources": [
     {
@@ -181,7 +168,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "7100247261354352306"
+              "templateHash": "16492197050070714217"
             }
           },
           "parameters": {
@@ -243,7 +230,70 @@
               "metadata": {
                 "description": "Tags for the resource"
               }
+            },
+            "enableNetworkRestrictions": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Enable network restrictions (VNet rules + deny by default)"
+              }
+            },
+            "allowedSubnetIds": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Subnet IDs allowed to access Key Vault (e.g., snet-app for App Service)"
+              }
+            },
+            "allowedIpRanges": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Specific IP addresses or CIDR ranges allowed (e.g., developer IPs for debugging)"
+              }
+            },
+            "appServicePrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the App Service managed identity (granted Key Vault Secrets User)"
+              }
+            },
+            "adminPrincipalIds": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Principal IDs granted Key Vault Administrator role (deployment pipelines, admins)"
+              }
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Log Analytics workspace ID for audit logs (empty to skip)"
+              }
             }
+          },
+          "variables": {
+            "copy": [
+              {
+                "name": "vnetRules",
+                "count": "[length(parameters('allowedSubnetIds'))]",
+                "input": {
+                  "id": "[parameters('allowedSubnetIds')[copyIndex('vnetRules')]]",
+                  "ignoreMissingVnetServiceEndpoint": false
+                }
+              },
+              {
+                "name": "ipRules",
+                "count": "[length(parameters('allowedIpRanges'))]",
+                "input": {
+                  "value": "[parameters('allowedIpRanges')[copyIndex('ipRules')]]"
+                }
+              }
+            ],
+            "keyVaultSecretsUserRoleId": "4633458b-17de-408a-b874-0445c86b69e6",
+            "keyVaultAdministratorRoleId": "00482a5a-887f-4fb3-b363-3b7fe8e74483"
           },
           "resources": [
             {
@@ -277,11 +327,82 @@
                 "softDeleteRetentionInDays": "[parameters('softDeleteRetentionDays')]",
                 "enablePurgeProtection": "[parameters('enablePurgeProtection')]",
                 "enableRbacAuthorization": true,
-                "networkAcls": {
-                  "defaultAction": "Allow",
-                  "bypass": "AzureServices"
-                }
+                "networkAcls": "[if(parameters('enableNetworkRestrictions'), createObject('defaultAction', 'Deny', 'bypass', 'AzureServices', 'virtualNetworkRules', variables('vnetRules'), 'ipRules', variables('ipRules')), createObject('defaultAction', 'Allow', 'bypass', 'AzureServices'))]"
               }
+            },
+            {
+              "condition": "[not(empty(parameters('appServicePrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), parameters('appServicePrincipalId'), variables('keyVaultSecretsUserRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('keyVaultSecretsUserRoleId'))]",
+                "principalId": "[parameters('appServicePrincipalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "adminRoleAssignments",
+                "count": "[length(parameters('adminPrincipalIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), parameters('adminPrincipalIds')[copyIndex()], variables('keyVaultAdministratorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('keyVaultAdministratorRoleId'))]",
+                "principalId": "[parameters('adminPrincipalIds')[copyIndex()]]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+              ]
+            },
+            {
+              "condition": "[not(equals(parameters('logAnalyticsWorkspaceId'), ''))]",
+              "type": "Microsoft.Insights/diagnosticSettings",
+              "apiVersion": "2021-05-01-preview",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[format('{0}-diagnostics', parameters('keyVaultName'))]",
+              "properties": {
+                "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
+                "logs": [
+                  {
+                    "categoryGroup": "audit",
+                    "enabled": true,
+                    "retentionPolicy": {
+                      "enabled": true,
+                      "days": 90
+                    }
+                  },
+                  {
+                    "categoryGroup": "allLogs",
+                    "enabled": true,
+                    "retentionPolicy": {
+                      "enabled": true,
+                      "days": 30
+                    }
+                  }
+                ],
+                "metrics": [
+                  {
+                    "category": "AllMetrics",
+                    "enabled": true,
+                    "retentionPolicy": {
+                      "enabled": true,
+                      "days": 30
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+              ]
             }
           ],
           "outputs": {
@@ -341,7 +462,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "12865521352993238726"
+              "templateHash": "9743978895551028508"
             }
           },
           "parameters": {
@@ -389,6 +510,27 @@
                 "description": "Enable lifecycle policy for test-documents container (24hr TTL)"
               }
             },
+            "disableSharedKeyAccess": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Disable shared key access (requires RBAC for all access)"
+              }
+            },
+            "allowedSubnetId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Subnet ID for VNet network rule (empty = allow all)"
+              }
+            },
+            "appServicePrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "App Service principal ID for Storage Blob Data Contributor RBAC role"
+              }
+            },
             "tags": {
               "type": "object",
               "defaultValue": {},
@@ -396,6 +538,9 @@
                 "description": "Tags for the resource"
               }
             }
+          },
+          "variables": {
+            "storageBlobDataContributorRoleId": "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
           },
           "resources": [
             {
@@ -413,11 +558,8 @@
                 "supportsHttpsTrafficOnly": true,
                 "minimumTlsVersion": "TLS1_2",
                 "allowBlobPublicAccess": false,
-                "allowSharedKeyAccess": true,
-                "networkAcls": {
-                  "defaultAction": "Allow",
-                  "bypass": "AzureServices"
-                }
+                "allowSharedKeyAccess": "[not(parameters('disableSharedKeyAccess'))]",
+                "networkAcls": "[if(not(empty(parameters('allowedSubnetId'))), createObject('defaultAction', 'Deny', 'bypass', 'AzureServices', 'virtualNetworkRules', createArray(createObject('id', parameters('allowedSubnetId'), 'action', 'Allow')), 'ipRules', createArray()), createObject('defaultAction', 'Allow', 'bypass', 'AzureServices'))]"
               }
             },
             {
@@ -478,9 +620,46 @@
                           }
                         }
                       }
+                    },
+                    {
+                      "name": "tier-ai-chunks-to-cool-after-30d",
+                      "enabled": true,
+                      "type": "Lifecycle",
+                      "definition": {
+                        "filters": {
+                          "blobTypes": [
+                            "blockBlob"
+                          ],
+                          "prefixMatch": [
+                            "ai-chunks/"
+                          ]
+                        },
+                        "actions": {
+                          "baseBlob": {
+                            "tierToCool": {
+                              "daysAfterModificationGreaterThan": 30
+                            }
+                          }
+                        }
+                      }
                     }
                   ]
                 }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('appServicePrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), parameters('appServicePrincipalId'), variables('storageBlobDataContributorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageBlobDataContributorRoleId'))]",
+                "principalId": "[parameters('appServicePrincipalId')]",
+                "principalType": "ServicePrincipal"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
@@ -502,7 +681,7 @@
             },
             "connectionString": {
               "type": "string",
-              "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix=core.windows.net', parameters('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').keys[0].value)]"
+              "value": "[if(parameters('disableSharedKeyAccess'), format('BlobEndpoint={0}', reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').primaryEndpoints.blob), format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix=core.windows.net', parameters('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').keys[0].value))]"
             }
           }
         }
@@ -671,7 +850,7 @@
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
-      "name": "[format('redis-{0}', variables('baseName'))]",
+      "name": "[format('membershipTopic-{0}', variables('baseName'))]",
       "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
         "expressionEvaluationOptions": {
@@ -679,20 +858,11 @@
         },
         "mode": "Incremental",
         "parameters": {
-          "redisName": {
-            "value": "[variables('redisName')]"
+          "serviceBusNamespaceName": {
+            "value": "[variables('serviceBusName')]"
           },
-          "location": {
-            "value": "[parameters('location')]"
-          },
-          "sku": {
-            "value": "[parameters('redisSku')]"
-          },
-          "capacity": {
-            "value": "[parameters('redisCapacity')]"
-          },
-          "tags": {
-            "value": "[parameters('tags')]"
+          "bffPrincipalId": {
+            "value": "[parameters('bffPrincipalId')]"
           }
         },
         "template": {
@@ -702,118 +872,128 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "12387683072245352071"
+              "templateHash": "14366972124933782234"
             }
           },
           "parameters": {
-            "redisName": {
+            "serviceBusNamespaceName": {
               "type": "string",
               "metadata": {
-                "description": "Name of the Redis Cache"
+                "description": "Name of the existing Service Bus namespace to attach the topic to"
               }
             },
-            "location": {
+            "topicName": {
               "type": "string",
-              "defaultValue": "[resourceGroup().location]",
+              "defaultValue": "sprk-membership-changes",
               "metadata": {
-                "description": "Location for the Redis Cache"
+                "description": "Name of the topic for membership-change events"
               }
             },
-            "sku": {
+            "subscriptionName": {
               "type": "string",
-              "defaultValue": "Basic",
-              "allowedValues": [
-                "Basic",
-                "Standard",
-                "Premium"
-              ],
+              "defaultValue": "recon-junction-updater",
               "metadata": {
-                "description": "SKU for Redis Cache"
+                "description": "Name of the subscription consumed by MembershipJunctionUpdater"
               }
             },
-            "capacity": {
-              "type": "int",
-              "defaultValue": 0,
-              "metadata": {
-                "description": "SKU capacity (family size)"
-              }
-            },
-            "enableNonSslPort": {
-              "type": "bool",
-              "defaultValue": false,
-              "metadata": {
-                "description": "Enable non-SSL port (not recommended)"
-              }
-            },
-            "minimumTlsVersion": {
+            "bffPrincipalId": {
               "type": "string",
-              "defaultValue": "1.2",
+              "defaultValue": "",
               "metadata": {
-                "description": "Minimum TLS version"
-              }
-            },
-            "tags": {
-              "type": "object",
-              "defaultValue": {},
-              "metadata": {
-                "description": "Tags for the resource"
+                "description": "Principal ID of the BFF App Service Managed Identity (granted Sender on topic + Receiver on subscription). Pass empty to skip RBAC assignment."
               }
             }
           },
           "variables": {
-            "skuFamilies": {
-              "Basic": "C",
-              "Standard": "C",
-              "Premium": "P"
-            }
+            "serviceBusDataSenderRoleId": "69a216fc-b8fb-44d8-bc22-1f3c2cd27a39",
+            "serviceBusDataReceiverRoleId": "4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0"
           },
           "resources": [
             {
-              "type": "Microsoft.Cache/redis",
-              "apiVersion": "2023-08-01",
-              "name": "[parameters('redisName')]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
+              "type": "Microsoft.ServiceBus/namespaces/topics",
+              "apiVersion": "2022-10-01-preview",
+              "name": "[format('{0}/{1}', parameters('serviceBusNamespaceName'), parameters('topicName'))]",
               "properties": {
-                "sku": {
-                  "name": "[parameters('sku')]",
-                  "family": "[variables('skuFamilies')[parameters('sku')]]",
-                  "capacity": "[parameters('capacity')]"
-                },
-                "enableNonSslPort": "[parameters('enableNonSslPort')]",
-                "minimumTlsVersion": "[parameters('minimumTlsVersion')]",
-                "redisConfiguration": {
-                  "maxmemory-policy": "volatile-lru"
-                }
+                "maxSizeInMegabytes": 1024,
+                "defaultMessageTimeToLive": "P14D",
+                "enablePartitioning": false,
+                "enableBatchedOperations": true,
+                "requiresDuplicateDetection": false,
+                "supportOrdering": true
               }
+            },
+            {
+              "type": "Microsoft.ServiceBus/namespaces/topics/subscriptions",
+              "apiVersion": "2022-10-01-preview",
+              "name": "[format('{0}/{1}/{2}', parameters('serviceBusNamespaceName'), parameters('topicName'), parameters('subscriptionName'))]",
+              "properties": {
+                "maxDeliveryCount": 10,
+                "lockDuration": "PT5M",
+                "defaultMessageTimeToLive": "P14D",
+                "deadLetteringOnMessageExpiration": true,
+                "enableBatchedOperations": true,
+                "requiresSession": false
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ServiceBus/namespaces/topics', parameters('serviceBusNamespaceName'), parameters('topicName'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('bffPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ServiceBus/namespaces/topics', parameters('serviceBusNamespaceName'), parameters('topicName'))]",
+              "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces/topics', parameters('serviceBusNamespaceName'), parameters('topicName')), parameters('bffPrincipalId'), variables('serviceBusDataSenderRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('serviceBusDataSenderRoleId'))]",
+                "principalId": "[parameters('bffPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "BFF App Service MI publishes MembershipChangedEvent to topic (R3 Phase 2)"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ServiceBus/namespaces/topics', parameters('serviceBusNamespaceName'), parameters('topicName'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('bffPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ServiceBus/namespaces/topics/subscriptions', parameters('serviceBusNamespaceName'), parameters('topicName'), parameters('subscriptionName'))]",
+              "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces/topics/subscriptions', parameters('serviceBusNamespaceName'), parameters('topicName'), parameters('subscriptionName')), parameters('bffPrincipalId'), variables('serviceBusDataReceiverRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('serviceBusDataReceiverRoleId'))]",
+                "principalId": "[parameters('bffPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "BFF App Service MI consumes recon-junction-updater subscription (MembershipJunctionUpdater handler) (R3 Phase 2)"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ServiceBus/namespaces/topics/subscriptions', parameters('serviceBusNamespaceName'), parameters('topicName'), parameters('subscriptionName'))]"
+              ]
             }
           ],
           "outputs": {
-            "redisId": {
+            "topicId": {
               "type": "string",
-              "value": "[resourceId('Microsoft.Cache/redis', parameters('redisName'))]"
+              "value": "[resourceId('Microsoft.ServiceBus/namespaces/topics', parameters('serviceBusNamespaceName'), parameters('topicName'))]"
             },
-            "redisName": {
+            "topicName": {
               "type": "string",
-              "value": "[parameters('redisName')]"
+              "value": "[parameters('topicName')]"
             },
-            "redisHostName": {
+            "subscriptionId": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.Cache/redis', parameters('redisName')), '2023-08-01').hostName]"
+              "value": "[resourceId('Microsoft.ServiceBus/namespaces/topics/subscriptions', parameters('serviceBusNamespaceName'), parameters('topicName'), parameters('subscriptionName'))]"
             },
-            "redisPort": {
-              "type": "int",
-              "value": "[reference(resourceId('Microsoft.Cache/redis', parameters('redisName')), '2023-08-01').sslPort]"
-            },
-            "redisConnectionString": {
+            "subscriptionName": {
               "type": "string",
-              "value": "[format('{0}:{1},password={2},ssl=True,abortConnect=False', reference(resourceId('Microsoft.Cache/redis', parameters('redisName')), '2023-08-01').hostName, reference(resourceId('Microsoft.Cache/redis', parameters('redisName')), '2023-08-01').sslPort, listKeys(resourceId('Microsoft.Cache/redis', parameters('redisName')), '2023-08-01').primaryKey)]"
+              "value": "[parameters('subscriptionName')]"
             }
           }
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName')))]"
       ]
     }
   ],
@@ -866,17 +1046,13 @@
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName'))), '2025-04-01').outputs.serviceBusConnectionString.value]"
     },
-    "redisHostName": {
+    "membershipTopicName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redis-{0}', variables('baseName'))), '2025-04-01').outputs.redisHostName.value]"
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('membershipTopic-{0}', variables('baseName'))), '2025-04-01').outputs.topicName.value]"
     },
-    "redisPort": {
-      "type": "int",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redis-{0}', variables('baseName'))), '2025-04-01').outputs.redisPort.value]"
-    },
-    "redisConnectionString": {
+    "membershipReconSubscriptionName": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redis-{0}', variables('baseName'))), '2025-04-01').outputs.redisConnectionString.value]"
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('membershipTopic-{0}', variables('baseName'))), '2025-04-01').outputs.subscriptionName.value]"
     },
     "platformKeyVaultName": {
       "type": "string",

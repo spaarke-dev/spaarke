@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>NEW .github/workflows/redis-key-rotation.yml — 3 staggered crons + workflow_dispatch</title>
+    <phase>2: Theme B — Redis key rotation automation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>030</blocks>
+    <tags>ci-workflow, github-actions, devops, security, rotation</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New CI workflow + GitHub Environments + OIDC auth setup.</rigor-reason>
+    <parallel-group>C-cont</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct file from tasks 010/012/013/014.</parallel-reason>
+  </metadata>
+  <prompt>Create NEW `.github/workflows/redis-key-rotation.yml` with 3 staggered quarterly cron schedules + `workflow_dispatch`. Crons: dev `0 6 1 */3 *`, staging `0 6 8 */3 *`, prod `0 6 15 */3 *` (06:00 UTC, 1st/8th/15th of Jan/Apr/Jul/Oct). `workflow_dispatch` accepts an `environment` choice input (dev/staging/prod). Each job uses the appropriate GitHub Environment (`AZURE_CLIENT_ID_DEV` / `_STAGING` / `_PROD`) via OIDC federated identity. Job calls `pwsh ./scripts/Rotate-RedisKey.ps1 -Environment {env} -Force`. Mirror OIDC auth pattern from `.github/workflows/sdap-ci.yml`.</prompt>
+  <role>DevOps engineer with GitHub Actions + OIDC + Azure familiarity. Apply `script-aware` skill.</role>
+  <goal>Workflow file commits; `gh workflow view redis-key-rotation.yml` shows 3 cron schedules; `gh workflow run redis-key-rotation.yml -f environment=dev` triggers a successful run (deferred verification to task 030 / operator).</goal>
+  <context>
+    <background>Spec FR-08: quarterly cadence + per-env staggering so dev catches breakage before prod. Reuses OIDC auth pattern from existing CI workflows (no PAT secrets).</background>
+    <relevant-files>
+      <file>.github/workflows/redis-key-rotation.yml (NEW)</file>
+      <file>.github/workflows/sdap-ci.yml (REFERENCE — OIDC pattern)</file>
+      <file>scripts/Rotate-RedisKey.ps1 (CALLED BY THIS WORKFLOW — created in task 010)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-08 — 3 cron schedules + workflow_dispatch with environment input.</constraint>
+    <constraint source="spec">FR-09 — per-env SP isolation: 3 distinct AZURE_CLIENT_ID_* GitHub Environment secrets.</constraint>
+    <constraint source="azure-deployment.md">No hardcoded secrets; OIDC only.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>.github/workflows/sdap-ci.yml</file>
+      <file>scripts/Rotate-RedisKey.ps1</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read sdap-ci.yml OIDC auth pattern (`azure/login@v2` with `client-id`, `tenant-id`, `subscription-id` from GitHub Environment).</step>
+    <step order="2">Author redis-key-rotation.yml header with `name`, `on` (schedule + workflow_dispatch).</step>
+    <step order="3">Define 3 cron entries with comments documenting cadence (dev 1st, staging 8th, prod 15th of every 3rd month).</step>
+    <step order="4">workflow_dispatch input: `environment` choice with options dev/staging/prod.</step>
+    <step order="5">Define 3 jobs (one per env), each gated by `if: github.event.schedule == '0 6 N */3 *' || github.event.inputs.environment == 'env'`. Each job uses `environment: {env}` so GitHub Environment secrets resolve.</step>
+    <step order="6">Each job step: `azure/login@v2` → `pwsh ./scripts/Rotate-RedisKey.ps1 -Environment {env} -Force`.</step>
+    <step order="7">Add `permissions: id-token: write` block for OIDC.</step>
+    <step order="8">Add summary step that posts the App Insights KQL query for verification to the workflow run summary.</step>
+    <step order="9">Validate YAML: `gh workflow view --yaml redis-key-rotation.yml` (after push) or `yamllint` locally.</step>
+    <step order="10">Document in PR: operator must provision the 3 GitHub Environments (`dev`, `staging`, `prod`) with `AZURE_CLIENT_ID_*` secrets BEFORE first cron fires (per spec §Dependencies §External Dependencies).</step>
+    <step order="11">Update TASK-INDEX 🔲 → ✅.</step>
+  </steps>
+  <tools>
+    <tool name="Read">sdap-ci.yml + spec</tool>
+    <tool name="Write">redis-key-rotation.yml</tool>
+    <tool name="Bash">YAML lint</tool>
+  </tools>
+  <outputs>
+    <output type="ci-workflow">.github/workflows/redis-key-rotation.yml (NEW)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">3 cron schedules + workflow_dispatch input visible in workflow file.</criterion>
+    <criterion testable="true">YAML valid (no syntax errors).</criterion>
+    <criterion testable="true">OIDC auth pattern matches existing workflows (no PAT secrets).</criterion>
+    <criterion testable="true">Per-env GitHub Environments referenced (AZURE_CLIENT_ID_DEV, _STAGING, _PROD).</criterion>
+    <criterion testable="true">`gh workflow run redis-key-rotation.yml -f environment=dev` succeeds (deferred to task 030 / operator).</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

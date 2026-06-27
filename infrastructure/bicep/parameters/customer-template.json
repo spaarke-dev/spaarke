@@ -3,7 +3,7 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
     "customerId": {
-      "value": "demo"
+      "value": "replaceme"
     },
     "environmentName": {
       "value": "prod"
@@ -22,11 +22,10 @@
     },
     "tags": {
       "value": {
-        "customer": "demo",
+        "customer": "replaceme",
         "environment": "prod",
         "application": "spaarke",
-        "managedBy": "bicep",
-        "purpose": "demo-validation"
+        "managedBy": "bicep"
       }
     }
   }

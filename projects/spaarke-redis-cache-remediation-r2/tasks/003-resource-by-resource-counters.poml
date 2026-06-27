@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>cache.hits.by_resource + cache.misses.by_resource Counters at TenantCache layer</title>
+    <phase>1: Theme A — Cache observability hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>030</blocks>
+    <tags>bff-api, telemetry, otel, observability</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag + .cs modification</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Depends on 002 (canonical static class). Parallel-safe with 005 (different file targets).</parallel-reason>
+  </metadata>
+  <prompt>At the `TenantCache` wrapper layer (`src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs`), emit SECONDARY metrics with `resource` dimension via NEW Counters `cache.hits.by_resource` + `cache.misses.by_resource`. Register on the canonical static `CacheMetrics` class (from task 002). `resource` is the natural resource name in the cache key (e.g., `session`, `document-analysis`, `embedding`, `graph-token`, `membership`). Primary `cache.hits` / `cache.misses` from the MetricsDistributedCache decorator layer remain UNCHANGED. Different metric names → no double-counting. No cardinality cap (NFR-06): code-driven natural bounding ~10-20 expected.</prompt>
+  <role>Senior .NET developer with OTel Metrics. Apply `task-execute` skill at FULL rigor.</role>
+  <goal>`TenantCache` emits `cache.hits.by_resource` + `cache.misses.by_resource` with `resource` dimension on every hit/miss path. Primary decorator-layer metrics unchanged. Build clean; tests at baseline. KQL verification deferred to task 030.</goal>
+  <context>
+    <background>Spec FR-03: R1 amendment to ADR-009 dropped per-tag dimensions (resource, op) because dimension cardinality was theoretically unbounded at the decorator layer. R2 reintroduces `resource` ONLY at the TenantCache wrapper where the resource name is part of the cache key shape `tenant:{tid}:{resource}:{id}:v{n}` — naturally bounded by code (~10-20 distinct resource names). Different metric names mean we don't double-count or interfere with the primary decorator-layer metrics.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs (MODIFY)</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/CacheMetrics.cs (EXTEND — add `cache.hits.by_resource` + `cache.misses.by_resource` counters)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-03 — secondary counters at TenantCache layer; resource dimension; bounded code-driven cardinality.</constraint>
+    <constraint source="spec">NFR-06 — no soft cap on resource dimension cardinality.</constraint>
+    <constraint source="ADR-009">No silent in-memory fallback; metrics must be observable.</constraint>
+    <constraint source="ADR-029">Publish-size ≤+0.5 MB (NFR-04).</constraint>
+    <constraint source="ADR-032">Symmetric DI preserved.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/CacheMetrics.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read TenantCache.cs to find the hit/miss decision points. Cache key shape `tenant:{tid}:{resource}:{id}:v{n}` means `resource` is available as a parameter to TenantCache methods.</step>
+    <step order="2">Add two new Counters to canonical `CacheMetrics` static class: `cache.hits.by_resource` + `cache.misses.by_resource` (both `Counter&lt;long&gt;`).</step>
+    <step order="3">In TenantCache hit path: call `CacheMetrics.RecordHitByResource(resource)`. In miss path: `CacheMetrics.RecordMissByResource(resource)`.</step>
+    <step order="4">Confirm resource value passed is the LOGICAL resource name (e.g., "session", "embedding") not the full key. If TenantCache's API does not surface resource as separate param, lift it from the key parse helper.</step>
+    <step order="5">Build: `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors.</step>
+    <step order="6">Run BFF unit tests; no regressions expected (additive change).</step>
+    <step order="7">Update TASK-INDEX 🔲 → ✅.</step>
+    <step order="8">Step 9.5 quality gates: code-review + adr-check.</step>
+  </steps>
+  <tools>
+    <tool name="Read">TenantCache + CacheMetrics</tool>
+    <tool name="Edit">TenantCache.cs + CacheMetrics.cs</tool>
+    <tool name="Bash">dotnet build + test</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs (MODIFIED)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Telemetry/CacheMetrics.cs (EXTENDED with by_resource counters)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">CacheMetrics has 2 new Counters: cache.hits.by_resource + cache.misses.by_resource.</criterion>
+    <criterion testable="true">TenantCache emits both on every hit/miss path with the logical resource name.</criterion>
+    <criterion testable="true">Primary cache.hits / cache.misses at decorator layer unchanged.</criterion>
+    <criterion testable="true">dotnet build clean; tests at baseline.</criterion>
+    <criterion testable="true">KQL `customMetrics | where name == 'cache.hits.by_resource' | summarize sum(value) by tostring(customDimensions.resource)` returns rows with bounded resource values post-deploy (verified at task 030).</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor.</protocol>
+  </execution>
+</task>

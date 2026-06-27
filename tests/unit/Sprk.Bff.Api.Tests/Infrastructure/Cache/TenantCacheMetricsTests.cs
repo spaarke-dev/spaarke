@@ -5,6 +5,7 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Telemetry;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Infrastructure.Cache;
@@ -49,8 +50,8 @@ public sealed class TenantCacheMetricsTests
             else if (instrument.Name == "cache.misses") { Interlocked.Add(ref misses, value); }
         });
         listener.Start();
-        listener.EnableMeasurementEvents(TenantCache.HitsCounter);
-        listener.EnableMeasurementEvents(TenantCache.MissesCounter);
+        listener.EnableMeasurementEvents(CacheMetrics.HitsCounter);
+        listener.EnableMeasurementEvents(CacheMetrics.MissesCounter);
 
         // Act
         var first = await sut.GetAsync<string>("t1", "session", "id-1", 1);

@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>Project wrap-up — code-review + adr-check + repo-cleanup + README Complete + lessons-learned</title>
+    <phase>4: Deploy + verify + close-out</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>031</dependencies>
+    <blocks></blocks>
+    <tags>wrap-up, close-out, lessons-learned</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Wrap-up gates: code-review + adr-check + repo-cleanup are FULL rigor by design.</rigor-reason>
+    <parallel-group>Phase 4 serial</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task.</parallel-reason>
+  </metadata>
+  <prompt>Mandatory wrap-up (per task-create Step 3.7): (1) Run `/code-review` on the full PR diff vs master. (2) Run `/adr-check` on the full PR diff vs master. (3) Update `README.md` status → "Complete". (4) Create `projects/spaarke-redis-cache-remediation-r2/notes/lessons-learned.md` capturing what worked (Theme A.2 Meter consolidation impact, etc.), what surprised us, and recommendations for future Redis/observability work. (5) Update `projects/INDEX.md` registry — remove R2 from Active table (per maintenance contract) OR move to Archived section (per `devops-project-archive` convention, if registry has one). (6) Run `/repo-cleanup` to remove ephemeral files. (7) Verify PR is mergeable + all checks pass.</prompt>
+  <role>Project close-out operator. Apply `task-execute` skill at FULL rigor + invoke `code-review`, `adr-check`, `repo-cleanup` skills.</role>
+  <goal>R2 PR merged + project marked Complete. lessons-learned.md committed. INDEX.md cleaned. Repo state clean. R8 (or whatever R3 is) can pick up cleanly.</goal>
+  <context>
+    <background>Last task of the project. After this, sister projects can rely on R2 being closed and shipped.</background>
+    <relevant-files>
+      <file>projects/spaarke-redis-cache-remediation-r2/README.md (UPDATE status to Complete)</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/notes/lessons-learned.md (NEW)</file>
+      <file>projects/INDEX.md (REMOVE R2 row OR move to Archived section)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="task-create">Step 3.7 mandatory wrap-up.</constraint>
+    <constraint source="spec">G-15 — build clean + tests at baseline maintained.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/plan.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/README.md</file>
+      <file>projects/INDEX.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Run `/code-review` on the R2 PR diff vs master.</step>
+    <step order="2">Run `/adr-check` on the R2 PR diff vs master (focus on ADR-009 untouched + ADR-010 alignment + ADR-029 publish-size).</step>
+    <step order="3">Address any review findings (loop back to relevant tasks if needed).</step>
+    <step order="4">Update README.md Status → Complete.</step>
+    <step order="5">Author `notes/lessons-learned.md` with: (a) what worked (e.g., Meter consolidation cleaned up DI surface; static class outcome matched ADR-010); (b) what surprised us (e.g., consumer count for CacheMetrics; live-customer audit for customer.bicep); (c) recommendations (e.g., for R3 / future Redis observability work).</step>
+    <step order="6">Update `projects/INDEX.md` — remove R2 row from Active table (R1 was kept in Active even when complete; follow same convention OR move to Archived if convention exists at time).</step>
+    <step order="7">Run `/repo-cleanup`.</step>
+    <step order="8">Final `dotnet build` + `dotnet test` + `Deploy-BffApi.ps1` smoke if dev still available — confirm baseline maintained.</step>
+    <step order="9">Update current-task.md status to "PROJECT COMPLETE" + reset.</step>
+    <step order="10">Update TASK-INDEX 🔲 → ✅ for task 032.</step>
+  </steps>
+  <tools>
+    <tool name="Skill">code-review, adr-check, repo-cleanup</tool>
+    <tool name="Edit">README.md + current-task.md + projects/INDEX.md</tool>
+    <tool name="Write">notes/lessons-learned.md</tool>
+    <tool name="Bash">dotnet build + dotnet test</tool>
+  </tools>
+  <outputs>
+    <output type="docs">projects/spaarke-redis-cache-remediation-r2/notes/lessons-learned.md (NEW)</output>
+    <output type="docs">projects/spaarke-redis-cache-remediation-r2/README.md (status → Complete)</output>
+    <output type="docs">projects/INDEX.md (R2 row removed or archived)</output>
+    <output type="docs">projects/spaarke-redis-cache-remediation-r2/current-task.md (status → PROJECT COMPLETE)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">code-review pass (or findings resolved).</criterion>
+    <criterion testable="true">adr-check pass.</criterion>
+    <criterion testable="true">lessons-learned.md exists with all 3 sections.</criterion>
+    <criterion testable="true">README.md status = Complete.</criterion>
+    <criterion testable="true">projects/INDEX.md cleaned.</criterion>
+    <criterion testable="true">Build clean + tests at baseline (NFR-02 + G-15).</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor.</protocol>
+  </execution>
+</task>

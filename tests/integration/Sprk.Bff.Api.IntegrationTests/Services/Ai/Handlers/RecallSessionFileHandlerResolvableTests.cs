@@ -71,6 +71,12 @@ public sealed class RecallSessionFileHandlerResolvableTests
         // smoke test asserts only the new tracker registration + handler constructor compatibility
         // — supply nulls/no-ops for non-tracker deps so the constructor can be reflected.
         services.AddSingleton(Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.IRagService>());
+        // ChatSessionManager constructor signature changed from IDistributedCache to ITenantCache
+        // (chat-routing-redesign-r1 task 091 merge). Pre-existing build break on master baseline
+        // discovered during spaarke-redis-cache-remediation-r2 task 005 — fixed surgically per
+        // bff-extensions.md §F.2 (Fixture-Config-FIRST) to enable the integration project to
+        // build so task 005's new MetricsDistributedCacheRegistrationTests can run.
+        services.AddSingleton(Moq.Mock.Of<ITenantCache>());
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.ChatSessionManager>(sp =>
             new Sprk.Bff.Api.Services.Ai.Chat.ChatSessionManager(
                 cache: sp.GetRequiredService<ITenantCache>(),

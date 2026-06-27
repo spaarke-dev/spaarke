@@ -7,7 +7,12 @@
 //   - Storage Account (temp files, document processing)
 //   - Key Vault (customer-specific secrets)
 //   - Service Bus namespace (job queues)
-//   - Redis Cache (token caching, session state)
+//
+// Note: per-customer Redis is DEPRECATED per Q-E Architecture 1 / FR-12
+// (spaarke-redis-cache-remediation-r1 + r2). Redis is provisioned per-environment
+// via scripts/Deploy-RedisCache.ps1 (spaarke-bff-redis-{env}) and consumed by the
+// BFF via Key Vault reference. See projects/spaarke-redis-cache-remediation-r2/
+// for the IaC gap closure (this template's Redis module call was removed in r2 task 020).
 
 targetScope = 'subscription'
 
@@ -57,15 +62,6 @@ param serviceBusQueues array = ['sdap-jobs', 'document-indexing', 'ai-indexing',
 @description('Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually.')
 param bffPrincipalId string = ''
 
-// --- Redis options ---
-
-@description('Redis Cache SKU')
-@allowed(['Basic', 'Standard', 'Premium'])
-param redisSku string = 'Basic'
-
-@description('Redis Cache capacity (family size: 0-6)')
-param redisCapacity int = 0
-
 // --- Tags ---
 
 @description('Tags applied to ALL resources for cost tracking and management')
@@ -95,9 +91,6 @@ var keyVaultName = take('sprk-${customerId}-${environmentName}-kv', 24)
 
 // Service Bus: spaarke-{customer}-{env}-sbus (Note: '-sb' suffix is reserved by Azure)
 var serviceBusName = 'spaarke-${customerId}-${environmentName}-sbus'
-
-// Redis: spaarke-{customer}-{env}-cache
-var redisName = 'spaarke-${customerId}-${environmentName}-cache'
 
 // ============================================================================
 // RESOURCE GROUP
@@ -175,22 +168,6 @@ module membershipTopic 'modules/membership-topic.bicep' = {
 }
 
 // ============================================================================
-// REDIS CACHE (Token caching, session state per ADR-009)
-// ============================================================================
-
-module redis 'modules/redis.bicep' = {
-  scope: rg
-  name: 'redis-${baseName}'
-  params: {
-    redisName: redisName
-    location: location
-    sku: redisSku
-    capacity: redisCapacity
-    tags: tags
-  }
-}
-
-// ============================================================================
 // OUTPUTS
 // ============================================================================
 
@@ -219,12 +196,6 @@ output serviceBusConnectionString string = serviceBus.outputs.serviceBusConnecti
 // --- Membership topic (R3 Phase 2) ---
 output membershipTopicName string = membershipTopic.outputs.topicName
 output membershipReconSubscriptionName string = membershipTopic.outputs.subscriptionName
-
-// --- Redis Cache ---
-output redisHostName string = redis.outputs.redisHostName
-output redisPort int = redis.outputs.redisPort
-#disable-next-line outputs-should-not-contain-secrets
-output redisConnectionString string = redis.outputs.redisConnectionString
 
 // --- Platform cross-reference ---
 output platformKeyVaultName string = platformKeyVaultName
