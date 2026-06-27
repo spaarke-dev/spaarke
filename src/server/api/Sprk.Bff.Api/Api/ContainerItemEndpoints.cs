@@ -1,4 +1,3 @@
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
@@ -275,8 +274,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var items = await graphService.ListContainerItemsAsync(graphClient, id, folderId, ct);
+            var items = await graphService.ListContainerItemsForConfigAsync(
+                config, id, folderId, ct);
 
             logger.LogInformation(
                 "SPE Admin list items succeeded — Container: {ContainerId}, FolderId: {FolderId}, " +
@@ -285,14 +284,14 @@ public static class ContainerItemEndpoints
 
             return TypedResults.Ok(items);
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            logger.LogError(odataError,
+            logger.LogError(ex,
                 "Graph API error listing items — Container: {ContainerId}, FolderId: {FolderId}, " +
                 "GraphStatus: {Status}, TraceId: {TraceId}",
-                id, folderId ?? "(root)", odataError.ResponseStatusCode, context.TraceIdentifier);
+                id, folderId ?? "(root)", ex.StatusCode, context.TraceIdentifier);
 
-            return ProblemDetailsHelper.FromGraphException(odataError);
+            return ex.ToProblemDetails();
         }
         catch (InvalidOperationException ex)
         {
@@ -354,8 +353,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var versions = await graphService.GetFileVersionsAsync(graphClient, id, itemId, ct);
+            var versions = await graphService.GetFileVersionsForConfigAsync(
+                config, id, itemId, ct);
 
             logger.LogInformation(
                 "SPE Admin get file versions succeeded — Container: {ContainerId}, ItemId: {ItemId}, " +
@@ -364,14 +363,14 @@ public static class ContainerItemEndpoints
 
             return TypedResults.Ok(versions);
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            logger.LogError(odataError,
+            logger.LogError(ex,
                 "Graph API error getting file versions — Container: {ContainerId}, ItemId: {ItemId}, " +
                 "GraphStatus: {Status}, TraceId: {TraceId}",
-                id, itemId, odataError.ResponseStatusCode, context.TraceIdentifier);
+                id, itemId, ex.StatusCode, context.TraceIdentifier);
 
-            return ProblemDetailsHelper.FromGraphException(odataError);
+            return ex.ToProblemDetails();
         }
         catch (InvalidOperationException ex)
         {
@@ -432,8 +431,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var thumbnails = await graphService.GetFileThumbnailsAsync(graphClient, id, itemId, ct);
+            var thumbnails = await graphService.GetFileThumbnailsForConfigAsync(
+                config, id, itemId, ct);
 
             logger.LogInformation(
                 "SPE Admin get thumbnails succeeded — Container: {ContainerId}, ItemId: {ItemId}, " +
@@ -442,14 +441,14 @@ public static class ContainerItemEndpoints
 
             return TypedResults.Ok(thumbnails);
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            logger.LogError(odataError,
+            logger.LogError(ex,
                 "Graph API error getting thumbnails — Container: {ContainerId}, ItemId: {ItemId}, " +
                 "GraphStatus: {Status}, TraceId: {TraceId}",
-                id, itemId, odataError.ResponseStatusCode, context.TraceIdentifier);
+                id, itemId, ex.StatusCode, context.TraceIdentifier);
 
-            return ProblemDetailsHelper.FromGraphException(odataError);
+            return ex.ToProblemDetails();
         }
         catch (InvalidOperationException ex)
         {
@@ -524,9 +523,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var sharingLink = await graphService.CreateSharingLinkAsync(
-                graphClient, id, itemId,
+            var sharingLink = await graphService.CreateSharingLinkForConfigAsync(
+                config, id, itemId,
                 request.LinkType, request.Scope, request.ExpirationDateTime,
                 ct);
 
@@ -537,14 +535,14 @@ public static class ContainerItemEndpoints
 
             return TypedResults.Ok(sharingLink);
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            logger.LogError(odataError,
+            logger.LogError(ex,
                 "Graph API error creating sharing link — Container: {ContainerId}, ItemId: {ItemId}, " +
                 "GraphStatus: {Status}, TraceId: {TraceId}",
-                id, itemId, odataError.ResponseStatusCode, context.TraceIdentifier);
+                id, itemId, ex.StatusCode, context.TraceIdentifier);
 
-            return ProblemDetailsHelper.FromGraphException(odataError);
+            return ex.ToProblemDetails();
         }
         catch (InvalidOperationException ex)
         {
@@ -629,9 +627,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var folder = await graphService.CreateFolderAsync(
-                graphClient, id, request.Name, request.ParentFolderId, ct);
+            var folder = await graphService.CreateFolderForConfigAsync(
+                config, id, request.Name, request.ParentFolderId, ct);
 
             logger.LogInformation(
                 "SPE Admin create folder succeeded — Container: {ContainerId}, FolderName: {FolderName}, " +
@@ -643,7 +640,7 @@ public static class ContainerItemEndpoints
                 $"/api/spe/containers/{id}/items/{folder.Id}?configId={configId}",
                 folder);
         }
-        catch (ODataError odataError) when (odataError.ResponseStatusCode == StatusCodes.Status409Conflict)
+        catch (SpaarkeStorageException ex) when (ex.StatusCode == StatusCodes.Status409Conflict)
         {
             logger.LogWarning(
                 "Folder name conflict — Container: {ContainerId}, FolderName: {FolderName}, " +
@@ -655,14 +652,14 @@ public static class ContainerItemEndpoints
                 detail: $"A folder named '{request.Name}' already exists at the specified location.",
                 statusCode: StatusCodes.Status409Conflict);
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            logger.LogError(odataError,
+            logger.LogError(ex,
                 "Graph API error creating folder — Container: {ContainerId}, FolderName: {FolderName}, " +
                 "GraphStatus: {Status}, TraceId: {TraceId}",
-                id, request.Name, odataError.ResponseStatusCode, context.TraceIdentifier);
+                id, request.Name, ex.StatusCode, context.TraceIdentifier);
 
-            return ProblemDetailsHelper.FromGraphException(odataError);
+            return ex.ToProblemDetails();
         }
         catch (InvalidOperationException ex)
         {
@@ -727,8 +724,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var result = await graphService.DownloadDriveItemAsync(graphClient, id, itemId, ct);
+            var result = await graphService.DownloadDriveItemForConfigAsync(
+                config, id, itemId, ct);
 
             if (result is null)
             {
@@ -757,14 +754,14 @@ public static class ContainerItemEndpoints
 
             return Results.Stream(contentStream, contentType: mimeType);
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            logger.LogError(odataError,
+            logger.LogError(ex,
                 "Graph API error downloading item — Container: {ContainerId}, ItemId: {ItemId}, " +
                 "GraphStatus: {Status}, TraceId: {TraceId}",
-                id, itemId, odataError.ResponseStatusCode, context.TraceIdentifier);
+                id, itemId, ex.StatusCode, context.TraceIdentifier);
 
-            return ProblemDetailsHelper.FromGraphException(odataError);
+            return ex.ToProblemDetails();
         }
         catch (InvalidOperationException ex)
         {
@@ -827,8 +824,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var previewUrl = await graphService.GetPreviewUrlAsync(graphClient, id, itemId, ct);
+            var previewUrl = await graphService.GetPreviewUrlForConfigAsync(
+                config, id, itemId, ct);
 
             if (previewUrl is null)
             {
@@ -848,14 +845,14 @@ public static class ContainerItemEndpoints
 
             return TypedResults.Ok(new PreviewUrlResponse(previewUrl));
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            logger.LogError(odataError,
+            logger.LogError(ex,
                 "Graph API error getting preview URL — Container: {ContainerId}, ItemId: {ItemId}, " +
                 "GraphStatus: {Status}, TraceId: {TraceId}",
-                id, itemId, odataError.ResponseStatusCode, context.TraceIdentifier);
+                id, itemId, ex.StatusCode, context.TraceIdentifier);
 
-            return ProblemDetailsHelper.FromGraphException(odataError);
+            return ex.ToProblemDetails();
         }
         catch (InvalidOperationException ex)
         {
@@ -921,8 +918,8 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-            var deleted = await graphService.DeleteDriveItemAsync(graphClient, id, itemId, ct);
+            var deleted = await graphService.DeleteDriveItemForConfigAsync(
+                config, id, itemId, ct);
 
             if (!deleted)
             {
@@ -953,14 +950,14 @@ public static class ContainerItemEndpoints
 
             return TypedResults.NoContent();
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            logger.LogError(odataError,
+            logger.LogError(ex,
                 "Graph API error deleting item — Container: {ContainerId}, ItemId: {ItemId}, " +
                 "GraphStatus: {Status}, TraceId: {TraceId}",
-                id, itemId, odataError.ResponseStatusCode, context.TraceIdentifier);
+                id, itemId, ex.StatusCode, context.TraceIdentifier);
 
-            return ProblemDetailsHelper.FromGraphException(odataError);
+            return ex.ToProblemDetails();
         }
         catch (InvalidOperationException ex)
         {
@@ -1061,13 +1058,11 @@ public static class ContainerItemEndpoints
 
         try
         {
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             SpeAdminGraphService.SpeContainerItemSummary uploadedItem;
             await using (var fileStream = formFile.OpenReadStream())
             {
-                uploadedItem = await graphService.UploadFileToContainerAsync(
-                    graphClient, id, fileName, fileStream, formFile.Length, folderId, ct);
+                uploadedItem = await graphService.UploadFileToContainerForConfigAsync(
+                    config, id, fileName, fileStream, formFile.Length, folderId, ct);
             }
 
             logger.LogInformation(
@@ -1092,14 +1087,14 @@ public static class ContainerItemEndpoints
                 $"/api/spe/containers/{id}/items/{uploadedItem.Id}",
                 uploadedItem);
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
-            logger.LogError(odataError,
+            logger.LogError(ex,
                 "Graph API error uploading file — Container: {ContainerId}, File: {FileName}, " +
                 "GraphStatus: {Status}, TraceId: {TraceId}",
-                id, fileName, odataError.ResponseStatusCode, context.TraceIdentifier);
+                id, fileName, ex.StatusCode, context.TraceIdentifier);
 
-            return ProblemDetailsHelper.FromGraphException(odataError);
+            return ex.ToProblemDetails();
         }
         catch (InvalidOperationException ex)
         {

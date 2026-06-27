@@ -43,6 +43,8 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 
 5. **MUST** verify the addition follows feature-module DI conventions per ADR-010 — register through a focused `Add{Feature}Module()` extension, not as a flat blob of `Program.cs` registrations.
 
+6. **MUST** verify any new config field (column, JSON property, scope entry) is on the right entity per the [Action/Node/Playbook config boundary decision tree](../../docs/architecture/ai-architecture-actions-nodes-scopes.md) — Home A (Action row) vs Home B (Playbook header columns) vs Home C (Node row + `sprk_configjson`) vs Home D (N:N scope relationships). See §G below. PR description MUST state the chosen home + why it does not belong in any of the other three. Added 2026-06-26 (R4 canonical-truth loop).
+
 ### B. New Package References (Binding)
 
 - **MUST** check `dotnet list package --vulnerable --include-transitive` before adding any package. New packages MUST NOT introduce HIGH-severity CVEs into the transitive graph.
@@ -188,6 +190,30 @@ DO NOT collapse fixture-config gaps into "upstream cluster fix subsumes it" — 
 4. **After merge to master, watch the auto-deploy**: it triggers immediately on push-to-master with matching path filter. `gh run watch` confirms the deploy completes successfully before the next project's merge can run cleanly.
 
 **Cross-reference**: [`docs/guides/bff-deploy-coordination.md`](../../docs/guides/bff-deploy-coordination.md) (referenced; expand here if/when a longer narrative is needed). For solo-deploy mechanics see [`.claude/skills/bff-deploy/SKILL.md`](../skills/bff-deploy/SKILL.md).
+
+### G. Action / Node / Playbook Config Boundary (Binding per R4 canonical-truth loop, 2026-06-26)
+
+**Codified 2026-06-26** from the spaarke-daily-update-service-r4 canonical-truth loop after surfacing a design smell where playbook config gets stuffed into the wrong column (node-level wire-up onto Action row, playbook-level scope decisions in node configjson, or node-graph data in `sprk_analysisplaybook.sprk_configjson` — which the runtime ignores).
+
+**Binding rule**: every new config field added to the playbook surface (column on `sprk_analysisaction`, `sprk_analysisplaybook`, `sprk_playbooknode`; JSON property inside `sprk_canvaslayoutjson` or any `sprk_configjson`; N:N scope entry) MUST be placed in the correct "home" per the decision tree in [`docs/architecture/ai-architecture-actions-nodes-scopes.md`](../../docs/architecture/ai-architecture-actions-nodes-scopes.md):
+
+| Home | What lives here |
+|---|---|
+| **A. Action row** | Action-intrinsic behaviour: prompt, temperature, output schema, ActionType FK |
+| **B. Playbook row direct columns** | Playbook header metadata: name, type, capabilities, builder hints, canvas JSON |
+| **C. Node row** (incl. `sprk_configjson`) | Per-node runtime config: action FK, input bindings, dependencies, output variable, position, executor-specific input shape |
+| **D. N:N scope relationships** | Declarative resource scope: which Actions/Skills/Knowledge/Tools the playbook is allowed/expected to use |
+
+**Specifically MUST NOT** (anti-patterns identified by code-archaeology §7):
+
+- ❌ **Stuff node-level wire-up into `sprk_analysisaction.sprk_configjson`** — defeats Action reusability across playbooks. (Note: `sprk_configurationjson` with "uration" does NOT exist on `sprk_analysisaction`; the canonical column is `sprk_configjson` on node + playbook.)
+- ❌ **Stuff playbook-level scope decisions into `sprk_playbooknode.sprk_configjson`** — bypasses `jps-playbook-audit` + `jps-scope-refresh` tooling.
+- ❌ **Use `sprk_analysisplaybook.sprk_configjson` to carry node-graph data when `sprk_playbooknode` rows exist** — runtime reads node rows, not playbook configjson. This was the R4 deploy bug.
+- ❌ **Routing config (destination, widgetType, deliveryType) in node configJson** — current state per `node-routing-config.schema.json`; flagged as tech debt for R5/R6 promotion to first-class columns. Acceptable for now but call out in `design.md` Placement Justification.
+
+**Pre-merge check**: the PR description's Placement Justification section MUST state, for each new config field: (1) which Home the field belongs to; (2) why it does NOT belong to any of the other three Homes; (3) if it lives in `sprk_configjson` (per-node), why first-class columns weren't justified.
+
+**Cross-reference**: [`docs/architecture/ai-architecture-actions-nodes-scopes.md`](../../docs/architecture/ai-architecture-actions-nodes-scopes.md) — the canonical decision tree + worked examples (R4 surfaces).
 
 ---
 

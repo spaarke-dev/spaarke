@@ -1,8 +1,5 @@
 using System.IO;
 using System.Text.Json;
-using Microsoft.Graph;
-using Microsoft.Graph.Drives.Item.Items.Item.Preview;
-using Microsoft.Graph.Models;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Utilities;
 using Spaarke.Dataverse;
@@ -108,7 +105,7 @@ public static class FileAccessEndpoints
         static async Task<IResult> GetPreviewUrl(
             string documentId,
             IDocumentDataverseService dataverseService,
-            IGraphClientFactory graphFactory,
+            SpeFileStore speFileStore,
             DocumentCheckoutService checkoutService,
             ILogger<Program> logger,
             HttpContext context,
@@ -147,28 +144,21 @@ public static class FileAccessEndpoints
             logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
                 document.GraphDriveId, document.GraphItemId);
 
-            // 4. Create Graph client using OBO (user context)
-            var graphClient = await graphFactory.ForUserAsync(context, ct);
-
-            // 5. Call Graph API to get preview URL
-            // Request chromeless preview (no SharePoint header/toolbar)
-            var previewRequest = new PreviewPostRequestBody
-            {
-                // Note: Graph SDK may not expose chromeless property directly
-                // If not available, we'll modify the URL after receiving it
-                AdditionalData = new Dictionary<string, object>
+            // 4-5. Call Graph API (via SpeFileStore OBO facade) to get preview URL.
+            // Request chromeless preview (no SharePoint header/toolbar). Per CICD-088b,
+            // the Graph SDK request/response types stay inside Infrastructure.Graph.
+            var rawPreviewUrl = await speFileStore.GetPreviewUrlAsUserAsync(
+                context,
+                document.GraphDriveId!,
+                document.GraphItemId!,
+                additionalData: new Dictionary<string, object>
                 {
                     { "chromeless", true },  // Hide SharePoint preview header
                     { "viewer", "onedrive" }  // Use OneDrive viewer
-                }
-            };
+                },
+                ct: ct);
 
-            var previewResponse = await graphClient.Drives[document.GraphDriveId!]
-                .Items[document.GraphItemId!]
-                .Preview
-                .PostAsync(previewRequest, cancellationToken: ct);
-
-            if (previewResponse == null || string.IsNullOrEmpty(previewResponse.GetUrl))
+            if (string.IsNullOrEmpty(rawPreviewUrl))
             {
                 throw new SdapProblemException(
                     "preview_not_available",
@@ -184,8 +174,7 @@ public static class FileAccessEndpoints
             // 6. Modify preview URL to hide SharePoint banner/header
             // Use Microsoft-documented 'nb=true' parameter (no banner)
             // Reference: https://learn.microsoft.com/en-us/sharepoint/dev/
-            var previewUrl = previewResponse.GetUrl;
-            if (!string.IsNullOrEmpty(previewUrl))
+            var previewUrl = rawPreviewUrl;
             {
                 var separator = previewUrl.Contains('?') ? '&' : '?';
                 // nb=true hides the top banner/header in SharePoint embed.aspx
@@ -251,7 +240,7 @@ public static class FileAccessEndpoints
         static async Task<IResult> GetPreview(
             string documentId,
             IDocumentDataverseService dataverseService,
-            IGraphClientFactory graphFactory,
+            SpeFileStore speFileStore,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -285,15 +274,15 @@ public static class FileAccessEndpoints
             // 3. Validate SPE pointers
             ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
-            // 4. Get preview URL using OBO
-            var graphClient = await graphFactory.ForUserAsync(context, ct);
+            // 4. Get preview URL using OBO (via SpeFileStore facade per CICD-088b)
+            var previewUrl = await speFileStore.GetPreviewUrlAsUserAsync(
+                context,
+                document.GraphDriveId!,
+                document.GraphItemId!,
+                additionalData: null,
+                ct: ct);
 
-            var previewResponse = await graphClient.Drives[document.GraphDriveId!]
-                .Items[document.GraphItemId!]
-                .Preview
-                .PostAsync(new PreviewPostRequestBody(), cancellationToken: ct);
-
-            if (string.IsNullOrEmpty(previewResponse?.GetUrl))
+            if (string.IsNullOrEmpty(previewUrl))
             {
                 throw new SdapProblemException(
                     "preview_not_available",
@@ -305,7 +294,7 @@ public static class FileAccessEndpoints
 
             // 5. Redirect to preview page
             logger.LogInformation("Redirecting to preview URL for document {DocumentId}", documentId);
-            return TypedResults.Redirect(previewResponse.GetUrl);
+            return TypedResults.Redirect(previewUrl);
         }
 
         /// <summary>
@@ -315,7 +304,7 @@ public static class FileAccessEndpoints
         static async Task<IResult> GetContent(
             string documentId,
             IDocumentDataverseService dataverseService,
-            IGraphClientFactory graphFactory,
+            SpeFileStore speFileStore,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -349,13 +338,9 @@ public static class FileAccessEndpoints
             // 3. Validate SPE pointers
             ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
-            // 4. Download file content using OBO
-            var graphClient = await graphFactory.ForUserAsync(context, ct);
-
-            var contentStream = await graphClient.Drives[document.GraphDriveId!]
-                .Items[document.GraphItemId!]
-                .Content
-                .GetAsync(cancellationToken: ct);
+            // 4. Download file content using OBO (via SpeFileStore facade per CICD-088b)
+            var contentStream = await speFileStore.GetContentStreamAsUserAsync(
+                context, document.GraphDriveId!, document.GraphItemId!, ct);
 
             if (contentStream == null)
             {
@@ -384,7 +369,7 @@ public static class FileAccessEndpoints
         static async Task<IResult> GetOffice(
             string documentId,
             IDocumentDataverseService dataverseService,
-            IGraphClientFactory graphFactory,
+            SpeFileStore speFileStore,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -418,15 +403,10 @@ public static class FileAccessEndpoints
             // 3. Validate SPE pointers
             ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
-            // 4. Get Office web app URL using OBO
-            var graphClient = await graphFactory.ForUserAsync(context, ct);
-
-            var driveItem = await graphClient.Drives[document.GraphDriveId!]
-                .Items[document.GraphItemId!]
-                .GetAsync(requestConfiguration =>
-                {
-                    requestConfiguration.QueryParameters.Select = new[] { "id", "name", "webUrl" };
-                }, cancellationToken: ct);
+            // 4. Get Office web app URL using OBO (via SpeFileStore facade per CICD-088b)
+            var driveItem = await speFileStore.GetDriveItemAsUserAsync(
+                context, document.GraphDriveId!, document.GraphItemId!,
+                selectFields: new[] { "id", "name", "webUrl" }, ct: ct);
 
             if (string.IsNullOrEmpty(driveItem?.WebUrl))
             {
@@ -463,7 +443,7 @@ public static class FileAccessEndpoints
         static async Task<IResult> GetOpenLinks(
             string documentId,
             IDocumentDataverseService dataverseService,
-            IGraphClientFactory graphFactory,
+            SpeFileStore speFileStore,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -501,16 +481,10 @@ public static class FileAccessEndpoints
             logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
                 document.GraphDriveId, document.GraphItemId);
 
-            // 4. Create Graph client using OBO (user context)
-            var graphClient = await graphFactory.ForUserAsync(context, ct);
-
-            // 5. Get DriveItem from Graph to retrieve URLs, parentReference, and mimeType
-            var driveItem = await graphClient.Drives[document.GraphDriveId!]
-                .Items[document.GraphItemId!]
-                .GetAsync(requestConfiguration =>
-                {
-                    requestConfiguration.QueryParameters.Select = new[] { "id", "name", "webUrl", "webDavUrl", "file", "parentReference" };
-                }, cancellationToken: ct);
+            // 4-5. Get DriveItem metadata via OBO (SpeFileStore facade per CICD-088b)
+            var driveItem = await speFileStore.GetDriveItemAsUserAsync(
+                context, document.GraphDriveId!, document.GraphItemId!,
+                selectFields: new[] { "id", "name", "webUrl", "webDavUrl", "file", "parentReference" }, ct: ct);
 
             if (driveItem == null)
             {
@@ -533,8 +507,8 @@ public static class FileAccessEndpoints
             }
 
             // 6. Extract MIME type from file facet
-            var mimeType = driveItem.File?.MimeType ?? document.MimeType ?? "application/octet-stream";
-            var fileName = driveItem.Name ?? document.FileName ?? "Unknown";
+            var mimeType = driveItem.MimeType ?? document.MimeType ?? "application/octet-stream";
+            var fileName = string.IsNullOrEmpty(driveItem.Name) ? (document.FileName ?? "Unknown") : driveItem.Name;
 
             // 7. Construct direct file URL for desktop protocol
             // The webUrl returns Doc.aspx (Office Online URL) which doesn't work well with ms-word: protocol
@@ -547,11 +521,11 @@ public static class FileAccessEndpoints
                 directFileUrl = driveItem.WebDavUrl;
             }
             // Otherwise construct from parent path
-            else if (driveItem.ParentReference?.Path != null && !string.IsNullOrEmpty(fileName))
+            else if (driveItem.ParentReferencePath != null && !string.IsNullOrEmpty(fileName))
             {
                 // ParentReference.Path format: /drives/{driveId}/root:/folder/path
                 // Extract the path after "root:" and construct URL
-                var pathParts = driveItem.ParentReference.Path.Split("root:");
+                var pathParts = driveItem.ParentReferencePath.Split("root:");
                 if (pathParts.Length > 1)
                 {
                     var folderPath = pathParts[1].TrimStart('/');
@@ -597,7 +571,7 @@ public static class FileAccessEndpoints
         static async Task<IResult> GetViewUrl(
             string documentId,
             IDocumentDataverseService dataverseService,
-            IGraphClientFactory graphFactory,
+            SpeFileStore speFileStore,
             DocumentCheckoutService checkoutService,
             ILogger<Program> logger,
             HttpContext context,
@@ -636,16 +610,10 @@ public static class FileAccessEndpoints
             logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
                 document.GraphDriveId, document.GraphItemId);
 
-            // 4. Create Graph client using OBO (user context)
-            var graphClient = await graphFactory.ForUserAsync(context, ct);
-
-            // 5. Get driveItem metadata for file info
-            var driveItem = await graphClient.Drives[document.GraphDriveId!]
-                .Items[document.GraphItemId!]
-                .GetAsync(requestConfiguration =>
-                {
-                    requestConfiguration.QueryParameters.Select = new[] { "id", "name", "webUrl", "size", "lastModifiedDateTime" };
-                }, cancellationToken: ct);
+            // 4-5. Get driveItem metadata for file info (via SpeFileStore facade per CICD-088b)
+            var driveItem = await speFileStore.GetDriveItemAsUserAsync(
+                context, document.GraphDriveId!, document.GraphItemId!,
+                selectFields: new[] { "id", "name", "webUrl", "size", "lastModifiedDateTime" }, ct: ct);
 
             if (driveItem == null)
             {
@@ -661,25 +629,20 @@ public static class FileAccessEndpoints
             // The Preview action returns a properly authenticated URL that works in iframes
             // Note: Preview URLs are cached for 30-60 seconds by SharePoint, but this is
             // the only reliable way to get an embeddable URL for SPE containers
-            var previewRequest = new PreviewPostRequestBody
-            {
-                AdditionalData = new Dictionary<string, object>
+            var previewUrlRaw = await speFileStore.GetPreviewUrlAsUserAsync(
+                context, document.GraphDriveId!, document.GraphItemId!,
+                additionalData: new Dictionary<string, object>
                 {
                     { "chromeless", true },
                     { "viewer", "onedrive" }
-                }
-            };
-
-            var previewResponse = await graphClient.Drives[document.GraphDriveId!]
-                .Items[document.GraphItemId!]
-                .Preview
-                .PostAsync(previewRequest, cancellationToken: ct);
+                },
+                ct: ct);
 
             string viewUrl;
-            if (previewResponse != null && !string.IsNullOrEmpty(previewResponse.GetUrl))
+            if (!string.IsNullOrEmpty(previewUrlRaw))
             {
                 // Use the preview URL with nb=true (no banner)
-                viewUrl = previewResponse.GetUrl;
+                viewUrl = previewUrlRaw;
                 var separator = viewUrl.Contains('?') ? '&' : '?';
                 viewUrl = $"{viewUrl}{separator}nb=true";
                 logger.LogInformation("Using Preview action URL for embedding");

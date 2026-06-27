@@ -77,6 +77,15 @@ export enum DataverseNodeType {
   Output = 100_000_001,
   Control = 100_000_002,
   Workflow = 100_000_003,
+  // chat-routing-redesign-r1 / Phase 5R Wave 5-C (FR-52 / ADR-037): multinode
+  // Output composition. Added to sprk_nodetype OptionSet via
+  // scripts/dataverse/Add-NodeTypeChoiceOption.ps1.
+  DeliverComposite = 100_000_004,
+  // R4 task 004 hotfix (2026-06-26, FR-3 / AC-3c): distinct OptionSet value so
+  // the MDA "Node Properties" form surfaces EntityNameValidator as its own type
+  // (not categorized under Workflow). Added via
+  // scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1.
+  EntityNameValidator = 100_000_005,
 }
 
 /**
@@ -98,9 +107,11 @@ export const NodeTypeToDataverse: Record<PlaybookNodeType, DataverseNodeType> = 
   // resolver service in-process and binds the resolved IDs to OutputVariable.
   [PlaybookNodeType.LookupUserMembership]: DataverseNodeType.Workflow,
   // EntityNameValidator is a post-LLM Tool — operates purely on text + an
-  // allow-list and emits a scrubbed string. Classified as Workflow because it
-  // mutates a data value bound to OutputVariable (no scopes required).
-  [PlaybookNodeType.EntityNameValidator]: DataverseNodeType.Workflow,
+  // allow-list and emits a scrubbed string. R4 task 004 hotfix (2026-06-26):
+  // re-pointed from Workflow to its OWN distinct OptionSet value so the MDA
+  // "Node Properties" form surfaces it as its own type. See
+  // scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1.
+  [PlaybookNodeType.EntityNameValidator]: DataverseNodeType.EntityNameValidator,
 };
 
 // ---------------------------------------------------------------------------

@@ -45,11 +45,29 @@ Ask the user (use AskUserQuestion or conversation):
 5. **Does it need template parameters?** (runtime customization like `{{jurisdiction}}`)
 6. **Does it need dynamic enum values?** (`$choices` from Dataverse lookups, option sets, or downstream routing nodes)
 
+### Step 1.5: Where does this config live? (Config-Home Guard — BINDING per canonical-truth loop 2026-06-26)
+
+Before writing JPS JSON, confirm what you are putting on the Action vs the node. **Actions are reusable; per-instance wire-up belongs on the node row.** Walk the 4-Home decision tree at [`docs/architecture/ai-architecture-actions-nodes-scopes.md`](../../../docs/architecture/ai-architecture-actions-nodes-scopes.md) §4 BEFORE Step 2:
+
+| If the field is... | Home | Goes on... |
+|---|---|---|
+| Action-intrinsic (prompt, temperature, output schema, executor selector) | A | `sprk_analysisaction` columns — THIS skill creates these |
+| Identity/scheduling/capability of the playbook | B | `sprk_analysisplaybook` columns — NOT this skill |
+| Per-node runtime config (input bindings, output variable, position, executor-specific knobs) | C | `sprk_playbooknode` row / `sprk_configjson` — NOT this skill |
+| Declarative "this playbook needs Skill X" scope | D | N:N relationships — NOT this skill |
+
+If your "Action config" turns out to be Home C (per-instance wire-up), STOP — that belongs in the node's `sprk_configjson` set by the playbook designer, not in the JPS. The JPS describes WHAT the Action does intrinsically (its system prompt + output shape + scope references).
+
+**Note on `sprk_outputschemajson`**: this column exists on `sprk_analysisaction` and is read at runtime by `PlaybookExecutionEngine.cs:490` (chat-summarize FK chain) — so it IS a Home A field. JPS authors can populate it via the `output.structuredOutput: true` flag (the deploy pipeline derives the JSON Schema from `output.fields[]`).
+
 ### Step 2: Load Context
 
 ```
 LOAD knowledge files:
-  - docs/guides/JPS-AUTHORING-GUIDE.md (schema reference)
+  - docs/architecture/ai-architecture-actions-nodes-scopes.md (PRIMARY — config-home decision tree)
+  - docs/architecture/ai-architecture-playbook-runtime.md (action lookup precedence §5; outputschemajson runtime read site)
+  - docs/guides/ai-guide-playbook-deploy-recipe.md (deploy-time actionCode → FK resolution)
+  - docs/guides/JPS-AUTHORING-GUIDE.md (schema reference — trimmed to schema-only per 2026-06-26 loop)
 
 
 LOAD 2-3 example JPS files as patterns:
@@ -159,6 +177,23 @@ ACTION-NAME convention:
   - Descriptive: document-profiler, clause-analyzer, risk-detector
   - Match the Analysis Action's sprk_name field
 ```
+
+### Step 5.5: Post-Deploy Verification (BINDING per canonical-truth loop 2026-06-26)
+
+After the Action row is seeded to Dataverse via `Seed-JpsActions.ps1`, **verify with Dataverse MCP `read_query`** that the row landed with the right columns. The actionCode is the canonical alternate key — every playbook node will FK-resolve to this Action via actionCode → Guid at deploy time (see [`ai-guide-playbook-deploy-recipe.md`](../../../docs/guides/ai-guide-playbook-deploy-recipe.md) §3 step 3).
+
+```
+mcp__dataverse__read_query against sprk_analysisaction
+  filter: sprk_actioncode eq '{ACTION-CODE}'
+  select: sprk_actioncode, sprk_name, sprk_systemprompt, sprk_outputschemajson, sprk_temperature, _sprk_actiontypeid_value
+
+EXPECT exactly 1 row.
+EXPECT sprk_systemprompt non-empty (Memo column — first 200 chars sufficient).
+EXPECT sprk_outputschemajson non-empty IF structuredOutput=true in JPS.
+EXPECT _sprk_actiontypeid_value resolves to the expected sprk_actiontype row.
+```
+
+If the row is missing or missing required columns, re-run `Seed-JpsActions.ps1` — do NOT manually patch.
 
 ### Step 6: Offer Next Steps
 
