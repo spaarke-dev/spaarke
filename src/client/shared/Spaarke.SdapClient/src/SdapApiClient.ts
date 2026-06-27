@@ -78,7 +78,7 @@ export class SdapApiClient {
   /**
    * Triggers sync OBO indexing of a SPE-resident file into Azure AI Search.
    * Call after a successful upload to make the file searchable in
-   * `spaarke-file-index`.
+   * `spaarke-files-index`.
    *
    * Requires `authenticatedFetch` in the constructor config (Spaarke Auth v2).
    *

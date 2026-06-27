@@ -32,7 +32,7 @@ import { IInputs } from '../generated/ManifestTypes';
  *   `entityTypeName` (e.g. `sprk_matter`) and `entityId` (GUID). Either being
  *   missing → returns `null`, which the downstream consumers treat as "use BFF
  *   tenant default" (omit-on-empty contract per tasks 031/032).
- * @returns The Azure AI Search index name (e.g. `spaarke-knowledge-index-v2`),
+ * @returns The Azure AI Search index name (e.g. `spaarke-files-index`),
  *   or `null` if the lookup is unset, the record can't be read, or the host
  *   isn't on an entity form.
  *

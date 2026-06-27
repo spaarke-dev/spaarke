@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Phase 4 final grep verification: zero retired index names in src/ + .claude/ (FR-13 + FR-14)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>completed</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>031, 032, 033, 034, 035, 036, 037, 038, 039, 040, 041</dependencies>
+    <blocks>050</blocks>
+    <tags>verification, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification gate for Phase 4 completion; explicit grep acceptance criteria (FR-13 + FR-14)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Final grep verification for Phase 4 completion per FR-13 + FR-14: zero matches for retired index names as live string values in src/ + .claude/ (excluding archive + FAILURE-MODES.md historical).
+  </prompt>
+
+  <role>
+    Spaarke platform QA engineer.
+  </role>
+
+  <goal>
+    Zero live references to retired index names in src/ + .claude/ (excluding documented historical refs).
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/</file>
+      <file>.claude/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">grep for `spaarke-knowledge-index-v2` in src/ + .claude/ returns zero matches as live values (excluding .claude/archive/ + .claude/FAILURE-MODES.md historical AP-2)</constraint>
+    <constraint source="FR-14">grep for `spaarke-knowledge-shared`, `discovery-index` in src/ returns zero live matches</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">grep `spaarke-knowledge-index-v2` src/ — must return zero live matches</step>
+    <step order="2">grep `spaarke-knowledge-index-v2` .claude/ (excluding archive/ + FAILURE-MODES.md) — must return zero live matches</step>
+    <step order="3">grep `spaarke-knowledge-shared` src/ — must return zero live matches</step>
+    <step order="4">grep `discovery-index` src/ — must return zero live matches</step>
+    <step order="5">grep `spaarke-knowledge-index` (v1) src/ — must return zero live matches</step>
+    <step order="6">grep `spaarke-file-index` (singular) repo-wide — must return zero live matches</step>
+    <step order="7">grep `playbook-embeddings` (unprefixed) src/ — must return zero live matches</step>
+    <step order="8">grep `spaarke-invoices-dev` src/ — must return zero live matches</step>
+    <step order="9">grep `text-embedding-3-small` appsettings* — must return zero matches</step>
+    <step order="10">REMOVED 2026-06-26: DiscoveryIndexName property removal — superseded by FR-14 reframe per task 031 user decision (property is now canonical, defaults to `spaarke-discovery-index`)</step>
+    <step order="11">Document grep results in notes/phase-4-grep-evidence.md; if any non-zero, file follow-up tasks</step>
+    <step order="12">Update TASK-INDEX.md: task 046 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">All grep checks</tool>
+    <tool name="Write">Evidence file</tool>
+  </tools>
+
+  <outputs>
+    <output type="evidence">projects/spaarke-ai-azure-setup-dev-r1/notes/phase-4-grep-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 9 grep checks return zero live matches (excluding documented historical refs)</criterion>
+    <criterion testable="true">DiscoveryIndexName removal step retired per FR-14 reframe (2026-06-26 task 031 user decision); property is now canonical and defaults to `spaarke-discovery-index`</criterion>
+    <criterion testable="true">Evidence file captures grep commands + results</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

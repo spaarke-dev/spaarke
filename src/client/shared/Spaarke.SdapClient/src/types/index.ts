@@ -117,7 +117,7 @@ export type AuthenticatedFetchFn = (url: string, options?: RequestInit) => Promi
 /**
  * Parent entity context attached to indexed file chunks for entity-scoped search.
  * Mirrors the BFF's `ParentEntityContext` record so chunks are filterable by
- * parent record in `spaarke-file-index`.
+ * parent record in `spaarke-files-index`.
  */
 export interface ParentEntityContext {
   /** Logical entity name — e.g., 'sprk_matter', 'sprk_project', 'sprk_workassignment', 'sprk_event'. */

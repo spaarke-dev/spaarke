@@ -386,7 +386,24 @@ pwsh ./scripts/Deploy-RedisCache.ps1 -Environment <env> -KeyVaultName <kv-name> 
 
 See [`docs/architecture/caching-architecture.md`](../architecture/caching-architecture.md) for the design rationale (tenant-scoped keys, symmetric DI, Null-Object kill-switch) and [`docs/guides/redis-cache-azure-setup.md`](redis-cache-azure-setup.md) for the operational runbook (per-environment SKU sizing, Key Vault secret naming, cutover verification, rollback).
 
-### 4.6 Per-Customer Resources
+### 4.6 Phase 1.5: AI Search Index Schemas
+
+This phase deploys the 7 canonical Spaarke AI Search index schemas to the environment's AI Search service immediately after infrastructure provisioning (Phase 1) and before Entra ID setup (Phase 2). It is the schema-side companion to §4.5 Redis Cache: per-environment, idempotent, and safe to re-run. The unified deployer `scripts/ai-search/Deploy-AllIndexes.ps1` (catalog-driven, mirrors the validated `scripts/Deploy-RedisCache.ps1` structure) handles one-or-many indexes via `-Indexes <subset>`, native `-WhatIf`/`-Confirm` via `SupportsShouldProcess`, and a post-deploy invariant verifier that asserts vector dimension, key field, required-filterable fields, and schema property policy compliance per index. The script expects the AI Search admin key in Key Vault secret `AiSearch--AdminKey` (canonical per FR-15 of `spaarke-ai-azure-setup-dev-r1`).
+
+```powershell
+# Deploy ALL 7 canonical AI Search indexes to <env>
+pwsh -File scripts/ai-search/Deploy-AllIndexes.ps1 -Environment dev
+# Or deploy a subset
+pwsh -File scripts/ai-search/Deploy-AllIndexes.ps1 -Environment dev -Indexes files-index,records-index
+# Dry-run preview (uses -WhatIf via SupportsShouldProcess)
+pwsh -File scripts/ai-search/Deploy-AllIndexes.ps1 -Environment dev -WhatIf
+# Verify post-deploy invariants only (no re-deploy)
+pwsh -File scripts/ai-search/Deploy-AllIndexes.ps1 -Environment dev -VerifyOnly
+```
+
+See [`docs/architecture/AI-SEARCH-INDEX-CATALOG.md`](../architecture/AI-SEARCH-INDEX-CATALOG.md) for the canonical catalog of all 7 active indexes (naming convention, schema property policy, vector/embedding configuration, per-index consumer map, retired indexes appendix) and [`docs/guides/ai-search-azure-setup.md`](ai-search-azure-setup.md) for the operational runbook (prerequisites, step-by-step setup for any environment, per-index ingestion procedure, troubleshooting, post-deploy verification commands).
+
+### 4.7 Per-Customer Resources
 
 Per-customer Azure resources are created by `Provision-Customer.ps1` (§12). The Bicep template is `infrastructure/bicep/customer.bicep` and creates:
 
@@ -397,7 +414,7 @@ Per-customer Azure resources are created by `Provision-Customer.ps1` (§12). The
 | Service Bus | `sprk-{customerId}-{env}-sbus` | |
 | ~~Redis Cache~~ | ~~`sprk-{customerId}-{env}-redis`~~ | **DEPRECATED** per R1 FR-12 / Q-E Architecture 1. Use the platform Redis `spaarke-bff-redis-{env}` provisioned via `Deploy-RedisCache.ps1`. `Provision-Customer.ps1` no longer creates per-customer Redis; `customer.bicep` still has a `modules/redis.bicep` call (line 181) that will be removed in a follow-up. |
 
-### 4.7 Verify Platform
+### 4.8 Verify Platform
 
 ```powershell
 az group show --name rg-spaarke-platform-prod --query "{name:name, location:location}" -o table
@@ -405,7 +422,7 @@ az webapp show -g rg-spaarke-platform-prod -n spaarke-bff-prod --query "{state:s
 az keyvault show --name sprk-platform-prod-kv --query "{name:name, location:location}" -o table
 ```
 
-### 4.8 Increase Dataverse Max Upload Size
+### 4.9 Increase Dataverse Max Upload Size
 
 **[AI]** Before importing Dataverse solutions, increase max upload file size to 32MB (default 5MB is too small for PCF control bundles):
 
@@ -1986,6 +2003,7 @@ All scripts are in the `scripts/` directory:
 |--------|---------|----------------|
 | `Deploy-Platform.ps1` | Deploy shared platform Bicep | `-EnvironmentName`, `-WhatIf` |
 | `Deploy-RedisCache.ps1` | Provision per-environment Redis (`spaarke-bff-redis-{env}`), upsert KV secret, optionally cut BFF App Settings over to KV references | `-Environment`, `-KeyVaultName`, `-CutoverBffSettings`, `-VerifyOnly`, `-WhatIf`, `-Force` (required for prod/demo per NFR-05). Location: `scripts/Deploy-RedisCache.ps1`. |
+| `Deploy-AllIndexes.ps1` | Unified catalog-driven deployer for ALL 7 canonical Spaarke AI Search indexes (Phase 1.5 — §4.6). Idempotent; per-index post-deploy invariant verifier (vector dim, key field, required-filterable fields, schema property policy). Reads admin key from KV secret `AiSearch--AdminKey`. Replaces all retired per-index deploy scripts per FR-07 of `spaarke-ai-azure-setup-dev-r1`. | `-Environment` (dev/staging/prod/demo), `-Indexes <subset>` (defaults to all 7), `-WhatIf` (via `SupportsShouldProcess`), `-DryRun`, `-VerifyOnly`, `-CutoverBffSettings`, `-Force` (required for prod/demo per NFR-05). Lifecycle: ACTIVE. Last-used: 2026-06-26. Location: `scripts/ai-search/Deploy-AllIndexes.ps1`. Cross-links: [`docs/architecture/AI-SEARCH-INDEX-CATALOG.md`](../architecture/AI-SEARCH-INDEX-CATALOG.md), [`docs/guides/ai-search-azure-setup.md`](ai-search-azure-setup.md). |
 | `Deploy-BffApi.ps1` | Deploy BFF API with zero-downtime | `-Environment`, `-UseSlotDeploy`, `-SkipBuild` |
 | `Deploy-DataverseSolutions.ps1` | Import 10 managed solutions in order | `-EnvironmentUrl`, `-TenantId`, `-ClientId`, `-ClientSecret`, `-SolutionPath` |
 | `Register-EntraAppRegistrations.ps1` | Create Entra ID app registrations | `-DryRun`, `-SkipBffApi`, `-SkipDataverseS2S` |

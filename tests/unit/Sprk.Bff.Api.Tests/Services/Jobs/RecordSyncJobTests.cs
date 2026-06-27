@@ -40,7 +40,7 @@ public class RecordSyncJobTests
     {
         Enabled = true,
         IntervalMinutes = 30,
-        AiSearchEndpoint = "https://spaarke-search-dev.search.windows.net",
+        AiSearchEndpoint = "https://test.search.windows.net",
         AiSearchApiKey = "test-key",
         DataverseEnvironmentUrl = "https://spaarkedev1.crm.dynamics.com",
     };

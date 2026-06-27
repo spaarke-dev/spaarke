@@ -1,12 +1,14 @@
 {
-  "name": "playbook-embeddings",
+  "name": "spaarke-playbook-embeddings",
   "fields": [
     {
+      "// override-sortable-facetable": "key field: Azure forbids sortable/facetable on the key",
       "name": "id",
       "type": "Edm.String",
       "key": true,
       "searchable": false,
-      "filterable": false,
+      "filterable": true,
+      "retrievable": true,
       "sortable": false,
       "facetable": false
     },
@@ -15,38 +17,41 @@
       "type": "Edm.String",
       "searchable": false,
       "filterable": true,
-      "sortable": false,
-      "facetable": false,
-      "retrievable": true
+      "retrievable": true,
+      "sortable": true,
+      "facetable": true
     },
     {
+      "// searchable=true": "text-content field (playbook display name) used for full-text query; sortable/facetable=true per policy",
       "name": "playbookName",
       "type": "Edm.String",
       "searchable": true,
-      "filterable": false,
-      "sortable": true,
-      "facetable": false,
+      "filterable": true,
       "retrievable": true,
+      "sortable": true,
+      "facetable": true,
       "analyzer": "standard.lucene"
     },
     {
+      "// searchable=true": "long-form description text used for full-text query; sortable/facetable=false: long-text fields cannot be sort/facet keys",
       "name": "description",
       "type": "Edm.String",
       "searchable": true,
       "filterable": false,
+      "retrievable": true,
       "sortable": false,
       "facetable": false,
-      "retrievable": true,
       "analyzer": "standard.lucene"
     },
     {
+      "// override-sortable": "Collection(Edm.String): Azure forbids sortable on collections; searchable=true: trigger phrases are full-text dispatch keys",
       "name": "triggerPhrases",
       "type": "Collection(Edm.String)",
       "searchable": true,
-      "filterable": false,
-      "sortable": false,
-      "facetable": false,
+      "filterable": true,
       "retrievable": true,
+      "sortable": false,
+      "facetable": true,
       "analyzer": "standard.lucene"
     },
     {
@@ -54,44 +59,49 @@
       "type": "Edm.String",
       "searchable": false,
       "filterable": true,
-      "sortable": false,
-      "facetable": true,
-      "retrievable": true
+      "retrievable": true,
+      "sortable": true,
+      "facetable": true
     },
     {
       "name": "entityType",
       "type": "Edm.String",
       "searchable": false,
       "filterable": true,
-      "sortable": false,
-      "facetable": true,
-      "retrievable": true
+      "retrievable": true,
+      "sortable": true,
+      "facetable": true
     },
     {
+      "// override-sortable": "Collection(Edm.String): Azure forbids sortable on collections; searchable=true: tags are short text content acceptable for full-text query",
       "name": "tags",
       "type": "Collection(Edm.String)",
       "searchable": true,
       "filterable": true,
+      "retrievable": true,
       "sortable": false,
       "facetable": true,
-      "retrievable": true,
       "analyzer": "keyword"
     },
     {
+      "// override-sortable": "Collection(Edm.String): Azure forbids sortable on collections; searchable=true: documentTypes are short categorical text",
       "name": "documentTypes",
       "type": "Collection(Edm.String)",
       "searchable": true,
       "filterable": true,
+      "retrievable": true,
       "sortable": false,
       "facetable": true,
-      "retrievable": true,
       "analyzer": "keyword"
     },
     {
+      "// vector-field": "3072-dim HNSW cosine; retrievable=false (vector payload is heavy, excluded from $select); stored=true retains for reranking; searchable=true enables vector search",
       "name": "contentVector3072",
       "type": "Collection(Edm.Single)",
       "searchable": true,
       "filterable": false,
+      "retrievable": false,
+      "stored": true,
       "sortable": false,
       "facetable": false,
       "dimensions": 3072,

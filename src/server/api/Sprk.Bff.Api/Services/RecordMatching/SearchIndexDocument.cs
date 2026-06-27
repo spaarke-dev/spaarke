@@ -19,6 +19,13 @@ public class SearchIndexDocument
     public string Id { get; set; } = string.Empty;
 
     /// <summary>
+    /// Azure AD tenant ID (the user's home tenant) — enforces tenant isolation at the index level (FR-12).
+    /// </summary>
+    [SimpleField(IsFilterable = true, IsSortable = true, IsFacetable = true)]
+    [JsonPropertyName("tenantId")]
+    public string TenantId { get; set; } = string.Empty;
+
+    /// <summary>
     /// Dataverse entity logical name (e.g., "sprk_matter", "sprk_project", "sprk_invoice").
     /// </summary>
     [SimpleField(IsFilterable = true, IsSortable = true, IsFacetable = true)]
