@@ -1,6 +1,6 @@
 # Current Task State
 
-> **Last Updated**: 2026-06-26 22:00 (by context-handoff)
+> **Last Updated**: 2026-06-26 22:25 (post-stale-zip diagnosis + clean redeploy)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,9 +10,20 @@
 | Field | Value |
 |-------|-------|
 | **Task** | R4 UAT in spaarkedev1 — `/narrate` end-to-end verification |
-| **Step** | UAT iteration 3 of N: 3 control-flow executors now live; **awaiting user retest** |
+| **Step** | UAT iteration 4: stale-zip deploy caught + clean rebuild + clean redeploy from `HEAD` (`09f5b24c1`); **awaiting user retest** |
 | **Status** | UAT in-progress; R4 PR #456 already merged to master; post-merge UAT fixes ongoing on `work/spaarke-daily-update-service-r4` |
 | **Next Action** | User hard-refreshes Daily Briefing widget + retries `/narrate`. If 503, share new console error — should now be at AI nodes (GenerateTldr/GenerateChannelNarratives) or Action row config, not at control-flow nodes. If success → R4 graduates end-to-end. |
+
+### UAT iteration 4 diagnosis (2026-06-26 22:25)
+
+User retested `/narrate` and got the SAME `Node 'Start' failed: Validation failed: Condition expression is required` error. Investigation:
+
+- Dispatch ladder was correct (`PlaybookOrchestrationService.cs:1316-1331` — `configActionType ?? IsDeployedStartNode(node) ?? ...`); deployed Start row had `sprk_actionid=null`, name="Start", `inputContract` in ConfigJson — matchers should fire.
+- Healthz returned 200; build at `deploy/api-publish-controlflow/` was current (DLL=9,868,288 bytes, built 17:55 EDT).
+- **Smoking gun**: `deploy/api-publish.zip` (created 17:56 EDT, last in the deploy history at 22:08 UTC) contained the OLD DLL `9,848,320 bytes` from 14:28 EDT — pre-`d9c648e30` (Start) and pre-`06be7c0e6` (LoadKnowledge + ReturnResponse). The "controlflow" zip was deployed earlier (21:55-21:58 UTC) but the 22:08 UTC deploy REGRESSED it by pushing the stale `api-publish.zip`.
+- **Fix**: clean `dotnet publish` → `deploy/api-publish-controlflow-v2/` (DLL=9,868,288 bytes, 18:21 EDT) → `PowerShell Compress-Archive` → `api-publish-controlflow-v2.zip` → `az webapp deploy` to `spaarke-bff-dev`. Result: `status: RuntimeSuccessful`, healthz 200.
+
+**Lesson learned (filed in [zip-naming-collision section] in current-task)**: never have multiple sibling zips with overlapping-but-stale folder mounts; always tag the deploy zip with the commit SHA or use a single canonical `api-publish/` folder rebuilt fresh per deploy.
 
 ### Files Modified This Session (latest commits only)
 
