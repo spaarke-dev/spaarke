@@ -151,10 +151,11 @@ module kvAccess 'modules/keyvault-secrets.bicep' = {
 
 // ---------------------------------------------------------------------
 // 5. spaarke-insights-index — created/updated on existing search service
-//     Schema loaded from schemas/spaarke-insights-index.index.json so
-//     the canonical shape lives in source control.
+//     Schema loaded from infrastructure/ai-search/spaarke-insights-index.json
+//     (consolidated location per spaarke-ai-azure-setup-dev-r1 FR-11; was
+//     schemas/spaarke-insights-index.index.json pre-2026-06-26).
 // ---------------------------------------------------------------------
-var insightsIndexSchema = loadJsonContent('schemas/spaarke-insights-index.index.json')
+var insightsIndexSchema = loadJsonContent('../../infrastructure/ai-search/spaarke-insights-index.json')
 
 module searchIndex 'modules/search-index.bicep' = {
   name: 'mod-search-index'

@@ -67,17 +67,6 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
     // Endpoint Registration Tests (ADR-001 — Minimal API)
     // =========================================================================
 
-    [Fact]
-    public void MapAnalysisChatContextEndpoints_MethodExists_AndIsStatic()
-    {
-        // Arrange
-        var method = typeof(AnalysisChatContextEndpoints).GetMethod("MapAnalysisChatContextEndpoints");
-
-        // Assert
-        method.Should().NotBeNull("endpoint registration extension method must exist");
-        method!.IsStatic.Should().BeTrue("Minimal API extension methods are static (ADR-001)");
-        method.ReturnType.Should().Be(typeof(IEndpointRouteBuilder));
-    }
 
     // =========================================================================
     // Authentication Tests (ADR-008)

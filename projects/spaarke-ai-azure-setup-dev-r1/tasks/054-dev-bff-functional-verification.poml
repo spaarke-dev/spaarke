@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Dev BFF functional verification: 5 endpoints (FR-19)</title>
+    <phase>5: Deploy + Validate</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>050, 051, 052</dependencies>
+    <blocks>090</blocks>
+    <tags>bff-api, integration-test, verification, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>End-to-end functional verification of refactored BFF against deployed indexes</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify dev BFF (spaarke-bff-dev) functional per FR-19: 5 endpoints return real (non-error, non-empty where data exists) results.
+    Deploy refactored BFF first if needed (via bff-deploy skill).
+  </prompt>
+
+  <role>
+    Spaarke platform QA + deployment engineer.
+  </role>
+
+  <goal>
+    `/healthz` returns Healthy; 4 AI endpoints return real results; playbook dispatch routes correctly.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-19">All 5 endpoint checks must pass</constraint>
+    <constraint source="NFR-05">Do NOT target prod/demo BFF</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Deploy refactored BFF to spaarke-bff-dev via bff-deploy skill (if not already)</step>
+    <step order="2">curl https://spaarke-bff-dev.azurewebsites.net/healthz — must return Healthy 200</step>
+    <step order="3">POST /api/ai/search with scope=entity — must return records (uses spaarke-records-index)</step>
+    <step order="4">POST /api/ai/rag/query — must return chunks (uses spaarke-files-index or spaarke-rag-references)</step>
+    <step order="5">POST /api/ai/insights/search — must return insights (uses spaarke-insights-index)</step>
+    <step order="6">Trigger playbook dispatch — must route correctly (uses spaarke-playbook-embeddings)</step>
+    <step order="7">Document evidence in notes/phase-5-functional-verification.md</step>
+    <step order="8">Update TASK-INDEX.md: task 054 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="curl">HTTP endpoint checks</tool>
+    <tool name="bff-deploy">Deploy refactored BFF (if needed)</tool>
+  </tools>
+
+  <outputs>
+    <output type="evidence">projects/spaarke-ai-azure-setup-dev-r1/notes/phase-5-functional-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">/healthz returns Healthy 200</criterion>
+    <criterion testable="true">/api/ai/search returns records</criterion>
+    <criterion testable="true">/api/ai/rag/query returns chunks</criterion>
+    <criterion testable="true">/api/ai/insights/search returns insights</criterion>
+    <criterion testable="true">Playbook dispatch routes correctly</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

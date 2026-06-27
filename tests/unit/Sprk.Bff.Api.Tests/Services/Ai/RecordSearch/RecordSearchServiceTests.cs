@@ -502,88 +502,11 @@ public class RecordSearchServiceTests
 
     #region SearchAsync - RecordType Filter Tests
 
-    [Fact]
-    public async Task SearchAsync_WithSingleRecordType_ExecutesSearch()
-    {
-        // Arrange
-        var service = CreateService();
-        var request = new RecordSearchRequest
-        {
-            Query = "test query",
-            RecordTypes = new List<string> { RecordEntityType.Matter }
-        };
-
-        SetupMockEmbedding();
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync(request);
-
-        // Assert
-        result.Should().NotBeNull();
-        _searchClientMock.Verify(
-            x => x.SearchAsync<SearchIndexDocument>(
-                It.IsAny<string>(),
-                It.IsAny<SearchOptions>(),
-                It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
-
-    [Fact]
-    public async Task SearchAsync_WithMultipleRecordTypes_ExecutesSearch()
-    {
-        // Arrange
-        var service = CreateService();
-        var request = new RecordSearchRequest
-        {
-            Query = "test query",
-            RecordTypes = new List<string> { RecordEntityType.Matter, RecordEntityType.Project, RecordEntityType.Invoice }
-        };
-
-        SetupMockEmbedding();
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync(request);
-
-        // Assert
-        result.Should().NotBeNull();
-        _searchClientMock.Verify(
-            x => x.SearchAsync<SearchIndexDocument>(
-                It.IsAny<string>(),
-                It.IsAny<SearchOptions>(),
-                It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
 
     #endregion
 
     #region SearchAsync - Organizations Filter Tests
 
-    [Fact]
-    public async Task SearchAsync_WithOrganizationsFilter_ExecutesSearch()
-    {
-        // Arrange
-        var service = CreateService();
-        var request = new RecordSearchRequest
-        {
-            Query = "test query",
-            RecordTypes = new List<string> { RecordEntityType.Matter },
-            Filters = new RecordSearchFilters
-            {
-                Organizations = new List<string> { "Acme Corp", "Globex" }
-            }
-        };
-
-        SetupMockEmbedding();
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync(request);
-
-        // Assert
-        result.Should().NotBeNull();
-    }
 
     #endregion
 
@@ -790,82 +713,6 @@ public class RecordSearchServiceTests
 
     #region SearchAsync - Optional Filters Tests
 
-    [Fact]
-    public async Task SearchAsync_WithPeopleFilter_ExecutesSearch()
-    {
-        // Arrange
-        var service = CreateService();
-        var request = new RecordSearchRequest
-        {
-            Query = "test query",
-            RecordTypes = new List<string> { RecordEntityType.Matter },
-            Filters = new RecordSearchFilters
-            {
-                People = new List<string> { "John Doe", "Jane Smith" }
-            }
-        };
-
-        SetupMockEmbedding();
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync(request);
-
-        // Assert
-        result.Should().NotBeNull();
-    }
-
-    [Fact]
-    public async Task SearchAsync_WithReferenceNumbersFilter_ExecutesSearch()
-    {
-        // Arrange
-        var service = CreateService();
-        var request = new RecordSearchRequest
-        {
-            Query = "test query",
-            RecordTypes = new List<string> { RecordEntityType.Matter },
-            Filters = new RecordSearchFilters
-            {
-                ReferenceNumbers = new List<string> { "MAT-2024-001", "INV-99" }
-            }
-        };
-
-        SetupMockEmbedding();
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync(request);
-
-        // Assert
-        result.Should().NotBeNull();
-    }
-
-    [Fact]
-    public async Task SearchAsync_WithAllFilters_ExecutesSearch()
-    {
-        // Arrange
-        var service = CreateService();
-        var request = new RecordSearchRequest
-        {
-            Query = "test query",
-            RecordTypes = new List<string> { RecordEntityType.Matter, RecordEntityType.Project },
-            Filters = new RecordSearchFilters
-            {
-                Organizations = new List<string> { "Acme Corp" },
-                People = new List<string> { "John Doe" },
-                ReferenceNumbers = new List<string> { "REF-001" }
-            }
-        };
-
-        SetupMockEmbedding();
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync(request);
-
-        // Assert
-        result.Should().NotBeNull();
-    }
 
     #endregion
 

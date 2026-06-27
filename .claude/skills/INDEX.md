@@ -54,6 +54,7 @@
 | [project-pipeline](project-pipeline/SKILL.md) | **🚀 RECOMMENDED**: Full automated pipeline SPEC.md → ready tasks + branch | No | `/project-pipeline`, "start project" |
 | [project-setup](project-setup/SKILL.md) | Generate project artifacts (README, PLAN, CLAUDE.md) only | No | `/project-setup`, "create artifacts" |
 | [repo-cleanup](repo-cleanup/SKILL.md) | Repository hygiene audit and ephemeral file cleanup | No | `/repo-cleanup`, "clean up repo" |
+| [test-diet](test-diet/SKILL.md) | Project-close test reconciliation — classifies tests touched during the project as scaffolding (delete) vs maintain (keep) per ADR-038 §7 (17-ban B1-B17). Read-only: emits `git rm`/`git mv` commands for reviewer judgment. **Binding** for every project's 090 wrap-up per spec FR-B09. | No | `/test-diet`, "test diet", "project close test review", "reconcile build vs maintain tests" |
 | [spaarke-conventions](spaarke-conventions/SKILL.md) | Coding standards and naming conventions | **Yes** | Auto-applied |
 | [task-create](task-create/SKILL.md) | Decompose plan.md into POML task files | No | `/task-create`, "create tasks" |
 | [task-execute](task-execute/SKILL.md) | Execute POML task with mandatory knowledge loading | No | "execute task", "run task", "work on task" |

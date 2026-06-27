@@ -81,6 +81,12 @@ public sealed class RecordSearchDocument
     [JsonPropertyName("id")]
     public string Id { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Azure AD tenant ID (the user's home tenant) — enforces tenant isolation at the index level (FR-12).
+    /// </summary>
+    [JsonPropertyName("tenantId")]
+    public string TenantId { get; set; } = string.Empty;
+
     [JsonPropertyName("recordType")]
     public string RecordType { get; set; } = string.Empty;
 
@@ -381,9 +387,15 @@ public class RecordSyncJob : BackgroundService
             .Select(r => r.GetProperty("modifiedon").GetDateTimeOffset())
             .Max();
 
+        // FR-12: resolve tenantId once per entity batch from Azure AD tenant context.
+        // The BFF runs against a single Azure AD tenant; AzureAd:TenantId is the canonical
+        // source for background services with no user context (matches the pattern used by
+        // Email, Workers/Office, Communication services).
+        var tenantId = _configuration["AzureAd:TenantId"] ?? string.Empty;
+
         // Transform all records to search documents.
         var documents = records
-            .Select(r => MapToSearchDocument(r, entity))
+            .Select(r => MapToSearchDocument(r, entity, tenantId))
             .ToList();
 
         // Push in batches of AiSearchBatchSize, respecting cancellation between batches.
@@ -493,7 +505,7 @@ public class RecordSyncJob : BackgroundService
     // Field mapping — Dataverse record → AI Search document
     // ─────────────────────────────────────────────────────────────────────────
 
-    public static RecordSearchDocument MapToSearchDocument(JsonElement record, EntityConfig entity)
+    public static RecordSearchDocument MapToSearchDocument(JsonElement record, EntityConfig entity, string tenantId = "")
     {
         var recordId = GetString(record, entity.IdField);
         var recordName = GetString(record, entity.NameField);
@@ -519,6 +531,7 @@ public class RecordSyncJob : BackgroundService
         return new RecordSearchDocument
         {
             Id = $"{entity.EntityLogicalName}_{recordId}",
+            TenantId = tenantId,  // FR-12: populated from Azure AD tenant context
             RecordType = entity.EntityLogicalName,
             RecordName = recordName,
             RecordDescription = desc,

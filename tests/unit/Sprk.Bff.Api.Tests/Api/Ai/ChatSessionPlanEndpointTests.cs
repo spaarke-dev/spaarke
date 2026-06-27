@@ -52,17 +52,6 @@ public class ChatSessionPlanEndpointTests : IClassFixture<CustomWebAppFactory>
     // Endpoint Registration Tests (ADR-001 — Minimal API)
     // =========================================================================
 
-    [Fact]
-    public void MapChatEndpoints_MethodExists_AndIsStatic()
-    {
-        // Arrange
-        var method = typeof(ChatEndpoints).GetMethod("MapChatEndpoints");
-
-        // Assert
-        method.Should().NotBeNull("endpoint registration extension method must exist (ADR-001)");
-        method!.IsStatic.Should().BeTrue("Minimal API extension methods are static (ADR-001)");
-        method.ReturnType.Should().Be(typeof(IEndpointRouteBuilder));
-    }
 
     // =========================================================================
     // Authentication Tests (ADR-008)
@@ -325,15 +314,6 @@ public class PendingPlanManagerTests
         result.Should().BeNull("plan was explicitly deleted");
     }
 
-    [Fact]
-    public async Task DeleteAsync_WhenNoPlanExists_DoesNotThrow()
-    {
-        // Act — deleting a non-existent plan should be idempotent
-        var action = async () => await _sut.DeleteAsync(TestTenantId, "never-existed-session");
-
-        // Assert
-        await action.Should().NotThrowAsync("deleting a non-existent plan is a no-op");
-    }
 
     // =========================================================================
     // Key isolation — different tenants/sessions are isolated

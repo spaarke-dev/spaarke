@@ -103,15 +103,208 @@ Tests authored elsewhere are anti-pattern by construction. If a planned test doe
 
 ---
 
-## Banned Antipatterns (5)
+## Banned Antipatterns (17 — extended 2026-06-26 per spec FR-B08)
 
-These wiring-test patterns generated the ~7,900-test suite that gave 0 signal on the 2026-06-25 Daily Briefing 9-bug cascade. **DO NOT write new tests of these shapes. Existing instances WILL be removed in Phase 2 task 053.**
+The original 5 (B1-B5) attack wiring antipatterns; the 12 new bans (B6-B17) attack the deeper scaffolding-class debt — tests written during development to drive design or lift coverage % rather than to protect regressions. Industry framing: Beck "delete the scaffolding", Feathers characterization-vs-behavior, Google test-sizes, DHH less-tests. **DO NOT write new tests of these shapes.** Existing instances were partially removed in Phase 2 task 053 (9 files, 179 tests); the full sweep happens in Phase 2.5 tasks CICD-083..085 targeting BFF unit test count ≤3,500.
+
+### B1-B5 — Wiring antipatterns
 
 1. ❌ `Mock<HttpMessageHandler>` — transport-level mock; encodes wire format; breaks on refactors. Use a real test double via `WebApplicationFactory` boundary instead.
 2. ❌ `Mock<IServiceClient>` (or other typed HttpClient wrappers) when they hide the same antipattern.
 3. ❌ **DI-registration tests** — `Assert.NotNull(services.GetRequiredService<X>())`. DI wiring is verified by the app starting; tests assert behavior.
 4. ❌ **Constructor null-argument tests** — `Assert.Throws<ArgumentNullException>(() => new X(null))`. Use `ArgumentNullException.ThrowIfNull(x)` in production code; do not test it.
 5. ❌ **Mocking the class-under-test's own collaborators** when an in-memory test double + real integration boundary is cheaper and more honest.
+
+### B6-B17 — Scaffolding-class debt
+
+#### B6. Mirror tests — test method 1:1 with production method
+
+```csharp
+// ❌ BAD
+[Fact]
+public void GetName_ReturnsName()
+{
+    var sut = new UserDto { Name = "Alice" };
+    sut.GetName().Should().Be("Alice");  // tests `=> Name;`
+}
+// ✅ GOOD — test the behavior the field participates in
+[Fact]
+public async Task GetUserByEmail_WhenFound_ReturnsCanonicalCase()
+{
+    var user = await client.GetFromJsonAsync<UserResponse>("/api/users?email=alice@x.com");
+    user.Name.Should().Be("Alice Smith");  // tests case-canonicalization
+}
+```
+
+#### B7. All-mocks + trivial assertion — every collaborator mocked, ≤2 assertions, often `Verify.Once()`
+
+```csharp
+// ❌ BAD
+var a = new Mock<IA>(); var b = new Mock<IB>(); var c = new Mock<IC>();
+var sut = new Processor(a.Object, b.Object, c.Object);
+await sut.ProcessAsync();
+a.Verify(x => x.DoAsync(), Times.Once);  // tests interaction shape
+b.Verify(x => x.DoAsync(), Times.Once);
+// ✅ GOOD — integration test against real collaborators (or delete entirely)
+var response = await client.PostAsJsonAsync("/api/orders", validOrder);
+response.StatusCode.Should().Be(HttpStatusCode.Created);
+(await db.Orders.FindAsync(orderId)).Status.Should().Be(OrderStatus.Confirmed);
+```
+
+#### B8. Internal/private method tests via `[InternalsVisibleTo]` or reflection
+
+```csharp
+// ❌ BAD
+var method = typeof(FileUploader).GetMethod("NormalizeFilename",
+    BindingFlags.NonPublic | BindingFlags.Instance);
+method.Invoke(new FileUploader(), new object[] { "fileé.pdf" }).Should().Be("file_.pdf");
+// ✅ GOOD — test through the public surface
+var response = await client.PostAsync("/api/files", multipartWithUnicodeName);
+(await db.Files.OrderByDescending(f => f.Id).FirstAsync()).NormalizedName.Should().NotContain("é");
+```
+
+#### B9. Pass-through wrapper tests — methods that delegate `=> _service.DoIt(x)`
+
+```csharp
+// ❌ BAD
+var repo = new Mock<IUserRepository>();
+repo.Setup(r => r.GetById("1")).Returns(new User());
+new UserFacade(repo.Object).GetUser("1");
+repo.Verify(r => r.GetById("1"), Times.Once);  // tests one line
+// ✅ GOOD — delete; OR test the aggregation if wrapper adds value
+var user = await sut.GetUserAsync("1", tenantId: "t1");
+user.TenantId.Should().Be("t1");  // aggregation, not delegation
+```
+
+#### B10. Coverage-fillers — assertions like `NotThrow()` / `NotNull()` added to push coverage %
+
+```csharp
+// ❌ BAD
+[Theory] [InlineData(1)] [InlineData(2)] [InlineData(3)]
+public void Add_AnyInteger_DoesNotThrow(int x) =>
+    (() => new Calculator().Add(x, x)).Should().NotThrow();
+// ✅ GOOD — assert the result
+[Theory] [InlineData(1, 1, 2)] [InlineData(2, 3, 5)]
+public void Add_GivenInputs_ReturnsSum(int a, int b, int expected) =>
+    new Calculator().Add(a, b).Should().Be(expected);
+```
+
+#### B11. Language-feature redundancy — tests of `required`, record equality, exhaustive switch
+
+```csharp
+// ❌ BAD — tests the compiler
+(() => new Document()).Should().Throw<InvalidOperationException>();  // 'required' enforced at init
+new Point(1, 2).Should().Be(new Point(1, 2));  // records get Equals/GetHashCode free
+// ✅ GOOD — test the dependent semantic
+sut.Add(new LineItem("A", 10));
+sut.Add(new LineItem("A", 10));
+sut.LineItems.Should().HaveCount(1);  // dedup, not equality
+```
+
+#### B12. Snapshot tests of trivial output — JSON round-trip, default `ToString()`, default `Equals`
+
+```csharp
+// ❌ BAD — tests System.Text.Json
+JsonSerializer.Serialize(new Person { Name = "Alice", Age = 30 })
+    .Should().Be("""{"Name":"Alice","Age":30}""");
+// ✅ GOOD — test the contract through the framework
+using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+doc.RootElement.GetProperty("name").GetString().Should().Be("Alice");
+```
+
+#### B13. Test names without scenario+expected — violate `{Method}_{Scenario}_{ExpectedResult}` convention
+
+```csharp
+// ❌ BAD
+[Fact] public void Test1() { ... }
+[Fact] public void Foo_Works() { ... }
+[Fact] public void DoIt_Bug417() { ... }  // bug numbers belong in regression file names
+// ✅ GOOD
+[Fact] public async Task GetDocument_WhenNotFound_ReturnsNotFound() { ... }
+[Fact] public async Task UploadFile_WhenSizeExceedsLimit_Returns413PayloadTooLarge() { ... }
+```
+
+#### B14. Exhaustive-switch / sealed-hierarchy coverage tests — C# 12 compiler enforces exhaustiveness
+
+```csharp
+// ❌ BAD
+[Theory] [InlineData(OrderStatus.Pending)] [InlineData(OrderStatus.Shipped)] [InlineData(OrderStatus.Delivered)]
+public void Process_AnyStatus_DoesNotThrowSwitchException(OrderStatus s) =>
+    (() => sut.Process(s)).Should().NotThrow();
+// ✅ GOOD — per-branch behavior
+[Theory] [InlineData(OrderStatus.Pending, "queued")] [InlineData(OrderStatus.Shipped, "in-transit")]
+public void StatusToShippingLabel_GivenStatus_ReturnsExpectedLabel(OrderStatus s, string expected) =>
+    sut.ToShippingLabel(s).Should().Be(expected);
+```
+
+#### B15. Setup-to-assertion ratio > 10:1 — 50+ lines of mock setup with 1-2 trivial assertions
+
+```csharp
+// ❌ BAD — 60 lines of mock setup, 1 weak assertion
+var mock1 = new Mock<IA>(); mock1.Setup(...).Returns(...);
+var mock2 = new Mock<IB>(); mock2.Setup(...).Returns(...);
+// ... 50 more lines ...
+(await sut.ProcessAsync(order)).Should().NotBeNull();
+// ✅ GOOD — integration test, setup amortized in WebApplicationFactory
+var response = await client.PostAsJsonAsync("/api/orders", validOrder);
+response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+(await db.Orders.FindAsync(orderId)).Status.Should().Be(OrderStatus.Confirmed);
+```
+
+#### B16. Pure getter/setter/auto-property tests — C# guarantees the round-trip
+
+```csharp
+// ❌ BAD
+var sut = new Document();
+sut.Name = "test.pdf";
+sut.Name.Should().Be("test.pdf");  // tests `{ get; set; }`
+// ✅ GOOD — delete; OR test the validation if any
+var sut = new User();
+(() => sut.Email = "not-an-email").Should().Throw<ArgumentException>();
+```
+
+#### B17. Generated-code field-by-field tests — record equality, AutoMapper profiles, EF projections
+
+```csharp
+// ❌ BAD — tests the AutoMapper profile generator
+var dto = mapper.Map<UserDto>(user);
+dto.Id.Should().Be(user.Id);
+dto.Name.Should().Be(user.Name);
+dto.Email.Should().Be(user.Email);
+// ✅ GOOD — single config-validity assertion + behavior tests on output shape
+[Fact] public void MapperConfiguration_IsValid() =>
+    mapper.ConfigurationProvider.AssertConfigurationIsValid();
+[Fact] public async Task GetUserDto_InPublicContext_StripsPii()
+{
+    var dto = await client.GetFromJsonAsync<UserDto>("/api/users/1?context=public");
+    dto.Email.Should().BeNull();  // public context strips PII — actual behavior
+}
+```
+
+---
+
+## Expect to Defend at Project Close
+
+**Every test you write today, expect to defend at project close.** If it can't be defended as integrate/maintain class — that is, a regression-protector, a contract-anchor, or a business-logic-with-branches test under one of the 6 KEEP paths — it gets deleted in the `/test-diet` pass at the project's `090-wrapup-*` task (added by spec FR-B09 / task CICD-081).
+
+The build-vs-maintain distinction:
+
+| Class | Half-life | Purpose | KEEP path? |
+|---|---|---|---|
+| **Build-class** | days/weeks (the project) | Drive design, validate construction, satisfy coverage % | NO — deleted in diet pass |
+| **Maintain-class** | months/years | Protect against regression, anchor a contract, exercise branched business logic | YES — lives in one of the 6 KEEP paths |
+
+When authoring a test, ask three questions:
+
+1. **What production behavior would break if this test were deleted?** If you can't name a concrete behavior, it's build-class — the test exists for design or coverage, not protection.
+2. **Does this test live under one of the 6 KEEP paths?** If not, the test is the wrong shape — re-scope to a KEEP path or escalate to an ADR amendment.
+3. **Is the assertion in this test about behavior the caller would notice, or about implementation the caller can't see?** If the latter, it's scaffolding by ADR-038 §7 definition.
+
+A test that survives all three questions is maintain-class — author it, name it per `{Method}_{Scenario}_{ExpectedResult}`, place it at the right KEEP path, and trust it to defend itself at project close.
+
+A test that fails any question is build-class. **Either fix the test now (rescope, rename, restructure) or accept that the `/test-diet` pass will delete it.**
+
+This is the cultural reset codified by ADR-038 §7 (binding ≥6 months from 2026-06-26) and enforced by `/test-diet` (added by task CICD-081) at every project's wrap-up.
 
 ---
 

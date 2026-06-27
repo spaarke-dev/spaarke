@@ -14,11 +14,12 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
-| **Urgency** | next-round |
+| **Status** | Superseded — 2026-06-26 |
+| **Urgency** | (closed) |
 | **Filed** | 2026-06-25 (migrated 2026-06-26) |
 | **Source** | spec.md FR-22 — explicitly deferred from R1; user-confirmed during Phase 3 cutover |
-| **GitHub Issue** | [#462](https://github.com/spaarke-dev/spaarke/issues/462) |
+| **GitHub Issue** | [#462](https://github.com/spaarke-dev/spaarke/issues/462) — kept open, addressed in R2 Theme B |
+| **Supersession rationale** | Project owner decision (2026-06-26): not worth +$485/mo for ACR Premium SKU to eliminate key rotation alone, AND Managed Redis (which has all-tier Entra ID) is also rejected (see DEF-005). Instead, R2 Theme B builds automation for the rotation procedure — same operational outcome (rotation happens reliably) without infra cost. Closes the GitHub Issue when R2 Theme B ships. |
 
 **Description**
 
@@ -146,11 +147,13 @@ Triage list against secrets that are intentionally plain-text (non-sensitive con
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
-| **Urgency** | next-round |
+| **Status** | Closed (Won't Fix) — 2026-06-26 |
+| **Urgency** | (closed) |
 | **Filed** | 2026-06-26 (during Phase 3 cutover) |
 | **Source** | User question during Phase 3 dev cutover (architectural review) |
-| **GitHub Issue** | [#466](https://github.com/spaarke-dev/spaarke/issues/466) |
+| **GitHub Issue** | [#466 (closed)](https://github.com/spaarke-dev/spaarke/issues/466) |
+| **Decision record** | [`projects/spaarke-redis-cache-remediation-r2/notes/managed-redis-decision.md`](../../spaarke-redis-cache-remediation-r2/notes/managed-redis-decision.md) |
+| **Closure rationale** | Managed Redis is an enterprise/high-throughput solution; Spaarke is below the scale where its differentiating features (RediSearch vector / RedisJSON / Bloom / active-active geo-rep) pay off. The strongest operational draw was Entra ID auth (DEF-001), but R2 Theme B (key rotation automation) solves the same root problem without the migration cost. Conditions that would trigger a revisit are documented in the decision record. |
 
 **Description**
 

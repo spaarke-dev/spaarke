@@ -911,4 +911,93 @@ public class DriveItemOperations
             throw;
         }
     }
+
+    // =========================================================================
+    // OBO-context methods for FileAccessEndpoints (CICD-088b — ADR-007 §1)
+    //
+    // Each returns the URL/stream/summary FileAccessEndpoints needs WITHOUT
+    // exposing the Graph SDK request-builder fluent API or DriveItem DTO to
+    // callers. The Microsoft.Graph types stay inside this file.
+    //
+    // Added 2026-06-26 by ci-cd-unit-test-remediation-r1 task CICD-088b.
+    // =========================================================================
+
+    /// <summary>
+    /// Posts an OBO-authenticated preview request to Graph and returns the resulting
+    /// preview URL. The caller-supplied <paramref name="additionalData"/> is forwarded
+    /// to <c>PreviewPostRequestBody.AdditionalData</c> (e.g., <c>chromeless: true</c>,
+    /// <c>viewer: "onedrive"</c>).
+    /// </summary>
+    public async Task<string?> GetPreviewUrlAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        IDictionary<string, object>? additionalData = null,
+        CancellationToken ct = default)
+    {
+        var graphClient = await _factory.ForUserAsync(ctx, ct);
+
+        var previewRequest = new Microsoft.Graph.Drives.Item.Items.Item.Preview.PreviewPostRequestBody
+        {
+            AdditionalData = additionalData ?? new Dictionary<string, object>()
+        };
+
+        var previewResponse = await graphClient.Drives[driveId]
+            .Items[itemId]
+            .Preview
+            .PostAsync(previewRequest, cancellationToken: ct);
+
+        return previewResponse?.GetUrl;
+    }
+
+    /// <summary>
+    /// Retrieves drive-item metadata via OBO context, projecting the Graph DTO into
+    /// a Spaarke-domain <see cref="SpeDriveItemSummary"/> record (no Graph SDK types
+    /// returned to the caller).
+    /// </summary>
+    public async Task<SpeDriveItemSummary?> GetDriveItemAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        IEnumerable<string>? selectFields = null,
+        CancellationToken ct = default)
+    {
+        var graphClient = await _factory.ForUserAsync(ctx, ct);
+
+        // Default select covers everything FileAccessEndpoints currently consumes.
+        var fields = (selectFields ?? new[] { "id", "name", "size", "webUrl", "webDavUrl", "file", "parentReference", "lastModifiedDateTime", "createdDateTime" }).ToArray();
+
+        var item = await graphClient.Drives[driveId]
+            .Items[itemId]
+            .GetAsync(req =>
+            {
+                req.QueryParameters.Select = fields;
+            }, cancellationToken: ct);
+
+        if (item is null) return null;
+
+        return new SpeDriveItemSummary(
+            Id: item.Id ?? string.Empty,
+            Name: item.Name ?? string.Empty,
+            Size: item.Size,
+            WebUrl: item.WebUrl,
+            WebDavUrl: item.WebDavUrl,
+            MimeType: item.File?.MimeType,
+            ParentReferencePath: item.ParentReference?.Path,
+            LastModifiedDateTime: item.LastModifiedDateTime,
+            CreatedDateTime: item.CreatedDateTime);
+    }
+
+    /// <summary>
+    /// Downloads file content via OBO context. Equivalent to
+    /// <see cref="DownloadFileAsUserAsync"/> but kept as a distinct member for
+    /// symmetry with the other CICD-088b OBO helpers consumed by
+    /// <c>FileAccessEndpoints.GetContent</c>.
+    /// </summary>
+    public Task<Stream?> GetContentStreamAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => DownloadFileAsUserAsync(ctx, driveId, itemId, ct);
 }

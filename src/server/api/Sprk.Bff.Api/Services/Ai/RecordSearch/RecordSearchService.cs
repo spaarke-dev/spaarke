@@ -35,8 +35,11 @@ namespace Sprk.Bff.Api.Services.Ai.RecordSearch;
 /// The index currently has no contentVector populated, so vector search degrades gracefully.
 /// </para>
 /// <para>
-/// Important: The spaarke-records-index does NOT have a tenantId field for tenant isolation.
-/// This differs from the knowledge-index. Security is enforced at the Dataverse layer.
+/// Per FR-12 (spaarke-ai-azure-setup-dev-r1): the spaarke-records-index now has a tenantId
+/// field and this service applies an unconditional <c>tenantId eq '...'</c> OData filter
+/// (derived from the user's 'tid' claim via <see cref="IHttpContextAccessor"/>) so cross-tenant
+/// record leaks are impossible at the search layer. The existing Dataverse-layer enforcement
+/// remains as defense-in-depth.
 /// </para>
 /// </remarks>
 public sealed class RecordSearchService : IRecordSearchService
@@ -81,10 +84,11 @@ public sealed class RecordSearchService : IRecordSearchService
     private static readonly string[] SearchFields =
         ["recordName", "recordDescription", "keywords", "organizations", "people"];
 
-    // Fields to select from index results (all non-vector fields)
+    // Fields to select from index results (all non-vector fields).
+    // FR-12: tenantId included so retrievable=true is honored end-to-end (useful for audit/diagnostics).
     private static readonly string[] SelectFields =
     [
-        "id", "recordType", "recordName", "recordDescription",
+        "id", "tenantId", "recordType", "recordName", "recordDescription",
         "organizations", "people", "referenceNumbers", "keywords",
         "lastModified", "dataverseRecordId", "dataverseEntityName"
     ];
@@ -226,8 +230,10 @@ public sealed class RecordSearchService : IRecordSearchService
                 searchClient = _searchIndexClient.GetSearchClient(indexName);
             }
 
-            // Step 4: Build OData filter
-            var filter = BuildRecordFilter(request);
+            // Step 4: Build OData filter (FR-12: tenantId predicate ALWAYS present —
+            // never bypassed even when SearchIndexName is supplied. tenantIdForCache is
+            // resolved above from the user's 'tid' claim; reuse it here as the source-of-truth.)
+            var filter = BuildRecordFilter(request, tenantIdForCache);
 
             // Step 5: Build search options
             searchStopwatch.Start();
@@ -312,11 +318,19 @@ public sealed class RecordSearchService : IRecordSearchService
 
     /// <summary>
     /// Builds OData filter for record search.
-    /// Always includes recordType filter; optionally adds organizations, people, referenceNumbers.
+    /// Always includes tenantId + recordType filters; optionally adds organizations, people, referenceNumbers.
     /// </summary>
-    private static string BuildRecordFilter(RecordSearchRequest request)
+    /// <remarks>
+    /// FR-12: tenantId predicate is ALWAYS first and unconditional — mirrors the
+    /// <see cref="Sprk.Bff.Api.Services.Ai.SemanticSearch.SearchFilterBuilder"/> pattern and
+    /// matches ADR-014 tenant-isolation invariant used by knowledge/files/session indexes.
+    /// </remarks>
+    private static string BuildRecordFilter(RecordSearchRequest request, string tenantId)
     {
         var filterParts = new List<string>();
+
+        // 0. tenantId filter (ALWAYS first, ALWAYS present — FR-12)
+        filterParts.Add($"tenantId eq '{EscapeODataValue(tenantId)}'");
 
         // 1. RecordType filter (ALWAYS required — at least one recordType)
         if (request.RecordTypes.Count == 1)

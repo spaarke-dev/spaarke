@@ -5,7 +5,7 @@
 > **Status**: Verified
 
 ## When
-Use when adding or modifying any code path that writes documents to `spaarke-knowledge-index-v2` — new upload surfaces, "Send to Index" variants, background indexing jobs, bulk re-indexers, or analysis result chunkers.
+Use when adding or modifying any code path that writes documents to `spaarke-files-index` (or its 1024-token sibling `spaarke-discovery-index`) — new upload surfaces, "Send to Index" variants, background indexing jobs, bulk re-indexers, or analysis result chunkers.
 
 ## Read These Files (in order)
 1. `src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs` — the three entry points (`/api/ai/rag/index-file`, `/api/ai/rag/send-to-index`, `/api/ai/rag/enqueue-indexing`) and the FileIndexRequest contract they expect.
@@ -26,7 +26,7 @@ Use when adding or modifying any code path that writes documents to `spaarke-kno
 - **MUST pass `parentEntity` (entityType / entityId / entityName)** when the document is scoped to a matter / project / invoice. `entityType` is the short form (`matter`, not `sprk_matter`) — strip the `sprk_` prefix.
 - **MUST treat a 200 response with `ChunksIndexed=0` as failure**. The BFF guard now returns `Success=false` in this case, but clients should not assume `response.ok` means "indexed."
 - **MUST log non-2xx response status and body** on the client. Fire-and-forget patterns that swallow errors hide regressions for months — see [`.claude/FAILURE-MODES.md`](../../FAILURE-MODES.md) AP-2.
-- **MUST NOT filter on `privilege_group_ids`** in dev environment queries — the field on the live dev `spaarke-knowledge-index-v2` was created with `filterable: false` and rejects filter expressions. New environments should deploy the schema from `infrastructure/ai-search/spaarke-knowledge-index-v2.json` (which declares it correctly) so the filter works there.
+- **MUST deploy via `scripts/ai-search/Deploy-AllIndexes.ps1`** (FR-07 canonical deployer) against the canonical schemas `infrastructure/ai-search/spaarke-files-index.json` + `spaarke-discovery-index.json` — these declare `privilege_group_ids` with `filterable: true` so the privilege filter in `RagService.cs` works correctly. The retired `spaarke-knowledge-index-v2` field-flag legacy issue (CRITICAL #1 in `.claude/FAILURE-MODES.md` historical AP-2) is resolved structurally by the canonical schemas + the Deploy-AllIndexes post-deploy invariant verifier (NFR-02) which asserts canonical field flags per AI-SEARCH-INDEX-CATALOG.md §4.
 
 ## Observability
 On every batch write, `RagService` logs (Information level):

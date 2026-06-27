@@ -1,0 +1,61 @@
+{
+  "name": "spaarke-discovery-index",
+  "fields": [
+    { "// override-sortable-facetable": "key field: Azure forbids sortable/facetable on the key", "name": "id",                  "type": "Edm.String",                "key": true,  "retrievable": true,  "filterable": true,  "searchable": false, "sortable": false, "facetable": false },
+    { "name": "tenantId",            "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
+    { "name": "deploymentId",        "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
+    { "name": "deploymentModel",     "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
+    { "name": "knowledgeSourceId",   "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
+    { "// searchable=true": "text-content field (knowledge source display name) used for full-text query", "name": "knowledgeSourceName", "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": true,  "sortable": true,  "facetable": true,  "analyzer": "standard.lucene" },
+    { "name": "documentId",          "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
+    { "name": "speFileId",           "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
+    { "// searchable=true": "text-content field (document display name) used for full-text query", "name": "documentName",        "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": true,  "sortable": true,  "facetable": true,  "analyzer": "standard.lucene" },
+    { "// searchable=true": "text-content field (file name) used for full-text query", "name": "fileName",            "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": true,  "sortable": true,  "facetable": true,  "analyzer": "standard.lucene" },
+    { "name": "documentType",        "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
+    { "name": "fileType",            "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
+    { "name": "chunkIndex",          "type": "Edm.Int32",                 "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
+    { "name": "chunkCount",          "type": "Edm.Int32",                 "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
+    { "// searchable=true": "long-form content text (1024-token chunks per RagIndexingPipeline DiscoveryChunkingOptions — 2x larger than spaarke-files-index for broader-context RAG retrieval); sortable/facetable=false: long-text fields cannot be sort/facet keys", "name": "content",             "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": false, "searchable": true,  "sortable": false, "facetable": false, "analyzer": "standard.lucene" },
+    { "// vector-field": "3072-dim HNSW cosine; retrievable=false (vector payload is heavy, excluded from $select); stored=true retains for reranking; searchable=true enables vector search", "name": "contentVector3072",   "type": "Collection(Edm.Single)",    "key": false, "retrievable": false, "stored": true,  "filterable": false, "searchable": true,  "sortable": false, "facetable": false, "dimensions": 3072, "vectorSearchProfile": "discovery-vector-profile-3072" },
+    { "// vector-field": "3072-dim HNSW cosine; retrievable=false (vector payload is heavy, excluded from $select); stored=true retains for reranking; searchable=true enables vector search", "name": "documentVector3072",  "type": "Collection(Edm.Single)",    "key": false, "retrievable": false, "stored": true,  "filterable": false, "searchable": true,  "sortable": false, "facetable": false, "dimensions": 3072, "vectorSearchProfile": "discovery-vector-profile-3072" },
+    { "// override-filter-sort-facet": "opaque JSON metadata blob — not meaningful to filter/sort/facet; retrievable for client-side parsing", "name": "metadata",            "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": false, "searchable": false, "sortable": false, "facetable": false },
+    { "// override-sortable": "Collection(Edm.String): Azure forbids sortable on collections; searchable=true: tags are short text content acceptable for full-text query", "name": "tags",                "type": "Collection(Edm.String)",    "key": false, "retrievable": true,  "filterable": true,  "searchable": true,  "sortable": false, "facetable": true  },
+    { "// override-facetable": "datetime faceting is rarely useful (per catalog policy table)", "name": "createdAt",           "type": "Edm.DateTimeOffset",        "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": false },
+    { "// override-facetable": "datetime faceting is rarely useful (per catalog policy table)", "name": "updatedAt",           "type": "Edm.DateTimeOffset",        "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": false },
+    { "// searchable=true": "parent entity type may be queried by name in semantic/full-text scenarios", "name": "parentEntityType",    "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": true,  "sortable": true,  "facetable": true  },
+    { "name": "parentEntityId",      "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
+    { "// searchable=true": "parent entity display name acceptable for full-text query", "name": "parentEntityname",    "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": true,  "sortable": true,  "facetable": true  },
+    { "// override-sortable": "Collection(Edm.String): Azure forbids sortable on collections", "name": "privilege_group_ids", "type": "Collection(Edm.String)",    "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": false, "facetable": true  },
+    { "name": "containerId",         "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  },
+    { "// override-facetable": "datetime faceting is rarely useful (per catalog policy table)", "name": "lastModified",        "type": "Edm.DateTimeOffset",        "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": false },
+    { "name": "sourceSystem",        "type": "Edm.String",                "key": false, "retrievable": true,  "filterable": true,  "searchable": false, "sortable": true,  "facetable": true  }
+  ],
+  "vectorSearch": {
+    "algorithms": [
+      {
+        "name": "hnsw-discovery-3072",
+        "kind": "hnsw",
+        "hnswParameters": { "m": 4, "efConstruction": 400, "efSearch": 500, "metric": "cosine" }
+      }
+    ],
+    "profiles": [
+      { "name": "discovery-vector-profile-3072", "algorithm": "hnsw-discovery-3072" }
+    ]
+  },
+  "semantic": {
+    "configurations": [
+      {
+        "name": "discovery-semantic-config",
+        "prioritizedFields": {
+          "titleField": { "fieldName": "documentName" },
+          "prioritizedContentFields": [ { "fieldName": "content" } ],
+          "prioritizedKeywordsFields": [ { "fieldName": "tags" } ]
+        }
+      }
+    ]
+  },
+  "corsOptions": {
+    "allowedOrigins": [ "*" ],
+    "maxAgeInSeconds": 300
+  }
+}

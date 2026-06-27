@@ -43,6 +43,15 @@ export interface PromptSchemaValidation {
     // + outputVariable are required; roles + includeRelated are optional.
     | 'lookup-user-membership-missing-entity-type'
     | 'lookup-user-membership-missing-output-variable'
+    // R4 hotfix #2 (2026-06-26): EntityNameValidator required-field rules.
+    // Mirrors server EntityNameValidatorNodeExecutor (ActionType=141) contract —
+    // candidateText + allowList + outputVariable are required; scrubStrategy is
+    // optional (defaults to 'sentence'). Without these the executor would
+    // silently no-op or fail at runtime; surfacing as 'error' blocks save via
+    // the existing hasValidationErrors() consumer in playbookNodeSync.ts.
+    | 'entity-name-validator-missing-candidate-text'
+    | 'entity-name-validator-missing-allow-list'
+    | 'entity-name-validator-missing-output-variable'
     // R3 P9 H2 (task 091): safety-net for duplicate OutputVariable names across
     // nodes. The primary defense is the rename-guard dialog in
     // NodePropertiesForm/Dialog; this rule catches the case where a user
@@ -193,6 +202,12 @@ export function validatePromptSchemaNodes(nodes: Node<PlaybookNodeData>[], edges
   for (const node of nodes) {
     if (node.data.type === 'lookupUserMembership') {
       results.push(...validateLookupUserMembershipNode(node.id, node));
+    }
+    // R4 hotfix #2 (2026-06-26): EntityNameValidator per-ActionType config
+    // validation. Required fields: candidateText + allowList (in configJson)
+    // and outputVariable (on node.data). Mirrors LookupUserMembership pattern.
+    if (node.data.type === 'entityNameValidator') {
+      results.push(...validateEntityNameValidatorNode(node.id, node));
     }
   }
 
@@ -568,6 +583,81 @@ function validateLookupUserMembershipNode(nodeId: string, node: Node<PlaybookNod
       rule: 'lookup-user-membership-missing-output-variable',
       message:
         'Lookup User Membership: Output Variable is required so downstream nodes can reference the resolved user IDs.',
+    });
+  }
+
+  return results;
+}
+
+/**
+ * R4 hotfix #2 (2026-06-26): Validate an EntityNameValidator node's config.
+ *
+ * Mirrors the server-side EntityNameValidatorNodeExecutor (ActionType=141)
+ * contract:
+ *   - candidateText (string, required) — template expression resolving to the
+ *     LLM-emitted text to scrub
+ *   - allowList (string, required) — template expression resolving to the
+ *     string[] of permitted entity names
+ *   - scrubStrategy (string, optional, default 'sentence') — 'sentence' | 'phrase'
+ *   - outputVariable (string, required) — canvas variable bound to scrubbed text
+ *
+ * Missing required fields produce 'error' severity which blocks playbook save
+ * via the existing hasValidationErrors() consumer in playbookNodeSync.ts.
+ *
+ * Pattern peer: validateLookupUserMembershipNode (R3 task 043). The form
+ * (EntityNameValidatorForm.tsx) already marks these fields visually with the
+ * Fluent `required` Label prop — this validator enforces the contract at save.
+ */
+function validateEntityNameValidatorNode(nodeId: string, node: Node<PlaybookNodeData>): PromptSchemaValidation[] {
+  const results: PromptSchemaValidation[] = [];
+
+  // Parse configJson defensively (matches EntityNameValidatorForm.parseConfig).
+  let candidateText = '';
+  let allowList = '';
+  const configJsonStr = node.data.configJson;
+  if (typeof configJsonStr === 'string' && configJsonStr.length > 0) {
+    try {
+      const parsed = JSON.parse(configJsonStr) as { candidateText?: unknown; allowList?: unknown };
+      if (typeof parsed.candidateText === 'string') {
+        candidateText = parsed.candidateText;
+      }
+      if (typeof parsed.allowList === 'string') {
+        allowList = parsed.allowList;
+      }
+    } catch {
+      // Malformed configJson — treat both fields as missing; rules below fire.
+    }
+  }
+
+  if (candidateText.trim() === '') {
+    results.push({
+      nodeId,
+      severity: 'error',
+      rule: 'entity-name-validator-missing-candidate-text',
+      message: 'Entity Name Validator: Candidate text source binding is required (e.g. {{narrate.output.result}}).',
+    });
+  }
+
+  if (allowList.trim() === '') {
+    results.push({
+      nodeId,
+      severity: 'error',
+      rule: 'entity-name-validator-missing-allow-list',
+      message: 'Entity Name Validator: Allow-list source binding is required (string[] of permitted entity names).',
+    });
+  }
+
+  // outputVariable lives on node.data (shared Basic-section field, NOT in
+  // configJson — the EntityNameValidatorForm authored a redundant copy that
+  // the server contract does not consume).
+  const outputVariable = typeof node.data.outputVariable === 'string' ? node.data.outputVariable.trim() : '';
+  if (outputVariable === '') {
+    results.push({
+      nodeId,
+      severity: 'error',
+      rule: 'entity-name-validator-missing-output-variable',
+      message:
+        'Entity Name Validator: Output Variable is required so downstream nodes can reference the scrubbed text.',
     });
   }
 
