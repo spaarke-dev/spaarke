@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Migrate Membership services to ITenantCache</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>013</blocks>
+    <tags>bff-api, cache, redis, refactoring, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + auth + .cs modifications</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Atomic migration ordering</parallel-reason>
+  </metadata>
+  <prompt>Migrate `Services/Ai/Membership/*` direct `IDistributedCache.` calls. `MembershipCacheInvalidator` + `MembershipCacheInvalidationSubscriber` use Pub/Sub via `IConnectionMultiplexer` — preserve. Any `IDistributedCache.` reads/writes migrate to `ITenantCache`.</prompt>
+  <role>Spaarke .NET developer with Pub/Sub semantics familiarity.</role>
+  <goal>`grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/Services/Ai/Membership/` returns ZERO unflagged matches; Pub/Sub via `IConnectionMultiplexer` preserved.</goal>
+  <context>
+    <background>Membership cache pub/sub uses `IConnectionMultiplexer` directly (not `IDistributedCache`) — that pattern is preserved. Only data-fetch via `IDistributedCache` migrates.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Membership/</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-06 atomic migration.</constraint>
+    <constraint source="ADR-032">Preserve Pub/Sub via `IConnectionMultiplexer`; `NullConnectionMultiplexer` no-op semantics in dev-in-memory mode.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/ITenantCache.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Open inventory Membership section.</step>
+    <step order="2">For each `IDistributedCache.` site: migrate to `ITenantCache` with `resource="membership"` or appropriate name.</step>
+    <step order="3">Confirm `IConnectionMultiplexer.GetSubscriber()` usage is unchanged.</step>
+    <step order="4">Run `dotnet build` + `dotnet test` (membership tests).</step>
+    <step order="5">Update inventory checkboxes.</step>
+    <step order="6">Update `TASK-INDEX.md` + `current-task.md`.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Inventory + call sites</tool>
+    <tool name="Edit">Per-file migration</tool>
+    <tool name="Bash">dotnet build + test</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/* (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/Services/Ai/Membership/` returns ZERO unflagged matches.</criterion>
+    <criterion testable="true">`IConnectionMultiplexer.GetSubscriber()` usage preserved (not migrated).</criterion>
+    <criterion testable="true">`dotnet test` membership tests pass.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor.</protocol>
+  </execution>
+</task>

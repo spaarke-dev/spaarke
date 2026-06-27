@@ -1,0 +1,53 @@
+<task id="CICD-090" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Wrap-up: README → Complete, lessons-learned.md, /repo-cleanup invocation</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>Wrap-up</phase>
+    <stream>all</stream>
+    <rigor-level>MINIMAL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>076, 077</dependencies>
+    <tags>wrap-up, lessons-learned, cleanup, project-completion</tags>
+  </metadata>
+
+  <prompt>
+    Final task. Update README.md status to Complete; write `notes/lessons-learned.md` covering what worked, what didn't, what to do differently; invoke `/repo-cleanup` skill to clean ephemeral files.
+  </prompt>
+
+  <role>Project lead doing post-project wrap-up.</role>
+
+  <goal>Project officially Complete; lessons captured for next project; ephemeral files cleaned.</goal>
+
+  <inputs>
+    <file purpose="README">projects/ci-cd-unit-test-remediation-r1/README.md</file>
+    <file purpose="all-task-poml">projects/ci-cd-unit-test-remediation-r1/tasks/*.poml (completed status)</file>
+    <file purpose="all-notes">projects/ci-cd-unit-test-remediation-r1/notes/*</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="convention">Lessons-learned must be honest — what went better OR worse than design predicted.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Verify all tasks complete (check TASK-INDEX.md — all ✅)</step>
+    <step order="2">Update README.md: Status → Complete; Progress → 100%; Completed Date → current; add a changelog entry</step>
+    <step order="3">Write `notes/lessons-learned.md` with sections: What worked (autonomous mode, sliced deletion sequencing, etc.), What didn't (whatever surfaced), What to do differently next time, Specific deltas vs design.md predictions (e.g., did 28-day estimate hold? did deletion distribution match estimate? did flake rate improve as predicted?), Recommendations for future CI/test work</step>
+    <step order="4">Invoke `/repo-cleanup` skill — cleans transient files like `notes/test-inventory.csv` per FR-B05 (transient), retains permanent artifacts</step>
+    <step order="5">Commit final wrap-up (title: "chore(ci-cd-unit-test-remediation-r1): project complete — wrap-up + lessons-learned + cleanup")</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/ci-cd-unit-test-remediation-r1/README.md (status: Complete)</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/lessons-learned.md</output>
+    <output type="cleanup">repo-cleanup skill execution (transient notes removed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README.md status = Complete</criterion>
+    <criterion testable="true">lessons-learned.md exists with all sections</criterion>
+    <criterion testable="true">All tasks in TASK-INDEX.md show ✅</criterion>
+    <criterion testable="true">Transient files cleaned (test-inventory.csv removed; permanent baseline-metrics.md retained)</criterion>
+  </acceptance-criteria>
+</task>

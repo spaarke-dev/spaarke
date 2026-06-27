@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Project wrap-up — code-review + adr-check + repo-cleanup + status + lessons-learned</title>
+    <phase>Phase8: Wrap-Up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>062, 063</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final quality gates (code-review + adr-check) + repo cleanup + lessons-learned authoring</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task; sequential</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Final project closure. Run code-review + adr-check across all project code, fix critical issues, then repo-cleanup. Update README + plan status to Complete. Author `notes/lessons-learned.md` covering both R1 retrospective (R1 lacked one — gap fill) and R2 learnings. Update plan.md milestones to ✅.
+  </prompt>
+
+  <role>SPAARKE platform developer + reviewer. Expert in code-review skill, adr-check skill, and lessons-learned authoring.</role>
+
+  <goal>Project state: Complete. All code-review + adr-check issues resolved. Cleanup done. Lessons-learned documented.</goal>
+
+  <context>
+    <background>
+      Per task-create Step 3.7 (mandatory wrap-up). Also closes the gap that R1 had no `lessons-learned.md`.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r2/README.md</file>
+      <file>projects/spaarke-daily-update-service-r2/plan.md</file>
+      <file>projects/spaarke-daily-update-service-r2/notes/lessons-learned.md</file>
+      <file>projects/spaarke-daily-update-service/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Spec NFR-07: FULL rigor; code-review + adr-check at Step 9.5.</constraint>
+    <constraint source="project">CLAUDE.md §10: confirm publish-size + CVE final report.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Invoke `/code-review` on the project — identify remaining issues; fix critical ones in a follow-up commit.</step>
+    <step order="2">Invoke `/adr-check` — validate ADR compliance across all changed code; fix any violations.</step>
+    <step order="3">Invoke `/repo-cleanup projects/spaarke-daily-update-service-r2` — audit + clean ephemeral files; archive `notes/handoffs/` to `.archive/`.</step>
+    <step order="4">Update README: Status → Complete; Last Updated → today; Progress → 100%; Completed Date set; check off all 14 graduation criteria; add Changelog entry.</step>
+    <step order="5">Update plan.md: Status → Complete; all milestones → ✅.</step>
+    <step order="6">Author `notes/lessons-learned.md` covering:</step>
+    <step order="7">  • R1 retrospective (gap fill — what R1 producer-layer shipped, why it was solid, missing pieces consumer-side that R2 had to fix)</step>
+    <step order="8">  • R2 learnings (Pattern D dual-use migration pattern; effect-based hook coordination; AI-output validation as defense in depth; toasttype-conditional `data.actions[]`)</step>
+    <step order="9">  • Anti-patterns avoided (didn't extend `@spaarke/ui-components`; didn't keep monolithic `useNotificationData`)</step>
+    <step order="10">  • Surprises/gotchas (anything unexpected during implementation)</step>
+    <step order="11">Verify all task files marked ✅ in TASK-INDEX.md.</step>
+    <step order="12">Update TASK-INDEX.md: change task 090 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run code-review + adr-check + repo-cleanup skills.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-daily-update-service-r2/README.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r2/plan.md</output>
+    <output type="docs">projects/spaarke-daily-update-service-r2/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">README + plan statuses set to Complete.</criterion>
+    <criterion testable="true">All 14 graduation criteria checked off.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists covering R1 + R2.</criterion>
+    <criterion testable="true">code-review + adr-check critical issues resolved.</criterion>
+    <criterion testable="true">repo-cleanup completed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    R1 lessons-learned gap is intentionally addressed here — it's the closest opportunity to capture R1's producer-layer learnings before they fade. Reference the predecessor project explicitly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

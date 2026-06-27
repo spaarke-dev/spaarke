@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Deploy Phase 3 to dev (BFF API + Deploy-Playbook script)</title>
+    <phase>3: WP3 Destination Metadata Wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>052,053</dependencies>
+    <blocks>055</blocks>
+    <tags>deploy, bff-api, azure, ADR-029</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deploy operation invoking bff-deploy skill; no source modification; STANDARD per Step 0.5</rigor-reason>
+    <parallel-group>3-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy Phase 3 BFF API changes to the dev environment: extended `NodeRoutingConfig` (Both enum + converter), extended `DispatchResult` (NodeDestination + WidgetType), populated `PlaybookDispatcher`, and 4 new `PlaybookOutputHandler` cases (Workspace + Both + FormPrefill + SideEffect). Verify Deploy-Playbook.ps1 validation gate works against a fixture playbook. Measure publish-size delta vs Phase 2 baseline.
+  </prompt>
+
+  <role>SPAARKE deployment engineer. Expert in `bff-deploy` skill + Azure App Service deploy.</role>
+
+  <goal>
+    Phase 3 BFF deployed to dev. Smoke test: dispatch `summarize-document-for-workspace` returns `NodeDestination = Workspace` from the live BFF; SSE stream shows `workspace.tab_open` event from the handler path (not implicit-streaming). Publish-size delta + cumulative reported.
+  </goal>
+
+  <context>
+    <background>
+      Phase 3 deploy gate. All Phase 3 implementation tasks (045-053) ✅. Per ADR-029, publish-size measurement mandatory. Phase 3 changes are additive (no schema changes); deploy is BFF-only.
+    </background>
+    <relevant-files>
+      <file>scripts/Deploy-BFF.ps1</file>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement + cumulative reporting.</constraint>
+    <constraint source="project">Use `bff-deploy` skill (not raw script).</constraint>
+    <constraint source="project">Smoke test must hit the live dev BFF — not local environment.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify all dependency tasks ✅ (045 through 053).</step>
+    <step order="2">Build + publish BFF: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed output.</step>
+    <step order="3">Compare against Phase 2 baseline (recorded in task 039 notes); report delta + cumulative size.</step>
+    <step order="4">Verify no new HIGH-severity CVE: `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="5">Invoke `bff-deploy` skill to deploy to dev App Service.</step>
+    <step order="6">Smoke test: dispatch `summarize-document-for-workspace` (POST chat message in dev) → confirm SSE event stream includes `workspace.tab_open` (proves handler-path; not implicit-streaming).</step>
+    <step order="7">Smoke test: dispatch chat-summarize playbook → confirm `NodeDestination = Chat` (default; FR-14f backward compat preserved).</step>
+    <step order="8">Validation gate dry-run: run Deploy-Playbook.ps1 (task 052) against a fixture playbook with malformed configJson → confirm abort.</step>
+    <step order="9">Capture deployment notes in `notes/handoffs/054-phase-3-deploy.md`.</step>
+    <step order="10">Update TASK-INDEX.md: task 054 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">bff-deploy</tool>
+    <tool name="Bash">dotnet publish; CVE scan; smoke test; pwsh script run</tool>
+    <tool name="Write">deployment notes</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment">BFF API deployed to dev App Service (Phase 3 surface)</output>
+    <output type="docs">notes/handoffs/054-phase-3-deploy.md — size delta + smoke results + validation-gate dry-run</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF App Service health endpoint returns 200 post-deploy.</criterion>
+    <criterion testable="true">BFF publish-size delta within NFR-01 thresholds (cumulative ≤55 MB triggers architecture review; ≥60 MB HARD STOP).</criterion>
+    <criterion testable="true">Smoke: `summarize-document-for-workspace` dispatch emits `workspace.tab_open` SSE from handler path.</criterion>
+    <criterion testable="true">Smoke: chat-summarize playbook dispatch returns Chat default (FR-14f).</criterion>
+    <criterion testable="true">Deploy-Playbook.ps1 validation gate (task 052) aborts on malformed configJson.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

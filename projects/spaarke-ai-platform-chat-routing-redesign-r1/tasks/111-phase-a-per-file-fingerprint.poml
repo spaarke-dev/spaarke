@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="111" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Phase A — per-file fingerprint (filename tokens + content type + textLength + sha256)</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>110</dependencies>
+    <blocks>112</blocks>
+    <tags>bff-api, services, ai, performance</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'ai'; modifies hot-path `PlaybookDispatcher.cs`; performance budget binding (FR-16); FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same `PlaybookDispatcher.cs` file as task 110; sequential within wave 5-A despite both being in 5-A grouping.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Implement Phase A of WP2 Hybrid C file-aware classification: per-file in-memory fingerprint computed in parallel across attachments. For each `ChatMessageAttachment`, compute `FileFingerprint { filenameTokens, contentType, textLength, textPrefix (first 2000 chars), sha256 }`. Per FR-16, total parallel runtime must be ≤50ms total (≤5ms per file). Pure CPU; no external calls.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer with performance-engineering focus. Expert in .NET Task.WhenAll patterns + lightweight hashing.</role>
+
+  <goal>
+    `PlaybookDispatcher` has a Phase A fingerprint computation step: for each attachment, builds a `FileFingerprint` record (filenameTokens via tokenize-lowercase, contentType pass-through, textLength, textPrefix.Substring(0, 2000), sha256(filename + ":" + textPrefix)). Parallel via `Task.WhenAll`. Benchmark test asserts ≤5ms per file and ≤25ms for 5 files.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-16 + design §1.2 Phase A. Pure CPU phase — no external calls. Discriminative content for legal docs lives in the first ~2000 chars (title block, parties, contract type, recitals); embedding-side latency is flat up to 8K tokens (provider batches), so 2000-char prefix captures discriminator without bloating downstream embedding. Per FR-16 strict budget: ≤5ms per file in isolation; ≤25ms for 5 files in parallel (Task.WhenAll over CPU). This task adds the fingerprint scaffold; Phase B vector match (task 112) consumes the fingerprints.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatMessageAttachment.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Chat/FileFingerprint.cs (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-16">Total parallel runtime ≤50ms total; ≤5ms per file; benchmark asserts.</constraint>
+    <constraint source="ADR-013">Stays in `Services/Ai/` boundary.</constraint>
+    <constraint source="ADR-015">Tier-1 logging — log filenameHash + fileCount + computeDurationMs; NEVER log filenames, content, or textPrefix contents.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="design §1.2 Phase A">2000-char prefix — discriminative content lives in first page; do NOT change without empirical validation.</constraint>
+    <constraint source="project">Pure CPU — NO embedding calls, NO LLM calls in Phase A. Those are Phase B/C.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author `Models/Ai/Chat/FileFingerprint.cs` — record with fields `filenameTokens : IReadOnlyList&lt;string&gt;`, `contentType : string`, `textLength : int`, `textPrefix : string`, `filenameHash : string`.</step>
+    <step order="2">In `PlaybookDispatcher.cs`, when attachments are non-empty, before existing match logic, call `ComputeFingerprintsAsync(attachments, ct)` which fans out per-file fingerprint via `Task.WhenAll`. Per file: tokenize lowercase filename, capture contentType, textLength, take Substring(0, Math.Min(2000, textContent.Length)), compute sha256(filename + ":" + textPrefix) → hex.</step>
+    <step order="3">Tokenize implementation: split on `[\W_]+` regex, drop empties, lowercase. Return `IReadOnlyList&lt;string&gt;`.</step>
+    <step order="4">SHA-256 implementation: `System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes($"{filename}:{textPrefix}"))` → hex.</step>
+    <step order="5">Emit ADR-015 tier-1 telemetry: log `(fileCount, durationMs, filenameHashes)` — NEVER filenames, never textPrefix content.</step>
+    <step order="6">Add unit benchmark test in `PlaybookDispatcherTests.cs` — 5 attachments with 100KB text each; assert total elapsed ≤25ms (BenchmarkDotNet not required; `Stopwatch` + assert is sufficient). 1 attachment with 200KB → ≤5ms.</step>
+    <step order="7">Run `dotnet build` + `dotnet test`. All pass.</step>
+    <step order="8">Measure BFF publish size; report delta.</step>
+    <step order="9">code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="10">Update TASK-INDEX.md: task 111 → ✅; current-task.md → ready for 112.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookDispatcher.cs (current state post-110); ChatMessageAttachment.cs</tool>
+    <tool name="Edit">Author FileFingerprint.cs; add Phase A logic to dispatcher</tool>
+    <tool name="Bash">dotnet build / test / publish; benchmark via Stopwatch in test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/FileFingerprint.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs (Phase A added)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookDispatcherTests.cs (benchmark cases)</output>
+    <output type="docs">notes/handoffs/111-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`FileFingerprint` record type exists with documented fields.</criterion>
+    <criterion testable="true">Phase A `ComputeFingerprintsAsync` runs in parallel via `Task.WhenAll`.</criterion>
+    <criterion testable="true">Per-file benchmark ≤5ms (Stopwatch assertion).</criterion>
+    <criterion testable="true">5-file benchmark ≤25ms total.</criterion>
+    <criterion testable="true">Telemetry tier-1 compliant — no filename / content / textPrefix leakage in logs.</criterion>
+    <criterion testable="true">BFF publish-size delta reported.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase A is the lightweight prep step — no LLM / embedding calls. If the benchmark fails, the most likely culprit is sha256 of large textPrefix; pre-cap to 2000 chars before hashing. Phase B (task 112) consumes the fingerprints for vector queries against `playbook-embeddings`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

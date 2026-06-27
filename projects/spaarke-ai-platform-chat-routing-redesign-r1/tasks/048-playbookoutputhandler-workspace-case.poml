@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>PlaybookOutputHandler Workspace case — emit workspace.tab_open SSE; delegate streaming</title>
+    <phase>3: WP3 Destination Metadata Wiring</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>045,046,047</dependencies>
+    <blocks>052,054</blocks>
+    <tags>bff-api, services, streaming, ADR-013, ADR-029, ADR-033</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'streaming'; modifies output handler `.cs` file; touches streaming side-channel — FULL per Step 0.5</rigor-reason>
+    <parallel-group>3-B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares PlaybookOutputHandler.cs switch with tasks 049, 050, 051 — sequential within wave 3-B per task-create Step 3.8 file-overlap auto-demotion rule (CRIT-8 fix)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a `Workspace` case to `PlaybookOutputHandler.HandleOutputAsync` switch (currently has Text / Dialog / Navigation / Download / Insert at `PlaybookOutputHandler.cs:108-117`; missing Workspace). The Workspace case emits a `workspace.tab_open` SSE event with `{tabId, widgetType}` and delegates streaming to `PlaybookExecutionEngine` per ADR-033 (the streaming chat-tool side-channel preservation pattern). Does NOT produce chat tokens (the destination is structural via the handler now, not implicit via the streaming code). Implements spec FR-14d Workspace branch.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in `PlaybookOutputHandler` switch surface + SSE event emission + ADR-033 streaming side-channel discipline.</role>
+
+  <goal>
+    `PlaybookOutputHandler.HandleOutputAsync` Workspace case emits SSE `workspace.tab_open { tabId, widgetType }` then delegates streaming to `PlaybookExecutionEngine.ExecuteAsync` (preserved streaming path). End-to-end test of `summarize-document-for-workspace` opens a Workspace tab via the handler path (NOT via `sseToPaneEventBridge` implicit-streaming). The destination is structural, not implicit.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-14d Workspace branch + design §1.3 (WP3 step 4) + ADR-033 (streaming side channel). Today the Workspace tab opens via a DIFFERENT path: `sseToPaneEventBridge.ts:174-256` reads `AnalysisChunk` deltas and emits `workspace.field_delta` events. This bypasses `PlaybookOutputHandler` entirely. After this task, Workspace destination becomes data-driven (loaded from `NodeRoutingConfig` via task 047) and routed through the handler.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookOutputHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/sseToPaneEventBridge.ts</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Services/Ai/Chat/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Handler lives in `Services/Ai/Chat/`; SSE event types defined in PublicContracts.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement.</constraint>
+    <constraint source="ADR-033">Streaming chat-tool side channel preserved — `PlaybookExecutionEngine` continues to stream `FieldDelta` SSE events per top-level field. Handler delegates; does NOT proxy streaming.</constraint>
+    <constraint source="spec">FR-14d Workspace acceptance: tab opens via handler path (NOT via implicit-streaming bridge).</constraint>
+    <constraint source="project">Wave 3-B parallel safe: tasks 048/049/050/051 add 4 separate switch arms to the same handler. Coordinate via Git: each task touches a distinct enum case + adds the new branch ABOVE the default. Distinct test files per case keep tests independent.</constraint>
+    <constraint source="project">CLAUDE.md §10 test obligation — add end-to-end test.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookOutputHandler.cs:108-117` to capture current switch shape.</step>
+    <step order="2">Read ADR-033 to confirm side-channel delegation pattern.</step>
+    <step order="3">Add `Workspace` case branch ABOVE default. Logic:
+      (a) Emit SSE: `workspace.tab_open { tabId, widgetType }` (use existing SSE writer pattern from R6 R5 streaming);
+      (b) Delegate to `PlaybookExecutionEngine.ExecuteAsync` (existing streaming path);
+      (c) Do NOT emit chat tokens.</step>
+    <step order="4">Coordinate with peer tasks 049/050/051: each adds a separate case; ensure no conflict on the switch's default or surrounding code (use a single edit point per task; main session verifies merged switch builds).</step>
+    <step order="5">Add end-to-end integration test: dispatch `summarize-document-for-workspace` (or test playbook with destination=Workspace), capture SSE event stream, assert `workspace.tab_open` event present AND `FieldDelta` events follow (proving streaming preserved).</step>
+    <step order="6">Verify the test does NOT depend on the `sseToPaneEventBridge` frontend bypass — the SSE event must originate from the handler.</step>
+    <step order="7">Run `dotnet build` + tests; measure publish delta.</step>
+    <step order="8">Quality gates per task-execute Step 9.5 (FULL rigor).</step>
+    <step order="9">Update TASK-INDEX.md: task 048 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookOutputHandler.cs + PlaybookExecutionEngine.cs</tool>
+    <tool name="Edit">Add Workspace case + tests</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookOutputHandler.cs — Workspace case</output>
+    <output type="test">tests/integration/.../PlaybookOutputHandlerWorkspaceCaseTests.cs</output>
+    <output type="docs">notes/handoffs/048-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Workspace destination dispatch emits `workspace.tab_open` SSE event from the handler.</criterion>
+    <criterion testable="true">`PlaybookExecutionEngine` streaming preserved — `FieldDelta` events fire per top-level field.</criterion>
+    <criterion testable="true">No chat tokens produced for Workspace destination (chat sidebar stays empty for `summarize-document-for-workspace` dispatch).</criterion>
+    <criterion testable="true">End-to-end test passes against fixture playbook.</criterion>
+    <criterion testable="true">BFF publish delta within NFR-01 thresholds.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Coordinate with tasks 049 (Both), 050 (FormPrefill), 051 (SideEffect). All four touch the same switch but at distinct case labels — wave 3-B parallel-safe per Step 3.8 file-overlap rule (distinct enum arms = distinct text regions in same file; the merge succeeds when each task patches a distinct case).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

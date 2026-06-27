@@ -9,7 +9,6 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -18,9 +17,12 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Telemetry;
 using Spaarke.Dataverse;
 using Xunit;
@@ -382,6 +384,14 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
     public StubOpenAiClient OpenAi { get; } = new();
     public Mock<IGenericEntityService> EntityServiceMock { get; } = new();
     public Mock<INodeService> NodeServiceMock { get; } = new();
+    public Mock<IPlaybookLookupService> PlaybookLookupMock { get; } = new();
+
+    // chat-routing-redesign-r1 task 028d (FR-1R-05) — orchestrator now consults
+    // IConsumerRoutingService first; default stub returns null so the fixture falls back to
+    // the FR-05 typed-options + IPlaybookLookupService path (preserves prior fixture intent
+    // verbatim — tests targeting the FR-1R-05 happy path live in SessionSummarizeOrchestratorTests).
+    public Mock<IConsumerRoutingService> ConsumerRoutingMock { get; } = new();
+
     public R5SummarizeTelemetry Telemetry { get; } = new();
 
     // R6 task 025 (D-A-17) — the chat-summarize streaming pipeline moved from
@@ -391,6 +401,15 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
     // FK-chain stubs so the engine resolves the action via the FK path (not alternate key).
     internal static readonly Guid ChatSummarizePlaybookId = Guid.Parse("44285d15-1360-f111-ab0b-70a8a59455f4");
     internal static readonly Guid ChatSummarizeActionId = Guid.Parse("eeb05bfd-1260-f111-ab0b-70a8a59455f4");
+
+    // chat-routing-redesign-r1 task 015 (FR-05): the orchestrator now resolves the chat-summarize
+    // playbook by stable-ID alternate key (sprk_playbookid) via IPlaybookLookupService.
+    // WorkspaceOptions.ChatSummarizePlaybookId carries the per-env GUID value (string-form).
+    // The fixture seeds the DEV GUID and stubs the lookup to return a PlaybookResponse whose
+    // Id matches — preserving the prior end-to-end behavior of forwarding this GUID to the
+    // engine for FK-chain resolution.
+    internal static readonly string ConfiguredChatSummarizePlaybookId =
+        "44285d15-1360-f111-ab0b-70a8a59455f4";
 
     private WebApplication? _app;
 
@@ -455,6 +474,22 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         builder.Services.AddSingleton(Mock.Of<Microsoft.AspNetCore.Http.IHttpContextAccessor>());
         builder.Services.AddScoped<IPlaybookExecutionEngine, PlaybookExecutionEngine>();
 
+        // chat-routing-redesign-r1 task 015 (FR-05) — orchestrator now depends on
+        // IPlaybookLookupService + IOptions<WorkspaceOptions> for stable-ID resolution.
+        // Register both with the configured DEV GUID so the orchestrator's runtime lookup
+        // returns the same Guid the prior hardcoded constant emitted.
+        builder.Services.AddSingleton(PlaybookLookupMock.Object);
+        builder.Services.Configure<WorkspaceOptions>(o =>
+        {
+            o.ChatSummarizePlaybookId = ConfiguredChatSummarizePlaybookId;
+        });
+
+        // chat-routing-redesign-r1 task 028d (FR-1R-05) — orchestrator now consults
+        // IConsumerRoutingService first. Default fixture stub returns null so the fixture
+        // exercises the FR-05 typed-options fallback path (preserves the prior fixture
+        // intent verbatim). FR-1R-05 happy-path coverage lives in SessionSummarizeOrchestratorTests.
+        builder.Services.AddSingleton(ConsumerRoutingMock.Object);
+
         // Orchestrator itself — concrete (ADR-010); registered Scoped to mirror prod.
         builder.Services.AddScoped<SessionSummarizeOrchestrator>();
 
@@ -492,6 +527,8 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         RagServiceMock.Reset();
         EntityServiceMock.Reset();
         NodeServiceMock.Reset();
+        PlaybookLookupMock.Reset();
+        ConsumerRoutingMock.Reset();
         ConfigureDefaults();
     }
 
@@ -531,6 +568,34 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
             .ReturnsAsync(BuildActionEntity(
                 systemPrompt: "You are the R5 Summarize-for-Chat assistant.",
                 outputSchemaJson: """{"type":"object","additionalProperties":false,"required":["tldr"],"properties":{"tldr":{"type":"array","items":{"type":"string"}}}}"""));
+
+        // chat-routing-redesign-r1 task 028d (FR-1R-05) — IConsumerRoutingService default:
+        // returns null so the fixture exercises the FR-05 fallback path (preserves the
+        // pre-028d fixture surface verbatim). Tests targeting the FR-1R-05 routing-table
+        // happy path live in SessionSummarizeOrchestratorTests.
+        ConsumerRoutingMock
+            .Setup(c => c.ResolveAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
+
+        // chat-routing-redesign-r1 task 015 (FR-05) — IPlaybookLookupService default: the
+        // orchestrator calls GetByIdAsync(configuredId) and forwards the response's Id (Guid)
+        // to the engine. Returning a PlaybookResponse whose Id == ChatSummarizePlaybookId
+        // preserves the prior end-to-end identity (FR-26 convergence invariant).
+        PlaybookLookupMock
+            .Setup(p => p.GetByIdAsync(
+                ConfiguredChatSummarizePlaybookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaybookResponse
+            {
+                Id = ChatSummarizePlaybookId,
+                Name = "summarize-document-for-chat@v1",
+                PlaybookCode = string.Empty,
+                IsActive = true
+            });
     }
 
     private static Entity BuildActionEntity(string systemPrompt, string outputSchemaJson)
@@ -584,7 +649,7 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
 public sealed class TestableChatSessionManager : ChatSessionManager
 {
     public TestableChatSessionManager() : base(
-        cache: Mock.Of<IDistributedCache>(),
+        cache: Mock.Of<ITenantCache>(),
         dataverseRepository: Mock.Of<IChatDataverseRepository>(),
         logger: Mock.Of<ILogger<ChatSessionManager>>(),
         persistence: null,

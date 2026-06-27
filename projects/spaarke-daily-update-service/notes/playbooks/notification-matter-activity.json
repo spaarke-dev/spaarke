@@ -1,8 +1,15 @@
 {
   "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "_correction": {
+    "date": "2026-06-25",
+    "by": "Claude Code task-015 entity-architecture correction + stub-to-full implementation (preparation for PR 3 W1 task 024)",
+    "reason": "Stub replaced with full implementation per R4 spec FR-8. Surfaces recent sprk_event activity on user's matters (general activity stream, all event types). Uses Spaarke custom sprk_event entity (NOT OOB tasks/appointments).",
+    "previousState": "1-node stub (createNotification only, no query, no membership)",
+    "correctedState": "Full graph: Start -> LookupUserMembership -> Query sprk_event (membership-scope union) -> Condition -> CreateNotification per FR-8 + AC-5b"
+  },
   "playbook": {
     "name": "Matter/Project Activity Summary",
-    "description": "Notifies users of recent activity on their matters and projects since last check, including document changes, task updates, communications, and status transitions.",
+    "description": "Notifies users of recent sprk_event activity on their matters and projects since last check (all event types — Action, Deadline, Meeting, Milestone, Reminder, Notification, Status Change, Approval). Uses Spaarke custom sprk_event entity. Surfaces general activity stream, distinct from the type-specific PB-019 (new-events) playbook.",
     "isPublic": true,
     "sprk_playbooktype": 2,
     "capabilities": ["notify"],
@@ -26,32 +33,132 @@
           "description": "How far back to look for matter activity"
         }
       },
+      "category": "matter-activity",
       "channel": "matter-activity",
       "channelLabel": "Matter/Project Activity"
     }
   },
   "nodes": [
     {
+      "name": "Start",
+      "nodeType": "Control",
+      "actionType": null,
+      "canvasType": "start",
+      "outputVariable": "start",
+      "positionX": 100,
+      "positionY": 200,
+      "dependsOn": [],
+      "configJson": {
+        "__actionType": 33,
+        "scope": "user-matters",
+        "resolveUserId": true,
+        "description": "Scoped to current user's matters via LookupUserMembership"
+      }
+    },
+    {
+      "name": "Lookup My Matters",
+      "nodeType": "Workflow",
+      "actionType": 52,
+      "canvasType": "lookupUserMembership",
+      "outputVariable": "myMatters",
+      "positionX": 250,
+      "positionY": 200,
+      "dependsOn": ["Start"],
+      "configJson": {
+        "__actionType": 52,
+        "entityType": "sprk_matter",
+        "roles": ["owner", "assignedAttorney", "assignedParalegal"],
+        "includeRelated": false,
+        "description": "Resolve the executing user's matter memberships per ADR-034. Bound to `myMatters.ids` for downstream filtering."
+      }
+    },
+    {
       "name": "Query Matter Activity",
+      "nodeType": "Workflow",
+      "actionType": 51,
+      "canvasType": "queryDataverse",
+      "outputVariable": "matterActivityQuery",
+      "positionX": 450,
+      "positionY": 200,
+      "dependsOn": ["Lookup My Matters"],
+      "configJson": {
+        "__actionType": 51,
+        "queryMode": true,
+        "entityLogicalName": "sprk_event",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_event\"><attribute name=\"sprk_eventname\"/><attribute name=\"sprk_eventid\"/><attribute name=\"sprk_eventtype_ref\"/><attribute name=\"statuscode\"/><attribute name=\"createdon\"/><attribute name=\"modifiedon\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"sprk_regardingproject\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"sprk_matternumber\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"modifiedon\" operator=\"last-x-hours\" value=\"{{timeWindowHours}}\"/><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"modifiedon\" descending=\"true\"/></entity></fetch>",
+        "templateParameters": {
+          "timeWindow": "{{userPreferences.timeWindow ?? '24h'}}"
+        },
+        "description": "Recent sprk_event activity on user's matters (all event types). Membership-scope union: (a) sprk_regardingmatter IN myMatters.ids OR (b) record-owner OR (c) matter-owner = current user. Sort: modifiedon desc."
+      }
+    },
+    {
+      "name": "Has Activity?",
+      "nodeType": "Control",
+      "actionType": 30,
+      "canvasType": "condition",
+      "outputVariable": "hasActivity",
+      "positionX": 700,
+      "positionY": 200,
+      "dependsOn": ["Query Matter Activity"],
+      "configJson": {
+        "__actionType": 30,
+        "condition": {
+          "operator": "gt",
+          "left": "{{matterActivityQuery.output.count}}",
+          "right": 0
+        },
+        "trueBranch": "Create Notification",
+        "description": "Check if any matter activity was found"
+      }
+    },
+    {
+      "name": "Create Notification",
       "nodeType": "Workflow",
       "actionType": 50,
       "canvasType": "createNotification",
       "outputVariable": "matterActivityNotification",
-      "positionX": 250,
-      "positionY": 200,
-      "dependsOn": [],
+      "positionX": 1000,
+      "positionY": 150,
+      "dependsOn": ["Has Activity?"],
       "configJson": {
         "__actionType": 50,
-        "title": "Activity on {{matter.name}}",
-        "body": "There has been new activity on {{matter.name}} in the last {{run.parameters.timeWindow}}: {{activitySummary}}",
+        "title": "{{matterActivityQuery.output.count}} recent activity item(s) on your matters",
+        "body": "{{#each matterActivityQuery.output.items}}{{sprk_eventname}} on {{sprk_regardingrecordname}}\n{{/each}}",
         "category": "matter-activity",
         "priority": 100000000,
-        "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={{matter.id}}",
-        "regardingId": "{{matter.id}}",
-        "regardingType": "sprk_matter",
-        "recipientId": "{{run.userId}}"
+        "recipientId": "{{run.userId}}",
+        "regardingType": "sprk_event",
+        "iterateItems": true,
+        "itemNotification": {
+          "title": "Activity on {{item.sprk_regardingrecordname}}",
+          "body": "{{item.sprk_eventname}}",
+          "category": "matter-activity",
+          "priority": 100000000,
+          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_event&id={{item.sprk_eventid}}",
+          "recipientId": "{{run.userId}}",
+          "regardingId": "{{item.sprk_eventid}}",
+          "regardingType": "sprk_event",
+          "regardingName": "{{item.sprk_eventname}}",
+          "sourceEntityType": "sprk_event",
+          "sourceId": "{{item.sprk_eventid}}",
+          "sourceModifiedOn": "{{item.modifiedon}}",
+          "sourceOwningUser": "{{item.ownerid}}",
+          "viaMatterId": "{{item.sprk_regardingmatter}}",
+          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterMembershipsVariable": "myMatters"
+        },
+        "deduplication": {
+          "enabled": true,
+          "key": "matter-activity:{{run.userId}}:{{item.sprk_eventid}}:{{item.modifiedon}}"
+        }
       }
     }
   ],
-  "edges": []
+  "edges": [
+    { "source": "Start", "target": "Lookup My Matters" },
+    { "source": "Lookup My Matters", "target": "Query Matter Activity" },
+    { "source": "Query Matter Activity", "target": "Has Activity?" },
+    { "source": "Has Activity?", "target": "Create Notification", "condition": "true" }
+  ]
 }

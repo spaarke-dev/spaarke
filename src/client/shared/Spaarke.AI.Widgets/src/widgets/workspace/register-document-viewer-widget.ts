@@ -18,6 +18,7 @@
  */
 
 import { registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
+import { documentViewerWidgetVisibility } from './pillar9-visibility';
 
 /**
  * The widget type ID under which DocumentViewerWidget is registered.
@@ -49,7 +50,12 @@ registerWorkspaceWidget(
   () =>
     import('./DocumentViewerWidget') as Promise<{
       default: import('../../types/widget-types').WorkspaceWidgetComponent;
-    }>
+    }>,
+  // Pillar 9 visibility opt-in (task 073, D-C-28). DocumentViewer category:
+  // exposes file metadata + selection state. selectionText capped at 200
+  // chars per FR-57 acceptance. See `pillar9-visibility.ts` for the
+  // derivation + ADR-015 privacy rationale.
+  documentViewerWidgetVisibility
 );
 
 /**

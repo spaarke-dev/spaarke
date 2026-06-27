@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="116" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Remove SoftSlashIntentToCapabilityName dict (FE + BE)</title>
+    <phase>5: WP2 File-Aware Classification</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>115</dependencies>
+    <blocks>117,118</blocks>
+    <tags>bff-api, frontend, refactoring, legacy-removal</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api' + 'frontend' + 'refactoring'; removes legacy routing surface; FR-20 binding; FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>5-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Remove the `SoftSlashIntentToCapabilityName` dict from both the BFF (Services/Ai/Capabilities/CapabilityRouter.cs:153 or wherever it lives) AND the frontend (SoftSlashRouter — `SOFT_SLASH_TO_INTENT`-style mappings). Per spec FR-20, `commandIntent` bias from task 115 replaces the dict's semantics; integration test asserts slash + NL flows route identically.
+  </prompt>
+
+  <role>SPAARKE platform full-stack developer. Comfortable with both BFF C# and React/TypeScript frontend refactoring.</role>
+
+  <goal>
+    Backend dict deleted; frontend mapping deleted; integration tests still pass; FR-20 binding test (from task 115) confirms semantic preservation. Grep across `src/` shows zero remaining `SoftSlashIntentToCapabilityName` / `SOFT_SLASH_TO_INTENT` references.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-20 + design WP4. The dict was the legacy bridge between slash-bias and capability-name routing. With task 115's `commandIntent` vector-query bias in place, the dict is dead weight. This task is the cleanup. Note: full `CapabilityRouter` retirement happens in Phase 7 task 141 (atomic deletion of 10 files). This task ONLY removes the dict in advance to prove the bias works in production.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/SoftSlashRouter.ts (or similar)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-20">Dict removed; slash + NL flows produce identical routing for same query text.</constraint>
+    <constraint source="ADR-013">Stays inside `Services/Ai/` boundary for BFF removal.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect MINOR REDUCTION.</constraint>
+    <constraint source="project">Coordinated FE+BE change — both halves land together. Verify task 022 `commandIntent` rename is settled before refactor.</constraint>
+    <constraint source="project">Use `npm install --legacy-peer-deps --no-audit --no-fund` for any Vite solutions touched.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep BFF for `SoftSlashIntentToCapabilityName` — locate exact file + line.</step>
+    <step order="2">Grep frontend for `SOFT_SLASH_TO_INTENT` (or equivalent map). Located in SoftSlashRouter or similar.</step>
+    <step order="3">Verify the dict's only consumers are in legacy routing path. Trace and confirm with task 115 in place, no production code depends on the dict.</step>
+    <step order="4">Delete the BFF dict + any companion enum entries that exist only to support the dict.</step>
+    <step order="5">Delete the frontend mapping object + any wrapper functions whose only callers were the slash→capability flow.</step>
+    <step order="6">Run BFF tests `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. All pass. If any test relied on the dict, refactor to use `commandIntent` bias semantics from task 115.</step>
+    <step order="7">Run frontend tests `npm test` in `src/solutions/SpaarkeAi/`. All pass.</step>
+    <step order="8">Run frontend build: `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build`.</step>
+    <step order="9">Re-run FR-20 binding test from task 115 — slash + NL routes identically.</step>
+    <step order="10">Grep prove: `grep -rn "SoftSlashIntentToCapabilityName" src/` returns zero hits; `grep -rn "SOFT_SLASH_TO_INTENT" src/` returns zero hits.</step>
+    <step order="11">Measure BFF publish size; expect minor reduction.</step>
+    <step order="12">code-review + adr-check (Step 9.5 quality gates).</step>
+    <step order="13">Update TASK-INDEX.md: task 116 → ✅; current-task.md → update.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Locate dict + verify zero consumers post-delete</tool>
+    <tool name="Read">Inspect surrounding code to confirm dict is removable</tool>
+    <tool name="Edit">Delete dict + wrapper code; refactor any leftover test references</tool>
+    <tool name="Bash">dotnet build / test; npm install / build / test; publish-size measurement</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Capabilities/CapabilityRouter.cs (dict deleted)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/SoftSlashRouter.ts (mapping deleted)</output>
+    <output type="docs">notes/handoffs/116-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rn "SoftSlashIntentToCapabilityName" src/` returns zero hits.</criterion>
+    <criterion testable="true">`grep -rn "SOFT_SLASH_TO_INTENT" src/` returns zero hits.</criterion>
+    <criterion testable="true">All BFF tests pass.</criterion>
+    <criterion testable="true">All frontend tests + build pass.</criterion>
+    <criterion testable="true">FR-20 binding test (from task 115) still passes.</criterion>
+    <criterion testable="true">BFF publish-size delta reported (expect minor reduction).</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Coordinated FE+BE change — do not merge BE half without FE half landing together (the FE could send a now-meaningless slash payload that the BE silently ignores; safer to land both atomically). Phase 7 task 141 removes the rest of CapabilityRouter (10 files atomic commit).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

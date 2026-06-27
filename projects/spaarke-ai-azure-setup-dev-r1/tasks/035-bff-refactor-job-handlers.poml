@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>BFF refactor: Job handlers (RagIndexingJobHandler + BulkRagIndexingJobHandler + InvoiceIndexingJobHandler) (FR-13 + FR-10)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>completed</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>014, 030</dependencies>
+    <blocks>046</blocks>
+    <tags>bff-api, refactoring, ai, worker, job, background</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation: Job handlers — ADR-017 contract preservation</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Refactor 3 job handlers per FR-13 + FR-10 code side: RagIndexingJobHandler.cs, BulkRagIndexingJobHandler.cs (replace spaarke-knowledge-index-v2 → spaarke-files-index), InvoiceIndexingJobHandler.cs:40 (constant from FR-10: spaarke-invoices-dev → spaarke-invoices-index).
+    Also update InvoiceSearchService.cs:45 per FR-10.
+  </prompt>
+
+  <role>
+    Spaarke platform .NET 8 background worker developer. ADR-017 expert.
+  </role>
+
+  <goal>
+    4 files use canonical index names; job contracts preserved.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/BulkRagIndexingJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceSearchService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">Replace spaarke-knowledge-index-v2 with spaarke-files-index</constraint>
+    <constraint source="FR-10">InvoiceIndexingJobHandler.cs:40 + InvoiceSearchService.cs:45 → spaarke-invoices-index</constraint>
+    <constraint source="ADR-017">Preserve job contract (signature, retry behavior, idempotency)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>.claude/adr/ADR-017-background-jobs-service-bus.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep within 4 files for stale names</step>
+    <step order="2">Edit each file to use canonical names</step>
+    <step order="3">Build BFF</step>
+    <step order="4">Update TASK-INDEX.md: task 035 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Find references</tool>
+    <tool name="Edit">Replace</tool>
+    <tool name="dotnet">Build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">4 BFF files</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep in 4 files returns zero matches for stale names</criterion>
+    <criterion testable="true">BFF builds; job contracts unchanged</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

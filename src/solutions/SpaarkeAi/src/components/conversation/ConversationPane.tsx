@@ -84,6 +84,11 @@ import {
 import { PaneHeader, SprkChat } from "@spaarke/ui-components";
 import type { AttachmentChip, ChatAttachment, IChatMessage } from "@spaarke/ui-components";
 import { useAiSession, usePaneEvent, useDispatchPaneEvent } from "@spaarke/ai-widgets";
+// R6 Pillar 8 (task 081): HardSlashExecutor needs the full bus instance to
+// dispatch on multiple channels. `usePaneEventBus` is promoted to the public
+// events barrel for this seam (preferred public hooks remain
+// useDispatchPaneEvent / usePaneEvent for single-channel components).
+import { usePaneEventBus } from "@spaarke/ai-widgets/events";
 import type { WorkspacePaneEvent, ContextPaneEvent } from "@spaarke/ai-widgets";
 // R4 task 042 (W-4): the DocumentViewerWidget dispatch from this file was
 // disabled in R5 SC-18 cycle 6 (see handleAttachmentReady). Import will be
@@ -101,6 +106,41 @@ import { HistoryMenu } from "./HistoryOverlay";
 // /documents promotion + /summarize SSE streaming + PaneEventBus bridging.
 // See notes/task-036-design-2026-06-05.md for design rationale.
 import { matchIntent } from "./intentMatcher";
+// R6 closeout (Pillar 8 / task 097): /new-session needs to POST /api/ai/chat/sessions
+// and return the new session id so HardSlashExecutor.execNewSession can complete.
+import { buildBffApiUrl } from "@spaarke/auth";
+// R6 task 080 / D-D-01 (Pillar 8 foundation): CommandRouter parser is wired
+// into the send-message boundary so downstream Phase D tasks (081 hard-slash
+// executor, 082 soft-slash agent routing, 083 reference resolver) can fan out.
+// This wire-up is INTENT-CAPTURE ONLY — no behavior branch lands here per the
+// POML acceptance criteria. NFR-11 binding: natural-language input still falls
+// through to the existing CapabilityRouter path unchanged (parse() returns
+// command:null for any non-slash input).
+import { parse as parseCommandIntent } from "./CommandRouter";
+// R6 Phase D Wave D-G1 — Pillar 8 Command Router wired via the new
+// onDecorateOutboundBody seam in SprkChat (ADR-012 context-agnostic prop).
+// Hard slashes (081) dispatch client-side + cancel the BFF send by returning null.
+// Soft slashes (082) decorate the outbound body with `intentHint` for
+// CapabilityRouter Layer 0.5 strong-intent routing. (Wire field renamed
+// `commandIntent` → `intentHint` per FR-07 / task 022, 2026-06-22.)
+// References (083) resolve `#scope` / `@<entity>` / `#<filename>` at parse time
+// and attach `resolvedReferences` to the body. NFR-11 binding: natural-language
+// input (no slash, no references) passes through unchanged.
+import {
+  executeHardSlash,
+  defaultTelemetrySink,
+  defaultDownloadBlob,
+  type ExecutorContext as HardSlashExecutorContext,
+  type ConversationMessage as HardSlashConversationMessage,
+} from "./HardSlashExecutor";
+import { CommandHelpPanel } from "./CommandHelpPanel";
+import { HelpAffordance } from "./HelpAffordance";
+import { decorateBody as decorateSoftSlashBody } from "./SoftSlashRouter";
+import ReferenceResolver, {
+  createScopeFetch,
+  createFileLookupFromSessionMap,
+  type ResolverContext,
+} from "./ReferenceResolver";
 import {
   executeSummarizeIntent,
   type HeldFile,
@@ -546,6 +586,11 @@ const useStyles = makeStyles({
     flex: 1,
     minHeight: 0,
     overflow: "hidden",
+    // R6 task 085 / D-D-06: anchor for the absolutely-positioned
+    // HelpAffordance (Pillar 8 `/help` discovery button). Keeps the
+    // button in the chat region without disturbing SprkChat's internal
+    // input bar layout (NFR-11: additive UX; existing behavior unchanged).
+    position: "relative",
   },
 
   // ── R5 task 020 / D2-11: "N files attached" indicator strip ──────────────
@@ -792,7 +837,19 @@ export function ConversationPane(): React.JSX.Element {
   // Subscribe to workspace channel — listen for selection_changed events from
   // workspace widgets. usePaneEvent is stable: the handler ref is kept current
   // internally without tearing down the subscription on each render.
+  // R6 closeout (Pillar 8 / task 097c): track the currently-focused workspace
+  // tab id via PaneEventBus `tab_change` events. The HardSlashExecutor's
+  // `/pin` command reads this via `getFocusedTabId` to know which tab to pin.
+  // A ref (not state) avoids re-rendering ConversationPane on every tab focus
+  // change — only the synchronous callback consumes the value.
+  const focusedTabIdRef = React.useRef<string | null>(null);
+
   usePaneEvent("workspace", (event: WorkspacePaneEvent): void => {
+    if (event.type === "tab_change") {
+      focusedTabIdRef.current = event.tabId ?? null;
+      return;
+    }
+
     if (event.type !== "selection_changed") return;
 
     if (event.selectedText == null || event.selectedText.length === 0) {
@@ -838,6 +895,27 @@ export function ConversationPane(): React.JSX.Element {
   // and appends to its thread on null→non-null transition. `onLocalMessageInjected`
   // clears the prop back to null so re-renders do not re-inject.
   const [pendingInjection, setPendingInjection] = React.useState<IChatMessage | null>(null);
+
+  // R6 task 081 / Pillar 8 — CommandHelpPanel open state. `/help` flips this on;
+  // the panel's onClose flips it off. Lives alongside `pendingInjection` because
+  // both are local UI affordances dispatched by HardSlashExecutor.
+  const [helpPanelOpen, setHelpPanelOpen] = React.useState<boolean>(false);
+
+  // R6 hotfix 2026-06-19 (UAT) — SprkChat remount key. `/clear` increments this,
+  // which forces SprkChat to unmount + remount and wipes its internal message
+  // list. This was previously a TODO stub on `clearLocalConversation` that
+  // shipped uncovered; the BFF DELETE session call still fires (it clears the
+  // server-side cache) but the UI message list was not being cleared, producing
+  // the "conversation didn't clear after /clear" UAT bug. The remount pattern
+  // is pragmatic (no new SprkChat API surface) and surgical to /clear.
+  const [sprkChatRemountKey, setSprkChatRemountKey] = React.useState<number>(0);
+
+  // chat-routing-redesign-r1 task 117b — track the user's most recent outbound
+  // message text so the playbook_options click handler can forward it to the
+  // dispatcher endpoint as `originalMessage`. Captured in `handleBeforeSendMessage`
+  // (synchronous BEFORE-send hook). Ref (not state) — never rendered.
+  // ADR-015: never logged.
+  const lastSentMessageRef = React.useRef<string>('');
 
   // ── R5 task 036 / P2-CLOSEOUT-05: held-files + promoted-chip tracking ─────
   //
@@ -1068,6 +1146,12 @@ export function ConversationPane(): React.JSX.Element {
    */
   const handleBeforeSendMessage = React.useCallback(
     (messageText: string): void => {
+      // chat-routing-redesign-r1 task 117b — capture the most recent outbound
+      // message text so the playbook_options click handler can forward it as
+      // `originalMessage` when the user picks a candidate.
+      // ADR-015: kept in a ref (never rendered, never logged).
+      lastSentMessageRef.current = messageText;
+
       // ── R5 task 036 / P2-CLOSEOUT-05: deterministic intent dispatch ─────
       //
       // BEFORE the multi-file interjection block (existing task 020 logic):
@@ -1083,6 +1167,21 @@ export function ConversationPane(): React.JSX.Element {
       // This is the chat-pane half of the FR-03 / task-036 contract. The
       // workspace-pane half (structured output → Summary tab) lives in
       // tasks 037 + 038; this task is the publisher (PaneEventBus events).
+
+      // ── R6 task 080 / D-D-01 (Pillar 8 foundation) ──────────────────────
+      // Capture the structured CommandRouter Intent at the send-message
+      // boundary. The Intent is currently CAPTURE-ONLY — there is NO
+      // behavior branch here. Downstream Phase D tasks (081 hard-slash
+      // executor, 082 soft-slash agent routing, 083 reference resolver)
+      // will read this Intent and dispatch. NFR-11 binding: when the user
+      // typed natural language (no slash), the parsed intent's `command === null`
+      // and the existing R5-task-036 matcher + SprkChat send funnel runs
+      // UNCHANGED. See projects/.../CLAUDE.md §Pillar 8 + spec FR-48.
+      // void-cast suppresses the "declared but never read" lint until tasks
+      // 081/082/083 wire branching behavior to this value.
+      const parsedIntent = parseCommandIntent(messageText);
+      void parsedIntent;
+
       const readyChips = attachmentChips.filter(c => c.status === "ready");
       const intent = matchIntent(messageText, readyChips.length > 0, undefined);
       // R6 Hotfix Wave B-G9c3 (B9) — slash-to-NL rewire (2026-06-10):
@@ -1232,6 +1331,342 @@ export function ConversationPane(): React.JSX.Element {
       getAccessToken,
       dispatch,
     ]
+  );
+
+  // ── R6 Phase D Wave D-G1 — Pillar 8 Command Router integration ────────────
+  //
+  // The decoration callback below is the SINGLE seam through which tasks 081
+  // (hard slashes), 082 (soft slashes), and 083 (references) dispatch. It
+  // runs INSIDE SprkChat's handleSend, between body construction and stream
+  // start (see ISprkChatProps.onDecorateOutboundBody JSDoc). Hard slashes
+  // return null → cancel the BFF send. Soft slashes decorate the body with
+  // `intentHint` for CapabilityRouter Layer 0.5. References attach
+  // `resolvedReferences` to the body so the BFF prompt builder can use them.
+  // Natural-language input (no slash, no refs) passes through unchanged
+  // (NFR-11 backward compat).
+  //
+  // Some executor capabilities (conversation-history serialization for
+  // `/export`, focused-tab tracking for `/pin`) require deeper plumbing
+  // through @spaarke/ui-components surfaces. They are stubbed here so the
+  // seam is functional; richer contexts land via follow-up tasks 084 (full
+  // composition tests) and 085 (/help UI affordance polish).
+  const paneEventBus = usePaneEventBus();
+  const hardSlashContext = React.useMemo<HardSlashExecutorContext>(
+    () => ({
+      bffBaseUrl,
+      authenticatedFetch,
+      sessionId: chatSessionId ?? "",
+      paneEventBus,
+      setHelpOpen: setHelpPanelOpen,
+      clearLocalConversation: () => {
+        // R6 hotfix 2026-06-19 (UAT): increment the SprkChat key to force a
+        // remount + state reset. Replaces the prior TODO no-op. The BFF
+        // session DELETE called by the executor handles server-side state;
+        // this handles client-side.
+        setSprkChatRemountKey((k) => k + 1);
+      },
+      createNewSession: async (): Promise<string | null> => {
+        // R6 closeout (Pillar 8 / task 097): POST /api/ai/chat/sessions with an
+        // empty body to mint a fresh session. Body fields (DocumentId, PlaybookId,
+        // HostContext) are all optional per ChatCreateSessionRequest. After the
+        // BFF returns the new session id we push it into AiSessionProvider via
+        // setChatSessionId — the remounted SprkChat sees the new id as its
+        // sessionId prop and continues with it (no second create round-trip).
+        try {
+          const url = buildBffApiUrl(bffBaseUrl, "/api/ai/chat/sessions");
+          const response = await authenticatedFetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          if (!response.ok) return null;
+          const json = (await response.json()) as { sessionId?: string };
+          const newId =
+            typeof json?.sessionId === "string" && json.sessionId.length > 0
+              ? json.sessionId
+              : null;
+          if (newId !== null) {
+            setChatSessionId(newId);
+          }
+          return newId;
+        } catch {
+          return null;
+        }
+      },
+      getConversationHistory: (): HardSlashConversationMessage[] => [],
+      // R6 closeout (Pillar 8 / task 097c): return the most-recently-focused
+      // workspace tab id tracked by the usePaneEvent('workspace', tab_change)
+      // subscription above. Returns null if no tab has been focused yet.
+      getFocusedTabId: (): string | null => focusedTabIdRef.current,
+      activeMatterId: entityContext?.matterId ?? null,
+      downloadBlob: defaultDownloadBlob,
+      telemetry: defaultTelemetrySink,
+    }),
+    [bffBaseUrl, authenticatedFetch, chatSessionId, entityContext, paneEventBus, setChatSessionId]
+  );
+
+  const referenceResolverContext = React.useMemo<ResolverContext>(
+    () => ({
+      // TODO(task 084): thread real tenantId once host exposes it; empty string
+      // turns OFF the resolver's caching (degraded mode) but resolution still
+      // works.
+      tenantId: "",
+      sessionId: chatSessionId ?? "",
+      entityContext: entityContext
+        ? {
+            entityType: entityContext.entityType,
+            entityId: entityContext.entityId,
+            displayName: entityContext.entityName ?? entityContext.entityType,
+          }
+        : undefined,
+      openTabs: [],
+      scopeFetch: createScopeFetch(bffBaseUrl, authenticatedFetch),
+      fileLookup: createFileLookupFromSessionMap(new Map()),
+    }),
+    [bffBaseUrl, authenticatedFetch, chatSessionId, entityContext]
+  );
+
+  const handleDecorateOutboundBody = React.useCallback(
+    async (
+      body: Record<string, unknown>
+    ): Promise<Record<string, unknown> | null> => {
+      const msg = typeof body.message === "string" ? body.message : "";
+      const intent = parseCommandIntent(msg);
+
+      if (intent.isHardSlash) {
+        try {
+          const result = await executeHardSlash(intent, hardSlashContext);
+          if (result.message) {
+            setPendingInjection({
+              role: "Assistant",
+              content: result.message,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        } catch (err) {
+          console.error("[R6 Pillar 8] HardSlashExecutor failed:", err);
+        }
+        return null;
+      }
+
+      let decorated: Record<string, unknown> = intent.isSoftSlash
+        ? (decorateSoftSlashBody(intent, body as Parameters<typeof decorateSoftSlashBody>[1]) as Record<string, unknown>)
+        : body;
+
+      if (intent.references.length > 0) {
+        try {
+          const resolved = await ReferenceResolver.resolveAll(
+            intent.references,
+            referenceResolverContext
+          );
+          decorated = { ...decorated, resolvedReferences: resolved };
+        } catch (err) {
+          console.error("[R6 Pillar 8] ReferenceResolver failed:", err);
+        }
+      }
+
+      return decorated;
+    },
+    [hardSlashContext, referenceResolverContext]
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // chat-routing-redesign-r1 task 117b — playbook_options chat-side handlers
+  // (FR-50 + FR-51). On a `playbook_options` SSE event the host (this
+  // component) appends a structured Assistant chat message containing the
+  // top-N candidates. SprkChatMessageRenderer renders inline link buttons +
+  // an Open Library link. Click handlers below dispatch the chosen playbook
+  // execution and Library modal launch.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * onPlaybookOptions — fired by SprkChat for each `playbook_options` SSE event.
+   * Synthesizes an Assistant chat message via the existing `injectLocalMessage`
+   * mechanism (R5 task 020 contract). The message carries
+   * `metadata.responseType='playbook_options'` so `SprkChatMessageRenderer`
+   * renders the candidates as inline link buttons (FR-50) + "Open Library" link (FR-51).
+   *
+   * ADR-015: payload is tier-1 safe by BFF construction (controlled-vocabulary
+   * reasons, admin display names, opaque IDs only). The handler MUST NOT log
+   * the payload — only structural counts.
+   */
+  const handlePlaybookOptions = React.useCallback(
+    (payload: {
+      candidates: Array<{
+        playbookId: string;
+        playbookCode: string;
+        displayName: string;
+        confidence: number;
+        reason: string;
+      }>;
+      libraryModalCta: boolean;
+      sessionAttachmentIds: string[];
+      rerankInvoked: boolean;
+      rerankReason?: string | null;
+    }): void => {
+      // ADR-015 telemetry: emit ONLY counts + boolean signals — never payload contents.
+      console.log(
+        '[ConversationPane] playbook_options received — candidates:%d libraryModalCta:%s rerankInvoked:%s',
+        payload.candidates.length,
+        payload.libraryModalCta,
+        payload.rerankInvoked,
+      );
+
+      setPendingInjection({
+        role: 'Assistant',
+        // `content` carries a tiny fallback text in case the renderer falls back
+        // to markdown (defensive — should never happen). Tier-1 safe.
+        content: payload.candidates.length > 0
+          ? 'Which playbook would you like me to use?'
+          : "I couldn't find a confident match for your files.",
+        timestamp: new Date().toISOString(),
+        metadata: {
+          responseType: 'playbook_options',
+          data: {
+            candidates: payload.candidates,
+            libraryModalCta: payload.libraryModalCta,
+            sessionAttachmentIds: payload.sessionAttachmentIds,
+            rerankInvoked: payload.rerankInvoked,
+            rerankReason: payload.rerankReason ?? null,
+          },
+        },
+      });
+    },
+    []
+  );
+
+  /**
+   * onSelectPlaybook — user clicked a candidate playbook link button (FR-50).
+   *
+   * POSTs to `/api/ai/playbook-dispatch/execute` with `{ playbookId,
+   * sessionAttachmentIds, originalMessage, sessionId }`. The orchestrator runs
+   * the chosen playbook against the same session context.
+   *
+   * NOTE: as of task 117b shipping, the orchestrator emit point for
+   * `playbook_options` is NOT yet wired (the 117a builder is registered in DI
+   * but not yet invoked from `ChatEndpoints`), and the `/playbook-dispatch/execute`
+   * endpoint is NOT yet implemented in the BFF. This handler will hit a 404
+   * until both arrive. We surface a console error + a brief inline confirmation
+   * so failure is visible during development.
+   *
+   * ADR-028: uses `authenticatedFetch` from `useAuth()` — never raw fetch +
+   * Authorization header. ADR-015: payload is tier-1 (opaque IDs); we DO carry
+   * `originalMessage` because the dispatcher needs it for routing — that's
+   * exempted user content sent server-side, NOT logged.
+   */
+  const handleSelectPlaybook = React.useCallback(
+    (playbookId: string, sessionAttachmentIds: string[]): void => {
+      // Fire-and-forget; the chat thread reflects the outcome via the next
+      // assistant turn (when the orchestrator runs the chosen playbook).
+      void (async () => {
+        try {
+          // Use buildBffApiUrl-style concatenation; the dispatch endpoint name
+          // is per spec FR-50 even though it is not yet implemented on the BFF.
+          const url = `${bffBaseUrl.replace(/\/$/, '')}/api/ai/playbook-dispatch/execute`;
+          const response = await authenticatedFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              playbookId,
+              sessionAttachmentIds,
+              originalMessage: lastSentMessageRef.current,
+              sessionId: chatSessionId ?? null,
+            }),
+          });
+          if (!response.ok) {
+            console.error(
+              '[ConversationPane] playbook-dispatch failed — status:%d',
+              response.status,
+            );
+            setPendingInjection({
+              role: 'Assistant',
+              content:
+                response.status === 404
+                  ? "I'm not able to run that playbook yet — the dispatcher endpoint is still being wired up."
+                  : 'I couldn\'t start that playbook. Please try again.',
+              timestamp: new Date().toISOString(),
+            });
+          }
+        } catch (err) {
+          // Network / auth failures — log structurally only, never include the error message
+          // verbatim because some error objects can leak headers or URLs.
+          console.error('[ConversationPane] playbook-dispatch threw:', err instanceof Error ? err.name : 'unknown');
+        }
+      })();
+    },
+    [authenticatedFetch, bffBaseUrl, chatSessionId]
+  );
+
+  /**
+   * onOpenLibraryModal — user clicked the "Open Library" link (FR-51).
+   *
+   * Opens the `sprk_playbooklibrary` Code Page via Xrm.Navigation.navigateTo
+   * (target: 2 modal). When `sessionAttachmentIds` are present we pass them
+   * through the `data` envelope so the Library can pre-filter by attachment
+   * classification (when available upstream).
+   *
+   * ADR-021 + ADR-028: dialog launch follows the existing
+   * `SemanticSearchCriteriaTool.launchSemanticSearch` pattern (proven Xrm
+   * frame-walk + navigateTo with target:2, percent-sized modal).
+   */
+  const handleOpenLibraryModal = React.useCallback(
+    (sessionAttachmentIds: string[]): void => {
+      // Resolve Xrm.Navigation via frame walk (handles iframe nesting in MDA).
+      let nav: { navigateTo?: (...args: unknown[]) => Promise<unknown> } | null = null;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const w = window as any;
+        const xrm = w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm ?? null;
+        nav = xrm?.Navigation ?? null;
+      } catch {
+        nav = null;
+      }
+
+      if (!nav?.navigateTo) {
+        console.warn(
+          '[ConversationPane] Open Library: Xrm.Navigation unavailable — running outside Dataverse host.',
+        );
+        return;
+      }
+
+      // Build the `data` query string. The Library Code Page accepts
+      // `sessionAttachmentIds` as a comma-separated opt-in pre-filter; when
+      // absent the modal opens unfiltered (per FR-51).
+      const parts: string[] = [];
+      if (sessionAttachmentIds.length > 0) {
+        parts.push(
+          `sessionAttachmentIds=${encodeURIComponent(sessionAttachmentIds.join(','))}`,
+        );
+      }
+      const data = parts.join('&');
+
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (nav.navigateTo as any)(
+          {
+            pageType: 'webresource',
+            webresourceName: 'sprk_playbooklibrary',
+            data,
+          },
+          {
+            target: 2,
+            width: { value: 85, unit: '%' },
+            height: { value: 85, unit: '%' },
+            title: 'Playbook Library',
+          },
+        ).catch?.((err: unknown) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const code = (err as any)?.errorCode;
+          // errorCode 2 = user-cancelled (modal closed); ignore.
+          if (code !== 2) {
+            console.warn('[ConversationPane] Open Library: navigateTo error:', code ?? 'unknown');
+          }
+        });
+      } catch (err) {
+        console.warn('[ConversationPane] Open Library: navigateTo threw synchronously:', err instanceof Error ? err.name : 'unknown');
+      }
+    },
+    []
   );
 
   /**
@@ -1823,6 +2258,7 @@ export function ConversationPane(): React.JSX.Element {
           */}
           <div className={mergeClasses(styles.sprkChatFlex)}>
             <SprkChat
+              key={sprkChatRemountKey}
               apiBaseUrl={bffBaseUrl}
               authenticatedFetch={authenticatedFetch}
               getAccessToken={getAccessToken}
@@ -1839,6 +2275,24 @@ export function ConversationPane(): React.JSX.Element {
               injectLocalMessage={pendingInjection}
               onLocalMessageInjected={handleLocalMessageInjected}
               onBeforeSendMessage={handleBeforeSendMessage}
+              onDecorateOutboundBody={handleDecorateOutboundBody}
+              // chat-routing-redesign-r1 task 117b (FR-49 + FR-50 + FR-51)
+              onPlaybookOptions={handlePlaybookOptions}
+              onSelectPlaybook={handleSelectPlaybook}
+              onOpenLibraryModal={handleOpenLibraryModal}
+            />
+            {/*
+              R6 task 085 / D-D-06 (Pillar 8 `/help` UI affordance) — a
+              discoverable button anchored top-right of the chat region.
+              Clicking opens the same CommandHelpPanel as the `/help` hard
+              slash so users who don't know slash syntax can discover the
+              closed Pillar 8 vocabulary. Additive UX — does NOT modify
+              SprkChat's internal input bar (NFR-11).
+            */}
+            <HelpAffordance onClick={() => setHelpPanelOpen(true)} />
+            <CommandHelpPanel
+              open={helpPanelOpen}
+              onClose={() => setHelpPanelOpen(false)}
             />
           </div>
         </div>

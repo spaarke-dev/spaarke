@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Json.Schema;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -8,6 +9,7 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
+using Sprk.Bff.Api.Services.Ai.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -97,6 +99,14 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     private readonly Func<ChatSseEvent, CancellationToken, Task>? _sseWriter;
     private readonly Func<Models.Ai.Chat.DocumentStreamEvent, CancellationToken, Task>? _documentStreamWriter;
     private readonly Guid? _analysisId;
+    /// <summary>
+    /// R6 Pillar 6c (FR-37 / task 063) — optional context.* event emitter. When non-null,
+    /// the adapter emits <c>context.tool_call_started</c> before each invocation and
+    /// <c>context.tool_call_completed</c> after. When null (test scenarios with older
+    /// fixtures), emission is skipped silently — ADR-015 anti-leakage is preserved by
+    /// construction (the interface accepts no user content).
+    /// </summary>
+    private readonly IContextEventEmitter? _contextEventEmitter;
 
     /// <summary>
     /// Constructs the adapter. Validates the tool's JSON Schema (well-formedness + top-level
@@ -184,7 +194,8 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         CitationContext? citationAccumulator = null,
         Func<ChatSseEvent, CancellationToken, Task>? sseWriter = null,
         Func<Models.Ai.Chat.DocumentStreamEvent, CancellationToken, Task>? documentStreamWriter = null,
-        Guid? analysisId = null)
+        Guid? analysisId = null,
+        IContextEventEmitter? contextEventEmitter = null)
     {
         _tool = tool ?? throw new ArgumentNullException(nameof(tool));
         _handler = handler ?? throw new ArgumentNullException(nameof(handler));
@@ -194,6 +205,7 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         _sseWriter = sseWriter;
         _documentStreamWriter = documentStreamWriter;
         _analysisId = analysisId;
+        _contextEventEmitter = contextEventEmitter;
 
         if (string.IsNullOrWhiteSpace(tool.Name))
         {
@@ -283,8 +295,39 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// <remarks>
     /// FR-10: this is the function name the LLM invokes. Sourced from the Dataverse
     /// <c>sprk_analysistool.sprk_name</c> column.
+    ///
+    /// R6 hotfix 2026-06-19 (UAT): OpenAI requires tool function names to match
+    /// the regex <c>^[a-zA-Z0-9_.-]+$</c> — spaces and most punctuation are NOT
+    /// allowed. Existing Dataverse <c>sprk_name</c> values follow the
+    /// human-readable convention "SYS-Display Name With Spaces". Sending those
+    /// raw produces a 400 from Azure OpenAI at tool-list build time, breaking
+    /// any chat turn that exposes a multi-tool list. We sanitise here so the LLM
+    /// sees a regex-safe identifier while the original display name remains in
+    /// <c>_tool.Name</c> for telemetry / logging / Description.
     /// </remarks>
-    public override string Name => _tool.Name;
+    public override string Name => SanitiseToolName(_tool.Name);
+
+    private static readonly Regex InvalidToolNameChars = new(@"[^a-zA-Z0-9_.-]", RegexOptions.Compiled);
+
+    /// <summary>
+    /// R6 hotfix 2026-06-19 — public so callers that compare against
+    /// AIFunction.Name (e.g., <c>SprkChatAgentFactory.BuildAllowedToolNames</c>'s
+    /// per-turn tool filter) can apply the same transform to their input. The
+    /// filter compares <c>AIFunction.Name</c> (this property is sanitised) to
+    /// the manifest-derived <c>allowedToolNames</c> HashSet (which carries raw
+    /// Dataverse <c>sprk_name</c> values with spaces). Without applying the same
+    /// sanitisation to the HashSet, every comparison fails and the agent ends
+    /// up with toolCount=0 — the LLM stalls because it has no tools to invoke.
+    /// </summary>
+    public static string SanitiseToolName(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return "unknown_tool";
+        }
+        // Replace each run of invalid characters with a single underscore.
+        return InvalidToolNameChars.Replace(raw.Trim(), "_");
+    }
 
     /// <inheritdoc />
     /// <remarks>
@@ -361,6 +404,13 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         var startedAt = DateTimeOffset.UtcNow;
         var stopwatch = Stopwatch.StartNew();
 
+        // R6 Pillar 6c (FR-37 / task 063) — context.tool_call_started.
+        // ADR-015 audit: payload is the tool NAME (config identifier, Tier 1 safe) +
+        // decisionId (freshly-generated GUID, no semantic content) + sessionId/tenantId
+        // (deterministic identifiers). No args, no user text.
+        _contextEventEmitter?.ToolCallStarted(
+            _tool.Name, context.DecisionId, context.ChatSessionId, context.TenantId);
+
         try
         {
             // FR-09: ValidateChat first (default impl rejects; chat-available handlers override).
@@ -371,6 +421,12 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
                 LogToolOutcome(context.DecisionId, outcome: "validation_failed", stopwatch.ElapsedMilliseconds, errorCode: "ValidationFailed");
                 activity?.SetTag("sprk.tool.outcome", "validation_failed");
                 activity?.SetStatus(ActivityStatusCode.Error, description: "validation_failed");
+
+                // R6 Pillar 6c — context.tool_call_completed (validation_failed branch).
+                // ADR-015 audit: outcome is enum-like ("validation_failed"), durationMs is numeric.
+                _contextEventEmitter?.ToolCallCompleted(
+                    _tool.Name, context.DecisionId, context.ChatSessionId, context.TenantId,
+                    outcome: "validation_failed", durationMs: stopwatch.ElapsedMilliseconds);
 
                 // Return a structured envelope the LLM can interpret. We surface validation
                 // errors as a tool-error response (NOT a thrown exception) so the LLM can
@@ -400,6 +456,13 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
                 activity?.SetStatus(ActivityStatusCode.Error, description: result.ErrorCode);
             }
 
+            // R6 Pillar 6c — context.tool_call_completed (handler-dispatch branch).
+            // ADR-015 audit: outcome is enum-like ("ok"/"error"), durationMs is numeric.
+            // No result body, no LLM response, no args.
+            _contextEventEmitter?.ToolCallCompleted(
+                _tool.Name, context.DecisionId, context.ChatSessionId, context.TenantId,
+                outcome: outcome, durationMs: stopwatch.ElapsedMilliseconds);
+
             // R6 Wave 7b: post-process well-known metadata keys for citation accumulation +
             // widget event emission. Failures here are non-fatal — handlers stay pure
             // input/output; this is cross-cutting infrastructure that MUST NOT bleed into
@@ -417,6 +480,12 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
             LogToolOutcome(context.DecisionId, outcome: "cancelled", stopwatch.ElapsedMilliseconds, errorCode: "Cancelled");
             activity?.SetTag("sprk.tool.outcome", "cancelled");
             activity?.SetStatus(ActivityStatusCode.Error, description: "cancelled");
+
+            // R6 Pillar 6c — context.tool_call_completed (cancelled branch).
+            _contextEventEmitter?.ToolCallCompleted(
+                _tool.Name, context.DecisionId, context.ChatSessionId, context.TenantId,
+                outcome: "cancelled", durationMs: stopwatch.ElapsedMilliseconds);
+
             throw;
         }
         catch (Exception ex)
@@ -431,6 +500,14 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
             activity?.SetTag("sprk.tool.outcome", "exception");
             activity?.SetTag("sprk.tool.exceptionType", ex.GetType().FullName);
             activity?.SetStatus(ActivityStatusCode.Error, description: ex.GetType().Name);
+
+            // R6 Pillar 6c — context.tool_call_completed (exception branch).
+            // ADR-015 audit: outcome is enum-like ("exception"); the exception details are
+            // logged separately above with ADR-015 governance — NOT carried in this event.
+            _contextEventEmitter?.ToolCallCompleted(
+                _tool.Name, context.DecisionId, context.ChatSessionId, context.TenantId,
+                outcome: "exception", durationMs: stopwatch.ElapsedMilliseconds);
+
             throw;
         }
     }

@@ -1,0 +1,45 @@
+<task id="R3-052" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Audit + migrate `notification-new-events.json`</title>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>
+      Audit decision: MIGRATED.
+      4 audit checks: (1) No non-existent entity joins (queries `appointment` only — real system entity). (2) No `currentuser` filter. (3) No inline membership FetchXML. (4) However, FetchXML had ZERO membership filtering — description claimed "where user is a team member" but actual query returned ALL appointments system-wide. This is a missing-filter defect, semantically equivalent to A1 (wrong/missing membership scoping).
+      Migration: Added `Lookup My Matters` node (actionType=52, entityType=`sprk_matter`, roles=[owner, assignedAttorney, assignedParalegal], includeRelated=false, outputVariable=myMatters). Updated Query node to filter `regardingobjectid in {{joinIds myMatters.ids}}` and added dependsOn=["Lookup My Matters"]. Updated edges chain: Start → Lookup My Matters → Query New Events → Has New Events? → Create Notification.
+      EntityType rationale: appointments link to matters via polymorphic `regardingobjectid` lookup (same pattern as documents' `sprk_matter` direct lookup). Mirrors canonical pattern from notification-new-documents.json (task 050).
+      JSON validated: 5 nodes, 4 edges, valid syntax.
+    </completion-notes>
+    <phase>P6</phase>
+    <parallel-group>L (with 050, 051)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1h</estimated-effort>
+    <tags>playbook-config,migration,audit</tags>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-events.json</file>
+    </relevant-files>
+    <dependencies>041, 042</dependencies>
+  </metadata>
+  <prompt>Audit notification-new-events.json for similar broken membership patterns; if found, migrate to LookupUserMembership.</prompt>
+  <goal>If broken pattern found, migrated. If not, document audit + close.</goal>
+  <constraints>
+    <constraint source="spec FR-1C.3">Audit + migrate if applicable</constraint>
+  </constraints>
+  <knowledge>
+    <topic>playbook-migration-audit</topic>
+    <files>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-events.json</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check</step>
+    <step order="1">Audit playbook for broken patterns</step>
+    <step order="2">Migrate if applicable; document if not</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Audit completed + outcome documented</criterion>
+    <criterion testable="true">If migrated, playbook produces non-zero notifications</criterion>
+  </acceptance-criteria>
+</task>

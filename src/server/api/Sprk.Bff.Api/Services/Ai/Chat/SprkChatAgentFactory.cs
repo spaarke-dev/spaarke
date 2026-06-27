@@ -10,13 +10,15 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Services.Ai.Capabilities;
 using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Services.Ai.Foundry;
+using Sprk.Bff.Api.Models.Workspace;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 using Sprk.Bff.Api.Services.Ai.Safety.Citations;
+using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -54,25 +56,16 @@ public class SprkChatAgentFactory
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<SprkChatAgentFactory> _logger;
 
-    // ── AIPU2-061: Per-turn capability routing ────────────────────────────────
-    // ICapabilityRouter is a singleton (in-memory keyword + LLM classifier).
-    // Injected here so CreateAgentAsync can call RouteAsync before tool resolution.
-    // When null (pre-AIPU2-010 environments), the factory falls back to the existing
-    // static tool resolution path (backward-compatible).
-    private readonly ICapabilityRouter? _capabilityRouter;
-
     public SprkChatAgentFactory(
         IChatClient chatClient,
         [FromKeyedServices("raw")] IChatClient rawChatClient,
         IServiceProvider serviceProvider,
-        ILogger<SprkChatAgentFactory> logger,
-        ICapabilityRouter? capabilityRouter = null)
+        ILogger<SprkChatAgentFactory> logger)
     {
         _chatClient = chatClient;
         _rawChatClient = rawChatClient;
         _serviceProvider = serviceProvider;
         _logger = logger;
-        _capabilityRouter = capabilityRouter;
     }
 
     /// <summary>
@@ -92,7 +85,6 @@ public class SprkChatAgentFactory
         _rawChatClient = null!;
         _serviceProvider = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _capabilityRouter = null;
     }
 
     /// <summary>
@@ -102,13 +94,11 @@ public class SprkChatAgentFactory
     /// are responsible for caching the agent for the duration of a session and replacing it
     /// when a context switch occurs (different document or playbook).
     ///
-    /// AIPU2-061: Per-turn tool injection via CapabilityRouter.
-    /// When <paramref name="latestUserMessage"/> is provided and <see cref="ICapabilityRouter"/> is
-    /// registered, the factory calls <c>RouteAsync</c> to select the minimal tool set for the turn,
-    /// then validates those capabilities via <see cref="ICapabilityValidator"/>.  Only tools whose
-    /// capability appears in the validated set are injected into the agent.  If routing produces no
-    /// confident result (Layer 3 fallback), the full backward-compatible tool set is used.
-    /// A <c>capability_change</c> SSE event is emitted when the routed tool set differs from the
+    /// Per-playbook tool filtering (FR-23): when <paramref name="playbookId"/> is non-null, the
+    /// tool set exposed to the LLM is gated by the playbook's declared capabilities (Action +
+    /// Tool scopes). When <paramref name="playbookId"/> is null (standalone conversational chat),
+    /// only the always-on core capabilities are exposed.
+    /// A <c>capability_change</c> SSE event is emitted when the per-turn tool set differs from the
     /// <paramref name="previousTurnToolNames"/> set passed by the caller.
     /// </summary>
     /// <param name="sessionId">Opaque session identifier (used for logging/tracing).</param>
@@ -127,21 +117,18 @@ public class SprkChatAgentFactory
     /// </param>
     /// <param name="sseWriter">
     /// Optional SSE writer delegate for out-of-band events (progress, document_replace,
-    /// capability_change). Used by tools and by AIPU2-061 to emit <c>capability_change</c>
-    /// events when the per-turn tool set differs from the previous turn.
+    /// capability_change). Used by tools and to emit <c>capability_change</c> events when
+    /// the per-turn tool set differs from the previous turn.
     /// Null when SSE is not available.
     /// </param>
     /// <param name="latestUserMessage">
-    /// The most recent user message text. Used for:
-    ///   1. Conversation-aware document chunk re-selection (FR-03).
-    ///   2. AIPU2-061: Per-turn capability routing — passed to CapabilityRouter.RouteAsync
-    ///      to classify intent and select the minimal tool set for this turn.
-    /// Null on initial session creation or when not applicable (falls back to full tool set).
+    /// The most recent user message text. Used for conversation-aware document chunk
+    /// re-selection (FR-03). Null on initial session creation or when not applicable.
     /// </param>
     /// <param name="previousTurnToolNames">
-    /// AIPU2-061: Names of tools that were active in the previous turn (from the caller's
-    /// session state). When provided, a <c>capability_change</c> SSE event is emitted if
-    /// the current turn's routed tool set differs. Null on the first turn (no comparison).
+    /// Names of tools that were active in the previous turn (from the caller's session state).
+    /// When provided, a <c>capability_change</c> SSE event is emitted if the current turn's
+    /// tool set differs. Null on the first turn (no comparison).
     /// </param>
     /// <param name="uploadedFiles">
     /// R5 task 033: Optional manifest of files the end user uploaded into the current chat
@@ -158,6 +145,13 @@ public class SprkChatAgentFactory
     /// omit the parameter behave exactly as before.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="intentHint">
+    /// Optional closed-vocabulary soft-slash hint emitted by the frontend
+    /// `SoftSlashRouter.decorateBody()` (`summarize` / `draft` /
+    /// `extract-entities` / `analyze`). Biases the PlaybookDispatcher Phase B
+    /// vector query downstream (task 115), where the slash + natural-language
+    /// flows converge. Default null preserves backward compatibility.
+    /// </param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
     /// The returned agent is wrapped with the middleware pipeline (AIPL-057, AIPU-072):
@@ -175,7 +169,8 @@ public class SprkChatAgentFactory
         string? latestUserMessage = null,
         IReadOnlyList<string>? previousTurnToolNames = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? intentHint = null)
     {
         _logger.LogInformation(
             "Creating SprkChatAgent for session={SessionId}, document={DocumentId}, playbook={PlaybookId}, tenant={TenantId}",
@@ -225,11 +220,30 @@ public class SprkChatAgentFactory
 
             if (!ReferenceEquals(enrichedPrompt, context.SystemPrompt))
             {
-                context = context with { SystemPrompt = enrichedPrompt };
-                _logger.LogDebug(
-                    "Enriched system prompt with Active Capabilities section ({CommandCount} scope commands)",
-                    commands.Count(c => !string.Equals(c.Category, "system", StringComparison.OrdinalIgnoreCase)
-                                     && !string.Equals(c.Category, "playbook", StringComparison.OrdinalIgnoreCase)));
+                // R6 task 068 — Active Capabilities block participates in the shared 8K
+                // budget tracker. We resolve the tracker lazily here (it lives later in
+                // the prompt-assembly path below; this is a no-op when null).
+                var capabilitiesAddition = enrichedPrompt.Length > context.SystemPrompt.Length
+                    ? enrichedPrompt[context.SystemPrompt.Length..]
+                    : string.Empty;
+                var lazyTracker = scope.ServiceProvider.GetService<IPromptBudgetTracker>();
+                var lazySessionGuid = Guid.TryParse(sessionId, out var pg) ? pg : (Guid?)null;
+                if (TryReservePromptBudget(
+                        lazyTracker, "active-capabilities", capabilitiesAddition,
+                        lazySessionGuid, tenantId))
+                {
+                    context = context with { SystemPrompt = enrichedPrompt };
+                    _logger.LogDebug(
+                        "Enriched system prompt with Active Capabilities section ({CommandCount} scope commands)",
+                        commands.Count(c => !string.Equals(c.Category, "system", StringComparison.OrdinalIgnoreCase)
+                                         && !string.Equals(c.Category, "playbook", StringComparison.OrdinalIgnoreCase)));
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "R6 task 068: Active Capabilities block denied by shared prompt budget tracker (sessionId={SessionId}); omitting",
+                        sessionId);
+                }
             }
         }
         catch (Exception ex)
@@ -264,10 +278,25 @@ public class SprkChatAgentFactory
                 var manifestSuffix = BuildSessionFilesManifestSuffix(files);
                 if (!string.IsNullOrEmpty(manifestSuffix))
                 {
-                    context = context with { SystemPrompt = context.SystemPrompt + manifestSuffix };
-                    _logger.LogInformation(
-                        "R5 task 033: appended Session Files manifest to system prompt — sessionId={SessionId}, fileCount={FileCount}",
-                        sessionId, files.Count);
+                    // R6 task 068 — session-files manifest participates in the shared 8K
+                    // budget tracker (manifest only — fileId + fileName + count; ADR-015).
+                    var lazyTracker = scope.ServiceProvider.GetService<IPromptBudgetTracker>();
+                    var lazySessionGuid = Guid.TryParse(sessionId, out var pg) ? pg : (Guid?)null;
+                    if (TryReservePromptBudget(
+                            lazyTracker, "session-files-manifest", manifestSuffix,
+                            lazySessionGuid, tenantId))
+                    {
+                        context = context with { SystemPrompt = context.SystemPrompt + manifestSuffix };
+                        _logger.LogInformation(
+                            "R5 task 033: appended Session Files manifest to system prompt — sessionId={SessionId}, fileCount={FileCount}",
+                            sessionId, files.Count);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "R6 task 068: Session Files manifest denied by shared prompt budget tracker — sessionId={SessionId}, fileCount={FileCount}; omitting",
+                            sessionId, files.Count);
+                    }
                 }
             }
             catch (Exception ex)
@@ -297,6 +326,76 @@ public class SprkChatAgentFactory
         context = context with { SystemPrompt = context.SystemPrompt + BuildCompactFormattingDirective() };
         // === End R6 Hotfix Wave B-G10b =========================================
 
+        // === R6 task 068 — Shared prompt budget tracker (Pillar 7 / FR-46) =====
+        // Resolve the shared 8K system-prompt budget tracker from the per-turn scope.
+        // Scoped lifetime — one tracker per HTTP request / per chat turn — so accounting
+        // reflects only this turn. When the tracker is unavailable (pre-task-068 envs),
+        // the factory falls back to per-block local budget checks (workspace block already
+        // does this via length-truncation in BuildWorkspaceStateBlock).
+        //
+        // ADR-015: tracker emits truncation telemetry with deterministic IDs only
+        // (layer name, token counts, sessionId, tenantId, decision enum). Never fragment
+        // bodies. The tracker's tag-set + log-prefix is `[ADR-015][memory.prompt_budget_*]`.
+        var promptBudgetTracker = scope.ServiceProvider.GetService<IPromptBudgetTracker>();
+        var sessionGuid = Guid.TryParse(sessionId, out var parsedSessionGuid)
+            ? parsedSessionGuid
+            : (Guid?)null;
+        // === End R6 task 068 — tracker resolution ==============================
+
+        // === R6 task 053 — Workspace State block (Pillar 6a / FR-34) ===========
+        // Per-turn snapshot of currently open workspace tabs the user has marked
+        // visible to the assistant. Lets the LLM answer questions like "what's
+        // open in my workspace?" / "what file is on tab 2?". Pillar 9 (task 074)
+        // refines this to schema-aware per-widget visible state.
+        //
+        // ADR-010: IWorkspaceStateService is Scoped; resolved from the same
+        // per-turn scope as IChatContextProvider (factory is Singleton) — ZERO
+        // new top-level DI registrations.
+        // ADR-014: tenantId in the read path (cache key + Cosmos partition key).
+        // ADR-015: block carries widget type + matterName + isPinned flags ONLY —
+        // never raw user message text from prior turns.
+        // NFR-10: workspace block truncates after ~500 chars to preserve the 8K
+        // system prompt budget; truncation emits telemetry. R6 task 068 wires the
+        // shared budget tracker so the workspace block participates in the same
+        // 8K accounting as document context + knowledge + memory composition.
+        try
+        {
+            var workspaceService = scope.ServiceProvider.GetService<IWorkspaceStateService>();
+            if (workspaceService is not null)
+            {
+                var tabs = await workspaceService.GetTabsAsync(tenantId, sessionId, cancellationToken);
+                var workspaceBlock = BuildWorkspaceStateBlock(tabs, sessionId);
+                if (!string.IsNullOrEmpty(workspaceBlock))
+                {
+                    if (TryReservePromptBudget(
+                            promptBudgetTracker, "workspace-state", workspaceBlock,
+                            sessionGuid, tenantId))
+                    {
+                        context = context with { SystemPrompt = context.SystemPrompt + workspaceBlock };
+                        _logger.LogDebug(
+                            "R6 task 053: appended Workspace State block to system prompt — sessionId={SessionId}, blockLength={BlockLength}",
+                            sessionId, workspaceBlock.Length);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "R6 task 068: workspace-state block denied by shared prompt budget tracker — sessionId={SessionId}, blockLength={BlockLength}; omitting",
+                            sessionId, workspaceBlock.Length);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Soft failure — workspace state is enhancing, not required. The agent
+            // still works without the block; it just can't answer workspace-aware
+            // questions for this turn. Logged so operators see in App Insights.
+            _logger.LogWarning(ex,
+                "R6 task 053: failed to query workspace state for system prompt — sessionId={SessionId}, continuing without",
+                sessionId);
+        }
+        // === End R6 task 053 ===================================================
+
         // Resolve playbook capabilities from Dataverse to determine which tools should be available.
         // When no playbook is specified (generic/standalone chat mode), use core capabilities only.
         // This prevents tools with unconfigured dependencies (LegalResearch, CodeInterpreter)
@@ -305,133 +404,25 @@ public class SprkChatAgentFactory
             ? await GetPlaybookCapabilitiesAsync(scope.ServiceProvider, playbookId.Value, cancellationToken)
             : (IReadOnlySet<string>)new HashSet<string>(PlaybookCapabilities.CoreCapabilities);
 
-        // === AIPU2-061: Per-turn capability routing via CapabilityRouter ===
-        // When a user message and the capability router are available, run the three-tier router
-        // to select the minimal tool set for this specific turn rather than injecting the full
-        // capability-gated set every time.  The routing result drives tool resolution below.
+        // === FR-24 (chat-routing-redesign-r1 task 141) — Render-routing dedup directive =========
+        // When the dispatcher-resolved playbook (passed via the `playbookId` parameter) targets
+        // a NON-chat terminal destination, append a dedup directive to the system prompt so the
+        // LLM emits ONLY a single-sentence acknowledgment for the `invoke_playbook` tool call —
+        // the playbook output renders at the destination (workspace tab / form-prefill /
+        // side-effect) and the chat-agent's parallel inline text would be a redundant render
+        // (R5 Gap A — path A vs path B parallelism is a smell; structurally eliminated here).
         //
-        // Routing pipeline:
-        //   1. RouteAsync(userMessage, playbookName, ct)   → CapabilityRoutingResult
-        //   2. ICapabilityValidator.FilterAsync(candidates) → removes kill-switch / tenant / role
-        //   3. ResolveTools with routing result            → only tools for this turn's capabilities
-        //   4. Emit capability_change SSE if tool set differs from previous turn (FR-801)
-        //
-        // Fallback: when the router is unavailable or routing produces no tools (Layer 3 with
-        // empty superset), fall back to the full playbook-capabilities-gated tool set so no
-        // regression occurs on environments that have not yet deployed AiCapabilitiesModule.
-        CapabilityRoutingResult? routingResult = null;
-        IReadOnlySet<string>? routedCapabilities = null;
-
-        if (_capabilityRouter is not null && !string.IsNullOrWhiteSpace(latestUserMessage))
-        {
-            try
-            {
-                // Derive the active playbook name from the context if available.
-                // PlaybookChatContextProvider populates SystemPrompt with the playbook name
-                // but there's no dedicated field — pass null when not resolvable.
-                // Future: AIPU2-013/014 may add PlaybookName to ChatContext.
-                var activePlaybookName = context.PlaybookId.HasValue
-                    ? context.PlaybookId.Value.ToString("N")
-                    : null;
-
-                routingResult = await _capabilityRouter
-                    .RouteAsync(latestUserMessage, activePlaybookName, cancellationToken)
-                    .ConfigureAwait(false);
-
-                _logger.LogInformation(
-                    "AIPU2-061: CapabilityRouter result — session={SessionId}, layer={Layer}, " +
-                    "confident={IsConfident}, capabilities=[{Capabilities}], toolNames=[{ToolNames}]",
-                    sessionId,
-                    routingResult.Layer,
-                    routingResult.IsConfident,
-                    string.Join(",", routingResult.SelectedCapabilities),
-                    string.Join(",", routingResult.SelectedToolNames));
-
-                // Validate the router-selected capabilities: apply kill-switch, tenant,
-                // permission, and context checks via ICapabilityValidator.
-                // ICapabilityValidator is scoped — resolve from the per-request scope.
-                if (routingResult.SelectedCapabilities.Length > 0)
-                {
-                    var validator = scope.ServiceProvider.GetService<ICapabilityValidator>();
-                    if (validator is not null)
-                    {
-                        var manifest = scope.ServiceProvider.GetService<ICapabilityManifest>();
-                        if (manifest is not null)
-                        {
-                            // Build candidate list from router-selected capability names.
-                            var candidates = routingResult.SelectedCapabilities
-                                .Select(name =>
-                                {
-                                    manifest.TryGet(name, out var entry);
-                                    return entry;
-                                })
-                                .OfType<CapabilityManifestEntry>()
-                                .ToList();
-
-                            if (candidates.Count > 0)
-                            {
-                                // Build validation context from available request data.
-                                // ClaimsPrincipal is not available in the factory (factory is
-                                // singleton; httpContext carries the principal per-request).
-                                var principal = httpContext?.User
-                                    ?? new System.Security.Claims.ClaimsPrincipal();
-                                var tenantEnvUrl = $"https://{tenantId}.crm.dynamics.com";
-                                var convContext = new Dictionary<string, string>(
-                                    StringComparer.OrdinalIgnoreCase);
-
-                                var validationCtx = new CapabilityValidationContext(
-                                    User: principal,
-                                    TenantEnvironmentUrl: tenantEnvUrl,
-                                    ConversationContext: convContext);
-
-                                var validated = await validator
-                                    .FilterAsync(candidates, validationCtx, cancellationToken)
-                                    .ConfigureAwait(false);
-
-                                // Build the routed capability set intersected with the
-                                // playbook capabilities (belt-and-suspenders security gate).
-                                routedCapabilities = new HashSet<string>(
-                                    validated.Select(e => e.CapabilityName)
-                                             .Where(c => capabilities.Contains(c)),
-                                    StringComparer.OrdinalIgnoreCase);
-
-                                _logger.LogDebug(
-                                    "AIPU2-061: validated routed capabilities=[{Capabilities}]",
-                                    string.Join(",", routedCapabilities));
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // Soft failure — routing is enhancing, not required.
-                // Fall through to the existing full-capability tool set.
-                _logger.LogWarning(ex,
-                    "AIPU2-061: CapabilityRouter failed for session={SessionId}; " +
-                    "falling back to full playbook capability set",
-                    sessionId);
-                routingResult = null;
-                routedCapabilities = null;
-            }
-        }
-        // === End AIPU2-061 routing ===
-
-        // === R6 task 042 (FR-30) — CapabilityRouter dedup: one intent → one render =========
-        // When the router resolved an UNAMBIGUOUS playbook (single confident capability with
-        // a non-null PlaybookId), look up the playbook's terminal node `destination` per
-        // NodeRoutingConfig (task 031 / FR-27). When the destination is NOT chat, append a
-        // dedup directive to the system prompt so the LLM emits ONLY a single-sentence
-        // acknowledgment for the `invoke_playbook` tool call — the playbook output renders
-        // at the destination (workspace tab / form-prefill / side-effect) and the chat-agent's
-        // parallel inline text would be a redundant render (R5 Gap A — path A vs path B
-        // parallelism is a smell; structurally eliminated here).
+        // The resolved playbook ID arrives via the explicit `playbookId` parameter (resolved
+        // upstream by PlaybookDispatcher in ChatEndpoints). Semantics: when there is a
+        // confident playbook resolution and its terminal destination is not chat, suppress
+        // LLM inline analysis (R5 Gap A — path A vs path B parallelism is a smell;
+        // structurally eliminated here).
         //
         // NFR-01 binding: conversational primacy preserved. The directive applies ONLY to the
-        // `invoke_playbook` tool call response in THIS turn. Refinement, follow-up,
-        // comparison, and context-injection turns are unaffected — the next turn's routing
-        // resolves separately and only adds the directive when it again resolves to a
-        // non-chat destination playbook.
+        // `invoke_playbook` tool call response in THIS turn. Refinement, follow-up, comparison,
+        // and context-injection turns are unaffected — the next turn's routing resolves
+        // separately and only adds the directive when it again resolves to a non-chat
+        // destination playbook.
         //
         // NFR-13 / NFR-07 / NFR-08 binding: safety pipeline, pre-fill flows, and node
         // executors are all UNCHANGED — the dedup is a system-prompt enrichment only.
@@ -441,19 +432,17 @@ public class SprkChatAgentFactory
         // Soft failure: if INodeService lookup fails (Dataverse outage, etc.), the directive
         // is NOT applied and the chat-agent emits inline text normally — degrades to current
         // (pre-task-042) behavior. NFR-01 conversational primacy is preserved unconditionally.
-        if (routingResult is not null
-            && routingResult.IsConfident
-            && routingResult.SelectedPlaybookId.HasValue)
+        if (playbookId.HasValue)
         {
             try
             {
-                var resolvedPlaybookId = routingResult.SelectedPlaybookId.Value;
+                var resolvedPlaybookId = playbookId.Value;
                 var destination = await ResolvePlaybookTerminalDestinationAsync(
                     scope.ServiceProvider, resolvedPlaybookId, cancellationToken)
                     .ConfigureAwait(false);
 
                 _logger.LogInformation(
-                    "R6 task 042: CapabilityRouter dedup — session={SessionId} " +
+                    "FR-24 render-routing dedup — session={SessionId} " +
                     "playbookId={PlaybookId} destination={Destination} " +
                     "directiveApplied={DirectiveApplied}",
                     sessionId,
@@ -472,7 +461,7 @@ public class SprkChatAgentFactory
                 else if (destination.HasValue && destination.Value == Models.Ai.NodeDestination.Chat)
                 {
                     // === Hotfix Wave B-G9b (R6, 2026-06-10) — PDF hallucination fix ====================
-                    // When the router resolves to a CHAT-destination playbook, the playbook itself
+                    // When the resolved playbook targets a CHAT destination, the playbook itself
                     // produces the primary structured result (rendered into chat). Without a directive,
                     // the LLM may ALSO generate inline content in parallel. For PDFs (and any async-
                     // text-extraction format), the LLM sees an empty document body at invocation time
@@ -505,13 +494,13 @@ public class SprkChatAgentFactory
             {
                 // ADR-015: log exception type + tenant only; never user content.
                 _logger.LogWarning(ex,
-                    "R6 task 042: CapabilityRouter dedup directive lookup failed " +
+                    "FR-24 render-routing dedup directive lookup failed " +
                     "(session={SessionId}, playbookId={PlaybookId}, exceptionType={ExceptionType}); " +
                     "continuing without dedup directive — NFR-01 conversational primacy preserved.",
-                    sessionId, routingResult.SelectedPlaybookId, ex.GetType().Name);
+                    sessionId, playbookId, ex.GetType().Name);
             }
         }
-        // === End R6 task 042 dedup ============================================================
+        // === End FR-24 dedup ============================================================
 
         // Create a shared CitationContext for search tools to populate with source metadata.
         // This context is passed to DocumentSearchTools and KnowledgeRetrievalTools so they
@@ -524,19 +513,16 @@ public class SprkChatAgentFactory
         // from the Analysis Workspace with full context (task 002, task 020).
         var analysisId = context.AnalysisMetadata?.GetValueOrDefault("analysisId");
 
-        // Resolve AIFunction tools.
-        // AIPU2-061: when a validated routed capability set is available, pass the routing
-        // result so ResolveTools restricts to only the capabilities selected for this turn.
-        // Otherwise fall back to the full playbook capability set (backward compatible).
-        var effectiveCapabilities = routedCapabilities ?? capabilities;
+        // Resolve AIFunction tools. FR-23 per-playbook tool filtering is enforced via the
+        // `capabilities` set above (matched-playbook capabilities OR always-on core capabilities).
         var tools = await ResolveTools(
-            scope.ServiceProvider, tenantId, sessionId, context.KnowledgeScope, effectiveCapabilities,
+            scope.ServiceProvider, tenantId, sessionId, context.KnowledgeScope, capabilities,
             playbookId ?? Guid.Empty, documentId, analysisId, httpContext, sseWriter, citationContext,
-            routingResult, cancellationToken).ConfigureAwait(false);
+            cancellationToken).ConfigureAwait(false);
 
-        // === AIPU2-061: capability_change SSE event ===
-        // Emit when the routed tool set for this turn differs from the previous turn's tool set.
-        // This notifies the client (FR-801) that the active capability profile has changed so
+        // === capability_change SSE event ===
+        // Emit when the per-turn tool set differs from the previous turn's tool set.
+        // This notifies the client (FR-801) that the active tool profile has changed so
         // the UI can update affordances (e.g., hide/show tool pills in the chat bar).
         if (sseWriter is not null && previousTurnToolNames is not null)
         {
@@ -658,7 +644,7 @@ public class SprkChatAgentFactory
 
         // Resolve remaining dependencies
         var nodeService = scope.ServiceProvider.GetRequiredService<INodeService>();
-        var cache = scope.ServiceProvider.GetRequiredService<IDistributedCache>();
+        var cache = scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
 
         return new PlaybookDispatcher(
             embeddingService,
@@ -683,7 +669,7 @@ public class SprkChatAgentFactory
     public virtual DynamicCommandResolver CreateCommandResolver()
     {
         var entityService = _serviceProvider.GetRequiredService<IGenericEntityService>();
-        var cache = _serviceProvider.GetRequiredService<IDistributedCache>();
+        var cache = _serviceProvider.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
         var loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
 
         return new DynamicCommandResolver(
@@ -802,12 +788,10 @@ public class SprkChatAgentFactory
     /// AnalysisQueryTools was migrated to typed handler AnalysisQueryHandler in R6 Wave 7
     /// (data-driven via the SYS-Analysis Query sprk_analysistool row + the FR-11 block below).
     ///
-    /// AIPU2-061: When <paramref name="routingResult"/> is provided and confident (Layer 1 or 2),
-    /// only tools whose names appear in the router-selected tool set are included. This implements
-    /// the per-turn tool injection contract: the LLM sees only the minimal tool set for the
-    /// classified intent, reducing token cost and hallucination risk.
-    /// When <paramref name="routingResult"/> is null, uncertain, or a Layer 3 fallback, all tools
-    /// enabled by <paramref name="capabilities"/> are included (backward-compatible behaviour).
+    /// FR-23 per-playbook tool filtering: the <paramref name="capabilities"/> set carries either
+    /// the matched playbook's declared capabilities (playbookId resolved) or the always-on core
+    /// capabilities (standalone conversational chat). Tools gated by capability are registered
+    /// only when the gating capability is in the set.
     /// </summary>
     /// <param name="scopedProvider">The scoped DI provider for this agent creation call.</param>
     /// <param name="tenantId">Tenant ID from the authenticated session — injected into tool constructors (ADR-014).</param>
@@ -833,12 +817,6 @@ public class SprkChatAgentFactory
     /// Shared citation context for search tools to populate with source metadata (chunk IDs, source names, excerpts).
     /// Passed to DocumentSearchTools and KnowledgeRetrievalTools so they register citations during execution.
     /// </param>
-    /// <param name="routingResult">
-    /// AIPU2-061: Optional routing result from <see cref="ICapabilityRouter.RouteAsync"/>.
-    /// When provided and confident (Layer 1 or 2), tools are post-filtered so that only those
-    /// whose AIFunction name appears in <see cref="CapabilityRoutingResult.SelectedToolNames"/>
-    /// or in the capabilities' tool name lists are included. Null = full set (backward compat).
-    /// </param>
     /// <returns>List of registered <see cref="AIFunction"/> instances, or empty list on failure.</returns>
     private async Task<IReadOnlyList<AIFunction>> ResolveTools(
         IServiceProvider scopedProvider,
@@ -852,7 +830,6 @@ public class SprkChatAgentFactory
         HttpContext? httpContext,
         Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter,
         CitationContext? citationContext,
-        CapabilityRoutingResult? routingResult = null,
         CancellationToken cancellationToken = default)
     {
         // Resolve services that tool classes depend on from DI.
@@ -1358,11 +1335,19 @@ public class SprkChatAgentFactory
                     // metadata. The adapter calls this per LLM invocation to get a fresh
                     // decision id (Guid.NewGuid per call).
                     var sessionIdGuid = TryParseChatSessionId(sessionId);
+                    // R6 Pillar 7 / task 069 (FR-47) — capture the principal oid claim once at
+                    // factory time and forward it through the per-call ChatInvocationContext so
+                    // user-scoped chat handlers (ManagePinnedContextHandler) see the owning user.
+                    // ADR-015: deterministic identifier only; never user message text. Null when
+                    // standalone chat (no authenticated user) or when the oid claim is missing.
+                    var oidClaim = httpContext?.User?.FindFirst("oid")?.Value
+                        ?? httpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
                     Func<ChatInvocationContext> contextFactory = () => new ChatInvocationContext
                     {
                         ChatSessionId = sessionIdGuid,
                         TenantId = tenantId,
                         MatterId = TryParseMatterId(knowledgeScope),
+                        UserId = string.IsNullOrWhiteSpace(oidClaim) ? null : oidClaim,
                         // R6 Wave 7c: forward the playbook's knowledge scope so chat-side
                         // handlers (KnowledgeRetrievalHandler etc.) can filter their queries
                         // to the playbook's knowledge sources without taking a separate DI
@@ -1515,109 +1500,11 @@ public class SprkChatAgentFactory
                 resolved, attempted, tools.Count);
         }
 
-        // === AIPU2-061: Per-turn tool filtering by routing result ===
-        // When the capability router produced a confident result (Layer 1 or 2), apply a
-        // post-filter so the agent only receives the tools selected for this specific turn.
-        //
-        // Filtering uses the union of:
-        //   (a) CapabilityRoutingResult.SelectedToolNames — explicit tool names from Layer 3
-        //       superset (populated by Layer 3 only; Layers 1 and 2 leave this empty).
-        //   (b) The tool names listed in each selected capability's manifest entry
-        //       (populated by Layers 1 and 2 via SelectedCapabilities → ToolNames lookup).
-        //
-        // Layer 3 fallback (IsConfident = false, SelectedToolNames may be non-empty):
-        //   SelectedToolNames carries the broad superset; filter by that list when non-empty.
-        //   When SelectedToolNames is also empty (empty manifest), return full set unchanged.
-        //
-        // Backward compat: when routingResult is null, skip filtering entirely.
-        if (routingResult is not null)
-        {
-            var allowedToolNames = BuildAllowedToolNames(routingResult, scopedProvider);
-            if (allowedToolNames.Count > 0)
-            {
-                var filtered = tools
-                    .Where(t => allowedToolNames.Contains(t.Name ?? string.Empty))
-                    .ToList();
-
-                _logger.LogDebug(
-                    "AIPU2-061: per-turn tool filter applied — " +
-                    "before={Before}, after={After}, layer={Layer}, confident={Confident}",
-                    tools.Count, filtered.Count, routingResult.Layer, routingResult.IsConfident);
-
-                tools = filtered;
-            }
-            else
-            {
-                // Empty allowed set means routing was uncertain (Layer 3 with empty manifest).
-                // Return the full capability-gated set unchanged (backward compatible).
-                _logger.LogDebug(
-                    "AIPU2-061: routing produced empty tool filter — returning full capability set ({Count} tools)",
-                    tools.Count);
-            }
-        }
-        // === End AIPU2-061 ===
+        // FR-23 per-playbook tool filtering: capability gating in the blocks above already
+        // limits tools to the matched playbook's declared capabilities (or the always-on
+        // core capabilities when no playbook is matched). No per-turn re-filter needed.
 
         return tools;
-    }
-
-    /// <summary>
-    /// AIPU2-061: Builds the set of AIFunction tool names that are permitted for this turn
-    /// based on the capability routing result.
-    ///
-    /// Resolution order:
-    ///   1. If the routing result has <see cref="CapabilityRoutingResult.SelectedToolNames"/>
-    ///      (Layer 3 superset), use those directly.
-    ///   2. Otherwise expand <see cref="CapabilityRoutingResult.SelectedCapabilities"/> to tool
-    ///      names by looking up each capability in the <see cref="ICapabilityManifest"/>.
-    ///   3. If neither produces a non-empty set, return empty — caller uses full set.
-    ///
-    /// Returns an empty set when routing produced no confident tool selection (full-set fallback).
-    /// </summary>
-    private HashSet<string> BuildAllowedToolNames(
-        CapabilityRoutingResult routingResult,
-        IServiceProvider scopedProvider)
-    {
-        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // Layer 3 superset: SelectedToolNames is pre-computed by ComputeLayer3Superset.
-        if (routingResult.SelectedToolNames.Length > 0)
-        {
-            foreach (var toolName in routingResult.SelectedToolNames)
-            {
-                if (!string.IsNullOrWhiteSpace(toolName))
-                    allowed.Add(toolName);
-            }
-            return allowed;
-        }
-
-        // Layers 1 and 2: expand capability names to tool names via the manifest.
-        if (routingResult.SelectedCapabilities.Length > 0)
-        {
-            var manifest = scopedProvider.GetService<ICapabilityManifest>();
-            if (manifest is not null)
-            {
-                foreach (var capName in routingResult.SelectedCapabilities)
-                {
-                    if (manifest.TryGet(capName, out var entry) && entry is not null)
-                    {
-                        foreach (var toolName in entry.ToolNames)
-                        {
-                            if (!string.IsNullOrWhiteSpace(toolName))
-                                allowed.Add(toolName);
-                        }
-                    }
-                    else
-                    {
-                        _logger.LogDebug(
-                            "AIPU2-061: routing selected capability '{CapabilityName}' " +
-                            "not found in manifest — skipping tool name expansion.",
-                            capName);
-                    }
-                }
-            }
-        }
-
-        return allowed;
     }
 
     /// <summary>
@@ -1879,9 +1766,9 @@ public class SprkChatAgentFactory
     /// <para>
     /// <b>NFR-01 binding</b>: the directive instructs a SHORT acknowledgment — NOT silence.
     /// Conversational primacy is preserved (the LLM still emits one acknowledgment sentence).
-    /// This directive is ONLY applied when the router has resolved a confident playbook
-    /// binding (<c>SelectedPlaybookId</c> != null); free-form / refinement / ambiguous turns
-    /// see no directive and the LLM responds conversationally as normal.
+    /// This directive is ONLY applied when the dispatcher has resolved a confident playbook
+    /// binding (the <c>playbookId</c> parameter is non-null); free-form / refinement /
+    /// ambiguous turns see no directive and the LLM responds conversationally as normal.
     /// </para>
     /// <para>
     /// <b>R5 Gap A binding</b>: this is the chat-destination side of the same dedup pattern
@@ -1894,6 +1781,250 @@ public class SprkChatAgentFactory
     /// widen the AI public-contracts surface.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// R6 Task 053 (Pillar 6a / FR-34) + Task 074 (Pillar 9 / FR-57/58/59) — builds the
+    /// per-turn Workspace State block summarizing currently open tabs the user has marked
+    /// visible to the assistant. Returns empty string when no tab is visible OR no visible
+    /// tab has a derivable visible state — call site short-circuits.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Privacy filter (FR-58 + FR-59 binding)</b>: a tab is INCLUDED iff
+    /// <see cref="WorkspaceTab.VisibleToAssistant"/> is true AND
+    /// <see cref="TryDeriveVisibleState"/> returns non-null for its widget data. Tabs
+    /// whose <c>VisibleToAssistant</c> is false OR whose widget data lacks renderable
+    /// visible state (e.g., Summary with no Tldr and empty Body) are filtered OUT.
+    /// This is the BFF-side enforcement of Pillar 9's per-widget
+    /// <c>getAgentVisibleState()</c> contract — server derives FR-57 shapes directly
+    /// from the typed <see cref="WorkspaceTabWidgetData"/> polymorphic union so the
+    /// closed 4-variant contract is structurally guaranteed.
+    /// </para>
+    /// <para>
+    /// <b>FR-57 shapes per widget category</b>:
+    /// <list type="bullet">
+    ///   <item><c>Summary</c> → <c>{ widgetType, summary, tldr, hasUserEdits }</c>.</item>
+    ///   <item><c>DocumentViewer</c> → <c>{ widgetType, filename, mimeType, sizeBytes,
+    ///   hasSelection, selectionText? }</c> (selectionText capped at 200 chars).</item>
+    ///   <item><c>Dashboard</c> → <c>{ widgetType, dashboardName, lastViewedSection }</c>
+    ///   (NO chart data; payload minimization per NFR-10).</item>
+    ///   <item><c>Table</c> → <c>{ widgetType, rowCount, sortColumn, filteredColumns,
+    ///   selectedRows: number }</c> (count only, NOT row IDs — token economy; stricter
+    ///   than POML which proposed <c>selectedRows[]</c>).</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// <b>ADR-015 governance</b>: block carries the FR-57 deterministic fields ONLY.
+    /// NEVER full widget bodies, NEVER raw user message text from prior turns. The
+    /// Summary body is explicitly omitted; only the TL;DR + edit flag participate.
+    /// DocumentViewer.selectionText is content-bearing but capped at 200 chars per the
+    /// frontend contract (task 073) and the spec's payload-minimization principle.
+    /// </para>
+    /// <para>
+    /// <b>NFR-10 budget</b>: each per-tab block is incrementally reserved against the
+    /// shared <see cref="IPromptBudgetTracker"/> by the call site
+    /// (<see cref="TryReservePromptBudget"/>). When the requested allocation is denied,
+    /// the entire block is omitted (the tracker emits truncation telemetry on the
+    /// <c>workspace-state</c> layer). The legacy <see cref="WorkspaceStateBlockMaxChars"/>
+    /// is retained as a hard fallback ceiling for when the tracker is unavailable
+    /// (pre-task-068 environments) — but is widened from 500 to
+    /// <see cref="WorkspaceStateBlockMaxCharsRich"/> to fit the richer per-tab shapes.
+    /// </para>
+    /// <para>
+    /// <b>Active tab convention</b>: the tab with the most recent <c>UpdatedAt</c>
+    /// is labeled "(active)". Preserved from task 053.
+    /// </para>
+    /// </remarks>
+    internal const int WorkspaceStateBlockMaxChars = 500;
+
+    /// <summary>
+    /// Hard fallback char ceiling for rich per-tab visible state when no
+    /// <see cref="IPromptBudgetTracker"/> is wired. ~2 KB ≈ 500 tokens at the conservative
+    /// 1.3× word-cost estimate — comfortably under the 8K NFR-10 budget. The tracker
+    /// supersedes this when present.
+    /// </summary>
+    internal const int WorkspaceStateBlockMaxCharsRich = 2000;
+
+    internal string BuildWorkspaceStateBlock(IReadOnlyList<WorkspaceTab> tabs, string sessionId)
+    {
+        // FR-58 + FR-59 BINDING: filter is `visibleToAssistant === true` AND widget has
+        // derivable visible state. Both required. Privacy default — when EITHER condition
+        // is unmet, the tab does NOT appear in the agent prompt.
+        var visible = tabs
+            .Where(t => t.VisibleToAssistant)
+            .Select(t => (Tab: t, State: TryDeriveVisibleState(t)))
+            .Where(p => p.State is not null)
+            .ToList();
+
+        if (visible.Count == 0) return string.Empty;
+
+        // Most-recent UpdatedAt → "active" (preserved from task 053 v1 simplification;
+        // explicit active-tab state from registry is a separate follow-up).
+        var ordered = visible.OrderByDescending(p => p.Tab.UpdatedAt).ToList();
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append("\n\n## Workspace State\n");
+        sb.Append("Tabs the user has marked visible to the assistant. Per-tab fields are deterministic visible state only (ADR-015 — no raw user text, no widget bodies).\n");
+
+        var truncatedAt = -1;
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var (tab, state) = ordered[i];
+            var activeMarker = i == 0 ? " (active)" : "";
+            var pinnedMarker = tab.IsPinned ? " user-pinned" : "";
+            var matterName = tab.MatterContext?.MatterName;
+            var matterSuffix = string.IsNullOrWhiteSpace(matterName) ? "" : $" matter=\"{matterName}\"";
+
+            // Header line + structured fields. Format chosen so the LLM can parse without
+            // needing to validate a JSON envelope per tab while still treating each tab as
+            // a discrete block.
+            var header = $"- Tab {i + 1}{activeMarker}: widgetType={tab.WidgetType}{pinnedMarker}{matterSuffix}\n";
+            var fields = FormatVisibleStateFields(state!);
+            var block = header + fields;
+
+            if (sb.Length + block.Length > WorkspaceStateBlockMaxCharsRich)
+            {
+                truncatedAt = i;
+                break;
+            }
+            sb.Append(block);
+        }
+
+        if (truncatedAt >= 0)
+        {
+            _logger.LogInformation(
+                "R6 task 074: Workspace State block truncated against fallback ceiling — sessionId={SessionId}, includedTabs={Included}, droppedTabs={Dropped}, charBudget={Budget}",
+                sessionId, truncatedAt, ordered.Count - truncatedAt, WorkspaceStateBlockMaxCharsRich);
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// R6 Task 074 (Pillar 9 / FR-57) — server-side derivation of the agent-visible state
+    /// shape from a tab's typed <see cref="WorkspaceTabWidgetData"/>. Mirrors the frontend
+    /// per-widget <c>getAgentVisibleState()</c> impls (task 073) so the BFF enforces the
+    /// FR-57 contract structurally, not by trusting client serialization.
+    /// </summary>
+    /// <returns>
+    /// A typed <see cref="WorkspaceTabVisibleState"/> instance when the widget has
+    /// derivable visible state; <c>null</c> when the widget should NOT appear in the
+    /// agent prompt (privacy default — e.g., Summary with no TL;DR and empty body).
+    /// </returns>
+    /// <remarks>
+    /// <b>ADR-015 BINDING</b>: only the FR-57 deterministic fields are projected.
+    /// Summary's <c>Body</c> is deliberately NOT projected — only TL;DR + edit flag.
+    /// DocumentViewer's <c>SelectionText</c> is capped at <see cref="SelectionTextMaxChars"/>.
+    /// Dashboard never projects chart data. Table never projects raw rows — only count.
+    /// </remarks>
+    internal const int SelectionTextMaxChars = 200;
+
+    internal static WorkspaceTabVisibleState? TryDeriveVisibleState(WorkspaceTab tab)
+    {
+        // Closed-union switch over the polymorphic widget-data types. A new widget kind
+        // cannot accidentally leak more than the FR-57 contract permits because the
+        // compiler requires explicit handling here.
+        return tab.WidgetData switch
+        {
+            SummaryTabWidgetData s when HasSummaryState(s) => new WorkspaceTabVisibleState.Summary(
+                Tldr: s.Tldr,
+                SummaryText: NormalizeBody(s.Body),
+                HasUserEdits: s.HasUserEdits ?? false),
+
+            DocumentViewerTabWidgetData d => new WorkspaceTabVisibleState.DocumentViewer(
+                Filename: d.Filename,
+                MimeType: d.MimeType,
+                SizeBytes: d.SizeBytes,
+                HasSelection: d.HasSelection ?? false,
+                SelectionText: TruncateSelection(d.SelectionText, d.HasSelection ?? false)),
+
+            DashboardTabWidgetData db => new WorkspaceTabVisibleState.Dashboard(
+                DashboardName: db.DashboardName,
+                LastViewedSection: db.LastViewedSection),
+
+            TableTabWidgetData t => new WorkspaceTabVisibleState.Table(
+                RowCount: t.RowCount,
+                SortColumn: t.SortColumn,
+                FilteredColumns: t.FilteredColumns,
+                SelectedRows: t.SelectedRows?.Count ?? 0),
+
+            // Unknown / null widget data → no visible state (privacy default).
+            _ => null,
+        };
+    }
+
+    /// <summary>Summary has visible state when EITHER a non-empty TL;DR OR a non-empty body exists.</summary>
+    private static bool HasSummaryState(SummaryTabWidgetData s)
+        => !string.IsNullOrWhiteSpace(s.Tldr) || !string.IsNullOrWhiteSpace(s.Body);
+
+    /// <summary>
+    /// Normalize the Summary body for the agent prompt — collapse whitespace + cap at a
+    /// conservative limit. Body text DOES participate in the prompt (it is the agent-
+    /// generated summary the user can quote), but we cap aggressively to honor NFR-10.
+    /// </summary>
+    private const int SummaryBodyMaxChars = 600;
+
+    private static string? NormalizeBody(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        var trimmed = body.Trim();
+        if (trimmed.Length <= SummaryBodyMaxChars) return trimmed;
+        return trimmed[..SummaryBodyMaxChars] + "…";
+    }
+
+    private static string? TruncateSelection(string? selection, bool hasSelection)
+    {
+        if (!hasSelection || string.IsNullOrWhiteSpace(selection)) return null;
+        var trimmed = selection.Trim();
+        if (trimmed.Length <= SelectionTextMaxChars) return trimmed;
+        return trimmed[..SelectionTextMaxChars] + "…";
+    }
+
+    /// <summary>
+    /// Format a derived <see cref="WorkspaceTabVisibleState"/> as the per-tab prompt
+    /// fields. Indented 2 spaces under the tab header. ADR-015: only deterministic
+    /// fields are emitted; selectionText is the only content-bearing field and respects
+    /// the 200-char cap upstream.
+    /// </summary>
+    internal static string FormatVisibleStateFields(WorkspaceTabVisibleState state)
+    {
+        var sb = new System.Text.StringBuilder();
+        switch (state)
+        {
+            case WorkspaceTabVisibleState.Summary s:
+                if (!string.IsNullOrWhiteSpace(s.Tldr))
+                    sb.Append($"  tldr: {s.Tldr}\n");
+                if (!string.IsNullOrWhiteSpace(s.SummaryText))
+                    sb.Append($"  summary: {s.SummaryText}\n");
+                sb.Append($"  hasUserEdits: {(s.HasUserEdits ? "true" : "false")}\n");
+                break;
+
+            case WorkspaceTabVisibleState.DocumentViewer d:
+                sb.Append($"  filename: {d.Filename}\n");
+                sb.Append($"  mimeType: {d.MimeType}\n");
+                sb.Append($"  sizeBytes: {d.SizeBytes}\n");
+                sb.Append($"  hasSelection: {(d.HasSelection ? "true" : "false")}\n");
+                if (!string.IsNullOrWhiteSpace(d.SelectionText))
+                    sb.Append($"  selectionText: {d.SelectionText}\n");
+                break;
+
+            case WorkspaceTabVisibleState.Dashboard db:
+                sb.Append($"  dashboardName: {db.DashboardName}\n");
+                if (!string.IsNullOrWhiteSpace(db.LastViewedSection))
+                    sb.Append($"  lastViewedSection: {db.LastViewedSection}\n");
+                break;
+
+            case WorkspaceTabVisibleState.Table t:
+                sb.Append($"  rowCount: {t.RowCount}\n");
+                if (!string.IsNullOrWhiteSpace(t.SortColumn))
+                    sb.Append($"  sortColumn: {t.SortColumn}\n");
+                if (t.FilteredColumns is { Count: > 0 })
+                    sb.Append($"  filteredColumns: [{string.Join(", ", t.FilteredColumns)}]\n");
+                sb.Append($"  selectedRows: {t.SelectedRows}\n");
+                break;
+        }
+        return sb.ToString();
+    }
+
     /// <summary>
     /// Hotfix Wave B-G10b (R6, 2026-06-10) — builds the system-prompt suffix that
     /// instructs the LLM to use compact markdown formatting in chat-pane responses.
@@ -1940,15 +2071,16 @@ public class SprkChatAgentFactory
     }
 
     /// <summary>
-    /// AIPU2-061: Emits <c>capability_change</c> SSE events when the current turn's tool set
-    /// differs from the previous turn's tool set.
+    /// Emits <c>capability_change</c> SSE events when the current turn's tool set differs
+    /// from the previous turn's tool set.
     ///
     /// Emits one event per tool that was added or removed:
     ///   - Added tool   → status "available"
     ///   - Removed tool → status "unavailable"
     ///
     /// This satisfies the FR-801 contract: clients can update affordances (tool pills, etc.)
-    /// in real time when the active capability profile changes between turns.
+    /// in real time when the active tool profile changes between turns (e.g., when the
+    /// dispatcher resolves a different playbook on a follow-up turn).
     ///
     /// ADR-015: only tool names are emitted — no user message content.
     /// </summary>
@@ -1972,7 +2104,7 @@ public class SprkChatAgentFactory
                 return; // No change — skip event emission.
 
             _logger.LogDebug(
-                "AIPU2-061: tool set changed between turns — emitting capability_change events. " +
+                "Tool set changed between turns — emitting capability_change events. " +
                 "Previous=[{Prev}], Current=[{Curr}]",
                 string.Join(",", previousNames),
                 string.Join(",", currentNames));
@@ -2006,7 +2138,7 @@ public class SprkChatAgentFactory
         {
             // Soft failure — SSE event emission must never break agent creation.
             _logger.LogWarning(ex,
-                "AIPU2-061: failed to emit capability_change SSE events; continuing without");
+                "Failed to emit capability_change SSE events; continuing without");
         }
     }
 
@@ -2524,5 +2656,44 @@ public class SprkChatAgentFactory
             DocumentContextService.MaxTokenBudget, result.AnyTruncated);
 
         return context with { DocumentSummary = enrichedSummary };
+    }
+
+    /// <summary>
+    /// R6 task 068 (D-C-22 / FR-46) — shared-tracker budget-reservation helper. When
+    /// <paramref name="tracker"/> is null (pre-task-068 environments), returns true so
+    /// behaviour is unchanged. When wired, estimates token cost of
+    /// <paramref name="fragment"/> and attempts to reserve via the tracker; truncation
+    /// telemetry is emitted by the tracker on denial.
+    /// </summary>
+    /// <remarks>
+    /// Uses the SAME conservative whitespace-word-count estimate as
+    /// <see cref="PlaybookChatContextProvider"/>'s EstimateTokenCount: word_count * 1.3.
+    /// Keeps accounting consistent across the four prompt-assembly subsystems.
+    /// </remarks>
+    internal static bool TryReservePromptBudget(
+        Sprk.Bff.Api.Services.Ai.Memory.IPromptBudgetTracker? tracker,
+        string layer,
+        string fragment,
+        Guid? sessionId,
+        string? tenantId)
+    {
+        if (tracker is null)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrEmpty(fragment))
+        {
+            return true;
+        }
+
+        var wordCount = fragment.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        var tokens = (int)Math.Ceiling(wordCount * 1.3);
+        if (tokens <= 0)
+        {
+            return true;
+        }
+
+        return tracker.TryReserve(layer, tokens, sessionId, tenantId);
     }
 }

@@ -290,52 +290,6 @@ public class CompareDocumentsToolTests
     // (f) Both fetches run in parallel (Task.WhenAll)
     // ═════════════════════════════════════════════════════════════════════════
 
-    // Suppressed 2026-06-01 to unblock PR #317 (github-actions-rationalization-r1).
-    // Test asserts absolute timing: stopwatch.ElapsedMilliseconds < 300L after launching
-    // two parallel downloads with simulated 100ms each. Passes locally + in Debug CI but
-    // flaky on Release CI runners where timing can drift to 420ms+ under runner load.
-    // Behavior is correct (downloads ARE parallel); the assertion is brittle.
-    // Tracked in docs/assessments/bff-warning-suppression-analysis-2026-06-01.md § 5c.
-    [Fact(Skip = "Flaky timing-sensitive assertion (< 300ms) on shared CI runners; see assessment doc § 5c. Unblock for PR #317.")]
-    public async Task CompareDocumentsAsync_FetchesBothDocumentsInParallel()
-    {
-        // Arrange — each SPE download has a 100ms delay; parallel execution should
-        // complete well within 2× the per-document delay.
-        const int downloadDelayMs = 100;
-        const int maxAllowedMs = 300; // generous: serial would be 200ms minimum
-
-        var docService = new Mock<IDocumentDataverseService>();
-        var speStore = new Mock<ISpeFileOperations>();
-
-        docService.Setup(s => s.GetDocumentAsync(DocId1, It.IsAny<CancellationToken>()))
-                  .ReturnsAsync(MakeDocument(DocId1, ItemId1));
-        docService.Setup(s => s.GetDocumentAsync(DocId2, It.IsAny<CancellationToken>()))
-                  .ReturnsAsync(MakeDocument(DocId2, ItemId2));
-
-        speStore
-            .Setup(s => s.DownloadFileAsync(DriveId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(async (string _, string _, CancellationToken ct) =>
-            {
-                await Task.Delay(downloadDelayMs, ct);
-                return (Stream?)TextStream("content");
-            });
-
-        var extractor = new Mock<ITextExtractor>();
-        extractor.Setup(x => x.ExtractAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                 .ReturnsAsync(TextExtractionResult.Succeeded("content", TextExtractionMethod.Native));
-
-        var tool = BuildTool(docService, speStore, extractor);
-        var stopwatch = Stopwatch.StartNew();
-
-        // Act
-        await tool.CompareDocumentsAsync(DocId1, DocId2);
-
-        stopwatch.Stop();
-
-        // Assert — parallel execution should finish well under the serial minimum
-        stopwatch.ElapsedMilliseconds.Should().BeLessThan(maxAllowedMs,
-            $"both downloads run in parallel; should complete in ~{downloadDelayMs}ms not ~{2 * downloadDelayMs}ms");
-    }
 
     // ═════════════════════════════════════════════════════════════════════════
     // [Description] attributes — required for AIFunctionFactory.Create

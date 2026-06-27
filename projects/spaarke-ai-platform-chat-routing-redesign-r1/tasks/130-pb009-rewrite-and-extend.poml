@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="130" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>PB-009 rewrite description + extend via JPS $ref + populate sprk_jpsmatchingmetadata + verify sprk_playbookcode</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>127</dependencies>
+    <blocks>131</blocks>
+    <tags>dataverse, ai, playbook</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies a production Dataverse playbook row (PB-009); per-Q17 rewrite + extend pattern; consequences material if mis-applied; FULL per task-execute Step 0.5</rigor-reason>
+    <parallel-group>6-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec FR-43 + task 121 remediation plan: rewrite PB-009 description (embedding-friendly), extend its action's systemPrompt with JPS `$ref` composition (SKL-003 NDA Review + KNW-006 NDA Standards + KNW-005 Defined Terms), populate `sprk_jpsmatchingmetadata` per the plan, and verify `sprk_playbookcode = "summarize-nda"` (or whatever code the task 121 plan assigned). DO NOT delete PB-009 — this is a rewrite-in-place per Q17 owner directive.
+  </prompt>
+
+  <role>SPAARKE AI playbook author. Applies a written remediation plan to an existing production Dataverse row.</role>
+
+  <goal>
+    PB-009 row in Dataverse has: (1) rewritten description (embedding-friendly per task 121 plan), (2) action systemPrompt extended with JPS `$ref` to SKL-003 + KNW-006 + KNW-005, (3) `sprk_jpsmatchingmetadata` populated with documentTypes + intents + triggerPhrases, (4) `sprk_playbookcode = "summarize-nda"` (or assigned code). Node graph adjustments applied per plan. Verification via Dataverse query confirms all 4 mutations applied.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-43 + Q17 + design §WP6 reconciliation §3. PB-009 is the canonical NDA playbook after WP6; task 121 produced the remediation plan; this task applies it. Note: this task is parallel-safe with tasks 126, 128, 129 because they author NEW playbook JSON files in seed-data — this task modifies the EXISTING Dataverse row. No file conflict.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/121-pb009-remediation-plan.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/120-pb-audit.md</file>
+      <file>scripts/Update-Playbook.ps1 (or equivalent)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner-clarification">Q17 — do NOT delete PB-009; rewrite + extend.</constraint>
+    <constraint source="spec">FR-43 acceptance — post-rewrite vector match for "summarize this NDA" returns PB-009 as top-1 (verified in task 131).</constraint>
+    <constraint source="project">Use existing SKL-003 + KNW-006 + KNW-005 (real seeded primitives).</constraint>
+    <constraint source="project">Apply EXACTLY the description rewrite, JPS `$ref` text, and metadata JSON from the task 121 plan — do not freelance.</constraint>
+    <constraint source="project">If task 121 plan assigned `summarize-nda` to PB-009, the NEW playbook in task 126 uses a different code; verify alignment before commit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/121-pb009-remediation-plan.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/120-pb-audit.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `notes/handoffs/121-pb009-remediation-plan.md` end-to-end. Internalize the 6 sections (Description Rewrite, JPS $ref Composition, sprk_jpsmatchingmetadata Payload, sprk_playbookcode Target, Node-Graph Adjustments, Task 130 Application Checklist).</step>
+    <step order="2">Take a Dataverse snapshot of PB-009 (current state) as a rollback safety net: `notes/handoffs/130-pb009-pre-rewrite.json`.</step>
+    <step order="3">Update PB-009 description field to the rewritten text from the plan.</step>
+    <step order="4">Update PB-009's action systemPrompt with the JPS `$ref` composition from the plan.</step>
+    <step order="5">Populate PB-009's `sprk_jpsmatchingmetadata` field with the JSON payload from the plan.</step>
+    <step order="6">Update PB-009's `sprk_playbookcode` to the target code from the plan.</step>
+    <step order="7">Apply any node-graph adjustments from the plan (single-node configJson destination=workspace + widgetType=structured-output-stream).</step>
+    <step order="8">Verify via Dataverse query that all 4 fields + node graph reflect the plan's targets.</step>
+    <step order="9">Save the post-rewrite snapshot at `notes/handoffs/130-pb009-post-rewrite.json`.</step>
+    <step order="10">Document the diff at `notes/handoffs/130-pb009-rewrite-applied.md` (sections: pre/post values + any plan deviations + rationale).</step>
+    <step order="11">Update TASK-INDEX.md: task 130 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">task 121 plan + task 120 audit</tool>
+    <tool name="Bash">Dataverse MCP update_record (or Update-Playbook.ps1)</tool>
+    <tool name="Write">Pre/post snapshots + rewrite applied report</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">PB-009 row mutated per plan</output>
+    <output type="docs">notes/handoffs/130-pb009-pre-rewrite.json — pre-state snapshot (rollback)</output>
+    <output type="docs">notes/handoffs/130-pb009-post-rewrite.json — post-state snapshot</output>
+    <output type="docs">notes/handoffs/130-pb009-rewrite-applied.md — diff + rationale</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Pre-state snapshot exists (rollback safety).</criterion>
+    <criterion testable="true">PB-009 description = rewritten text from plan.</criterion>
+    <criterion testable="true">PB-009 action systemPrompt contains JPS `$ref` to SKL-003 + KNW-006 + KNW-005.</criterion>
+    <criterion testable="true">PB-009 sprk_jpsmatchingmetadata populated per plan JSON.</criterion>
+    <criterion testable="true">PB-009 sprk_playbookcode set per plan target.</criterion>
+    <criterion testable="true">Post-state snapshot exists.</criterion>
+    <criterion testable="true">Diff document records any plan deviations.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    PB-009 is sacred per Q17. Do not delete. If any plan step cannot be applied exactly, STOP and escalate per CLAUDE.md §6 (Human Escalation Triggers). Vector-match top-1 verification happens in task 131, not here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol.</protocol>
+  </execution>
+</task>

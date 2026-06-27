@@ -38,10 +38,16 @@ public static class DefaultPlaybookConstants
     public const string DefaultPlaybookName = "Spaarke AI General";
 
     /// <summary>
-    /// Portable alternate key (<c>sprk_playbookcode</c>) for the default playbook.
-    /// Survives solution imports across environments (GUIDs regenerate; codes travel).
-    /// Used by <c>IPlaybookLookupService.GetByCodeAsync</c> when available.
+    /// Portable alternate key (<c>sprk_playbookcode</c> — admin-facing descriptive slug) for the
+    /// default playbook. Survives solution imports across environments.
     /// </summary>
+    /// <remarks>
+    /// Per Q&amp;A 2026-06-22 Q1 this code is admin-facing only and is NOT used for runtime lookup.
+    /// The runtime lookup column is <c>sprk_playbookid</c> (see
+    /// <c>IPlaybookLookupService.GetByIdAsync</c>). This constant is retained for documentation /
+    /// seed-script use; consumers needing the playbook should resolve via
+    /// <c>IPlaybookService.GetByNameAsync</c> with <see cref="DefaultPlaybookName"/>.
+    /// </remarks>
     public const string PlaybookCode = "PB-DEFAULT-GENERAL";
 
     /// <summary>

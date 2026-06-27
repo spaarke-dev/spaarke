@@ -2,7 +2,7 @@
 
 > **Purpose**: Operator-side decision guide + step-by-step tutorial for adding a new widget to the SpaarkeAi shell. Walks through the **two-wrapper decision tree first**, then the five archetypes that fall out of it, then the file edits + Dataverse seed + deploy sequence. The canonical worked example is the **Calendar widget** (Pattern D — dual-use, shipped R3 tasks 114 + 115, polished through R13).
 >
-> **Last reviewed**: 2026-05-26 (R4 task 011 / W-2). Rewritten around the two-wrapper model now codified in [`SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md). Previous version (Task 123, R13) catalogued Patterns A–D but did not lead with a single decision tree; this rewrite makes the wrapper choice the first 5 minutes of the read.
+> **Last reviewed**: 2026-06-18 (project `spaarke-daily-update-service-r2` task 063 / SC14). §1.1 archetypes table row 3 (dual-use) updated to list Daily Briefing (`@spaarke/daily-briefing-components`, R2 task 010, with `loadNotificationContext` factory option seam) and Smart Todo (`@spaarke/smart-todo-components`) alongside the canonical Calendar example. Previous review: 2026-05-26 (R4 task 011 / W-2; rewritten around the two-wrapper model now codified in [`SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](../architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md)).
 >
 > **Audience**: A developer who has never built a SpaarkeAi widget. After §1 you should know which wrapper / archetype you need; the rest of the doc is implementation detail per archetype.
 >
@@ -66,7 +66,7 @@ START
 |---|---|---|---|---|---|
 | 1 | Composable section (LW-internal) | Dashboard | A | Quick Summary, Documents, To Do, Latest Updates | New section that genuinely depends on LegalWorkspace context (FeedTodoSyncContext, LW DataverseService) and won't ship in a non-LW host. |
 | 2 | Sophisticated single-purpose direct widget | Direct | B (Code Page dispatcher) or C (AI output) | RedlineViewer, AnalysisEditor, future DocumentViewer | One sophisticated component owns the whole tab. Not composable. Mounted from Assistant or Context (or future surfaces). |
-| 3 | Dual-use section (shared-lib widget + thin LW shim) | Dashboard (Direct optional) | D | **Calendar** (R3 task 115 — canonical) | New widget that could ship in **both** a Dashboard layout AND as a standalone Direct tab. Default for new widgets going forward. |
+| 3 | Dual-use section (shared-lib widget + thin LW shim) | Dashboard (Direct optional) | D | **Calendar** (R3 task 115 — canonical) · **Smart Todo** (`@spaarke/smart-todo-components`) · **Daily Briefing** (`@spaarke/daily-briefing-components`, R2 task 010 — `loadNotificationContext` factory option seam) | New widget that could ship in **both** a Dashboard layout AND as a standalone Direct tab. Default for new widgets going forward. |
 | 4 | Context-pane widget (with workspace dispatch) | (Context-surface UI; dispatches to Direct wrapper) | (Pattern C, but originating in Context) | Create Project wizard, Create Matter wizard final step | Widget body lives in the Context pane; on completion, dispatches `widget_load` to mount a result widget in the Workspace pane. R4 W-5 (FR-03) ships first such dispatch. |
 | 5 | Modal-launcher | Direct (thin) | B (canonical) | create-project-wizard, find-similar-wizard | The "widget" is conceptually a launcher button — it calls `Xrm.Navigation.navigateTo` to open a wizard / Code Page / form as a modal at 80% × 80%. The tab content is small (launch / relaunch / status). |
 
@@ -647,6 +647,208 @@ The output tells you:
 - ❌ **Relying on the workspace pane being narrow enough that overshoot is
   invisible.** The operator can resize panes; the widget must constrain
   itself regardless of current pane width.
+
+---
+
+## 7.2 Sizing & layout — the HEIGHT chain (updated 2026-06-23, smart-todo-r4 R4-110 chain audit)
+
+If your widget's body should grow to fill the SectionPanel area (kanban,
+list, grid, anything that benefits from vertical space) — and you see it
+capping at content height even though the surrounding section has more
+room — the height chain has a break somewhere between the workspace tab
+content and your widget's innermost flex child.
+
+This was the root cause of a 7-round debug cycle on the SmartTodo widget
+(smart-todo-r4 UAT 4 → 12, June 2026). The widget kept rendering at
+~600px (or its minHeight floor) even when the section panel was 900+ px
+tall. Working widgets in the same pane (Daily Briefing, Calendar) fill
+correctly because they follow the contract below.
+
+### 7.2.1 The chain contract (post R4-110, 2026-06-23)
+
+The full height chain is:
+
+```
+viewport
+  → SpaarkeAi 3-pane shell                  (✓ established, don't touch)
+  → WorkspacePane.root                       (✓ display:flex; height:100%)
+  → WorkspaceTabManagerComponent.root        (✓ display:flex; height:100%)
+  → WorkspaceTabManagerComponent.content     (✓ display:flex + flex:1, R4-110)
+  → widgetWrapper                            (✓ height:100%)
+  → WorkspaceLayoutWidget.root               (✓ flex:1 + height:100%, round 11)
+  → LegalWorkspaceApp root                   (✓ already height:100%)
+  → WorkspaceShell.shell                     (✓ flex:1 1 auto)
+  → WorkspaceShell.row                       (✓ flex:1 1 0 + alignItems:stretch, round 12)
+  → SectionPanel.card                        (✓ stretches via grid alignItems:stretch)
+  → SectionPanel.content                     (✓ flex:1 1 auto)
+  → YOUR WIDGET ROOT                         ★ Your responsibility — Rule 1
+  → ...inner widget wrappers...              ★ Your responsibility — Rule 2
+  → your scrollable body / kanban / list
+```
+
+**The shell-side chain is now FORGIVING** (post-R4-110). Every layer above
+your widget supplies determinate height. You do NOT need per-section
+`style: { height: "calc(100vh - X)" }` workarounds — the SectionPanel
+stretches to fill the grid row, and the grid row claims the shell's
+available height.
+
+**Rule 1 — Widget root anchors to parent height.** Use EITHER `height:
+100%` OR `flex: 1` (R4-110 made both work — pre-R4-110 only `height:
+100%` did, because `WorkspaceTabManagerComponent.content` was block).
+
+**Rule 2 — Every intermediate wrapper inside the widget must be a flex
+container** (`display: flex` or `display: grid`). A `div` defaults to
+`block`, and a block parent IGNORES child flex props. This is the most
+common widget-author trap.
+
+```typescript
+// ✅ CORRECT — every wrapper in the chain is flex
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',          // anchor to parent's supplied height
+    overflow: 'hidden',
+  },
+  body: {
+    display: 'flex',         // ← CRITICAL: without this, child flex props don't work
+    flexDirection: 'column',
+    flex: '1 1 auto',
+    minHeight: 0,
+    overflowY: 'auto',
+  },
+  kanbanContainer: {
+    flex: '1 1 auto',        // claims body's height
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+});
+
+// ❌ THE TRAP — the body div is implicitly display:block, so the kanbanContainer
+// child's `flex: 1 1 auto` is IGNORED. Kanban falls back to content height.
+const broken = makeStyles({
+  body: {
+    flex: '1 1 auto',
+    minHeight: 0,
+    overflowY: 'auto',
+    // MISSING: display: 'flex'  ← caused the smart-todo-r4 round 4-12 cycle
+  },
+});
+```
+
+### 7.2.2 Working reference widgets (clone this layout)
+
+If in doubt, copy the proven pattern from these widgets — they fill
+correctly with NO height-cap workarounds:
+
+- **`DailyBriefingApp`** — `src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx` —
+  `container: { display: flex, flexDirection: column, height: '100%' }` +
+  `scrollContent: { flex: 1 }`. Note `height: 100%` instead of `flex: 1` on
+  the root anchors against the block-parent-crossing problem.
+- **`CalendarWorkspaceWidget`** — `src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx` —
+  `root: { display: flex, flexDirection: column, height: '100%' }` +
+  `gridContainer: { flex: '1 1 auto', minHeight: 0 }`. Canonical Pattern D
+  reference.
+
+### 7.2.3 Per-section sizing (post R4-110 — no calc() needed)
+
+`SectionPanel.card` does NOT have `height: 100%` and does NOT need it.
+It is a direct grid item of `WorkspaceShell.row` which has
+`alignItems: stretch` (the CSS grid default for the cross axis), so the
+card automatically stretches to fill the row's track height. The row in
+turn shares the shell's vertical space equally with sibling rows
+(`flex: 1 1 0`).
+
+**Recommended pattern for new sections** — supply a `minHeight` floor
+only (as a safety net for tiny viewports / broken host layouts) and let
+the chain supply real height:
+
+```typescript
+// For Path A (LegalWorkspace static workspaceConfig.tsx default dashboard)
+{
+  id: "your-widget",
+  type: "content",
+  title: "Your Widget",
+  style: { minHeight: "560px" },        // floor only — chain supplies real height
+  renderContent: () => <YourWidget />,
+}
+
+// For Path B (SpaarkeAi dynamic workspace layouts via buildDynamicWorkspaceConfig)
+// Set defaultHeight in the SectionRegistration; buildDynamicWorkspaceConfig
+// promotes it to minHeight automatically:
+export const yourRegistration: SectionRegistration = {
+  id: "your-widget",
+  defaultHeight: "560px",               // → becomes style.minHeight on the SectionPanel
+  factory(ctx) {
+    return { id: "your-widget", type: "content", title: "Your Widget", ... };
+  },
+};
+```
+
+**To make a widget DOMINATE its tab visually**, do NOT override `style.height`
+on the section. Instead, create a single-section workspace layout via the
+WorkspaceLayoutWizard (one row, one section). With only one row,
+`flex: 1 1 0` distribution gives that row 100% of the shell height, and
+the SectionPanel + widget fill the full Workspace tab area.
+
+### 7.2.4 Diagnostic script when something looks wrong
+
+Open DevTools console on the SpaarkeAi page with your widget visible
+and paste:
+
+```javascript
+(function dumpHeightChain() {
+  var start = document.querySelector('[role="region"][aria-label*="your-widget-name"]') ||
+              document.querySelector('main');
+  var el = start, depth = 0;
+  while (el && depth < 25) {
+    var cs = getComputedStyle(el);
+    var rect = el.getBoundingClientRect();
+    var cls = (typeof el.className === 'string'
+      ? '.' + el.className.split(/\s+/)[0] : '');
+    console.log('  '.repeat(depth) + el.tagName.toLowerCase() + cls +
+      ' | h=' + Math.round(rect.height) + 'px' +
+      ' | display=' + cs.display +
+      ' | flex=' + cs.flex);
+    el = el.parentElement; depth++;
+  }
+})();
+```
+
+The output walks UP from your widget to viewport. Look for:
+- The first `display: block` parent that has more height than its child
+  → that's where flex children are being ignored.
+- Any `flex: 1 1 0` or `flex: 1 1 auto` element NOT growing to fill its
+  parent → that level needs `height: 100%` instead, OR its parent isn't
+  a flex container.
+
+For a worked-through example see `projects/smart-todo-r4/notes/` — the
+UAT rounds 4-12 debugging artifacts (kept as a reference for the height
+chain investigation methodology).
+
+### 7.2.5 Anti-patterns specific to height sizing
+
+- ❌ **Using `flex: 1 1 0` on a child of `display: block`.** Flex
+  properties only work in flex parents. `display: block` ignores them
+  and child sizes to content. Either make the parent `display: flex` or
+  use `height: 100%` on the child.
+- ❌ **Forgetting `display: flex` on intermediate wrappers.** A div with
+  `flex: 1 1 auto, overflowY: auto` looks like a flex item but its
+  CHILDREN can't use flex (because the div itself is block). Add
+  `display: flex, flexDirection: column` to make it a flex container.
+- ❌ **Setting `minHeight: 400px` (or any pixel floor) on the scrollable
+  body to "guarantee" it renders.** That's masking a broken chain. Fix
+  the chain; use `minHeight: 0` so the chain can supply natural height.
+- ❌ **Inventing a per-widget height fallback like `height: 'calc(100vh
+  - 200px)'`** ON the widget itself rather than on the section config.
+  Sections own height; widgets fill what they're given.
+- ❌ **Adding `style: { height: "calc(100vh - X)" }` to a section
+  config** to force a widget to dominate. Post-R4-110 the chain
+  delivers determinate height to every section; calc overrides force the
+  shell to overflow (master-scroll), which is rarely the intended UX.
+  If you want a widget to dominate, give it its own single-section
+  workspace layout via the WorkspaceLayoutWizard instead.
 
 ---
 

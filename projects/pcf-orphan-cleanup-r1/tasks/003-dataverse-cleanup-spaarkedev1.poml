@@ -1,0 +1,113 @@
+<task id="003" project="pcf-orphan-cleanup-r1">
+  <metadata>
+    <title>Dataverse cleanup session — spaarkedev1 (11 customcontrols + 4-6 canvas apps)</title>
+    <phase>P2</phase>
+    <status>not-started</status>
+    <estimated-effort>4-6 hours (single focused block)</estimated-effort>
+    <dependencies>001, 002</dependencies>
+    <blocks>004</blocks>
+    <tags>pcf, dataverse, cleanup, destructive, production-shape</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production-shape Dataverse mutations. Not source code, but blast radius is high. FULL rigor per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>(sequential — single Dataverse session)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocking by design — destructive Dataverse session must be a focused single-actor block. Cannot interleave with other Dataverse mutations.</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+  </metadata>
+
+  <prompt>
+    Execute the Dataverse-side cleanup against spaarkedev1. Follow [procedure §3 Part C](../../ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md#3-part-c--dataverse-cleanup-single-session-gated) verbatim. This is the highest-blast-radius task in the project.
+
+    Targets: the 11 customcontrols + 4-6 canvas apps from [spec.md FR-02 / FR-03](../spec.md), in the deletion order specified in [procedure §3.1](../../ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md#31-cleanup-targets).
+
+    Hard gates before each deletion:
+    - Task 001's preflight-results entry for this control = `ready-to-delete`
+    - SpeDocumentViewer specifically: confirm the FormXML grep MANDATORY check ran clean (per D-02)
+
+    For each control, follow the 9-step sequence in [procedure §3.2](../../ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md#32-per-control-deletion-sequence):
+    1. Re-run §1.2 checks (immediate-pre-deletion sanity)
+    2. Remove form references (if §1.2 check 2 surfaced any)
+    3. Unpublish canvas app
+    4. Remove canvas from solution
+    5. Remove customcontrol from solution
+    6. Delete canvas app
+    7. Delete customcontrol
+    8. Verify (re-query — should return empty)
+    9. Log entry in `notes/dataverse-cleanup-log.md`
+
+    Spot-test resurrection per NFR-07 ONCE during this session — pick a low-stakes control (e.g., EventAutoAssociate), delete it, immediately re-import from baseline backup, verify the resurrected control exists. This proves the safety net works. Document in the cleanup log.
+  </prompt>
+
+  <role>Dataverse administrator performing carefully-gated destructive cleanup in a focused single session, with explicit logging and resurrection spot-test.</role>
+
+  <goal>
+    11 customcontrol records + 4-6 canvas apps deleted from spaarkedev1. Each deletion logged with §1.2 results + smoke-test outcome. Resurrection spot-test passed.
+
+    On completion: Dataverse MCP query `SELECT COUNT(*) FROM customcontrol WHERE (name LIKE 'sprk_Spaarke%' OR name LIKE 'sprk_Sprk%') AND componentstate = 0` returns 13 (was 24).
+  </goal>
+
+  <inputs>
+    <file purpose="procedure-section">projects/ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md</file>
+    <file purpose="spec">projects/pcf-orphan-cleanup-r1/spec.md</file>
+    <file purpose="design">projects/pcf-orphan-cleanup-r1/design.md</file>
+    <file purpose="claude-md">projects/pcf-orphan-cleanup-r1/CLAUDE.md</file>
+    <file purpose="preflight-input">projects/pcf-orphan-cleanup-r1/notes/preflight-results-spaarkedev1.md</file>
+    <file purpose="backups">projects/pcf-orphan-cleanup-r1/backups-2026-06-22/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FR-02">11 customcontrol deletions per spec</constraint>
+    <constraint source="FR-03">4-6 canvas-app deletions per spec</constraint>
+    <constraint source="NFR-02">§1.2 4-check immediately pre-deletion</constraint>
+    <constraint source="NFR-07">Resurrection spot-test MUST be performed during this session</constraint>
+    <constraint source="D-02">SDV FormXML grep is HARD gate</constraint>
+    <constraint source="D-03">PlaybookBuilderHost EXPLICITLY out of scope</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>projects/pcf-orphan-cleanup-r1/notes/research-findings-2026-06-22.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/pcf-deployment-inventory-2026-06-22.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm Task 001 outputs exist: `backups-2026-06-22/` has the expected ZIPs; `notes/preflight-results-spaarkedev1.md` classifies all 11 controls as `ready-to-delete`. STOP if any control is `deviation-blocked`.</step>
+    <step order="2">Authenticate to spaarkedev1: `pac auth select --name spaarkedev1`.</step>
+    <step order="3">For each control in [procedure §3.1 cleanup-targets table](../../ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md#31-cleanup-targets) (order matters — start with UQC, end with LegalWorkspace + DTW canvas): execute the 9-step per-control sequence per procedure §3.2.</step>
+    <step order="4">After the first deletion (UQC), pause for resurrection spot-test: re-import `backups-2026-06-22/baseline-{UQC-solution}-pre-cleanup-2026-06-22.zip` and confirm UQC's customcontrol reappears (with a new GUID — see §3.5.2). Then re-delete it (we're not actually keeping it; this is a recovery-drill verification only). Log spot-test outcome in `notes/dataverse-cleanup-log.md`.</step>
+    <step order="5">After EACH per-control deletion: append log entry per [spec.md FR-07 entry shape](../spec.md#fr-07--cleanup-log).</step>
+    <step order="6">After all deletions: run the smoke-test suite per procedure §3.2 step 8 — open a Matter and verify Documents subgrid still works (UQC's primary consumer was the ribbon there); open an Event and verify calendar filtering still works (EventCalendarFilter was the calendar PCF); open any AnalysisWorkspace Code Page and verify it renders (the PCF version is gone but the Code Page should be untouched).</step>
+    <step order="7">Verify counts post-session: `SELECT COUNT(*) FROM customcontrol WHERE (name LIKE 'sprk_Spaarke%' OR name LIKE 'sprk_Sprk%') AND componentstate = 0` returns 13. Run per-control re-queries: each of the 11 deleted controls returns empty.</step>
+    <step order="8">Run quality gates per CLAUDE.md §8 FULL rigor: invoke `code-review` skill on the cleanup log (does the log accurately reflect what was deleted?) + `adr-check` (no ADR violations introduced).</step>
+    <step order="9">Update [`current-task.md`](../current-task.md): Task 003 ✅; next action = wait 7 days for soak before Task 004.</step>
+    <step order="10">Update [`tasks/TASK-INDEX.md`](TASK-INDEX.md): Task 003 → ✅ with date.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">PAC CLI: `pac auth select`, `pac solution import` (for resurrection drill), `pac solution publish`</tool>
+    <tool name="mcp__dataverse__read_query">solutioncomponent + customcontrol re-queries</tool>
+    <tool name="Write">notes/dataverse-cleanup-log.md (per-control entries + spot-test outcome + final summary)</tool>
+    <tool name="Skill">code-review + adr-check (Step 8 quality gates)</tool>
+  </tools>
+
+  <outputs>
+    <output type="state-change">spaarkedev1: 24 deployed Spaarke PCFs → 13</output>
+    <output type="state-change">spaarkedev1: 6 Spaarke canvas apps → 0-2</output>
+    <output type="docs">projects/pcf-orphan-cleanup-r1/notes/dataverse-cleanup-log.md (with 11+4-6 entries + resurrection spot-test)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 11 customcontrols from FR-02 return empty when re-queried by name in spaarkedev1</criterion>
+    <criterion testable="true">All canvas apps from FR-03 (sans pending verification on eventspage + playbookbuilder) return empty when re-queried</criterion>
+    <criterion testable="true">Smoke tests pass: Matter / Documents subgrid renders; Event calendar filter works; AnalysisWorkspace Code Page renders</criterion>
+    <criterion testable="true">Resurrection spot-test logged with pass outcome</criterion>
+    <criterion testable="true">`notes/dataverse-cleanup-log.md` has one entry per deletion (11+4-6 minimum) + summary section</criterion>
+    <criterion testable="true">code-review + adr-check skills invoked and pass</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. FULL rigor (destructive Dataverse mutations; Step 9.5 quality gates required).
+  </execution>
+</task>

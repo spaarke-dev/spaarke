@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Add deprecation telemetry to /by-name/ endpoint</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>025,026</blocks>
+    <tags>bff-api, telemetry, ADR-015</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Additive telemetry on existing endpoint; tier-1 safe; tags include 'bff-api' + 'telemetry'; STANDARD per Step 0.5</rigor-reason>
+    <parallel-group>1-H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add deprecation-warning telemetry to the existing `GET /api/ai/playbooks/by-name/{name}` endpoint per FR-03 acceptance. Each call emits a warning-level log + `Activity` tag (e.g., `deprecated.endpoint = "playbooks-by-name"`) so the stabilization window's call-rate-to-zero can be measured. Tier-1 safe per ADR-015 — log the name string (it's a stable identifier, not user content), tenant ID, caller user-agent; do NOT log user message text or memory content.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in ASP.NET Core ILogger + ActivitySource + ADR-015 telemetry hygiene.</role>
+
+  <goal>
+    `/by-name/` endpoint emits one warning-level log entry + one Activity event tag per call, marked deprecated. Tier-1 safe payload only: endpoint name, tenant ID, requested-name parameter, caller user-agent. Integration test asserts the log + tag fires on a call. Call-rate dashboard query documented in handoff note so the stabilization-window owner can measure decay.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-03 acceptance + ADR-015. After tasks 020 + 021 migrate consumers to `/by-code/`, the `/by-name/` endpoint should see zero calls from production code. Telemetry on the deprecated endpoint surfaces the few remaining call sites (legacy clients, etc.) and provides the metric for the deprecation-window close gate.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEmbeddingEndpoints.cs (or wherever /by-name/ lives)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Telemetry/ (existing ActivitySource convention)</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/PlaybookByNameDeprecationTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API — apply telemetry inside the endpoint handler or via endpoint filter.</constraint>
+    <constraint source="ADR-008">Tenant context from auth filter; include in log payload.</constraint>
+    <constraint source="ADR-010">Inject `ILogger&lt;T&gt;` + `ActivitySource` directly; no service locator.</constraint>
+    <constraint source="ADR-015">Tier-1 safe: tenant ID, deterministic identifiers, endpoint name, caller user-agent. DO NOT log user message text, file content, memory facts, or recall results. The playbook name parameter IS tier-1 safe — it's a stable identifier, not user content.</constraint>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; expect ≤0.05 MB delta.</constraint>
+    <constraint source="spec">FR-03 acceptance: `/by-name/` endpoint emits deprecation warning per call; calls drop to zero after migration.</constraint>
+    <constraint source="project">DO NOT remove the endpoint in this task (deletion is later stabilization-window action). Only add telemetry.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Locate the `/by-name/` endpoint handler. Read the existing implementation.</step>
+    <step order="2">Add warning-level log entry at the top of the handler: `_logger.LogWarning("Deprecated endpoint /by-name/ called for {Name} by tenant {TenantId} ua={UserAgent}", name, tenantId, userAgent);`.</step>
+    <step order="3">Add Activity tags: `Activity.Current?.SetTag("deprecated.endpoint", "playbooks-by-name"); Activity.Current?.SetTag("deprecated.name", name);` (tier-1 safe per ADR-015).</step>
+    <step order="4">Verify NO user message content / file content / memory data is logged.</step>
+    <step order="5">Add integration test `PlaybookByNameDeprecationTests.cs` asserting: a successful call still returns 200 (behavior unchanged); a single warning-level log entry fires; the Activity tag is set.</step>
+    <step order="6">Run `dotnet build` + `dotnet test`. Pass.</step>
+    <step order="7">Measure publish size; report delta.</step>
+    <step order="8">Document the call-rate dashboard query (Application Insights KQL) in `notes/handoffs/024-deprecation-dashboard.md` so the stabilization-window owner can monitor decay.</step>
+    <step order="9">Update TASK-INDEX.md: task 024 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookEmbeddingEndpoints.cs + existing ActivitySource convention</tool>
+    <tool name="Edit">Add telemetry to /by-name/ handler</tool>
+    <tool name="Write">Create integration test + dashboard query note</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookEmbeddingEndpoints.cs — /by-name/ handler instrumented</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/PlaybookByNameDeprecationTests.cs — asserts warning log + Activity tag</output>
+    <output type="docs">notes/handoffs/024-deprecation-dashboard.md — KQL query for call-rate decay measurement</output>
+    <output type="docs">notes/handoffs/024-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/by-name/{name}` continues to return 200 for valid names (behavior unchanged).</criterion>
+    <criterion testable="true">Each call emits one warning-level log entry with tenant ID + name + user-agent.</criterion>
+    <criterion testable="true">Each call sets Activity tag `deprecated.endpoint = "playbooks-by-name"`.</criterion>
+    <criterion testable="true">No user message text, file content, or memory data in log payload (manual audit of log format string).</criterion>
+    <criterion testable="true">Integration test exits 0.</criterion>
+    <criterion testable="true">Publish-size delta within NFR-01 thresholds.</criterion>
+    <criterion testable="true">Dashboard query documented for stabilization-window monitoring.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Parallel-safe with task 023 (different files). The endpoint stays mapped — deletion is owner-decided later based on call-rate decay. The KQL query in the dashboard handoff note should filter to: `traces | where customDimensions["deprecated.endpoint"] == "playbooks-by-name" | summarize count() by bin(timestamp, 1d)`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — code-review + adr-check skipped at Step 9.5; build + test verification required.</protocol>
+  </execution>
+</task>

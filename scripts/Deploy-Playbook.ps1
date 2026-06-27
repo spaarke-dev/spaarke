@@ -65,7 +65,21 @@ param(
 
     [switch]$DryRun,
 
-    [switch]$Force
+    [switch]$Force,
+
+    # ----- chat-routing-redesign-r1 FR-14e: JSON-Schema validation gate -----
+    # Path to the node-routing-config JSON Schema (Draft 2020-12). Each playbook
+    # node's sprk_configjson is validated against this schema BEFORE the Dataverse
+    # POST. The C# source of truth is Sprk.Bff.Api.Models.Ai.NodeRoutingConfig;
+    # this schema is its mechanical projection (per task 052 / POML notes). If
+    # the NodeDestination enum changes in C#, the schema must update in lockstep.
+    [string]$SchemaPath = "$PSScriptRoot\schemas\node-routing-config.schema.json",
+
+    # Emergency override. When set, skips the FR-14e schema validation gate and
+    # emits a Write-Warning per skipped node. Reserved for break-glass scenarios
+    # (e.g. validating a hot fix against an environment with a slightly stale
+    # schema); routine deploys MUST NOT use this switch.
+    [switch]$SkipValidation
 )
 
 $ErrorActionPreference = 'Stop'
@@ -242,9 +256,11 @@ function Associate-NtoN {
 # Node type mapping
 # ---------------------------------------------------------------------------
 $NodeTypeMap = @{
-    'AIAnalysis' = 100000000
-    'Output'     = 100000001
-    'Control'    = 100000002
+    'AIAnalysis'        = 100000000
+    'Output'            = 100000001
+    'Control'           = 100000002
+    'Workflow'          = 100000003
+    'DeliverComposite'  = 100000004  # chat-routing-redesign-r1 FR-52 — multi-section composite output (ADR-037)
 }
 
 # ===========================================================================
@@ -306,8 +322,15 @@ if (-not $definition.nodes -or $definition.nodes.Count -eq 0) {
 # UI on save (D-01 §2.4). The actionCode binding is the load-bearing dispatch
 # mechanism for Insights playbooks per D-01 + owner direction 2026-06-02.
 
+# DeliverComposite nodes (NodeType 100000004 / ActionType 42, ADR-037) are
+# code-registered executors — they dispatch via ActionType lookup in
+# AnalysisServicesModule.cs, NOT via actionCode → sprk_actionid lookup. The
+# Designer-clobbering risk that the linter guards against does not apply
+# because the configjson "sections" array has no Designer UI to be edited.
+# Skip DeliverComposite nodes from the actionCode requirement.
 $nodesMissingActionCode = @()
 foreach ($lintNode in $definition.nodes) {
+    if ($lintNode.nodeType -eq 'DeliverComposite') { continue }
     if (-not $lintNode.actionCode) {
         $nodesMissingActionCode += $lintNode.name
     }
@@ -321,15 +344,17 @@ if ($nodesMissingActionCode.Count -gt 0) {
     }
     Write-Host ''
     Write-Host 'Why this matters:' -ForegroundColor Yellow
-    Write-Host '  Every node MUST reference a sprk_analysisaction row via `actionCode`.' -ForegroundColor Yellow
+    Write-Host '  Every dispatchable node MUST reference a sprk_analysisaction row via `actionCode`.' -ForegroundColor Yellow
     Write-Host '  Without it, this script cannot set sprk_playbooknode.sprk_actionid,' -ForegroundColor Yellow
     Write-Host '  and the orchestrator dispatch falls back to canvas-Designer configjson' -ForegroundColor Yellow
     Write-Host '  (which gets clobbered if the playbook is opened in the Designer).' -ForegroundColor Yellow
     Write-Host ''
+    Write-Host '  Exception: DeliverComposite nodes (ADR-037) are code-registered and exempt.' -ForegroundColor Gray
+    Write-Host ''
     Write-Host 'Reference: projects/ai-spaarke-insights-engine-r2/decisions/D-01-wave-b-root-cause-corrected.md' -ForegroundColor Gray
     throw "Playbook lint failed: $($nodesMissingActionCode.Count) of $($definition.nodes.Count) nodes missing actionCode."
 }
-Write-Host "  Lint    : ✅ all $($definition.nodes.Count) nodes have actionCode wiring" -ForegroundColor Green
+Write-Host "  Lint    : ✅ all dispatchable nodes have actionCode wiring (DeliverComposite nodes exempt)" -ForegroundColor Green
 
 $playbookName = $definition.playbook.name
 $playbookDescription = if ($definition.playbook.description) { $definition.playbook.description } else { '' }
@@ -697,6 +722,42 @@ if ($scopeAssociationCount -eq 0) {
 Write-Host ''
 Write-Host '[8/12] Creating nodes...' -ForegroundColor Yellow
 
+# ---------------------------------------------------------------------------
+# FR-14e: JSON-Schema validation gate for sprk_configjson (chat-routing-redesign-r1)
+# ---------------------------------------------------------------------------
+# Each node's compacted sprk_configjson is validated against the schema below
+# BEFORE the POST. Authoring errors (e.g. destination = "invalid", or an unknown
+# enum value) surface here, NOT at runtime.
+#
+# Source-of-truth invariant (per task 052 / POML notes): the C# enum
+# Sprk.Bff.Api.Models.Ai.NodeDestination is the source of truth; this JSON
+# Schema is its mechanical projection. If the enum changes in C# (e.g. a new
+# destination is added), this schema MUST update in lockstep.
+#
+# Use -SkipValidation for break-glass only. Default behavior is GATED.
+$schemaContent = $null
+if (-not $SkipValidation) {
+    if (-not (Test-Path $SchemaPath)) {
+        throw "Schema file not found at: $SchemaPath. Pass -SchemaPath to override or -SkipValidation to bypass (not recommended)."
+    }
+    try {
+        $schemaContent = Get-Content $SchemaPath -Raw -Encoding utf8
+    } catch {
+        throw "Failed to load schema file '$SchemaPath': $($_.Exception.Message)"
+    }
+    Write-Host "  Schema  : $SchemaPath" -ForegroundColor Gray
+} else {
+    Write-Warning "  -SkipValidation set — FR-14e configJson schema gate BYPASSED for this run."
+}
+
+# Extract a playbook code for the structured error (best-effort — the
+# definition shape varies across older + newer playbook definition files).
+$playbookCode = $null
+if ($definition.playbook.code)         { $playbookCode = $definition.playbook.code }
+elseif ($definition.playbook.sprk_code) { $playbookCode = $definition.playbook.sprk_code }
+elseif ($definition.playbook.playbookCode) { $playbookCode = $definition.playbook.playbookCode }
+if (-not $playbookCode) { $playbookCode = $playbookName }
+
 # Map: node definition name -> created GUID (for dependency resolution)
 $nodeIdMap = @{}
 $nodeIndex = 0
@@ -715,6 +776,41 @@ foreach ($node in $definition.nodes) {
 
     $modelDisplay = if ($modelName) { $modelName } else { 'none' }
     $actionDisplay = if ($actionCode) { $actionCode } else { 'none' }
+
+    # -----------------------------------------------------------------------
+    # FR-14e schema gate — validate sprk_configjson BEFORE the POST.
+    # -----------------------------------------------------------------------
+    # Test-Json -Schema accepts the schema as a string (PowerShell 7+). On
+    # failure, abort with a structured error including: playbook code, node
+    # index, node name, and the Test-Json error. The Test-Json -ErrorAction
+    # SilentlyContinue + -ErrorVariable pattern lets us capture the schema
+    # violation reason cleanly instead of letting Test-Json's own throw bubble
+    # up unscoped.
+    if ($configJson -and -not $SkipValidation) {
+        $schemaErrors = $null
+        $isValid = $false
+        try {
+            $isValid = Test-Json -Json $configJson -Schema $schemaContent -ErrorAction SilentlyContinue -ErrorVariable schemaErrors
+        } catch {
+            # Some PowerShell builds throw rather than returning false. Treat
+            # both paths the same — surface a structured error and abort.
+            $schemaErrors = @($_.Exception.Message)
+            $isValid = $false
+        }
+        if (-not $isValid) {
+            $errDetail = if ($schemaErrors) { ($schemaErrors | ForEach-Object { $_.ToString() }) -join '; ' } else { 'unknown schema violation' }
+            $errMsg = @(
+                "❌ FR-14e schema validation FAILED",
+                "  Playbook : $playbookCode",
+                "  Node     : #$nodeIndex '$nodeName'",
+                "  ConfigJson: $configJson",
+                "  Reason   : $errDetail",
+                "  Schema   : $SchemaPath",
+                "  Fix      : Correct the node's configJson in the definition file, or update the schema if the C# NodeDestination enum changed."
+            ) -join [Environment]::NewLine
+            throw $errMsg
+        }
+    }
 
     if ($DryRun) {
         Write-Host "  Node $nodeIndex`: $nodeName ($actionDisplay, $modelDisplay)" -ForegroundColor Gray

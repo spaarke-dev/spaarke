@@ -3,10 +3,13 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Xunit;
@@ -26,33 +29,43 @@ public sealed class EntityExtractorHandlerTests : TypedToolHandlerTestFixture
 {
     private static readonly Assembly BffAssembly = typeof(IToolHandler).Assembly;
 
-    private readonly Mock<IDistributedCache> _cacheMock = new();
-    private readonly Dictionary<string, byte[]> _cacheStore = new(StringComparer.Ordinal);
-
-    public EntityExtractorHandlerTests()
+    // Recording IDistributedCache so we can both verify hit/miss behaviour AND inspect the
+    // tenant-scoped keys produced by TenantCache (which prepends `tenant:{tenantId}:...`).
+    private sealed class RecordingDistributedCache : IDistributedCache
     {
-        // Wire the cache mock to a simple in-memory store so we can verify hit/miss behavior.
-        _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string key, CancellationToken _) =>
-                _cacheStore.TryGetValue(key, out var bytes) ? bytes : null!);
+        private readonly IDistributedCache _inner;
+        public Dictionary<string, byte[]> SetKeys { get; } = new(StringComparer.Ordinal);
 
-        _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Returns((string key, byte[] bytes, DistributedCacheEntryOptions _, CancellationToken _) =>
-            {
-                _cacheStore[key] = bytes;
-                return Task.CompletedTask;
-            });
+        public RecordingDistributedCache(IDistributedCache inner) { _inner = inner; }
+
+        public byte[]? Get(string key) => _inner.Get(key);
+        public Task<byte[]?> GetAsync(string key, CancellationToken token = default) => _inner.GetAsync(key, token);
+        public void Refresh(string key) => _inner.Refresh(key);
+        public Task RefreshAsync(string key, CancellationToken token = default) => _inner.RefreshAsync(key, token);
+        public void Remove(string key) { _inner.Remove(key); SetKeys.Remove(key); }
+        public Task RemoveAsync(string key, CancellationToken token = default)
+        {
+            SetKeys.Remove(key);
+            return _inner.RemoveAsync(key, token);
+        }
+        public void Set(string key, byte[] value, DistributedCacheEntryOptions options)
+        {
+            SetKeys[key] = value;
+            _inner.Set(key, value, options);
+        }
+        public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default)
+        {
+            SetKeys[key] = value;
+            return _inner.SetAsync(key, value, options, token);
+        }
     }
+
+    private readonly RecordingDistributedCache _distributedCache = new(new MemoryDistributedCache(
+        Options.Create(new MemoryDistributedCacheOptions())));
 
     private EntityExtractorHandler CreateHandler() => new(
         OpenAiClientMock.Object,
-        _cacheMock.Object,
+        new TenantCache(_distributedCache, NullLogger<TenantCache>.Instance),
         Options.Create(new ModelSelectorOptions
         {
             ToolHandlerModel = "gpt-4o-mini",
@@ -615,9 +628,10 @@ public sealed class EntityExtractorHandlerTests : TypedToolHandlerTestFixture
             It.IsAny<CancellationToken>()),
             Times.Exactly(2));
 
-        // And cache holds keys for both tenants (different keys)
-        _cacheStore.Keys.Should().Contain(k => k.Contains(":tenant-A:"));
-        _cacheStore.Keys.Should().Contain(k => k.Contains(":tenant-B:"));
+        // And cache holds keys for both tenants (different keys).
+        // TenantCache produces keys of form `tenant:{tenantId}:entity-extractor:{hash}:v1`.
+        _distributedCache.SetKeys.Keys.Should().Contain(k => k.Contains("tenant:tenant-A:"));
+        _distributedCache.SetKeys.Keys.Should().Contain(k => k.Contains("tenant:tenant-B:"));
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

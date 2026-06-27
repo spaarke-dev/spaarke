@@ -121,12 +121,14 @@ export {
   replaceWorkspaceWidget,
   resolveWorkspaceWidget,
   getWorkspaceWidgetMetadata,
+  getWorkspaceWidgetVisibleStateFn,
   getAllWorkspaceWidgetTypes,
   hasWorkspaceWidget,
   clearWorkspaceRegistry,
 } from './registry/WorkspaceWidgetRegistry';
 
-export type { WorkspaceWidgetRegistration } from './registry/WorkspaceWidgetRegistry';
+// Task 072 (D-C-27) — Pillar 9 visibility extension.
+export type { WorkspaceWidgetRegistration, RegistryGetAgentVisibleState } from './registry/WorkspaceWidgetRegistry';
 
 // ContextWidgetRegistry — lazy-load with null-return for unknown types
 export {
@@ -478,6 +480,43 @@ registerContextWidget('file-preview', {
     // Generic variance at the registry boundary — see PlaybookGalleryWidget
     // registration above for the same pattern.
     import('./widgets/context/FilePreviewContextWidget').then(m => ({
+      default: m.default as unknown as ContextWidgetComponent,
+    })),
+});
+
+// ---------------------------------------------------------------------------
+// Widgets: ExecutionTraceWidget (context pane — Claude-Code-like trace)
+//
+// R6 task 061 / D-C-14. Subscribes to the six `context.*` trace event types
+// added by R6 task 059 (D-C-12) and renders an ordered timeline of the chat
+// agent's deterministic activity (tool calls, knowledge retrievals,
+// playbook-node executions, decisions). Per ADR-015 BINDING: renders only
+// the typed enumerated fields from each event payload (tool name + decision
+// + timestamp + numeric metrics) — NEVER user message text or document
+// content. Per ADR-030 + NFR-05: subscribes to the existing `context`
+// channel — no new channel introduced.
+//
+// NOTE: registration in ContextWidgetRegistry is performed by task 062 — this
+// task only exposes the widget + its types via the package barrel.
+// ---------------------------------------------------------------------------
+
+export { default as ExecutionTraceWidget } from './widgets/context/ExecutionTraceWidget';
+export type { ExecutionTraceData, ExecutionTraceWidgetProps } from './widgets/context/ExecutionTraceWidget';
+export { EXECUTION_TRACE_WIDGET_TYPE, MAX_TRACE_ENTRIES } from './widgets/context/ExecutionTraceWidget';
+
+// R6 task 062 / D-C-15: register the widget so the SpaarkeAi shell can mount it
+// as the Context-pane primary widget via `resolveContextWidget('execution-trace')`.
+// Registration is idempotent (the registry is first-wins; the parallel inline
+// path in `src/registry/register-context-widgets.ts` is the mirror call for
+// shell entry points that bypass this barrel — both call sites are deliberate
+// per the FilePreviewContextWidget pattern above).
+registerContextWidget('execution-trace', {
+  factory: () =>
+    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
+    // widget's default export is typed ContextWidgetComponent<ExecutionTraceData>.
+    // Generic variance at the registry boundary — see PlaybookGalleryWidget
+    // registration above for the same pattern.
+    import('./widgets/context/ExecutionTraceWidget').then(m => ({
       default: m.default as unknown as ContextWidgetComponent,
     })),
 });

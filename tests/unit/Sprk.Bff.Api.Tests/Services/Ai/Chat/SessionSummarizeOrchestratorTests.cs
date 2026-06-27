@@ -1,13 +1,16 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -27,9 +30,10 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 ///   <item>Argument validation (tenant + session required; NFR-02 ≤20 file cap).</item>
 ///   <item>Session lookup at the orchestrator boundary (missing session →
 ///         InvalidOperationException; endpoint maps to 404).</item>
-///   <item>Forwards <see cref="ChatSummarizeRequest"/> to the engine with playbook ID
-///         <see cref="SessionSummarizeOrchestrator.ChatSummarizePlaybookId"/>
-///         and yields the engine's chunks unchanged (byte-equivalent pass-through).</item>
+///   <item>Forwards <see cref="ChatSummarizeRequest"/> to the engine with the playbook ID
+///         resolved at runtime via <see cref="IPlaybookLookupService.GetByIdAsync"/> using
+///         <see cref="WorkspaceOptions.ChatSummarizePlaybookId"/> (FR-05 task 015 stable-ID
+///         migration) and yields the engine's chunks unchanged (byte-equivalent pass-through).</item>
 /// </list>
 /// <para>
 /// Tests covering the moved logic (RAG retrieval / Structured Outputs / IncrementalJsonParser
@@ -44,20 +48,66 @@ public class SessionSummarizeOrchestratorTests
     private const string FileId1 = "file-001";
     private const string FileId2 = "file-002";
 
+    // FR-05 task 015 (chat-routing-redesign-r1): tests configure WorkspaceOptions with the
+    // canonical DEV-environment value for the summarize-document-for-chat@v1 playbook (the
+    // sprk_playbookid value, mirroring its sprk_analysisplaybookid PK per task 014 backfill).
+    // The orchestrator passes this string into IPlaybookLookupService.GetByIdAsync; the
+    // mock returns a PlaybookResponse whose Id is the same GUID (parsed) so the engine
+    // call site sees the unchanged GUID identifier — FR-26 convergence preserved.
+    private const string ConfiguredChatSummarizePlaybookId = "44285d15-1360-f111-ab0b-70a8a59455f4";
+    private static readonly Guid ResolvedChatSummarizePlaybookGuid =
+        Guid.Parse(ConfiguredChatSummarizePlaybookId);
+
     private readonly TestableChatSessionManager _sessionManagerStub;
     private readonly Mock<IPlaybookExecutionEngine> _engineMock;
+    private readonly Mock<IPlaybookLookupService> _playbookLookupMock;
+    private readonly Mock<IConsumerRoutingService> _consumerRoutingMock;
+    private readonly IOptions<WorkspaceOptions> _workspaceOptions;
     private readonly Mock<ILogger<SessionSummarizeOrchestrator>> _loggerMock;
 
     public SessionSummarizeOrchestratorTests()
     {
         _sessionManagerStub = new TestableChatSessionManager();
         _engineMock = new Mock<IPlaybookExecutionEngine>();
+        _playbookLookupMock = new Mock<IPlaybookLookupService>();
+        _consumerRoutingMock = new Mock<IConsumerRoutingService>();
+        _workspaceOptions = Options.Create(new WorkspaceOptions
+        {
+            ChatSummarizePlaybookId = ConfiguredChatSummarizePlaybookId
+        });
         _loggerMock = new Mock<ILogger<SessionSummarizeOrchestrator>>();
+
+        // Default stub: GetByIdAsync(<configured id>, ct) → PlaybookResponse with Id = GUID.
+        // The orchestrator forwards playback.Id (Guid) to the engine.
+        _playbookLookupMock
+            .Setup(p => p.GetByIdAsync(ConfiguredChatSummarizePlaybookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaybookResponse
+            {
+                Id = ResolvedChatSummarizePlaybookGuid,
+                Name = "summarize-document-for-chat@v1",
+                PlaybookCode = string.Empty,
+                IsActive = true
+            });
+
+        // Default stub: routing-table returns null → fallback to typed-options path
+        // (preserves the pre-028d behavior verbatim across the existing test surface).
+        // Tests covering the FR-1R-05 happy path override this setup explicitly.
+        _consumerRoutingMock
+            .Setup(c => c.ResolveAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid?)null);
     }
 
     private SessionSummarizeOrchestrator CreateSut() => new(
         _sessionManagerStub,
         _engineMock.Object,
+        _playbookLookupMock.Object,
+        _consumerRoutingMock.Object,
+        _workspaceOptions,
         _loggerMock.Object);
 
     // ─── (a) Forwards to engine with ChatSummarizePlaybookId and resolved manifest ─────────────
@@ -84,9 +134,16 @@ public class SessionSummarizeOrchestratorTests
         var sut = CreateSut();
         _ = await Collect(sut.SummarizeSessionFilesAsync(request));
 
-        capturedPlaybookId.Should().Be(SessionSummarizeOrchestrator.ChatSummarizePlaybookId,
+        capturedPlaybookId.Should().Be(ResolvedChatSummarizePlaybookGuid,
             "Pillar 4 binding — chat /summarize MUST route through PlaybookExecutionEngine using " +
-            "the summarize-document-for-chat@v1 playbook ID");
+            "the summarize-document-for-chat@v1 playbook ID resolved at runtime via " +
+            "IPlaybookLookupService.GetByIdAsync(WorkspaceOptions.ChatSummarizePlaybookId) " +
+            "(FR-05 task 015 stable-ID migration)");
+        _playbookLookupMock.Verify(
+            p => p.GetByIdAsync(ConfiguredChatSummarizePlaybookId, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "FR-05 — orchestrator MUST resolve the playbook via IPlaybookLookupService " +
+            "using the configured WorkspaceOptions.ChatSummarizePlaybookId");
         capturedRequest.Should().NotBeNull();
         capturedRequest!.TenantId.Should().Be(TenantId);
         capturedRequest.SessionId.Should().Be(SessionId);
@@ -165,10 +222,15 @@ public class SessionSummarizeOrchestratorTests
         var sut = CreateSut();
         _ = await Collect(sut.SummarizeSessionFilesAsync(request));
 
-        // FR-26 binding: playbook ID is a Guid, not the alternate-key string code.
+        // FR-26 binding: playbook ID is a Guid (not the alternate-key string code) and is
+        // sourced from the IPlaybookLookupService.GetByIdAsync resolution path — not the
+        // pre-task-015 hardcoded constant. The convergence invariant is preserved as long
+        // as both slash /summarize and NL agent-tool dispatch end up here with the same
+        // resolved Guid.
         capturedPlaybookId.Should().NotBe(Guid.Empty);
-        capturedPlaybookId.Should().Be(Guid.Parse("44285d15-1360-f111-ab0b-70a8a59455f4"),
-            "Pillar 4 chat-summarize uses the FK-resolved playbook 'summarize-document-for-chat@v1' ID");
+        capturedPlaybookId.Should().Be(ResolvedChatSummarizePlaybookGuid,
+            "Pillar 4 chat-summarize uses the FK-resolved playbook 'summarize-document-for-chat@v1' ID, " +
+            "now resolved at runtime via WorkspaceOptions.ChatSummarizePlaybookId + IPlaybookLookupService (task 015 FR-05)");
     }
 
     // ─── (d) ADR-014 — tenant + session forwarded to engine for downstream RAG isolation ─────
@@ -362,21 +424,211 @@ public class SessionSummarizeOrchestratorTests
 
     // ─── (l) FR-26 invariant — orchestrator no longer references alternate-key constants ─────
 
-    [Fact]
-    public void SessionSummarizeOrchestrator_HasNoAlternateKeyConstants_FR26()
-    {
-        // The pre-R6 path used SessionSummarizeOrchestrator.SummarizeActionCode +
-        // ActionEntityLogicalName constants for the alternate-key bypass. R6 task 025 removed
-        // these. Reflection assert: neither constant exists on the orchestrator anymore.
-        var members = typeof(SessionSummarizeOrchestrator)
-            .GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            .Select(m => m.Name)
-            .ToArray();
 
-        members.Should().NotContain("SummarizeActionCode",
-            "FR-26 — alternate-key bypass removed in R6 task 025 (D-A-17)");
-        members.Should().NotContain("ActionEntityLogicalName",
-            "FR-26 — alternate-key bypass removed in R6 task 025 (D-A-17)");
+    // ─── (m) FR-05 task 015 — hardcoded ChatSummarizePlaybookId constant removed ─────────────
+
+
+    // ─── (n) FR-05 — orchestrator calls IPlaybookLookupService with configured options value ─
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_ResolvesPlaybookViaLookupService_UsingConfiguredOptionValue()
+    {
+        // FR-05 task 015: verify the orchestrator passes the EXACT configured
+        // WorkspaceOptions.ChatSummarizePlaybookId value into the lookup service. This pins
+        // the typed-options contract: WorkspaceOptions is the only place the per-env GUID
+        // string lives in the orchestrator path.
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        _engineMock
+            .Setup(e => e.ExecuteChatSummarizeAsync(
+                It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(EmptyChunkStream());
+
+        var request = new SummarizeSessionFilesRequest(
+            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
+            Path: SummarizeInvocationPath.DirectEndpoint);
+
+        var sut = CreateSut();
+        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
+
+        _playbookLookupMock.Verify(
+            p => p.GetByIdAsync(ConfiguredChatSummarizePlaybookId, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "FR-05 — orchestrator MUST invoke IPlaybookLookupService.GetByIdAsync with the " +
+            "exact WorkspaceOptions.ChatSummarizePlaybookId value (no string mutation, no fallback)");
+    }
+
+    // ─── (o) FR-05 — fail-fast on missing configuration (no hardcoded fallback at convergence) ─
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_EmptyConfiguredId_ThrowsInvalidOperationException()
+    {
+        // FR-05 task 015 + R6 FR-26: at the chat /summarize convergence point, missing
+        // per-env config MUST fail fast (no hardcoded fallback). The error must surface
+        // upstream so operators see misconfiguration rather than silent routing to a
+        // (potentially) stale dev GUID.
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        var emptyOptions = Options.Create(new WorkspaceOptions
+        {
+            ChatSummarizePlaybookId = string.Empty
+        });
+        var sut = new SessionSummarizeOrchestrator(
+            _sessionManagerStub,
+            _engineMock.Object,
+            _playbookLookupMock.Object,
+            _consumerRoutingMock.Object,
+            emptyOptions,
+            _loggerMock.Object);
+
+        var request = new SummarizeSessionFilesRequest(
+            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
+            Path: SummarizeInvocationPath.DirectEndpoint);
+
+        var act = async () => { await foreach (var _ in sut.SummarizeSessionFilesAsync(request)) { } };
+        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
+        thrown.Which.Message.Should().Contain("routing-table",
+            "FR-1R-05 error message MUST point operators at the routing-table + " +
+            "Workspace:ChatSummarizePlaybookId fallback path");
+
+        _playbookLookupMock.Verify(
+            p => p.GetByIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "fail-fast — lookup MUST NOT be attempted with an empty configured value");
+        _engineMock.Verify(
+            e => e.ExecuteChatSummarizeAsync(
+                It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "fail-fast — engine MUST NOT be called when playbook resolution failed at config layer");
+    }
+
+    // ─── (p) FR-1R-05 task 028d — routing-table happy path resolves via IConsumerRoutingService ─
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_RoutingTableReturnsId_UsesRoutingTablePlaybookIdAndSkipsLookup()
+    {
+        // FR-1R-05 task 028d: when IConsumerRoutingService.ResolveAsync returns a non-null
+        // Guid for ConsumerTypes.ChatSummarize, the orchestrator MUST use that GUID as the
+        // engine's playbookId AND MUST NOT fall through to the typed-options /
+        // IPlaybookLookupService path. This pins the new primary resolution path.
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        var routingTableGuid = Guid.Parse("11111111-2222-3333-4444-555555555555");
+        _consumerRoutingMock
+            .Setup(c => c.ResolveAsync(
+                ConsumerTypes.ChatSummarize,
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(routingTableGuid);
+
+        Guid capturedPlaybookId = Guid.Empty;
+        _engineMock
+            .Setup(e => e.ExecuteChatSummarizeAsync(
+                It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, ChatSummarizeRequest, CancellationToken>(
+                (pid, _, _) => capturedPlaybookId = pid)
+            .Returns(EmptyChunkStream());
+
+        var request = new SummarizeSessionFilesRequest(
+            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
+            Path: SummarizeInvocationPath.DirectEndpoint);
+
+        var sut = CreateSut();
+        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
+
+        capturedPlaybookId.Should().Be(routingTableGuid,
+            "FR-1R-05 — routing-table resolution is the new primary path; the GUID returned by " +
+            "IConsumerRoutingService MUST be forwarded to the engine verbatim");
+        _consumerRoutingMock.Verify(
+            c => c.ResolveAsync(
+                ConsumerTypes.ChatSummarize,
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            "FR-1R-05 — orchestrator MUST consult IConsumerRoutingService with the ConsumerTypes constant");
+        _playbookLookupMock.Verify(
+            p => p.GetByIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "FR-1R-05 — fallback path (typed-options → IPlaybookLookupService) MUST NOT execute when " +
+            "the routing-table returned a non-null GUID");
+    }
+
+    // ─── (q) FR-1R-05 task 028d — routing-table returns null → fallback to typed-options ────
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_RoutingTableReturnsNull_FallsBackToTypedOptionsPath()
+    {
+        // FR-1R-05 task 028d graceful-degrade: when IConsumerRoutingService returns null
+        // (no row), the orchestrator MUST fall through to the FR-05 typed-options +
+        // IPlaybookLookupService path (preserves pre-028d behavior verbatim). The default
+        // _consumerRoutingMock setup in the ctor returns null → this is the implicit path.
+        _sessionManagerStub.Session = BuildSession(FileId1);
+
+        Guid capturedPlaybookId = Guid.Empty;
+        _engineMock
+            .Setup(e => e.ExecuteChatSummarizeAsync(
+                It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, ChatSummarizeRequest, CancellationToken>(
+                (pid, _, _) => capturedPlaybookId = pid)
+            .Returns(EmptyChunkStream());
+
+        var request = new SummarizeSessionFilesRequest(
+            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
+            Path: SummarizeInvocationPath.DirectEndpoint);
+
+        var sut = CreateSut();
+        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
+
+        capturedPlaybookId.Should().Be(ResolvedChatSummarizePlaybookGuid,
+            "FR-1R-05 graceful-degrade — null from IConsumerRoutingService → orchestrator MUST " +
+            "resolve via WorkspaceOptions.ChatSummarizePlaybookId + IPlaybookLookupService " +
+            "(pre-028d behavior preserved verbatim for the FR-1R-06 deprecation window)");
+        _playbookLookupMock.Verify(
+            p => p.GetByIdAsync(ConfiguredChatSummarizePlaybookId, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "FR-1R-05 graceful-degrade — fallback path invokes IPlaybookLookupService with the " +
+            "configured typed-options value when the routing-table has no matching row");
+    }
+
+    // ─── (r) FR-1R-05 task 028d — routing-table returns empty Guid → treats as null, falls back ─
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_RoutingTableReturnsEmptyGuid_FallsBackToTypedOptionsPath()
+    {
+        // FR-1R-05 task 028d defensive edge — Guid.Empty is semantically equivalent to null
+        // for routing purposes; the orchestrator MUST treat it as "no match" and fall back
+        // to the typed-options path rather than forwarding Guid.Empty to the engine.
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        _consumerRoutingMock
+            .Setup(c => c.ResolveAsync(
+                ConsumerTypes.ChatSummarize,
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.Empty);
+
+        Guid capturedPlaybookId = Guid.Empty;
+        _engineMock
+            .Setup(e => e.ExecuteChatSummarizeAsync(
+                It.IsAny<Guid>(), It.IsAny<ChatSummarizeRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, ChatSummarizeRequest, CancellationToken>(
+                (pid, _, _) => capturedPlaybookId = pid)
+            .Returns(EmptyChunkStream());
+
+        var request = new SummarizeSessionFilesRequest(
+            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
+            Path: SummarizeInvocationPath.DirectEndpoint);
+
+        var sut = CreateSut();
+        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
+
+        capturedPlaybookId.Should().Be(ResolvedChatSummarizePlaybookGuid,
+            "FR-1R-05 defensive edge — Guid.Empty from the routing service is semantically " +
+            "no-match and MUST trigger the same fallback as null");
+        capturedPlaybookId.Should().NotBe(Guid.Empty,
+            "engine MUST NOT be called with Guid.Empty — the fallback path resolves a real GUID");
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────────────────────
@@ -443,7 +695,7 @@ public class SessionSummarizeOrchestratorTests
     private sealed class TestableChatSessionManager : ChatSessionManager
     {
         public TestableChatSessionManager() : base(
-            cache: Mock.Of<IDistributedCache>(),
+            cache: Mock.Of<ITenantCache>(),
             dataverseRepository: Mock.Of<IChatDataverseRepository>(),
             logger: Mock.Of<ILogger<ChatSessionManager>>(),
             persistence: null,

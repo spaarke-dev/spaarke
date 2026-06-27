@@ -1,0 +1,140 @@
+<task id="R4-105" project="smart-todo-r4">
+  <metadata>
+    <title>UAT — Consumer of the spaarke-prototype UAT harness framework</title>
+    <phase>Phase 2: Wave UAT-tooling (cross-project enabler)</phase>
+    <workstream>tooling</workstream>
+    <status>complete</status>
+    <estimated-effort>~1 hour (within the framework setup; this is the consumer slice)</estimated-effort>
+    <tags>tooling, prototype-harness, uat, framework-consumer, smart-todo</tags>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>R4-099 (widget chrome), R4-101 (useKanbanColumns hoist), R4-102 (Kanban hoist), R4-103 (toolbar polish), prototype framework feature/uat-harness-framework branch</dependencies>
+    <relevant-files>
+      <file>c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat/ (consumer lives there)</file>
+      <file>c:/code_files/spaarke-prototype/_infra/ (framework lives there)</file>
+      <file>c:/code_files/spaarke-prototype/projects/_framework-setup-2026-06/README.md (framework design)</file>
+    </relevant-files>
+  </metadata>
+
+  <prompt>
+Validate the prototype UAT harness framework by standing up `smart-todo-r4-uat/` as its first consumer. Mount the production SmartTodoWidget against mocked Xrm + seeded sprk_todo data. Sub-second visual iteration on widget changes without the master-deploy cycle.
+  </prompt>
+
+  <role>
+Cross-repo dev. Comfortable editing in BOTH `spaarke-wt-smart-todo-r4` (production source) and `spaarke-prototype` (sandbox harness).
+  </role>
+
+  <goal>
+A working `npm run dev` at `c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat/` that renders the SmartTodoWidget with realistic mock data, and HMR-reloads when the widget source files in `spaarke-wt-smart-todo-r4` are edited. Closes the iteration-time gap that drove Wave D + Wave E rework loops.
+  </goal>
+
+  <inputs>
+    <file purpose="framework-design">c:/code_files/spaarke-prototype/projects/_framework-setup-2026-06/README.md</file>
+    <file purpose="framework-claude">c:/code_files/spaarke-prototype/claude.md (section "Production Component Harnesses")</file>
+    <file purpose="template">c:/code_files/spaarke-prototype/projects/_templates/prod-component-harness/</file>
+    <file purpose="consumer">c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat/</file>
+    <file purpose="widget-source">src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx (production source — the harness viewport)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="cross-repo">Harness lives in spaarke-prototype repo, NOT this worktree. Edits to production source happen IN this worktree; harness only views them via Vite alias.</constraint>
+    <constraint source="no-replace-deploy">The harness catches visual/UX issues only. Master-deploy + integration UAT remain mandatory before R4-098 wrap-up to validate Xrm-real behaviors (drag-persistence, BroadcastChannel cross-tab, auth refresh).</constraint>
+    <constraint source="reuse-not-duplicate">Mocks + seed factories live in `spaarke-prototype/_infra/`, NOT in the smart-todo-r4-uat project directory. Future projects reuse the same _infra/.</constraint>
+    <constraint source="durable user instruction">spaarkedev1 deploys are master-only; the harness does NOT change this — it's pre-deploy iteration only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>cross-repo prototype harness</topic>
+    <files>
+      <file>c:/code_files/spaarke-prototype/projects/_framework-setup-2026-06/README.md</file>
+      <file>c:/code_files/spaarke-prototype/_infra/vite.shared-libs.ts (alias config)</file>
+      <file>c:/code_files/spaarke-prototype/_infra/mocks/xrm.ts (Xrm.WebApi mock surface)</file>
+      <file>c:/code_files/spaarke-prototype/_infra/seed/factories/sprk_todo.ts (15-todo seed factory)</file>
+    </files>
+    <patterns>
+      <pattern name="Prototype Component Harness (framework convention)" location="c:/code_files/spaarke-prototype/claude.md">
+        Production component sources are viewed via Vite alias; the harness directory itself contains only mocks + seed data + mount shell. Edits to production source happen in the worktree; HMR reloads the harness browser instantly.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      UAT rounds 1-3 on the deployed Wave D + Wave E bits required full build + deploy + Ctrl+F5 cycles (~30 min each). The prototype harness collapses that to sub-second HMR. This task validates the framework end-to-end + gives the smart-todo-r4 project an immediate iteration tool for any future UAT rounds (or for catching visual issues before they ship in a deploy).
+    </background>
+    <dependencies>
+      <dependency task="R4-102" status="must-complete">SmartTodoKanban + KanbanCard in peer package (the harness mounts them via the @spaarke/smart-todo-components alias)</dependency>
+      <dependency task="R4-103" status="must-complete">Widget toolbar polish (search-icon, always-on Open, column tints, Capital Case, inline QuickAdd) — visible in the harness</dependency>
+    </dependencies>
+    <related-work>
+      <item>Framework branch: `feature/uat-harness-framework` in `c:/code_files/spaarke-prototype` (commit 73a9ddc)</item>
+      <item>Future projects: copy `projects/_templates/prod-component-harness/` and configure for their worktree</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">All framework files in `spaarke-prototype/feature/uat-harness-framework` branch.</step>
+    <step order="1" name="Validate build">Run `cd c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat && npm install && npx vite build` — should produce a clean bundle.</step>
+    <step order="2" name="Validate dev server">`npm run dev` — opens browser at localhost:5173 showing the widget with 15 seeded todos across Today/Tomorrow/Future buckets.</step>
+    <step order="3" name="HMR smoke test">Edit a file in `c:/code_files/spaarke-wt-smart-todo-r4/src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.styles.ts` (e.g. change a column tint); verify the prototype browser HMR-reloads within ~200ms.</step>
+    <step order="4" name="Document for the project">Update `projects/smart-todo-r4/current-task.md` to point future UAT cycles at the prototype harness; reference the framework branch + the harness directory path.</step>
+    <step order="5" name="Update task status">Flip POML to `complete`; update TASK-INDEX with the consumer link.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + dev server (executes in spaarke-prototype repo, not this worktree)</tool>
+    <tool name="git">Standard workflow remains in this worktree — harness doesn't change PR shape</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Working harness at `c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat/` (committed on `feature/uat-harness-framework` branch in that repo)</output>
+    <output type="docs">Framework discoverability via this POML + current-task.md update</output>
+    <output type="enabler">Framework reusable for future projects via `_templates/prod-component-harness/` + `_infra/`</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`npm install` + `npx vite build` in smart-todo-r4-uat produces a clean bundle (verified: 2,181 modules transformed, 579 KB)</criterion>
+    <criterion testable="true">`npm run dev` boots a dev server at localhost:5173 with the SmartTodoWidget visible</criterion>
+    <criterion testable="true">15 sprk_todos visible across Today/Tomorrow/Future buckets per seed factory</criterion>
+    <criterion testable="true">Editing widget source in the smart-todo-r4 worktree triggers HMR in the prototype browser</criterion>
+    <criterion testable="true">Console shows verbose Xrm + auth + BroadcastChannel logs (mocks installed correctly)</criterion>
+    <criterion testable="true">Framework files reusable: `_templates/prod-component-harness/` + `_infra/` documented in `_framework-setup-2026-06/README.md` + `claude.md`</criterion>
+    <criterion testable="true">POML + TASK-INDEX updated; current-task.md references the harness for future UAT cycles</criterion>
+  </acceptance-criteria>
+
+  <notes>
+## Completion 2026-06-18
+
+Built end-to-end this session:
+- `c:/code_files/spaarke-prototype/feature/uat-harness-framework` branch (commit `73a9ddc`) — pushed to origin
+- 25 files added: `_infra/` (mocks + seed + vite alias), `_templates/prod-component-harness/` (copy-able scaffold), `projects/smart-todo-r4-uat/` (first consumer), `projects/_framework-setup-2026-06/README.md` (design doc), `claude.md` update (AI convention)
+- Build verified: 2,181 modules transformed, 579 KB bundle in 7.75s
+- Framework reusable: any future project copies `_templates/prod-component-harness/` + sets `SPAARKE_REPO_ROOT` env var to point at its worktree
+
+### Future-state workflow (the iteration loop this enables)
+
+```
+1. Project starts (design-to-spec / project-pipeline) — unchanged
+2. NEW: First task copies _templates/prod-component-harness/ → projects/<project>-uat/
+3. task-execute writes code in production worktree
+   ◆ Harness HMR-reloads on every save (sub-second)
+4. Pre-deploy review: walk through harness; catch chrome/UX issues
+5. master-deploy only when ready for integration UAT
+6. Integration UAT: Xrm-real behaviors only (drag-persist, BroadcastChannel, auth)
+7. merge-to-master — unchanged
+```
+
+Estimated saving for visual-heavy projects: ~30 min per UAT cycle compressed to sub-second; eliminates entire "post-deploy chrome rework wave" pattern that drove smart-todo-r4 Wave D + Wave E.
+
+### Boundaries (what the harness does NOT replace)
+
+- Master-deploy is still required for Xrm-real behaviors
+- Integration UAT is still required
+- Automated UI tests (R4-093 pattern) still run against deployed bits
+
+### Reference
+
+- Framework PR: TBD (will open from `feature/uat-harness-framework` to `main` in spaarke-prototype when ready to land)
+- Harness path: `c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat/`
+- To run: `cd c:/code_files/spaarke-prototype/projects/smart-todo-r4-uat && npm run dev`
+  </notes>
+</task>

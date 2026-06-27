@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Upload pipeline integration test — 50-page PDF target ≤4s total</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4b)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>072</dependencies>
+    <blocks>074</blocks>
+    <tags>testing, integration-test, performance</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test creation; tags include `testing`, `integration-test`; per task-create Step 0.5 STANDARD applies</rigor-reason>
+    <parallel-group>4-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>NEW test file; no overlap with peer 4-D task 074 (telemetry — separate concern)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author integration test for the upload pipeline (066 orchestrator + 067/068/069 enrichment + 072 persistence + 071 shape). Test simulates uploading a 50-page synthetic PDF text content through `ChatDocumentEndpoints.UploadDocumentAsync` and asserts:
+    - All 4 enriched fields populated (`SummaryText`, `ClassifiedDocType`, `Sections`, `PageCount`)
+    - Total enrichment latency ≤4s per architecture §6.1
+    - Cosmos write completed (read-back assertion via Redis or Cosmos)
+    - No tier-1-banned content in logs (textContent, summary text, classification text)
+  </prompt>
+
+  <role>SPAARKE platform QA / test engineer. Expert in WebApplicationFactory integration tests + performance assertions.</role>
+
+  <goal>
+    `UploadPipelineIntegrationTests.cs` exists in `tests/integration/Sprk.Bff.Api.IntegrationTests/UploadPipeline/`. Test runs end-to-end with mocked Azure OpenAI (fast deterministic responses) + in-memory Redis + Cosmos emulator (or test double). Asserts ≤4s total + enriched field population + tier-1 log safety.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §6.1 — total latency target for 50-page PDF enrichment: ~2-4s. The 4 parallel paths (classify ~250ms, summarize ~250ms, manifest extract ~50ms, RAG index ~1500-3500ms — the dominant tail) complete via `Task.WhenAll`. This test makes the latency budget binding.
+    </background>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-015">Log assertion: NO log line in the captured stream contains textContent OR summary text OR classification label text body.</constraint>
+    <constraint source="architecture §6.1">Latency target: total ≤4s for 50-page synthetic text input.</constraint>
+    <constraint source="project">Mock `IOpenAiClient` for deterministic latency (avoid real LLM cost in CI); use in-memory Redis + Cosmos emulator OR test doubles.</constraint>
+    <constraint source="project">Test the parallel-execution path — assert `Task.WhenAll` semantics by confirming total ≤ sum of slowest individual call + overhead.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read peer integration test for style (`tests/integration/Sprk.Bff.Api.IntegrationTests/...Tests.cs`).</step>
+    <step order="2">Author `UploadPipelineIntegrationTests.cs`:
+      - Fixture: WebApplicationFactory with mocked `IOpenAiClient` returning deterministic results in ~200ms
+      - Synthetic 50-page input: ~150K chars text content
+      - POST to upload endpoint
+      - Assert response shape: `{ fileId, summary, docType, confidence }`
+      - Read back from session persistence; assert enriched fields populated
+      - Capture logs; assert no tier-1-banned content</step>
+    <step order="3">Latency assertion: total &lt; 4000ms (with mocked LLM latency = 250ms each, parallel paths complete &lt; 2s; add headroom).</step>
+    <step order="4">Add second test case: small file (1 page) — assert &lt;1s total.</step>
+    <step order="5">Run `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/UploadPipeline/`.</step>
+    <step order="6">code-review (Step 9.5).</step>
+    <step order="7">Update TASK-INDEX.md: 073 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Peer integration tests + ChatDocumentEndpoints</tool>
+    <tool name="Write">UploadPipelineIntegrationTests.cs</tool>
+    <tool name="Bash">dotnet test</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.IntegrationTests/UploadPipeline/UploadPipelineIntegrationTests.cs (NEW)</output>
+    <output type="docs">notes/handoffs/073-test-results.md — latency + tier-1 audit summary</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`UploadPipelineIntegrationTests.cs` exists.</criterion>
+    <criterion testable="true">Test asserts all 4 enriched fields populated post-upload.</criterion>
+    <criterion testable="true">Test asserts total enrichment ≤4s on 50-page synthetic input.</criterion>
+    <criterion testable="true">Test asserts no tier-1-banned content in captured logs.</criterion>
+    <criterion testable="true">`dotnet test` for the new file exits 0.</criterion>
+    <criterion testable="true">code-review exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Latency assertion uses mocked OpenAI client so it tests parallel-execution semantics, NOT real LLM latency. Real-LLM latency is observed in dev environment by manual testing.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

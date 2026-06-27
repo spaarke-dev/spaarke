@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>FR-45 regression test — PlaybookChatContextProvider.cs:627 invocation continues to fire</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4c)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>076,077,078,079</dependencies>
+    <blocks>083,084,085,086,087</blocks>
+    <tags>testing, regression, binding-invariant</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Test creation; tags include `testing`, `regression`; binding-invariant per CLAUDE.md "do not regress"</rigor-reason>
+    <parallel-group>4-F</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single regression test; runs after all wave 4-E refactors complete to assert the FR-45 invariant survived</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author a regression test asserting that `PlaybookChatContextProvider.cs:627` (or its post-refactor line) MatterMemoryService.ToSystemPromptFragmentAsync invocation continues to fire when `ProvideAsync` runs. Per CLAUDE.md decision log (2026-06-21): "FR-45 VERIFIED at `PlaybookChatContextProvider.cs:627` — Architecture §11.1 confirms wiring; treat as 'do not regress' invariant." This test is the binding enforcement.
+  </prompt>
+
+  <role>SPAARKE platform QA / test engineer. Authoring binding-invariant regression test.</role>
+
+  <goal>
+    `PlaybookChatContextProviderFr45RegressionTests.cs` exists. Test instantiates `PlaybookChatContextProvider` with mocked `IMatterMemoryService` and asserts `ToSystemPromptFragmentAsync` is invoked exactly once when `ProvideAsync` runs with a matter-context session. Also includes a source-code grep assertion: `grep "MatterMemoryService.ToSystemPromptFragmentAsync" src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookChatContextProvider.cs` returns 1+ hits.
+  </goal>
+
+  <context>
+    <background>
+      Architecture §11.1 + CLAUDE.md decision: FR-45 wiring at line 627 is VERIFIED + binding invariant. Wave 4-E (task 078 coordinator) refactors `PlaybookChatContextProvider.ProvideAsync` to unify composition; line 627 may shift during refactor but the invocation MUST remain. This test enforces.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookChatContextProvider.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-45">Binding invariant — `MatterMemoryService.ToSystemPromptFragmentAsync` MUST be invoked from `PlaybookChatContextProvider.ProvideAsync` when matter context present.</constraint>
+    <constraint source="architecture §11.1">Wiring VERIFIED at `PlaybookChatContextProvider.cs:627` (line number may shift post-refactor).</constraint>
+    <constraint source="CLAUDE.md">"Do not regress" invariant — this test is the binding enforcement.</constraint>
+    <constraint source="project">Sequential after wave 4-E (076, 077, 078, 079) so it tests the POST-REFACTOR state.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `PlaybookChatContextProvider.cs` post-task-078 to locate current line of MatterMemoryService invocation. Read `notes/handoffs/078-fr-45-line-verified.md` if present for the post-refactor line.</step>
+    <step order="2">Author `PlaybookChatContextProviderFr45RegressionTests.cs`:
+      - Test 1 (behavioral): Mock `IMatterMemoryService`. Invoke `ProvideAsync` with matter-context session. Assert mock's `ToSystemPromptFragmentAsync` called exactly once.
+      - Test 2 (grep assertion): `File.ReadAllText("src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookChatContextProvider.cs")` contains `"MatterMemoryService.ToSystemPromptFragmentAsync"` substring. Fail loudly with "FR-45 binding invariant violated — see architecture §11.1 + CLAUDE.md decision log" message.
+      - Test 3 (no-matter-context): When session has no matter context, invocation may be skipped (verify graceful behavior per architecture §9.1: "MatterMemoryService throws → empty fragment, agent operates without matter memory").</step>
+    <step order="3">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookChatContextProviderFr45RegressionTests.cs` — must pass.</step>
+    <step order="4">Run code-review.</step>
+    <step order="5">Update TASK-INDEX.md: 080 → ✅; wave 4-F complete.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">PlaybookChatContextProvider + handoffs/078-fr-45-line-verified.md</tool>
+    <tool name="Write">PlaybookChatContextProviderFr45RegressionTests.cs</tool>
+    <tool name="Bash">dotnet test</tool>
+    <tool name="Grep">FR-45 invariant verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookChatContextProviderFr45RegressionTests.cs (NEW)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Behavioral test: `ToSystemPromptFragmentAsync` mock invoked exactly once on matter-context session.</criterion>
+    <criterion testable="true">Grep test: source contains literal "MatterMemoryService.ToSystemPromptFragmentAsync".</criterion>
+    <criterion testable="true">No-matter-context test: graceful behavior per architecture §9.1.</criterion>
+    <criterion testable="true">Test failure message explicitly references FR-45 + architecture §11.1 + CLAUDE.md decision.</criterion>
+    <criterion testable="true">`dotnet test` exits 0.</criterion>
+    <criterion testable="true">code-review exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a BINDING-INVARIANT test. Its failure indicates a regression of FR-45 (architecture §11.1) — must be addressed before merge per CLAUDE.md. If line 627 shifted, update assertion target via the handoff doc; do NOT weaken the test.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>BFF refactor: file indexing + reference services (FR-13 expanded scope)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>046</blocks>
+    <tags>bff-api, refactoring, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation: 4 services (FileIndexingService, ReferenceIndexingService, ReferenceRetrievalService, SessionFilesCleanupJob)</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Refactor 4 file/reference indexing services per FR-13 expanded 2026-06-26 audit scope: FileIndexingService.cs (direct SearchIndexName consumer), ReferenceIndexingService.cs, ReferenceRetrievalService.cs, SessionFilesCleanupJob.cs (SessionFilesIndexName consumer).
+    Replace `spaarke-knowledge-index-v2` references with `spaarke-files-index`.
+  </prompt>
+
+  <role>
+    Spaarke platform .NET 8 BFF developer.
+  </role>
+
+  <goal>
+    All 4 services use canonical index names.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionFilesCleanupJob.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">Replace all spaarke-knowledge-index-v2 references with spaarke-files-index</constraint>
+    <constraint source="ADR-017">Preserve job contract for SessionFilesCleanupJob</constraint>
+    <constraint source="NFR-04">Publish-size delta ≤ 0 MB</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>.claude/adr/ADR-017-background-jobs-service-bus.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep within 4 files for `spaarke-knowledge-index-v2`</step>
+    <step order="2">Edit each file to replace with `spaarke-files-index`</step>
+    <step order="3">Build BFF: `dotnet build src/server/api/Sprk.Bff.Api/`</step>
+    <step order="4">Update TASK-INDEX.md: task 032 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Find references</tool>
+    <tool name="Edit">Replace strings</tool>
+    <tool name="dotnet">Build BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">4 BFF service files</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep within 4 files returns zero spaarke-knowledge-index-v2 matches</criterion>
+    <criterion testable="true">BFF builds successfully</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

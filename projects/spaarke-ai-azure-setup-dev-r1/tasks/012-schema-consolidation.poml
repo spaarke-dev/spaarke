@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Consolidate schema files to infrastructure/ai-search/ (FR-11)</title>
+    <phase>2: Schema Preparation</phase>
+    <status>completed</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>020</blocks>
+    <tags>azure-search, schemas, refactoring, file-moves</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>File moves + Bicep path updates with explicit acceptance criteria (FR-11)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Move schema files from `infra/ai-search/` + `infra/insights/schemas/` into single canonical location `infrastructure/ai-search/`.
+    Update Bicep `loadJsonContent()` paths in `infra/insights/modules/search-index.bicep`. Update Deploy-AllIndexes.ps1 reference paths (Phase 3 will use consolidated location).
+  </prompt>
+
+  <role>
+    Spaarke platform infrastructure engineer.
+  </role>
+
+  <goal>
+    All 7 schema files live in `infrastructure/ai-search/`. Bicep + Deploy script references updated.
+  </goal>
+
+  <context>
+    <background>
+      Three schema-file locations currently: `infrastructure/ai-search/`, `infra/ai-search/`, `infra/insights/schemas/`. No doc explains why or which is canonical. Per spec Assumption: `infrastructure/ai-search/` chosen (more mature, more files already).
+    </background>
+    <relevant-files>
+      <file>infra/ai-search/spaarke-file-index.json</file>
+      <file>infrastructure/ai-search/spaarke-files-index.json</file>
+      <file>infra/insights/schemas/spaarke-insights-index.index.json</file>
+      <file>infrastructure/ai-search/spaarke-insights-index.json</file>
+      <file>infra/insights/modules/search-index.bicep</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-11">Files moved to `infrastructure/ai-search/`; Bicep `loadJsonContent()` paths updated; Deploy-AllIndexes.ps1 references consolidated location</constraint>
+    <constraint source="project">infra/insights/modules/search-index.bicep RETAINED (Open Question resolved 2026-06-26 — keeps Insights Bicep stack consistent)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/design.md</file>
+      <file>infra/insights/modules/search-index.bicep</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">git mv `infra/ai-search/spaarke-file-index.json` → `infrastructure/ai-search/spaarke-files-index.json` (after task 011 rename)</step>
+    <step order="2">git mv `infra/insights/schemas/spaarke-insights-index.index.json` → `infrastructure/ai-search/spaarke-insights-index.json`</step>
+    <step order="3">Edit `infra/insights/modules/search-index.bicep` to update `loadJsonContent()` path to consolidated location</step>
+    <step order="4">Grep for other `loadJsonContent()` or schema-file references; update any found</step>
+    <step order="5">Verify `infra/ai-search/` and `infra/insights/schemas/` directories are empty (or contain only retired files) — clean up</step>
+    <step order="6">Update TASK-INDEX.md: task 012 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">git mv for atomic file moves</tool>
+    <tool name="Edit">Update Bicep loadJsonContent paths</tool>
+    <tool name="Grep">Find other schema-file references</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">infrastructure/ai-search/ (7 schemas consolidated)</output>
+    <output type="infra">infra/insights/modules/search-index.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 schema files in `infrastructure/ai-search/`</criterion>
+    <criterion testable="true">`infra/ai-search/` empty or contains only retired files</criterion>
+    <criterion testable="true">`infra/insights/schemas/` empty</criterion>
+    <criterion testable="true">Bicep `loadJsonContent()` paths point to consolidated location</criterion>
+    <criterion testable="true">Bicep build (if tested) succeeds with new paths</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

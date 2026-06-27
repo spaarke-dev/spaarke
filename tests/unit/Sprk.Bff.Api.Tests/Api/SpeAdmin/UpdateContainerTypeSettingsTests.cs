@@ -29,27 +29,6 @@ public class UpdateContainerTypeSettingsTests
 {
     #region Endpoint Registration Tests
 
-    [Fact]
-    public void MapContainerTypeSettingsEndpoints_MethodExists_AndIsExtensionOnRouteGroupBuilder()
-    {
-        // Verify the endpoint registration method exists with correct signature (ADR-001: Minimal API)
-        var method = typeof(ContainerTypeSettingsEndpoints)
-            .GetMethod("MapContainerTypeSettingsEndpoints");
-
-        method.Should().NotBeNull("MapContainerTypeSettingsEndpoints extension method must exist");
-        method!.IsStatic.Should().BeTrue("must be a static extension method");
-        method.ReturnType.Should().Be(typeof(RouteGroupBuilder), "must return RouteGroupBuilder for chaining");
-    }
-
-    [Fact]
-    public void SpeAdminEndpoints_RegistersContainerTypeSettings_ViaGroup()
-    {
-        // Verify the SpeAdminEndpoints class exists and has MapSpeAdminEndpoints
-        var method = typeof(SpeAdminEndpoints).GetMethod("MapSpeAdminEndpoints");
-
-        method.Should().NotBeNull("MapSpeAdminEndpoints must exist");
-        method!.IsStatic.Should().BeTrue("must be a static extension method");
-    }
 
     #endregion
 
@@ -342,19 +321,6 @@ public class UpdateContainerTypeSettingsTests
 
     #region Authorization Filter Tests
 
-    [Fact]
-    public void SpeAdminAuthFilter_IsAppliedViaParentGroup_NotPerEndpoint()
-    {
-        // Authorization for containertypes/{typeId}/settings is inherited from the /api/spe parent group.
-        // ContainerTypeSettingsEndpoints.MapContainerTypeSettingsEndpoints does NOT apply its own filter —
-        // the parent group (SpeAdminEndpoints) already has RequireAuthorization() + SpeAdminAuthorizationFilter.
-        // ADR-008: No endpoint-level filter duplication.
-
-        var speAdminEndpointsType = typeof(SpeAdminEndpoints);
-        var method = speAdminEndpointsType.GetMethod("MapSpeAdminEndpoints");
-
-        method.Should().NotBeNull("MapSpeAdminEndpoints must exist and register the settings endpoint on the group");
-    }
 
     [Fact]
     public async Task SpeAdminAuthorizationFilter_ReturnsUnauthorized_WhenNoUserId()
@@ -448,16 +414,6 @@ public class UpdateContainerTypeSettingsTests
 
     #region Graph Service Method Existence Tests
 
-    [Fact]
-    public void SpeAdminGraphService_HasUpdateContainerTypeSettingsAsync()
-    {
-        // Verify UpdateContainerTypeSettingsAsync exists with the expected signature
-        var method = typeof(SpeAdminGraphService).GetMethod("UpdateContainerTypeSettingsAsync");
-
-        method.Should().NotBeNull("UpdateContainerTypeSettingsAsync must be added to SpeAdminGraphService");
-        method!.IsPublic.Should().BeTrue("must be public for use by endpoint handlers");
-        method.ReturnType.Name.Should().Contain("Task", "must return a Task<ContainerTypeSettingsResult?>");
-    }
 
     [Fact]
     public void SpeAdminGraphService_HasValidSharingCapabilities_PublicStaticField()

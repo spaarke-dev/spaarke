@@ -26,6 +26,39 @@ export interface IWebApi {
     options?: string,
     maxPageSize?: number
   ) => Promise<{ entities: Array<Record<string, unknown>>; nextLink?: string }>;
+  /**
+   * R4 task 102 (E-1, 2026-06-18) — the widget now renders the full Kanban
+   * with drag-drop + pin persistence (`SmartTodoKanban`). Adding
+   * `updateRecord` here lets the widget wrap `webApi` into a minimal
+   * `IKanbanDataverseService` adapter for the hoisted hook's persistence
+   * path. Optional so hosts that only need read-only widget rendering
+   * (pre-102 surfaces) can satisfy the contract with just
+   * `retrieveMultipleRecords`.
+   */
+  updateRecord?: (
+    entityLogicalName: string,
+    id: string,
+    data: Record<string, unknown>
+  ) => Promise<{ id: string; entityType: string }>;
+  /**
+   * R4 task 103 (E-2, 2026-06-18) — quick-add (UAT 7). The widget's inline
+   * QuickAdd input (toolbar left slot) calls `createRecord('sprk_todo', { sprk_name })`
+   * with just the title. Dataverse defaults populate statecode/statuscode,
+   * and the widget refetches on success.
+   *
+   * On failure (e.g., Dataverse rejects due to other required fields), the
+   * widget surfaces a graceful error with a "Open full wizard" link that
+   * dispatches the host's full `<CreateTodoWizard>` via `onAddTodo`.
+   *
+   * Optional so hosts that wire the widget without quick-add support
+   * (read-only surfaces, future Direct widget mounts in SpaarkeAi that
+   * intentionally omit the field) can satisfy the contract without it.
+   * When absent, the quick-add input row is suppressed.
+   */
+  createRecord?: (
+    entityLogicalName: string,
+    data: Record<string, unknown>
+  ) => Promise<{ id: string; entityType: string }>;
 }
 
 /**

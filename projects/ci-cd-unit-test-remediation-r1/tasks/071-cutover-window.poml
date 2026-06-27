@@ -1,0 +1,74 @@
+<task id="CICD-071" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Cutover (~4h window): restore Release matrix, flip branch protection to CI/Router only, enable merge queue (batch=1)</title>
+    <status>not-started</status>
+    <estimated-effort>4 hours</estimated-effort>
+    <phase>3 - Cutover</phase>
+    <stream>A+B+C - Cutover</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>070</dependencies>
+    <blocks>075</blocks>
+    <tags>cutover, branch-protection, merge-queue, release-matrix, highest-stakes</tags>
+  </metadata>
+
+  <prompt>
+    THE CUTOVER. Execute the ~4-hour synchronized window per spec.md §177-184 + design.md §177-191. Three settings flips: (1) restore `Release` to the `Build & Test` matrix in `sdap-ci.yml` (or its successor); (2) flip branch protection on master to require ONLY `CI / Router`; (3) enable GitHub merge queue (batch=1, no speculative, queue timeout 30 min). Rollback playbook ready per spec §152 — pre-cutover snapshot from task 070 is the source.
+  </prompt>
+
+  <role>CI/CD engineer executing the synchronized cutover.</role>
+
+  <goal>Branch protection requires only `CI / Router`; merge queue enabled; Release matrix restored; sdap-ci.yml still running in parallel (NOT yet deleted — that's task 077, gated by 14-day stability).</goal>
+
+  <inputs>
+    <file purpose="pre-cutover-snapshot">projects/ci-cd-unit-test-remediation-r1/notes/branch-protection-pre-cutover.json (from 070)</file>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md (§152 rollback, §177-184 cutover)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-C01">Merge queue: batch=1, no speculative, queue timeout 30 min.</constraint>
+    <constraint source="spec MUST">Keep sdap-ci.yml running in parallel through cutover+14d. DO NOT delete in this task.</constraint>
+    <constraint source="spec rollback">Rollback authority is solo dev's judgment. Triggers: Tier 1 flake rate >2% sustained 24h; master green rate <90% over 24h; >3 false-positive blocks within 24h; merge queue stalls >2h with >4 PRs.</constraint>
+    <constraint source="project autonomous">FULL rigor; highest-stakes task in project. Step 9.5 mandatory.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Branch protection + merge queue flips</topic>
+    <files>
+      <file>projects/ci-cd-unit-test-remediation-r1/notes/branch-protection-pre-cutover.json (rollback source)</file>
+      <file>.github/workflows/sdap-ci.yml (Release matrix restoration target)</file>
+      <file>.github/workflows/ci-router.yml (becomes the sole required check)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm 070 snapshot exists + is well-formed + meta document references the restore command</step>
+    <step order="2">Restore Release matrix in `sdap-ci.yml` (uncomment lines 86-91 area; verify build runs both Debug and Release). Commit + push.</step>
+    <step order="3">Wait for one full sdap-ci.yml run to confirm Release matrix builds green</step>
+    <step order="4">Flip branch protection: `gh api -X PUT repos/spaarke-dev/spaarke/branches/master/protection -F required_status_checks[contexts][]='CI / Router'` (replace full required check list — only `CI / Router` required; sdap-ci.yml jobs become non-required but still run in parallel)</step>
+    <step order="5">Enable merge queue: GitHub UI → Settings → Branches → master → Require merge queue (batch=1, no speculative, timeout 30min). OR via `gh api` if available.</step>
+    <step order="6">Verify state: `gh api repos/spaarke-dev/spaarke/branches/master/protection` shows only `CI / Router` required; merge queue enabled</step>
+    <step order="7">Test merge: create a trivial test PR; verify it goes through router → tier1 (blocking) → tier2 (advisory PR comment) → merge queue → merged</step>
+    <step order="8">Monitor for the next 4 hours for any of the rollback triggers; if triggered, execute rollback (see spec §152) — restore branch-protection from 070 snapshot, disable merge queue, re-enable sdap-ci as required, document in `notes/cutover-attempts.md`</step>
+    <step order="9">If stable through 4-hour window, commit cutover-success note to `notes/cutover-success.md`</step>
+    <step order="10">Step 9.5: code-review + adr-check on sdap-ci.yml Release restoration (other changes are settings, not code)</step>
+  </steps>
+
+  <outputs>
+    <output type="workflow">.github/workflows/sdap-ci.yml (Release matrix restored)</output>
+    <output type="setting">Branch protection updated (gh CLI / UI)</output>
+    <output type="setting">Merge queue enabled (UI)</output>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/cutover-success.md OR cutover-attempts.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Release matrix restored in sdap-ci.yml; both Debug+Release build green</criterion>
+    <criterion testable="true">Branch protection lists only `CI / Router` as required</criterion>
+    <criterion testable="true">Merge queue enabled (batch=1, no speculative, 30min timeout)</criterion>
+    <criterion testable="true">A test PR successfully goes through router → tier1 → tier2 → merge queue → merge</criterion>
+    <criterion testable="true">No rollback triggered within 4-hour window (or rollback executed cleanly if triggered)</criterion>
+    <criterion testable="true">sdap-ci.yml still running in parallel (NOT yet deleted)</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+  </acceptance-criteria>
+</task>

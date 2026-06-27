@@ -80,10 +80,21 @@ public static class WorkspaceModule
         // Concrete registration per ADR-010 (no interface seam needed).
         services.AddScoped<WorkspaceAiService>();
 
-        // BriefingService: Scoped because it depends on PortfolioService (also scoped).
-        // The IOpenAiClient dependency is resolved as optional (null-safe) — when not registered
+        // BriefingService: Scoped because it depends on PortfolioService (also scoped),
+        // IDataverseService (Scoped — used for the AAD-oid → systemuserid cross-reference per
+        // ADR-028 and for the membership-resolved matter detail query), and
+        // IMembershipResolverService (Singleton — registered by MembershipModule; safe to
+        // inject into Scoped consumers, no captive-dependency issue). The IBriefingAi
+        // facade is resolved as optional (null-safe) — when not registered
         // (DocumentIntelligence:Enabled = false), the service falls back to template narrative.
         // Concrete registration per ADR-010 (no interface seam needed).
+        //
+        // Top-priority-matter wiring (Wave 28 / GitHub #229 closeout, 2026-06-22):
+        //   The prior STUB in BriefingService.GetTopPriorityMatterAsync now routes through
+        //   IMembershipResolverService per ADR-034 (canonical user-record membership). The
+        //   resolver and IDataverseService are pre-existing BFF registrations — no new DI
+        //   binding is required here. See docs/architecture/membership-resolution-pattern.md
+        //   "Wiring + Consumer Inventory (AS-BUILT)" for the updated consumer list.
         services.AddScoped<BriefingService>();
 
         // MatterPreFillService: Scoped to match HttpContext lifetime used for OBO file uploads.

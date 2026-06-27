@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="150" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Project Wrap-up (mandatory final task)</title>
+    <phase>7: WP4 Retirement + Project Closeout</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>146</dependencies>
+    <blocks>none</blocks>
+    <tags>wrap-up, documentation, lessons-learned, quality-gate</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Mandatory closeout includes code-review + adr-check + repo-cleanup quality gates per task-create Step 3.7</rigor-reason>
+    <parallel-group>7-G</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task — depends on all preceding phases; sequential closeout</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Execute mandatory project wrap-up per `task-create` Step 3.7: final quality gates (code-review + adr-check + repo-cleanup), README + plan + CLAUDE.md status flip to Complete, lessons-learned authoring, R7 backlog seeding, project archival.
+  </prompt>
+
+  <role>SPAARKE platform developer + project coordinator. Synthesizes the entire project's work into closeout artifacts.</role>
+
+  <goal>
+    Project status flipped to Complete across README + plan + CLAUDE.md. All graduation criteria checked off. lessons-learned.md authored. Repository hygiene audit clean (no orphan files; ephemeral notes archived). R7 backlog seeded with deferred items from CLAUDE.md "Implementation Notes" + design.md §1.6 technical debt deferring list. Branch ready for merge to master.
+  </goal>
+
+  <context>
+    <background>
+      Final task per `task-create` Step 3.7. Closes out the chat-routing-redesign project. Synthesizes work across 8 phases, 82 tasks, multiple subsystems (BFF, frontend, Dataverse, Cosmos, AI Search, Power Apps).
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/README.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/plan.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">All graduation criteria from README must be verifiable (16 items per README).</constraint>
+    <constraint source="project">Lessons-learned MUST cover: what surprised us, what we'd do differently, what worked exceptionally well, and concrete R7 backlog items.</constraint>
+    <constraint source="ADR-029">Final BFF publish-size summary report — expected NET REDUCTION from WP4 deletion.</constraint>
+    <constraint source="project">repo-cleanup MUST be approved before completion — ephemeral notes/debug, notes/spikes, notes/drafts archived or removed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/README.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/plan.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/code-review` across project surface — identify any remaining issues. Fix critical issues before proceeding.</step>
+    <step order="2">Run `/adr-check` across project code — validate architecture compliance. Fix critical violations.</step>
+    <step order="3">Run `/repo-cleanup projects/spaarke-ai-platform-chat-routing-redesign-r1` — audit + clean ephemeral files. Approve removals (notes/debug, notes/spikes, notes/drafts). Archive handoffs to notes/.archive/.</step>
+    <step order="4">Update README.md: Status → "Complete"; Last Updated → today; Phase → "Complete"; Progress → "100%"; Completed Date populated; ALL 16 graduation criteria checkboxes checked; Changelog entry appended.</step>
+    <step order="5">Update plan.md: Status → "Complete"; all phase deliverable checkboxes checked; per-phase technical acceptance verified.</step>
+    <step order="6">Update CLAUDE.md: Project Status section → "Complete"; final Decisions Made entries appended; Implementation Notes section populated with cross-cutting learnings.</step>
+    <step order="7">Update TASK-INDEX.md: confirm all 82 tasks marked ✅ (no 🔄 or 🚧 remain).</step>
+    <step order="8">Update current-task.md: Task → none; Next Action → "Project complete. Run /merge-to-master".</step>
+    <step order="9">Author `notes/lessons-learned.md` with sections: Executive Summary, What Surprised Us, What We'd Do Differently, What Worked Exceptionally Well, Cross-Cutting Patterns, R7 Backlog Items.</step>
+    <step order="10">Author or extend R7 backlog with deferred items: auto-deploy gap, Pillar 9 closed-union, tool-name normalization, voyage-law-2 ADR amendment (if UAT exposed precision issue), promotion approval UX detail design, sprk_userpreferences field expansion (Q13), per-turn cache invalidation benchmark (Q14).</step>
+    <step order="11">Report final BFF publish-size summary: Phase 0 baseline → Phase 7 final. Confirm NET REDUCTION from WP4 deletion.</step>
+    <step order="12">Verify Insights Engine regression suite passed (task 145 result).</step>
+    <step order="13">Confirm branch ready for merge: `git status` clean; `git log` shows clean commit history; final commit message authored.</step>
+    <step order="14">Update TASK-INDEX.md: task 150 → ✅. Project Complete.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">code-review, adr-check, repo-cleanup</tool>
+    <tool name="Edit">Update README, plan, CLAUDE, current-task, TASK-INDEX</tool>
+    <tool name="Write">Author lessons-learned.md and R7 backlog</tool>
+    <tool name="Bash">Final publish-size measurement; git status verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-chat-routing-redesign-r1/README.md (Status: Complete; all criteria checked)</output>
+    <output type="docs">projects/spaarke-ai-platform-chat-routing-redesign-r1/plan.md (Status: Complete; all deliverables checked)</output>
+    <output type="docs">projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md (Status: Complete)</output>
+    <output type="docs">projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/lessons-learned.md (authored)</output>
+    <output type="docs">projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/r7-backlog.md (authored or extended)</output>
+    <output type="docs">projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/final-publish-size-summary.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">code-review reports no critical issues.</criterion>
+    <criterion testable="true">adr-check reports no critical violations.</criterion>
+    <criterion testable="true">repo-cleanup reports clean state.</criterion>
+    <criterion testable="true">README.md Status = "Complete"; all 16 graduation criteria checked.</criterion>
+    <criterion testable="true">plan.md Status = "Complete".</criterion>
+    <criterion testable="true">All 82 tasks in TASK-INDEX.md = ✅.</criterion>
+    <criterion testable="true">lessons-learned.md authored with 6 required sections.</criterion>
+    <criterion testable="true">R7 backlog seeded with deferred items.</criterion>
+    <criterion testable="true">BFF publish-size final report shows NET REDUCTION vs baseline.</criterion>
+    <criterion testable="true">Insights Engine regression suite passed (task 145).</criterion>
+    <criterion testable="true">Branch `work/spaarke-ai-platform-chat-routing-redesign-r1` ready for merge to master.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the MANDATORY final task. Do not skip. The lessons-learned and R7 backlog are valuable downstream artifacts — invest time. Run /merge-to-master only AFTER this task completes successfully and owner reviews lessons-learned.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol. Multiple sub-skills invoked: code-review, adr-check, repo-cleanup.</protocol>
+  </execution>
+</task>

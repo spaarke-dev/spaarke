@@ -1,0 +1,57 @@
+<task id="R3-102" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Refresh `docs/architecture/playbook-architecture.md` Known Pitfalls section</title>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+      Refreshed `docs/architecture/playbook-architecture.md` Known Pitfalls section per FR-3G4 + AC-Docs:
+      - Restructured to canonical G1-G11 catalog (from design.md Part 3 §G1-G11) replacing the previous unnumbered 6-item list.
+      - Added status legend (Fixed (R3) / Documented (R3) / Deferred to R4).
+      - G1 (Handlebars `??`): Fixed — cited tasks 003, 004, 050, 051, 052, 053 (default helper + 3 playbook migrations + integration tests).
+      - G2 (OutputVariable rename): Fixed — cited tasks 091 + 094 (rename guard via VariableReferencePanel.tsx + canvasValidation.ts).
+      - G3 (Condition branch wiring): Fixed — cited tasks 092 + 094 (branch metadata auto-generation).
+      - G4 (CreateNotification idempotency-on-unread): Explicit doc paragraph added per FR-3G4. Documented the unread-key dedupe in CreateNotificationNodeExecutor + the independent ScheduledJobHost.HasRunForScheduledTimeAsync tick-coalescing mechanism (task 014).
+      - G5 (sprk_matterteammember): Fixed (Part 1) — cited tasks 030-035 + 037 (MembershipResolverService + ADR-034).
+      - G6 (canvas-server drift): Fixed — cited task 065 (CI drift test).
+      - G7 (Singleton-Scoped DI pattern): Fixed (documentation) — cited task 066 (node-executor authoring pattern doc).
+      - G8 (sprk_searchindexed misleading): Fixed — cited tasks 060 + 061 + 062 (consumer inventory + schema migration + dual-write executor).
+      - G9 (unnecessary edges): Fixed — cited tasks 093 + 094 (edge perf hint advisory).
+      - G10 (unrendered template leakage): Fixed — cited task 005 (runtime unrendered-template detection event).
+      - G11 (scheduler rollout-mode): Deferred to R4 — `spaarke-playbook-rollout-mode-r4` + ADR-035 (reserved); also added R4 Follow-up table at section end.
+      - Added Changelog entry 2.1 (2026-06-22) summarizing the refresh.
+      No source code changes; docs-only. No .claude/ writes. AC-Docs satisfied.
+    </completion-notes>
+    <phase>P10</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1-2h</estimated-effort>
+    <tags>docs,architecture,playbook</tags>
+    <relevant-files>
+      <file>docs/architecture/playbook-architecture.md</file>
+    </relevant-files>
+    <dependencies>005, 065, 066</dependencies>
+  </metadata>
+  <prompt>Update Known Pitfalls section: mark G1 + G10 as fixed (Workstream H1); G6 + G7 + G8 as fixed (H3); G2 + G3 + G9 as fixed (H2); add G4 explicit doc; mark G5 as fixed (Part 1); mark G11/H4 as deferred to R4. Per spec FR-3G4 + AC-Docs.</prompt>
+  <goal>Known Pitfalls section reflects R3 outcomes. G1-G11 status accurate.</goal>
+  <constraints>
+    <constraint source="spec FR-3G4">G4 doc-only update</constraint>
+    <constraint source="spec AC-Docs">Refresh required</constraint>
+  </constraints>
+  <knowledge>
+    <topic>architecture-doc-update</topic>
+    <files>
+      <file>docs/architecture/playbook-architecture.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + spec G1-G11 status</step>
+    <step order="1">Update Known Pitfalls table with R3 outcomes</step>
+    <step order="2">Add G4 explicit doc (idempotency-on-unread)</step>
+    <step order="3">Cross-reference R4 follow-up for G11/H4</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">AC-Docs — Known Pitfalls section refreshed</criterion>
+  </acceptance-criteria>
+</task>

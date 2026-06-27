@@ -52,9 +52,9 @@ OBO direct query pattern: exchange user's bearer token for Dataverse-scoped toke
 
 | Data | Cache Key Pattern | TTL |
 |------|-------------------|-----|
-| User Roles | `sdap:auth:roles:{userOid}` | 2 min |
-| Team Memberships | `sdap:auth:teams:{userOid}` | 2 min |
-| Resource Access | `sdap:auth:access:{userOid}:{resourceId}` | 60 sec |
+| User Roles | `spaarke:tenant:{tenantId}:user-roles:{userOid}:v1` (via `ITenantCache`) | 2 min |
+| Team Memberships | `spaarke:tenant:{tenantId}:user-teams:{userOid}:v1` (via `ITenantCache`) | 2 min |
+| Resource Access | `spaarke:tenant:{tenantId}:uac-access:{userOid}:{resourceId}:v1` (via `ITenantCache`) | 60 sec |
 
 Fail-open on Redis errors: falls through to Dataverse. Cache stores permission **data**, not decisions (allows rule changes without cache invalidation).
 

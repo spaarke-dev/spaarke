@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Deploy 7 schemas to spaarke-search-dev (FR-16)</title>
+    <phase>5: Deploy + Validate</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>020, 021, 036, 041, 042, 046</dependencies>
+    <blocks>051, 052, 053, 054</blocks>
+    <tags>azure-search, deploy, infrastructure</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Live Azure deploy; tags include deploy + azure</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy 7 schemas to spaarke-search-dev via `Deploy-AllIndexes.ps1 -Environment dev`. Verify all 7 created with canonical names + post-deploy invariants pass.
+  </prompt>
+
+  <role>
+    Spaarke platform Azure deployment operator.
+  </role>
+
+  <goal>
+    `az search indexes list -g spe-infrastructure-westus2 --service-name spaarke-search-dev` shows 7 canonical-named indexes. Post-deploy invariants pass for each.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>scripts/ai-search/Deploy-AllIndexes.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-16">Deploy-AllIndexes.ps1 -EnvironmentName dev deploys all 7 successfully</constraint>
+    <constraint source="NFR-02">Post-deploy verifier fail-fast on any policy violation</constraint>
+    <constraint source="NFR-12">Total runtime &lt; 30 min target</constraint>
+    <constraint source="NFR-05">Do NOT target prod/demo</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>scripts/ai-search/Deploy-AllIndexes.ps1</file>
+      <file>docs/guides/ai-search-azure-setup.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify Phase 4 task 042 (test fixtures) + 045 (publish size) + 046 (grep) all passed</step>
+    <step order="2">Run `Deploy-AllIndexes.ps1 -Environment dev -DryRun` final preview</step>
+    <step order="3">Run `Deploy-AllIndexes.ps1 -Environment dev` — actual deploy</step>
+    <step order="4">Run post-deploy invariant verifier — must pass for all 7</step>
+    <step order="5">Run `az search indexes list -g spe-infrastructure-westus2 --service-name spaarke-search-dev` — verify 7 canonical names</step>
+    <step order="6">Document evidence in notes/phase-5-deploy-evidence.md</step>
+    <step order="7">Update TASK-INDEX.md: task 050 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">Run Deploy-AllIndexes.ps1</tool>
+    <tool name="az">Verify deployed indexes</tool>
+  </tools>
+
+  <outputs>
+    <output type="azure">7 indexes deployed to spaarke-search-dev</output>
+    <output type="evidence">projects/spaarke-ai-azure-setup-dev-r1/notes/phase-5-deploy-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Deploy-AllIndexes.ps1 -Environment dev exits 0</criterion>
+    <criterion testable="true">Post-deploy verifier passes for all 7</criterion>
+    <criterion testable="true">az search indexes list shows 7 canonical names</criterion>
+    <criterion testable="true">Total runtime &lt; 30 min</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Phase 1 exit gate — verify zero hardcoded GUIDs/names in Services/Ai/ via grep</title>
+    <phase>1: §1.7 Stable Codes Migration</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>025,026</dependencies>
+    <blocks>030,045</blocks>
+    <tags>verification</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Read-only verification gate; tags = 'verification'; no code change; MINIMAL per Step 0.5</rigor-reason>
+    <parallel-group>1-J</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Phase 1 exit gate: verify zero hardcoded playbook GUIDs and zero literal playbook-name resolution calls remain in `src/server/api/Sprk.Bff.Api/Services/Ai/` and the two frontend Pattern B files. Produce an exit-gate evidence note for Phase 2 entry. If any residual GUID or name lookup is found, BLOCK Phase 2 and file a follow-up task.
+  </prompt>
+
+  <role>SPAARKE platform verification engineer. Expert in grep-based code audits + exit-gate evidence documentation.</role>
+
+  <goal>
+    Exit-gate evidence note `notes/handoffs/027-phase-1-exit-gate-evidence.md` containing: (a) grep results for known playbook GUID prefixes (returns zero in `Services/Ai/`); (b) grep results for literal playbook-name strings in target consumer files (returns zero); (c) test suite from task 025 passing; (d) DEV smoke test from task 026 green; (e) explicit GO / NO-GO for Phase 2 entry.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-02 acceptance: code search for `Guid.Parse("44285d15` / `2d660cad` / `fc343e9c` / `4a72f99c` / `18cf3cc8` returns zero hits in `Services/Ai/`. This task formalizes the exit-gate check as a single verification run.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ (target of grep)</file>
+      <file>src/client/code-pages/AnalysisWorkspace/src/hooks/useAiSummary.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-02 acceptance: `grep "Guid.Parse(\"44285d15\"` returns zero matches in `Services/Ai/` (similarly for the other 4 known GUID prefixes).</constraint>
+    <constraint source="spec">FR-03 acceptance: `/by-name/` call sites removed from target frontend files.</constraint>
+    <constraint source="project">DO NOT modify any code in this task. Pure verification.</constraint>
+    <constraint source="project">If any residual GUID/name lookup is found, STOP — do not mark gate green. File a follow-up task and escalate.</constraint>
+    <constraint source="project">Verification must also include test suite (025) green status + DEV smoke (026) green status as supplementary evidence.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep for known playbook GUID prefixes in `src/server/api/Sprk.Bff.Api/Services/Ai/`: `44285d15`, `2d660cad`, `fc343e9c`, `4a72f99c`, `18cf3cc8`. Capture results. (Spec FR-02 lists exactly these 5.)</step>
+    <step order="2">Grep for literal playbook-name strings in target frontend files: `useAiSummary.ts`, `DocumentEmailWizard.tsx`. Patterns: `Summarize New File`, `Document Profile`, `Create New Matter Pre-Fill`, `Create New Project Pre-Fill`, `summarize-document-for-chat@v1`, `summarize-document-for-workspace@v1`.</step>
+    <step order="3">Grep for `/by-name/` URL pattern in the two target frontend files. Expect zero.</step>
+    <step order="4">Verify task 025 test suite is green: `dotnet test tests/integration/Sprk.Bff.Api.IntegrationTests/ --filter "FullyQualifiedName~Phase1StableCodeMigration"`. Expect exit 0.</step>
+    <step order="5">Read task 026 handoff note `notes/handoffs/026-phase-1-dev-deploy-evidence.md`. Confirm smoke tests green and cumulative publish-size delta within NFR-01.</step>
+    <step order="6">Write exit-gate evidence note `notes/handoffs/027-phase-1-exit-gate-evidence.md` summarizing all checks with explicit GO/NO-GO marker.</step>
+    <step order="7">If any check fails: mark NO-GO, file a follow-up task in TASK-INDEX (e.g., `028-fix-residual-guid-in-X.poml`), do NOT mark task 027 ✅.</step>
+    <step order="8">If all green: update TASK-INDEX.md: task 027 → ✅. current-task.md → Phase 2 ready (task 030 next).</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Search for residual GUIDs, names, /by-name/ URL pattern</tool>
+    <tool name="Bash">dotnet test (verify suite green) + read evidence notes</tool>
+    <tool name="Read">Task 025 + 026 handoff notes</tool>
+    <tool name="Write">Exit-gate evidence note</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">notes/handoffs/027-phase-1-exit-gate-evidence.md — comprehensive Phase 1 exit evidence with GO/NO-GO</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep for each of the 5 known GUID prefixes (`44285d15`, `2d660cad`, `fc343e9c`, `4a72f99c`, `18cf3cc8`) returns zero matches in `src/server/api/Sprk.Bff.Api/Services/Ai/`.</criterion>
+    <criterion testable="true">Grep for literal playbook-name strings returns zero matches in `useAiSummary.ts` + `DocumentEmailWizard.tsx`.</criterion>
+    <criterion testable="true">Grep for `/by-name/` URL pattern returns zero matches in the two target frontend files.</criterion>
+    <criterion testable="true">Task 025 integration test suite reports exit 0.</criterion>
+    <criterion testable="true">Task 026 DEV deploy evidence note reports green smoke tests + within-threshold publish size.</criterion>
+    <criterion testable="true">Exit-gate evidence note exists with explicit GO/NO-GO marker.</criterion>
+    <criterion testable="true">If GO: TASK-INDEX task 027 → ✅; Phase 2 may begin.</criterion>
+    <criterion testable="true">If NO-GO: follow-up task filed; task 027 NOT marked ✅; escalation documented.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Pure verification — no code edits. The exit-gate evidence note will be referenced by Phase 2 + Phase 3 task 030 + 045 (both depend on 027). The grep patterns are EXACT — spec FR-02 names the 5 GUID prefixes explicitly. If the audit surfaces a residual GUID not in the FR-02 list, document it and escalate — it indicates incomplete spec coverage.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor protocol — pure verification + evidence note; no quality gates at Step 9.5.</protocol>
+  </execution>
+</task>

@@ -23,12 +23,14 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Sessions;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
@@ -241,16 +243,20 @@ public class ChatDocumentEndpointsTests : IClassFixture<ChatDocumentEndpointsTes
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
 
         // R3 legacy paths still populated (no consumer left behind).
-        var docUploadKeys = _fx.CacheCalls.Where(k => k.StartsWith("doc-upload:")).ToList();
-        var docBinaryKeys = _fx.CacheCalls.Where(k => k.StartsWith("doc-binary:")).ToList();
-        var docMetaKeys = _fx.CacheCalls.Where(k => k.StartsWith("doc-upload-meta:")).ToList();
+        // Post-FR-05 (redis-cache-remediation-r1 Wave 6 task 013): ITenantCache resource names
+        // replaced the raw legacy key prefixes. Final on-wire keys remain
+        // `spaarke:tenant:{tenantId}:{resource}:{id}:v1`, which is the same Redis storage —
+        // only the wrapper has migrated.
+        var docTextSets = _fx.CacheCalls.Where(k => k == "doc-upload-text").ToList();
+        var docBinarySets = _fx.CacheCalls.Where(k => k == "doc-upload-binary").ToList();
+        var docMetaSets = _fx.CacheCalls.Where(k => k == "doc-upload-meta").ToList();
 
-        docUploadKeys.Should().NotBeEmpty(
-            "back-compat: extracted text Redis write (doc-upload:) must still happen");
-        docBinaryKeys.Should().NotBeEmpty(
-            "back-compat: original binary Redis write (doc-binary:) must still happen");
-        docMetaKeys.Should().NotBeEmpty(
-            "back-compat: metadata Redis write (doc-upload-meta:) must still happen");
+        docTextSets.Should().NotBeEmpty(
+            "back-compat: extracted text cache write (resource=doc-upload-text) must still happen");
+        docBinarySets.Should().NotBeEmpty(
+            "back-compat: original binary cache write (resource=doc-upload-binary) must still happen");
+        docMetaSets.Should().NotBeEmpty(
+            "back-compat: metadata cache write (resource=doc-upload-meta) must still happen");
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -300,7 +306,7 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
     public List<string> CacheCalls { get; } = new();
 
     private WebApplication? _app;
-    private RecordingDistributedCache _recordingCache = null!;
+    private RecordingTenantCache _recordingCache = null!;
 
     public async Task InitializeAsync()
     {
@@ -337,8 +343,11 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         builder.Services.AddProblemDetails();
 
         // Test-double dependencies for the endpoint handler.
-        _recordingCache = new RecordingDistributedCache(CacheCalls);
-        builder.Services.AddSingleton<IDistributedCache>(_recordingCache);
+        // Wave 6 task 013 migrated ChatDocumentEndpoints from IDistributedCache to ITenantCache;
+        // the fixture now records resource names via RecordingTenantCache for back-compat
+        // assertions (see Upload_Success_StillWritesLegacyRedisKeys_ForBackCompat).
+        _recordingCache = new RecordingTenantCache(CacheCalls);
+        builder.Services.AddSingleton<ITenantCache>(_recordingCache);
         builder.Services.AddSingleton<ChatSessionManager>(Sessions);
         builder.Services.AddSingleton<ITextExtractor>(TextExtractorMock.Object);
         builder.Services.AddSingleton(AuthMock.Object);
@@ -372,6 +381,13 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         // parameter binding requires the type to resolve at startup; not exercised by upload tests.
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(_ =>
             Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>());
+
+        // chat-routing-redesign-r1 task 074 — IContextEventEmitter is now a required
+        // parameter of UploadDocumentAsync (emits context.upload_started / _indexed / _completed).
+        // Register a Loose Moq stub for the fixture. Per-emission assertions live in
+        // UploadPipelineTelemetryTests.cs.
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter>(_ =>
+            Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter>());
 
         builder.WebHost.UseTestServer();
         _app = builder.Build();
@@ -483,7 +499,7 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
 public sealed class TestableChatSessionManagerForUpload : ChatSessionManager
 {
     public TestableChatSessionManagerForUpload() : base(
-        cache: Mock.Of<IDistributedCache>(),
+        cache: Mock.Of<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(),
         dataverseRepository: Mock.Of<IChatDataverseRepository>(),
         logger: Mock.Of<ILogger<ChatSessionManager>>(),
         persistence: null,
@@ -506,36 +522,71 @@ public sealed class TestableChatSessionManagerForUpload : ChatSessionManager
     }
 }
 
-/// <summary>Records every cache key SET so back-compat tests can assert the legacy Redis writes still happen.</summary>
-public sealed class RecordingDistributedCache : IDistributedCache
+/// <summary>
+/// Records every cache resource SET so back-compat tests can assert the legacy Redis writes
+/// still happen. Wave 6 task 013 migrated <see cref="ChatDocumentEndpoints"/> from
+/// <see cref="IDistributedCache"/> to <see cref="ITenantCache"/>; this decorator preserves the
+/// existing fixture API by recording the <c>resource</c> argument of each Set call (the
+/// post-migration analogue of the legacy raw key prefix).
+/// </summary>
+public sealed class RecordingTenantCache : ITenantCache
 {
     private readonly List<string> _calls;
-    private readonly Dictionary<string, byte[]> _store = new();
+    private readonly InMemoryTenantCache _inner = new();
 
-    public RecordingDistributedCache(List<string> calls) => _calls = calls;
+    public RecordingTenantCache(List<string> calls) => _calls = calls;
 
-    public byte[]? Get(string key) => _store.TryGetValue(key, out var v) ? v : null;
-    public Task<byte[]?> GetAsync(string key, CancellationToken token = default)
-        => Task.FromResult(Get(key));
+    public Task<T?> GetAsync<T>(
+        string tenantId, string resource, string id, int version,
+        string cacheInstance = "default", CancellationToken ct = default)
+        => _inner.GetAsync<T>(tenantId, resource, id, version, cacheInstance, ct);
 
-    public void Set(string key, byte[] value, DistributedCacheEntryOptions options)
+    public Task SetAsync<T>(
+        string tenantId, string resource, string id, int version,
+        T value, TimeSpan? ttl = null,
+        string cacheInstance = "default", CancellationToken ct = default)
     {
-        _calls.Add(key);
-        _store[key] = value;
+        _calls.Add(resource);
+        return _inner.SetAsync(tenantId, resource, id, version, value, ttl, cacheInstance, ct);
     }
-    public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default)
+
+    public Task RemoveAsync(
+        string tenantId, string resource, string id, int version,
+        string cacheInstance = "default", CancellationToken ct = default)
+        => _inner.RemoveAsync(tenantId, resource, id, version, cacheInstance, ct);
+
+    public Task<T> GetOrCreateAsync<T>(
+        string tenantId, string resource, string id, int version,
+        Func<CancellationToken, Task<T>> factory, TimeSpan? ttl = null,
+        string cacheInstance = "default", CancellationToken ct = default)
+        => _inner.GetOrCreateAsync(tenantId, resource, id, version, factory, ttl, cacheInstance, ct);
+
+    public Task<string?> GetStringAsync(
+        string tenantId, string resource, string id, int version,
+        string cacheInstance = "default", CancellationToken ct = default)
+        => _inner.GetStringAsync(tenantId, resource, id, version, cacheInstance, ct);
+
+    public Task SetStringAsync(
+        string tenantId, string resource, string id, int version,
+        string value, TimeSpan? ttl = null, TimeSpan? slidingExpiration = null,
+        string cacheInstance = "default", CancellationToken ct = default)
     {
-        Set(key, value, options);
-        return Task.CompletedTask;
+        _calls.Add(resource);
+        return _inner.SetStringAsync(tenantId, resource, id, version, value, ttl, slidingExpiration, cacheInstance, ct);
     }
 
-    public void Refresh(string key) { }
-    public Task RefreshAsync(string key, CancellationToken token = default) => Task.CompletedTask;
-    public void Remove(string key) => _store.Remove(key);
-    public Task RemoveAsync(string key, CancellationToken token = default)
+    public Task RefreshAsync(
+        string tenantId, string resource, string id, int version,
+        string cacheInstance = "default", CancellationToken ct = default)
+        => _inner.RefreshAsync(tenantId, resource, id, version, cacheInstance, ct);
+
+    public Task SetSlidingAsync<T>(
+        string tenantId, string resource, string id, int version,
+        T value, TimeSpan slidingExpiration,
+        string cacheInstance = "default", CancellationToken ct = default)
     {
-        Remove(key);
-        return Task.CompletedTask;
+        _calls.Add(resource);
+        return _inner.SetSlidingAsync(tenantId, resource, id, version, value, slidingExpiration, cacheInstance, ct);
     }
 }
 

@@ -1,6 +1,6 @@
 # Current Task State — smart-todo-r4
 
-> **Last Updated**: 2026-06-11 (post-Wave-C; 27/31 ✅; 4 remaining; 092 deploy deferred)
+> **Last Updated**: 2026-06-24 (by /context-handoff — R4-110 COMPLETE + merged + worktree current with master)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,158 +9,123 @@
 
 | Field | Value |
 |-------|-------|
-| **Project** | smart-todo-r4 — 7 workstreams (A-G), 31 tasks total |
-| **Status** | **27 of 31 tasks ✅** (87% by count; all implementation waves complete) |
-| **PR #377** | ✅ MERGED to master as squash `eed39e40a` (Phases 0 + 1 + Wave 2a + followups; 13 tasks) |
-| **Worktree branch** | `work/smart-todo-r4-wave2` @ `2ff4d9b75` (Wave A + B + C: +14 tasks) — pushed to origin |
-| **Active task** | none; 4 tasks remain |
-| **Working tree** | clean |
-| **Next Action** | Choice of: (a) **094** final `sprk_todoflag` grep gate (~15 min, mechanical — strict gate per graduation criterion 12); (b) **093** UI test suite (NFR-05 latency, NFR-07 a11y, NFR-08 orientation switch — requires deployed bits or live `npm run dev` smoke); (c) **098** wrap-up + open combined PR. 092 deploy plan is DEFERRED per user instruction (master-only deploy happens after PR merge, NOT as a branch task). |
-| **PR strategy** | User chose to bundle Wave A + B + C on same branch (`work/smart-todo-r4-wave2`). After 093 + 094 + 098 land, open ONE combined PR for the entire `wave2` branch (14 + ~3 = ~17 tasks). |
+| **Project** | smart-todo-r4 — closeout wave (110-117) post UAT rounds 4-13 |
+| **Phase** | **Closeout Wave**. R4-110 ✅ COMPLETE. 6 tasks remaining: R4-111 → R4-117. |
+| **Worktree branch** | `work/smart-todo-r4-closeout` at `cc1391c9a` (= origin/master) — fully current; pushed to origin |
+| **Active task** | **NONE** (between tasks). R4-110 just shipped via PR #419 → master at `b26ac56b7` (2026-06-23T20:10:31Z). |
+| **Next Action** | Say "work on task 111" (or 112/113/114/115 in any order — see "Execution order" below). Task POMLs are at `tasks/111-117.poml`. Each task uses `task-execute` skill per root CLAUDE.md §4. |
+| **Working tree** | Clean except 1 untracked researcher MD (intentionally ignored per project handoff). 0 commits ahead of origin/master; 0 behind. |
 
-### Critical context for resume
+### What just shipped (PR #419 on master)
 
-- All R4 client surfaces from Phases 0 + 1 + Wave 2a + Wave 2a-followups are **live on master** via PR #377. Wave A surfaces are **on `work/smart-todo-r4-wave2` only** (commit `54fb0d541`) — NOT yet on master.
-- **spaarkedev1 deploys are master-only** (durable memory saved at `~/.claude/projects/c--code-files-spaarke-wt-smart-todo-r4/memory/feedback_spaarkedev1-deploy-discipline.md`). Whoever lands LAST among in-flight PRs touching SpaarkeAi / SmartTodo / shared Code Page surfaces does ONE final master-side redeploy. Do NOT propose branch-based deploys.
-- Master also includes PR #375 (R6 platform unification phases A+B+partial C) and PR #369 (multi-container-multi-index project scaffolding) — landed concurrently with R4 in same deploy window.
-- **Known pre-existing condition from PR #369**: `@spaarke/sdap-client` rootDir cascade in `Spaarke.UI.Components/EntityCreationService.ts` breaks Vite builds of every code-page consuming `@spaarke/ui-components`. Workaround = vite alias to source. NOW APPLIED to: SmartTodo (Wave A task 040), LegalWorkspace (Wave A main-session reconciliation), CreateMatter/Project/Event/WorkAssignmentWizard (prior). Project-wide fix (tsconfig refs) deferred to task 092/098.
+**R4-110 — Structural Workspace height-chain audit + fix** (merge commit `b26ac56b7`):
 
----
+- `WorkspaceTabManagerComponent.content` — added `display:flex; flexDirection:column; minHeight:0` so future widget roots can use either `flex:1` OR `height:100%` (R4-110 chain robustness)
+- `workspaceConfig.tsx` — removed per-section `style:{height:'calc(100vh-200px)',minHeight:'560px'}` on SmartTodo; kept `minHeight:560` floor parity with `todoRegistration.defaultHeight`
+- `SmartTodoWidget.kanbanContainer` — removed vestigial `minHeight:400px` pixel floor
+- `WorkspaceShell.row` — removed `minHeight:0` (R4-110 follow-up after UAT revealed multi-widget dashboard overlap)
+- `SectionPanel.tsx` — refreshed round-7 comment
+- `BUILD-A-NEW-WORKSPACE-WIDGET.md §7.2` — rewritten chain map + per-section sizing guidance + anti-patterns
+- `.claude/patterns/ui/embedded-widget-sizing.md` — HEIGHT contract simplified (3 author-rules → 2)
+- 8 closeout-wave POMLs (R4-111–R4-117) + R5 design backlog (incl. F-6 filter/search label, F-7 inner-modal sizing, F-8 inner-modal Save&Close)
 
-## Waves Complete (this session 2026-06-10 → 2026-06-11)
+**UAT validation**: 8-section checklist + multi-widget overlap re-test all passed. Console height-chain diagnostic showed 943px widget root, chain consistent across 14 layers.
 
-| Wave | Tasks | Outcome |
+### Deploy state (spaarkedev1)
+
+| Web Resource | Source | State |
 |---|---|---|
-| **G0 Phase 0 audits** | 001, 002, 003, 004 | All binding decisions captured. Decisions: A=Pattern D dual-use; D=virtual PCF (mirrors AssociationResolver precedent); G drill-through payload confirmed via MS Learn + 20+ repo callers; `useLaunchContext` EXISTS (R3 task 070b shipped it; not new build — REPURPOSE + EXTEND). **NEW TASK 034 added** to close R4-003/R4-004 contract gap (envelope handling + openTodos discriminator). |
-| **G1+2a hoists/PCF/hook/charts** | 010, 012, 034, 050, 080 | Shared lib hoists (RecordNavigationModalShell + 3 toolbar primitives), RegardingResolver virtual PCF (20/20 tests, 1.56 MiB bundle), useLaunchContext extension (235→471 LOC, 22 tests), 4 chart def JSONs + idempotent PS deploy script. |
-| **G1+2a-followups** | 011, 020, 030, 051 | RichFilePreviewDialog refactor (regression-safety pass), SmartToDo widget rebuild via new `@spaarke/smart-todo-components` peer package (Pattern D; FeedTodoSyncContext lifted to LW shim per user decision; agent hit timeout but produced clean buildable work; main session did closeout), SmartTodo 4-row Header layout, form-binding JS Web Resource + 9-section instructions doc. |
-| **R4-051 follow-up fix** | (no new task) | PCF CREATE-mode bridge: `RegardingResolverApp.tsx` populates `window.__sprk_regarding_pending__` on CREATE so OnSave handler stages all 5 fields in INSERT transaction. Closes the HIGH-priority follow-up before any deploy. |
-| **Wave A (post-/compact)** | 031, 032, 033, 040, 070, 081 | 6 parallel agents on `work/smart-todo-r4-wave2`. All returned clean with builds green. 031 "Assigned to Me" filter + MyTasksFilter deletion; 032 selection-aware toolbar (Open/Delete/Email/Pin); 033 List/Card view toggle + persistence; 040 SmartTodo modal wire-up (`<RecordNavigationModalShell>` + iframe OOB form); 070 vertical Kanban orientation (CSS flex-direction); 081 Matter form Visual Host instructions doc. Main-session reconciliation: deduped `OPEN_TODOS_EVENT` between 032 + 040 (032 canonical); added `@spaarke/sdap-client` vite alias to LegalWorkspace (PR #369 cascade unblock). Commit `54fb0d541`. |
-| **Wave B** | 042, 052, 060, 082, 083, 084 | 6 parallel agents. All returned clean. 042 retired `TodoDetailPanel` side-pane (FR-18; deleted `TodoDetailPanel.tsx` + `todoDetailService.ts`); 060 card affordances (Open icon + Checkbox + double-click on KanbanCard; reused Wave A `OPEN_TODOS_EVENT`); 052 RegardingResolver PCF read-only mode + pre-save handler formType 3/4 skip (PCF version bump 1.0.0 → 1.1.0, +3 tests = 23/23 pass, added PCF-side webpack alias for PR #369 cascade); 082/083/084 Visual Host instructions docs for Project/Invoice/WorkAssignment (clones of 081 template per §10 substitution table). 042 + 060 successfully merged on `SmartTodoApp.tsx` without write-race losses. Commit `0c2dd15da`. |
-| **Wave C** | 041, 071 | 2 parallel agents. 071 returned clean (orientation persistence via `useUserPreferences` envelope extension mirroring 033's `viewMode` pattern; 13-assertion executable-spec test; back-compat with pre-071 records). 041 produced its on-disk artifacts (318-LOC `sprk_todo_dirty_check.js` web resource with `request-dirty-check`/`dirty-check-result` correlationId handshake + origin allow-list; 359-LOC test suite at `iframeDirtyCheckScript.test.ts`; 298-LOC bind instructions doc at `notes/c-dirty-check-bind-instructions.md`; shell README protocol section) but its final response was rate-limited before TASK-INDEX bump — main session fixed up row + counter. Commit `2ff4d9b75`. |
+| `sprk_smarttodo` | ✅ Built + deployed from main repo **master** (2026-06-24 16:32 local), bundle 1721 KB | Fully current with master |
+| `sprk_spaarkeai` | ⚠️ Last deploy was from worktree iteration (R4-110 follow-up code, 3854 KB) | Has R4-110 changes (UAT-validated) but missing master-only work since. Master build was broken at deploy time (`@spaarke/daily-briefing-components/widgets` missing). **PR #417 (`fix(daily-briefing): unbreak master CI`) is now on master and likely fixes it.** Owner of the daily-briefing project (or whoever ships next) should redeploy from master to bring spaarkedev1 fully current. |
+| `sprk_createtodowizard` | 2026-06-20 22:35Z | Unchanged from PR #406 |
+| `sprk_/js/sprk_todo_dirty_check.js` v1.1.0 | 2026-06-22 12:41Z | NEVER REGISTERED on form OnLoad — R4-113 will audit |
+
+### Closeout Wave execution order (remaining: 111-117)
+
+| Task | Title | Est | Parallel-safe? |
+|---|---|---|---|
+| ~~R4-110~~ | Structural height-chain audit + fix | DONE | — |
+| **R4-111** | Remove widget "Expand to Code Page modal" path | 1-2 hrs | Yes |
+| **R4-112** | PCF CREATE-mode bridge (FU-1) | 2-3 hrs | Yes (different surface) |
+| **R4-113** | Form-script audit (NEW-1) — register or delete `sprk_todo_dirty_check.js` | 1-2 hrs | Yes |
+| **R4-114** | Wire vitest for SmartTodo Code Page (FU-4) | 2-3 hrs | Yes |
+| **R4-115** | SpeDocumentViewer stale bundle cleanup (FU-6) | 1-2 hrs | Yes |
+| **R4-116** | R4-092 final deploy notes + flip to ✅ | 30 min | No (serial after 111-115) |
+| **R4-117** | R4-098 wrap-up + lessons-learned + repo-cleanup | 2-3 hrs | No (serial after 116) |
+
+### Files Modified This Session (R4-110)
+
+**Committed to `work/smart-todo-r4-closeout` and MERGED to master via PR #419 (`b26ac56b7`):**
+
+- `40ff12224` fix(workspace-layout): R4-110 — chain robustness + remove SmartTodo calc workaround (7 files)
+- `222ddae3f` fix(workspace-shell): R4-110 follow-up — remove row minHeight:0 (4 files)
+- `a222bf2e3` Merge origin/master into work/smart-todo-r4-closeout (181 files — master sync; 7 conflicts resolved "ours")
+
+After PR #419 merged, the worktree fast-forwarded to `cc1391c9a` (current master HEAD, which includes 17 more commits from other projects: PCF cleanup, CI fixes, daily-briefing test repair).
+
+**Uncommitted (NOT smart-todo-r4 — DO NOT include in any commit):**
+
+- `.claude/agent-memory/researcher/MEMORY.md` (now matches master — resolved during pull)
+- `.claude/agent-memory/researcher/spaarke-pcf-client-quality-eslint-2026-06.md` (untracked, researcher subagent's PCF ESLint research)
+
+### Critical Context for resumption
+
+1. **R4-110 is DONE and on master.** The shell-side height chain is now forgiving — widget authors can use either `flex:1` OR `height:100%` on their roots, and intermediate wrappers must be `display:flex` (or `grid`). Per-section `style.height` is no longer needed; minHeight floors only (matches `defaultHeight` in registrations).
+
+2. **R4-111 simplifies R4-110.** Once the widget no longer launches the Code Page as a modal, the nested-modal complexity (F-7, F-8 in R5 backlog) is reduced.
+
+3. **R4-112 is independent** — PCF CREATE-mode bridge can run in parallel with 111/113-115.
+
+4. **R4-113 form-script audit** — `sprk_/js/sprk_todo_dirty_check.js` v1.1.0 lives at Dataverse `webresourceid: 4c6e8319-c069-f111-ab0d-7ced8ddc4cc6`. Decision needed from user before executing: register on form OnLoad, or delete per "no shims" rule.
+
+5. **R5 worktree** — DEFERRED until R4 closes (after R4-117). R5 design.md captured all R5 items so context doesn't leak.
+
+6. **sprk_spaarkeai deploy is owed to spaarkedev1** — once the daily-briefing project (or whoever ships next) deploys from master, spaarkedev1 will be fully current. NOT this worktree's responsibility per the durable "spaarkedev1 deploys are master-only" rule.
+
+7. **MUST invoke `task-execute` skill** to start any task (per root CLAUDE.md §4). DO NOT read POML files directly + implement manually.
 
 ---
 
-## Remaining Work — 4 tasks (Phase 3/4; 092 deploy DEFERRED)
+## Full State (Detailed)
 
-### Phase 3 + 4 (final tasks)
+### Project repository state
 
-| Task | Description | Dependencies | Estimated | Recommended order |
-|---|---|---|---|---|
-| **094** | Final `grep -ri sprk_todoflag src/` → 0 functional hits (graduation criterion 12) | none on this branch (was `092` originally, but per user decision 092 is deferred) | ~15 min | **DO FIRST** — cheap, fully local, gating |
-| **093** | UI test suite — NFR-05 modal nav latency, NFR-07 a11y, NFR-08 orientation switch | could run against `npm run dev` (no deploy needed) instead of deployed bits | ~1 day | DO SECOND |
-| **098** | Project wrap-up — lessons-learned + README status → Complete + repo-cleanup + open ONE combined PR for `work/smart-todo-r4-wave2` (Waves A + B + C + Phase 3 = 16 tasks delta over master) | 093, 094 | ~0.5 day | DO LAST |
-| **092** | Deploy all affected solutions — **DEFERRED per user instruction**. The master-only-deploy policy means this happens after the combined PR merges, NOT as a branch task. The task POML can be marked complete when 098 opens the PR (since merge → master triggers deploy responsibility for the last lander). Also fold in project-wide tsconfig refs fix for `@spaarke/sdap-client` cascade (5 code-pages + 1 PCF currently have local workaround aliases). | all 020-084 ✅ | n/a here | After PR merge |
+- **PR #406**: MERGED at squash commit `80f70a1d4` on master (2026-06-23T13:21:19Z) — R4 main scope.
+- **PR #419**: MERGED at merge commit `b26ac56b7` on master (2026-06-23T20:10:31Z) — R4-110.
+- **Master HEAD now**: `cc1391c9a` (R4-110 + 17 commits from PCF cleanup, CI fixes, daily-briefing test repair PR #417).
+- **Worktree HEAD**: `cc1391c9a` (= master via fast-forward + push 2026-06-24).
+- **Working tree**: Clean except 1 untracked researcher MD (intentional).
 
-**Rationale for the 094 → 093 → 098 sequence**: 094 is a mechanical local grep gate that catches any straggler `sprk_todoflag` references; better to know early than to discover it in the PR review. 093 can use `npm run dev` smoke testing instead of deployed bits. 098 closes the loop.
+### Data state on spaarkedev1
 
----
+- `sprk_todo.sprk_assignedto` schema = OOB `contact` lookup ✓ (verified via MCP)
+- Nav-prop name = `sprk_AssignedTo` (PascalCase) ✓ (verified via EntityDefinitions metadata)
+- Ralph Schroeder contact: `contactid=2e419a4f-010d-f111-8342-7ced8d1dc988`, linked via `sprk_systemuser` to systemuser `1d02f31c-1872-f011-b4cb-7c1e52671ad0` ✓
+- 15 active sprk_todo rows bulk-assigned to Ralph's contact for UAT seed ✓
 
-## Follow-ups Surfaced (Not Yet Filed As Tasks)
+### Open items going to R5 (captured in `projects/smart-todo-r5/design.md`)
 
-See [`tasks/TASK-INDEX.md` Follow-ups Surfaced section](tasks/TASK-INDEX.md#follow-ups-surfaced-not-yet-filed-as-tasks). Summary:
+- F-1 yellow contrast (visual)
+- F-2 Completed status + filter toggle
+- F-3 filter pane redesign (Priority/Status/Due/Assigned-To categories)
+- F-4 NEW `sprk_priority` choice + priority icon + auto-set score
+- F-5 NEW `sprk_effort` choice + auto-set score
+- **F-6 NEW** — SmartTodo widget toolbar 'Search' label (should be Filter, also broken) — surfaced during R4-110 UAT, pre-existing
+- **F-7 NEW** — Open-To-Do inner-modal sizing (nested modals at 80% vs outer 85%) — surfaced during R4-110 UAT, pre-existing
+- **F-8 NEW** — Open-To-Do inner-modal Save&Close routing (inner dialog Save lands user on SpaarkeAi instead of refreshing parent) — surfaced during R4-110 UAT, pre-existing
+- FU-2 RecordNavigationModalShell chromeMode
+- FU-5 LW Kanban rich-feature hoist (IMPORTANT per shared-lib elevation philosophy)
+- NEW-2 Structural Workspace height-chain fix → ✅ Closed in R4-110 (delete this entry once R4 PR fully closes)
+- TEST-1/TEST-2 test infrastructure
+- PROC-1 real-Dataverse smoke before merge (cross-cutting; affects all UI projects)
+- R5 worktree creation deferred until R4 closes
 
-1. **MEDIUM** — LW Kanban rich-feature hoist into `@spaarke/smart-todo-components` (13-file subtree deferred from R4-020)
-2. **LOW** — Shell `chromeMode?` or `RichFilePreview` `suppressTitleBar?` API tweak (R4-011 finding)
-3. **LOW** — SmartTodo vitest/jest test runner wiring (pre-existing; 22 useLaunchContext tests + 12+ Toolbar tests + 12+ Modal tests are executable-spec shims)
-4. **MEDIUM (NEW from Wave A)** — Project-wide `@spaarke/sdap-client` rootDir fix: tsconfig `composite` + `references` so consumers don't need per-config vite alias workarounds. Currently aliased in 5 code-pages (4 wizards + SmartTodo + LegalWorkspace). Belongs in task 092 or 098.
-5. **MONITOR** — PR #376 `WidgetErrorBoundary` rewrite landed clean (no follow-up needed; verified via rebase)
+### Durable feedback memories (apply going forward)
 
----
-
-## Files Modified This Session (post-Wave-A state)
-
-**Phases 0 + 1 + Wave 2a + Wave 2a-followups all merged to master via PR #377 squash `eed39e40a`. Wave A is on `work/smart-todo-r4-wave2` (commit `54fb0d541`) and pushed to origin but NOT yet merged.**
-
-### Wave A new files (commit `54fb0d541`)
-
-- `src/solutions/SmartTodo/src/components/Toolbar/{ToolbarActions.ts,index.ts,__tests__/ToolbarActions.test.ts}` — Open/Delete/Email/Pin action factory + tests (task 032)
-- `src/solutions/SmartTodo/src/components/Modal/{SmartTodoModal.tsx,buildTodoIframeUrl.ts,index.ts,__tests__/buildTodoIframeUrl.test.ts}` — `<RecordNavigationModalShell>` + iframe wrapper + URL builder + tests (task 040)
-- `src/solutions/SmartTodo/src/components/ListView/{ListView.tsx,ListView.styles.ts,index.ts}` — dense Fluent v9 table view (task 033)
-- `projects/smart-todo-r4/notes/g-matter-form-visualhost-instructions.md` — 10-section maker doc (task 081)
-
-### Wave A modified files (commit `54fb0d541`)
-
-- `src/client/shared/Spaarke.UI.Components/src/components/Kanban/{KanbanBoard.tsx,types.ts,index.ts,__tests__/KanbanBoard.test.tsx}` — orientation prop + Griffel vertical rules + 3 tests (task 070)
-- `src/solutions/SmartTodo/src/SmartTodoApp.tsx` — App-level wiring for all 4 SmartTodoApp-touching tasks (031 filter, 032 toolbar, 033 view mode + ListView mount, 040 modal subscriber); OPEN_TODOS_EVENT reconciled to import from `./components/Toolbar`
-- `src/solutions/SmartTodo/src/hooks/useUserPreferences.ts` — viewMode field added (033); MyTasksFilterMode removed (031)
-- `src/solutions/SmartTodo/src/hooks/useTodoItems.ts` + `services/queryHelpers.ts` + `services/DataverseService.ts` — single-arg `getActiveTodos(userId)`; filter baked in unconditionally (031)
-- `src/solutions/SmartTodo/src/components/{Header/Header.tsx,SmartToDo.tsx,KanbanHeader.tsx,index.ts,ThresholdSettings.tsx}` — Header view-mode toggle (033) + orientation toggle slot (070); MyTasksFilter prop/render purge (031)
-- `src/solutions/SmartTodo/src/components/MyTasksFilter.tsx` — DELETED (031)
-- `src/solutions/SmartTodo/vite.config.ts` — `@spaarke/sdap-client` alias (040)
-- `src/solutions/LegalWorkspace/vite.config.ts` — `@spaarke/sdap-client` alias (main-session reconciliation; PR #369 cascade unblock)
-- All 6 Wave A POMLs flipped to `complete`; TASK-INDEX updated to 19/31
-
-### Cumulative project state (master + branch)
-
-Refer to `git log master..work/smart-todo-r4-wave2` for the precise Wave A delta. Master tip carries everything from Phases 0 + 1 + Wave 2a + followups.
+- **no-shims-clean-up-dead-code**: complete or delete; don't leave dead web resources, unregistered scripts, or spec files without runners
+- **elevate-to-shared-component-library**: if potentially reusable (PCF / Outlook / mobile / other workspace), hoist to `@spaarke/*` shared lib NOW; don't wait for second consumer
+- **spaarkedev1-deploy-discipline**: deploys are master-only; last merger redeploys after PR lands
 
 ---
 
-## Key Decisions Made This Session
-
-| Date | Decision | Why |
-|---|---|---|
-| 2026-06-10 | Pattern D dual-use for A widget | R4-001 audit: source CLEAN; rebuild via shared-lib widget + thin LW shim mirrors Calendar canonical R3 task 115 |
-| 2026-06-10 | Virtual PCF (40/40 vs 22/40 vs 26/40) for D | R4-002 audit: AssociationResolver v1.1.0 precedent already deployed; same shape |
-| 2026-06-10 | REPURPOSE + EXTEND useLaunchContext (don't build new) | R4-004 audit: hook EXISTS (235 LOC + 217 tests from R3 task 070b) — initial discovery missed it |
-| 2026-06-10 | New task 034 added | R4-003 + R4-004 surfaced contract gap: VisualHost wraps params in `?data=<envelope>`; raw-key parser needed extension |
-| 2026-06-10 | FeedTodoSyncContext lifted to LW section shim | User decision per R4-001 audit recommendation — shared-lib widget stays host-agnostic |
-| 2026-06-10 | LW Kanban rich-feature hoist deferred (R4-020 scope decision) | Initial 0.1.0 of `@spaarke/smart-todo-components` ships minimal Pattern D widget satisfying FR-02 + FR-04 + FR-05; 13-file rich-feature subtree deferred to future task |
-| 2026-06-10 | PCF CREATE-mode bridge via `window.__sprk_regarding_pending__` global | R4-051 surfaced gap; ~30-line addition to RegardingResolverApp.tsx closes it; landed before PR open |
-| 2026-06-10 | spaarkedev1 deploys are master-only (durable convention) | User instruction; saved as feedback memory; last merger does single master-side redeploy |
-
----
-
-## Quick Reference
-
-### Project files
-- Project root: `c:\code_files\spaarke-wt-smart-todo-r4\projects\smart-todo-r4\`
-- Spec: `spec.md` (3491 words; binding requirements)
-- Plan: `plan.md` (Phase 0 outcomes + Wave G1+2a outcomes + Wave G1+2a-followups outcomes captured)
-- CLAUDE.md: project AI context (binding decisions + parallel branch coord)
-- TASK-INDEX: 31 tasks with statuses + 5 follow-ups documented
-
-### To resume (post-Wave-C)
-1. Quick read: this file's Quick Recovery + "Phase 3 + 4" table
-2. Verify branch state: `git status` clean, `git fetch origin --prune`, branch is ~6 commits ahead of master
-3. Recommended next: **094** (mechanical local grep gate; ~15 min) — flips ✅ then proceed
-4. Then **093** UI tests via `npm run dev` smoke (no deploy needed); then **098** wrap-up + open ONE combined PR for `work/smart-todo-r4-wave2`
-5. **092 is DEFERRED per user instruction** — master-only-deploy means deploy happens AFTER PR merge, not as a branch task
-6. **Do NOT deploy from the branch.** Master-only deploy discipline holds.
-
-### Commands for resume
-```bash
-# 1. Verify worktree on wave2 branch
-git branch --show-current   # expect: work/smart-todo-r4-wave2
-
-# 2. Master sync check
-git fetch origin --prune
-git rev-list --count HEAD..origin/master  # expect 0 unless master moved; rebase if non-zero
-git rev-list --count origin/master..HEAD  # expect ~6 (resume + Wave A + post-A doc + Wave B + post-B doc + Wave C)
-
-# 3. Open project task index
-# View projects/smart-todo-r4/tasks/TASK-INDEX.md for task list (look for 🔲 markers)
-```
-
----
-
-## Recovery Instructions
-
-**To recover context after compaction or new session:**
-
-1. **Quick Recovery**: Read the table at the top (< 30 seconds)
-2. **If more context needed**: Read "Waves Complete this session" + "Remaining Work" sections
-3. **Load task POML**: `projects/smart-todo-r4/tasks/{NNN}-*.poml` for the specific task being executed
-4. **Resume**: Follow the "To resume" steps in Quick Reference; dispatch Wave A
-
-**Commands:**
-- `/project-continue` — full project context reload + master sync
-- `/context-handoff` — save state again (next time)
-- "where was I?" — quick context recovery
-
-**For full protocol**: See [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
-
----
-
-*This file is the primary source of truth for active work state. Keep it updated.*
+*Updated by `/context-handoff` 2026-06-24. To resume: say "work on task 111" (or 112/113/114/115 in any order — they're parallel-safe). Each task uses `task-execute` skill per root CLAUDE.md §4.*

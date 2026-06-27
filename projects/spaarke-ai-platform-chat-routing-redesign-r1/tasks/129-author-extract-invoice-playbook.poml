@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="129" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Author extract-invoice playbook + action (SKL-002 Invoice Processing)</title>
+    <phase>6: WP6 Specialized Playbooks + Path 3</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>127</dependencies>
+    <blocks>131</blocks>
+    <tags>dataverse, ai, playbook</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Playbook + action authoring; pure extraction (no knowledge); FULL per task-execute Step 0.5</rigor-reason>
+    <parallel-group>6-F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per spec FR-41: author the `extract-invoice` playbook + action via JPS `$ref` to existing SKL-002 (Invoice Processing). No knowledge source (pure extraction). Output schema is structured extraction: invoiceNumber, issueDate, dueDate, vendor (name/address/taxId), customer (name/address), lineItems (description/quantity/unitPrice/total), subtotal, tax, total, paymentTerms, currency.
+  </prompt>
+
+  <role>SPAARKE AI playbook author. Familiar with extraction-style output schemas.</role>
+
+  <goal>
+    A new `scripts/seed-data/playbooks/extract-invoice.playbook.json` deployed to Dataverse with code `extract-invoice`, referencing SKL-002 (Invoice Processing) via JPS `$ref`. `sprk_jpsmatchingmetadata` populated for invoice document detection. Output schema enforces invoice extraction shape.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-41 + design §WP6 specialized playbook table. SKL-002 (Invoice Processing) already exists; no knowledge source needed (pure extraction). Same single-node + JPS `$ref` pattern but simpler — no KNW `$ref`.
+    </background>
+    <relevant-files>
+      <file>scripts/seed-data/playbooks/</file>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>scripts/seed-data/skills.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-41 acceptance — playbook indexed (task 131); test invoice upload routes to it.</constraint>
+    <constraint source="project">Use existing SKL-002 (Invoice Processing); no knowledge source.</constraint>
+    <constraint source="project">Kebab-case code `extract-invoice`, no `@v1` suffix.</constraint>
+    <constraint source="project">Single-node, destination=workspace + widgetType=structured-output-stream.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/design.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/data-model/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `scripts/seed-data/skills.json` to confirm SKL-002 Invoice Processing exists.</step>
+    <step order="2">Read `summarize-nda.playbook.json` (task 126) as a structural template; simplify (no KNW `$ref`).</step>
+    <step order="3">Design the invoice output schema: invoiceNumber, issueDate, dueDate, vendor (object: name/address/taxId), customer (object: name/address), lineItems (array of {description, quantity, unitPrice, total}), subtotal, tax, total, paymentTerms, currency.</step>
+    <step order="4">Author `extract-invoice.playbook.json`: action with JPS `$ref` to Invoice Processing skill; outputSchema as above; configJson destination=workspace + widgetType=structured-output-stream.</step>
+    <step order="5">Add `sprk_jpsmatchingmetadata` JSON: documentTypes (`invoice`, `bill`, `purchase-invoice`), intents (`extract`, `summarize`), triggerPhrases (`extract invoice`, `invoice details`, `summarize invoice`).</step>
+    <step order="6">Validate JPS-v1 schema.</step>
+    <step order="7">Deploy via `Deploy-Playbook.ps1`. Indexing in task 131.</step>
+    <step order="8">Verify via Dataverse query: `sprk_analysisplaybook` row with code `extract-invoice` exists.</step>
+    <step order="9">Document deployment outcome at `notes/handoffs/129-extract-invoice.md`.</step>
+    <step order="10">Update TASK-INDEX.md: task 129 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">skills.json, summarize-nda playbook template</tool>
+    <tool name="Write">scripts/seed-data/playbooks/extract-invoice.playbook.json</tool>
+    <tool name="Bash">Deploy-Playbook.ps1 + Dataverse query</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">scripts/seed-data/playbooks/extract-invoice.playbook.json</output>
+    <output type="dataverse">sprk_analysisplaybook row code=extract-invoice</output>
+    <output type="docs">notes/handoffs/129-extract-invoice.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Playbook JSON file exists, parses, validates against JPS-v1.</criterion>
+    <criterion testable="true">JPS `$ref` references SKL-002 Invoice Processing only (no KNW).</criterion>
+    <criterion testable="true">Output schema includes invoice-specific fields (lineItems, vendor, customer, totals).</criterion>
+    <criterion testable="true">configJson destination=workspace + widgetType=structured-output-stream.</criterion>
+    <criterion testable="true">Dataverse row deployed; metadata populated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Pure extraction — no knowledge composition. Output schema completeness matters more than narrative quality. Consider whether `lineItems[].lineNumber` is needed.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol.</protocol>
+  </execution>
+</task>

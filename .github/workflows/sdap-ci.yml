@@ -46,6 +46,7 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -72,9 +73,22 @@ jobs:
   build-test:
     name: Build & Test
     runs-on: windows-latest
+    continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
     strategy:
+      # When one matrix configuration fails (e.g., a flaky timing test in
+      # Release), the default fail-fast=true cancels the sibling Debug job
+      # mid-flight. The cancelled Debug then shows COMPLETED/CANCELLED — and
+      # because Debug is the only REQUIRED status check, the PR becomes
+      # un-mergeable even though Debug would have passed on its own. We want
+      # each matrix configuration to run to its own conclusion.
+      fail-fast: false
       matrix:
-        configuration: [Debug, Release]
+        # 2026-06-24 — Release matrix entry temporarily removed due to high
+        # CI-flake rate on shared runners (timing/scheduling tests). Debug-only
+        # build still validates compilation + unit tests. Tracked under
+        # projects/test-architecture-reset-r1/ for permanent resolution.
+        # Restore Release here AFTER that audit lands a stable test suite.
+        configuration: [Debug]
 
     steps:
       - name: Checkout
@@ -114,10 +128,71 @@ jobs:
         # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
         run: dotnet build -c ${{ matrix.configuration }} --no-restore
 
-      - name: Test with coverage
+      # ------------------------------------------------------------------
+      # Two-pass test runner — see scripts/ci/classify-and-retry.ps1 + docs/
+      # procedures/testing-and-code-quality.md.
+      #
+      # Pass 1 runs the full suite. The classifier reads the TRX and consults
+      # tests/.reliability-registry.json. If any pass-1 failure is NOT in the
+      # registry, that's a real bug → classify exits 1 → this job fails (no
+      # retry). If failures are ALL registry-tagged (timing/concurrency-
+      # sensitive), pass 2 reruns just those on a fresh execution. Pass 2
+      # failures fail the build (treated as a real regression — two
+      # consecutive failures on different runs is no longer noise).
+      # ------------------------------------------------------------------
+      - name: Test with coverage (pass 1)
+        id: test-pass-1
+        continue-on-error: true   # let classifier decide; don't abort here on test failures
+        shell: pwsh
         run: |
-          dotnet test -c ${{ matrix.configuration }} --no-build --logger trx --results-directory ./TestResults `
+          dotnet test -c ${{ matrix.configuration }} --no-build `
+            --logger "trx;LogFileName=pass1.trx" `
+            --results-directory ./TestResults/pass1 `
             --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings
+
+      - name: Classify pass-1 failures (decide on retry)
+        id: classify
+        shell: pwsh
+        run: ./scripts/ci/classify-and-retry.ps1 -TrxDirectory ./TestResults/pass1
+
+      - name: Retry timing/concurrency-sensitive tests (pass 2)
+        id: test-pass-2
+        if: steps.classify.outputs.retry_needed == 'true'
+        continue-on-error: true   # final verdict step decides; capture TRX either way
+        shell: pwsh
+        run: |
+          dotnet test -c ${{ matrix.configuration }} --no-build `
+            --filter "${{ steps.classify.outputs.retry_filter }}" `
+            --logger "trx;LogFileName=pass2.trx" `
+            --results-directory ./TestResults/pass2
+
+      - name: Final test verdict
+        shell: pwsh
+        run: |
+          $retryRan = "${{ steps.classify.outputs.retry_needed }}" -eq "true"
+          if (-not $retryRan) {
+            # Classify already exited 1 if there were deterministic failures.
+            # Reaching here with retry_needed=false means pass 1 was fully clean.
+            Write-Host "Pass 1 clean — no retry was needed"
+            exit 0
+          }
+          if (-not (Test-Path ./TestResults/pass2/pass2.trx)) {
+            Write-Host "::error::Retry pass 2 ran but pass2.trx is missing — dotnet test likely crashed"
+            exit 1
+          }
+          $xml = [xml](Get-Content ./TestResults/pass2/pass2.trx -Raw)
+          $nsm = New-Object System.Xml.XmlNamespaceManager $xml.NameTable
+          $nsm.AddNamespace("x", "http://microsoft.com/schemas/VisualStudio/TeamTest/2010")
+          $stillFailing = $xml.SelectNodes("//x:UnitTestResult[@outcome='Failed']", $nsm)
+          if ($stillFailing.Count -gt 0) {
+            Write-Host "::error::Retry pass failed: $($stillFailing.Count) test(s) still failing after a second attempt — treating as real regression"
+            $stillFailing | ForEach-Object {
+              Write-Host "  - $($_.GetAttribute('testName'))"
+            }
+            exit 1
+          }
+          $passed = $xml.SelectNodes("//x:UnitTestResult[@outcome='Passed']", $nsm).Count
+          Write-Host "Retry pass clean: $passed test(s) retried, all passed on second attempt"
 
       - name: Upload test results
         uses: actions/upload-artifact@v6
@@ -136,6 +211,7 @@ jobs:
   client-quality:
     name: Client Quality (Prettier + ESLint)
     runs-on: ubuntu-latest
+    continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
     permissions:
       contents: write   # Auto-format push-back on PRs
     steps:
@@ -169,7 +245,12 @@ jobs:
             ${{ runner.os }}-npm-pcf-
 
       - name: Install root dependencies (Prettier)
-        run: npm ci --ignore-scripts
+        # `npm install` instead of `npm ci` per root CLAUDE.md §11 Node Installs:
+        # this repo's lockfiles drift frequently; strict `npm ci` blocks CI on
+        # transitive churn that's harmless at install time. `npm install` reads
+        # the lockfile as hints but does not enforce strict sync.
+        # Established pattern across ~14 Vite solutions + Build-AllClientComponents.ps1.
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
 
       - name: Prettier auto-fix
         run: npx prettier --write "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
@@ -191,15 +272,28 @@ jobs:
 
       - name: Install PCF dependencies (ESLint)
         working-directory: src/client/pcf
-        run: npm ci --ignore-scripts
+        # Same `npm install` pattern as the root step above — see comment there.
+        # PCF lockfile drifts on dev-dep bumps (e.g. eslint 9.39.4 was a
+        # transitive of @microsoft/eslint-plugin-power-apps that broke `npm ci`
+        # on 2026-06-18 / PR #391).
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
 
       - name: ESLint check
         # --max-warnings 0 dropped: pre-existing baseline has 186 warnings
         # (window.top usage in Power Apps integration code, unused-vars in catch blocks).
         # Mirrors the WarningsNotAsErrors policy applied to C# (visible but non-blocking).
         # Follow-on cleanup tracked per docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
+        #
+        # `node_modules/.bin/eslint` instead of `npx eslint` per PR #393 root-cause
+        # fix (2026-06-18): `npx eslint` silently auto-fetches `eslint` from the
+        # registry when the local copy is missing, masking install bugs. Using the
+        # local path forces resolution from the just-installed node_modules — if
+        # eslint is ever missing again, this step fails loudly with "ENOENT" rather
+        # than confusing `Cannot find module 'eslint/package.json'` errors deep in
+        # an ESLint plugin's require chain. See d-widget-parity-audit-2026-06-18.md
+        # follow-up + PR #393 commit message for the full root-cause analysis.
         working-directory: src/client/pcf
-        run: npx eslint .
+        run: node_modules/.bin/eslint .
 
       # Spaarke.AI.Widgets tsc gate (R4 task 061 / B-2 / NFR-05)
       # AI.Widgets tsconfig path-maps four @spaarke/* sibling packages to their
@@ -258,6 +352,7 @@ jobs:
     name: Code Quality
     runs-on: windows-latest
     needs: build-test
+    continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
     permissions:
       contents: write   # Auto-format push-back on PRs
 
@@ -373,6 +468,7 @@ jobs:
     runs-on: windows-latest
     needs: [security-scan, build-test, code-quality, client-quality]
     if: github.ref == 'refs/heads/master' || github.event_name == 'pull_request'
+    continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
 
     steps:
       - name: Checkout

@@ -192,7 +192,7 @@
 
 | File | Last commit | Purpose (inferred) |
 |---|---|---|
-| `sprk_wizard_commands.js` | 2026-05-12 | Wizard launch / command bar actions |
+| `sprk_wizard_commands.js` | 2026-06-25 | Wizard launch / command bar actions. Includes `openCreateTodoWizard(primaryControl)` (R4-118, 2026-06-25 deploy) for parent-form "Create To Do" buttons — currently wired to Matter ribbon via `spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml`. Future entities (Project/Event/Invoice/WorkAssignment/Communication) deferred to R5 R-9 per `projects/smart-todo-r5/design.md`. |
 | `sprk_registrationribbon.js` | 2026-04-06 | Demo registration ribbon actions |
 | `sprk_emailactions.js` | 2026-04-05 | Email ribbon actions |
 | `sprk_DocumentOperations.js` | 2026-04-05 | Document ribbon operations |

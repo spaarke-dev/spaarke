@@ -421,3 +421,133 @@ Before starting implementation, verify:
 
 *Last updated: December 24, 2025*
 
+
+
+---
+
+## Portfolio Integration (added 2026-06-23 by spaarke-devops-project-tracking-r1 · FR-29)
+
+Spaarke runs ~30+ active projects as git worktrees. **Project #2** ([github.com/users/spaarke-dev/projects/2](https://github.com/users/spaarke-dev/projects/2)) is the single portfolio surface — Epics → Projects → POML tasks. The day-to-day development workflow keeps the board current automatically via 9 hook-injected existing skills.
+
+### Step 0 (NEW): Capture the idea
+
+Before running `/design-to-spec`, capture the raw idea as an Idea Issue on the portfolio:
+
+```bash
+/devops-idea-create --summary "Add shared dashboard for portfolio stakeholders" --why-it-matters "Stakeholders ask weekly; takes ~30s to answer from a single page"
+```
+
+This creates a GitHub Issue with `Type=Idea`, label `backlog`. **No local folder or worktree is created.** Promotion to a Project happens later via `/devops-idea-promote`.
+
+If the idea is already mature enough to be a project, skip Step 0 and start at Step 1 (the existing `/design-to-spec` workflow).
+
+### Epic ↔ Project mechanics
+
+Every Project must have an Epic parent (per D-12). Epics are the portfolio rollup; Projects are the unit of work.
+
+- **Create an Epic**: `/devops-epic-create --title "AI Platform & Chat" --objectives "..." --scope "..." --success "..." --timeframe "H2 2026"`
+- **Attach a Project to its Epic**: the `Parent issue` field on the Project Issue (set automatically by `/devops-idea-promote --epic #E` and `/devops-project-start`)
+
+### Idea → Project promotion
+
+Two paths per D-12:
+
+**Path A** (1 → 1): a single Idea matures into a single Project:
+
+```bash
+/devops-idea-promote --to-project #N --epic #E
+```
+
+Flips the Idea's Type from `Idea` to `Project`, sets Parent issue to Epic #E, swaps label `backlog` → `project`. Issue number preserved.
+
+**Path B** (N → 1): multiple Ideas package into one Project (with Idea sub-issues kept open per D-20):
+
+```bash
+/devops-idea-promote --package #X #Y #Z --epic #E
+```
+
+Creates a new Project Issue with #X, #Y, #Z as sub-issues. Original Ideas remain open.
+
+### `/devops-project-start` — THE BLESSED HANDOFF (D-13)
+
+The one canonical bridge from a portfolio Issue to a local worktree:
+
+```bash
+/devops-project-start --from-issue #N
+```
+
+In one invocation:
+1. Reads Project Issue #N body + fields
+2. Derives slug from Issue title (per F9: kebab-cased + `-r1`; auto-bumps `-r2+` if folder exists; `--slug <override>` available)
+3. Creates `projects/{slug}-r1/` folder
+4. Creates git worktree at `c:/code_files/spaarke-wt-{slug}-r1` with feature branch `work/{slug}-r1`
+5. Drafts `design.md` skeleton populated from Issue body
+6. Writes back `Worktree Path` + `Project Folder` field values to the Issue
+7. Writes `> **Portfolio**: ...` header block to the new local `README.md`
+
+For Path B promotions: `--absorbs #X #Y #Z` includes a "Source Ideas" section in `design.md`.
+
+`--open-editor` (default OFF per D-21) launches VS Code after scaffolding.
+
+### Auto-hook behaviors (no explicit `/devops-*` typing needed)
+
+Once a project has a portfolio pointer block in its README, **9 existing skills automatically keep the portfolio current** during normal workflow (per FR-16..FR-24):
+
+| Existing skill | Hook behavior |
+|---|---|
+| `/design-to-spec` | At end: sync + set Status=In Progress |
+| `/project-pipeline` | At start: register-or-sync (prompts for `--epic` once) |
+| `/task-create` | At end: set Task Count on Issue |
+| `/task-execute` | At Step 9.6: increment Tasks Completed; prompt to promote at last task |
+| `/context-handoff` | **Highest-value hook** — always sync at end of handoff |
+| `/worktree-setup` | At end: link-or-prompt register |
+| `/worktree-sync` | At end: sync |
+| `/repo-cleanup` | Mid-skill: prompt to archive each candidate |
+| `/merge-to-master` | After merge: PR comment + conditional archive prompt |
+
+Hooks are silent on success (single `✅ Portfolio synced: #N` line) and degrade-to-warn on failure (NFR-03 — never block host skill). Hooks are no-ops on projects without portfolio pointer blocks.
+
+### 9 `/devops-*` skills — command reference
+
+| Skill | Purpose |
+|---|---|
+| `/devops-portfolio-setup` | One-shot idempotent bootstrap of Project #2 schema (Type=Project option, 6 fields, 7 labels, 3 issue templates) |
+| `/devops-epic-create` | Create an Epic Issue |
+| `/devops-idea-create` | Capture an Idea (no local side-effects) |
+| `/devops-idea-promote` | Path A (1→1) or Path B (N→1) Idea → Project promotion |
+| `/devops-project-start` | **THE BLESSED HANDOFF** — Issue → folder + worktree + design.md + field round-trip |
+| `/devops-project-register` | Inverse of project-start — folder → Issue (used for backfill) |
+| `/devops-project-sync` | Workhorse — idempotent local→Issue field sync (called by 5 hooks) |
+| `/devops-portfolio-status` | Terminal dashboard + `--snapshot` for stakeholder narrative |
+| `/devops-project-archive` | **DESTRUCTIVE** — set Status, close Issue, delete worktree, retain folder + `.archived` marker |
+
+### Portfolio-specific troubleshooting
+
+**Q: I just created a project but it's not showing in the Active view.**
+- Check the Project Issue's `Project Status` field — must be `In Progress`. Run `/devops-project-sync` to recompute from local state. If still wrong, check that `current-task.md` shows an active task OR that the branch has commits in the last 30 days.
+
+**Q: My worktree exists but there's no Project Issue.**
+- Run `/devops-project-register --from-folder projects/{name} --epic #E` to backfill it.
+
+**Q: Issue says Type=Project but Project Status field is empty.**
+- The Project was created manually without using the skills. Run `/devops-project-sync` to populate fields from local state (assuming the README has the portfolio pointer block — otherwise re-register first).
+
+**Q: I want to archive a project but the worktree has uncommitted changes.**
+- `/devops-project-archive` refuses by default (safety contract). Either commit/stash first, OR re-run with `--force` (uncommitted work will be LOST).
+
+**Q: Multiple projects on Project #2 board have the same Type=Project but no Parent issue.**
+- D-12 violation — every Project must have an Epic parent. Set `Parent issue` manually in GitHub UI, OR re-run `/devops-project-register --epic #E` for each orphan.
+
+---
+
+## Related Documents
+
+- [Skills Index](.claude/skills/INDEX.md) - All available skills (includes 9 `/devops-*` family)
+- [ADR Index](docs/adr/INDEX.md) - Architecture decisions
+- [Root CLAUDE.md](CLAUDE.md) - Repository-wide AI instructions
+- [Project #2 (Spaarke Core)](https://github.com/users/spaarke-dev/projects/2) - Portfolio board
+- [AI Coding Procedures Guide](docs/procedures/AI-CODING-PROCEDURES-GUIDE.md) - Lifecycle scenarios
+
+---
+
+*Portfolio Integration section added 2026-06-23 by spaarke-devops-project-tracking-r1 / FR-29*

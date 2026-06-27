@@ -29,6 +29,15 @@ public static class AnalysisServicesModule
         // RecordSummarizeInvocation; task 007 cleanup may call RecordSessionFilesIndexSize.
         services.AddSingleton<Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry>();
 
+        // R6 Pillar 6c (FR-37 / task 063) — IContextEventEmitter for context.* execution-trace
+        // events (tool_call_started/completed, knowledge_retrieved, playbook_node_executing/completed,
+        // decision_made). Registered unconditionally at the top of the module like R5SummarizeTelemetry
+        // so emission sites in PlaybookOrchestrationService / ToolHandlerToAIFunctionAdapter
+        // can resolve it regardless of feature flags. ADR-015 binding: the implementation is structurally
+        // constrained to deterministic IDs only — see ContextEventEmitter.cs class header.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter,
+            Sprk.Bff.Api.Services.Ai.Telemetry.ContextEventEmitter>();
+
         // Insights Engine Widgets r1 telemetry (project ai-spaarke-insights-engine-widgets-r1 task 050).
         // Meter "Sprk.Bff.Api.InsightWidgets" per Q-U8 evidence resolution (matches all 9 existing BFF
         // meter `Sprk.Bff.Api.<Feature>` convention). Unconditional registration mirrors R5SummarizeTelemetry
@@ -45,6 +54,22 @@ public static class AnalysisServicesModule
         // so it resolves correctly on BOTH AI-ON and AI-OFF paths. Lifetime: scoped (matches consumer
         // expectations + Dataverse Web API client lifetime).
         services.AddScoped<ISearchIndexNameResolver, SearchIndexNameResolver>();
+
+        // R6 Pillar 7 (task 065, D-C-18) — IPinnedContextRepository.
+        // **Hotfix moved out of compound (Analysis:Enabled && DocumentIntelligence:Enabled) gate**
+        // for asymmetric-registration compliance (CLAUDE.md §10 F.1). MapPinnedMemoryEndpoints
+        // (EndpointMappingExtensions.cs) registers /api/memory/pins UNCONDITIONALLY at startup; if
+        // IPinnedContextRepository is missing from the service collection at endpoint-registration
+        // time, Minimal API parameter-binding inference treats the parameter as a body candidate,
+        // and GET/DELETE handlers fail with "Body was inferred but the method does not allow inferred
+        // body parameters" — which crashes host startup and fails every WebApplicationFactory
+        // integration test (observed in PR #395 CI run).
+        // Dependencies (CosmosClient + IConfiguration) are unconditionally registered upstream,
+        // so this registration is safe outside the gate. The repository only does work when an
+        // authenticated request actually hits the endpoints (rate-limit + auth filter unchanged).
+        // Lifetime: Scoped (matches the WorkspaceStateService precedent in Pillar 6a).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Memory.IPinnedContextRepository,
+                           Sprk.Bff.Api.Services.Ai.Memory.PinnedContextRepository>();
 
         // multi-container-multi-index-r1 Phase G (task 102) — TRULY UNCONDITIONAL.
         // IAllowedIndexesProvider is consumed by KnowledgeDeploymentService (registered behind
@@ -238,7 +263,7 @@ public static class AnalysisServicesModule
         // null and ChatSessionManager's fire-and-forget signal call short-circuits.
         // Back-compat preserved for existing call sites and unit tests.
         services.AddScoped<ChatSessionManager>(sp => new ChatSessionManager(
-            cache: sp.GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+            cache: sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(),
             dataverseRepository: sp.GetRequiredService<IChatDataverseRepository>(),
             logger: sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatSessionManager>>(),
             persistence: sp.GetService<Sprk.Bff.Api.Services.Ai.Sessions.ISessionPersistenceService>(),
@@ -485,6 +510,169 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();
         Console.WriteLine("✓ R5 SessionSummarizeOrchestrator registered (task 012; ADR-010 concrete; chat-session Summarize convergence)");
 
+        // R6 Pillar 7 (task 064, D-C-17) — SummarizationCompressionService. Sliding-window
+        // compression primitive: folds the oldest M chat turns into a single System-role
+        // summary message when the conversation exceeds the NFR-10 8K system-prompt budget.
+        // Foundation for task 067 (hierarchical memory composition); task 068 wires it into
+        // SprkChatAgentFactory's per-turn prompt-assembly path.
+        //
+        // §F.1 asymmetric-registration audit: this registration is INSIDE the compound
+        // (Analysis:Enabled && DocumentIntelligence:Enabled) gate. The only consumer in R6
+        // is task 068's SprkChatAgentFactory wiring, which is itself inside the same
+        // compound gate via the unconditional NullSprkChatAgentFactory peer (B2 pattern).
+        // The Null-Object kill-switch posture is intrinsic to the service: it returns null
+        // (P2 Quiet) when SummarizationCompression:Enabled=false or the OpenAI circuit is
+        // broken, so the caller short-circuits to the raw window. No separate Null peer
+        // needed at the DI layer.
+        //
+        // Options binding uses BindConfiguration; the B-G11 hardening pattern means the
+        // options class does NOT decorate use-site-conditional fields with [Required], so
+        // an app start with no SummarizationCompression section in appsettings is allowed
+        // (defaults take over, kill switch defaults to true).
+        //
+        // Lifetime: Scoped — matches IOpenAiClient (Singleton) wrap pattern used elsewhere
+        // in this module (Scoped is the safe lifetime that respects the wrapped singleton).
+        services.AddOptions<Sprk.Bff.Api.Services.Ai.Memory.SummarizationCompressionOptions>()
+            .BindConfiguration(Sprk.Bff.Api.Services.Ai.Memory.SummarizationCompressionOptions.SectionName);
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Memory.ISummarizationCompressionService,
+                           Sprk.Bff.Api.Services.Ai.Memory.SummarizationCompressionService>();
+        Console.WriteLine("✓ R6 Pillar 7 SummarizationCompressionService registered (task 064, D-C-17; sliding-window compression foundation)");
+
+        // R6 Pillar 7 (task 065, D-C-18) — PinnedContextRepository. Cosmos-backed repository
+        // for the user-curated PinnedContextItem "memory anchor" entity (spec FR-42:
+        // pinned items NEVER drop from system-prompt assembly). Cosmos container `memory`
+        // is reused (same partition key `/tenantId` as MatterMemoryService + workspace-tab
+        // durable rows); document discriminator `documentType = "pinned-context"` +
+        // id prefix `pinned-context_` co-exist with the other documentTypes on the same
+        // partition without id collision.
+        //
+        // §F.1 asymmetric-registration audit: this registration is INSIDE the compound
+        // (Analysis:Enabled && DocumentIntelligence:Enabled) gate matching the surrounding
+        // Memory services. Consumers (task 067 hierarchical memory composition; task 070
+        // Q7 Pinned Memory UI) are themselves inside the same compound gate.
+        //
+        // Placement (CLAUDE.md §10 / ADR-013): memory plumbing only. The repository injects
+        // CosmosClient + IConfiguration only — no AI-internal collaborators
+        // (IOpenAiClient, IPlaybookService, etc.). AI-internal callers consume this
+        // repository directly per the 2026-05-20 refined ADR-013 boundary.
+        //
+        // Lifetime: Scoped — matches the WorkspaceStateService precedent (R6 Pillar 6a).
+        // CosmosClient itself is Singleton (injected); the scoped wrapper is stateless.
+        //
+        // **PR #395 HOTFIX 2026-06-18**: the actual AddScoped registration was MOVED to the top
+        // of this module (above the compound gate) to satisfy CLAUDE.md §10 F.1 asymmetric-
+        // registration compliance. MapPinnedMemoryEndpoints (EndpointMappingExtensions.cs) is
+        // unconditional; if the repository were registered only inside this gate, Minimal API
+        // parameter-binding inference would treat IPinnedContextRepository as a body candidate
+        // at endpoint-registration time when flags are OFF — crashing host startup with
+        // "Body was inferred but the method does not allow inferred body parameters" on the
+        // GET / DELETE handlers, which fails every WebApplicationFactory integration test.
+        // The registration moved upward is unchanged in shape (same Scoped lifetime, same
+        // interface→impl mapping); only the location changed.
+        Console.WriteLine("✓ R6 Pillar 7 PinnedContextRepository registered earlier in module (unconditional; hotfix per PR #395)");
+
+        // R6 Pillar 7 (task 066, D-C-19) — PinnedContextRecallService. Embedding-based
+        // selective recall: ranks the user's pinned-context items by cosine similarity of
+        // their content embedding against the current user-message embedding and returns
+        // the top-K most relevant pins. Reuses the EXISTING IEmbeddingCache + IOpenAiClient
+        // pipeline per the spec FR-43 rule ("use the existing IEmbeddingCache
+        // infrastructure — do NOT introduce a new embedding service"). Foundation for task
+        // 067 (hierarchical memory composition) when the matter has more pins than fit
+        // the NFR-10 8K system-prompt budget.
+        //
+        // §F.1 asymmetric-registration audit: this registration is INSIDE the compound
+        // (Analysis:Enabled && DocumentIntelligence:Enabled) gate matching the surrounding
+        // Memory services. The only consumer in R6 is task 067's memory-composition
+        // wiring, which is itself inside the same compound gate. The Null-Object
+        // kill-switch posture is intrinsic to the service: it returns an empty list (P2
+        // Quiet) when PinnedContextRecall:Enabled=false, no pins exist, or the embedding
+        // pipeline fails; the caller (task 067) treats empty as "no recall — proceed with
+        // unranked or skip recall". No separate Null peer needed at the DI layer.
+        //
+        // Options binding uses BindConfiguration; the B-G11 hardening pattern means the
+        // options class does NOT decorate use-site-conditional fields with [Required], so
+        // an app start with no PinnedContextRecall section in appsettings is allowed
+        // (defaults take over, kill switch defaults to true).
+        //
+        // Placement (CLAUDE.md §10 / ADR-013): memory plumbing only. NO PublicContracts
+        // facade because the only consumers are AI-internal callers per the refined
+        // 2026-05-20 ADR-013 boundary rule.
+        //
+        // Lifetime: Scoped — matches the SummarizationCompressionService precedent (R6
+        // task 064) and the IPinnedContextRepository it depends on (R6 task 065).
+        services.AddOptions<Sprk.Bff.Api.Services.Ai.Memory.PinnedContextRecallOptions>()
+            .BindConfiguration(Sprk.Bff.Api.Services.Ai.Memory.PinnedContextRecallOptions.SectionName);
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Memory.IPinnedContextRecallService,
+                           Sprk.Bff.Api.Services.Ai.Memory.PinnedContextRecallService>();
+        Console.WriteLine("✓ R6 Pillar 7 PinnedContextRecallService registered (task 066, D-C-19; embedding-based selective recall over pinned items)");
+
+        // R6 Pillar 7 (task 067, D-C-20) — MemoryCompositionService. Hierarchical
+        // memory composition orchestrator: produces a single tagged four-layer memory
+        // block (recent verbatim / compressed mid-distance / retrieved old via
+        // similarity / pinned context grouped by pinType) consumed by the chat
+        // prompt-assembly path (task 068). Composes the three Pillar 7 primitives:
+        //   - ISummarizationCompressionService (task 064) for the mid-distance summary
+        //   - IPinnedContextRepository (task 065) for the always-included pinned tier
+        //   - IPinnedContextRecallService (task 066) for the relevance-ranked
+        //     retrieved-old tier
+        // under the NFR-10 8K total budget. Layer drop priority on overflow:
+        //   retrieved-old → compressed-mid → recent-verbatim oldest-first
+        // Pinned tier is NEVER dropped (FR-42 invariant); when pinned alone exceeds
+        // the budget, the service returns pinned-only and logs a warning so the
+        // chat prompt builder (task 068) can apply the final hard guard.
+        //
+        // §F.1 asymmetric-registration audit: this registration is INSIDE the compound
+        // (Analysis:Enabled && DocumentIntelligence:Enabled) gate matching the
+        // surrounding Memory services (SummarizationCompressionService,
+        // PinnedContextRepository, PinnedContextRecallService). The only consumer in
+        // R6 is task 068's SprkChatAgentFactory wiring, itself inside the same
+        // compound gate via the unconditional NullSprkChatAgentFactory peer (B2
+        // pattern). The Null-Object kill-switch posture is intrinsic to the service:
+        // it returns MemoryComposition.Empty (P2 Quiet) when
+        // MemoryComposition:Enabled=false or when both the conversation and the pin
+        // set are empty. No separate Null peer needed at the DI layer.
+        //
+        // Options binding uses BindConfiguration; the B-G11 hardening pattern means
+        // the options class does NOT decorate use-site-conditional fields with
+        // [Required], so an app start with no MemoryComposition section in
+        // appsettings is allowed (defaults take over, kill switch defaults to true,
+        // total budget defaults to 8000 per NFR-10).
+        //
+        // Placement (CLAUDE.md §10 / ADR-013): memory plumbing only. NO PublicContracts
+        // facade because the only consumers are AI-internal callers per the refined
+        // 2026-05-20 ADR-013 boundary rule.
+        //
+        // Lifetime: Scoped — matches the SummarizationCompressionService (task 064)
+        // and PinnedContextRecallService (task 066) precedents it depends on.
+        services.AddOptions<Sprk.Bff.Api.Services.Ai.Memory.MemoryCompositionOptions>()
+            .BindConfiguration(Sprk.Bff.Api.Services.Ai.Memory.MemoryCompositionOptions.SectionName);
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Memory.IMemoryCompositionService,
+                           Sprk.Bff.Api.Services.Ai.Memory.MemoryCompositionService>();
+        Console.WriteLine("✓ R6 Pillar 7 MemoryCompositionService registered (task 067, D-C-20; hierarchical 4-layer memory composition with NFR-10 budget enforcement)");
+
+        // R6 Pillar 7 (task 068, D-C-22 / FR-46) — PromptBudgetTracker. Shared per-turn
+        // token-budget tracker that centralises the NFR-10 8K system-prompt budget across
+        // the four chat prompt-assembly subsystems (factory blocks, document context,
+        // knowledge inline content, memory composition). Each subsystem calls
+        // TryReserve(layer, requestedTokens, sessionId, tenantId) before appending its
+        // fragment; truncation telemetry is emitted on the `false` path so operators see
+        // which layers were truncated and why. Reads its budget ceiling from
+        // MemoryCompositionOptions.TotalTokenBudget (same 8K physical ceiling per NFR-10).
+        //
+        // §F.1 asymmetric-registration audit: registration is INSIDE the compound
+        // (Analysis:Enabled && DocumentIntelligence:Enabled) gate matching the surrounding
+        // Memory services. The Null-Object kill-switch posture is intrinsic: when the
+        // compound AI gate is OFF, the tracker is never resolved because the chat factory
+        // itself is the NullSprkChatAgentFactory. No separate Null peer needed at the DI
+        // layer.
+        //
+        // Lifetime: Scoped — one tracker per HTTP request / per chat turn. Singleton
+        // lifetime would leak budget across requests and is structurally wrong. Matches
+        // the surrounding Pillar 7 services (MemoryCompositionService, recall, etc.).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Memory.IPromptBudgetTracker,
+                           Sprk.Bff.Api.Services.Ai.Memory.PromptBudgetTracker>();
+        Console.WriteLine("✓ R6 Pillar 7 PromptBudgetTracker registered (task 068, D-C-22; shared 8K system-prompt budget across factory / document / knowledge / memory subsystems)");
+
         // --- InvokeInsightsQueryTool typed HttpClient ---
         // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): the specialized
         // InvokeInsightsQueryTool C# bridge class was deleted in favor of the generic
@@ -528,7 +716,13 @@ public static class AnalysisServicesModule
         services.AddHttpClient<IPlaybookSharingService, PlaybookSharingService>();
         // NotificationService promoted to unconditional registration (task 011 Phase 1b Tier 1, D-09 §2 B1).
         // See AddUnconditionalChatAndNotificationServices below.
-        services.AddHostedService<Sprk.Bff.Api.Services.PlaybookSchedulerService>();
+
+        // R3 task 023 (FR-2.8 / D2 / Q1): the legacy PlaybookSchedulerService BackgroundService has
+        // been DELETED. Its discovery + fan-out logic is now PlaybookSchedulerJob (IScheduledJob),
+        // registered + seeded in SchedulingModule.AddSchedulingModule(). The ScheduledJobHost
+        // (Spaarke.Scheduling) drives the cron tick on the same 1h cadence (NFR-04 preserved).
+        // Do NOT re-add an AddHostedService<PlaybookSchedulerService> here — that path was the
+        // migration target.
 
         // R5 task 007 (D1-07) — Session-files cleanup hosted service per spec NFR-02
         // "Aggressive cleanup on session-end". Scheduled sweep (every IntervalHours;
@@ -665,6 +859,11 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.UpdateRecordNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverOutputNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverToIndexNodeExecutor>();
+        // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery node executor.
+        // ActionType.DeliverComposite (= 42) paired with NodeType.DeliverComposite (= 100_000_004).
+        // Existing DeliverOutputNodeExecutor for ActionType.DeliverOutput is UNCHANGED
+        // (backward-compat invariant — single-action Output Node behavior preserved).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverCompositeNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.ConditionNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AiAnalysisNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateNotificationNodeExecutor>();
@@ -674,6 +873,47 @@ public static class AnalysisServicesModule
         // Requires AgentServiceClient singleton (AIPU-060). Kill switch: AgentService:Enabled.
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Foundry.AgentServiceClient>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AgentServiceNodeExecutor>();
+
+        // LookupUserMembershipNodeExecutor — ActionType.LookupUserMembership = 52 (R3 Part 1, FR-1B.1, task 041).
+        // Singleton+Scoped DI pattern: injects IServiceScopeFactory to resolve the Scoped
+        // IMembershipResolverService per execution. In-process call (NOT HTTP round-trip).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.LookupUserMembershipNodeExecutor>();
+
+        // EntityNameValidatorNodeExecutor — ActionType.EntityNameValidator = 141
+        // (R4 spaarke-daily-update-service-r4 / FR-3, task 003).
+        // Singleton: pure string analysis, no external deps beyond ILogger; matches the
+        // SanitizerNodeExecutor / GroundingVerifyNode shape. Post-LLM scrubber that strips
+        // hallucinated entity names not present in the input-derived allow-list and emits
+        // a structured `hallucination_detected` warning per removal (App Insights query
+        // target per docs/guides/AI-MONITORING-DASHBOARD.md). UNCONDITIONAL registration
+        // per CLAUDE.md §F.1 asymmetric-registration governance (no feature gate).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.EntityNameValidatorNodeExecutor>();
+
+        // StartNodeExecutor — ActionType.Start = 33 (R4 spaarke-daily-update-service-r4,
+        // post canonical-truth deploy UAT 2026-06-25). First-class entry-point executor:
+        // binds the dispatching wrapper's payload (Parameters[payloadKey]) as JsonElement
+        // into the playbook scope under node.OutputVariable (default "start"). Optional
+        // input-contract validation gated by configJson.validateOnExecute. Singleton:
+        // pure ConfigJson + Parameters read, ILogger only; no Scoped deps. UNCONDITIONAL
+        // registration per CLAUDE.md §10 BFF Hygiene §F.1.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.StartNodeExecutor>();
+
+        // LoadKnowledgeNodeExecutor — ActionType.LoadKnowledge = 142 (R4 spaarke-daily-update-service-r4,
+        // UAT 2026-06-26 same failure class as Start). Pass-through placeholder for the
+        // R5 AI Search knowledge-source binding. Reads configJson.passthroughBinding
+        // (optional name→template map), renders templates against scope, binds resolved
+        // object to node.OutputVariable (default "channelRegistry"). Singleton: pure
+        // ConfigJson + scope read via ITemplateEngine + ILogger; no Scoped deps.
+        // UNCONDITIONAL registration per CLAUDE.md §10 BFF Hygiene §F.1.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.LoadKnowledgeNodeExecutor>();
+
+        // ReturnResponseNodeExecutor — ActionType.ReturnResponse = 143 (R4 spaarke-daily-update-service-r4,
+        // UAT 2026-06-26 same failure class as Start). Terminal node — projects upstream
+        // node outputs into the run's return value via configJson.responseBinding (optional
+        // _validationMetadata sidecar). Bound to node.OutputVariable (default "response").
+        // Singleton: pure ConfigJson + scope read via ITemplateEngine + ILogger; no Scoped
+        // deps. UNCONDITIONAL registration per CLAUDE.md §10 BFF Hygiene §F.1.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.ReturnResponseNodeExecutor>();
 
         // CodeInterpreterBridge — thin wrapper around AgentServiceClient for Code Interpreter sandbox
         // invocations (AIPU-070). Singleton: stateless, thread-safe. Kill switch: CodeInterpreter:Enabled.

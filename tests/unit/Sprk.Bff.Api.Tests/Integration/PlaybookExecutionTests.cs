@@ -45,7 +45,7 @@ public class PlaybookExecutionTests
     {
         // Arrange
         var mockTemplateEngine = new Mock<ITemplateEngine>();
-        var mockHttpClientFactory = new Mock<IHttpClientFactory>();
+        var mockHttpClientFactory = new Mock<Spaarke.Dataverse.IGenericEntityService>(); // R2.3: was Mock<IHttpClientFactory> before IGenericEntityService refactor — variable name retained for diff hygiene
         var mockToolHandlerRegistry = new Mock<IToolHandlerRegistry>();
         var mockGraphClientFactory = new Mock<IGraphClientFactory>();
         var mockHttpContextAccessor = new Mock<IHttpContextAccessor>();
@@ -99,7 +99,7 @@ public class PlaybookExecutionTests
     {
         // Arrange
         var mockTemplateEngine = new Mock<ITemplateEngine>();
-        var mockHttpClientFactory = new Mock<IHttpClientFactory>();
+        var mockHttpClientFactory = new Mock<Spaarke.Dataverse.IGenericEntityService>(); // R2.3: was Mock<IHttpClientFactory> before IGenericEntityService refactor — variable name retained for diff hygiene
 
         var createTaskExecutor = new CreateTaskNodeExecutor(
             mockTemplateEngine.Object,
@@ -122,7 +122,7 @@ public class PlaybookExecutionTests
     {
         // Arrange
         var mockTemplateEngine = new Mock<ITemplateEngine>();
-        var mockHttpClientFactory = new Mock<IHttpClientFactory>();
+        var mockHttpClientFactory = new Mock<Spaarke.Dataverse.IGenericEntityService>(); // R2.3: was Mock<IHttpClientFactory> before IGenericEntityService refactor — variable name retained for diff hygiene
         var mockToolHandlerRegistry = new Mock<IToolHandlerRegistry>();
         var mockGraphClientFactory = new Mock<IGraphClientFactory>();
         var mockHttpContextAccessor = new Mock<IHttpContextAccessor>();
@@ -429,39 +429,23 @@ public class PlaybookExecutionTests
     {
         // Arrange
         var templateEngineMock = new Mock<ITemplateEngine>();
-        var httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        var entityServiceMock = new Mock<Spaarke.Dataverse.IGenericEntityService>();
         var loggerMock = new Mock<ILogger<CreateTaskNodeExecutor>>();
 
         templateEngineMock
             .Setup(t => t.Render(It.IsAny<string>(), It.IsAny<IDictionary<string, object?>>()))
             .Returns((string template, IDictionary<string, object?> _) => template);
 
-        // Task 061: stub the Dataverse HttpClient. Production
-        // `CreateTaskNodeExecutor.ExecuteAsync` calls `_httpClientFactory.CreateClient("DataverseApi")`
-        // then `http.PostAsync("tasks", ...)`. The original test left the factory mock
-        // unconfigured for `CreateClient`, so the call returned null and the catch block
-        // produced Success=false. Wire a stub handler that responds with the canonical
-        // Dataverse "201 Created + OData-EntityId" shape.
+        // R2.3 (2026-06-23): production refactored from IHttpClientFactory.CreateClient("DataverseApi")
+        // (orphan, never registered) to IGenericEntityService.CreateAsync. Stub returns a fresh GUID.
         var newTaskId = Guid.NewGuid();
-        var handler = new StubHttpMessageHandler((req, _) =>
-        {
-            var response = new HttpResponseMessage(System.Net.HttpStatusCode.Created);
-            response.Headers.Add(
-                "OData-EntityId",
-                $"https://example.crm.dynamics.com/api/data/v9.2/tasks({newTaskId})");
-            return Task.FromResult(response);
-        });
-        var httpClient = new HttpClient(handler)
-        {
-            BaseAddress = new Uri("https://example.crm.dynamics.com/api/data/v9.2/")
-        };
-        httpClientFactoryMock
-            .Setup(f => f.CreateClient("DataverseApi"))
-            .Returns(httpClient);
+        entityServiceMock
+            .Setup(s => s.CreateAsync(It.IsAny<Microsoft.Xrm.Sdk.Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(newTaskId);
 
         var executor = new CreateTaskNodeExecutor(
             templateEngineMock.Object,
-            httpClientFactoryMock.Object,
+            entityServiceMock.Object,
             loggerMock.Object);
 
         var context = CreateNodeContext(ActionType.CreateTask, @"{""subject"":""Review document"",""description"":""Please review""}");
@@ -479,12 +463,12 @@ public class PlaybookExecutionTests
     {
         // Arrange
         var templateEngineMock = new Mock<ITemplateEngine>();
-        var httpClientFactoryMock = new Mock<IHttpClientFactory>();
+        var entityServiceMock = new Mock<Spaarke.Dataverse.IGenericEntityService>();
         var loggerMock = new Mock<ILogger<CreateTaskNodeExecutor>>();
 
         var executor = new CreateTaskNodeExecutor(
             templateEngineMock.Object,
-            httpClientFactoryMock.Object,
+            entityServiceMock.Object,
             loggerMock.Object);
 
         var context = CreateNodeContext(ActionType.CreateTask, @"{""description"":""No subject""}");

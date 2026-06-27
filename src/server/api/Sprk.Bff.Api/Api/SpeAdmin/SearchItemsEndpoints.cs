@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
 
@@ -112,11 +111,9 @@ public static class SearchItemsEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            var graphClient = await graphService.GetClientForConfigAsync(config, ct);
-
             // Execute search via Graph search API.
-            var searchResult = await graphService.SearchItemsAsync(
-                graphClient,
+            var searchResult = await graphService.SearchItemsForConfigAsync(
+                config,
                 request.Query,
                 request.ContainerId,
                 request.FileType,
@@ -160,18 +157,18 @@ public static class SearchItemsEndpoints
                 statusCode: StatusCodes.Status400BadRequest,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
-        catch (ODataError odataError)
+        catch (SpaarkeStorageException ex)
         {
             logger.LogError(
-                odataError,
+                ex,
                 "SearchItems: Graph API error for configId {ConfigId}, Status={Status}, TraceId={TraceId}",
-                configGuid, odataError.ResponseStatusCode, context.TraceIdentifier);
+                configGuid, ex.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
                 title: "Graph API Error",
-                detail: odataError.Error?.Message ?? "An error occurred communicating with the Graph API.",
-                statusCode: odataError.ResponseStatusCode is >= 400 and < 600
-                    ? odataError.ResponseStatusCode
+                detail: ex.Message ?? "An error occurred communicating with the Graph API.",
+                statusCode: ex.StatusCode is >= 400 and < 600
+                    ? ex.StatusCode.Value
                     : StatusCodes.Status502BadGateway,
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }

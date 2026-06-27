@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Draft ADR — Workspace Section Registry as Composition Factory (Option D)</title>
+    <phase>Phase7b: Documentation Alignment (post-Option D)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>071</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation, architecture</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>ADR authoring — standardized template; requires architectural judgment about ADR number + relationship to existing ADRs</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after 071 (architecture docs must already reference the pattern)</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Draft an Architecture Decision Record (ADR) for the registry-as-composition pattern. The next ADR number after ADR-032 is ADR-033. The ADR captures the architectural decision so that:
+    - Future maintainers understand WHY the pattern exists
+    - Future projects know to follow it instead of inventing band-aids
+    - The decision has an explicit owner sign-off trail
+
+    ADR location: `docs/adr/ADR-033-workspace-section-registry-composition.md` (and a concise `.claude/adr/ADR-033-*.md` for AI-consumption).
+
+    Structure (per existing ADR conventions in `docs/adr/` and `.claude/adr/`):
+    1. Status: Accepted (2026-06-18)
+    2. Context: the problem (module-mutation band-aid; SpaarkeAi as critical core surface; need for two-way Assistant ⇄ Workspace ⇄ Context flows)
+    3. Decision: Option D — `createLegalWorkspaceSectionRegistry(options)` factory with `LegalWorkspaceSectionRegistryOptions` typed contract
+    4. Considered alternatives: Options A (replace), B (module-mutation — shipped first), C (React Context per widget)
+    5. Consequences: positive (one pattern N widgets, type-safe discoverability, no global state, test-friendly); negative/trade-offs (slightly more boilerplate at registry construction site vs static const)
+    6. Related ADRs: ADR-006 (UI Surface Architecture), ADR-012 (Shared Component Library), ADR-022 (React 19), ADR-026 (Code Page Build Standard)
+    7. References: PR #396, task 002 retro, task 018 retro, notes/option-d-registry-as-composition.md
+  </prompt>
+
+  <role>SPAARKE platform developer / architect. Author a focused ADR following existing conventions.</role>
+
+  <goal>ADR-033 published in both full (`docs/adr/`) and AI-concise (`.claude/adr/`) forms. ADR-INDEX.md updated. Cross-references to/from ADR-006, ADR-012 added so reviewers find it from the existing ADRs.</goal>
+
+  <context>
+    <background>
+      The decision IS the pattern + the no-speculative-additions discipline. The ADR formalizes both so future projects don't relitigate (and don't speculatively add `paneEventBus`/`agentClient`/`contextProvider` before a real consumer arrives).
+    </background>
+    <relevant-files>
+      <file>docs/adr/</file>
+      <file>.claude/adr/</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>docs/adr/ADR-INDEX.md</file>
+      <file>docs/adr/ADR-006-ui-surface-architecture.md</file>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Follow existing ADR templates. Look at ADR-028 or another recent ADR for the latest template shape.</constraint>
+    <constraint source="project">The full ADR lives at `docs/adr/ADR-033-*.md`; the concise AI-consumption version lives at `.claude/adr/ADR-033-*.md` (100-150 lines per CLAUDE.md §13).</constraint>
+    <constraint source="project">Update `docs/adr/ADR-INDEX.md` AND `.claude/adr/INDEX.md` with the new entry.</constraint>
+    <constraint source="project">Cross-link ADR-006 + ADR-012 (back-reference) so the new ADR is discoverable from related ADRs.</constraint>
+    <constraint source="project">.claude/ paths require main-session execution per CLAUDE.md §3.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-006-ui-surface-architecture.md</file>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>docs/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-006-ui-surface-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read recent ADRs (ADR-028 or later, both full and AI-concise versions) to pin down the current template.</step>
+    <step order="2">Verify ADR-033 is the next available number (`ls docs/adr/ | grep "ADR-0" | sort` and look for the next gap).</step>
+    <step order="3">Author `docs/adr/ADR-033-workspace-section-registry-composition.md` (full).</step>
+    <step order="4">Author `.claude/adr/ADR-033-workspace-section-registry-composition.md` (AI-concise, 100-150 lines).</step>
+    <step order="5">Update `docs/adr/ADR-INDEX.md` with the new entry.</step>
+    <step order="6">Update `.claude/adr/INDEX.md` with the new entry.</step>
+    <step order="7">Add a "See also: ADR-033" back-reference to `docs/adr/ADR-006-ui-surface-architecture.md` and `docs/adr/ADR-012-shared-component-library.md` (and their `.claude/adr/` counterparts).</step>
+    <step order="8">Update TASK-INDEX.md: change task 072 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">File ops.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/adr/ADR-033-workspace-section-registry-composition.md</output>
+    <output type="docs">.claude/adr/ADR-033-workspace-section-registry-composition.md</output>
+    <output type="docs">docs/adr/ADR-INDEX.md</output>
+    <output type="docs">.claude/adr/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both ADR-033 files exist (full + concise) following the existing ADR template.</criterion>
+    <criterion testable="true">Both INDEX files updated with the new ADR entry.</criterion>
+    <criterion testable="true">ADR-006 and ADR-012 have "See also: ADR-033" back-references in both full and concise versions.</criterion>
+    <criterion testable="true">ADR explicitly captures the "no speculative options until first concrete consumer" discipline.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The ADR is the LASTING record of this decision. The notes file (`option-d-registry-as-composition.md`) is a per-project artifact; the ADR is the codebase-level constraint that future projects must comply with.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

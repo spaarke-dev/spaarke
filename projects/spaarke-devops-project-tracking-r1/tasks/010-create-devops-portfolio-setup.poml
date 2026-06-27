@@ -1,0 +1,86 @@
+<task id="DEVOPS-010" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Create /devops-portfolio-setup skill (codifies Phase 1)</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>skill-creation, devops, portfolio, gh-cli, idempotent</tags>
+    <dependencies>008</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Author the `/devops-portfolio-setup` skill at `.claude/skills/devops-portfolio-setup/SKILL.md` per FR-06. This skill codifies Phase 1 hand-driven work (FR-01..FR-04) into an idempotent one-shot bootstrap that can be re-run anywhere. After this skill exists, the Phase 1 schema bootstrap is reproducible on a fresh repo/project from a single command. This is the gate Phase 2 skill — all other Phase 2 skills assume the schema this skill enforces.
+
+NOTE: This task modifies `.claude/skills/` — per root CLAUDE.md §3 Sub-Agent Write Boundary, this MUST run in the main session, not delegated to a sub-agent.
+  </prompt>
+
+  <role>
+Skill author who has shipped skills before. You know the NFR-07 file convention cold: YAML frontmatter + Prerequisites + Purpose + Steps + Failure-Modes. You write skills that are idempotent by construction.
+  </role>
+
+  <goal>
+`.claude/skills/devops-portfolio-setup/SKILL.md` exists. Running the skill against a project that already has the FR-01..FR-04 schema is a no-op. Running against a fresh project produces FR-01..FR-04 acceptance state.
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-07">SKILL.md MUST have YAML frontmatter (`description`, `tags`, `techStack`, `appliesTo`, `alwaysApply: false`, `last-reviewed: 2026-06-XX`) + Prerequisites + Purpose + Steps + Failure-Modes sections</constraint>
+    <constraint source="NFR-04">Idempotent — re-running on extended schema produces zero API mutations</constraint>
+    <constraint source="spec MUST">Uses `gh` CLI / `gh api graphql` only — no Octokit wrapper</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only (touches `.claude/skills/`)</constraint>
+    <constraint source="exemplar">Match structure of `.claude/skills/worktree-setup/SKILL.md` (skill structure exemplar)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/CLAUDE.md</file>
+      <file>.claude/skills/worktree-setup/SKILL.md</file>
+      <file>.claude/skills/task-execute/SKILL.md</file>
+      <file>.claude/skills/INDEX.md</file>
+      <file>projects/spaarke-devops-project-tracking-r1/notes/phase1-field-ids.md</file>
+    </files>
+    <patterns>
+      <pattern name="Spaarke skill structure" location=".claude/skills/worktree-setup/SKILL.md">
+        Frontmatter → H1 → Last Reviewed footer → Prerequisites → Purpose → Workflow steps (numbered, each with deterministic action + verify) → Outputs → Failure Modes table.
+      </pattern>
+      <pattern name="idempotent gh patterns" location="Phase 1 task notes">
+        For every mutation, first query for existence; emit "no-op" log and skip if present. For single-select option additions, query existing options + filter additions, ensuring the mutation list still includes all existing options (mutation replaces full list).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Read exemplar `worktree-setup/SKILL.md`. Confirm Phase 1 task 008 ✅.</step>
+    <step order="1" name="Author frontmatter">Write YAML frontmatter: description = "One-shot idempotent bootstrap of GitHub Project #2 portfolio schema (Type=Project option, 6 custom fields, 7 labels, 3 issue templates) per FR-06"; tags include `devops`, `github-project`, `portfolio`, `bootstrap`, `idempotent`; alwaysApply: false; last-reviewed: 2026-06-XX.</step>
+    <step order="2" name="Author Prerequisites">`gh` CLI v2.40+ authenticated; Project #2 reachable; `repo`, `project`, `read:org` token scopes.</step>
+    <step order="3" name="Author Purpose">One-paragraph what + why. Tie to FR-06.</step>
+    <step order="4" name="Author Workflow">Numbered steps that replay tasks 001..004. Each step does: idempotency pre-check → mutation (only if needed) → verify → log result (no-op vs created).</step>
+    <step order="5" name="Author Outputs section">What the skill produces: extended Project #2 schema, 7 labels, 3 templates. Includes idempotency summary line.</step>
+    <step order="6" name="Author Failure Modes">Table: rate-limit hit (mitigation: NFR-05 backoff), partial-mutation drift (mitigation: re-run idempotently heals), bad token scopes, schema-already-modified (intended no-op).</step>
+    <step order="7" name="Update INDEX.md">Add row in `.claude/skills/INDEX.md` for this skill.</step>
+    <step order="8" name="Smoke test">Throwaway clone scenario — verify idempotency: run the skill twice; confirm zero mutations on second run via dry-run-mode logging.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">Edit SKILL.md, INDEX.md</tool>
+    <tool name="Write">Create new SKILL.md</tool>
+    <tool name="gh">Smoke testing</tool>
+  </tools>
+
+  <outputs>
+    <output type="skill">.claude/skills/devops-portfolio-setup/SKILL.md</output>
+    <output type="config">.claude/skills/INDEX.md (one new row)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase2-portfolio-setup-smoke-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SKILL.md exists with all NFR-07 sections present</criterion>
+    <criterion testable="true">Idempotency smoke test passes: second run produces zero mutations</criterion>
+    <criterion testable="true">INDEX.md updated with new row</criterion>
+    <criterion testable="true">Skill is discoverable via `Skill` tool with name `devops-portfolio-setup`</criterion>
+  </acceptance-criteria>
+</task>

@@ -46,6 +46,7 @@ This directory contains comprehensive architecture documentation covering system
 | [ai-semantic-relationship-graph.md](ai-semantic-relationship-graph.md) | Multi-modal document discovery combining Dataverse structural lookups with AI Search vector similarity | 2026-02-23 | 2026-04-05 | Verified |
 | [M365-COPILOT-INTEGRATION-ARCHITECTURE.md](M365-COPILOT-INTEGRATION-ARCHITECTURE.md) | M365 Copilot integration: Declarative Agent, API Plugin, agent gateway layer, Adaptive Cards | 2026-03-26 | 2026-04-05 | Verified |
 | [INSIGHTS-ENGINE-ARCHITECTURE.md](INSIGHTS-ENGINE-ARCHITECTURE.md) | Insights Engine: Fact/Observation/Inference taxonomy, Insight Index + Live Facts substrate, hybrid playbook + RAG paths, Spaarke Assistant tool-call contract v1.1 (SSE streaming + clickable citations) | 2026-06-04 | 2026-06-04 | Phase 1.5 shipped (r2) |
+| [membership-resolution-pattern.md](membership-resolution-pattern.md) | User-record membership resolution: metadata-driven discovery, 6-path identity normalization, Phase 1A live FetchXml → Phase 2 junction table + Service Bus topic + Redis pub/sub invalidation, strangler-fig migration. Includes naming-collision register vs `AssociationResolver` PCF. | 2026-06-22 | 2026-06-22 | New (r3) |
 
 > For document processing and summarization pipeline (which consolidates former ai-document-summary-architecture.md), see [sdap-document-processing-architecture.md](sdap-document-processing-architecture.md) in the SDAP section above.
 
@@ -86,6 +87,7 @@ This directory contains comprehensive architecture documentation covering system
 |----------|-------------|--------------|---------------|--------|
 | [jobs-architecture.md](jobs-architecture.md) | Service Bus job processing: contract, routing, 13 handlers, idempotency, dead-letter management | 2026-04-05 | 2026-04-05 | New |
 | [background-workers-architecture.md](background-workers-architecture.md) | All 17 BackgroundService/IHostedService implementations: queue processors, timers, channels, migrations | 2026-04-05 | 2026-04-05 | New |
+| [spaarke-scheduling-architecture.md](spaarke-scheduling-architecture.md) | Spaarke.Scheduling framework (R3): IScheduledJob contract, ScheduledJobHost, IBackgroundJobStore, admin endpoints, sprk_backgroundjob*/run entities, 2 reference consumers (PlaybookSchedulerJob, MembershipReconciliationJob), migration story for the 26 ad-hoc workers | 2026-06-22 | 2026-06-22 | New (r3) |
 
 ### Cross-Cutting Concerns
 

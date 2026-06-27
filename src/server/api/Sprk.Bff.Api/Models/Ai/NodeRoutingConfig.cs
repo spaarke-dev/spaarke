@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Models.Ai;
 /// <para>
 /// Lives inside <c>sprk_playbooknode.sprk_configjson</c> as the <c>destination</c>
 /// property. Consumed by <see cref="NodeRoutingConfig"/> parse / by downstream
-/// CapabilityRouter dedup (task 042 / FR-30 — "one user intent → one route → one
+/// FR-24 render-routing dedup (task 042 / FR-30 — "one user intent → one route → one
 /// playbook → one DeliverOutput → one render") and by the schema-aware
 /// <c>StructuredOutputStreamWidget</c> (tasks 040/041).
 /// </para>
@@ -50,7 +50,7 @@ public enum NodeDestination
     /// the existing pre-fill flow (<c>MatterPreFillService</c>, <c>ProjectPreFillService</c>,
     /// <c>useAiPrefill</c> hook). NFR-07 binding: signatures + 45s timeout + behavior of
     /// the pre-fill flow are UNCHANGED; this destination merely tags the routing intent
-    /// for CapabilityRouter dedup (task 042).
+    /// for FR-24 render-routing dedup (task 042).
     /// </summary>
     FormPrefill,
 
@@ -60,7 +60,19 @@ public enum NodeDestination
     /// rendering. Used for playbooks whose primary product is a Dataverse mutation or
     /// system action rather than a conversational reply.
     /// </summary>
-    SideEffect
+    SideEffect,
+
+    /// <summary>
+    /// Dual destination — output is routed BOTH to the chat conversation surface AND to
+    /// a workspace tab via <c>StructuredOutputStreamWidget</c>. Requires
+    /// <see cref="NodeRoutingConfig.WidgetType"/> to be set when routing the workspace
+    /// half. Added in chat-routing-redesign-r1 (FR-14a / WP3) to support playbooks whose
+    /// output must appear in both surfaces (e.g. an answer rendered inline in chat while
+    /// a structured artifact is also streamed into a workspace widget). Inserted at the
+    /// end of the enum list to preserve the numeric ordinals of the four pre-existing
+    /// values bit-for-bit (FR-14a).
+    /// </summary>
+    Both
 }
 
 /// <summary>
@@ -80,7 +92,7 @@ public enum NodeDestination
 /// <b>NFR-08 binding</b>: the 11 production node executors are NOT modified. This record
 /// is a SEPARATE contract consumed by:
 /// <list type="bullet">
-///   <item>CapabilityRouter dedup (task 042 / FR-30) — reads <see cref="Destination"/> to enforce one-route-per-intent</item>
+///   <item>FR-24 render-routing dedup (task 042 / FR-30) — reads <see cref="Destination"/> to enforce one-route-per-intent</item>
 ///   <item><c>StructuredOutputStreamWidget</c> (tasks 040/041) — reads <see cref="WidgetType"/> when rendering workspace destinations</item>
 ///   <item>Action migration tasks 032-035 — populate this contract for the 4 migrated actions</item>
 /// </list>
@@ -191,7 +203,7 @@ public sealed record NodeRoutingConfig
             // Malformed JSON — treat as no routing config (default to chat).
             // The DeliverOutputNodeExecutor follows the same swallow-and-default
             // pattern (see ParseConfigOrDefault). Logging belongs to the caller
-            // (CapabilityRouter / widget registry consumer).
+            // (render-routing dedup site / widget registry consumer).
             return new NodeRoutingConfig();
         }
     }
@@ -207,7 +219,7 @@ public sealed record NodeRoutingConfig
     /// with a single descriptive error message.
     /// </returns>
     /// <remarks>
-    /// Callers (CapabilityRouter, widget renderer) invoke this BEFORE attempting to
+    /// Callers (render-routing dedup site, widget renderer) invoke this BEFORE attempting to
     /// resolve the widget — invalid configs are surfaced as the playbook author's
     /// error, not a render-time crash. This is a separate validation pass from the
     /// existing <c>DeliveryNodeConfig</c> <c>IsValidDeliveryType</c> check in
@@ -253,9 +265,10 @@ public sealed class NodeDestinationJsonConverter : JsonConverter<NodeDestination
             "workspace" => NodeDestination.Workspace,
             "form-prefill" => NodeDestination.FormPrefill,
             "side-effect" => NodeDestination.SideEffect,
+            "both" => NodeDestination.Both,
             _ => throw new JsonException(
                 $"Unknown NodeDestination value: '{value}'. Expected one of: " +
-                "chat, workspace, form-prefill, side-effect.")
+                "chat, workspace, form-prefill, side-effect, both.")
         };
     }
 
@@ -267,6 +280,7 @@ public sealed class NodeDestinationJsonConverter : JsonConverter<NodeDestination
             NodeDestination.Workspace => "workspace",
             NodeDestination.FormPrefill => "form-prefill",
             NodeDestination.SideEffect => "side-effect",
+            NodeDestination.Both => "both",
             _ => throw new JsonException($"Unknown NodeDestination enum value: {value}")
         };
         writer.WriteStringValue(wire);

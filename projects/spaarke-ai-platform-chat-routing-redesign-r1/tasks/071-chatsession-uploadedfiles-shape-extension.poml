@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>ChatSession.UploadedFiles shape extension via SaveTabsAsync pattern</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4b)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>070</dependencies>
+    <blocks>072,073</blocks>
+    <tags>bff-api, models</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies persistent shape (ChatSession model); tags include `bff-api`; FR-26 / FR-30 invariants depend on session shape stability</rigor-reason>
+    <parallel-group>4-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential: model extension MUST land before SessionPersistenceService method (072) consumes it; same conceptual edit surface</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Extend `ChatSession.UploadedFiles[]` shape to carry the enriched fields per architecture §11.2 — `SummaryText`, `ClassifiedDocType`, `ClassifiedConfidence`, `Sections`, `TableMetadata`, `Citations`, `PageCount`, `Language`. Follow the R6 task 051 `SaveTabsAsync` precedent: add fields to existing record/class additively, ensure JSON serialization is backward-compat (existing sessions without these fields deserialize cleanly with defaults).
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in `ChatSession` persistence shape + JSON backward-compat patterns.</role>
+
+  <goal>
+    `ChatSession.cs` (or `ChatSessionFile.cs`) extended with the 8 enriched fields. Cosmos JSON serialization round-trips cleanly: existing session docs (no enriched fields) deserialize with field defaults; new sessions roundtrip enriched fields. Unit test confirms backward-compat.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §11.2 (What to extend): `ChatSession.UploadedFiles[N]` adds enriched fields. The pattern precedent is R6 task 051's `SaveTabsAsync` (extended `StoredSession` with `Tabs` + `WidgetStates` fields the same way). The shape is consumed by:
+      - `SessionPersistenceService.UpdateUploadedFilesAsync` (task 072)
+      - `LayeredContextCardBuilder` (task 076)
+      - `list_session_files` tool (task 083)
+      - `get_file_manifest` tool (task 084)
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Models/Chat/ChatSession.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Chat/ChatSessionFile.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Model lives in `Models/Chat/` — within AI module surface.</constraint>
+    <constraint source="ADR-015">Tier-1 safety: the enriched fields are persisted to Cosmos but tier-1 logging applies elsewhere (logging fileId only). Persistence here is OK — tier-1 governs LOGS not STORAGE.</constraint>
+    <constraint source="architecture §11.2">Additive extension only — existing sessions with no enriched fields MUST deserialize cleanly with defaults (e.g., empty lists, null strings).</constraint>
+    <constraint source="project">Follow R6 task 051 `SaveTabsAsync` precedent — DO NOT introduce a new doc-type discriminator; extend existing `ChatSessionFile` record.</constraint>
+    <constraint source="ADR-029">Per-task publish-size measurement.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `ChatSession.cs` + `ChatSessionFile.cs`. Identify the current shape of `UploadedFiles[]` items.</step>
+    <step order="2">Grep for R6 task 051 SaveTabsAsync precedent (likely in `SessionPersistenceService.cs` + `StoredSession.cs`).</step>
+    <step order="3">Add the 8 enriched fields to `ChatSessionFile` (or equivalent):
+      - `SummaryText` (string?, nullable)
+      - `ClassifiedDocType` (string?, nullable)
+      - `ClassifiedConfidence` (double?, nullable)
+      - `Sections` (List&lt;SectionInfo&gt;, default empty)
+      - `TableMetadata` (List&lt;TableInfo&gt;, default empty)
+      - `Citations` (List&lt;CitationReference&gt;, default empty)
+      - `PageCount` (int?, nullable)
+      - `Language` (string?, nullable, default "en")
+
+      Use `[JsonPropertyName]` if other peer fields use it; otherwise rely on default casing.</step>
+    <step order="4">Author unit test: serialize an existing-shape `ChatSession` JSON (no enriched fields) and verify deserialization produces field defaults; serialize a new-shape `ChatSession` and verify roundtrip.</step>
+    <step order="5">Run `dotnet build`.</step>
+    <step order="6">Run `dotnet test` for serialization test.</step>
+    <step order="7">Measure BFF publish size.</step>
+    <step order="8">code-review + adr-check.</step>
+    <step order="9">Update TASK-INDEX.md: 071 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">ChatSession + ChatSessionFile + SessionPersistenceService</tool>
+    <tool name="Grep">SaveTabsAsync precedent</tool>
+    <tool name="Edit">Extend ChatSessionFile</tool>
+    <tool name="Write">Backward-compat serialization test</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Chat/ChatSessionFile.cs (extended) OR new sub-types if needed</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Models/Chat/ChatSessionFileSerializationTests.cs (NEW)</output>
+    <output type="docs">notes/handoffs/071-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">8 enriched fields added to `ChatSessionFile`.</criterion>
+    <criterion testable="true">Backward-compat test: existing-shape JSON deserializes with field defaults.</criterion>
+    <criterion testable="true">Roundtrip test: new-shape ChatSession serializes + deserializes identically.</criterion>
+    <criterion testable="true">`dotnet build` + tests exit 0.</criterion>
+    <criterion testable="true">No breaking change to peer `ChatSession` shape; existing readers (sessions API, restore service) still work.</criterion>
+    <criterion testable="true">BFF publish delta &lt;0.2 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Same approach as R6 task 051 SaveTabsAsync. DO NOT add a new Cosmos doc-type or container — extend in-place per architecture §7.1.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol with code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

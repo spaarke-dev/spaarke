@@ -1,0 +1,72 @@
+<task id="R3-053" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Integration tests for all migrated playbooks</title>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <phase>P6</phase>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>2-3h</estimated-effort>
+    <tags>integration-test,playbook,membership</tags>
+    <relevant-files>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/MigratedPlaybookFixture.cs (new)</file>
+      <file>tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/MigratedPlaybookTests.cs (new)</file>
+    </relevant-files>
+    <dependencies>050, 051, 052</dependencies>
+    <completion-notes>
+      6 tests authored — 3 happy-path (1 per migrated playbook: documents/emails/events) +
+      3 exclusion-path (over-disclosure regression checks). All pass; full integration suite
+      63/63 green; full BFF unit suite 7486 pass / 0 fail / 110 pre-existing skips. Build
+      0 errors / 1 pre-existing warning. No NuGet adds; no .claude/ writes.
+
+      Orchestrator entry point chosen: direct-executor sequence (not PlaybookOrchestrationService
+      with INodeService). Justification: the migrated playbook JSON files live in
+      projects/spaarke-daily-update-service/notes/playbooks/ as file-only artifacts (not seeded
+      into Dataverse sprk_playbooknode rows), so the production orchestrator's GetNodesAsync
+      path would fail. The direct-executor sequence wires the REAL production
+      LookupUserMembershipNodeExecutor + QueryDataverseNodeExecutor + CreateNotificationNodeExecutor
+      against the REAL production TemplateEngine and dispatches them in topological order —
+      mirroring the orchestrator's ExecuteNodeBasedModeAsync behavior. The migration defect
+      under test (broken FetchXML + missing membership filter) is exercised end-to-end this way.
+
+      Fixture-shape decisions:
+        - In-memory IMembershipResolverService Strict mock seeded per scenario (matter ids).
+        - StubDataverseHandler honors fetchXml 'in' filter on regarding attribute so the
+          exclusion-path tests correctly produce zero rows when the user has no memberships.
+        - Pre-render of FetchXML via TemplateEngine BEFORE dispatching to QueryDataverse-shaped
+          executor — needed because QueryDataverseNodeExecutor only does a narrow set of
+          well-known-token replacements (timeWindowHours, etc.) and does NOT invoke
+          ITemplateEngine.Render on FetchXml. Documented in fixture rationale comments.
+
+      Deferred:
+        - Latent finding (NOT addressed here, outside task scope): QueryDataverseNodeExecutor
+          does not currently invoke ITemplateEngine.Render on the FetchXML, so the production
+          execution of these migrated playbooks would also need pre-render somewhere upstream.
+          If P11 UAT (task 110) surfaces this, the fix is either (a) add Render in
+          QueryDataverseNodeExecutor.ResolveFetchXmlVariables, or (b) have the orchestrator
+          pre-render ConfigJson. Out of scope for the integration-test task.
+    </completion-notes>
+  <prompt>End-to-end tests for the 3 migrated playbooks per spec FR-1C.4. Each runs against seeded spaarkedev1 user fixture; asserts non-zero notification rows.</prompt>
+  <goal>AC-1C.1 + AC-1C.2 covered by automated tests.</goal>
+  <constraints>
+    <constraint source="NFR-03">Integration tests mandatory</constraint>
+  </constraints>
+  <knowledge>
+    <topic>playbook-integration-testing</topic>
+    <files>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + AC-1C.1, AC-1C.2, FR-1C.4</step>
+    <step order="1">Author MigratedPlaybookTests.cs covering each migrated playbook</step>
+    <step order="2">Seed fixture data; run playbook end-to-end; assert count &gt; 0</step>
+    <step order="3">CI integration</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">All migrated playbooks produce non-zero notification rows in tests</criterion>
+    <criterion testable="true">Tests pass green in CI</criterion>
+  </acceptance-criteria>
+</task>

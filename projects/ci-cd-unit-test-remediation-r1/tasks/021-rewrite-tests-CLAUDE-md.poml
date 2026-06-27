@@ -1,0 +1,62 @@
+<task id="CICD-021" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Rewrite tests/CLAUDE.md: drop coverage targets, drop &lt;1s/test, integration-first template, ban wiring-test antipatterns</title>
+    <status>complete</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1 - Stream B</phase>
+    <stream>B - Test reset</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>testing, directive-rewrite, test-CLAUDE-md</tags>
+  </metadata>
+
+  <prompt>
+    Rewrite `tests/CLAUDE.md` end-to-end per spec FR-B02. Remove: 80/70/90% coverage targets (lines 153-155), `<1s/test` rule (line 177), mock-first AAA template (lines 26-42). Add: integration-first template, "every bug = regression test", "every new endpoint = ≥1 integration test", explicit bans on `Mock&lt;HttpMessageHandler&gt;`, `Mock&lt;IServiceClient&gt;`, DI-registration tests, constructor null-checks.
+  </prompt>
+
+  <role>Test architecture engineer rewriting the canonical test-authoring directive read by every Claude session.</role>
+
+  <goal>`tests/CLAUDE.md` rewritten such that any future Claude session reading it will produce integration-first tests with no coverage-% mandate and no wiring-test antipatterns.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+    <file purpose="pre-rewrite-source">tests/CLAUDE.md</file>
+    <file purpose="new-standard">docs/standards/TEST-ARCHITECTURE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B02">No 80/70/90% coverage targets. No `&lt;1s/test`. No mock-first AAA template. No `Mock&lt;HttpMessageHandler&gt;`. No DI-registration tests. No constructor null-checks. Add "every bug = regression test" + "every new endpoint = ≥1 integration test".</constraint>
+    <constraint source="spec MUST">MUST NOT introduce coverage-% targets to any new directive file (binding for ≥6 months).</constraint>
+    <constraint source="project autonomous">FULL rigor — Step 9.5 code-review + adr-check runs on this PR (per spec FR-B07 override).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Test directive authoring</topic>
+    <files>
+      <file>docs/standards/TEST-ARCHITECTURE.md (created in task 023; may not exist when 021 runs in parallel — if missing, draft in parallel and cross-reference)</file>
+      <file>.claude/constraints/testing.md (rewritten in task 022; same caveat)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current `tests/CLAUDE.md` end-to-end. Note all sections.</step>
+    <step order="2">Read `spec.md` FR-B02 + the design.md "tests/CLAUDE.md full rewrite" table row (§91)</step>
+    <step order="3">Draft new structure: Purpose → 6 KEEP categories → Integration-first template (full example) → Authoring rules (every bug = regression test; every new endpoint = ≥1 integration test) → Bans (Mock&lt;HttpMessageHandler&gt;, Mock&lt;IServiceClient&gt;, DI-registration, constructor null-checks) → TimeProvider usage (not Stopwatch) → Cross-references to ADR-038 and TEST-ARCHITECTURE.md</step>
+    <step order="4">Replace file contents (single Write, preserve front-matter style)</step>
+    <step order="5">Step 9.5: invoke code-review on the new file; verify no coverage-% language remains; verify ban list is complete</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">tests/CLAUDE.md (rewrite)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -E "80%|70%|90%|coverage" tests/CLAUDE.md` returns no MUST/SHOULD coverage mandate (informational mentions allowed)</criterion>
+    <criterion testable="true">`grep -E "&lt;1s|&lt;100ms" tests/CLAUDE.md` returns nothing</criterion>
+    <criterion testable="true">File contains explicit bans on Mock&lt;HttpMessageHandler&gt; and DI-registration tests</criterion>
+    <criterion testable="true">File contains integration-first template (full example, not stub)</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check pass</criterion>
+  </acceptance-criteria>
+</task>

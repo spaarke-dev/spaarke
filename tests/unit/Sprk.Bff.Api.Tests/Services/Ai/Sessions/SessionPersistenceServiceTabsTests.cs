@@ -2,11 +2,13 @@ using System.Net;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Azure.Cosmos;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Sessions;
+using Sprk.Bff.Api.Services.Ai.Telemetry;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Sessions;
@@ -32,7 +34,7 @@ public class SessionPersistenceServiceTabsTests
     private const string DatabaseName = "spaarke-ai";
     private const string CosmosEndpoint = "https://spaarke-cosmos-dev.documents.azure.com:443/";
 
-    private readonly Mock<IDistributedCache> _cacheMock;
+    private readonly TrackingTenantCache _cache;
     private readonly Mock<CosmosClient> _cosmosClientMock;
     private readonly Mock<Container> _containerMock;
     private readonly Mock<ILogger<SessionPersistenceService>> _loggerMock;
@@ -41,7 +43,7 @@ public class SessionPersistenceServiceTabsTests
 
     public SessionPersistenceServiceTabsTests()
     {
-        _cacheMock = new Mock<IDistributedCache>();
+        _cache = new TrackingTenantCache();
         _cosmosClientMock = new Mock<CosmosClient>();
         _containerMock = new Mock<Container>();
         _loggerMock = new Mock<ILogger<SessionPersistenceService>>();
@@ -59,10 +61,13 @@ public class SessionPersistenceServiceTabsTests
             .Returns(_containerMock.Object);
 
         _sut = new SessionPersistenceService(
-            _cacheMock.Object,
+            _cache,
             _cosmosClientMock.Object,
             _configuration,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            // chat-routing-redesign-r1 task 074 — IContextEventEmitter dep added for
+            // context.upload_persisted emission. SaveTabsAsync does not emit; Loose mock suffices.
+            new Mock<IContextEventEmitter>().Object);
     }
 
     // =========================================================================
@@ -72,8 +77,7 @@ public class SessionPersistenceServiceTabsTests
     [Fact]
     public async Task SaveTabsAsync_NoExistingSession_ReturnsFalse()
     {
-        // Arrange — Redis miss + Cosmos 404
-        SetupCacheMiss();
+        // Arrange — Redis miss (empty TrackingTenantCache) + Cosmos 404
         _containerMock
             .Setup(c => c.ReadItemAsync<StoredSession>(
                 It.IsAny<string>(),
@@ -91,13 +95,7 @@ public class SessionPersistenceServiceTabsTests
         result.Should().BeFalse("SaveTabsAsync must return false when no session exists in either store");
 
         // No writes should have happened
-        _cacheMock.Verify(c => c.SetAsync(
-            It.IsAny<string>(),
-            It.IsAny<byte[]>(),
-            It.IsAny<DistributedCacheEntryOptions>(),
-            It.IsAny<CancellationToken>()),
-            Times.Never,
-            "Redis must not be written when the session does not exist");
+        _cache.SetCount.Should().Be(0, "Redis must not be written when the session does not exist");
     }
 
     // =========================================================================
@@ -110,10 +108,7 @@ public class SessionPersistenceServiceTabsTests
         // Arrange — existing session loaded from Redis
         var existing = BuildStoredSession(withTabs: BuildTab("old-tab", "wizard.old"));
         var bytes = JsonSerializer.SerializeToUtf8Bytes(existing);
-        _cacheMock
-            .Setup(c => c.GetAsync(SessionPersistenceService.BuildRedisKey(TenantId, SessionId), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(bytes);
-        SetupCacheSetSuccess();
+        await SeedCacheFromBytes(bytes);
 
         StoredSession? capturedSession = null;
         _containerMock
@@ -147,10 +142,7 @@ public class SessionPersistenceServiceTabsTests
         // Arrange — existing empty session in Redis
         var existing = BuildStoredSession();
         var bytes = JsonSerializer.SerializeToUtf8Bytes(existing);
-        _cacheMock
-            .Setup(c => c.GetAsync(SessionPersistenceService.BuildRedisKey(TenantId, SessionId), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(bytes);
-        SetupCacheSetSuccess();
+        await SeedCacheFromBytes(bytes);
 
         StoredSession? capturedSession = null;
         _containerMock
@@ -205,10 +197,7 @@ public class SessionPersistenceServiceTabsTests
         var existing = BuildStoredSession();
         existing.ActiveTabId = "old-active";
         var bytes = JsonSerializer.SerializeToUtf8Bytes(existing);
-        _cacheMock
-            .Setup(c => c.GetAsync(SessionPersistenceService.BuildRedisKey(TenantId, SessionId), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(bytes);
-        SetupCacheSetSuccess();
+        await SeedCacheFromBytes(bytes);
 
         StoredSession? capturedSession = null;
         _containerMock
@@ -263,10 +252,7 @@ public class SessionPersistenceServiceTabsTests
         """;
         var legacyBytes = System.Text.Encoding.UTF8.GetBytes(legacyJson);
 
-        _cacheMock
-            .Setup(c => c.GetAsync(SessionPersistenceService.BuildRedisKey(TenantId, SessionId), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(legacyBytes);
-        SetupCacheSetSuccess();
+        await SeedCacheFromBytes(legacyBytes);
 
         StoredSession? capturedSession = null;
         _containerMock
@@ -304,22 +290,18 @@ public class SessionPersistenceServiceTabsTests
     // Helpers — mirror SessionPersistenceServiceTests
     // =========================================================================
 
-    private void SetupCacheMiss()
+    /// <summary>
+    /// Seeds the TrackingTenantCache with raw bytes (a JSON-serialized StoredSession or
+    /// legacy session document) at the FR-05 (resource, id) coordinates the production
+    /// code probes. Mirrors how the pre-Wave-6 IDistributedCache mock seeded a hit.
+    /// </summary>
+    private async Task SeedCacheFromBytes(byte[] bytes)
     {
-        _cacheMock
-            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-    }
-
-    private void SetupCacheSetSuccess()
-    {
-        _cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        var session = JsonSerializer.Deserialize<StoredSession>(bytes)
+            ?? throw new InvalidOperationException("Test fixture: cannot deserialize seeded bytes");
+        await _cache.SetAsync<StoredSession>(
+            TenantId, "stored-session", SessionId, 1, session);
+        _cache.SetCount = 0; // reset write counter so test assertions exclude the seed write
     }
 
     private static StoredWorkspaceTab BuildTab(string id, string widgetType, string displayName = "Tab")

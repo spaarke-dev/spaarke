@@ -1,0 +1,48 @@
+<task id="CICD-011" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Measure current sdap-ci p50/p95 end-to-end runtime (baseline for SC-03)</title>
+    <status>complete</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>1 - Stream A</phase>
+    <stream>A - CI tiering</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>ci, baseline, metrics</tags>
+  </metadata>
+
+  <prompt>
+    Compute current p50/p95 PR-to-merge time for `sdap-ci.yml` over the last 30 days. This becomes the baseline for SC-03 (≥30% reduction post-cutover) and SC-01/SC-02 calibration targets.
+  </prompt>
+
+  <role>CI/CD engineer doing baseline metric capture.</role>
+
+  <goal>A baseline metrics report in `notes/baseline-metrics.md` with p50/p95 for the last 30 days plus methodology.</goal>
+
+  <inputs>
+    <file purpose="workflow">.github/workflows/sdap-ci.yml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Use gh API only; no production data needed beyond workflow run timings.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">`gh run list --workflow=sdap-ci.yml --limit 200 --created &gt;=2026-05-26 --json databaseId,conclusion,createdAt,updatedAt,event,headBranch`</step>
+    <step order="2">Filter to PR-triggered runs that completed (success OR failure, exclude cancelled)</step>
+    <step order="3">Compute duration per run; calculate p50, p75, p95, p99 across the set</step>
+    <step order="4">Also compute success rate, retry rate</step>
+    <step order="5">Write `notes/baseline-metrics.md` with: methodology, sample size, p50/p95/p99, success rate, retry rate, comparison targets for SC-01..SC-03</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/baseline-metrics.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Report includes p50, p95 for at least 30-day window</criterion>
+    <criterion testable="true">Sample size ≥ 50 runs (if fewer available, document why)</criterion>
+    <criterion testable="true">Calibration targets for SC-01..SC-03 derived from baseline</criterion>
+  </acceptance-criteria>
+</task>

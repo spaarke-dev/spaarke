@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="096" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Dispatch memory.promotion_pending from MatterMemoryPromotionService</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4e)</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>093,094,095</dependencies>
+    <blocks>098</blocks>
+    <tags>bff-api, services, ADR-030</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include 'bff-api'; modifies `.cs`; ADR-030 v2 binding (memory channel + payload shape); ADR-015 binding (factSummary 80-char preview only)</rigor-reason>
+    <parallel-group>4-L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add dispatch of `memory.promotion_pending` PaneEventBus event from `MatterMemoryPromotionService.QueueForApprovalAsync` (after successful Cosmos pending-record write). Payload: `{ type: 'promotion_pending', promotionId, factSummary (80-char preview), matterId, sessionId }` per architecture §6.4 + ADR-030 v2 amendment 2026-06-21. Uses the new `memory` channel (added to PaneEventTypes by task 060). ADR-015 binding: `factSummary` is the ONLY content field permitted and is capped at 80 characters; full fact content NEVER emitted in the event.
+  </prompt>
+
+  <role>SPAARKE platform BFF developer. Expert in PaneEventBus dispatch + ADR-015 tier-1 payload safety.</role>
+
+  <goal>
+    `MatterMemoryPromotionService.QueueForApprovalAsync` (task 093) extended to emit `memory.promotion_pending` after the Cosmos write completes. The dispatch goes through the existing server-side event emitter (e.g., `IContextEventEmitter` or whichever channel emits to PaneEventBus). Payload schema MATCHES the architecture §6.4 + spec FR-32 contract verbatim. Unit tests assert: event emitted after Cosmos write success; payload shape exact; `factSummary` capped ≤80 chars (substring of fact, no full fact in payload); event NOT emitted on Cosmos write failure.
+  </goal>
+
+  <context>
+    <background>
+      Per architecture §6.4 (promote-to-matter flow — `memory.promotion_pending` emission), ADR-030 v2 amendment (memory channel added by task 060), ADR-015 (factSummary 80-char preview only; never full fact). Spec FR-32 specifies the channel + payload verbatim. The frontend subscriber (task 098) consumes this event via `usePaneEvent('memory', ...)`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryPromotionService.cs (from task 093)</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md (v2 amendment)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">No new endpoint.</constraint>
+    <constraint source="ADR-010">Inject existing event-emitter contract directly into the service (likely already wired by task 093).</constraint>
+    <constraint source="ADR-013">Service is BFF-internal; event emitter is in the AI eventing namespace — no PublicContracts crossing.</constraint>
+    <constraint source="ADR-015">CRITICAL — `factSummary` is the ONLY content-bearing field and MUST be truncated to ≤80 chars. Full fact text MUST NOT appear in the event payload. Telemetry logs also omit fact content per tier-1 rule.</constraint>
+    <constraint source="ADR-029">≤+0.05 MB delta.</constraint>
+    <constraint source="ADR-030">v2 amendment: `memory` channel is the canonical channel for memory-domain events. Use `memory.promotion_pending` discriminant. Do NOT route through `workspace.*` channels (architecture §6.4 + ADR-030 v2).</constraint>
+    <constraint source="architecture">§6.4 — event emitted AFTER Cosmos pending-write succeeds; not on failure.</constraint>
+    <constraint source="architecture">§6.4 — payload schema: `{ type: 'promotion_pending', promotionId, factSummary (80-char preview), matterId, sessionId }`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load architecture §6.4 + ADR-030 v2 + ADR-015.</step>
+    <step order="2">Read `MatterMemoryPromotionService.cs` (from task 093) — locate the `QueueForApprovalAsync` success path right after the Cosmos write.</step>
+    <step order="3">Identify the canonical server-side event emitter (likely `IContextEventEmitter` or a dedicated PaneEventBus contract — search `Services/Ai/Audit/` and `Services/Ai/Eventing/` for the pattern).</step>
+    <step order="4">Add emit logic: `factSummary` = `fact.Substring(0, Math.Min(80, fact.Length))`; payload `{ type: "promotion_pending", promotionId, factSummary, matterId, sessionId }`; channel `"memory"`.</step>
+    <step order="5">If the channel string constant doesn't exist server-side, add `MemoryEventChannel = "memory"` to the appropriate constants file mirroring the `workspace`/`context` channel patterns.</step>
+    <step order="6">Update unit tests at `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/MatterMemoryPromotionServiceTests.cs` (extended from task 093):
+      - Assert event emitted after Cosmos write success
+      - Assert `factSummary.Length &lt;= 80`
+      - Assert event payload shape matches architecture §6.4
+      - Assert event NOT emitted when Cosmos write throws
+    </step>
+    <step order="7">Run `dotnet build` + `dotnet test`. Must pass.</step>
+    <step order="8">Measure BFF publish-size delta; write `notes/handoffs/096-bff-publish-delta.md`.</step>
+    <step order="9">Run code-review + adr-check (Step 9.5 FULL — adr-check is binding for ADR-015 fact-content rule).</step>
+    <step order="10">Update TASK-INDEX.md: 096 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">MatterMemoryPromotionService, event emitter contracts</tool>
+    <tool name="Grep">Locate channel constants (workspace, context)</tool>
+    <tool name="Edit">Service emit site + tests + possibly constants file</tool>
+    <tool name="Bash">dotnet build / test / publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryPromotionService.cs (extended emit)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Memory/MatterMemoryPromotionServiceTests.cs (extended)</output>
+    <output type="docs">notes/handoffs/096-bff-publish-delta.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Event `memory.promotion_pending` emitted after `QueueForApprovalAsync` Cosmos write success.</criterion>
+    <criterion testable="true">Payload exactly matches `{ type, promotionId, factSummary, matterId, sessionId }`.</criterion>
+    <criterion testable="true">`factSummary.Length &lt;= 80` — unit test asserts on factories with long fact strings.</criterion>
+    <criterion testable="true">Event NOT emitted on Cosmos write failure.</criterion>
+    <criterion testable="true">Channel string is `"memory"` (not `"workspace"`).</criterion>
+    <criterion testable="true">`grep -n "fact[^S]" src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryPromotionService.cs | grep -i "emit\|payload"` returns ZERO matches (no full fact content in payload).</criterion>
+    <criterion testable="true">BFF publish delta ≤+0.05 MB.</criterion>
+    <criterion testable="true">code-review + adr-check exit 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Separated from task 093 service authoring for clean reviewability of the ADR-015 payload-shape invariant. Companion task 097 dispatches the `resolved` + `fact_promoted` events from the Approve/Reject paths. Task 098 is the frontend subscriber.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor protocol — includes code-review + adr-check at Step 9.5. ADR-015 is critically binding.</protocol>
+  </execution>
+</task>

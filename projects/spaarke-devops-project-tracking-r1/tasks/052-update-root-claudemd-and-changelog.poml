@@ -1,0 +1,63 @@
+<task id="DEVOPS-052" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Update root CLAUDE.md §17 Pointers + .claude/CHANGELOG.md</title>
+    <status>completed</status>
+    <phase>6</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <actual-effort>~5 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>documentation, claudemd, changelog, additive-only</tags>
+    <dependencies>050, 051</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Update root `CLAUDE.md` §17 Pointers with one new row per FR-31, and add an entry to `.claude/CHANGELOG.md` referencing this project. The spec references §16 but current root CLAUDE.md uses §17 — verify the active section number and use it.
+
+NOTE: This task modifies root `CLAUDE.md` and `.claude/CHANGELOG.md` — main session only (Sub-Agent Write Boundary).
+  </prompt>
+
+  <role>Documentation maintainer. Tiny additive edits in two files.</role>
+
+  <goal>
+Root CLAUDE.md Pointers section has portfolio row. `.claude/CHANGELOG.md` has a dated entry for this project.
+  </goal>
+
+  <constraints>
+    <constraint source="spec FR-31">Specific row content per spec</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+    <constraint source="root CLAUDE.md footer">Every PR touching CLAUDE.md MUST add an entry to .claude/CHANGELOG.md</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/CHANGELOG.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Verify active Pointers section number in root CLAUDE.md (spec says §16, current may be §17; use current number).</step>
+    <step order="1" name="Add Pointers row">Edit root CLAUDE.md Pointers table. Add row: `Portfolio tracking + DevOps procedures` | `docs/guides/HOW-TO-INITIATE-NEW-PROJECT.md` (initiation + portfolio integration) · `docs/procedures/AI-CODING-PROCEDURES-GUIDE.md` (lifecycle scenarios) · [project #2](https://github.com/users/spaarke-dev/projects/2) (board)</step>
+    <step order="2" name="Add CHANGELOG entry">`.claude/CHANGELOG.md` — add dated entry (current date) referencing this project, the 9 new skills, the 9 hooks, and the 2 extended docs.</step>
+    <step order="3" name="Verify">`grep "Portfolio tracking" CLAUDE.md` returns 1. `grep "spaarke-devops-project-tracking-r1" .claude/CHANGELOG.md` returns 1.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">CLAUDE.md, .claude/CHANGELOG.md</tool>
+    <tool name="Grep">Verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">CLAUDE.md (modified - one row added)</output>
+    <output type="docs">.claude/CHANGELOG.md (modified - one entry added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep "Portfolio tracking" CLAUDE.md` returns 1</criterion>
+    <criterion testable="true">CHANGELOG entry exists referencing this project</criterion>
+    <criterion testable="true">No other CLAUDE.md content changed</criterion>
+  </acceptance-criteria>
+</task>

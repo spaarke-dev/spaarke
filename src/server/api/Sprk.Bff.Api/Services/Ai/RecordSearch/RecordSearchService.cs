@@ -4,9 +4,9 @@ using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.RecordMatching;
 
@@ -35,8 +35,11 @@ namespace Sprk.Bff.Api.Services.Ai.RecordSearch;
 /// The index currently has no contentVector populated, so vector search degrades gracefully.
 /// </para>
 /// <para>
-/// Important: The spaarke-records-index does NOT have a tenantId field for tenant isolation.
-/// This differs from the knowledge-index. Security is enforced at the Dataverse layer.
+/// Per FR-12 (spaarke-ai-azure-setup-dev-r1): the spaarke-records-index now has a tenantId
+/// field and this service applies an unconditional <c>tenantId eq '...'</c> OData filter
+/// (derived from the user's 'tid' claim via <see cref="IHttpContextAccessor"/>) so cross-tenant
+/// record leaks are impossible at the search layer. The existing Dataverse-layer enforcement
+/// remains as defense-in-depth.
 /// </para>
 /// </remarks>
 public sealed class RecordSearchService : IRecordSearchService
@@ -44,7 +47,14 @@ public sealed class RecordSearchService : IRecordSearchService
     private readonly SearchIndexClient _searchIndexClient;
     private readonly IOpenAiClient _openAiClient;
     private readonly IEmbeddingCache _embeddingCache;
-    private readonly IDistributedCache _distributedCache;
+    private readonly ITenantCache _distributedCache;
+
+    // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
+    // spaarke:tenant:{tenantId}:record-search:{queryHash}:{recordTypesHash}:{filtersHash}:{mode}:{limit}:{offset}:v1
+    // NOTE: records-index has no tenantId field; tenant scoping here is for cache-key isolation
+    // (avoids cross-tenant cache poisoning) — security continues to be enforced at the Dataverse layer.
+    private const string CacheResource = "record-search";
+    private const int CacheVersion = 1;
     private readonly DocumentIntelligenceOptions _docIntelOptions;
     private readonly ILogger<RecordSearchService> _logger;
     // multi-container-multi-index-r1 FR-BFF-07 (part 3) — resolver routing for caller-supplied
@@ -74,16 +84,18 @@ public sealed class RecordSearchService : IRecordSearchService
     private static readonly string[] SearchFields =
         ["recordName", "recordDescription", "keywords", "organizations", "people"];
 
-    // Fields to select from index results (all non-vector fields)
+    // Fields to select from index results (all non-vector fields).
+    // FR-12: tenantId included so retrievable=true is honored end-to-end (useful for audit/diagnostics).
     private static readonly string[] SelectFields =
     [
-        "id", "recordType", "recordName", "recordDescription",
+        "id", "tenantId", "recordType", "recordName", "recordDescription",
         "organizations", "people", "referenceNumbers", "keywords",
         "lastModified", "dataverseRecordId", "dataverseEntityName"
     ];
 
     // Cache configuration
-    private const string CacheKeyPrefix = "records-search";
+    // CacheKeyPrefix removed — tenant scoping + on-wire key construction now lives in
+    // ITenantCache wrapper (FR-05 redis remediation r1). Resource name is "record-search".
     private const int CacheExpirationMinutes = 5;
 
     /// <summary>
@@ -111,7 +123,7 @@ public sealed class RecordSearchService : IRecordSearchService
         SearchIndexClient searchIndexClient,
         IOpenAiClient openAiClient,
         IEmbeddingCache embeddingCache,
-        IDistributedCache distributedCache,
+        ITenantCache distributedCache,
         IOptions<DocumentIntelligenceOptions> docIntelOptions,
         ILogger<RecordSearchService> logger,
         IKnowledgeDeploymentService deploymentService,
@@ -148,12 +160,17 @@ public sealed class RecordSearchService : IRecordSearchService
 
         try
         {
-            // Step 1: Check Redis cache
-            var cacheKey = BuildCacheKey(request);
-            var cachedResult = await GetFromCacheAsync(cacheKey, cancellationToken);
+            // Step 1: Check Redis cache (FR-05 + ADR-014)
+            // Derive tenantId for cache-key isolation. Records-index has no tenantId field so
+            // this is purely cache-side scoping; security is enforced at Dataverse.
+            var tenantIdForCache = _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
+                ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+                ?? "system";
+            var cacheId = BuildCacheId(request);
+            var cachedResult = await GetFromCacheAsync(tenantIdForCache, cacheId, cancellationToken);
             if (cachedResult is not null)
             {
-                _logger.LogDebug("Record search cache hit for key {CacheKey}", cacheKey);
+                _logger.LogDebug("Record search cache hit for id {CacheId}", cacheId);
                 return cachedResult;
             }
 
@@ -213,8 +230,10 @@ public sealed class RecordSearchService : IRecordSearchService
                 searchClient = _searchIndexClient.GetSearchClient(indexName);
             }
 
-            // Step 4: Build OData filter
-            var filter = BuildRecordFilter(request);
+            // Step 4: Build OData filter (FR-12: tenantId predicate ALWAYS present —
+            // never bypassed even when SearchIndexName is supplied. tenantIdForCache is
+            // resolved above from the user's 'tid' claim; reuse it here as the source-of-truth.)
+            var filter = BuildRecordFilter(request, tenantIdForCache);
 
             // Step 5: Build search options
             searchStopwatch.Start();
@@ -256,7 +275,7 @@ public sealed class RecordSearchService : IRecordSearchService
             };
 
             // Step 9: Cache results in Redis
-            await SetInCacheAsync(cacheKey, searchResponse, cancellationToken);
+            await SetInCacheAsync(tenantIdForCache, cacheId, searchResponse, cancellationToken);
 
             _logger.LogInformation(
                 "Record search completed: {ResultCount}/{TotalCount} results in {TotalMs}ms " +
@@ -299,11 +318,19 @@ public sealed class RecordSearchService : IRecordSearchService
 
     /// <summary>
     /// Builds OData filter for record search.
-    /// Always includes recordType filter; optionally adds organizations, people, referenceNumbers.
+    /// Always includes tenantId + recordType filters; optionally adds organizations, people, referenceNumbers.
     /// </summary>
-    private static string BuildRecordFilter(RecordSearchRequest request)
+    /// <remarks>
+    /// FR-12: tenantId predicate is ALWAYS first and unconditional — mirrors the
+    /// <see cref="Sprk.Bff.Api.Services.Ai.SemanticSearch.SearchFilterBuilder"/> pattern and
+    /// matches ADR-014 tenant-isolation invariant used by knowledge/files/session indexes.
+    /// </remarks>
+    private static string BuildRecordFilter(RecordSearchRequest request, string tenantId)
     {
         var filterParts = new List<string>();
+
+        // 0. tenantId filter (ALWAYS first, ALWAYS present — FR-12)
+        filterParts.Add($"tenantId eq '{EscapeODataValue(tenantId)}'");
 
         // 1. RecordType filter (ALWAYS required — at least one recordType)
         if (request.RecordTypes.Count == 1)
@@ -534,15 +561,9 @@ public sealed class RecordSearchService : IRecordSearchService
     }
 
     /// <summary>
-    /// Builds a cache key for the record search request.
-    /// Format: records-search:{queryHash}:{recordTypesHash}:{filtersHash}:{options}:v1
+    /// Builds the cache "id" component (query+filters+mode hash) consumed by ITenantCache.
     /// </summary>
-    /// <remarks>
-    /// Note: The records-index does not have tenantId, so tenant scoping is not applied
-    /// at the cache key level. If tenant isolation is added to the index in the future,
-    /// the tenantId should be included in the cache key.
-    /// </remarks>
-    private string BuildCacheKey(RecordSearchRequest request)
+    private string BuildCacheId(RecordSearchRequest request)
     {
         var queryHash = _embeddingCache.ComputeContentHash(request.Query);
         var recordTypesHash = _embeddingCache.ComputeContentHash(
@@ -567,55 +588,49 @@ public sealed class RecordSearchService : IRecordSearchService
         var limit = request.Options?.Limit ?? 20;
         var offset = request.Options?.Offset ?? 0;
 
-        return $"{CacheKeyPrefix}:{queryHash}:{recordTypesHash}:{filtersHash}:{mode}:{limit}:{offset}:v1";
+        return $"{queryHash}:{recordTypesHash}:{filtersHash}:{mode}:{limit}:{offset}";
     }
 
     /// <summary>
-    /// Gets cached search response from Redis.
+    /// Gets cached search response from Redis via ITenantCache.
     /// </summary>
     private async Task<RecordSearchResponse?> GetFromCacheAsync(
-        string cacheKey,
+        string tenantId,
+        string cacheId,
         CancellationToken cancellationToken)
     {
         try
         {
-            var cached = await _distributedCache.GetStringAsync(cacheKey, cancellationToken);
-            if (cached is not null)
-            {
-                return System.Text.Json.JsonSerializer.Deserialize<RecordSearchResponse>(cached);
-            }
+            return await _distributedCache.GetAsync<RecordSearchResponse>(
+                tenantId, CacheResource, cacheId, CacheVersion, ct: cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read record search from cache, key={CacheKey}", cacheKey);
+            _logger.LogWarning(ex, "Failed to read record search from cache, id={CacheId}", cacheId);
         }
 
         return null;
     }
 
     /// <summary>
-    /// Caches search response in Redis.
+    /// Caches search response in Redis via ITenantCache.
     /// </summary>
     private async Task SetInCacheAsync(
-        string cacheKey,
+        string tenantId,
+        string cacheId,
         RecordSearchResponse response,
         CancellationToken cancellationToken)
     {
         try
         {
-            var json = System.Text.Json.JsonSerializer.Serialize(response);
-            await _distributedCache.SetStringAsync(
-                cacheKey,
-                json,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(CacheExpirationMinutes)
-                },
-                cancellationToken);
+            await _distributedCache.SetAsync(
+                tenantId, CacheResource, cacheId, CacheVersion,
+                response, TimeSpan.FromMinutes(CacheExpirationMinutes),
+                ct: cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to cache record search results, key={CacheKey}", cacheKey);
+            _logger.LogWarning(ex, "Failed to cache record search results, id={CacheId}", cacheId);
         }
     }
 

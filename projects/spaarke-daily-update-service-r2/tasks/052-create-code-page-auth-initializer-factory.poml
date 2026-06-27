@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Create `createCodePageAuthInitializer` factory in `@spaarke/auth` (FR-20a)</title>
+    <phase>DD: De-Duplication</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>053</blocks>
+    <tags>auth, frontend, refactoring, typescript</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag auth triggers FULL; new factory consumed by 3 solutions; preserves call sequence</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Per FR-20: create `createCodePageAuthInitializer(config)` factory in `@spaarke/auth`. Factory returns the triple `{ ensureAuthInitialized, authenticatedFetch, getTenantId }`. Internal logic preserves the exact call sequence used by the 3 current solution-local `authInit.ts` copies (compared in this task to ensure no semantic drift).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in `@spaarke/auth` v2 SSO contract (ADR-028) + code page auth bootstrap.</role>
+
+  <goal>Factory exists and exports from `@spaarke/auth`; signature matches FR-20; behaviorally equivalent to the 3 solution-local copies.</goal>
+
+  <context>
+    <background>
+      Per FR-20 + ADR-028: `@spaarke/auth` is the canonical auth entry point. The 3 solution-local `authInit.ts` files are byte-similar boilerplate that should consolidate into a factory.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Auth/src/createCodePageAuthInitializer.ts</file>
+      <file>src/solutions/DailyBriefing/src/authInit.ts</file>
+      <file>src/solutions/LegalWorkspace/src/authInit.ts</file>
+      <file>src/solutions/SpaarkeAi/src/authInit.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Spaarke Auth v2 canonical entry point.</constraint>
+    <constraint source="ADR-010">DI minimalism; factory is a single export, no new providers.</constraint>
+    <constraint source="project">FR-20: factory returns `{ ensureAuthInitialized, authenticatedFetch, getTenantId }`.</constraint>
+    <constraint source="project">Behavior must match existing 3 solution-local copies (no semantic change).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Open the 3 solution-local `authInit.ts` files; diff them. Identify the union of init logic.</step>
+    <step order="2">Create `src/client/shared/Spaarke.Auth/src/createCodePageAuthInitializer.ts` exporting the factory.</step>
+    <step order="3">Factory signature: `createCodePageAuthInitializer(config: CodePageAuthConfig) =&gt; { ensureAuthInitialized, authenticatedFetch, getTenantId }`.</step>
+    <step order="4">Internal logic preserves the call sequence + side effects from the solution copies.</step>
+    <step order="5">Export from `@spaarke/auth` main barrel.</step>
+    <step order="6">Build `@spaarke/auth`; verify green.</step>
+    <step order="7">Update TASK-INDEX.md: change task 052 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript packages.</tool>
+    <tool name="terminal">Diff files.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Auth/src/createCodePageAuthInitializer.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Factory exported from `@spaarke/auth` with the specified signature.</criterion>
+    <criterion testable="true">Factory internal logic matches union of solution-local copies' behavior.</criterion>
+    <criterion testable="true">`@spaarke/auth` builds green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    If solution-local copies diverge meaningfully, surface in `notes/` BEFORE consolidating — divergence may indicate per-solution requirements that need a config option, not consolidation.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

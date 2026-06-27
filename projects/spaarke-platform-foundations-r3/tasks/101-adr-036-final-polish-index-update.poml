@@ -1,0 +1,55 @@
+<task id="R3-101" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>ADR-036 final polish + INDEX update (post-implementation pass)</title>
+    <status>completed</status>
+    <completion-date>2026-06-22</completion-date>
+    <completion-notes>
+      Post-implementation polish applied to `.claude/adr/ADR-036-background-job-infrastructure.md`:
+      - Status updated: "Accepted — shipped in R3 (2026-06-22; Phase 2 reconciliation
+        consumer pending operator topic deploy per task 071)"
+      - Last Updated bumped to 2026-06-22
+      - Reference consumers section reflects actual shipped state:
+        * PlaybookSchedulerJob: SHIPPED (task 023 + 25 unit/integration tests via task 025)
+        * MembershipReconciliationJob: DEFERRED to post-operator-deploy (task 085 blocked
+          by task 071 Bicep deploy — operator-followup-task071.md runbook authored)
+      Full `docs/adr/ADR-036` doc + both INDEX.md files were authored/updated by task 017
+      (2026-06-21) and remain authoritative — no additional INDEX updates needed since
+      cross-refs to ADR-034 + ADR-035 reserved status already correct. Main-session
+      execution per `.claude/` write boundary (CLAUDE.md §3).
+    </completion-notes>
+    <phase>P10</phase>
+    <parallel-group>U (sequential — main-session-only — .claude/ write boundary)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1-2h</estimated-effort>
+    <tags>docs,adr,polish</tags>
+    <relevant-files>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>docs/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>docs/adr/INDEX.md</file>
+    </relevant-files>
+    <dependencies>017, 023, 025</dependencies>
+  </metadata>
+  <prompt>Post-implementation pass: ADR-036 polish to reflect what was actually built (PlaybookSchedulerService migrated as single row; admin endpoints; Cronos NuGet retained; 26 services NOT migrated per opportunistic strategy).</prompt>
+  <goal>ADR-036 final state matches deployed reality. INDEX updated.</goal>
+  <constraints>
+    <constraint source="CLAUDE.md §3">.claude/ writes are main-session-only</constraint>
+  </constraints>
+  <knowledge>
+    <topic>adr-post-implementation-polish</topic>
+    <files>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>docs/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check + diff</step>
+    <step order="1">Update both ADR files with as-built reality</step>
+    <step order="2">Update INDEX entries</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">ADR-036 reflects shipped reality</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,40 @@
+<task id="R3-051" project="spaarke-platform-foundations-r3">
+  <metadata>
+    <title>Audit + migrate `notification-new-emails.json`</title>
+    <status>completed</status>
+    <completion-date>2026-06-21</completion-date>
+    <completion-notes>Audit found one A1-class defect: the original FetchXML had NO user-membership filter at all (only `directioncode=0` + `createdon>=X` + inner-join to `sprk_matter`), so it would have returned inbound emails on EVERY matter in the tenant — not just the executing user's matters — directly contradicting the playbook description. No `sprk_matterteammember` reference (so not the literal A1 broken-join pattern), but the same root cause (no working membership scoping). Migrated using the same pattern as task 050: added `Lookup My Matters` LookupUserMembership node (actionType=52, entityType=sprk_matter, roles=[owner,assignedAttorney,assignedParalegal], outputVariable=myMatters) between Start and Query New Emails; added `<condition attribute='regardingobjectid' operator='in' value='{{joinIds myMatters.ids}}'/>` to the email filter; preserved the `sprk_matter` link-entity (added `alias='matter'`) so the body template's `regardingMatterName` keeps working. Edges updated (Start→Lookup My Matters→Query New Emails). Positions shifted +100x to make room. JSON re-validated.</completion-notes>
+    <phase>P6</phase>
+    <parallel-group>L (with 050, 052)</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <rigor>STANDARD</rigor>
+    <estimated-effort>1h</estimated-effort>
+    <tags>playbook-config,migration,audit</tags>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-emails.json</file>
+    </relevant-files>
+    <dependencies>041, 042</dependencies>
+  </metadata>
+  <prompt>Audit notification-new-emails.json for similar broken membership patterns; if found, migrate to LookupUserMembership.</prompt>
+  <goal>If broken pattern found, migrated. If not, document audit findings + close.</goal>
+  <constraints>
+    <constraint source="spec FR-1C.2">Audit + migrate if applicable</constraint>
+  </constraints>
+  <knowledge>
+    <topic>playbook-migration-audit</topic>
+    <files>
+      <file>projects/spaarke-platform-foundations-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-new-emails.json</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="0">Context check</step>
+    <step order="1">Read playbook; identify any non-existent entity joins or ad-hoc membership FetchXML</step>
+    <step order="2">If broken: migrate to LookupUserMembership pattern (per task 050)</step>
+    <step order="3">If not broken: document audit in task notes; close task</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Audit completed + outcome documented</criterion>
+    <criterion testable="true">If migrated, playbook produces non-zero notifications</criterion>
+  </acceptance-criteria>
+</task>

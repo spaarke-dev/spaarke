@@ -8,6 +8,10 @@
  *   • `{ action: 'openTodos', regardingFilter }`  — Visual Host card drill-through
  *     (R4 FR-34 / task 034). Triggers the Kanban to pre-filter to the parent
  *     record.
+ *   • `{ action: 'openTodo', todoId }`            — LegalWorkspace widget "Open"
+ *     button (R4 task 100 / W-2). Triggers `<SmartTodoApp>` to auto-mount the
+ *     `<SmartTodoModal>` on the specific record (NOT the Kanban). Closes UAT
+ *     issue 4 from the 2026-06-18 widget-parity audit.
  *   • `undefined` — Normal SmartTodo load (no launch context); Kanban renders
  *     unfiltered, no wizard auto-opens.
  *
@@ -43,6 +47,12 @@
  *   • `regardingId`       — GUID (lowercased, no braces)
  *   • `regardingName`     — display name (typically the email subject)
  *
+ * **openTodo branch** (R4 task 100 / W-2 — LW widget "Open" button):
+ *   • `action=openTodo`   — discriminator (REQUIRED)
+ *   • `todoId`            — GUID of the to-do record to open (REQUIRED)
+ *   Recognised in BOTH raw query form AND the `?data=<envelope>` form per the
+ *   `parseDataParams` ADR-026 convention.
+ *
  * **openTodos branch** (two recognised wire formats):
  *
  *   1. Explicit raw query (e.g., direct test URL or future caller):
@@ -67,9 +77,10 @@
  *      formats (per Spaarke Code Page convention — ADR-026).
  *   2. Recognises the launch contract per priority order:
  *      a. Explicit `action=createTodo` + valid regarding triple → createTodo.
- *      b. Explicit `action=openTodos`  + regardingType/Id        → openTodos.
- *      c. VisualHost auto-inject (`filterField` + `filterValue` present;
- *         `action` absent)                                       → openTodos.
+ *      b. Explicit `action=openTodo`   + valid todoId           → openTodo.
+ *      c. Explicit `action=openTodos`  + regardingType/Id       → openTodos.
+ *      d. VisualHost auto-inject (`filterField` + `filterValue` present;
+ *         `action` absent)                                      → openTodos.
  *   3. If `action` is `createTodo` but regarding params are missing/blank:
  *        → returns `{ action: 'createTodo', initialRegarding: undefined }`
  *          (graceful degrade, logs a console warning). Wizard still auto-opens.
@@ -107,14 +118,28 @@ export const LAUNCH_ACTION_CREATE_TODO = 'createTodo';
 export const LAUNCH_ACTION_OPEN_TODOS = 'openTodos';
 
 /**
+ * Action discriminator value indicating `<SmartTodoApp>` should auto-mount the
+ * `<SmartTodoModal>` on a specific to-do record (R4 task 100 / W-2 — closes UAT
+ * issue 4: clicking Open on the LegalWorkspace widget must open the To Do main
+ * form, NOT the bare Kanban Code Page).
+ *
+ * Binding contract shared with `src/solutions/LegalWorkspace/src/sections/
+ * todo.registration.ts` (`handleOpenTodo`).
+ */
+export const LAUNCH_ACTION_OPEN_TODO = 'openTodo';
+
+/**
  * Query-parameter keys consumed by this hook for the explicit (raw) wire format.
- * Binding contract shared with `createTodoLauncher.ts` (R3 task 070).
+ * Binding contract shared with `createTodoLauncher.ts` (R3 task 070) and the
+ * LegalWorkspace `todo.registration.ts` shim (R4 task 100 — `TODO_ID` key).
  */
 export const LAUNCH_PARAM_KEYS = {
   ACTION: 'action',
   REGARDING_TYPE: 'regardingType',
   REGARDING_ID: 'regardingId',
   REGARDING_NAME: 'regardingName',
+  /** GUID of the to-do record to open (used by the openTodo branch, R4 task 100). */
+  TODO_ID: 'todoId',
 } as const;
 
 /**
@@ -195,7 +220,7 @@ export interface ICreateTodoLaunchContext {
 }
 
 /**
- * Launch context for the R4 FR-34 Visual Host drill-through flow (NEW).
+ * Launch context for the R4 FR-34 Visual Host drill-through flow.
  */
 export interface IOpenTodosLaunchContext {
   action: typeof LAUNCH_ACTION_OPEN_TODOS;
@@ -204,11 +229,28 @@ export interface IOpenTodosLaunchContext {
 }
 
 /**
+ * Launch context for the R4 task 100 / W-2 widget "Open" flow.
+ *
+ * Emitted by the LegalWorkspace SmartTodo widget shim when the user clicks
+ * the toolbar Open button on a selected widget card. `<SmartTodoApp>` reads
+ * this context to auto-mount `<SmartTodoModal>` on the supplied record (so
+ * the user sees the To Do main form rather than the bare Kanban — UAT issue 4).
+ */
+export interface IOpenTodoLaunchContext {
+  action: typeof LAUNCH_ACTION_OPEN_TODO;
+  /** GUID of the to-do record to open in the modal. */
+  todoId: string;
+}
+
+/**
  * Parsed launch context returned by `useLaunchContext`. `undefined` indicates
  * the Code Page was loaded without a recognised launch action — SmartTodo
  * renders normally.
  */
-export type ILaunchContext = ICreateTodoLaunchContext | IOpenTodosLaunchContext;
+export type ILaunchContext =
+  | ICreateTodoLaunchContext
+  | IOpenTodosLaunchContext
+  | IOpenTodoLaunchContext;
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -246,7 +288,7 @@ function deriveEntityTypeFromFilterField(filterField: string): string | undefine
  * the browser history stack is disturbed.
  *
  * Cleared keys:
- *   • Raw: `action`, `regardingType`, `regardingId`, `regardingName`
+ *   • Raw: `action`, `regardingType`, `regardingId`, `regardingName`, `todoId`
  *   • Raw VisualHost: `entityName`, `filterField`, `filterValue`, `mode`
  *   • Envelope: the whole `data=` param (since its decoded contents are
  *     known launch keys; if a future caller needs to preserve non-launch
@@ -388,6 +430,30 @@ function looksLikeVisualHostAutoInject(params: Record<string, string>): boolean 
 }
 
 /**
+ * Build the `openTodo` branch (R4 task 100 / W-2). The LegalWorkspace widget's
+ * Open button emits `?action=openTodo&todoId=<guid>` (raw OR envelope-wrapped)
+ * so `<SmartTodoApp>` can auto-mount `<SmartTodoModal>` on the specific record.
+ *
+ * Returns `undefined` when `todoId` is missing/blank — without a target ID the
+ * action is meaningless. The caller falls back to normal load (Kanban view).
+ */
+function buildOpenTodoContext(
+  params: Record<string, string>,
+): IOpenTodoLaunchContext | undefined {
+  const todoId = params[LAUNCH_PARAM_KEYS.TODO_ID];
+  if (!isNonBlank(todoId)) {
+    console.warn(
+      '[SmartTodo] useLaunchContext: action=openTodo received but todoId is missing/blank — falling back to normal load',
+    );
+    return undefined;
+  }
+  return {
+    action: LAUNCH_ACTION_OPEN_TODO,
+    todoId: todoId.trim(),
+  };
+}
+
+/**
  * Pure parser (extracted for testability). Reads from the supplied query string
  * and returns the launch context (or `undefined`). Does NOT touch `window`.
  *
@@ -406,6 +472,10 @@ export function parseLaunchContextFromSearch(search: string): ILaunchContext | u
 
   if (action === LAUNCH_ACTION_CREATE_TODO) {
     return buildCreateTodoContext(params);
+  }
+
+  if (action === LAUNCH_ACTION_OPEN_TODO) {
+    return buildOpenTodoContext(params);
   }
 
   if (action === LAUNCH_ACTION_OPEN_TODOS) {
@@ -441,6 +511,12 @@ export function parseLaunchContextFromSearch(search: string): ILaunchContext | u
  * if (launchContext?.action === 'createTodo') {
  *   // launchContext.initialRegarding may be undefined (graceful degrade)
  *   openCreateWizard(launchContext.initialRegarding);
+ * }
+ *
+ * // openTodo branch (R4 task 100 — LegalWorkspace widget Open button)
+ * if (launchContext?.action === 'openTodo') {
+ *   // launchContext.todoId is always populated
+ *   setModalTodoId(launchContext.todoId);
  * }
  *
  * // openTodos branch (R4 FR-34 — Visual Host drill-through)

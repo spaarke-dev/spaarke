@@ -1,0 +1,54 @@
+<task id="CICD-077" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Retire .github/workflows/sdap-ci.yml (at cutover+14d minimum per spec MUST rule)</title>
+    <status>not-started</status>
+    <estimated-effort>0.5 hours</estimated-effort>
+    <phase>3 - Retirement</phase>
+    <stream>A - CI tiering</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>075</dependencies>
+    <tags>cleanup, retirement, sdap-ci, MUST-rule</tags>
+    <gate-condition>cutover+14d minimum</gate-condition>
+  </metadata>
+
+  <prompt>
+    Per spec MUST rule: retire `sdap-ci.yml` only after cutover+14 days of new-tier stability. Delete the file; verify branch protection no longer references its jobs; verify ci-router.yml + tier1 + tier2 + augmented nightly-health cover all previous responsibilities.
+  </prompt>
+
+  <role>CI/CD engineer retiring the legacy workflow.</role>
+
+  <goal>`sdap-ci.yml` deleted; nothing in branch protection or CD chain references it.</goal>
+
+  <inputs>
+    <file purpose="legacy">.github/workflows/sdap-ci.yml</file>
+    <file purpose="soak-evidence">projects/ci-cd-unit-test-remediation-r1/notes/soak-passed.md (from 075)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec MUST">Retire only post-cutover after 14 days of new-tier stability.</constraint>
+    <constraint source="spec rollback">sdap-ci.yml was the rollback fallback during the 14d window; deletion makes rollback harder (only branch-protection-pre-cutover.json + 070 snapshot restore remains).</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Verify cutover+14d minimum has elapsed (check timestamps in 071 cutover-success.md vs current date)</step>
+    <step order="2">Verify task 075 soak-passed.md shows ≥7d green; verify additional ≥7d of stability beyond that</step>
+    <step order="3">Confirm branch protection no longer references any sdap-ci.yml jobs (re-check `gh api repos/spaarke-dev/spaarke/branches/master/protection`)</step>
+    <step order="4">Confirm no other workflow (`workflow_run`-based, e.g., deploy-promote.yml) depends on `sdap-ci.yml` completion</step>
+    <step order="5">`git rm .github/workflows/sdap-ci.yml`; also delete `sdap-ci-docs-only.yml` if it becomes a no-op orphan</step>
+    <step order="6">Commit + push (title: "ci: retire sdap-ci.yml after 14-day post-cutover stability soak [closes spec MUST rule]")</step>
+  </steps>
+
+  <outputs>
+    <output type="workflow-deletion">.github/workflows/sdap-ci.yml (deleted)</output>
+    <output type="workflow-deletion" conditional="if-orphan">.github/workflows/sdap-ci-docs-only.yml (potentially deleted)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">cutover+14d minimum verified</criterion>
+    <criterion testable="true">sdap-ci.yml file deleted</criterion>
+    <criterion testable="true">Branch protection no longer references sdap-ci jobs</criterion>
+    <criterion testable="true">No other workflow depends on sdap-ci.yml</criterion>
+  </acceptance-criteria>
+</task>

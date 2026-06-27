@@ -9,6 +9,24 @@
 
 ---
 
+## 🆕 Structured Truth Source (added 2026-06-26)
+
+**For machine-parseable lookup** (Claude / scripts / CI) — use **[`config/spaarke-resources.yaml`](../../config/spaarke-resources.yaml)**:
+- Tenant + subscription IDs
+- All app registrations (BFF API, MSAL, code page, PCF, deprecated)
+- SharePoint Embedded container TYPE + container INSTANCES per environment
+- Per-environment Azure / Dataverse / AI / SPE resources
+- Key Vault secret references (`kv:NAME` — never values)
+- Lifecycle metadata: `_meta` blocks with status/created/retired/history; `_changelog` at top
+- Key Vault inventory snapshot: referenced / not-secret-but-stored-as-secret / duplicates
+
+**Materialize secret values** locally (gitignored): `./scripts/Sync-LocalConfig.ps1`
+**Detect drift** vs Azure: `./scripts/Validate-Manifest.ps1`
+
+This prose document remains the canonical narrative reference for **debugging steps + worked examples**. The YAML is canonical for IDs, names, and KV references.
+
+---
+
 ## TL;DR
 
 Quick reference for all Azure resource IDs, app registration GUIDs, and configuration values used in SDAP authentication. Use this when debugging auth issues or configuring new environments.

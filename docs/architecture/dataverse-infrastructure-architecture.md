@@ -43,7 +43,7 @@ The key design decision is the **separation of data access from authorization de
 ### User Access Resolution
 
 1. API endpoint calls `IAccessDataSource.GetUserAccessAsync(userId, resourceId, userAccessToken?)`
-2. `CachedAccessDataSource` checks Redis (`sdap:auth:access:{userId}:{resourceId}`, TTL 60s)
+2. `CachedAccessDataSource` checks Redis via `ITenantCache` (`spaarke:tenant:{tenantId}:uac-access:{userId}:{resourceId}:v1`, TTL 60s) — post-`spaarke-redis-cache-remediation-r1`
 3. On cache miss: delegates to `DataverseAccessDataSource`
 4. `DataverseAccessDataSource` determines auth mode:
    - If `userAccessToken` is provided: performs OBO token exchange via MSAL to get Dataverse token

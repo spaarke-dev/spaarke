@@ -1,0 +1,61 @@
+name: Epic
+description: Create a new Epic to group related Spaarke projects under a portfolio rollup.
+title: "[Epic]: "
+labels: [epic]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template to define a portfolio Epic. Epics group related Spaarke Projects under a single rollup so Roadmap views answer "what theme is this work part of?"
+        After submission: set `Type=Epic` on Project #2 (auto-applied on label `epic`). Projects attach to this Epic via the `Parent issue` field.
+
+  - type: textarea
+    id: objectives
+    attributes:
+      label: Objectives / Focus
+      description: 2-4 sentences. What does this Epic aim to achieve at the portfolio level?
+      placeholder: e.g. "Unify all chat surfaces across Spaarke into a single platform with shared playbook execution, capability routing, and observability..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What's in-scope and what's out-of-scope for the Epic. Bullet points OK.
+      placeholder: |
+        In scope:
+        - …
+        Out of scope:
+        - …
+    validations:
+      required: true
+
+  - type: textarea
+    id: success-criteria
+    attributes:
+      label: Success Criteria
+      description: How will we know this Epic has been delivered? Measurable outcomes.
+      placeholder: |
+        - …
+        - …
+    validations:
+      required: true
+
+  - type: input
+    id: timeframe
+    attributes:
+      label: Projected Timeframe
+      description: Free-text — quarter, half-year, "after X completes", etc. Roadmap view interprets dates from Start Date / Target Date custom fields (set later).
+      placeholder: e.g. "H2 2026" or "After AI Platform Unification r6 ships"
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / Context
+      description: Anything stakeholders should know.
+      placeholder: References, prior projects, owner thinking…
+    validations:
+      required: false

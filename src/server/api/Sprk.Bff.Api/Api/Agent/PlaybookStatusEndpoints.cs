@@ -3,8 +3,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Api.Agent;
 
@@ -17,21 +17,23 @@ namespace Sprk.Bff.Api.Api.Agent;
 /// </summary>
 public sealed class AgentPlaybookStatusService
 {
-    private readonly IDistributedCache _cache;
+    /// <summary>Tenant-cache resource name for agent playbook-status payloads (FR-05).</summary>
+    internal const string CacheResource = "agent-playbook-job";
+
+    /// <summary>Tenant-cache schema version for agent playbook-status payloads.</summary>
+    internal const int CacheVersion = 1;
+
+    private readonly ITenantCache _cache;
     private readonly ILogger<AgentPlaybookStatusService> _logger;
     private readonly HandoffUrlBuilder _handoffUrlBuilder;
 
     // Default threshold: if playbook takes longer than this, offer deep-link
     private static readonly TimeSpan InlineExecutionTimeout = TimeSpan.FromSeconds(30);
 
-    private const string CacheKeyPrefix = "agent:playbook-job:";
-    private static readonly DistributedCacheEntryOptions CacheOptions = new()
-    {
-        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(4)
-    };
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(4);
 
     public AgentPlaybookStatusService(
-        IDistributedCache cache,
+        ITenantCache cache,
         ILogger<AgentPlaybookStatusService> logger,
         HandoffUrlBuilder handoffUrlBuilder)
     {
@@ -154,17 +156,24 @@ public sealed class AgentPlaybookStatusService
     private async Task<PlaybookJobStatus?> GetJobStatusInternalAsync(
         string tenantId, Guid jobId, CancellationToken cancellationToken)
     {
-        var cacheKey = $"{CacheKeyPrefix}{tenantId}:{jobId}";
-        var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+        // Tenant-scoped via ITenantCache per FR-05; id = jobId.
+        var cached = await _cache.GetStringAsync(
+            tenantId, CacheResource, jobId.ToString(), CacheVersion, ct: cancellationToken);
         return cached is null ? null : JsonSerializer.Deserialize<PlaybookJobStatus>(cached);
     }
 
     private async Task SaveJobStatusAsync(
         PlaybookJobStatus status, CancellationToken cancellationToken)
     {
-        var cacheKey = $"{CacheKeyPrefix}{status.TenantId}:{status.JobId}";
         var json = JsonSerializer.Serialize(status);
-        await _cache.SetStringAsync(cacheKey, json, CacheOptions, cancellationToken);
+        await _cache.SetStringAsync(
+            status.TenantId,
+            CacheResource,
+            status.JobId.ToString(),
+            CacheVersion,
+            json,
+            ttl: CacheTtl,
+            ct: cancellationToken);
     }
 }
 

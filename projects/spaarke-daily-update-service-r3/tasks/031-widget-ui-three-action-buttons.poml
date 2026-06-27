@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-daily-update-service-r3">
+  <metadata>
+    <title>Widget UI: 3 action buttons in `NarrativeBullet` + props wiring + handler composition in `DailyBriefingApp`</title>
+    <phase>Phase 4b: Widget UI Wiring</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>040</blocks>
+    <tags>frontend, react, fluent-ui, ui, e2e-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Fluent v9 UI work per ADR-021; preserves existing "Add to To Do" (ADR-024); regression risk if mishandled; quality gates at Step 9.5 required</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add 3 new per-item action buttons to `NarrativeBullet` using Fluent v9 icons (`CheckmarkRegular`, `DismissRegular`, `CalendarAddRegular`). Wire the new button props through `ActivityNotesSection`. Compose the new hook handlers (from task 030) in `DailyBriefingApp.tsx` and pass them down. Preserve the existing "Add to To Do" button (4th in row, ADR-024). Verify dark-mode rendering. Update `DailyBriefingApp.smoke.test.tsx` fixtures for `sprk_briefingstate` field.
+  </prompt>
+
+  <role>SPAARKE frontend platform developer. Expert in React component composition, Fluent UI v9 (tokens, icons, dark mode), and the `@spaarke/daily-briefing-components` package shape.</role>
+
+  <goal>3 new action buttons render per item in order (Check / Remove / Keep / existing Add-to-To-Do). Clicking each invokes the corresponding hook handler from task 030. Optimistic UI updates as expected. Toasts confirm. Dark mode + light mode both render correctly per ADR-021. `DailyBriefingApp.smoke.test.tsx` passes with `sprk_briefingstate` fixture updates.</goal>
+
+  <context>
+    <background>
+      Per spec FR-4, FR-5, FR-6, FR-7: the widget UI surfaces the 3 new actions with Fluent v9 icons and standard Spaarke button patterns. The UI layer is thin — buttons call hook handlers (task 030) which do the work. Owner-specified icons: `CheckmarkRegular` (Check), `DismissRegular` (Remove), `CalendarAddRegular` (Keep +7d). ADR-024: the existing "Add to To Do" 4th button MUST remain functional — `useInlineTodoCreate` with `TODO_REGARDING_CATALOG` preserved.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/test/DailyBriefingApp.smoke.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">All changes confined to `@spaarke/daily-briefing-components` package</constraint>
+    <constraint source="ADR-021">MUST use Fluent v9 icons + tokens (`tokens.colorBrandBackground` etc.); MUST support dark mode</constraint>
+    <constraint source="ADR-024">MUST preserve existing "Add to To Do" button + `useInlineTodoCreate` + `TODO_REGARDING_CATALOG` — no changes</constraint>
+    <constraint source="spec">Icon set MUST be: `CheckmarkRegular` / `DismissRegular` / `CalendarAddRegular` from `@fluentui/react-icons` (owner-specified)</constraint>
+    <constraint source="spec">Tooltips MUST be: "Mark as read" / "Remove from briefing" / "Keep on briefing for 7 more days"</constraint>
+    <constraint source="spec">Button order MUST be: Check, Remove, Keep, (existing) Add to To Do</constraint>
+    <constraint source="fluent-v9-component-authoring.md">Use Griffel + semantic tokens + `mergeClasses` per Spaarke convention</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-daily-update-service-r3/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r3/design.md</file>
+      <file>projects/spaarke-daily-update-service-r3/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `NarrativeBullet.tsx` to locate the existing action button row (where "Add to To Do" lives)</step>
+    <step order="2">Read `ActivityNotesSection.tsx` to identify how item-level callbacks are passed down</step>
+    <step order="3">Read `DailyBriefingApp.tsx:238-287` for the `handleAddToTodo` composition pattern</step>
+    <step order="4">In `NarrativeBullet.tsx`, add 3 new `IconButton` (or `Button` with `icon`) elements BEFORE the existing "Add to To Do" button, in order: Check → Remove → Keep. Use `CheckmarkRegular`, `DismissRegular`, `CalendarAddRegular` from `@fluentui/react-icons`. Tooltips per spec. Each receives an `onClick` prop from the parent</step>
+    <step order="5">Add new optional props to `NarrativeBullet`: `onCheck?(id): void`, `onRemove?(id): void`, `onKeep?(id, currentTtlSeconds): void`. If undefined, hide the button (defensive default)</step>
+    <step order="6">Plumb the new props through `ActivityNotesSection.tsx` from its parent</step>
+    <step order="7">In `DailyBriefingApp.tsx`, destructure `markChecked`, `markRemoved`, `extendTtl` from `useBriefingActions()`. Pass them down through `ActivityNotesSection` to `NarrativeBullet` as `onCheck`, `onRemove`, `onKeep`</step>
+    <step order="8">Verify Griffel `makeStyles` uses semantic tokens (e.g., `tokens.colorBrandForeground1`) — NOT raw hex values</step>
+    <step order="9">Visual check (manual + dev server): toggle dark mode; verify icon colors adapt; verify hover states; verify tooltip rendering</step>
+    <step order="10">Update `DailyBriefingApp.smoke.test.tsx` fixtures: include `sprk_briefingstate` in mock entity shapes (use values 0 and 1 to cover Unread and Checked); ensure rendering doesn't break</step>
+    <step order="11">Add a smoke test assertion: 3 new buttons render per item (using `getAllByRole('button')` or testing-library queries by accessible name)</step>
+    <step order="12">Verify existing "Add to To Do" button still renders + still functions (preserve ADR-024 regression-free)</step>
+    <step order="13">Run `npm run build` + `npm test` in widget package — all must pass</step>
+    <step order="14">Update TASK-INDEX.md: change task 031 status from 🔲 to ✅</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test widget package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx (3 new buttons + props)</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/ActivityNotesSection.tsx (props plumbing)</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx (handler composition)</output>
+    <output type="test">src/client/shared/Spaarke.DailyBriefing.Components/test/DailyBriefingApp.smoke.test.tsx (fixtures + new assertions)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3 new buttons render per item in the correct order with the correct icons (verified by smoke test)</criterion>
+    <criterion testable="true">Existing "Add to To Do" button still renders + still functions (ADR-024 regression-free)</criterion>
+    <criterion testable="true">Clicking each new button invokes the corresponding hook handler (manual UAT + smoke test)</criterion>
+    <criterion testable="true">Dark mode renders correctly (manual visual check + semantic-token check in code review)</criterion>
+    <criterion testable="true">All jest tests pass</criterion>
+    <criterion testable="true">No raw hex colors introduced; only Fluent v9 semantic tokens</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="3 new action buttons render in order">
+      <steps>
+        <step>Render `DailyBriefingApp` with a fixture containing 1 unread notification</step>
+        <step>Query all per-item buttons</step>
+        <step>Verify order: Check, Remove, Keep, Add to To Do</step>
+      </steps>
+      <expected>4 buttons render; first 3 have the specified Fluent v9 icons</expected>
+    </test>
+
+    <test name="Check action invokes markChecked handler">
+      <steps>
+        <step>Render with a notification item</step>
+        <step>Click the Check button</step>
+        <step>Verify `markChecked` hook handler called with item id</step>
+        <step>Verify optimistic UI update applied</step>
+      </steps>
+      <expected>Handler invoked; toast shown; item rendered as read</expected>
+    </test>
+
+    <test name="Dark mode visual compliance per ADR-021">
+      <steps>
+        <step>Toggle FluentProvider theme to `webDarkTheme`</step>
+        <step>Render widget</step>
+        <step>Inspect button icon colors vs background contrast</step>
+      </steps>
+      <expected>Icons + backgrounds use semantic tokens; contrast ratio meets WCAG AA per ADR-021</expected>
+    </test>
+
+    <test name="Existing Add to To Do button regression-free">
+      <steps>
+        <step>Render with a notification item that has `regardingId`</step>
+        <step>Click the existing "Add to To Do" button</step>
+        <step>Verify `useInlineTodoCreate` flow still executes</step>
+      </steps>
+      <expected>4th button still functional; ADR-024 `TODO_REGARDING_CATALOG` resolution preserved</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Sequential dependency: BLOCKED BY task 030 (needs new hook handlers).
+
+    Defer toast-copy refinement to UAT — placeholder copy from spec.md is acceptable; tune if owner requests changes during UAT (task 040).
+
+    Owner-specified icon set is NOT negotiable: `CheckmarkRegular`, `DismissRegular`, `CalendarAddRegular`. Don't substitute alternatives (e.g., `MoreHorizontalRegular`, `CalendarRegular`) without explicit owner approval.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist. FULL rigor — run code-review + adr-check at Step 9.5. Invoke `fluent-v9-component` skill for the 3 new buttons.</protocol>
+  </execution>
+</task>

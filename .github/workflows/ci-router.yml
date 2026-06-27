@@ -1,0 +1,273 @@
+# ============================================================================
+# ci-router.yml — Tiered CI Router (single required status check)
+# ============================================================================
+#
+# PURPOSE
+#   This workflow is the single gate for branch protection on master.
+#   Per spec FR-A01: emits exactly ONE required status check named
+#   `CI / Router` that is NEVER stuck pending. Dispatches Tier 1 (blocking)
+#   and Tier 2 (advisory) via reusable workflow calls, conditioned on
+#   path-aware diff classification.
+#
+# SIGNAL MODEL — Model A (single composite check)
+#   Per task 012's decision (notes/router-signal-model-decision.md):
+#   - Workflow has NO `paths:` filter (would re-introduce the stuck-pending
+#     trap; see GitHub Docs "Troubleshooting required status checks").
+#   - `classify` job uses dorny/paths-filter to emit boolean outputs.
+#   - `tier1` / `tier2` are reusable-workflow calls gated by `if:` on
+#     classify outputs (skipped jobs report success per GitHub semantics).
+#   - `router-result` is the final job: `if: always()` + re-actors/alls-green.
+#     This job's success/failure IS the `CI / Router` required check.
+#
+# BAN — NO COMMIT-MARKER SKIP MECHANISM (spec FR-A05)
+#   The router MUST NOT inspect commit messages for [skip ci]-style markers.
+#   Path-based dispatch via `classify` is the ONLY relief mechanism.
+#
+# SHADOW MODE (Phase 2)
+#   This workflow runs in PARALLEL with the existing `sdap-ci.yml` for ≥14
+#   days. Branch protection is NOT flipped to require `CI / Router` until
+#   task 071 (cutover). Until then, this workflow's result is observational.
+#
+# MERGE QUEUE COMPATIBILITY (spec FR-C01)
+#   The `merge_group` trigger is included from day 1. When merge queue is
+#   enabled in task 071, this workflow re-runs on each queued PR with the
+#   integrated base. classify still works because dorny/paths-filter handles
+#   merge_group payloads (uses github.event.merge_group.base_sha when present).
+#
+# REFERENCES
+#   - projects/ci-cd-unit-test-remediation-r1/spec.md FR-A01, FR-A05, FR-C01
+#   - projects/ci-cd-unit-test-remediation-r1/notes/router-signal-model-decision.md
+#   - GitHub Docs: "Troubleshooting required status checks" — paths-ignore
+#     causes stuck-pending; skipped JOBS report success.
+#   - re-actors/alls-green — pinned to a tagged release for supply-chain safety.
+# ============================================================================
+
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  merge_group:
+    # NOTE: `merge_group` does NOT support a `branches:` filter per GitHub Actions
+    # schema (only `types:` is allowed). Adding `branches:` here causes workflow
+    # startup_failure on every push to master. Merge queue events only fire for
+    # the queue's target branch anyway, so no filter is needed.
+
+permissions:
+  contents: read
+  # pull-requests: write — bumped from `read` to `write` per CICD-086 bisect (2026-06-26).
+  # Root cause: ci-tier2-advisory.yml declares `permissions: pull-requests: write` (for
+  # the tier2-pr-comment job that posts ONE deduplicated comment). GitHub rejects reusable
+  # workflow calls when the callee requests MORE permissions than the caller granted,
+  # pre-job-creation, with no logs (conclusion=startup_failure). `read` was sufficient
+  # for dorny/paths-filter but insufficient for tier2's PR-comment. `write` covers both.
+  # Bisect proof: step 5 (router + tier2 + read) → startup_failure; step 6 (+ write) → parses.
+  pull-requests: write
+
+concurrency:
+  # NOTE: `cancel-in-progress` MUST be a literal boolean — GitHub Actions
+  # schema rejects expressions here at workflow startup (was the cause of
+  # startup_failure 2026-06-26). Using literal `true` is safe because the
+  # `group` key already segregates events:
+  #   - PRs: group `ci-router-{pr_number}` — new push cancels previous PR run (desired)
+  #   - master push: group `ci-router-refs/heads/master` — back-to-back master
+  #     pushes (rare) may cancel each other; acceptable since the newer push
+  #     supersedes the older one anyway
+  #   - merge_group: group includes the ephemeral queue ref, so each queued PR
+  #     gets its own group — no cross-cancellation
+  group: ci-router-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==========================================================================
+  # JOB 1 — classify: Diff classification (path-aware dispatch)
+  # ==========================================================================
+  # Runs unconditionally on every event. Emits boolean outputs consumed by
+  # downstream tier jobs' `if:` conditions. Designed to complete in <10s.
+  # ==========================================================================
+  classify:
+    name: Classify Diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      bff: ${{ steps.filter.outputs.bff }}
+      spaarke_ai: ${{ steps.filter.outputs.spaarke_ai }}
+      docs: ${{ steps.filter.outputs.docs }}
+      ci_workflows: ${{ steps.filter.outputs.ci_workflows }}
+      docs_only: ${{ steps.docs-only-flag.outputs.value }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # Full history for accurate diff on push / merge_group events.
+          # PRs use the GitHub-provided merge ref and don't need depth.
+          fetch-depth: ${{ github.event_name == 'pull_request' && 1 || 0 }}
+
+      - name: Classify changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          # On merge_group / push events, paths-filter compares against the
+          # merge_group.base_sha / previous commit automatically. On PRs it
+          # uses the PR base.
+          filters: |
+            bff:
+              - 'src/server/api/Sprk.Bff.Api/**'
+              - 'src/server/shared/**'
+              - 'tests/integration/auth/**'
+              - 'tests/integration/regression/**'
+              - 'tests/unit/Sprk.Bff.Api.Tests/**'
+              - 'Directory.Packages.props'
+              - 'Directory.Build.props'
+            spaarke_ai:
+              - 'src/solutions/SpaarkeAi/**'
+              - 'src/client/shared/Spaarke.AI.**/**'
+            docs:
+              - 'docs/**'
+              - 'projects/**'
+              - '**.md'
+              - '.claude/**'
+              - 'knowledge/**'
+              - 'memory/**'
+              - 'CHANGELOG*'
+              - 'CODEOWNERS'
+              - 'LICENSE*'
+            ci_workflows:
+              - '.github/workflows/**'
+
+      - name: Derive docs_only flag
+        id: docs-only-flag
+        # docs_only = true iff docs changed AND no production-code surface
+        # changed (no BFF, no SpaarkeAi, no CI workflows). This is the only
+        # classification that allows the entire Tier 1/2 stack to be skipped.
+        shell: bash
+        run: |
+          docs='${{ steps.filter.outputs.docs }}'
+          bff='${{ steps.filter.outputs.bff }}'
+          spaarke_ai='${{ steps.filter.outputs.spaarke_ai }}'
+          ci_workflows='${{ steps.filter.outputs.ci_workflows }}'
+          if [[ "$docs" == "true" && "$bff" != "true" && "$spaarke_ai" != "true" && "$ci_workflows" != "true" ]]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Docs-only change detected — Tier 1 and Tier 2 will be skipped; router-result will still pass."
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Classification summary
+        shell: bash
+        run: |
+          {
+            echo "### CI Router — Diff Classification"
+            echo ""
+            echo "| Surface | Changed |"
+            echo "|---|---|"
+            echo "| BFF (Sprk.Bff.Api + shared server) | ${{ steps.filter.outputs.bff }} |"
+            echo "| SpaarkeAi (solutions/SpaarkeAi + AI client libs) | ${{ steps.filter.outputs.spaarke_ai }} |"
+            echo "| Docs (docs/, .claude/, *.md, etc.) | ${{ steps.filter.outputs.docs }} |"
+            echo "| CI workflows (.github/workflows/) | ${{ steps.filter.outputs.ci_workflows }} |"
+            echo ""
+            echo "**docs_only**: ${{ steps.docs-only-flag.outputs.value }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ==========================================================================
+  # JOB 2 — tier1: Blocking checks (compile, arch, smoke, auth)
+  # ==========================================================================
+  # Reusable workflow call. Skipped only on docs_only diffs. Tier 1 IS the
+  # blocking surface. Per spec NFR-01: p95 ≤ 3 min.
+  # ==========================================================================
+  tier1:
+    name: Tier 1 (Blocking)
+    needs: classify
+    if: needs.classify.outputs.docs_only != 'true'
+    uses: ./.github/workflows/ci-tier1-blocking.yml
+    secrets: inherit
+    with:
+      bff_changed: ${{ needs.classify.outputs.bff }}
+      spaarke_ai_changed: ${{ needs.classify.outputs.spaarke_ai }}
+
+  # ==========================================================================
+  # JOB 3 — tier2: Advisory checks (format, lint, full tests, ADR, etc.)
+  # ==========================================================================
+  # Reusable workflow call. Skipped on docs_only diffs. Tier 2 is ADVISORY
+  # (non-blocking) per spec FR-A03 — handled by `allowed-skips: tier2` in
+  # the router-result gate below, so Tier 2 failures or skips DO NOT block.
+  # Per spec NFR-02: p95 ≤ 8 min.
+  # ==========================================================================
+  tier2:
+    name: Tier 2 (Advisory)
+    needs: classify
+    if: needs.classify.outputs.docs_only != 'true'
+    uses: ./.github/workflows/ci-tier2-advisory.yml
+    secrets: inherit
+    with:
+      # Map router classification → tier2's `run-*` toggles per its workflow_call contract.
+      # docs_only diffs never reach here (see `if:` above). For everything else, default-on.
+      # Skip client-side lint when no client files changed (no spaarke_ai/bff client paths).
+      # All run-* are tier2's string-typed inputs (CICD-086). Literals are quoted
+      # to satisfy actionlint's stricter-than-runtime type check; expressions are
+      # already string-returning per `== 'true'` comparison.
+      run-lint: ${{ needs.classify.outputs.spaarke_ai == 'true' || needs.classify.outputs.bff == 'true' }}
+      run-format: 'true'
+      run-unit-tests: ${{ needs.classify.outputs.bff == 'true' }}
+      run-adr-compliance: 'true'
+      run-markdown: 'true'
+      run-last-reviewed: 'true'
+      run-plugin-size: ${{ needs.classify.outputs.bff == 'true' }}
+
+  # ==========================================================================
+  # JOB 4 — Router: THE single required status check (`CI / Router`)
+  # ==========================================================================
+  # `if: always()` ensures this job can never be skipped. The job name `Router`
+  # combined with the workflow name `CI` produces the branch-protection
+  # required-check string `CI / Router` per spec FR-A01.
+  #
+  # alls-green semantics (default):
+  #   - success     -> pass
+  #   - skipped     -> pass (used for tier1 on docs_only; used for tier2 always
+  #                          via allowed-skips)
+  #   - failure     -> FAIL (this fails the required check)
+  #   - cancelled   -> FAIL
+  #
+  # `allowed-skips: tier2` means tier2's status (success OR failure OR skipped)
+  # does not affect the router result. tier1 failures DO fail the router.
+  # classify failure DOES fail the router (since classify is unconditional).
+  # ==========================================================================
+  router-result:
+    name: Router
+    if: always()
+    needs: [classify, tier1, tier2]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Aggregate tier results
+        # Pinned to a tagged release (v1.2.2) per supply-chain hygiene.
+        # If this action is ever deprecated, fallback is inline bash gate
+        # documented in notes/router-signal-model-decision.md §5.
+        uses: re-actors/alls-green@v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}
+          # tier2 is advisory per FR-A03 — its failure must not block merge.
+          # NOTE: allowed-failures would allow tier2 to fail; allowed-skips
+          # treats a skipped result as success. We use allowed-failures here
+          # so tier2 failures also don't block (advisory semantics).
+          allowed-failures: tier2
+          allowed-skips: tier1,tier2
+
+      - name: Router decision summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### CI Router — Final Decision"
+            echo ""
+            echo "| Job | Result |"
+            echo "|---|---|"
+            echo "| classify | ${{ needs.classify.result }} |"
+            echo "| tier1 (blocking) | ${{ needs.tier1.result }} |"
+            echo "| tier2 (advisory) | ${{ needs.tier2.result }} |"
+            echo ""
+            echo "Tier 2 is **advisory** — its result does NOT block merge (per spec FR-A03)."
+            echo "Tier 1 failure OR classify failure DOES fail the required check \`CI / Router\`."
+          } >> "$GITHUB_STEP_SUMMARY"

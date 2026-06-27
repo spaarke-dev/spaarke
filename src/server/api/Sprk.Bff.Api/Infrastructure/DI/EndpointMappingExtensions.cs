@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Insights;
+using Sprk.Bff.Api.Api.Membership;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Workspace;
@@ -139,8 +140,6 @@ public static class EndpointMappingExtensions
         app.MapPromptLibraryEndpoints();
         // AIPU2-036: Feedback — per-response thumbs up/down submit + aggregation by playbook/capability
         app.MapFeedbackEndpoints();
-        // AI Capabilities: webhook-triggered manifest refresh (AIPU2-011)
-        app.MapCapabilityEndpoints();
         app.MapChatEndpoints();
 
         // R5 task 014 (D2-04) — direct entry point for the chat-driven Summarize vertical
@@ -195,6 +194,12 @@ public static class EndpointMappingExtensions
         // Consumes IWorkspaceStateService registered in AnalysisServicesModule (task 051).
         // ai-context rate-limit + tid-claim tenant scope per InsightEndpoints precedent.
         app.MapWorkspaceStateEndpoints();
+
+        // R6 Pillar 7 / Q7 SCOPE EXPANSION / task 070 PART A — /api/memory/pins CRUD pair.
+        // Consumes IPinnedContextRepository registered in AnalysisServicesModule (task 065).
+        // ai-context rate-limit + tid/oid-claim tenant+user scope. Ownership invariant
+        // enforced at handler level (UserId match between caller's oid and pin's UserId).
+        Sprk.Bff.Api.Api.Memory.PinnedMemoryEndpoints.MapPinnedMemoryEndpoints(app);
 
         app.MapDailyBriefingEndpoints();
 
@@ -251,6 +256,29 @@ public static class EndpointMappingExtensions
 
         // Registration endpoints (/api/registration/*) — demo request submission, approval, rejection
         app.MapRegistrationEndpoints();
+
+        // R3 task 020 (FR-2.6) — Admin background-job inspection endpoints.
+        // GET /api/admin/jobs               — list registered jobs + status summary
+        // GET /api/admin/jobs/{jobId}/status — per-job detail + last 10 runs
+        // Behind RequireAuthorization("SystemAdmin") per Q6 owner clarification.
+        // Tasks 021 + 022 append their handlers to JobsEndpoints.cs in pre-reserved comment blocks.
+        app.MapAdminJobsEndpoints();
+
+        // R3 task 035 (FR-1A.9) — User-facing membership endpoint.
+        // GET /api/users/me/memberships/{entityType} — resolves caller's memberships per
+        // entity, grouped by role; supports filtering by roles/identityTypes + pagination.
+        // Standard Spaarke Auth v2 OBO (ADR-028). Unconditional registration per
+        // bff-extensions.md §F.1 (dependencies in MembershipModule.AddMembership are also
+        // unconditional). Phase 1D includeRelated accepted-but-ignored until task 054.
+        app.MapMembershipApi();
+
+        // R3 task 036 (FR-1A.10 + FR-1A.11) — Admin membership-discovery audit + cache refresh.
+        // GET  /api/admin/membership/discovered/{entityType} — operator audit (AC-1A.2)
+        // POST /api/admin/membership/refresh-metadata        — cache invalidation (AC-1A.7)
+        // Behind RequireAuthorization("SystemAdmin") per Q6 owner clarification.
+        // Unconditional registration per bff-extensions.md §F.1 — IMembershipFieldDiscoveryService
+        // is unconditionally registered in MembershipModule.AddMembership.
+        app.MapAdminMembershipEndpoints();
     }
 
     private static void MapSpaFallback(WebApplication app)

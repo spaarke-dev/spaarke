@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Add ExecutorActionType 141 = EntityNameValidator to INodeExecutor enum</title>
+    <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Added `EntityNameValidator = 141` to `ActionType` enum at `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs` line 244-area (after `ObservationEmit = 140`). XML doc comment matches sibling style — describes post-LLM output scrubber, references allow-list validation, hallucination_detected event emission, and §FR-3 / AC-3a provenance. Build succeeded: 0 errors, 17 pre-existing warnings (unchanged). Publish-size: 46.30 MB compressed (+0.65 MB vs §10 baseline 45.65 MB; within +5 MB binding threshold). CVE: no new HIGH-severity (pre-existing Microsoft.Kiota.Abstractions 1.21.2 transitive only). Full evidence at `projects/spaarke-daily-update-service-r4/notes/debug/002-publish-size.md`. Unblocks tasks 003, 004, 007.</completion-notes>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>003, 007</blocks>
+    <tags>bff-api, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code change in BFF API (.cs source file modification + DI/enum impact). FULL rigor applies per CLAUDE.md §8 (tags include bff-api, modifying .cs file).</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Edit `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs` to add `EntityNameValidator = 141` to the `ActionType` (ExecutorActionType) enum, placing it after the existing 140 ObservationEmit slot. Verify no value collisions with existing 0/51/52/60/70/80/90/100/110/120/130/140 entries. Update the XML doc comment to describe the new value.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF AI NodeExecutor framework maintainer; understands the post-LLM cluster numbering convention (Sanitization=130, ObservationEmit=140, EntityNameValidator=141).</role>
+
+  <goal>The `INodeExecutor.cs` ActionType enum compiles with `EntityNameValidator = 141` present; `dotnet build src/server/api/Sprk.Bff.Api/` succeeds; no value conflicts; XML doc comment describes EntityNameValidator's role (post-LLM output scrubber).</goal>
+
+  <context>
+    <background>R4 FR-3 (line 116-122) ships a new C# NodeExecutor for post-LLM hallucination scrubbing. Owner Q&amp;A 2026-06-25 confirmed 141 as the ExecutorActionType integer (spec line 342). The slot is intentionally adjacent to 130 (Sanitization) + 140 (ObservationEmit) to group all post-LLM/output-stage nodes together. Task 003 cannot begin authoring the executor file until this enum value is committed.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">BFF AI architecture — new ActionType lives in INodeExecutor.cs alongside existing values; no separate enum file.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — verify publish-size delta + CVE check + bff-extensions.md §A checklist. Enum addition is expected delta ≤ +0.01 MB.</constraint>
+    <constraint source="spec AC-3a">EntityNameValidator = 141 enum value present; ExecutorActionType doesn't conflict with existing values (0/51/52/60/70/80/90/100/110/120/130/140).</constraint>
+    <constraint source="project">Do not introduce new ActionType values beyond 141. This task is enum-addition-only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API conventions; relevant for downstream context only.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read spec.md FR-3 (lines 116-122) + AC-3a (line 119).</step>
+    <step order="2">Open `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs`. Locate the `ActionType` (or `ExecutorActionType`) enum block. Confirm existing values: 0, 51, 52, 60, 70, 80, 90, 100, 110, 120, 130, 140.</step>
+    <step order="3">Edit the enum to add `EntityNameValidator = 141,` immediately after `ObservationEmit = 140,`. Add XML doc comment: "&lt;summary&gt;Post-LLM output scrubber. Validates entity names in LLM output against an allow-list and removes hallucinated names. Logs hallucination_detected event per removal.&lt;/summary&gt;"</step>
+    <step order="4">Run `dotnet build src/server/api/Sprk.Bff.Api/` — confirm no errors.</step>
+    <step order="5">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed publish size; record delta vs baseline (~45.65 MB per CLAUDE.md §10).</step>
+    <step order="6">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE introduced.</step>
+    <step order="7">Update TASK-INDEX.md: change this task's status to ✅.</step>
+    <step order="8">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, publish, and CVE-scan .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">INodeExecutor.cs ActionType enum has `EntityNameValidator = 141` value with XML doc.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with 0 errors.</criterion>
+    <criterion testable="true">No ActionType value collision (each existing 0/51/52/60/70/80/90/100/110/120/130/140 still unique).</criterion>
+    <criterion testable="true">Publish-size delta ≤ +0.05 MB vs baseline; CVE scan reports no new HIGH-severity.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-3 (line 116-122), AC-3a (line 119), Owner Q&amp;A confirming 141 (line 342). This is a single-file, single-enum-value edit — the smallest possible BFF change. Task 003 will reference `ActionType.EntityNameValidator` once this commits.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

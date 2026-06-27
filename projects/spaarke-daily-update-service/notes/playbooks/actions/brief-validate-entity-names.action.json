@@ -1,0 +1,108 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "_dataverseRow": {
+    "_comment": "Maps this JPS document onto the sprk_analysisaction Dataverse row. Fields below populate the row at deploy time. The 'sprk_systemprompt' field stores this entire document (minus '_dataverseRow') as JSON text. THIS IS A SYSTEM DATA-OPS PRIMITIVE — sprk_executoractiontype=141 routes execution to EntityNameValidatorNodeExecutor (in-process C# string-analysis), NOT to AiAnalysisNodeExecutor. The JPS body documents the input/output contract for catalog discoverability + PlaybookBuilder palette, NOT for LLM rendering. sprk_temperature=0 is harmless (irrelevant to Tool dispatch).",
+    "sprk_name": "Brief Validate Entity Names",
+    "sprk_actioncode": "BRIEF-VALIDATE-ENTITY-NAMES",
+    "sprk_actionid": "BRIEF-VALIDATE-ENTITY-NAMES",
+    "sprk_executoractiontype": 141,
+    "sprk_temperature": 0,
+    "sprk_outputformat": 0,
+    "sprk_description": "Post-LLM defense-in-depth scrubber that removes sentences mentioning entity names NOT present in an explicit allow-list. Used by DAILY-BRIEFING-NARRATE playbook (R4 FR-3) to guard against LLM hallucination of firm/case/matter names. Per-removal emits a structured 'hallucination_detected' warning log event for App Insights monitoring. Backed by EntityNameValidatorNodeExecutor (ActionType 141).",
+    "sprk_tags": "daily-briefing, validator, post-llm, grounding, anti-hallucination, system, data-ops, r4",
+    "statecode": 0,
+    "statuscode": 1
+  },
+
+  "instruction": {
+    "role": "System data-ops primitive (ActionType 141 = EntityNameValidator). Not invoked against an LLM — the BFF resolves this via EntityNameValidatorNodeExecutor (in-process C# sentence-level proper-noun scrubbing) per FR-3 of spaarke-daily-update-service-r4.",
+    "task": "Scrub LLM-emitted entity names that are NOT present in an explicit allow-list derived from the input payload. Sentence-split the candidateText on terminal punctuation; for each sentence extract Proper-Noun spans (Title-Case sequences with optional connectors & v. case-citation markers); test each span against allowList via case-insensitive substring (either direction) + token-index match. Sentences containing any non-allowed proper-noun span are removed. Surviving sentences are reassembled into scrubbedText. Removed spans are returned in removedTerms and each emits a 'hallucination_detected' warning log event.",
+    "constraints": [
+      "MUST be invoked via the playbook engine routing on sprk_executoractiontype = 141 — NEVER dispatched to AiAnalysisNodeExecutor.",
+      "MUST receive non-null allowList in ConfigJson — empty array [] is VALID (means 'scrub all proper-noun-bearing sentences'); null is a validation error.",
+      "MUST receive non-empty candidateText in ConfigJson.",
+      "MUST emit one structured 'hallucination_detected' warning per removed term — the literal event name is referenced from docs/guides/AI-MONITORING-DASHBOARD.md.",
+      "MUST preserve sentence ordering for surviving sentences (no reorder)."
+    ],
+    "context": "R3 UAT verified the LLM emits fictional firm/case names (e.g., 'Johnson & Lee LLP', 'Davis v. Metro Transit') into narration output even with temperature 0 + explicit grounding instructions in the JPS prompt. This Tool implements post-LLM defense-in-depth: a deterministic, in-process scrub of any proper-noun span that lacks an allow-list match. The allow-list is sourced from input-payload entity fields (matter names, contact names, regarding entities) so the scrubber's truth-set is whatever names actually appear in the user's Dataverse data. The DAILY-BRIEFING-NARRATE playbook (PR 2 task 011) places this Tool downstream of both narrate actions (BRIEF-NARRATE-TLDR + BRIEF-NARRATE-CHANNEL) and upstream of the final response, so the response can never contain a fabricated entity name."
+  },
+
+  "input": {
+    "candidateText": {
+      "type": "string",
+      "required": true,
+      "maxLength": 100000,
+      "placeholder": "{{narration.text}}",
+      "description": "The raw text emitted by the upstream LLM node (BRIEF-NARRATE-TLDR.summary, BRIEF-NARRATE-CHANNEL.narrative concatenated, etc.) that needs scrubbing. The Tool sentence-splits this on terminal punctuation; full readability of surviving sentences is preserved."
+    },
+    "allowList": {
+      "type": "array",
+      "items": { "type": "string" },
+      "required": true,
+      "description": "Explicit allow-list of entity names known to be present in the input payload (matter names, contact names, owning user names, regarding entity names). Each proper-noun span found in candidateText must match an allowList entry (case-insensitive, either-direction substring, OR all candidate tokens present in the allow-token index). Empty array [] is the explicit opt-in for 'scrub every proper-noun-bearing sentence' semantics."
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "scrubbedText",
+        "type": "string",
+        "description": "The candidateText with all sentences containing non-allowed proper-noun spans removed. Sentence order is preserved; sentences are joined with single spaces. If every sentence contained a hallucination, this will be an empty string. Bound to the node's OutputVariable."
+      },
+      {
+        "name": "removedTerms",
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "List of every proper-noun span (verbatim text) that triggered a sentence removal. Same term may appear multiple times if it appeared in multiple removed sentences. Empty array means no hallucinations were detected."
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "examples": [
+    {
+      "input": {
+        "candidateText": "ACME Corp received an engagement letter from Johnson & Lee LLP yesterday. The matter ACME Corp v. Sprk Industries was scheduled for hearing Friday.",
+        "allowList": ["ACME Corp", "Sprk Industries"]
+      },
+      "output": {
+        "scrubbedText": "The matter ACME Corp v. Sprk Industries was scheduled for hearing Friday.",
+        "removedTerms": ["Johnson & Lee LLP"]
+      },
+      "_comment": "First sentence removed because 'Johnson & Lee LLP' is not in allowList. Second sentence kept because 'ACME Corp' + 'Sprk Industries' match allowList and 'Friday' is a calendar word (sentence-starter-only filter)."
+    },
+    {
+      "input": {
+        "candidateText": "No notifications today.",
+        "allowList": []
+      },
+      "output": {
+        "scrubbedText": "No notifications today.",
+        "removedTerms": []
+      },
+      "_comment": "No proper-noun spans detected (sentence-starter-only filter skips 'No'; 'today' is calendar word). Surviving sentence emitted unchanged. Empty allowList semantics not triggered because no spans were found."
+    },
+    {
+      "input": {
+        "candidateText": "Davis v. Metro Transit was filed Monday morning by the firm.",
+        "allowList": ["ACME Corp"]
+      },
+      "output": {
+        "scrubbedText": "",
+        "removedTerms": ["Davis v. Metro Transit"]
+      },
+      "_comment": "v. case-citation marker correctly captured as one span. Span not in allowList. Sentence removed. scrubbedText empty because only one sentence existed."
+    }
+  ],
+
+  "metadata": {
+    "author": "spaarke-daily-update-service-r4 task 007",
+    "authorLevel": 0,
+    "createdAt": "2026-06-25T00:00:00Z",
+    "description": "System data-ops primitive: post-LLM proper-noun scrubber backed by EntityNameValidatorNodeExecutor (ActionType 141). Canonical Action row deployed by R4 task 007 to close the EntityNameValidator triplet (enum 002 + executor 003 + form 004 + row 007). Used by DAILY-BRIEFING-NARRATE (R4 FR-3) and any future playbook needing post-LLM entity-name grounding.",
+    "tags": ["system", "data-ops", "validator", "post-llm", "anti-hallucination", "daily-briefing", "r4", "fr-3"]
+  }
+}

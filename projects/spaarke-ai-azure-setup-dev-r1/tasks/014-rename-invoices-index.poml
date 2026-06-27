@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Atomic rename: spaarke-invoices-dev → spaarke-invoices-index (FR-10, rename 3 of 3)</title>
+    <phase>2: Schema Preparation</phase>
+    <status>completed</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>002, 010</dependencies>
+    <blocks>020</blocks>
+    <tags>azure-search, schemas, refactoring, rename</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Atomic rename per NFR-07</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>NFR-07: one PR per rename</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Atomically rename `spaarke-invoices-dev` to `spaarke-invoices-index` (drop env suffix per NFR-03, apply -index type suffix) across all touchpoints in ONE PR per NFR-07.
+    Touchpoints: schema file path + JSON name + InvoiceIndexingJobHandler.cs:40 + InvoiceSearchService.cs:45 + retire Deploy-InvoiceSearchIndex.ps1 (Phase 3) + deploy-invoice-index.ps1 + deploy-invoice-index.bicep (per 2026-06-26 audit).
+  </prompt>
+
+  <role>
+    Spaarke platform Azure AI Search engineer.
+  </role>
+
+  <goal>
+    All references to `spaarke-invoices-dev` replaced with `spaarke-invoices-index`.
+  </goal>
+
+  <context>
+    <background>
+      `spaarke-invoices-dev` violates NFR-03 (no env suffix on sub-resources). Canonical is `spaarke-invoices-index`.
+    </background>
+    <relevant-files>
+      <file>infrastructure/ai-search/spaarke-invoices-index.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceSearchService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-10">All touchpoints updated atomically</constraint>
+    <constraint source="NFR-03">No env suffix on sub-resources</constraint>
+    <constraint source="NFR-07">One PR per rename</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep for `spaarke-invoices-dev` to enumerate touchpoints</step>
+    <step order="2">git mv schema to `spaarke-invoices-index.json`; edit JSON name</step>
+    <step order="3">Edit `InvoiceIndexingJobHandler.cs:40` constant</step>
+    <step order="4">Edit `InvoiceSearchService.cs:45` constant</step>
+    <step order="5">Note: `Deploy-InvoiceSearchIndex.ps1`, `deploy-invoice-index.ps1`, `deploy-invoice-index.bicep` retired by FR-07 in Phase 3</step>
+    <step order="6">Update TASK-INDEX.md: task 014 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Enumerate references</tool>
+    <tool name="Bash">git mv</tool>
+    <tool name="Edit">Update touchpoints</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">infrastructure/ai-search/spaarke-invoices-index.json</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceSearchService.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep for `spaarke-invoices-dev` returns zero live references</criterion>
+    <criterion testable="true">Schema JSON name = `spaarke-invoices-index`</criterion>
+    <criterion testable="true">Code constants use new name</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+
+  <notes-results completed="2026-06-26" rigor="STANDARD">
+    <summary>Atomic rename per NFR-07 applied across all in-scope touchpoints. Schema file + JSON name + 2 BFF code constants (+ 4 adjacent production doc-comments) all updated.</summary>
+
+    <touchpoints-updated>
+      <touchpoint>infrastructure/ai-search/invoice-index-schema.json → infrastructure/ai-search/spaarke-invoices-index.json (git mv, rename detected by git)</touchpoint>
+      <touchpoint>infrastructure/ai-search/spaarke-invoices-index.json line 2: JSON "name": "spaarke-invoices" → "spaarke-invoices-index" (note: existing schema name was "spaarke-invoices", NOT "spaarke-invoices-dev" as orchestrator hint suggested)</touchpoint>
+      <touchpoint>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs:40 — IndexNamePattern const "spaarke-invoices-dev" → "spaarke-invoices-index"</touchpoint>
+      <touchpoint>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs:37-38 — XML doc comment refreshed (cites AI-SEARCH-INDEX-CATALOG.md + FR-10 + NFR-03)</touchpoint>
+      <touchpoint>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceIndexingJobHandler.cs:332 — schema-path doc comment updated to spaarke-invoices-index.json</touchpoint>
+      <touchpoint>src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceSearchService.cs:45 — IndexName const "spaarke-invoices-dev" → "spaarke-invoices-index"</touchpoint>
+      <touchpoint>src/server/api/Sprk.Bff.Api/Services/Finance/InvoiceSearchService.cs:16 — XML doc comment schema-path updated to spaarke-invoices-index.json</touchpoint>
+      <touchpoint>src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs:63 — DI doc comment "spaarke-invoices-dev index" → "spaarke-invoices-index"</touchpoint>
+      <touchpoint>src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs:177 — DI doc comment "Index: spaarke-invoices-dev (per-tenant...)" → "Index: spaarke-invoices-index (MVP single index; per-tenant fan-out is a future extension)"</touchpoint>
+    </touchpoints-updated>
+
+    <intentionally-untouched reason="orchestrator scope discipline">
+      <item path="infrastructure/ai-search/Deploy-InvoiceSearchIndex.ps1">Retired by FR-07 (task 020). Orchestrator: "Do NOT delete these scripts in task 014."</item>
+      <item path="infrastructure/ai-search/deploy-invoice-index.ps1">Same as above.</item>
+      <item path="infrastructure/ai-search/deploy-invoice-index.bicep">Same as above (no spaarke-invoices-dev or invoice-index-schema match; bicep param defaults to "spaarke-invoices").</item>
+      <item path="docs/architecture/AI-SEARCH-INDEX-CATALOG.md (line 59 + line 161)">Already uses canonical names; intentionally retains historical references for traceability (line 59 examples retired non-canonical names; line 161 explicitly notes the rename per FR-10).</item>
+      <item path="docs/architecture/finance-intelligence-architecture.md:53 + docs/guides/AI-EMBEDDING-STRATEGY.md:189,304">Out-of-scope per spec FR-10 acceptance + orchestrator's 4-item touchpoint list. May be handled by Phase 4 doc-sweep task 046 if drift detected.</item>
+      <item path="other projects' POMLs/design.md">Historical project narrative — never updated retroactively.</item>
+    </intentionally-untouched>
+
+    <verification>
+      <grep-result scope="src/">No matches for spaarke-invoices-dev or invoice-index-schema — production code clean</grep-result>
+      <grep-result scope="full repo (orchestrator's recipe)">Remaining matches all classified above: retired-pending scripts (left for task 020), catalog historical references (intentional), out-of-scope docs, other-project narrative</grep-result>
+    </verification>
+
+    <acceptance-criteria-status>
+      <criterion id="grep-dev-zero-live-refs">PASS — zero live production-code references to spaarke-invoices-dev in src/</criterion>
+      <criterion id="schema-json-name">PASS — spaarke-invoices-index.json "name" = "spaarke-invoices-index"</criterion>
+      <criterion id="code-constants-updated">PASS — both IndexName constants reference spaarke-invoices-index</criterion>
+    </acceptance-criteria-status>
+
+    <not-done-by-design>
+      <item>TASK-INDEX.md update (main session handles)</item>
+      <item>git commit/push (main session handles per NFR-07 atomic PR)</item>
+    </not-done-by-design>
+  </notes-results>
+</task>

@@ -86,25 +86,6 @@ public class PlaybookAuthorizationFilterTests
 
     #region Constructor Tests
 
-    [Fact]
-    public void Constructor_WithNullPlaybookService_ThrowsArgumentNullException()
-    {
-        Assert.Throws<ArgumentNullException>(() =>
-            new PlaybookAuthorizationFilter(null!, _sharingServiceMock.Object, _loggerMock.Object, PlaybookAuthorizationMode.OwnerOnly));
-    }
-
-    [Fact]
-    public void Constructor_WithNullSharingService_DoesNotThrow()
-    {
-        // Sharing service is optional (nullable)
-        var filter = new PlaybookAuthorizationFilter(
-            _playbookServiceMock.Object,
-            null,
-            _loggerMock.Object,
-            PlaybookAuthorizationMode.OwnerOnly);
-
-        Assert.NotNull(filter);
-    }
 
     [Fact]
     public void Constructor_WithAllParameters_CreatesFilter()

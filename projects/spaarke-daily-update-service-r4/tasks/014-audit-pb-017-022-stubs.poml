@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Audit PB-017, PB-022 stub playbooks</title>
+    <phase>2: W0 JPS — Narrate playbook + reconcile 7 (PR 2)</phase>
+    <status>completed</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>015</blocks>
+    <tags>jps, playbook-audit, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only audit confirming current stub state. Repo JSON will be authored by W1 tasks 024/025; this captures the pre-W1 stub baseline. Parallel-safe with sibling tasks 012, 013.</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <completed>2026-06-25</completed>
+    <completion-notes>Both PB-017 and PB-022 confirmed STUB-AS-EXPECTED on spaarkedev1. PB-017 (GUID 24051c80-…) has 1 deployed node which has drifted to a bare AI-Analysis placeholder (nodeType=100000000, __actionType=0) — even more inert than the repo stub which defines a createNotification node. PB-022 (GUID be7874be-…) has 1 deployed node "Notify New Assignment" matching the repo stub (actionType=50 with {{task.*}} mustache referencing variables no upstream node produces — inert). Both playbook headers (schedule/parameters/channel) match repo exactly. Both playbooks produce zero notifications today (no query node feeding the template). Neither has LookupUserMembership. Audit report at notes/audit/014-pb-017-022.md instructs task 015 to SKIP both — W1 tasks 024 (matter-activity) + 025 (work-assignments) own end-to-end rewrite + redeploy. Carry-forward note for W1: PB-017's deployed node needs wholesale delete-and-replace (currently an AI-Analysis placeholder, not the createNotification stub from repo).</completion-notes>
+  </metadata>
+
+  <prompt>For PB-017 (notification-matter-activity) and PB-022 (notification-work-assignments), confirm the current deployed state in spaarkedev1 is a stub (per spec these are flagged as "stub" — implement in W1). Read deployed `sprk_configjson` via MCP `read_query`. Compare against the canonical repo JSON at `projects/spaarke-daily-update-service/notes/playbooks/notification-{matter-activity,work-assignments}.json`. Note: W1 tasks 024 (matter-activity) and 025 (work-assignments) will author the full repo JSON + redeploy. THIS task documents the CURRENT stub state for reconciliation baseline. Document state + stub-status in `notes/audit/014-pb-017-022.md`.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS playbook auditor — stub-state capture.</role>
+
+  <goal>One audit report at `projects/spaarke-daily-update-service-r4/notes/audit/014-pb-017-022.md` listing — per playbook — (a) current deployed configjson (stub or otherwise), (b) current repo JSON state (likely empty/stub), (c) explicit note that task 015 should NOT redeploy from current repo JSON because W1 will author + redeploy.</goal>
+
+  <context>
+    <background>R4 spec FR-8 (line 145-146) implements `notification-matter-activity` (PB-017); FR-9 (line 148-149) implements `notification-work-assignments` (PB-022). Spec calls both "currently stub". W1 tasks 024 + 025 author repo JSON and redeploy. THIS audit task captures pre-W1 baseline. AC-5a (line 128) requires final state to match repo source-of-truth; that final state arrives via W1, not this task.</background>
+    <relevant-files>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-matter-activity.json</file>
+      <file>projects/spaarke-daily-update-service/notes/playbooks/notification-work-assignments.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">No code change. Audit reads only.</constraint>
+    <constraint source="project">DO NOT flag PB-017 / PB-022 for task 015 redeploy. W1 (PR 3) authors repo JSON + deploys.</constraint>
+    <constraint source="spec FR-8/FR-9">PB-017 and PB-022 are stubs. W1 implements both. Audit captures pre-W1 state.</constraint>
+    <constraint source="project">Parallel-safe with tasks 012, 013.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>.claude/skills/jps-playbook-audit/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="jps-playbook-audit" location=".claude/skills/jps-playbook-audit/SKILL.md">Read deployed configjson + compare against repo source.</pattern>
+      <pattern name="dataverse-mcp-usage" location=".claude/skills/dataverse-mcp-usage/SKILL.md">MCP read_query for sprk_analysisplaybook.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read repo JSON for PB-017 (notification-matter-activity) + PB-022 (notification-work-assignments).</step>
+    <step order="2">MCP `read_query` for each playbook by sprk_playbookcode; capture sprk_configjson + statecode.</step>
+    <step order="3">Classify the deployed configjson — is it a meaningful node graph or a stub (empty / minimal / placeholder)?</step>
+    <step order="4">Classify the repo JSON — likely empty / stub since W1 will author. If the repo file does NOT exist, note that — W1 will create it.</step>
+    <step order="5">Create directory `projects/spaarke-daily-update-service-r4/notes/audit/` if needed. Author `014-pb-017-022.md` with: per-playbook section; explicit note "task 015 SKIPS these — W1 tasks 024/025 author + deploy"; baseline state captured.</step>
+    <step order="6">Update TASK-INDEX.md: change this task's status to &#x2705;.</step>
+    <step order="7">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">read_query — sprk_analysisplaybook for PB-017 / PB-022</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-daily-update-service-r4/notes/audit/014-pb-017-022.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit report exists at `projects/spaarke-daily-update-service-r4/notes/audit/014-pb-017-022.md`.</criterion>
+    <criterion testable="true">Per-playbook section for PB-017 + PB-022 confirms current stub state in deployed config.</criterion>
+    <criterion testable="true">Report explicitly states that task 015 SKIPS PB-017/PB-022 (W1 tasks 024/025 own author + deploy).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-8 (line 145-146), FR-9 (line 148-149), FR-5 (line 127). Hint: if the playbook row is MISSING from spaarkedev1 entirely (not even a stub), that's a divergence from spec's "7 deployed notification playbook configs" claim — escalate. Hint: "stub" typically means a sprk_configjson that contains only Start → ReturnResponse with no Skill/Tool nodes.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

@@ -1,6 +1,8 @@
-using System.Text.Json;
+using System.Diagnostics;
 using Microsoft.Azure.Cosmos;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Sessions;
 
@@ -30,28 +32,48 @@ public class SessionPersistenceService : ISessionPersistenceService
     /// <summary>Redis sliding TTL for hot session cache (NFR-07: 24-hour idle expiry, ADR-009).</summary>
     internal static readonly TimeSpan RedisTtl = TimeSpan.FromHours(24);
 
-    /// <summary>Redis key prefix — distinct from ChatSessionManager's "chat:session:" prefix (ADR-014).</summary>
-    private const string RedisKeyPrefix = "sessions";
+    /// <summary>
+    /// Tenant-cache resource name for warm-tier StoredSession payloads (FR-05).
+    /// Distinct from <see cref="ChatSessionManager.CacheResource"/> ("session") because
+    /// SessionPersistenceService is the Cosmos-warm-tier write-through path (full
+    /// <see cref="StoredSession"/> shape) vs ChatSessionManager's hot-tier
+    /// <see cref="ChatSession"/> shape.
+    /// </summary>
+    internal const string CacheResource = "stored-session";
+
+    /// <summary>Tenant-cache schema version for StoredSession payloads.</summary>
+    internal const int CacheVersion = 1;
+
+    /// <summary>
+    /// Reproduces the on-wire cache key produced by <see cref="ITenantCache"/> for legacy
+    /// test consumers that asserted on the raw Redis key shape pre-FR-05.
+    /// Format: <c>tenant:{tenantId}:stored-session:{sessionId}:v1</c>.
+    /// </summary>
+    internal static string BuildRedisKey(string tenantId, string sessionId)
+        => $"tenant:{tenantId}:{CacheResource}:{sessionId}:v{CacheVersion}";
 
     /// <summary>Cosmos DB container name (ADR-015 Tier 3 container mapping).</summary>
     private const string ContainerName = "sessions";
 
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly CosmosClient _cosmosClient;
     private readonly string _databaseName;
     private readonly ILogger<SessionPersistenceService> _logger;
+    private readonly IContextEventEmitter _contextEventEmitter;
 
     public SessionPersistenceService(
-        IDistributedCache cache,
+        ITenantCache cache,
         CosmosClient cosmosClient,
         IConfiguration configuration,
-        ILogger<SessionPersistenceService> logger)
+        ILogger<SessionPersistenceService> logger,
+        IContextEventEmitter contextEventEmitter)
     {
         _cache = cache;
         _cosmosClient = cosmosClient;
         _databaseName = configuration["CosmosPersistence:DatabaseName"]
             ?? throw new InvalidOperationException("CosmosPersistence:DatabaseName is not configured.");
         _logger = logger;
+        _contextEventEmitter = contextEventEmitter ?? throw new ArgumentNullException(nameof(contextEventEmitter));
     }
 
     // =========================================================================
@@ -149,11 +171,10 @@ public class SessionPersistenceService : ISessionPersistenceService
             "SessionPersistenceService: Deleting session {SessionId} from both stores (tenant={TenantId})",
             sessionId, tenantId);
 
-        // Delete from Redis
+        // Delete from Redis (tenant-scoped via ITenantCache per FR-05)
         try
         {
-            var key = BuildRedisKey(tenantId, sessionId);
-            await _cache.RemoveAsync(key, ct);
+            await _cache.RemoveAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
         }
         catch (Exception ex)
         {
@@ -249,12 +270,194 @@ public class SessionPersistenceService : ISessionPersistenceService
     }
 
     // =========================================================================
+    // UpdateUploadedFilesAsync (chat-routing-redesign-r1 task 072 — architecture §6.1 + §7.1)
+    // =========================================================================
+    //
+    // PLACEMENT JUSTIFICATION (CLAUDE.md §10 BFF Hygiene + ADR-013):
+    //   - In-process extension of the existing AI session persistence pipeline.
+    //   - NO new DI feature module — registration handled by existing AiPersistenceModule
+    //     via the ISessionPersistenceService interface (ADR-010).
+    //   - NO new service, NO new NuGet packages, NO new Cosmos container / doc-type.
+    //     Architecture §7.1 explicitly reuses the existing `sessions` container.
+    //   - Reuses the same Redis-hot + Cosmos-warm write-through pattern as SaveTabsAsync (D-06).
+    //   - Additive Cosmos schema change (StoredSession.UploadedFiles) — backwards
+    //     compatible with older documents (ADR-015 partition key /tenantId unchanged).
+    //
+    // STRATEGY: REPLACE (not merge).
+    //   The upload-pipeline orchestrator (SessionFileEnrichmentService, task 066) returns
+    //   the complete enriched-state snapshot for the session's uploaded files. Replacing the
+    //   collection wholesale is simpler than per-FileId merge and avoids stale-data risk
+    //   (e.g., a file deleted upstream lingering in storage). See architecture §6.1.
+    //
+    // ETAG / OPTIMISTIC CONCURRENCY:
+    //   The peer SaveTabsAsync precedent does NOT use ETag (fire-and-forget UpsertItemAsync
+    //   without IfMatchEtag). Matching that precedent: this method swallows Cosmos write
+    //   failures at Warning level rather than surfacing concurrency exceptions to the caller.
+    //   The session-document write rate is low (one write per uploaded file's enrichment
+    //   completion) so last-writer-wins is acceptable per architecture §6.1.
+
+    /// <inheritdoc/>
+    public async Task<bool> UpdateUploadedFilesAsync(
+        string sessionId,
+        string tenantId,
+        IReadOnlyList<ChatSessionFile> enrichedFiles,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(enrichedFiles);
+
+        var stopwatch = Stopwatch.StartNew();
+
+        // Load existing session: try Redis first, fall back to Cosmos. Mirrors SaveTabsAsync.
+        var session = await LoadFromRedisAsync(tenantId, sessionId, cancellationToken)
+            ?? await LoadFromCosmosAsync(tenantId, sessionId, cancellationToken);
+
+        if (session is null)
+        {
+            stopwatch.Stop();
+            _logger.LogInformation(
+                "SessionPersistenceService.UpdateUploadedFilesAsync: session {SessionId} not found (tenant={TenantId}) — durationMs={DurationMs}",
+                sessionId, tenantId, stopwatch.ElapsedMilliseconds);
+            return false;
+        }
+
+        // REPLACE strategy (per architecture §6.1) — wholesale swap of the manifest with the
+        // orchestrator's complete enrichment snapshot.
+        session.UploadedFiles = MapToStored(enrichedFiles);
+        session.LastActivity = DateTimeOffset.UtcNow;
+
+        // Write-through (D-06): Redis hot tier first, then Cosmos warm tier (fire-and-forget).
+        await WriteToRedisAsync(tenantId, sessionId, session, cancellationToken);
+        _ = UpsertToCosmosAsync(session, CancellationToken.None);
+
+        stopwatch.Stop();
+
+        // ADR-015 Tier-1 logging: sessionId + fileCount + durationMs ONLY.
+        // NEVER log per-file SummaryText / ClassifiedDocType / Sections content / FileName.
+        _logger.LogInformation(
+            "SessionPersistenceService.UpdateUploadedFilesAsync: persisted manifest for session {SessionId} (tenant={TenantId}, fileCount={FileCount}, durationMs={DurationMs})",
+            sessionId, tenantId, enrichedFiles.Count, stopwatch.ElapsedMilliseconds);
+
+        // chat-routing-redesign-r1 task 074 — emit context.upload_persisted (manifest write-through done).
+        // ADR-015 Tier 1 SAFE: durationMs + IDs only. The fileId field is the MOST RECENT enriched
+        // file (or empty if the manifest is empty — should not happen in practice but defensive).
+        // The per-file emission contract is "one event per pipeline" — bulk persists carry the last
+        // file as the representative anchor. Future per-file granular events can be added by
+        // emitting inside the orchestrator's per-file enrichment loop.
+        var sessionGuid = Guid.TryParse(sessionId, out var parsedSessionGuid) ? parsedSessionGuid : (Guid?)null;
+        var representativeFileId = enrichedFiles.Count > 0 ? enrichedFiles[enrichedFiles.Count - 1].FileId : string.Empty;
+        _contextEventEmitter.UploadPersisted(
+            sessionId: sessionGuid,
+            fileId: representativeFileId,
+            durationMs: stopwatch.ElapsedMilliseconds,
+            tenantId: tenantId);
+
+        return true;
+    }
+
+    // =========================================================================
+    // Private helpers — ChatSessionFile <-> StoredUploadedFile bridge (task 072)
+    // =========================================================================
+    //
+    // ChatSessionFile (Models.Ai.Chat) uses PascalCase + no JsonPropertyName attributes.
+    // StoredUploadedFile (Services.Ai.Sessions) uses camelCase via [JsonPropertyName].
+    // These mappers bridge the two shapes. Kept private + focused: no generic mapper because
+    // the property surface is small + stable + auditable.
+
+    internal static List<StoredUploadedFile> MapToStored(IReadOnlyList<ChatSessionFile> files)
+    {
+        var result = new List<StoredUploadedFile>(files.Count);
+        foreach (var file in files)
+        {
+            result.Add(new StoredUploadedFile
+            {
+                FileId = file.FileId,
+                FileName = file.FileName,
+                ContentType = file.ContentType,
+                SizeBytes = file.SizeBytes,
+                SearchDocumentIdsCsv = file.SearchDocumentIdsCsv,
+                UploadedAt = file.UploadedAt,
+                SummaryText = file.SummaryText,
+                ClassifiedDocType = file.ClassifiedDocType,
+                ClassifiedConfidence = file.ClassifiedConfidence,
+                Sections = file.Sections
+                    .Select(s => new StoredSectionInfo
+                    {
+                        Name = s.Name,
+                        StartCharOffset = s.StartCharOffset,
+                        EndCharOffset = s.EndCharOffset,
+                        StartPage = s.StartPage,
+                        EndPage = s.EndPage
+                    })
+                    .ToList(),
+                TableMetadata = file.TableMetadata
+                    .Select(t => new StoredTableInfo
+                    {
+                        Name = t.Name,
+                        StartCharOffset = t.StartCharOffset,
+                        Page = t.Page
+                    })
+                    .ToList(),
+                Citations = file.Citations
+                    .Select(c => new StoredCitationReference
+                    {
+                        SourceId = c.SourceId,
+                        Quote = c.Quote,
+                        Page = c.Page
+                    })
+                    .ToList(),
+                PageCount = file.PageCount,
+                Language = file.Language
+            });
+        }
+        return result;
+    }
+
+    internal static List<ChatSessionFile> MapFromStored(IReadOnlyList<StoredUploadedFile> stored)
+    {
+        var result = new List<ChatSessionFile>(stored.Count);
+        foreach (var s in stored)
+        {
+            result.Add(new ChatSessionFile(
+                FileId: s.FileId,
+                FileName: s.FileName,
+                ContentType: s.ContentType,
+                SizeBytes: s.SizeBytes,
+                SearchDocumentIdsCsv: s.SearchDocumentIdsCsv,
+                UploadedAt: s.UploadedAt)
+            {
+                SummaryText = s.SummaryText,
+                ClassifiedDocType = s.ClassifiedDocType,
+                ClassifiedConfidence = s.ClassifiedConfidence,
+                Sections = s.Sections
+                    .Select(x => new SectionInfo(
+                        Name: x.Name,
+                        StartCharOffset: x.StartCharOffset,
+                        EndCharOffset: x.EndCharOffset,
+                        StartPage: x.StartPage,
+                        EndPage: x.EndPage))
+                    .ToList(),
+                TableMetadata = s.TableMetadata
+                    .Select(x => new TableInfo(
+                        Name: x.Name,
+                        StartCharOffset: x.StartCharOffset,
+                        Page: x.Page))
+                    .ToList(),
+                Citations = s.Citations
+                    .Select(x => new CitationReference(
+                        SourceId: x.SourceId,
+                        Quote: x.Quote,
+                        Page: x.Page))
+                    .ToList(),
+                PageCount = s.PageCount,
+                Language = s.Language
+            });
+        }
+        return result;
+    }
+
+    // =========================================================================
     // Private helpers — Redis
     // =========================================================================
-
-    /// <summary>Builds the Redis key for a session. Pattern: <c>sessions:{tenantId}:{sessionId}</c>.</summary>
-    internal static string BuildRedisKey(string tenantId, string sessionId)
-        => $"{RedisKeyPrefix}:{tenantId}:{sessionId}";
 
     private async Task<StoredSession?> LoadFromRedisAsync(
         string tenantId,
@@ -263,18 +466,13 @@ public class SessionPersistenceService : ISessionPersistenceService
     {
         try
         {
-            var key = BuildRedisKey(tenantId, sessionId);
-            var bytes = await _cache.GetAsync(key, ct);
-            if (bytes is null)
-            {
-                return null;
-            }
-
-            var session = JsonSerializer.Deserialize<StoredSession>(bytes);
+            // Tenant-scoped via ITenantCache per FR-05.
+            var session = await _cache.GetAsync<StoredSession>(
+                tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
             if (session is not null)
             {
                 // Refresh sliding TTL on every access (ADR-009)
-                await _cache.RefreshAsync(key, ct);
+                await _cache.RefreshAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
             }
 
             return session;
@@ -296,13 +494,15 @@ public class SessionPersistenceService : ISessionPersistenceService
     {
         try
         {
-            var key = BuildRedisKey(tenantId, sessionId);
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(session);
-            var options = new DistributedCacheEntryOptions
-            {
-                SlidingExpiration = RedisTtl   // ADR-009, NFR-07
-            };
-            await _cache.SetAsync(key, bytes, options, ct);
+            // Sliding expiry per ADR-009 / NFR-07; tenant-scoped via ITenantCache per FR-05.
+            await _cache.SetSlidingAsync(
+                tenantId,
+                CacheResource,
+                sessionId,
+                CacheVersion,
+                session,
+                RedisTtl,
+                ct: ct);
         }
         catch (Exception ex)
         {

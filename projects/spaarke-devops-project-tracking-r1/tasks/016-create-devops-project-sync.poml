@@ -1,0 +1,73 @@
+<task id="DEVOPS-016" project="Spaarke DevOps Project Tracking r1">
+  <metadata>
+    <title>Create /devops-project-sync skill (idempotent + partial-success)</title>
+    <status>completed</status>
+    <phase>2</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <actual-effort>~10 minutes</actual-effort>
+    <completed>2026-06-23</completed>
+    <tags>skill-creation, devops, project-sync, idempotent, gh-cli</tags>
+    <dependencies>010, 015</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Author `/devops-project-sync` skill per FR-12. Re-reads local state (`tasks/TASK-INDEX.md`, `current-task.md`, worktree presence) and updates the GitHub Project Issue's custom fields. Idempotent. Partial-success tolerant per F7: report individual field-update failures and continue with other fields. This skill is the workhorse — it's called by FR-16, FR-17, FR-20, FR-22, FR-24 hooks, so its contract is load-bearing.
+
+NOTE: This task modifies `.claude/skills/` — main session only.
+  </prompt>
+
+  <role>Skill author who values robustness. You design for partial-success because hooks WILL fail mid-sync occasionally (rate limit, transient API error). The skill must heal on the next run.</role>
+
+  <goal>
+Run against a project with N completed POML tasks produces `Tasks Completed=N` on the Issue. Running twice in a row produces zero GitHub API mutations on the second run (true idempotency, verified by dry-run mode).
+  </goal>
+
+  <constraints>
+    <constraint source="NFR-04">Idempotent — second run on unchanged state = zero mutations</constraint>
+    <constraint source="spec F7 / NFR-03">Partial-success tolerant: collect per-field failures, continue updating other fields, report all failures at end</constraint>
+    <constraint source="NFR-07">Spaarke skill convention</constraint>
+    <constraint source="NFR-03">Hooks call this skill — must be silent on success (single ✅ line); failures degrade-to-warn</constraint>
+    <constraint source="root CLAUDE.md §3">Main session only</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-devops-project-tracking-r1/spec.md</file>
+      <file>.claude/skills/INDEX.md</file>
+      <file>.claude/skills/devops-project-register/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check">Confirm task 015 ✅. This skill is called by 5 hook tasks downstream — invest in clear contract.</step>
+    <step order="1" name="Author SKILL.md frontmatter + Prerequisites">Standard.</step>
+    <step order="2" name="Author Steps">(a) Locate Project Issue for current folder: read `README.md` portfolio block. (b) Read local state: count POML files; count ✅ in TASK-INDEX; read current task # from `current-task.md`. (c) Read current Issue field values. (d) Compute diff: which fields would change. (e) Dry-run mode (`--dry-run` flag): print proposed mutations + exit 0. (f) Apply each field mutation in try/catch; collect successes + failures. (g) Emit single ✅ line on success or single ⚠️ line listing failed fields. (h) Optional `--verbose` flag for full output.</step>
+    <step order="3" name="Author Failure Modes">No portfolio block in README (suggest `/devops-project-register`); rate-limit (NFR-05 backoff); transient field-update failure (collect + continue per F7); Issue closed (skip with warn).</step>
+    <step order="4" name="Update INDEX.md">Add row.</step>
+    <step order="5" name="Idempotency smoke test">Run twice on a smoke-test project; second run reports "no changes."</step>
+    <step order="6" name="Partial-success smoke test">Force a field update to fail (e.g., simulate by passing a bad field ID); confirm skill continues + reports the one failure + other fields update successfully.</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">.claude/skills/* files</tool>
+    <tool name="Write">New SKILL.md</tool>
+    <tool name="gh">Smoke tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="skill">.claude/skills/devops-project-sync/SKILL.md</output>
+    <output type="config">.claude/skills/INDEX.md (one new row)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-devops-project-tracking-r1/notes/spikes/phase2-project-sync-smoke-{date}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SKILL.md exists with NFR-07 sections + explicit idempotency + partial-success documentation</criterion>
+    <criterion testable="true">Idempotency smoke test: second run reports zero mutations</criterion>
+    <criterion testable="true">Partial-success smoke test: one failure does not block other field updates</criterion>
+    <criterion testable="true">`--dry-run` flag prints proposed mutations + exits without applying</criterion>
+    <criterion testable="true">Success output is single ✅ line; failures emit ⚠️ with failed-field list</criterion>
+    <criterion testable="true">INDEX.md updated</criterion>
+  </acceptance-criteria>
+</task>

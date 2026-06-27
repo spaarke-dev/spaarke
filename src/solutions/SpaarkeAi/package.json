@@ -39,6 +39,7 @@
     "@spaarke/ai-outputs": "file:../../client/shared/Spaarke.AI.Outputs",
     "@spaarke/ai-widgets": "file:../../client/shared/Spaarke.AI.Widgets",
     "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
+    "@spaarke/daily-briefing-components": "file:../../client/shared/Spaarke.DailyBriefing.Components",
     "@spaarke/events-components": "file:../../client/shared/Spaarke.Events.Components",
     "@spaarke/sdap-client": "file:../../client/shared/Spaarke.SdapClient",
     "@spaarke/smart-todo-components": "file:../../client/shared/Spaarke.SmartTodo.Components",

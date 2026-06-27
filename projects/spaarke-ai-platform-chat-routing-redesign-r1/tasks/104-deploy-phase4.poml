@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="104" project="spaarke-ai-platform-chat-routing-redesign-r1">
+  <metadata>
+    <title>Deploy Phase 4: bff-deploy + code-page-deploy for SpaarkeAi</title>
+    <phase>4: WP5 6-Tier Memory Subsystem (sub-WP 4f)</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>103</dependencies>
+    <blocks>105</blocks>
+    <tags>deploy, bff-api, code-page-deploy, azure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Tags include 'deploy'; uses deployment skills; new file creation (deployment artifacts); STANDARD per task-execute Step 0.5.</rigor-reason>
+    <parallel-group>4-R</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deploy Phase 4 work to the development environment: invoke `bff-deploy` for `Sprk.Bff.Api` and `code-page-deploy` for the `SpaarkeAi` code page (which carries the ContextPane `memory`-channel subscriber from task 098 + the layered context cards from tasks 076-079). Verify post-deploy health via `/ping` + smoke-test of recall + promotion flow.
+  </prompt>
+
+  <role>SPAARKE platform release engineer. Familiar with `bff-deploy` and `code-page-deploy` skills + Azure App Service deployment.</role>
+
+  <goal>
+    BFF API deployed to `bff-dev` App Service; SpaarkeAi code page deployed to Dataverse; post-deploy smoke tests confirm endpoint health, recall flow, and promotion-event delivery. Deploy artifacts archived with publish-size delta vs prior baseline.
+  </goal>
+
+  <context>
+    <background>
+      Phase 4 added: upload-pipeline enrichment services (4-B), composition refactor (4-E), 8 tool handlers (4-G + 4-H), promotion workflow (4-K + 4-L), ContextPane subscriber (4-M), workspace Q8 conflict check (4-N), Tier 5 retrieval (4-O), audit-repo rename (4-P), verification (4-Q), tests (4-R 103). This task is the deploy half of wave 4-R, paired with 103. Deploy skills handle environment selection + secret resolution.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/solutions/SpaarkeAi/</file>
+      <file>scripts/deploy/</file>
+      <file>deploy/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029">Per-task BFF publish-size measurement; report delta vs Phase 3 baseline.</constraint>
+    <constraint source="azure-deployment.md">Deploy to bff-dev first; production gating happens via Phase 7 wrap-up.</constraint>
+    <constraint source="bff-extensions.md">Verify no new HIGH-severity CVE from `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="project">Use `npm install --legacy-peer-deps --no-audit --no-fund` for Vite code-page (NOT `npm ci`) per CLAUDE.md §11.</constraint>
+    <constraint source="ADR-015">Tier-1 logging review on deployed instance — App Insights query confirms no content leakage.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/stateful-chat-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Verify task 103 = ✅ in TASK-INDEX (integration tests green is gating for deploy).</step>
+    <step order="2">Run `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api.csproj` — must surface zero new HIGH-severity CVEs vs Phase 3 baseline.</step>
+    <step order="3">Build BFF release: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed output size + delta vs prior Phase 4 baseline (must remain ≤60 MB per ADR-029).</step>
+    <step order="4">Invoke `bff-deploy` skill targeting `bff-dev` App Service. Monitor deployment to completion.</step>
+    <step order="5">Smoke-test BFF endpoints: `/ping` returns 200; `GET /api/ai/playbooks/by-code/summarize-document-chat` returns 200; `POST /api/memory/promotions/{nonexistent}/approve` returns 404 ProblemDetails.</step>
+    <step order="6">Build SpaarkeAi code page: `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build:prod` per CLAUDE.md.</step>
+    <step order="7">Invoke `code-page-deploy` skill for SpaarkeAi to Dataverse dev environment.</step>
+    <step order="8">Smoke-test code page in browser: load SpaarkeAi, open ContextPane, verify console shows `usePaneEvent('memory', ...)` subscription registered (no errors).</step>
+    <step order="9">Spot-check App Insights for tier-1 hygiene — verify no document content / query text / fact text in logs from recent deployments.</step>
+    <step order="10">Write deploy report to `notes/handoffs/104-phase4-deploy.md` — publish-size delta, vuln scan result, smoke-test results.</step>
+    <step order="11">Update TASK-INDEX.md: task 104 → ✅; current-task.md → ready for 105.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">dotnet publish + size measurement + vuln scan; npm install/build for code-page</tool>
+    <tool name="Skill">bff-deploy skill; code-page-deploy skill</tool>
+    <tool name="Read">Deploy artifact outputs + App Service health</tool>
+    <tool name="Write">Deploy report at notes/handoffs/</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">BFF API deployed to bff-dev App Service</output>
+    <output type="deploy">SpaarkeAi code page deployed to Dataverse dev environment</output>
+    <output type="docs">notes/handoffs/104-phase4-deploy.md — publish-size delta + vuln scan + smoke-test results</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF `/ping` returns 200 post-deploy.</criterion>
+    <criterion testable="true">`/api/ai/playbooks/by-code/summarize-document-chat` returns 200 with valid playbook payload.</criterion>
+    <criterion testable="true">`POST /api/memory/promotions/{id}/approve` returns 404 ProblemDetails for nonexistent ID.</criterion>
+    <criterion testable="true">SpaarkeAi loads in browser; ContextPane mounts; `memory` channel subscription registers without console error.</criterion>
+    <criterion testable="true">BFF publish-size delta reported; cumulative ≤60 MB per NFR-01 / ADR-029.</criterion>
+    <criterion testable="true">Zero new HIGH-severity CVEs vs Phase 3 baseline.</criterion>
+    <criterion testable="true">App Insights spot-check confirms no tier-1 content leakage.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Use `bff-deploy` + `code-page-deploy` skills — do not author bespoke deploy scripts. If the deploy fails midway, do NOT roll back manually; capture logs, escalate per CLAUDE.md §6.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor protocol — Step 9.5 quality gates skipped (deploy-only).</protocol>
+  </execution>
+</task>

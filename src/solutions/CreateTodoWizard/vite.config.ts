@@ -78,6 +78,15 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
       "@spaarke/ui-components": path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src"),
       "@spaarke/auth": path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src"),
+      // @spaarke/sdap-client — pulled in transitively via
+      // @spaarke/ui-components/services/EntityCreationService.ts (Phase G of
+      // multi-container-multi-index-r1 / PR #369). Source-resolves rather
+      // than dist-resolves so no pre-build is required. Same workaround
+      // applied to SmartTodo/LegalWorkspace/CreateMatter/Project/Event/
+      // WorkAssignmentWizard vite configs; project-wide tsconfig refs fix
+      // is the planned permanent solution (see current-task.md "Follow-ups
+      // Surfaced" #4).
+      "@spaarke/sdap-client": path.resolve(__dirname, "../../client/shared/Spaarke.SdapClient/src"),
       "@fluentui/react-components": path.resolve(__dirname, "node_modules/@fluentui/react-components"),
       "@fluentui/react-icons": path.resolve(__dirname, "node_modules/@fluentui/react-icons"),
     },

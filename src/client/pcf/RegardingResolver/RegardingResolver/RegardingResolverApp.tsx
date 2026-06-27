@@ -7,14 +7,32 @@
  *   │  Record Type:  [ Matter  ▼ ]      [ Select Record 🔍 ]                │
  *   │                                                                        │
  *   │  ✅ Smith v. Jones (Matter)                  [ Open ]  [ ✕ Clear ]   │
- *   │                                                                        │
- *   │                                              v1.0.0                    │
  *   └────────────────────────────────────────────────────────────────────────┘
  *
  * When read-only (FR-24), the dropdown / Select Record / Clear are hidden;
  * only the selected target's clickable link is rendered.
  *
- * The component:
+ * # HOST-only usage (binding contract — R4-112 clarification 2026-06-24)
+ *
+ * Bind this PCF ONLY to entities that HOST the polymorphic regarding fields
+ * (`sprk_regardingrecordtype` lookup + `sprk_regardingrecordid` / `name` /
+ * `url` text fields + the 11 `sprk_Regarding<X>` entity-specific lookups).
+ *
+ * Currently host entities: `sprk_todo`, `sprk_communication` (FR-22).
+ *
+ * Do NOT bind to target entities (the things a To Do can be regarding):
+ * `sprk_matter`, `sprk_project`, `sprk_event`, `sprk_invoice`,
+ * `sprk_workassignment`, `sprk_budget`, `sprk_analysis`,
+ * `sprk_organization`, `contact`, `sprk_document`. These entities do NOT
+ * have the resolver fields, so a save will fail with HTTP 400
+ * "Error identified in Payload provided by the user for Entity:''".
+ *
+ * If the desired UX is "from a target record, see/create related To Dos",
+ * use the inverse direction: a To Do subgrid on the target form (1:N
+ * relationship via the `sprk_Regarding<X>` lookup).
+ *
+ * # Behavior
+ *
  *  - Renders the 11-entity picker (via TODO_REGARDING_CATALOG)
  *  - Calls `applyRegardingSelection` from the local handler on selection.
  *    That handler wraps `applyResolverFields` (ADR-024 / FR-21) — there is
@@ -24,6 +42,11 @@
  *  - Auto-seeds the picker on mount from the bound `regardingRecordType`
  *    lookup if it's already populated (mirrors AssociationResolver's
  *    "auto-detect existing parent" pattern).
+ *  - On CREATE-mode forms (formType===1, no host record id), publishes the
+ *    selection payload on `window.__sprk_regarding_pending__` so the
+ *    companion OnSave handler (`sprk_todo_regarding_presave.js`) can stage
+ *    the 4 companion fields into the form's pending-attribute buffer for
+ *    the INSERT transaction.
  */
 
 import * as React from 'react';
@@ -41,7 +64,12 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { DismissRegular, Open16Regular, SearchRegular } from '@fluentui/react-icons';
-import { TODO_REGARDING_CATALOG, buildRecordUrl, type ITodoRegardingTargetCatalogEntry } from '@spaarke/ui-components';
+import {
+  TODO_REGARDING_CATALOG,
+  buildRecordUrl,
+  resolveRecordType,
+  type ITodoRegardingTargetCatalogEntry,
+} from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import {
   applyRegardingSelection,
@@ -120,7 +148,7 @@ const useStyles = makeStyles({
 function getXrm():
   | {
       Utility?: {
-        lookupObjects: (opts: unknown) => Promise<Array<{ id: string; name: string; entityType?: string }>>;
+        lookupObjects: (opts: unknown) => Promise<{ id: string; name: string; entityType?: string }[]>;
         getGlobalContext?: () => unknown;
       };
       Navigation?: { openForm: (opts: unknown) => void };
@@ -184,7 +212,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   const hostEntity = (context.parameters.entity?.raw ?? '').trim();
 
   // Allowed regarding targets (subset of TODO_REGARDING_CATALOG).
-  const catalog = React.useMemo<ReadonlyArray<ITodoRegardingTargetCatalogEntry>>(
+  const catalog = React.useMemo<readonly ITodoRegardingTargetCatalogEntry[]>(
     () => resolveAllowedCatalog(context.parameters.regardingTargets?.raw),
     [context.parameters.regardingTargets?.raw]
   );
@@ -322,16 +350,37 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
         };
       }
 
-      // Notify PCF class so the bound lookup output is kept in sync. The
-      // sprk_regardingrecordtype was written by applyResolverFields via
-      // @odata.bind; for the form we surface it as a LookupValue using the
-      // existing bound value (if any) — the form's next refresh will pick up
-      // the new sprk_recordtype_ref id from the host record itself.
-      onRecordTypeChanged({
-        id: cleanId,
-        name: picked.name,
-        entityType: selectedEntityType,
-      });
+      // Notify PCF class so the bound `sprk_regardingrecordtype` lookup output
+      // is kept in sync. CRITICAL (Bug-1 fix 2026-06-24): the bound lookup
+      // targets `sprk_recordtype_ref` — NOT the parent entity. We MUST pass
+      // the matching `sprk_recordtype_ref` record's id + 'sprk_recordtype_ref'
+      // as the entityType. Passing the parent (e.g., `sprk_matter` GUID +
+      // entityType) causes MDA to throw:
+      //   "Unable to find many-to-one relationship, entity: sprk_todo,
+      //    referenced entity: sprk_matter, field: sprk_regardingrecordtype"
+      // because that m:1 path doesn't exist.
+      //
+      // `resolveRecordType` queries sprk_recordtype_ref for the entry where
+      // sprk_recordlogicalname === selection.entityType and is cached per page.
+      // `applyResolverFields` already used this internally to write the
+      // host record's @odata.bind, so this is a cache hit in practice.
+      try {
+        const recordType = await resolveRecordType(writeCtx.webApi, selection.entityType);
+        if (recordType) {
+          onRecordTypeChanged({
+            id: recordType.id,
+            name: recordType.name,
+            entityType: 'sprk_recordtype_ref',
+          });
+        } else {
+          // No matching record-type-ref — clear the bound output rather than
+          // setting it to a stale value.
+          onRecordTypeChanged(null);
+        }
+      } catch (rtErr) {
+        console.warn('[RegardingResolver] resolveRecordType for output notify failed:', rtErr);
+        onRecordTypeChanged(null);
+      }
 
       setStatusMsg(`Associated with ${selection.recordName}.`);
     } catch (err) {

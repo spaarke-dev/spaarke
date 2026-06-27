@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Symmetric DI registration (§F.1 static-scan recipe)</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>003,004</dependencies>
+    <blocks>009</blocks>
+    <tags>bff-api, cache, redis, di</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + verifies ADR-032 symmetric DI invariant + applies bff-extensions §F.1 static-scan recipe</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Verification depends on completion of 003 + 004</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Apply `bff-extensions.md` §F.1 Asymmetric-Registration Tier 1.5 static-scan recipe against `CacheModule`. Verify every endpoint handler / service that injects `IConnectionMultiplexer` resolves cleanly in both Redis-on and dev-in-memory branches. If any asymmetric registration leaks past the 4-branch logic, fix it.
+  </prompt>
+
+  <role>
+    Spaarke .NET developer with DI and ADR-032 familiarity. Use Grep to enumerate consumers, then inspect CacheModule to confirm symmetric registration.
+  </role>
+
+  <goal>
+    Documented proof (in `notes/symmetric-di-verification.md`) that `IConnectionMultiplexer` is symmetrically registered: every consumer resolves either the real Redis instance OR `NullConnectionMultiplexer` based on config. No consumer relies on `IConnectionMultiplexer?` nullable injection. No `if (flag) { register }` asymmetry remains.
+  </goal>
+
+  <context>
+    <background>
+      Per `bff-extensions.md` §F.1, when a NEW service is registered inside an `if (flag) { ... }` block in a `*Module.cs`, the PR reviewer must run a static-scan recipe identifying all endpoint handlers that inject it. If the endpoint's `MapXxxEndpoints()` is UNCONDITIONAL, ADR-032 P1/P2/P3 must be applied. This task is the in-PR application of that recipe for `IConnectionMultiplexer`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/symmetric-di-verification.md (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-032">Symmetric registration MUST hold: real and Null-Object both register `IConnectionMultiplexer`; selection by config, not by `if (flag) { register }`.</constraint>
+    <constraint source="bff-extensions.md">§F.1 static-scan recipe — required for any task adding/modifying conditional service registration.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep BFF source for `IConnectionMultiplexer` injections: `grep -rn "IConnectionMultiplexer" src/server/api/Sprk.Bff.Api/`. List every consumer (constructor parameter, field declaration).</step>
+    <step order="2">For each consumer, identify whether it is reached by an UNCONDITIONAL endpoint handler / background service / hosted service. If yes, ADR-032 applies.</step>
+    <step order="3">Read `CacheModule.cs` (post-task-003 state). Verify both branches (Redis-on and dev-in-memory) call a registration for `IConnectionMultiplexer` (real OR `NullConnectionMultiplexer`). Verify Redis-off-throw branches do not need a registration (process exits at startup).</step>
+    <step order="4">If any consumer uses `IConnectionMultiplexer?` (nullable) — refactor to non-nullable. Symmetric registration eliminates the need for nullables.</step>
+    <step order="5">If any consumer uses `[FromServices] IConnectionMultiplexer? cm = null` in endpoint signatures — refactor; symmetric registration removes the need.</step>
+    <step order="6">Write `notes/symmetric-di-verification.md` — list each consumer + its endpoint/route + verdict (symmetric ✅ / fixed in this task / N/A).</step>
+    <step order="7">Run `dotnet build`.</step>
+    <step order="8">Update `TASK-INDEX.md` and `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Enumerate consumers</tool>
+    <tool name="Read">Inspect consumers + CacheModule</tool>
+    <tool name="Edit">Fix nullable consumers if any</tool>
+    <tool name="Write">Verification notes</tool>
+    <tool name="Bash">dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/symmetric-di-verification.md (NEW)</output>
+    <output type="code">Any consumer fixes (modified, expected: 0–2 files)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/symmetric-di-verification.md` lists every `IConnectionMultiplexer` consumer in `Sprk.Bff.Api/` with verdict.</criterion>
+    <criterion testable="true">No `IConnectionMultiplexer?` nullable injection remains in BFF code (verified by `grep -rn "IConnectionMultiplexer?" src/server/api/Sprk.Bff.Api/` returning ZERO matches after this task).</criterion>
+    <criterion testable="true">`dotnet build` succeeds with no new warnings.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Quality gates at Step 9.5.</protocol>
+  </execution>
+</task>

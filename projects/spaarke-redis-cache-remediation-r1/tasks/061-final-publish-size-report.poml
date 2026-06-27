@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Final publish-size delta report (cumulative)</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks>062</blocks>
+    <tags>bff-api, verification, ci-cd</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Final ADR-029 gate</rigor-reason>
+    <parallel-group>Wrap</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wrap-up gate sequence</parallel-reason>
+  </metadata>
+  <prompt>Produce final publish-size delta report. Compare branch HEAD vs `b2fa78c81` (branch-start baseline). Cumulative delta MUST be ≤+1 MB compressed. Document in PR description.</prompt>
+  <role>Spaarke developer; deployment hygiene.</role>
+  <goal>`notes/final-publish-size-report.md` documents baseline + final + delta; PR description includes the numbers.</goal>
+  <context><background>The binding rule per ADR-029 + CLAUDE.md §10.</background><relevant-files><file>src/server/api/Sprk.Bff.Api/</file></relevant-files></context>
+  <constraints>
+    <constraint source="ADR-029">≤+1 MB delta; ≤60 MB absolute.</constraint>
+    <constraint source="spec">NFR-04.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/phase-1-publish-size-delta.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Build baseline from `b2fa78c81` commit.</step>
+    <step order="2">Build current branch HEAD.</step>
+    <step order="3">Compare compressed sizes.</step>
+    <step order="4">Write report; copy to PR description.</step>
+    <step order="5">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">git, dotnet publish, size</tool><tool name="Write">report</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/final-publish-size-report.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Report exists with baseline + final + delta.</criterion>
+    <criterion testable="true">Delta ≤+1 MB compressed.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

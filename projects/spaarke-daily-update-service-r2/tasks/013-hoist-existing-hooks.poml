@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-daily-update-service-r2">
+  <metadata>
+    <title>Hoist existing hooks (`useInlineTodoCreate`, `useBriefingNarration`)</title>
+    <phase>P2: Pattern D Hoist</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>014, 015, 019</blocks>
+    <tags>frontend, react, refactoring, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Hooks touch Dataverse Web API (ADR-024); preserve TODO_REGARDING_CATALOG verbatim</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Hoist `useInlineTodoCreate` (multi-entity regarding resolution via `TODO_REGARDING_CATALOG`) and `useBriefingNarration` to `src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/` per FR-05. Preserve `TODO_REGARDING_CATALOG` + `applyResolverFields` logic verbatim per ADR-024. Export from `./hooks` subpath. Original locations become re-export shims.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in `Xrm.WebApi` patterns and ADR-024 11-entity regarding catalog.</role>
+
+  <goal>Both hooks live in the new package's `hooks/` directory and are exported; logic unchanged; consumers (now via re-export shims) still build.</goal>
+
+  <context>
+    <background>
+      Per FR-05 + ADR-024: `useInlineTodoCreate` implements multi-entity regarding resolution via `TODO_REGARDING_CATALOG`. Preserve verbatim — the catalog + `applyResolverFields` are load-bearing.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingNarration.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sections/dailyBriefing/hooks/useInlineTodoCreate.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">`TODO_REGARDING_CATALOG` + `applyResolverFields` preserved verbatim during hoist.</constraint>
+    <constraint source="ADR-012">Hooks live in the new package, not `@spaarke/ui-components`.</constraint>
+    <constraint source="project">Logic-equivalent move; no behavior change.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-024-sprk-todo-multi-entity-regarding.md</file>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/dataverse/web-api-client.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>projects/spaarke-daily-update-service-r2/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r2/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Move `useInlineTodoCreate.ts` and `useBriefingNarration.ts` to `src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/`.</step>
+    <step order="2">Preserve `TODO_REGARDING_CATALOG` + `applyResolverFields` verbatim (per ADR-024).</step>
+    <step order="3">Export both hooks from `src/hooks/index.ts`.</step>
+    <step order="4">Original locations: replace with re-export shims `export { useInlineTodoCreate, useBriefingNarration } from '@spaarke/daily-briefing-components/hooks'`.</step>
+    <step order="5">Run `npm run build` in new package + consumers; verify green.</step>
+    <step order="6">Update TASK-INDEX.md: change task 013 status from 🔲 to ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TypeScript packages.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingNarration.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both hooks exported from `@spaarke/daily-briefing-components/hooks`.</criterion>
+    <criterion testable="true">`TODO_REGARDING_CATALOG` + `applyResolverFields` byte-identical to pre-hoist version (verifiable via git diff).</criterion>
+    <criterion testable="true">New package + consumers build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Do NOT decompose `useNotificationData` here — that's task 014. This task only moves the existing hooks.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

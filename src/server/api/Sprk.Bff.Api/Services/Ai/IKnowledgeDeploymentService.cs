@@ -13,7 +13,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// 2. Falls back to default from AnalysisOptions.DefaultRagModel
 ///
 /// Index routing:
-/// - Shared: spaarke-knowledge-index-v2 with tenantId filter
+/// - Shared: spaarke-files-index with tenantId filter
 /// - Dedicated: {tenantId}-knowledge-index in Spaarke subscription
 /// - CustomerOwned: Customer-provided index in customer's Azure subscription
 /// </remarks>
@@ -160,9 +160,9 @@ public record KnowledgeDeploymentConfig
 
     /// <summary>
     /// Index name in Azure AI Search.
-    /// Defaults: Shared="spaarke-knowledge-index-v2", Dedicated="{tenantId}-knowledge", CustomerOwned=customer-specified
+    /// Defaults: Shared="spaarke-files-index", Dedicated="{tenantId}-knowledge", CustomerOwned=customer-specified
     /// </summary>
-    public string IndexName { get; init; } = "spaarke-knowledge-index-v2";
+    public string IndexName { get; init; } = "spaarke-files-index";
 
     /// <summary>
     /// Key Vault secret name containing the API key (for CustomerOwned).

@@ -2,6 +2,7 @@ using System.Linq;
 using System.Text;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Memory;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -49,19 +50,89 @@ public class PlaybookChatContextProvider : IChatContextProvider
     private readonly IDocumentDataverseService _documentService;
     private readonly ILogger<PlaybookChatContextProvider> _logger;
 
+    // R6 Pillar 7 (task 068, D-C-21) — cross-session matter-memory activation. When the
+    // host context identifies a matter, the per-matter structured fragment is appended
+    // to the system prompt under the shared budget tracker. Registered unconditionally
+    // in AiPersistenceModule, so required (non-nullable) here.
+    private readonly IMatterMemoryService _matterMemoryService;
+
+    // R6 Pillar 7 (task 068, D-C-22) — shared 8K system-prompt budget tracker. Remains
+    // nullable because the tracker registration is gated by the compound
+    // (Analysis:Enabled && DocumentIntelligence:Enabled) flag in AnalysisServicesModule
+    // while this provider is registered unconditionally in AiModule. When the AI gate is
+    // off the chat factory becomes NullSprkChatAgentFactory so this provider is never
+    // resolved in practice — but the nullable shape keeps the DI graph honest.
+    private readonly IPromptBudgetTracker? _promptBudgetTracker;
+
     public PlaybookChatContextProvider(
         IScopeResolverService scopeResolver,
         IPlaybookService playbookService,
         IDocumentDataverseService documentService,
-        ILogger<PlaybookChatContextProvider> logger)
+        ILogger<PlaybookChatContextProvider> logger,
+        IMatterMemoryService matterMemoryService,
+        IPromptBudgetTracker? promptBudgetTracker = null)
     {
         _scopeResolver = scopeResolver;
         _playbookService = playbookService;
         _documentService = documentService;
         _logger = logger;
+        _matterMemoryService = matterMemoryService;
+        _promptBudgetTracker = promptBudgetTracker;
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>FR-27 single-pipeline contract (chat-routing-redesign-r1, task 078 MVP audit, 2026-06-23)</b>:
+    /// this method is the single per-turn system-prompt composition seam for chat. There is
+    /// exactly one composition flow: persona/action resolution → knowledge scope enrichment
+    /// → entity enrichment → matter-memory append (FR-45) → document-summary load → return
+    /// <see cref="ChatContext"/>. The chat factory (<see cref="SprkChatAgentFactory"/>)
+    /// then appends suffix blocks (Active Capabilities, Session Files manifest, formatting
+    /// directive, Workspace State) onto the returned <c>SystemPrompt</c> under the shared
+    /// <see cref="IPromptBudgetTracker"/>. NO other component composes the per-turn prompt
+    /// — there is no parallel composer in <see cref="SprkChatAgentFactory"/>, no early-return
+    /// path that bypasses this method, and no production caller of
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Memory.IMemoryCompositionService.ComposeAsync"/>
+    /// today. Future wave 4-E tasks (076 layered context cards, 077 trust-frame injector,
+    /// 079 composition target) will plug into this method at the documented insertion points
+    /// below — they MUST NOT introduce a second composition seam in
+    /// <see cref="SprkChatAgentFactory"/>.
+    /// </para>
+    /// <para>
+    /// <b>FR-45 binding invariant</b>: this method MUST call
+    /// <see cref="IMatterMemoryService.ToSystemPromptFragmentAsync"/> via the
+    /// <see cref="AppendMatterMemoryAsync"/> helper for both the generic (no-playbook) and
+    /// playbook paths. As of architecture §11.1 the invocation was at line 627; after the
+    /// task-078 MVP XML-doc additions on 2026-06-23 the invocation site shifted to
+    /// <see cref="AppendMatterMemoryAsync"/>'s try-block (currently ~line 679, line number
+    /// is NOT load-bearing — the test asserts the call exists, not its position). Do NOT
+    /// regress this wiring — task 080 (binding regression test) enforces it.
+    /// </para>
+    /// <para>
+    /// <b>Future plug-in points (deferred — MVP Q5b cut)</b>:
+    /// <list type="bullet">
+    /// <item><description>
+    /// <b>Trust-frame instruction injection (task 077)</b>: will plug in here AFTER persona
+    /// resolution and BEFORE knowledge-scope enrichment (i.e., between the persona prompt
+    /// assignment and <see cref="EnrichSystemPrompt"/>). Belongs to the static-prefix tier
+    /// per architecture §6.2 (cacheable across turns within a session).
+    /// </description></item>
+    /// <item><description>
+    /// <b>Layered context cards (task 076)</b>: will plug in here AFTER knowledge-scope
+    /// enrichment and BEFORE entity enrichment (i.e., between <see cref="EnrichSystemPrompt"/>
+    /// and <see cref="AppendEntityEnrichment"/>). Also belongs to the static-prefix tier.
+    /// </description></item>
+    /// <item><description>
+    /// <b>Dynamic suffix via <see cref="IMemoryCompositionService.ComposeAsync"/> (task 079)</b>:
+    /// will plug in here AFTER all static-prefix layers and AFTER matter-memory append, before
+    /// the final <c>ChatContext</c> return. The composer's 4-layer output (recent-verbatim,
+    /// compressed-mid, retrieved-old, pinned) joins the system prompt as the per-turn dynamic
+    /// suffix. Pinned-tier FR-42 invariant is owned by the composer itself.
+    /// </description></item>
+    /// </list>
+    /// </para>
+    /// </remarks>
     public async Task<ChatContext> GetContextAsync(
         string documentId,
         string tenantId,
@@ -146,6 +217,13 @@ public class PlaybookChatContextProvider : IChatContextProvider
 
             // 6. Append entity metadata enrichment (generic mode)
             defaultPrompt = AppendEntityEnrichment(defaultPrompt, hostContext);
+
+            // 7. R6 task 068 (D-C-21 / FR-45) — append cross-session matter memory fragment
+            // when the host context identifies a matter and the IMatterMemoryService is wired.
+            // ADR-015: fragment may carry user-authored facts (parties / dates / analyses);
+            // it lives in the prompt by design, not in logs. Soft-fails to no-op.
+            defaultPrompt = await AppendMatterMemoryAsync(
+                defaultPrompt, tenantId, hostContext, cancellationToken);
 
             // Still load document summary for inline context (skipped when documentId is null/empty)
             string? defaultDocSummary = null;
@@ -249,6 +327,12 @@ public class PlaybookChatContextProvider : IChatContextProvider
 
         // 5. Append entity metadata enrichment (after all other sections)
         systemPrompt = AppendEntityEnrichment(systemPrompt, hostContext);
+
+        // 5b. R6 task 068 (D-C-21 / FR-45) — append cross-session matter memory fragment
+        // when the host context identifies a matter and the IMatterMemoryService is wired.
+        // Same soft-fail posture + budget gating as the generic-mode path.
+        systemPrompt = await AppendMatterMemoryAsync(
+            systemPrompt, tenantId, hostContext, cancellationToken);
 
         // 6. Load document summary for inline context injection
         string? documentSummary = null;
@@ -383,7 +467,13 @@ public class PlaybookChatContextProvider : IChatContextProvider
     /// Enriches the system prompt with inline knowledge and skill instructions
     /// from the resolved knowledge scope.
     /// </summary>
-    private static string EnrichSystemPrompt(string systemPrompt, ChatKnowledgeScope? scope)
+    /// <remarks>
+    /// R6 task 068 (D-C-22): when the shared <see cref="IPromptBudgetTracker"/> is wired,
+    /// each fragment (knowledge-inline, skill-instructions) reserves budget independently
+    /// — denial logs truncation telemetry via the tracker and omits the fragment. Behaviour
+    /// is unchanged when the tracker is null (legacy tests + pre-task-068 environments).
+    /// </remarks>
+    private string EnrichSystemPrompt(string systemPrompt, ChatKnowledgeScope? scope)
     {
         if (scope is null)
             return systemPrompt;
@@ -392,21 +482,50 @@ public class PlaybookChatContextProvider : IChatContextProvider
 
         if (!string.IsNullOrWhiteSpace(scope.InlineContent))
         {
-            sb.AppendLine();
-            sb.AppendLine();
-            sb.AppendLine("## Reference Materials");
-            sb.AppendLine(scope.InlineContent);
+            if (TryReservePromptBudget("knowledge-inline", scope.InlineContent))
+            {
+                sb.AppendLine();
+                sb.AppendLine();
+                sb.AppendLine("## Reference Materials");
+                sb.AppendLine(scope.InlineContent);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(scope.SkillInstructions))
         {
-            sb.AppendLine();
-            sb.AppendLine();
-            sb.AppendLine("## Specialized Instructions");
-            sb.AppendLine(scope.SkillInstructions);
+            if (TryReservePromptBudget("skill-instructions", scope.SkillInstructions))
+            {
+                sb.AppendLine();
+                sb.AppendLine();
+                sb.AppendLine("## Specialized Instructions");
+                sb.AppendLine(scope.SkillInstructions);
+            }
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// R6 task 068 (D-C-22) — shared-tracker budget reservation helper. When the tracker
+    /// is null (legacy path), returns true unconditionally so behaviour is unchanged.
+    /// When the tracker is wired, attempts to reserve the estimated tokens for the named
+    /// layer; on denial, the tracker emits truncation telemetry and this method returns
+    /// false so the caller omits its fragment.
+    /// </summary>
+    private bool TryReservePromptBudget(string layer, string fragment)
+    {
+        if (_promptBudgetTracker is null)
+        {
+            return true;
+        }
+
+        var tokens = EstimateTokenCount(fragment);
+        if (tokens <= 0)
+        {
+            return true;
+        }
+
+        return _promptBudgetTracker.TryReserve(layer, tokens, sessionId: null, tenantId: null);
     }
 
     /// <summary>
@@ -460,17 +579,162 @@ public class PlaybookChatContextProvider : IChatContextProvider
             return systemPrompt;
         }
 
-        // Guard: total system prompt budget
-        var currentTokenEstimate = EstimateTokenCount(systemPrompt);
-        if (currentTokenEstimate + enrichmentTokenEstimate > MaxSystemPromptTokenBudget)
+        // Guard: total system prompt budget. When the shared per-turn tracker is wired,
+        // it owns the authoritative accounting + truncation telemetry (R6 task 068).
+        // Fallback: when the tracker is absent (legacy tests, pre-task-068 environments),
+        // we re-estimate locally against the static MaxSystemPromptTokenBudget so behaviour
+        // is unchanged on those paths.
+        if (_promptBudgetTracker is not null)
         {
-            _logger.LogWarning(
-                "System prompt token budget would be exceeded ({CurrentTokens} + {EnrichmentTokens} > {Budget}); skipping entity enrichment",
-                currentTokenEstimate, enrichmentTokenEstimate, MaxSystemPromptTokenBudget);
-            return systemPrompt;
+            if (!_promptBudgetTracker.TryReserve(
+                    "entity-enrichment",
+                    enrichmentTokenEstimate,
+                    sessionId: null,
+                    tenantId: null))
+            {
+                // Tracker emits truncation telemetry; we log soft-fail rationale here.
+                _logger.LogWarning(
+                    "R6 task 068: entity enrichment denied by shared prompt budget tracker (requested={EnrichmentTokens}, remaining={Remaining}); skipping enrichment",
+                    enrichmentTokenEstimate, _promptBudgetTracker.Remaining);
+                return systemPrompt;
+            }
+        }
+        else
+        {
+            var currentTokenEstimate = EstimateTokenCount(systemPrompt);
+            if (currentTokenEstimate + enrichmentTokenEstimate > MaxSystemPromptTokenBudget)
+            {
+                _logger.LogWarning(
+                    "System prompt token budget would be exceeded ({CurrentTokens} + {EnrichmentTokens} > {Budget}); skipping entity enrichment",
+                    currentTokenEstimate, enrichmentTokenEstimate, MaxSystemPromptTokenBudget);
+                return systemPrompt;
+            }
         }
 
         return systemPrompt + "\n\n" + enrichmentBlock;
+    }
+
+    /// <summary>
+    /// R6 Pillar 7 (task 068, D-C-21 / FR-45) — activates the existing production
+    /// <see cref="IMatterMemoryService"/> into the chat system-prompt assembly. When
+    /// the host context identifies a matter (EntityType == "matter") and the memory
+    /// service is wired (post-R6 environments), the per-matter structured fragment
+    /// (parties / key dates / prior analyses / key facts) is appended to the system
+    /// prompt so cross-session same-matter conversations are coherent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Invariant</b>: this method does NOT modify
+    /// <see cref="MatterMemoryService"/>. The service's production code (Cosmos-backed
+    /// read + 500-token render budget + confidence filtering) is consumed unchanged.
+    /// </para>
+    /// <para>
+    /// <b>Budget</b>: the rendered fragment is accounted via the shared
+    /// <see cref="IPromptBudgetTracker"/> when present. The tracker emits truncation
+    /// telemetry on denial. The fragment itself is bounded to ~500 tokens by
+    /// <see cref="MatterMemoryService"/>; this method just contributes that token
+    /// cost to the shared 8K budget tracker on behalf of the matter-memory layer.
+    /// </para>
+    /// <para>
+    /// <b>ADR-015</b>: the fragment may contain user-authored matter facts (parties,
+    /// dates). It is part of the LLM prompt by design; it is NOT logged. This method
+    /// logs only (matterId, tenantId, fragmentLength) — deterministic identifiers and
+    /// counts only.
+    /// </para>
+    /// <para>
+    /// <b>Soft failure</b>: any exception path (Cosmos outage, ETag conflict, etc.)
+    /// degrades to "no matter memory this turn"; the rest of the prompt assembly
+    /// continues. Matches the soft-failure posture of the surrounding subsystems.
+    /// </para>
+    /// </remarks>
+    private async Task<string> AppendMatterMemoryAsync(
+        string systemPrompt,
+        string tenantId,
+        ChatHostContext? hostContext,
+        CancellationToken cancellationToken)
+    {
+        // Guard: service not wired (legacy tests, pre-task-068 envs)
+        if (_matterMemoryService is null)
+        {
+            return systemPrompt;
+        }
+
+        // Guard: host context must identify a matter
+        if (hostContext is null
+            || string.IsNullOrWhiteSpace(hostContext.EntityType)
+            || string.IsNullOrWhiteSpace(hostContext.EntityId)
+            || !string.Equals(hostContext.EntityType, "matter", StringComparison.OrdinalIgnoreCase))
+        {
+            return systemPrompt;
+        }
+
+        // Guard: tenant required for Cosmos partition key
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            return systemPrompt;
+        }
+
+        try
+        {
+            var fragment = await _matterMemoryService.ToSystemPromptFragmentAsync(
+                tenantId, hostContext.EntityId, cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(fragment))
+            {
+                _logger.LogDebug(
+                    "R6 task 068: matter memory empty for matter={MatterId} tenant={TenantId}; no fragment appended",
+                    hostContext.EntityId, tenantId);
+                return systemPrompt;
+            }
+
+            var fragmentTokens = EstimateTokenCount(fragment);
+
+            // Budget gate via shared tracker when present
+            if (_promptBudgetTracker is not null)
+            {
+                if (!_promptBudgetTracker.TryReserve(
+                        "matter-memory",
+                        fragmentTokens,
+                        sessionId: null,
+                        tenantId: tenantId))
+                {
+                    _logger.LogWarning(
+                        "R6 task 068: matter memory fragment denied by shared prompt budget tracker (requested={Tokens}, remaining={Remaining}, matter={MatterId}); skipping",
+                        fragmentTokens, _promptBudgetTracker.Remaining, hostContext.EntityId);
+                    return systemPrompt;
+                }
+            }
+            else
+            {
+                var currentTokenEstimate = EstimateTokenCount(systemPrompt);
+                if (currentTokenEstimate + fragmentTokens > MaxSystemPromptTokenBudget)
+                {
+                    _logger.LogWarning(
+                        "R6 task 068: matter memory fragment would exceed system prompt budget ({Current} + {Fragment} > {Budget}); skipping",
+                        currentTokenEstimate, fragmentTokens, MaxSystemPromptTokenBudget);
+                    return systemPrompt;
+                }
+            }
+
+            _logger.LogInformation(
+                "R6 task 068: appended matter memory fragment to system prompt — matter={MatterId} tenant={TenantId} fragmentTokens={Tokens} fragmentLength={Length}",
+                hostContext.EntityId, tenantId, fragmentTokens, fragment.Length);
+
+            return systemPrompt + "\n\n" + fragment;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Soft failure — matter memory is enhancing, not required. Cross-session
+            // coherence degrades for this turn; the rest of the prompt assembly continues.
+            _logger.LogWarning(ex,
+                "R6 task 068: failed to load matter memory for matter={MatterId} tenant={TenantId}; continuing without",
+                hostContext.EntityId, tenantId);
+            return systemPrompt;
+        }
     }
 
     /// <summary>

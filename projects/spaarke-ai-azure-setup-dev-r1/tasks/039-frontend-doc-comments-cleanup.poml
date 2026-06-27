@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>Frontend doc-comments cleanup (FR-13 cosmetic — 4 client files)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>completed</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>046</blocks>
+    <tags>frontend, pcf, refactoring, docs</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Doc-comment hygiene only — no behavior change (FR-13 cosmetic)</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update 4 frontend doc-comment references per FR-13 cosmetic scope (2026-06-26 validation):
+    - SearchIndexResolver.ts:35 (PCF)
+    - ConversationPane.tsx:1079 (SpaarkeAi solution)
+    - SavedQuery XML (sprk_Precedent {b637f6c8-...}.xml:48) — refs spaarke-insights-index (verify canonical)
+    - searchIndexResolver.test.ts (DocumentUploadWizard) — test constant + mock Dataverse record
+  </prompt>
+
+  <role>
+    Spaarke platform frontend developer (PCF + React + Dataverse solutions).
+  </role>
+
+  <goal>
+    All 4 frontend files reference canonical index names.
+  </goal>
+
+  <context>
+    <background>
+      Per 2026-06-26 validation, all frontend AI-Search access in src/solutions/ goes through BFF API — these are pure doc/comment hygiene, NOT behavior changes.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SearchIndexResolver.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/spaarke_insights/Entities/sprk_Precedent/SavedQueries/{b637f6c8-ae5a-f111-a825-3833c5d9bcb1}.xml</file>
+      <file>src/solutions/DocumentUploadWizard/src/components/searchIndexResolver.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">Cosmetic doc-comment updates only; no behavior change</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Edit SearchIndexResolver.ts:35 — canonical name</step>
+    <step order="2">Edit ConversationPane.tsx:1079 — canonical name (refs spaarke-session-files; verify it's correct canonical)</step>
+    <step order="3">Edit SavedQuery XML:48 — verify spaarke-insights-index is canonical (no rename expected)</step>
+    <step order="4">Edit searchIndexResolver.test.ts — update test constant + mock Dataverse record</step>
+    <step order="5">Run frontend builds where applicable; verify no behavior change</step>
+    <step order="6">Update TASK-INDEX.md: task 039 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Edit">4 frontend files</tool>
+    <tool name="npm">Build PCF + solutions where applicable</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">4 frontend files (cosmetic + test constant)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 frontend files reference canonical index names</criterion>
+    <criterion testable="true">Tests pass (no behavior change)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>MINIMAL rigor. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -2,13 +2,13 @@ using System.Diagnostics;
 using System.Text;
 using Azure;
 using Azure.AI.DocumentIntelligence;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using MimeKit;
 using MsgReader.Outlook;
 using Polly;
 using Polly.CircuitBreaker;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Telemetry;
@@ -27,15 +27,19 @@ public class TextExtractorService : ITextExtractor
     private readonly DocumentIntelligenceOptions _options;
     private readonly ILogger<TextExtractorService> _logger;
     private readonly ICircuitBreakerRegistry? _circuitRegistry;
-    private readonly IDistributedCache? _cache;
+    private readonly ITenantCache _cache;
     private readonly CacheMetrics? _cacheMetrics;
     private readonly AsyncCircuitBreakerPolicy _docIntelCircuitBreaker;
 
-    /// <summary>
-    /// Cache key prefix for extracted document text.
-    /// Full key format: sdap:ai:text:{driveId}:{itemId}:v{etag}
-    /// </summary>
-    private const string CacheKeyPrefix = "sdap:ai:text";
+    // NFR-08 system-level cache allow-listed (FR-05 redis remediation r1):
+    // ITextExtractor.ExtractAsync(stream, fileName, driveId, itemId, etag, ct) has no tenantId
+    // in scope — the SPE drive+item+etag tuple is already a content-versioned identifier
+    // (ETag changes when the file changes, auto-invalidating). Using the "system" sentinel
+    // preserves the wrapper invariant while documenting this as a system-level cache exception.
+    // On-wire key: spaarke:tenant:system:doc-text:{driveId}:{itemId}:{etag}:v1
+    private const string SystemTenantSentinel = "system";
+    private const string CacheResource = "doc-text";
+    private const int CacheVersion = 1;
 
     /// <summary>
     /// Cache type identifier for metrics tracking.
@@ -57,14 +61,14 @@ public class TextExtractorService : ITextExtractor
     public TextExtractorService(
         IOptions<DocumentIntelligenceOptions> options,
         ILogger<TextExtractorService> logger,
+        ITenantCache cache,
         ICircuitBreakerRegistry? circuitRegistry = null,
-        IDistributedCache? cache = null,
         CacheMetrics? cacheMetrics = null)
     {
         _options = options.Value;
         _logger = logger;
         _circuitRegistry = circuitRegistry;
-        _cache = cache;
+        _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _cacheMetrics = cacheMetrics;
 
         // Register circuit breaker for Document Intelligence
@@ -159,21 +163,23 @@ public class TextExtractorService : ITextExtractor
         string? etag,
         CancellationToken cancellationToken = default)
     {
-        // If cache identifiers are incomplete, fall back to non-cached extraction
-        if (string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId) || string.IsNullOrEmpty(etag) || _cache == null)
+        // If cache identifiers are incomplete, fall back to non-cached extraction.
+        // FR-05 redis remediation r1: nullable IDistributedCache fallback removed — the symmetric
+        // CacheModule registration guarantees ITenantCache is always present.
+        if (string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId) || string.IsNullOrEmpty(etag))
         {
             _logger.LogDebug(
-                "Cache identifiers incomplete or cache unavailable, extracting without cache (DriveId={DriveId}, ItemId={ItemId}, HasETag={HasETag})",
+                "Cache identifiers incomplete, extracting without cache (DriveId={DriveId}, ItemId={ItemId}, HasETag={HasETag})",
                 driveId ?? "(null)", itemId ?? "(null)", !string.IsNullOrEmpty(etag));
             return await ExtractAsync(fileStream, fileName, cancellationToken);
         }
 
         // Sanitize ETag (remove surrounding quotes if present, common in HTTP headers)
         var sanitizedEtag = etag.Trim('"');
-        var cacheKey = $"{CacheKeyPrefix}:{driveId}:{itemId}:v{sanitizedEtag}";
+        var cacheId = $"{driveId}:{itemId}:{sanitizedEtag}";
 
         // Try cache lookup first (cache-aside pattern per ADR-009)
-        var cachedResult = await TryGetFromCacheAsync(cacheKey, cancellationToken);
+        var cachedResult = await TryGetFromCacheAsync(cacheId, cancellationToken);
         if (cachedResult != null)
         {
             return cachedResult;
@@ -185,7 +191,7 @@ public class TextExtractorService : ITextExtractor
         // Cache successful results (skip failures, vision-required, and oversized text)
         if (result.Success && result.Text != null && !result.IsVisionRequired)
         {
-            await TrySetInCacheAsync(cacheKey, result, cancellationToken);
+            await TrySetInCacheAsync(cacheId, result, cancellationToken);
         }
 
         return result;
@@ -196,20 +202,22 @@ public class TextExtractorService : ITextExtractor
     /// Returns null on cache miss or error (graceful degradation).
     /// </summary>
     private async Task<TextExtractionResult?> TryGetFromCacheAsync(
-        string cacheKey,
+        string cacheId,
         CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         try
         {
-            var cachedText = await _cache!.GetStringAsync(cacheKey, cancellationToken);
+            // NFR-08 system-level allow-listed: tenant scope = "system" (see class header).
+            var cachedText = await _cache.GetAsync<string>(
+                SystemTenantSentinel, CacheResource, cacheId, CacheVersion, ct: cancellationToken);
             sw.Stop();
 
             if (cachedText != null)
             {
                 _logger.LogDebug(
-                    "Text extraction cache HIT for key {CacheKey} ({CharCount} chars, {LatencyMs:F1}ms)",
-                    cacheKey, cachedText.Length, sw.Elapsed.TotalMilliseconds);
+                    "Text extraction cache HIT for id {CacheId} ({CharCount} chars, {LatencyMs:F1}ms)",
+                    cacheId, cachedText.Length, sw.Elapsed.TotalMilliseconds);
                 _cacheMetrics?.RecordHit(sw.Elapsed.TotalMilliseconds, CacheType);
 
                 // Reconstruct a successful result from cached text.
@@ -218,8 +226,8 @@ public class TextExtractorService : ITextExtractor
             }
 
             _logger.LogDebug(
-                "Text extraction cache MISS for key {CacheKey} ({LatencyMs:F1}ms)",
-                cacheKey, sw.Elapsed.TotalMilliseconds);
+                "Text extraction cache MISS for id {CacheId} ({LatencyMs:F1}ms)",
+                cacheId, sw.Elapsed.TotalMilliseconds);
             _cacheMetrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, CacheType);
             return null;
         }
@@ -227,8 +235,8 @@ public class TextExtractorService : ITextExtractor
         {
             sw.Stop();
             _logger.LogWarning(ex,
-                "Error reading text extraction cache for key {CacheKey}, proceeding with extraction",
-                cacheKey);
+                "Error reading text extraction cache for id {CacheId}, proceeding with extraction",
+                cacheId);
             _cacheMetrics?.RecordMiss(sw.Elapsed.TotalMilliseconds, CacheType);
             return null; // Graceful degradation — cache failure should not block extraction
         }
@@ -240,7 +248,7 @@ public class TextExtractorService : ITextExtractor
     /// Errors are logged but do not propagate (caching is optimization, not requirement).
     /// </summary>
     private async Task TrySetInCacheAsync(
-        string cacheKey,
+        string cacheId,
         TextExtractionResult result,
         CancellationToken cancellationToken)
     {
@@ -251,31 +259,27 @@ public class TextExtractorService : ITextExtractor
         if (textByteSize > MaxCacheableTextBytes)
         {
             _logger.LogDebug(
-                "Skipping cache for key {CacheKey}: text size {SizeKB:F0}KB exceeds {MaxKB}KB limit",
-                cacheKey, textByteSize / 1024.0, MaxCacheableTextBytes / 1024);
+                "Skipping cache for id {CacheId}: text size {SizeKB:F0}KB exceeds {MaxKB}KB limit",
+                cacheId, textByteSize / 1024.0, MaxCacheableTextBytes / 1024);
             return;
         }
 
         try
         {
-            await _cache!.SetStringAsync(
-                cacheKey,
-                result.Text,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = CacheTtl
-                },
-                cancellationToken);
+            // NFR-08 system-level allow-listed: tenant scope = "system" (see class header).
+            await _cache.SetAsync(
+                SystemTenantSentinel, CacheResource, cacheId, CacheVersion,
+                result.Text, CacheTtl, ct: cancellationToken);
 
             _logger.LogDebug(
-                "Cached extracted text for key {CacheKey} ({CharCount} chars, {SizeKB:F0}KB, TTL={TtlHours}h)",
-                cacheKey, result.Text.Length, textByteSize / 1024.0, CacheTtl.TotalHours);
+                "Cached extracted text for id {CacheId} ({CharCount} chars, {SizeKB:F0}KB, TTL={TtlHours}h)",
+                cacheId, result.Text.Length, textByteSize / 1024.0, CacheTtl.TotalHours);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "Error caching extracted text for key {CacheKey}, extraction result still returned",
-                cacheKey);
+                "Error caching extracted text for id {CacheId}, extraction result still returned",
+                cacheId);
             // Don't throw — caching is optimization, not requirement
         }
     }

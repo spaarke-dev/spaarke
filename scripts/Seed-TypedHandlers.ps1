@@ -161,6 +161,57 @@ $RowFiles = @{
     # to all playbooks; per-playbook authorization enforced inside the facade + the handler's
     # tenant-visibility check via IPlaybookService). sprk_availableincontexts = Chat (100000001).
     "INVOKE-PLAYBOOK"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-invoke-playbook-row.json"
+    # R6 Pillar 6b / D-C-05 / task 054 — SendWorkspaceArtifactHandler: single row exposing the
+    # send_workspace_artifact(widgetType, title, widgetData, matterId?) chat tool. Constructs
+    # a WorkspaceTab + persists via IWorkspaceStateService.UpsertTabAsync (Pillar 6a infra
+    # landed in task 053). sprk_requiredcapability = null (intentional — sending an artifact
+    # is a default chat affordance; the closed 4-variant widgetType enum is the authorization
+    # surface). sprk_availableincontexts = Chat (100000001) — playbook nodes write to
+    # sprk_analysisoutput, not the chat-session workspace tab list.
+    "SEND-WORKSPACE-ARTIFACT"          = "$RepoRoot/infra/dataverse/sprk_analysistool-send-workspace-artifact-row.json"
+    # R6 Pillar 6b / D-C-06 / task 055 — UpdateWorkspaceTabHandler: single row exposing the
+    # update_workspace_tab(tabId, widgetData, expectedLastUserEditAt?) chat tool. Mutates an
+    # existing WorkspaceTab via IWorkspaceStateService.UpsertTabAsync with Q8 USER-WINS
+    # conflict resolution (refuses with structured 'stale_read' response when the stored
+    # LastUserEditAt is later than the LLM-supplied timestamp). sprk_requiredcapability = null
+    # (intentional — default user affordance available in every chat session; handler-side
+    # gates supply the authorization surface). sprk_availableincontexts = Chat (100000001).
+    "UPDATE-WORKSPACE-TAB"             = "$RepoRoot/infra/dataverse/sprk_analysistool-update-workspace-tab-row.json"
+    # R6 Pillar 7 / D-C-23 / task 069 — ManagePinnedContextHandler: single row exposing the
+    # manage_pinned_context(action, pinType, title, content?) chat tool. Creates or deletes
+    # PinnedContextItem rows via IPinnedContextRepository. Voice command surface (FR-47):
+    # 'remember X' → create user-preference; 'always X' → create system-rule;
+    # 'forget X' → delete by (pinType, title) case-insensitive match. CapabilityRouter Layer 0
+    # voice command pre-pass (added in task 069) recognises the three patterns and biases the
+    # LLM toward this tool. sprk_requiredcapability = null (intentional — default voice
+    # affordance available in every chat session). sprk_availableincontexts = Chat (100000001).
+    # ADR-015 BINDING: handler logs title length + content presence only — never the bodies.
+    "MANAGE-PINNED-CONTEXT"            = "$RepoRoot/infra/dataverse/sprk_analysistool-manage-pinned-context-row.json"
+    # chat-routing-redesign-r1 / Phase 4 WP5 / task 085 — RecallSessionFileHandler: single row
+    # exposing the recall_session_file(fileId, purpose, query, scope, maxTokens?, requireCitations?)
+    # chat tool. Load-bearing T2+T5 retrieval tool for the legal-domain trust framing — the
+    # requireCitations: true default + the persona instruction injected by TrustFrameInstructionInjector
+    # (task 077) ensure the agent uses citation-bearing recall rather than quoting the precomputed
+    # (NOT authoritative) summary. Reads ONLY from the spaarke-session-files Azure AI Search index
+    # (architecture §5.2.1 BINDING) — session-scoped RagService route, with tenantId + sessionId
+    # AND-clause enforcement (ADR-014). sprk_requiredcapability = null (intentional — always-on
+    # when the session has uploaded files per architecture §8.2). sprk_availableincontexts =
+    # Chat (100000001) — playbook nodes do not read from ChatSession.UploadedFiles.
+    # MVP-cut scope (chat-routing-redesign-r1 Q5b): this is the ONE retrieval handler shipping in
+    # MVP; tasks 083/084/086/087/088/089/090 (list_session_files / get_file_manifest /
+    # write_session_memory / retrieve_matter_memory / promote_to_matter_memory /
+    # get_user_preferences / get_org_templates) are DEFERRED.
+    "RECALL-SESSION-FILE"              = "$RepoRoot/infra/dataverse/sprk_analysistool-recall-session-file-row.json"
+    # chat-routing-redesign-r1 / Phase 5R / task 118b / FR-57 — GetWorkspaceTabContentHandler:
+    # single row exposing the get_workspace_tab_content(tabId, sectionName?) chat tool. Closes
+    # the T2 workspace-output → AI-memory round-trip per architecture §6.5 + §11.1: composed
+    # widget state (sections + values) for an existing workspace tab becomes AI-readable on
+    # subsequent chat turns. READ-ONLY projection over the existing Pillar 6b plumbing
+    # (IWorkspaceStateService.GetTabsAsync) — NO new state storage; NO mutation. Sibling write
+    # tool is UPDATE-WORKSPACE-TAB (task 055). sprk_requiredcapability = null (intentional —
+    # default user affordance available in every chat session). sprk_availableincontexts =
+    # Chat (100000001) — playbook nodes do not read from chat-session workspace tabs.
+    "GET-WORKSPACE-TAB-CONTENT"        = "$RepoRoot/infra/dataverse/sprk_analysistool-get-workspace-tab-content-row.json"
 }
 
 # -----------------------------------------------------------------------------

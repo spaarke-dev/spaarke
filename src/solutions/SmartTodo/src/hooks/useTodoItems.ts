@@ -60,7 +60,12 @@ function sortTodoItems(items: ITodo[]): ITodo[] {
 export interface IUseTodoItemsOptions {
   /** Xrm.WebApi reference from the PCF framework context */
   webApi: IWebApi;
-  /** GUID of the current user (context.userSettings.userId) */
+  /**
+   * UAT 2026-06-19: param semantic changed from systemuser GUID to
+   * sprk_contact GUID. Caller must resolve via useCurrentContactId.
+   * The field name stays `userId` for back-compat with legacy callers
+   * (they pass whatever value they have; field renaming is deferred).
+   */
   userId: string;
   /**
    * Optional mock items for local development / testing.

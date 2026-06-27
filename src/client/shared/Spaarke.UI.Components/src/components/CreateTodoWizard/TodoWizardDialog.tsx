@@ -174,7 +174,12 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
         renderContent: _wizardFiles => (
           <CreateTodoStep
             dataService={dataService}
-            onSearchUsers={handleSearchUsers}
+            // UAT 2026-06-21 — sprk_todo.sprk_assignedto migrated to a Contact
+            // lookup. The wizard's Assignee picker now searches the OOB
+            // `contact` entity (not systemuser) so the selected GUID matches
+            // the lookup's target. Prop name kept as `onSearchUsers` for back-
+            // compat with the existing CreateTodoStep signature.
+            onSearchUsers={handleSearchContacts}
             onValidChange={setFormValid}
             onFormValues={setFormValues}
             initialFormValues={formValues}

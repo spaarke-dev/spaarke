@@ -48,6 +48,7 @@
 
 import {
   LAUNCH_ACTION_CREATE_TODO,
+  LAUNCH_ACTION_OPEN_TODO,
   LAUNCH_ACTION_OPEN_TODOS,
   LAUNCH_PARAM_KEYS,
   VISUAL_HOST_PARAM_KEYS,
@@ -391,6 +392,110 @@ describe('parseLaunchContextFromSearch — openTodos branch (R4 FR-34)', () => {
     const search = '?entityName=sprk_todo&mode=dialog';
     const result = parseLaunchContextFromSearch(search);
     expect(result).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// openTodo branch tests — R4 task 100 / W-2 LegalWorkspace widget "Open" button
+//
+// Verifies the parser recognises:
+//   (l) Explicit raw `?action=openTodo&todoId=<guid>`
+//   (m) Envelope-wrapped `?data=action%3DopenTodo%26todoId%3D<guid>`
+//   (n) Missing/blank todoId → undefined (defensive)
+//   (o) Action discriminator + LAUNCH_PARAM_KEYS.TODO_ID binding contract
+//   (p) openTodo coexists with createTodo / openTodos (no regression to other branches)
+// ---------------------------------------------------------------------------
+
+describe('parseLaunchContextFromSearch — openTodo branch (R4 task 100 / W-2)', () => {
+  let warnSpy: any;
+
+  beforeEach(() => {
+    warnSpy = typeof jest !== 'undefined' ? jest.spyOn(console, 'warn').mockImplementation(() => {}) : null;
+  });
+
+  afterEach(() => {
+    warnSpy?.mockRestore?.();
+  });
+
+  it('(l) returns openTodo context via explicit raw keys', () => {
+    const guid = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
+    const search = `?action=openTodo&todoId=${guid}`;
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result).toBeDefined();
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODO);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODO) {
+      expect(result.todoId).toBe(guid);
+    }
+  });
+
+  it('(m) returns openTodo context via envelope-wrapped `?data=` form', () => {
+    // The LegalWorkspace shim calls ctx.onOpenWizard(...) which routes through
+    // Xrm.Navigation.navigateTo({pageType:"webresource", data: "action=openTodo&todoId=<guid>"}).
+    // Dataverse URL-encodes the entire `data` string and presents it as ?data=<urlencoded>.
+    const guid = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
+    const dataString = `action=openTodo&todoId=${guid}`;
+    const search = `?data=${encodeURIComponent(dataString)}`;
+
+    const result = parseLaunchContextFromSearch(search);
+
+    expect(result).toBeDefined();
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODO);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODO) {
+      expect(result.todoId).toBe(guid);
+    }
+  });
+
+  it('(n) returns undefined when action=openTodo but todoId is missing', () => {
+    const result = parseLaunchContextFromSearch('?action=openTodo');
+    expect(result).toBeUndefined();
+    if (warnSpy) {
+      expect(warnSpy).toHaveBeenCalled();
+    }
+  });
+
+  it('(n) returns undefined when action=openTodo but todoId is whitespace-only', () => {
+    const result = parseLaunchContextFromSearch('?action=openTodo&todoId=%20%20');
+    expect(result).toBeUndefined();
+  });
+
+  it('(o) matches the binding LAUNCH_PARAM_KEYS.TODO_ID contract', () => {
+    // Bind by literal value — if the shim's URL builder changes the param name,
+    // this test will fail loud (the parser must change too — they are a pair).
+    expect(LAUNCH_PARAM_KEYS.TODO_ID).toBe('todoId');
+    expect(LAUNCH_ACTION_OPEN_TODO).toBe('openTodo');
+  });
+
+  it('(p) openTodo does NOT collide with openTodos (regression — different actions)', () => {
+    // openTodo (singular) — specific record open.
+    const guid = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
+    const openTodoResult = parseLaunchContextFromSearch(`?action=openTodo&todoId=${guid}`);
+    expect(openTodoResult?.action).toBe(LAUNCH_ACTION_OPEN_TODO);
+
+    // openTodos (plural) — kanban filter — regression check.
+    const openTodosResult = parseLaunchContextFromSearch(
+      `?action=openTodos&regardingType=sprk_matter&regardingId=${guid}`,
+    );
+    expect(openTodosResult?.action).toBe(LAUNCH_ACTION_OPEN_TODOS);
+
+    // createTodo — regression check.
+    const createTodoResult = parseLaunchContextFromSearch(
+      `?action=createTodo&regardingType=sprk_communication&regardingId=${guid}&regardingName=Subject`,
+    );
+    expect(createTodoResult?.action).toBe(LAUNCH_ACTION_CREATE_TODO);
+  });
+
+  it('(p) openTodo URL trimming — strips surrounding whitespace from todoId', () => {
+    const guid = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
+    // %20 = space; surround the guid with encoded spaces.
+    const search = `?action=openTodo&todoId=%20${guid}%20`;
+
+    const result = parseLaunchContextFromSearch(search);
+    expect(result?.action).toBe(LAUNCH_ACTION_OPEN_TODO);
+    if (result?.action === LAUNCH_ACTION_OPEN_TODO) {
+      expect(result.todoId).toBe(guid); // trimmed
+    }
   });
 });
 

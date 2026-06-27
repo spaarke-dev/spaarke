@@ -42,6 +42,14 @@ public partial class RagService : IRagService
     private readonly AnalysisOptions _analysisOptions;
     private readonly ILogger<RagService> _logger;
     private readonly AiTelemetry? _telemetry;
+    /// <summary>
+    /// R6 Pillar 6c (FR-37 / task 063) — optional context.* event emitter for
+    /// <c>context.knowledge_retrieved</c> emission after each RAG search completes.
+    /// ADR-015 audit: per-result emission carries deterministic source IDs + relevance score
+    /// + numeric resultCount ONLY. Never document content, never chunk text. Optional so
+    /// existing test fixtures and AI-OFF paths continue to construct cleanly.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? _contextEventEmitter;
     // B8 (task 011 Phase 1b Tier 3, D-09 §2 B8): direct Azure SDK access for knowledge-base
     // index administration. Used only by GetIndexHealthAsync / GetIndexedDocumentsAsync /
     // DeleteIndexedDocumentAsync which absorb the calls previously made by KnowledgeBaseEndpoints.
@@ -77,7 +85,8 @@ public partial class RagService : IRagService
         IOptions<AiSearchOptions> aiSearchOptions,
         ILogger<RagService> logger,
         IResilientSearchClient? resilientClient = null,
-        AiTelemetry? telemetry = null)
+        AiTelemetry? telemetry = null,
+        Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? contextEventEmitter = null)
     {
         _deploymentService = deploymentService;
         _openAiClient = openAiClient;
@@ -89,6 +98,7 @@ public partial class RagService : IRagService
         _aiSearchOptions = (aiSearchOptions ?? throw new ArgumentNullException(nameof(aiSearchOptions))).Value;
         _logger = logger;
         _telemetry = telemetry;
+        _contextEventEmitter = contextEventEmitter;
     }
 
     /// <inheritdoc />
@@ -207,6 +217,24 @@ public partial class RagService : IRagService
             SearchClient searchClient;
             if (!string.IsNullOrEmpty(options.SessionId))
             {
+                // ────────────────────────────────────────────────────────────────────
+                // chat-routing-redesign-r1 task 100 — Architecture §5.2.1 binding-NEGATIVE
+                // guard (FR-36). Session-scoped chat-memory retrieval MUST NOT target the
+                // spaarke-insights-index. The Insights index holds derived knowledge
+                // artifacts (Observations / Precedents) owned by the Insights subsystem.
+                // Forcing chat memory through it would:
+                //   (a) pollute Insights with chat-specific records (artifact-type bloat),
+                //   (b) confuse retrieval ranking (mixing diagnostic findings w/ memory),
+                //   (c) couple two unrelated domains,
+                //   (d) force the Insights team to support chat-memory queries.
+                // Per architecture §4.5 + §7.3, allowed chat-memory indexes are exclusively
+                // spaarke-session-files (T2 session recall), spaarke-files-index
+                // (T3 matter-scoped), and spaarke-rag-references (T4 org-scoped knowledge).
+                // This guard is defense-in-depth against misconfiguration of
+                // AiSearchOptions.SessionFilesIndexName (which is operator-settable).
+                // ────────────────────────────────────────────────────────────────────
+                EnsureNotInsightsIndex(_aiSearchOptions.SessionFilesIndexName);
+
                 searchClient = _searchIndexClient.GetSearchClient(_aiSearchOptions.SessionFilesIndexName);
                 _logger.LogDebug(
                     "RAG search routing to session-files index {IndexName} for tenant {TenantId} session {SessionId}",
@@ -304,6 +332,30 @@ public partial class RagService : IRagService
                 documentIds: string.Join(",", results.Select(r => r.DocumentId ?? r.Id)),
                 scores: string.Join(",", results.Select(r => r.Score.ToString("F4"))),
                 elapsedMs: totalStopwatch.ElapsedMilliseconds);
+
+            // R6 Pillar 6c (FR-37 / task 063) — context.knowledge_retrieved emission.
+            // ADR-015 audit per emission site (lines below): payload carries
+            //   - DocumentId / Id (deterministic identifier of the chunk; Tier 1 safe)
+            //   - Score (numeric metric)
+            //   - resultCount (numeric metric)
+            //   - tenantId (deterministic identifier)
+            // It DOES NOT carry: result.Content (chunk text), result.Highlights (excerpt text),
+            // result.Metadata (free-form), result.DocumentName (filename — could leak via
+            // ADR-015 amendment Tier 2; intentionally excluded from this event surface to keep
+            // it Tier 1 only). The IContextEventEmitter.KnowledgeRetrieved signature is
+            // structurally constrained — no string/object parameters accept user content.
+            if (_contextEventEmitter is not null)
+            {
+                foreach (var r in results)
+                {
+                    _contextEventEmitter.KnowledgeRetrieved(
+                        knowledgeSourceId: r.DocumentId ?? r.Id ?? string.Empty,
+                        relevanceScore: r.Score,
+                        resultCount: results.Count,
+                        sessionId: null, // R6 task 063: chat session id not threaded into RagService.SearchAsync today; downstream Pillar 6c trace widget correlates by tenantId + timestamp ordering.
+                        tenantId: options.TenantId);
+                }
+            }
 
             _logger.LogInformation(
                 "RAG search completed for tenant {TenantId}: {ResultCount} results in {TotalMs}ms " +
@@ -1240,6 +1292,44 @@ public partial class RagService : IRagService
     {
         // Escape single quotes for OData filter expressions
         return value.Replace("'", "''");
+    }
+
+    /// <summary>
+    /// chat-routing-redesign-r1 task 100 — Architecture §5.2.1 binding-NEGATIVE enforcement
+    /// + spec FR-36. Throws <see cref="InvalidOperationException"/> if a chat-memory
+    /// retrieval path attempts to route through the Insights-domain
+    /// <c>spaarke-insights-index</c>. Called from the session-scoped routing branch in
+    /// <see cref="SearchAsync(string, RagSearchOptions, ClaimsPrincipal?, CancellationToken)"/>
+    /// to defend against operator misconfiguration of
+    /// <see cref="AiSearchOptions.SessionFilesIndexName"/>.
+    /// </summary>
+    /// <remarks>
+    /// This is a deliberately literal name compare (case-insensitive) — the Insights index
+    /// name is a stable, well-known string per architecture §7.3. Per §5.2.1 the chat-memory
+    /// allowed index family is { spaarke-session-files, spaarke-files-index,
+    /// spaarke-rag-references } exclusively; the Insights index is reserved for the Insights
+    /// subsystem's own services. Use of the Insights index from chat-memory paths would be
+    /// a categorical-mismatch design violation, not merely a misconfiguration.
+    /// </remarks>
+    /// <param name="indexName">The Azure AI Search index name about to be resolved.</param>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <paramref name="indexName"/> equals <c>"spaarke-insights-index"</c>.
+    /// </exception>
+    private static void EnsureNotInsightsIndex(string indexName)
+    {
+        if (string.Equals(indexName, "spaarke-insights-index", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "BINDING VIOLATION (architecture §5.2.1 + spec FR-36): chat-memory retrieval " +
+                "cannot target spaarke-insights-index. The Insights index holds derived knowledge " +
+                "artifacts owned by the Insights subsystem; using it from chat-memory paths would " +
+                "pollute Insights records, confuse retrieval ranking, and couple two unrelated " +
+                "domains. Configure AiSearchOptions.SessionFilesIndexName to one of the allowed " +
+                "chat-domain indexes: spaarke-session-files (T2 session-scoped recall), " +
+                "spaarke-files-index (T3 matter-scoped), or spaarke-rag-references (T4 org-scoped " +
+                "knowledge). If you need Insights-domain retrieval, use the Insights subsystem's " +
+                "own services (InsightsOrchestrator / IndexRetrieveNode).");
+        }
     }
 
     /// <summary>

@@ -1,0 +1,108 @@
+<task id="001" project="pcf-orphan-cleanup-r1">
+  <metadata>
+    <title>Pre-flight: solution backups + per-control 4-check (spaarkedev1)</title>
+    <phase>P1</phase>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <dependencies>none</dependencies>
+    <blocks>003</blocks>
+    <tags>pcf, dataverse, pre-flight, backups, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only audit + backup capture; no source code modifications. STANDARD rigor per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>P1-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Writes only to `backups-2026-06-22/`. Disjoint from Task 002 (which writes to `src/client/pcf/*`).</parallel-reason>
+    <production-fix-per-ledger>false</production-fix-per-ledger>
+  </metadata>
+
+  <prompt>
+    Execute the pre-flight phase of the orphan PCF cleanup procedure. Two parts:
+
+    1. **§1.1 Solution backups** — For every unmanaged solution in spaarkedev1 that contains a customcontrol slated for deletion in FR-02 / FR-03, export it unmanaged with `pac solution export --managed false --include general`. Park each ZIP in `projects/pcf-orphan-cleanup-r1/backups-2026-06-22/`.
+
+    2. **§1.2 Per-control 4-check verification** — For each of the 11 customcontrol records + 4-6 canvas apps in [`spec.md §FR-02 / §FR-03`](../spec.md), run the 4 checks documented in [procedure §1.2](../../ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md#12-per-control-still-referenced-check):
+       - Check 1: solution memberships (Dataverse MCP `read_query` on `solutioncomponent`)
+       - Check 2: FormXML grep (PAC CLI export + Select-String on customizations.xml) — **MANDATORY for SpeDocumentViewer per D-02**
+       - Check 3: ribbon JS grep across `src/solutions/*` + `src/client/pcf/*` + `scripts/*`
+       - Check 4: canvas app dependencies (Dataverse MCP `read_query`)
+
+    Document results per control in `notes/preflight-results-spaarkedev1.md` — one section per control, all 4 checks captured.
+
+    **Gate**: a control is safe to delete ONLY when all 4 checks return clean. ANY unexpected reference → STOP and reconcile (file a note in `notes/preflight-deviations.md`; do NOT proceed to Task 003 for that control).
+  </prompt>
+
+  <role>Dataverse + PCF engineer performing read-only verification + solution backup capture before destructive cleanup.</role>
+
+  <goal>
+    Two deliverables:
+    1. `backups-2026-06-22/` contains one unmanaged solution ZIP per touched solution.
+    2. `notes/preflight-results-spaarkedev1.md` contains per-control 4-check results for all 11 customcontrols + 4-6 canvas apps. Any unexpected references documented in `notes/preflight-deviations.md`.
+
+    NO source file modifications. NO Dataverse mutations. Read-only + backup-capture only.
+  </goal>
+
+  <inputs>
+    <file purpose="procedure-section">projects/ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md</file>
+    <file purpose="spec">projects/pcf-orphan-cleanup-r1/spec.md</file>
+    <file purpose="design">projects/pcf-orphan-cleanup-r1/design.md</file>
+    <file purpose="claude-md">projects/pcf-orphan-cleanup-r1/CLAUDE.md</file>
+    <file purpose="inventory">projects/ai-procedure-quality-r1/notes/inventory/pcf-deployment-inventory-2026-06-22.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">Baseline backups MUST be captured (no exceptions; this task's primary deliverable)</constraint>
+    <constraint source="NFR-02">4-check verification per control; FormXML grep MANDATORY for SpeDocumentViewer</constraint>
+    <constraint source="D-02">SpeDocumentViewer FormXML grep is a HARD GATE, not advisory</constraint>
+    <constraint source="ADR-022">PCF platform-libraries context (relevant for understanding why some controls bind to forms)</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>projects/ai-procedure-quality-r1/notes/inventory/pcf-deployment-inventory-2026-06-22.md</file>
+      <file>projects/pcf-orphan-cleanup-r1/notes/research-findings-2026-06-22.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Authenticate to spaarkedev1: `pac auth select --name spaarkedev1` (or `pac auth create` if not yet registered).</step>
+    <step order="2">Enumerate solutions: `pac solution list --output table > backups-2026-06-22/solution-list-2026-06-22.txt`.</step>
+    <step order="3">For each customcontrol slated for deletion (per spec.md FR-02), run Dataverse MCP `read_query` against `solutioncomponent` to identify owning solutions. Capture in `notes/preflight-results-spaarkedev1.md`.</step>
+    <step order="4">Export each owning solution unmanaged: `pac solution export --name {SolutionName} --path backups-2026-06-22/baseline-{SolutionName}-pre-cleanup-2026-06-22.zip --managed false --include general`. Verify each ZIP exists + has non-zero size.</step>
+    <step order="5">For each customcontrol + canvas app: run all 4 checks per [procedure §1.2](../../ai-procedure-quality-r1/notes/inventory/orphan-pcf-cleanup-and-react-types-procedure-2026-06-22.md#12-per-control-still-referenced-check). Append results to `notes/preflight-results-spaarkedev1.md`.</step>
+    <step order="6">For SpeDocumentViewer specifically: confirm FormXML grep step actually ran on every exported solution's customizations.xml. Mark `MANDATORY ✅` or `MANDATORY ❌ STOPPED` in the SDV section.</step>
+    <step order="7">Any check returning unexpected references → write to `notes/preflight-deviations.md` with: control name, check that surfaced the reference, suggested resolution. Do NOT mark the control as ready for deletion.</step>
+    <step order="8">Final summary section in `notes/preflight-results-spaarkedev1.md`: per-control disposition table (`ready-to-delete` / `deviation-blocked` / `out-of-scope`).</step>
+    <step order="9">Update [`current-task.md`](../current-task.md): mark Task 001 ✅ if all 11 customcontrols + canvas apps are `ready-to-delete` OR `deviation-blocked` (deviations = future work, not failure of this task).</step>
+    <step order="10">Update [`tasks/TASK-INDEX.md`](TASK-INDEX.md): Task 001 status 🔲 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">PAC CLI for solution export + list</tool>
+    <tool name="mcp__dataverse__read_query">solutioncomponent + canvasapp dependency queries</tool>
+    <tool name="Grep">FormXML / ribbon JS searches across exported customizations.xml + repo source</tool>
+    <tool name="Write">notes/preflight-results-spaarkedev1.md, notes/preflight-deviations.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="artifact">projects/pcf-orphan-cleanup-r1/backups-2026-06-22/*.zip (one per touched solution)</output>
+    <output type="docs">projects/pcf-orphan-cleanup-r1/notes/preflight-results-spaarkedev1.md</output>
+    <output type="docs">projects/pcf-orphan-cleanup-r1/notes/preflight-deviations.md (only if deviations found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every unmanaged solution containing a customcontrol from FR-02 / FR-03 has a corresponding ZIP in `backups-2026-06-22/`</criterion>
+    <criterion testable="true">`notes/preflight-results-spaarkedev1.md` has one section per customcontrol + canvas app (11+4-6 sections minimum)</criterion>
+    <criterion testable="true">Each section captures results of all 4 checks (solution membership, FormXML grep, ribbon JS grep, canvas-app deps)</criterion>
+    <criterion testable="true">SpeDocumentViewer's section explicitly confirms the FormXML grep ran on every exported customizations.xml</criterion>
+    <criterion testable="true">Final disposition table classifies each control as `ready-to-delete` / `deviation-blocked` / `out-of-scope`</criterion>
+    <criterion testable="true">If any control is `deviation-blocked`, `notes/preflight-deviations.md` exists with the deviation details</criterion>
+    <criterion testable="true">No source file modifications in `src/` (verified by `git status`)</criterion>
+    <criterion testable="true">No Dataverse mutations (read-only queries only — verified by re-querying customcontrol count post-task = pre-task count)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    Run via `task-execute` skill. STANDARD rigor (read-only + backup-capture; no production code changes).
+  </execution>
+</task>
