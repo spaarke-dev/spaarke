@@ -1,18 +1,18 @@
 <#
 .SYNOPSIS
-    Indexes all existing playbooks into the playbook-embeddings AI Search index.
+    Indexes all existing playbooks into the spaarke-playbook-embeddings AI Search index.
 
 .DESCRIPTION
     Queries Dataverse for all active sprk_analysisplaybook records, generates embeddings
     via Azure OpenAI (text-embedding-3-large), and upserts documents into the
-    playbook-embeddings AI Search index.
+    spaarke-playbook-embeddings AI Search index.
 
     This script bypasses the BFF API and directly calls Azure OpenAI and AI Search APIs,
     making it suitable for initial seeding or re-indexing without needing BFF auth tokens.
 
     Prerequisites:
     - Azure CLI installed and authenticated (az login)
-    - The playbook-embeddings AI Search index must exist (run Create-PlaybookEmbeddingsIndex.ps1 first)
+    - The spaarke-playbook-embeddings AI Search index must exist (deployed via Deploy-AllIndexes.ps1)
     - Azure OpenAI text-embedding-3-large deployment must be available
 
 .PARAMETER DataverseUrl
@@ -64,13 +64,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $env:Path = "C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin;" + $env:Path
 
-$IndexName = "playbook-embeddings"
+$IndexName = "spaarke-playbook-embeddings"
 $SearchApiVersion = "2024-07-01"
 $OpenAiApiVersion = "2024-06-01"
 
 Write-Host ''
 Write-Host '============================================================' -ForegroundColor Cyan
-Write-Host ' Index Existing Playbooks into playbook-embeddings' -ForegroundColor Cyan
+Write-Host ' Index Existing Playbooks into spaarke-playbook-embeddings' -ForegroundColor Cyan
 Write-Host '============================================================' -ForegroundColor Cyan
 Write-Host "  Dataverse       : $DataverseUrl"
 Write-Host "  AI Search       : $SearchServiceName"

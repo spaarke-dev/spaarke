@@ -3,9 +3,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Nodes;
@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <para>
 /// <b>Stage 1 — Vector Similarity Search</b> (1.5s budget):
 /// Embeds the user message via <see cref="PlaybookEmbeddingService.SearchPlaybooksAsync"/> and
-/// queries the <c>playbook-embeddings</c> AI Search index. Pre-filters by <c>recordType</c>
+/// queries the <c>spaarke-playbook-embeddings</c> AI Search index. Pre-filters by <c>recordType</c>
 /// from <see cref="ChatHostContext"/> when available. Returns top 5 candidates.
 /// If a single candidate scores &gt;= 0.85, Stage 2 is skipped.
 /// </para>
@@ -84,10 +84,16 @@ public sealed class PlaybookDispatcher
     /// </summary>
     private static readonly SemaphoreSlim AiConcurrencyLimiter = new(maxCount: 10, initialCount: 10);
 
+    /// <summary>Tenant-cache resource name for dispatch output-node metadata (FR-05).</summary>
+    internal const string CacheResource = "playbook-dispatch-output";
+
+    /// <summary>Tenant-cache schema version for dispatch output-node metadata.</summary>
+    internal const int CacheVersion = 1;
+
     private readonly PlaybookEmbeddingService _embeddingService;
     private readonly IChatClient _executionClient;
     private readonly INodeService _nodeService;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly IMemoryCache _memoryCache;
     private readonly ILogger _logger;
     private readonly string _tenantId;
@@ -149,7 +155,7 @@ public sealed class PlaybookDispatcher
         PlaybookEmbeddingService embeddingService,
         IChatClient executionClient,
         INodeService nodeService,
-        IDistributedCache cache,
+        ITenantCache cache,
         string tenantId,
         ILogger<PlaybookDispatcher> logger,
         IMemoryCache? memoryCache = null)
@@ -377,7 +383,7 @@ public sealed class PlaybookDispatcher
 
     /// <summary>
     /// Per-file Hybrid C Phase B classifier (chat-routing-redesign-r1 FR-17 v2, task 112).
-    /// Performs a per-attachment vector match against the <c>playbook-embeddings</c>
+    /// Performs a per-attachment vector match against the <c>spaarke-playbook-embeddings</c>
     /// index in parallel, returning the top-K candidate playbooks for each file
     /// independently. The caller (task 113R top-N selector) reconciles cross-file
     /// disagreements.
@@ -392,7 +398,7 @@ public sealed class PlaybookDispatcher
     /// aligned by index OR by <c>FileId</c>). When an entry's
     /// <see cref="ChatSessionFile.ClassifiedDocType"/> is non-null, that file uses
     /// the <b>manifest-present</b> path: a structured <c>documentTypes</c> pre-filter
-    /// against <c>playbook-embeddings</c>. When the entry is null or the doc-type is
+    /// against <c>spaarke-playbook-embeddings</c>. When the entry is null or the doc-type is
     /// null, the file falls through to the <b>manifest-absent</b> path: a per-file
     /// composed query <c>"{userMessage} | Document: {filename} | Type hint: {contentType} | Content: {textPrefix}"</c>.
     /// MVP scope: Phase 4b classification is deferred so the manifest-absent path is
@@ -563,7 +569,7 @@ public sealed class PlaybookDispatcher
 
     /// <summary>
     /// Manifest-present per-file path: classified doc type drives a structured pre-filter
-    /// (<c>documentTypes/any(t: search.in(t, 'NDA'))</c>) on the playbook-embeddings index.
+    /// (<c>documentTypes/any(t: search.in(t, 'NDA'))</c>) on the spaarke-playbook-embeddings index.
     /// Per FR-17 v2 budget ≤100ms (single embed + filtered search; no extra LLM call).
     /// Results are cached for 5 min on <c>(tenantId, classifiedDocType, normalizedMessage, intentHint)</c>.
     /// </summary>
@@ -618,7 +624,7 @@ public sealed class PlaybookDispatcher
     /// <summary>
     /// Manifest-absent per-file path: per-file query composition + vector search.
     /// Composes <c>"[Intent: {intentHint} | ]{userMessage} | Document: {filename} | Type hint: {contentType} | Content: {textPrefix}"</c>
-    /// and embeds it as a single query against the unfiltered playbook-embeddings index.
+    /// and embeds it as a single query against the unfiltered spaarke-playbook-embeddings index.
     /// The leading <c>Intent: …</c> segment is present iff <paramref name="intentHint"/>
     /// is non-null (FR-20, task 115). Per FR-17 v2 budget ≤300ms for 3 files (parallel
     /// fan-out — bounded by slowest embed + search). Results cached 5 min on
@@ -1000,13 +1006,13 @@ public sealed class PlaybookDispatcher
         NodeDestination nodeDestination, string? widgetType)>
         GetOutputNodeMetadataAsync(string playbookId, CancellationToken cancellationToken)
     {
-        // ADR-014: Cache key scoped by tenant and playbook
-        var cacheKey = $"dispatch:output:{_tenantId}:{playbookId}";
-
+        // ADR-014 / FR-05: tenant-scoped via ITenantCache. Resource = "playbook-dispatch-output";
+        // id = playbookId.
         try
         {
             // Check cache first
-            var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+            var cached = await _cache.GetStringAsync(
+                _tenantId, CacheResource, playbookId, CacheVersion, ct: cancellationToken);
             if (cached is not null)
             {
                 var cachedMeta = JsonSerializer.Deserialize<OutputNodeMetadata>(cached);
@@ -1072,14 +1078,17 @@ public sealed class PlaybookDispatcher
                 widgetType = null;
             }
 
-            // Cache the result (ADR-014)
+            // Cache the result (ADR-014 / FR-05 wrapper, absolute TTL).
             var metadata = new OutputNodeMetadata(
                 outputType, requiresConfirmation, targetPage, nodeDestination, widgetType);
             await _cache.SetStringAsync(
-                cacheKey,
+                _tenantId,
+                CacheResource,
+                playbookId,
+                CacheVersion,
                 JsonSerializer.Serialize(metadata),
-                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheTtl },
-                cancellationToken);
+                ttl: CacheTtl,
+                ct: cancellationToken);
 
             return (outputType, requiresConfirmation, targetPage, nodeDestination, widgetType);
         }

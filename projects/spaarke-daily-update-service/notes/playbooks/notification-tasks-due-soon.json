@@ -1,9 +1,17 @@
 {
   "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
+  "_correction": {
+    "date": "2026-06-25",
+    "by": "Claude Code task-015 entity-architecture correction (preparation for PR 3 W1 task 023)",
+    "reason": "Owner clarified Spaarke uses sprk_event (with sprk_eventtype_ref = Task discriminator) for tasks. Original repo file used OOB task activity entity incorrectly. Corrected per CLAUDE.md § '2026-06-25 — Spaarke entity architecture'. Spec FR-7 'Dedupe by activityid' is wrong — corrected to sprk_eventid here. Added LookupUserMembership branch + membership-scope FetchXml union (W1 task 023 will verify + deploy).",
+    "previousEntities": ["task"],
+    "correctedEntities": ["sprk_event"],
+    "alsoAdded": "Membership-scope branch via LookupUserMembership (ActionType 52) — R4 FR-7 target; deployed PB-020 currently LACKS this; PR 3 W1 task 023 deploys this corrected state."
+  },
   "playbook": {
     "id": "NP-002",
     "name": "Tasks Due Soon",
-    "description": "Identifies tasks approaching their due date within a configurable window (dueWithinDays) and creates notifications. Users configure the lookahead window via preferences.",
+    "description": "Identifies Task-type sprk_event records (sprk_eventtype_ref = Task) approaching their due date within a configurable window (dueWithinDays) on the user's matters. Uses Spaarke custom sprk_event entity (NOT OOB task activity).",
     "sprk_playbooktype": 2,
     "isPublic": true,
     "isSystemPlaybook": true,
@@ -43,28 +51,47 @@
       "positionY": 200,
       "dependsOn": [],
       "configJson": {
+        "__actionType": 33,
         "scope": "user-matters",
-        "description": "Scoped to the current user's matters"
+        "resolveUserId": true,
+        "description": "Scoped to the current user's matters (resolved via LookupUserMembership node)"
+      }
+    },
+    {
+      "name": "Lookup My Matters",
+      "nodeType": "Workflow",
+      "actionType": 52,
+      "canvasType": "lookupUserMembership",
+      "outputVariable": "myMatters",
+      "positionX": 250,
+      "positionY": 200,
+      "dependsOn": ["Start"],
+      "configJson": {
+        "__actionType": 52,
+        "entityType": "sprk_matter",
+        "roles": ["owner", "assignedAttorney", "assignedParalegal"],
+        "includeRelated": false,
+        "description": "Resolve the executing user's matter memberships per ADR-034. Bound to `myMatters.ids` for downstream filtering."
       }
     },
     {
       "name": "Query Tasks Due Soon",
       "nodeType": "Workflow",
-      "actionType": 22,
-      "canvasType": "updateRecord",
+      "actionType": 51,
+      "canvasType": "queryDataverse",
       "outputVariable": "dueSoonQuery",
-      "positionX": 350,
+      "positionX": 450,
       "positionY": 200,
-      "dependsOn": ["Start"],
+      "dependsOn": ["Lookup My Matters"],
       "configJson": {
-        "__actionType": 22,
+        "__actionType": 51,
         "queryMode": true,
-        "entityLogicalName": "task",
-        "fetchXml": "<fetch top='50'><entity name='task'><attribute name='subject'/><attribute name='scheduledend'/><attribute name='regardingobjectid'/><attribute name='activityid'/><filter type='and'><condition attribute='ownerid' operator='eq-userid'/><condition attribute='statecode' operator='eq' value='0'/><condition attribute='scheduledend' operator='on-or-after' value='{{todayUtc}}'/><condition attribute='scheduledend' operator='on-or-before' value='{{todayPlusDueWithinDays}}'/></filter><order attribute='scheduledend' descending='false'/></entity></fetch>",
+        "entityLogicalName": "sprk_event",
+        "fetchXml": "<fetch top=\"50\"><entity name=\"sprk_event\"><attribute name=\"sprk_eventname\"/><attribute name=\"sprk_duedate\"/><attribute name=\"sprk_finalduedate\"/><attribute name=\"sprk_eventid\"/><attribute name=\"sprk_eventtype_ref\"/><attribute name=\"statuscode\"/><attribute name=\"modifiedon\"/><attribute name=\"sprk_regardingrecordname\"/><attribute name=\"sprk_regardingrecordurl\"/><attribute name=\"sprk_regardingmatter\"/><attribute name=\"ownerid\"/><link-entity name=\"sprk_matter\" from=\"sprk_matterid\" to=\"sprk_regardingmatter\" link-type=\"outer\" alias=\"m\"><attribute name=\"sprk_mattername\"/><attribute name=\"ownerid\"/></link-entity><filter type=\"and\"><condition attribute=\"sprk_eventtype_ref\" operator=\"eq\" value=\"124f5fc9-98ff-f011-8406-7c1e525abd8b\"/><condition attribute=\"statuscode\" operator=\"eq\" value=\"659490001\"/><filter type=\"or\"><filter type=\"and\"><condition attribute=\"sprk_duedate\" operator=\"ge\" value=\"{{todayUtc}}\"/><condition attribute=\"sprk_duedate\" operator=\"le\" value=\"{{dueSoonWindowUtc}}\"/></filter><filter type=\"and\"><condition attribute=\"sprk_finalduedate\" operator=\"ge\" value=\"{{todayUtc}}\"/><condition attribute=\"sprk_finalduedate\" operator=\"le\" value=\"{{dueSoonWindowUtc}}\"/></filter></filter><filter type=\"or\"><condition attribute=\"sprk_regardingmatter\" operator=\"in\" value=\"{{joinIds myMatters.ids}}\"/><condition entityname=\"m\" attribute=\"ownerid\" operator=\"eq-userid\"/><condition attribute=\"ownerid\" operator=\"eq-userid\"/></filter></filter><order attribute=\"sprk_finalduedate\" descending=\"false\"/><order attribute=\"sprk_duedate\" descending=\"false\"/></entity></fetch>",
         "templateParameters": {
-          "dueWithinDays": "{{default userPreferences.dueWithinDays 3}}"
+          "dueWithinDays": "{{userPreferences.dueWithinDays ?? 3}}"
         },
-        "description": "Query open tasks owned by current user where scheduledend is between today and today + dueWithinDays"
+        "description": "Open Task-type sprk_events (sprk_eventtype_ref = Task GUID 124f5fc9-…, statuscode=Open 659490001) where sprk_duedate OR sprk_finalduedate is between today and {{dueSoonWindowUtc}} (today + parameters.dueWithinDays, default 3). Membership-scope union: (a) sprk_regardingmatter IN myMatters.ids OR (b) record-owner OR (c) matter-owner = current user. Sort: sprk_finalduedate asc, sprk_duedate asc tiebreaker. Dedupe by sprk_eventid (NOT activityid)."
       }
     },
     {
@@ -73,12 +100,17 @@
       "actionType": 30,
       "canvasType": "condition",
       "outputVariable": "hasDueSoon",
-      "positionX": 600,
+      "positionX": 700,
       "positionY": 200,
       "dependsOn": ["Query Tasks Due Soon"],
       "configJson": {
         "__actionType": 30,
-        "conditionJson": "{{dueSoonQuery.output.count}} > 0",
+        "condition": {
+          "operator": "gt",
+          "left": "{{dueSoonQuery.output.count}}",
+          "right": 0
+        },
+        "trueBranch": "Create Notification",
         "description": "Check if any tasks are due within the configured window"
       }
     },
@@ -88,35 +120,48 @@
       "actionType": 50,
       "canvasType": "createNotification",
       "outputVariable": "notification",
-      "positionX": 900,
+      "positionX": 1000,
       "positionY": 150,
       "dependsOn": ["Check Results"],
       "configJson": {
         "__actionType": 50,
         "title": "{{dueSoonQuery.output.count}} task(s) due in the next {{dueWithinDays}} day(s)",
-        "body": "{{#each dueSoonQuery.output.items}}{{subject}} is due {{scheduledend}} ({{regardingName}}).\n{{/each}}",
+        "body": "{{#each dueSoonQuery.output.items}}{{sprk_eventname}} is due on {{sprk_duedate}}.\n{{/each}}",
         "category": "tasks-due",
         "priority": 200000000,
-        "actionUrl": "/main.aspx?pagetype=entitylist&etn=task&viewid=00000000-0000-0000-0000-000000000000&viewtype=1039",
+        "actionUrl": "/main.aspx?pagetype=entitylist&etn=sprk_event&viewtype=1039",
         "recipientId": "{{run.userId}}",
-        "regardingType": "task",
+        "regardingType": "sprk_event",
         "iterateItems": true,
         "itemNotification": {
-          "title": "Due soon: {{item.subject}}",
-          "body": "{{item.subject}} is due {{item.scheduledend}} ({{item.regardingName}})",
+          "title": "Due soon: {{item.sprk_eventname}}",
+          "body": "{{item.sprk_eventname}} is due on {{item.sprk_duedate}} ({{item.sprk_regardingrecordname}})",
           "category": "tasks-due",
           "priority": 200000000,
-          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=task&id={{item.activityid}}",
+          "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_event&id={{item.sprk_eventid}}",
           "recipientId": "{{run.userId}}",
-          "regardingId": "{{item.activityid}}",
-          "regardingType": "task",
-          "dueDate": "{{item.scheduledend}}"
+          "regardingId": "{{item.sprk_eventid}}",
+          "regardingType": "sprk_event",
+          "dueDate": "{{item.sprk_duedate}}",
+          "regardingName": "{{item.sprk_eventname}}",
+          "sourceEntityType": "sprk_event",
+          "sourceId": "{{item.sprk_eventid}}",
+          "sourceModifiedOn": "{{item.modifiedon}}",
+          "sourceOwningUser": "{{item.ownerid}}",
+          "viaMatterId": "{{item.sprk_regardingmatter}}",
+          "viaMatterName": "{{item.m_sprk_mattername}}",
+          "viaMatterMembershipsVariable": "myMatters"
+        },
+        "deduplication": {
+          "enabled": true,
+          "key": "tasks-due:{{run.userId}}:{{item.sprk_eventid}}"
         }
       }
     }
   ],
   "edges": [
-    { "source": "Start", "target": "Query Tasks Due Soon" },
+    { "source": "Start", "target": "Lookup My Matters" },
+    { "source": "Lookup My Matters", "target": "Query Tasks Due Soon" },
     { "source": "Query Tasks Due Soon", "target": "Check Results" },
     { "source": "Check Results", "target": "Create Notification", "condition": "true" }
   ]

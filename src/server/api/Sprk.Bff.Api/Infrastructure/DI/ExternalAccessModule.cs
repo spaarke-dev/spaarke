@@ -7,7 +7,7 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// Registers participation data and project data services used by the external SPA.
 ///
 /// ADR-010: Concrete type registrations — no unnecessary interfaces.
-/// ADR-009: ExternalParticipationService uses Redis via IDistributedCache (60s TTL).
+/// ADR-009: ExternalParticipationService uses Redis via ITenantCache (60s TTL).
 /// </summary>
 public static class ExternalAccessModule
 {

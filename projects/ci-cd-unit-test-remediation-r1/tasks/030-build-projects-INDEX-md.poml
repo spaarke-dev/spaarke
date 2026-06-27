@@ -1,0 +1,53 @@
+<task id="CICD-030" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Build projects/INDEX.md with hot-path declarations (scope: worktrees with commits in last 30 days)</title>
+    <status>complete</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1 - Stream C</phase>
+    <stream>C - Hot-path coordination</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>coordination, hot-path, INDEX, worktrees</tags>
+  </metadata>
+
+  <prompt>
+    Create the new `projects/INDEX.md` registry per spec FR-C02. Scope: only worktrees with commits in the last 30 days (per user clarification 2026-06-25; spec says 5-6 active, which matches the recent-activity subset of 18 total worktrees). For each active project: name, worktree branch, worktree path, hot-path declarations (BFF Y/N, SpaarkeAi Y/N, ci-workflows Y/N, skill-directives Y/N), last-touched date.
+  </prompt>
+
+  <role>Coordination engineer building the parallel-project registry.</role>
+
+  <goal>`projects/INDEX.md` lists every active worktree (last-30-day-active) with full hot-path declarations.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+    <file purpose="design">projects/ci-cd-unit-test-remediation-r1/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="user-clarification">Scope: worktrees with commits in last 30 days only.</constraint>
+    <constraint source="spec FR-C02">Maintained atomically by `project-pipeline` (new project) and `task-execute` (hot-path touch). No cron.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">`git worktree list` → list all 18 worktrees</step>
+    <step order="2">For each worktree branch, get last commit date: `git for-each-ref --sort=-committerdate refs/heads/work/* --format='%(refname:short) %(committerdate:iso8601)'`</step>
+    <step order="3">Filter to worktrees with last commit ≥ 2026-05-26 (last 30 days from 2026-06-25)</step>
+    <step order="4">For each active worktree: cd to the worktree, read `projects/{project-name}/spec.md` or `design.md`, extract hot-path touch (BFF, SpaarkeAi, ci-workflows, skill-directives)</step>
+    <step order="5">Draft `projects/INDEX.md` with table: Project | Branch | Worktree Path | BFF | SpaarkeAi | CI Workflows | Skill Directives | Last Commit | Status</step>
+    <step order="6">Include explanatory preamble: purpose, maintenance contract (auto-updated by project-pipeline + task-execute, no cron), scoping rule (last-30-day-active)</step>
+    <step order="7">Include this project as one of the active rows (dogfood)</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">projects/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File exists with table covering 5-6 active worktrees (per user expectation; document if count differs from estimate)</criterion>
+    <criterion testable="true">Hot-path declarations match each project's design.md (where present)</criterion>
+    <criterion testable="true">This project (ci-cd-unit-test-remediation-r1) appears in the index with its own hot-path declaration</criterion>
+    <criterion testable="true">Maintenance contract documented in preamble</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Remove minConfidence end-to-end + grep verify zero references (FR-17e)</title>
+    <phase>5: W2 Consumer — UX redesign + preferences + link (PR 5)</phase>
+    <status>completed</status>
+    <completed>2026-06-26</completed>
+    <completion-notes>Removed minConfidence + AiConfidenceThreshold across types/notifications.ts (interface field + type alias + default value), services/preferencesService.ts (mergeWithDefaults branch), components/PreferencesDropdown.tsx (import, CONFIDENCE_OPTIONS array, handleConfidenceChange handler, AI confidence threshold UI section), and test/DailyBriefingApp.smoke.test.tsx (mock fixture). Binding AC-17e: post-task grep returned 0 results for both identifiers across the daily-briefing-components package. npm build verified clean — only the 5 pre-existing peer-dep errors (@spaarke/ui-components, @spaarke/auth) remain, none introduced. useBriefingPreferences hook test suite passes (6/6). 4 pre-existing test suites (NarrativeBullet, ActivityNotesSection ×2, DailyBriefingApp.smoke) fail to compile in jest due to unrelated import gaps in NarrativeBullet.tsx (missing Tooltip/Button/Spinner imports landed in commit c922f24cb Wave 3) — not caused by this task; the smoke test's preferences-fixture edit (removed minConfidence: 75) is syntactically correct but the compile failure pre-empts execution. Backward-compat preserved per task constraint: legacy persisted JSON containing minConfidence loads without error because mergeWithDefaults destructures only known keys.</completion-notes>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>036</dependencies>
+    <blocks>049</blocks>
+    <tags>pcf, react, frontend, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Cross-cutting refactor across multiple TS/TSX files; verifiable via grep but errors easy to miss without protocol</rigor-reason>
+    <parallel-group>E2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Remove `minConfidence` row from `PreferencesDropdown.tsx`. Remove from `DailyDigestPreferences` interface in `types/notifications.ts`. Remove from the default preferences object. Remove from any persistence/serialization path. Final step: `grep -rn "minConfidence\|AiConfidenceThreshold"` returns 0 results in `src/client/shared/Spaarke.DailyBriefing.Components/`.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 + React hooks + Xrm.WebApi.</role>
+  <goal>Zero references to `minConfidence` or `AiConfidenceThreshold` anywhere in the daily-briefing-components workspace. UI dropdown no longer shows the row. Persisted preferences gracefully ignore old `minConfidence` field if present in saved JSON.</goal>
+  <context>
+    <background>FR-17e: minConfidence was a UAT defect — exposed a setting that did nothing. Removal must be complete: UI, type, default object, persistence/serialization paths.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/components/PreferencesDropdown.tsx</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/services/preferencesService.ts (if present)</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/DailyBriefingApp.tsx</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only; semantic tokens; dark mode required</constraint>
+    <constraint source="ADR-024">Preserve useInlineTodoCreate + TODO_REGARDING_CATALOG in Add to To Do</constraint>
+    <constraint source="project">R3 PR #451 file overlap — see notes/risks.md R1; run conflict-check before merge</constraint>
+    <constraint source="project">Preserve R3 deliverables: schema, TTL=604800, read-state, 3 actions (now via overflow menu)</constraint>
+    <constraint source="project">Backward-compat: old persisted preferences containing minConfidence must be loaded without crash (field silently ignored)</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>projects/spaarke-daily-update-service-r4/notes/risks.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-024-sprk-todo-polymorphic-resolver.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Grep for all `minConfidence` and `AiConfidenceThreshold` references to build a complete touch list</step>
+    <step order="2">Remove the minConfidence row + handler from `PreferencesDropdown.tsx`</step>
+    <step order="3">Remove `minConfidence` property from `DailyDigestPreferences` interface in `types/notifications.ts`</step>
+    <step order="4">Remove `minConfidence` from default preferences object (wherever instantiated)</step>
+    <step order="5">Remove minConfidence from persistence/serialization paths (preferencesService or similar); ensure stored JSON containing old field loads without crash (TypeScript `Pick` / destructure ignores unknown keys safely)</step>
+    <step order="6">Remove minConfidence from any consumer call sites (DailyBriefingApp or hooks)</step>
+    <step order="7">Run `grep -rn "minConfidence\|AiConfidenceThreshold" src/client/shared/Spaarke.DailyBriefing.Components/` — MUST return 0 results</step>
+    <step order="8">Run `npm test`; ensure no tests reference the removed field; update any that do</step>
+    <step order="9">Run `npm run build` to verify TypeScript compiles cleanly with no implicit-any or missing-prop errors</step>
+    <step order="10">Update TASK-INDEX.md ✅</step>
+    <step order="11">Document deviations in notes/</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test TypeScript widget</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/components/PreferencesDropdown.tsx</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/types/notifications.ts</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/services/preferencesService.ts (if applicable)</output>
+    <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src/DailyBriefingApp.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rn "minConfidence\|AiConfidenceThreshold"` returns 0 results in daily-briefing-components (FR-17e / AC-17e)</criterion>
+    <criterion testable="true">TypeScript compiles clean; no dangling references; npm test passes</criterion>
+    <criterion testable="true">Backward-compat: legacy persisted preferences containing minConfidence load without error</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test>Open PreferencesDropdown; verify minConfidence row is absent</test>
+    <test>Load widget with mocked legacy preferences JSON (containing minConfidence); verify no console error, widget renders</test>
+    <test>Dark Mode Compliance: PreferencesDropdown in dark theme renders without the removed row per ADR-021</test>
+    <test>Console Errors: no errors during preferences load + dropdown open</test>
+  </ui-tests>
+  <notes>Final grep gate is the binding acceptance gate. Backward-compat for legacy persisted JSON: TypeScript object destructure naturally ignores extra keys — no migration needed. R3 PR #451 file overlap on PreferencesDropdown.tsx — run conflict-check.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

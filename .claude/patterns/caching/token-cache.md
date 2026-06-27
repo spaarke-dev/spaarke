@@ -20,7 +20,7 @@ Caching OBO (On-Behalf-Of) Graph tokens to avoid repeated token exchanges.
 - MUST fail gracefully on cache errors — cache miss should not break OBO flow
 
 ## Key Rules
-- Cache key: `sdap:graph:token:{sha256hash}`
+- Cache key: `spaarke:graph-token:{sha256hash}` (system-level exception per ADR-009 amendment + `SystemCacheKeys.GraphToken` — keyed by SHA256(user-token), not tenant-scoped)
 - TTL: 55 minutes (5-minute buffer before token expiry)
 - Flow: hash user token → check cache → if miss, do OBO exchange → cache result
 - Performance targets: 95%+ hit rate, ~5ms hit latency, ~200ms miss latency

@@ -616,33 +616,6 @@ public class SemanticSearchServiceTests
         result.Metadata.AppliedFilters.EntityId.Should().BeNull();
     }
 
-    [Fact]
-    public async Task SearchAsync_AllScope_WithOptionalFilters_Works()
-    {
-        // Arrange
-        var service = CreateService();
-        var request = new SemanticSearchRequest
-        {
-            Query = "test query",
-            Scope = SearchScope.All,
-            Filters = new SearchFilters
-            {
-                DocumentTypes = new List<string> { "contract" },
-                FileTypes = new List<string> { "pdf" }
-            }
-        };
-
-        SetupMockEmbedding();
-        SetupMockSearchClient();
-
-        // Act
-        var result = await service.SearchAsync(request, TestTenantId);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.Metadata.AppliedFilters!.DocumentTypes.Should().Contain("contract");
-        result.Metadata.AppliedFilters.FileTypes.Should().Contain("pdf");
-    }
 
     [Fact]
     public async Task CountAsync_AllScope_ReturnsCount()

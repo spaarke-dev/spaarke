@@ -30,6 +30,11 @@ export enum PlaybookNodeType {
   // server-side ActionType.LookupUserMembership = 52 and the
   // LookupUserMembershipNodeExecutor (task 041).
   LookupUserMembership = 'lookupUserMembership',
+  // R4 PR 1 (task 004): Tool that scrubs LLM-emitted entity names not present
+  // in a maker-supplied allow-list. Pairs with server-side
+  // ActionType.EntityNameValidator = 141 and the EntityNameValidatorNodeExecutor
+  // (task 003). FR-3 / AC-3c.
+  EntityNameValidator = 'entityNameValidator',
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +77,15 @@ export enum DataverseNodeType {
   Output = 100_000_001,
   Control = 100_000_002,
   Workflow = 100_000_003,
+  // chat-routing-redesign-r1 / Phase 5R Wave 5-C (FR-52 / ADR-037): multinode
+  // Output composition. Added to sprk_nodetype OptionSet via
+  // scripts/dataverse/Add-NodeTypeChoiceOption.ps1.
+  DeliverComposite = 100_000_004,
+  // R4 task 004 hotfix (2026-06-26, FR-3 / AC-3c): distinct OptionSet value so
+  // the MDA "Node Properties" form surfaces EntityNameValidator as its own type
+  // (not categorized under Workflow). Added via
+  // scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1.
+  EntityNameValidator = 100_000_005,
 }
 
 /**
@@ -92,6 +106,12 @@ export const NodeTypeToDataverse: Record<PlaybookNodeType, DataverseNodeType> = 
   // LookupUserMembership is a data-ops Workflow node — invokes the membership
   // resolver service in-process and binds the resolved IDs to OutputVariable.
   [PlaybookNodeType.LookupUserMembership]: DataverseNodeType.Workflow,
+  // EntityNameValidator is a post-LLM Tool — operates purely on text + an
+  // allow-list and emits a scrubbed string. R4 task 004 hotfix (2026-06-26):
+  // re-pointed from Workflow to its OWN distinct OptionSet value so the MDA
+  // "Node Properties" form surfaces it as its own type. See
+  // scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1.
+  [PlaybookNodeType.EntityNameValidator]: DataverseNodeType.EntityNameValidator,
 };
 
 // ---------------------------------------------------------------------------
@@ -125,6 +145,10 @@ export enum ActionType {
   // Slot 52 sits alongside QueryDataverse (51, server-only, not yet exposed in the
   // canvas) in the Dataverse-data-ops group.
   LookupUserMembership = 52,
+  // R4 PR 1 (task 002 enum / task 003 executor / task 004 form): mirrors server
+  // INodeExecutor.cs ActionType.EntityNameValidator. Slot 141 sits in the
+  // post-LLM cluster alongside Sanitization (130) and ObservationEmit (140).
+  EntityNameValidator = 141,
 }
 
 /**
@@ -143,6 +167,7 @@ export const NodeTypeToActionType: Record<PlaybookNodeType, ActionType> = {
   [PlaybookNodeType.CreateNotification]: ActionType.CreateNotification,
   [PlaybookNodeType.Wait]: ActionType.Wait,
   [PlaybookNodeType.LookupUserMembership]: ActionType.LookupUserMembership,
+  [PlaybookNodeType.EntityNameValidator]: ActionType.EntityNameValidator,
 };
 
 // ---------------------------------------------------------------------------

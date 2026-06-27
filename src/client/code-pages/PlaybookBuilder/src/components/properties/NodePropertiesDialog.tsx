@@ -51,6 +51,7 @@ import { AiCompletionForm } from './AiCompletionForm';
 import { WaitForm } from './WaitForm';
 import { UpdateRecordForm } from './UpdateRecordForm';
 import { LookupUserMembershipForm } from './LookupUserMembershipForm';
+import { EntityNameValidatorForm } from './EntityNameValidatorForm';
 import { PromptSchemaForm } from './PromptSchemaForm';
 import { PromptSchemaEditor } from './PromptSchemaEditor';
 import { RenameGuardDialog, type RenameGuardAction } from './RenameGuardDialog';
@@ -174,6 +175,7 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
     'aiCompletion',
     'wait',
     'lookupUserMembership',
+    'entityNameValidator',
   ].includes(nodeType);
   const hasConfigTab = hasTypeForm || isConditionNode || !isStartNode;
 
@@ -504,6 +506,13 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
                         )}
                         {nodeType === 'lookupUserMembership' && (
                           <LookupUserMembershipForm
+                            nodeId={selectedNode.id}
+                            configJson={selectedNode.data.configJson ?? '{}'}
+                            onConfigChange={handleConfigChange}
+                          />
+                        )}
+                        {nodeType === 'entityNameValidator' && (
+                          <EntityNameValidatorForm
                             nodeId={selectedNode.id}
                             configJson={selectedNode.data.configJson ?? '{}'}
                             onConfigChange={handleConfigChange}

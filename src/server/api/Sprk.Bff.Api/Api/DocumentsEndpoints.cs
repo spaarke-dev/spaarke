@@ -1,5 +1,3 @@
-using Microsoft.Graph;
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
@@ -35,17 +33,19 @@ public static class DocumentsEndpoints
                 logger.LogInformation("Creating container {DisplayName} with type {ContainerTypeId}",
                     request.DisplayName, request.ContainerTypeId);
 
-                var result = await speFileStore.CreateContainerAsync(
-                    request.ContainerTypeId,
-                    request.DisplayName,
-                    request.Description);
+                var result = await GraphCallScope.Run(
+                    () => speFileStore.CreateContainerAsync(
+                        request.ContainerTypeId,
+                        request.DisplayName,
+                        request.Description),
+                    "container.create");
 
                 return TypedResults.Created($"/api/containers/{result?.Id}", result);
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Failed to create container");
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception ex)
             {
@@ -81,14 +81,16 @@ public static class DocumentsEndpoints
 
                 logger.LogInformation("Listing containers for type {ContainerTypeId}", containerTypeId.Value);
 
-                var result = await speFileStore.ListContainersAsync(containerTypeId.Value);
+                var result = await GraphCallScope.Run(
+                    () => speFileStore.ListContainersAsync(containerTypeId.Value),
+                    "containers.list");
 
                 return TypedResults.Ok(result);
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Failed to list containers");
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception ex)
             {
@@ -122,14 +124,16 @@ public static class DocumentsEndpoints
 
                 logger.LogInformation("Getting drive for SPE container {ContainerId}", containerId);
 
-                var result = await speFileStore.GetContainerDriveAsync(containerId);
+                var result = await GraphCallScope.Run(
+                    () => speFileStore.GetContainerDriveAsync(containerId),
+                    "container.drive.get");
 
                 return TypedResults.Ok(result);
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Failed to get container drive");
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception ex)
             {
@@ -163,14 +167,16 @@ public static class DocumentsEndpoints
 
                 logger.LogInformation("Listing children for drive {DriveId}, item {ItemId}", driveId, itemId);
 
-                var result = await speFileStore.ListChildrenAsync(driveId, itemId);
+                var result = await GraphCallScope.Run(
+                    () => speFileStore.ListChildrenAsync(driveId, itemId),
+                    "drive.children.list");
 
                 return TypedResults.Ok(result);
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Failed to list drive children");
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception ex)
             {
@@ -209,7 +215,9 @@ public static class DocumentsEndpoints
 
                 logger.LogInformation("Getting metadata for file {ItemId} in drive {DriveId}", itemId, driveId);
 
-                var result = await speFileStore.GetFileMetadataAsync(driveId, itemId);
+                var result = await GraphCallScope.Run(
+                    () => speFileStore.GetFileMetadataAsync(driveId, itemId),
+                    "file.metadata.get");
 
                 if (result == null)
                 {
@@ -218,10 +226,10 @@ public static class DocumentsEndpoints
 
                 return TypedResults.Ok(result);
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Failed to get file metadata");
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception ex)
             {
@@ -260,7 +268,9 @@ public static class DocumentsEndpoints
 
                 logger.LogInformation("Downloading file {ItemId} from drive {DriveId}", itemId, driveId);
 
-                var stream = await speFileStore.DownloadFileAsync(driveId, itemId);
+                var stream = await GraphCallScope.Run(
+                    () => speFileStore.DownloadFileAsync(driveId, itemId),
+                    "file.download");
 
                 if (stream == null)
                 {
@@ -268,15 +278,17 @@ public static class DocumentsEndpoints
                 }
 
                 // Get file metadata to determine content type and filename
-                var metadata = await speFileStore.GetFileMetadataAsync(driveId, itemId);
+                var metadata = await GraphCallScope.Run(
+                    () => speFileStore.GetFileMetadataAsync(driveId, itemId),
+                    "file.metadata.get");
                 var fileName = metadata?.Name ?? "download";
 
                 return TypedResults.File(stream, "application/octet-stream", fileName);
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Failed to download file");
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception ex)
             {
@@ -318,7 +330,10 @@ public static class DocumentsEndpoints
 
                 using var stream = request.Body;
 
-                var result = await speFileStore.UploadSmallAsync(driveId, fileName, stream);
+                var localStream = stream;
+                var result = await GraphCallScope.Run(
+                    () => speFileStore.UploadSmallAsync(driveId, fileName, localStream),
+                    "file.upload.small");
 
                 if (result == null)
                 {
@@ -331,10 +346,10 @@ public static class DocumentsEndpoints
 
                 return TypedResults.Created($"/api/drives/{driveId}/items/{result.Id}", result);
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Failed to upload file");
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception ex)
             {
@@ -373,7 +388,9 @@ public static class DocumentsEndpoints
 
                 logger.LogInformation("Deleting file {ItemId} from drive {DriveId}", itemId, driveId);
 
-                var deleted = await speFileStore.DeleteFileAsync(driveId, itemId);
+                var deleted = await GraphCallScope.Run(
+                    () => speFileStore.DeleteFileAsync(driveId, itemId),
+                    "file.delete");
 
                 if (!deleted)
                 {
@@ -382,10 +399,10 @@ public static class DocumentsEndpoints
 
                 return TypedResults.NoContent();
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Failed to delete file");
-                return ProblemDetailsHelper.FromGraphException(ex);
+                return ex.ToProblemDetails();
             }
             catch (Exception ex)
             {

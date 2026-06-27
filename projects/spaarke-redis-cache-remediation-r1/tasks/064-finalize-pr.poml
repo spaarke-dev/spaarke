@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="064" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Push + finalize draft PR</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>063</dependencies>
+    <blocks>090</blocks>
+    <tags>devops, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>PR finalization</rigor-reason>
+    <parallel-group>Wrap</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wrap-up gate sequence</parallel-reason>
+  </metadata>
+  <prompt>Push all changes. Mark draft PR as Ready for Review. PR description includes: scope summary, Phases 1-5 status, publish-size delta from task 061, three-question justification (from `plan.md` §2), known follow-ups (R7 backlog reference).</prompt>
+  <role>Spaarke developer; PR finalization.</role>
+  <goal>PR is Ready for Review with comprehensive description.</goal>
+  <context><background>Final pre-merge step before project wrap-up (task 090).</background><relevant-files><file>GitHub PR</file></relevant-files></context>
+  <constraints><constraint source="project">PR description includes all required elements.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/plan.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/final-publish-size-report.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">`git push`.</step>
+    <step order="2">Edit PR description with comprehensive content.</step>
+    <step order="3">Mark Ready for Review (`gh pr ready`).</step>
+    <step order="4">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">git, gh</tool></tools>
+  <outputs><output type="deploy">GitHub PR (Ready for Review)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">PR is Ready for Review (not Draft).</criterion>
+    <criterion testable="true">Description includes scope, phases, publish-size delta, justification, follow-ups.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

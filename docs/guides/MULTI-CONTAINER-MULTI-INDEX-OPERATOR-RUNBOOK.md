@@ -64,8 +64,8 @@ The binding **invariants (INV-1..INV-8)** that govern these scenarios live in [`
 
 | Business Unit | `sprk_containerid` (verified via MCP) | `sprk_searchindexname` (set this) |
 |---|---|---|
-| Spaarke Demo | `b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50` | `spaarke-knowledge-index-v2` |
-| Spaarke | `b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh` | `spaarke-file-index` |
+| Spaarke Demo | `b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50` | `spaarke-files-index` |
+| Spaarke | `b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh` | `spaarke-files-index` |
 | Spaarke Dev 1 | (NULL today) | operator-determined (R1: leave NULL → tenant default applies) |
 | Spaarke Test 1 | (NULL today) | operator-determined (R1: leave NULL → tenant default applies) |
 
@@ -102,7 +102,7 @@ Expected: at minimum, Spaarke Demo and Spaarke show non-NULL `sprk_searchindexna
 
 ## 2. How to assign a new index to a BU
 
-**Scenario**: A BU should default new records to a different physical index — e.g., the Spaarke BU has migrated and new records should land in `spaarke-file-index` (instead of the prior `spaarke-knowledge-index-v2`).
+**Scenario**: A BU should default new records to a different physical index — e.g., the Spaarke BU has migrated and new records should land in `spaarke-files-index` (instead of the prior `spaarke-knowledge-index-v2`).
 
 **Effect**: NEW records created via the Spaarke wizards after this change inherit the new value. EXISTING records are unaffected — this is intentional per **INV-3** (BU change does NOT propagate). See [§4 Drift coexistence model](#4-drift-coexistence-model).
 
@@ -111,7 +111,7 @@ Expected: at minimum, Spaarke Demo and Spaarke show non-NULL `sprk_searchindexna
 1. Confirm the new index name appears in the BFF allow-list (`appsettings.AiSearch.AllowedIndexes`). If not, follow [§5 Adding a new physical index](#5-adding-a-new-physical-index) FIRST — otherwise the BFF will return `400 INDEX_NOT_ALLOWED` on every search routed to that index.
 2. Open the Power Apps maker portal, navigate to **Tables → Business Unit**.
 3. Open the target BU record.
-4. Set `sprk_searchindexname` to the new index name (e.g., `spaarke-file-index`).
+4. Set `sprk_searchindexname` to the new index name (e.g., `spaarke-files-index`).
 5. Optionally update `sprk_containerid` to match the new SPE container (the two are paired per INV-6).
 6. Save.
 
@@ -139,7 +139,7 @@ Expected: at minimum, Spaarke Demo and Spaarke show non-NULL `sprk_searchindexna
 
 ## 3. How to mark a single record as Protected
 
-**Scenario**: A specific Matter (or Project / Invoice / WorkAssignment / Event) must store its documents in a separate, access-controlled container + index — distinct from the BU's defaults. Common case: "Protected Matter" stored in `spaarke-file-index` while the BU defaults to `spaarke-knowledge-index-v2`.
+**Scenario**: A specific Matter (or Project / Invoice / WorkAssignment / Event) must store its documents in a separate, access-controlled container + index — distinct from the BU's defaults. Common case: "Protected Matter" stored in `spaarke-files-index` while the BU defaults to `spaarke-knowledge-index-v2`.
 
 **Why explicit override works**: Per **INV-2** (record's own fields are authoritative after create) and **INV-5** (explicit overrides are sacred), once you set non-empty values on the record itself, no subsequent default-fill logic (wizards, backfill) will overwrite them. A Document uploaded under that Matter inherits the Matter's explicit values via **INV-4** (Document inherits from immediate parent), not the user's BU.
 
@@ -148,7 +148,7 @@ Expected: at minimum, Spaarke Demo and Spaarke show non-NULL `sprk_searchindexna
 1. Identify the target record and the protected container + index. Example:
    - Matter: "Protected Client X — Litigation 2026"
    - Target container: `b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh` (Spaarke production SPE container)
-   - Target index: `spaarke-file-index`
+   - Target index: `spaarke-files-index`
 2. Open the record (via Power Apps maker portal or the model-driven app) in form-edit mode.
 3. Set BOTH fields together (per **INV-6** — container ref + index travel together):
    - `sprk_containerid` = (the SPE container id)
@@ -169,7 +169,7 @@ Expected: at minimum, Spaarke Demo and Spaarke show non-NULL `sprk_searchindexna
    ```
 
    Expected: `sprk_graphdriveid` and `sprk_searchindexname` match the Matter's override values — NOT the user's BU defaults.
-3. **PCF search returns protected results**: On the form where SemanticSearchControl is hosted, run a search. BFF log should show the resolved index URL pointing to `spaarke-file-index`.
+3. **PCF search returns protected results**: On the form where SemanticSearchControl is hosted, run a search. BFF log should show the resolved index URL pointing to `spaarke-files-index`.
 
 ### Cross-references
 
@@ -237,7 +237,7 @@ If you want to verify the system is correctly applying INV-3:
      "AiSearch": {
        "AllowedIndexes": [
          "spaarke-knowledge-index-v2",
-         "spaarke-file-index",
+         "spaarke-files-index",
          "discovery-index",
          "spaarke-rag-references",
          "your-new-index-name"

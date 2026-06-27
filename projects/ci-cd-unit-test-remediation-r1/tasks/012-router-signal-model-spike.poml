@@ -1,0 +1,52 @@
+<task id="CICD-012" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Spike: resolve router signal model (single composite required check vs neutral conclusion for skipped tiers)</title>
+    <status>complete</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1 - Stream A</phase>
+    <stream>A - CI tiering</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>ci, spike, router, branch-protection, merge-queue</tags>
+    <blocks>040</blocks>
+  </metadata>
+
+  <prompt>
+    Resolves spec Unresolved Question #1. Determine: should `ci-router.yml` use a single composite required check that always reports success/failure, or use GitHub's neutral conclusion for skipped tiers? Investigate the interaction with GitHub merge queue (batch=1) and branch protection rules. The decision blocks final implementation of `ci-router.yml` in task 040.
+  </prompt>
+
+  <role>CI/CD engineer doing a documentation-driven spike against GitHub Actions/merge queue/branch protection docs.</role>
+
+  <goal>A decision record in `notes/router-signal-model-decision.md` documenting: chosen approach, evidence from GitHub docs, behavior under each merge-queue scenario, fallback if neutral-conclusion semantics misbehave.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+    <file purpose="design">projects/ci-cd-unit-test-remediation-r1/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec">FR-A01: router always reports a single required status check (`CI / Router`); required check never stuck pending.</constraint>
+    <constraint source="spec">FR-C01: merge queue batch=1, no speculative.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Read GitHub Actions docs on: conditional jobs, neutral conclusion (`if: cancelled() || ...`), `workflow_call` patterns</step>
+    <step order="2">Read GitHub merge queue docs: required check semantics on merged state, queue timeout behavior</step>
+    <step order="3">Read GitHub branch protection docs: "required status check" semantics under "skipped" workflows</step>
+    <step order="4">Build decision matrix: 3 scenarios (BFF-only diff, SpaarkeAi-only diff, docs-only diff) × 2 signal models (single composite vs neutral conclusion)</step>
+    <step order="5">Recommend approach with evidence; document fallback plan if chosen model fails in shadow phase</step>
+    <step order="6">Write `notes/router-signal-model-decision.md`</step>
+  </steps>
+
+  <outputs>
+    <output type="notes">projects/ci-cd-unit-test-remediation-r1/notes/router-signal-model-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Decision documented with explicit choice + GitHub doc citations</criterion>
+    <criterion testable="true">3 scenarios × 2 signal models matrix analyzed</criterion>
+    <criterion testable="true">Fallback documented if neutral-conclusion path fails in shadow</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Deploy SYS-LOOKUP-MEMBERSHIP sprk_analysisaction row (ActionType 52)</title>
+    <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
+    <status>completed</status>
+    <completed>2026-06-25</completed>
+    <completion-notes>Created sprk_analysisaction row `SYS-LOOKUP-MEMBERSHIP` (Dataverse GUID `ca44b7aa-fc70-f111-ab0e-7ced8ddc4cc6`) in spaarkedev1 via `mcp__dataverse__create_record`. statecode=Active, statuscode=Active, sprk_executoractiontype=52, sprk_temperature=0. Canonical JSON committed at `projects/spaarke-daily-update-service/notes/playbooks/actions/sys-lookup-membership.action.json`. AC-1 verified via `mcp__dataverse__read_query` (1 row returned with correct field values). Smoke notes at `projects/spaarke-daily-update-service-r4/notes/smoke/005-sys-lookup-membership-deploy.md`. Closes carry-forward from task 001's MCP-deferred note — MCP available + working against spaarkedev1.</completion-notes>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>011</blocks>
+    <tags>jps, dataverse, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Data deployment via MCP. No code change. JPS Action row is data (not code) per spec §Executive Summary. STANDARD rigor applies.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Follow the `jps-action-create` skill. Author + deploy a `sprk_analysisaction` row to spaarkedev1 with `sprk_executoractiontype = 52`, `sprk_actioncode = "SYS-LOOKUP-MEMBERSHIP"`, a JPS-compliant `sprk_systemprompt` (input schema: entityType, roles, identityTypes, includeRelated, limit), an `sprk_outputschemajson` defining the output shape, and `statecode = Active`. Validate via `jps-validate` before deploy. Verify via MCP `read_query` SELECT … WHERE sprk_executoractiontype = 52 returns the row.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. JPS Action-row author with knowledge of the JPS-AUTHORING-GUIDE conventions, upsert-pattern deployment via MCP, and the LookupUserMembership input/output contract.</role>
+
+  <goal>One `sprk_analysisaction` row in spaarkedev1 with sprk_executoractiontype = 52, code SYS-LOOKUP-MEMBERSHIP, statecode Active; canonical JSON source at `projects/spaarke-daily-update-service/notes/playbooks/actions/sys-lookup-membership.action.json` committed; `jps-validate` passes; MCP read_query confirms the row.</goal>
+
+  <context>
+    <background>R4 FR-1 (lines 109-110) closes the platform-foundations-R3 deployment gap: the C# `LookupUserMembershipNodeExecutor` shipped in R3 but its corresponding `sprk_analysisaction` row was never deployed to spaarkedev1. Without the row, ActionType 52 cannot be referenced by any playbook (the playbook engine resolves Actions via Dataverse lookup, not C# enum). Owner Q&amp;A confirmed naming convention "SYS-* for system data-ops" (spec line 338). Idempotency via upsert pattern (spec line 343) — if row exists, update; if not, create.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-034">User-record Membership Resolution Pattern — LookupUserMembership ActionType 52 is the canonical primitive. R4 deploys its missing Action row.</constraint>
+    <constraint source="spec MUST">MUST follow `jps-action-create` skill; MUST validate each JPS document via `jps-validate` before deployment; MUST use repo JSON files as canonical source-of-truth.</constraint>
+    <constraint source="spec AC-1">mcp__dataverse__read_query SELECT … FROM sprk_analysisaction WHERE sprk_executoractiontype = 52 returns 1 row.</constraint>
+    <constraint source="project">Upsert pattern (Owner Q&amp;A spec line 343) — if row exists in spaarkedev1, update it; if not, create. Idempotent.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>docs/guides/AI-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="jps-action-create" location=".claude/skills/jps-action-create/SKILL.md">Author + validate + deploy sprk_analysisaction row via MCP upsert.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read spec.md FR-1 (lines 109-110) + AC-1.</step>
+    <step order="2">Invoke the `jps-action-create` skill to scaffold the SYS-LOOKUP-MEMBERSHIP Action JSON.</step>
+    <step order="3">Read `LookupUserMembershipNodeExecutor.cs` to extract the canonical input schema (entityType, roles, identityTypes, includeRelated, limit) and output schema.</step>
+    <step order="4">Author the JSON source at `projects/spaarke-daily-update-service/notes/playbooks/actions/sys-lookup-membership.action.json` with: sprk_executoractiontype 52, sprk_actioncode "SYS-LOOKUP-MEMBERSHIP", sprk_systemprompt with input schema, sprk_outputschemajson, statecode Active.</step>
+    <step order="5">Run `jps-validate` against the JSON — fix any errors.</step>
+    <step order="6">Check spaarkedev1 for an existing row via `mcp__dataverse__read_query` filtered to sprk_executoractiontype = 52 (idempotency check).</step>
+    <step order="7">If exists → `mcp__dataverse__update_record` with the canonical fields; if not → `mcp__dataverse__create_record`.</step>
+    <step order="8">Verify via `mcp__dataverse__read_query` SELECT … FROM sprk_analysisaction WHERE sprk_executoractiontype = 52 — returns exactly 1 row matching the canonical JSON.</step>
+    <step order="9">Update TASK-INDEX.md: change this task's status to ✅.</step>
+    <step order="10">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="mcp-dataverse">read_query / create_record / update_record for sprk_analysisaction upsert</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">spaarkedev1: sprk_analysisaction row with sprk_executoractiontype = 52, code SYS-LOOKUP-MEMBERSHIP, Active</output>
+    <output type="source">projects/spaarke-daily-update-service/notes/playbooks/actions/sys-lookup-membership.action.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">mcp__dataverse__read_query SELECT WHERE sprk_executoractiontype = 52 returns exactly 1 row.</criterion>
+    <criterion testable="true">Row has sprk_actioncode = "SYS-LOOKUP-MEMBERSHIP" and statecode = Active.</criterion>
+    <criterion testable="true">JPS-validate passes against the canonical JSON source file.</criterion>
+    <criterion testable="true">Canonical JSON committed at projects/spaarke-daily-update-service/notes/playbooks/actions/sys-lookup-membership.action.json.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-1 (line 109-110), AC-1 (line 110), Owner Q&amp;A on naming convention (line 338), Owner Q&amp;A on upsert idempotency (line 343). Hand-built test playbook validation portion of AC-1 ("LookupUserMembership → QueryDataverse executes end-to-end") is covered by task 008 smoke test — this task only deploys the row.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

@@ -6,8 +6,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Infrastructure.Cache;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -68,7 +68,10 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 public sealed class EntityExtractorHandler : IToolHandler
 {
     private const string HandlerIdValue = nameof(EntityExtractorHandler);
-    private const string CacheKeyPrefix = "entity-extractor";
+    // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
+    // spaarke:tenant:{tenantId}:entity-extractor:{hash}:v1
+    private const string CacheResource = "entity-extractor";
+    private const int CacheVersion = 1;
     private const string SchemaName = "EntityExtractionResult";
     private const double DefaultConfidenceThreshold = 0.6;
     private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
@@ -86,13 +89,13 @@ public sealed class EntityExtractorHandler : IToolHandler
         SupportedEntityTypes, StringComparer.OrdinalIgnoreCase);
 
     private readonly IOpenAiClient _openAiClient;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ModelSelectorOptions _modelSelectorOptions;
     private readonly ILogger<EntityExtractorHandler> _logger;
 
     public EntityExtractorHandler(
         IOpenAiClient openAiClient,
-        IDistributedCache cache,
+        ITenantCache cache,
         IOptions<ModelSelectorOptions> modelSelectorOptions,
         ILogger<EntityExtractorHandler> logger)
     {
@@ -351,11 +354,11 @@ public sealed class EntityExtractorHandler : IToolHandler
         var effectiveTypes = ResolveEffectiveEntityTypes(config);
         var confidenceThreshold = config.ConfidenceThreshold ?? DefaultConfidenceThreshold;
 
-        // ADR-014: per-tenant cache key — never cross-tenant
-        var cacheKey = BuildCacheKey(tenantId, inputText, effectiveTypes, confidenceThreshold);
+        // ADR-014 / FR-05: per-tenant cache id — ITenantCache wraps tenant scoping.
+        var cacheId = BuildCacheId(inputText, effectiveTypes, confidenceThreshold);
 
         // Cache lookup (best-effort — failures fall through to LLM call)
-        var cached = await TryGetFromCacheAsync(cacheKey, cancellationToken);
+        var cached = await TryGetFromCacheAsync(tenantId, cacheId, cancellationToken);
         if (cached is not null)
         {
             stopwatch.Stop();
@@ -434,7 +437,7 @@ public sealed class EntityExtractorHandler : IToolHandler
         };
 
         // Cache store (best-effort)
-        await TrySetCacheAsync(cacheKey, result, cancellationToken);
+        await TrySetCacheAsync(tenantId, cacheId, result, cancellationToken);
 
         stopwatch.Stop();
 
@@ -548,8 +551,8 @@ public sealed class EntityExtractorHandler : IToolHandler
     // ADR-014: per-tenant cache key
     // ─────────────────────────────────────────────────────────────────────────────
 
-    private static string BuildCacheKey(
-        string tenantId,
+    // Builds the cache "id" component (content hash) consumed by ITenantCache.
+    private static string BuildCacheId(
         string inputText,
         IReadOnlyList<string> entityTypes,
         double confidenceThreshold)
@@ -558,19 +561,16 @@ public sealed class EntityExtractorHandler : IToolHandler
         var rawComposite = $"{inputText}|types={typesPart}|threshold={confidenceThreshold.ToString("F2", CultureInfo.InvariantCulture)}";
         using var sha = SHA256.Create();
         var hashBytes = sha.ComputeHash(Encoding.UTF8.GetBytes(rawComposite));
-        var hashHex = Convert.ToHexString(hashBytes).ToLowerInvariant();
-        return $"{CacheKeyPrefix}:{tenantId}:{hashHex}";
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
     private async Task<EntityExtractionResult?> TryGetFromCacheAsync(
-        string cacheKey, CancellationToken cancellationToken)
+        string tenantId, string cacheId, CancellationToken cancellationToken)
     {
         try
         {
-            var bytes = await _cache.GetAsync(cacheKey, cancellationToken);
-            if (bytes is null || bytes.Length == 0)
-                return null;
-            return JsonSerializer.Deserialize<EntityExtractionResult>(bytes, JsonOpts);
+            return await _cache.GetAsync<EntityExtractionResult>(
+                tenantId, CacheResource, cacheId, CacheVersion, ct: cancellationToken);
         }
         catch (Exception ex)
         {
@@ -582,16 +582,12 @@ public sealed class EntityExtractorHandler : IToolHandler
     }
 
     private async Task TrySetCacheAsync(
-        string cacheKey, EntityExtractionResult value, CancellationToken cancellationToken)
+        string tenantId, string cacheId, EntityExtractionResult value, CancellationToken cancellationToken)
     {
         try
         {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(value, JsonOpts);
             await _cache.SetAsync(
-                cacheKey,
-                bytes,
-                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheTtl },
-                cancellationToken);
+                tenantId, CacheResource, cacheId, CacheVersion, value, CacheTtl, ct: cancellationToken);
         }
         catch (Exception ex)
         {

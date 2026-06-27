@@ -644,7 +644,7 @@ public class SprkChatAgentFactory
 
         // Resolve remaining dependencies
         var nodeService = scope.ServiceProvider.GetRequiredService<INodeService>();
-        var cache = scope.ServiceProvider.GetRequiredService<IDistributedCache>();
+        var cache = scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
 
         return new PlaybookDispatcher(
             embeddingService,
@@ -669,7 +669,7 @@ public class SprkChatAgentFactory
     public virtual DynamicCommandResolver CreateCommandResolver()
     {
         var entityService = _serviceProvider.GetRequiredService<IGenericEntityService>();
-        var cache = _serviceProvider.GetRequiredService<IDistributedCache>();
+        var cache = _serviceProvider.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
         var loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
 
         return new DynamicCommandResolver(

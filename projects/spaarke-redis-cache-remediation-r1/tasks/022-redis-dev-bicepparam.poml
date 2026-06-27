@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>redis-dev.bicepparam (Basic C0)</title>
+    <phase>2: Bicep + provisioning artifacts</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>020,021</dependencies>
+    <blocks>025,028,031</blocks>
+    <tags>azure, bicep, infrastructure</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New param file for dev env</rigor-reason>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create `infrastructure/bicep/parameters/redis-dev.bicepparam` with: `redisName = 'spaarke-bff-redis-dev'`, `sku = 'Basic'`, `capacity = 0`, `minimumTlsVersion = '1.2'`, `enableNonSslPort = false`, `tags = { environment: 'dev' }`. Targets `redis.bicep` module.</prompt>
+  <role>Spaarke infrastructure developer.</role>
+  <goal>`redis-dev.bicepparam` exists; `bicep build` validates.</goal>
+  <context><background>Per spec Q1, dev SKU = Basic C0 (~$15/mo).</background><relevant-files><file>infrastructure/bicep/parameters/redis-dev.bicepparam (NEW)</file><file>infrastructure/bicep/modules/redis.bicep</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">Q1 — Basic C0 for dev.</constraint>
+    <constraint source="spec">NFR-03 — canonical name `spaarke-bff-redis-{env}`.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>infrastructure/bicep/modules/redis.bicep</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/redis-bicep-audit.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read `redis.bicep` parameter shape (post-task-020).</step>
+    <step order="2">Create `redis-dev.bicepparam` using `.bicepparam` typed syntax targeting `redis.bicep`.</step>
+    <step order="3">`bicep build redis-dev.bicepparam`.</step>
+    <step order="4">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">redis.bicep</tool><tool name="Write">Param file</tool><tool name="Bash">bicep build</tool></tools>
+  <outputs><output type="config">infrastructure/bicep/parameters/redis-dev.bicepparam (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">File exists with name = 'spaarke-bff-redis-dev', SKU = Basic, capacity = 0.</criterion>
+    <criterion testable="true">`bicep build redis-dev.bicepparam` succeeds.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

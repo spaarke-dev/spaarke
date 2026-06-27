@@ -1,0 +1,57 @@
+<task id="CICD-052" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>DELETE PR 2/3: tests/unit/Spaarke.Scheduling.Tests/ DELETE category (~8 files)</title>
+    <status>cancelled-no-scope</status>
+    <completion-note>2026-06-26: Cancelled. Per inventory (task 020): 0 DELETE files in Spaarke.Scheduling.Tests (all 8 files KEEP). Top-5 flaky test list from task 010 will be addressed via separate test stabilization work (not deletion).</completion-note>
+    <estimated-effort>1.5 hours</estimated-effort>
+    <phase>2 - Stream B</phase>
+    <stream>B - Test reset</stream>
+    <rigor-level>FULL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>051</dependencies>
+    <blocks>053a</blocks>
+    <tags>testing, deletion, sliced-PR, scheduling</tags>
+  </metadata>
+
+  <prompt>
+    Second sliced-deletion PR per spec FR-B06. Delete DELETE-categorized files from `tests/unit/Spaarke.Scheduling.Tests/` (~8 files). Rebase on master after 051 merges. Many of the flakes per design.md §263 live here.
+  </prompt>
+
+  <role>Test architecture engineer executing the medium-sized slice.</role>
+
+  <goal>DELETE-categorized files removed from Spaarke.Scheduling.Tests; surviving tests pass; flake rate from this project drops.</goal>
+
+  <inputs>
+    <file purpose="inventory">projects/ci-cd-unit-test-remediation-r1/notes/test-inventory.csv (DELETE rows for Spaarke.Scheduling.Tests)</file>
+    <file purpose="failure-catalog">projects/ci-cd-unit-test-remediation-r1/notes/sdap-ci-failure-catalog.md (from task 010; identifies Scheduling.Tests flakes)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B06">Path-check deletion-safety at Step 9.5.</constraint>
+    <constraint source="design §263">Many R3-added Scheduling.Tests have known flakes — coordinate KEEP/DELETE per inventory.</constraint>
+    <constraint source="project autonomous">FULL rigor.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">Rebase worktree branch on origin/master (51 should have merged)</step>
+    <step order="2">Load inventory CSV; filter DELETE rows for `tests/unit/Spaarke.Scheduling.Tests/`</step>
+    <step order="3">Verify no protected-path violations</step>
+    <step order="4">`git rm` files; update .csproj if needed</step>
+    <step order="5">Run `dotnet build` and `dotnet test` for Spaarke.Scheduling.Tests</step>
+    <step order="6">Cross-reference task 010 failure catalog: verify top-5-flaky tests from Scheduling.Tests are either removed (DELETE) or re-classified KEEP with regression-marker rationale</step>
+    <step order="7">Step 9.5; commit + PR (title: "test(b-phase2): delete DELETE-category wiring tests from Spaarke.Scheduling.Tests per FR-B06 [slice 2/3]")</step>
+  </steps>
+
+  <outputs>
+    <output type="test-deletion">~8 .cs files removed from tests/unit/Spaarke.Scheduling.Tests/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Only inventory-marked DELETE files removed</criterion>
+    <criterion testable="true">No protected-path violations</criterion>
+    <criterion testable="true">Surviving Scheduling.Tests pass</criterion>
+    <criterion testable="true">Top-5 flaky Scheduling tests (from 010 catalog) accounted for (deleted or marked KEEP with rationale)</criterion>
+    <criterion testable="true">Step 9.5 pass</criterion>
+  </acceptance-criteria>
+</task>

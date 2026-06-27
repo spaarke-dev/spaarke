@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-daily-update-service-r4">
+  <metadata>
+    <title>Author EntityNameValidatorNodeExecutor.cs + xUnit tests</title>
+    <phase>1: W0 JPS — Action rows + EntityNameValidator (PR 1)</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>007</blocks>
+    <tags>bff-api, ai, testing, unit-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New C# NodeExecutor file + new xUnit test file in BFF API. Tags include bff-api + ai. Modifying .cs source. FULL rigor mandatory per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <completed>2026-06-25</completed>
+    <completion-notes>
+      Authored `EntityNameValidatorNodeExecutor.cs` (~430 LOC; sibling pattern from `LookupUserMembershipNodeExecutor.cs`; pure-function — ILogger only, no IServiceScopeFactory needed) and `EntityNameValidatorNodeExecutorTests.cs` (~320 LOC; 12 tests, 8 mandatory + 4 additional Validate edge cases). Unconditional Singleton DI registration added to `AnalysisServicesModule.AddNodeExecutors` per §F.1 (no feature gate). Build: 0 errors. Tests: 12/12 pass (44 ms). Spec AC-3b satisfied — `ExecuteAsync_ScrubsHallucination_Johnson_Lee_LLP` removes "Johnson &amp; Lee LLP" sentence AND verifies the structured `hallucination_detected` warning event is emitted via Mock&lt;ILogger&gt; capture (uses the canonical event-name constant `EntityNameValidatorNodeExecutor.HallucinationDetectedEvent` so the literal token survives App Insights queries). Publish-size: 44.98 MB compressed (delta -1.32 MB vs Wave 1 baseline 46.30 MB; within +5 MB rule + 60 MB ceiling). CVE: no NEW HIGH; pre-existing Kiota 1.21.2 HIGH carried forward (documented). Implementation notes: sentence-level scrubbing on terminal punctuation; Proper-Noun span detection via word-boundary Regex tolerant of "&amp;", "of", "and", and case-citation markers ("v."); case-insensitive allow-list matching with two-strategy ranking (substring either-direction + per-token coverage); stop-word filter for sentence starters, calendar/temporal words (Friday, Monday, January, etc.), and common pronouns to prevent false positives. Per-removal log event uses literal "hallucination_detected" key in the message template (NOT just structured property) so App Insights `traces | where message contains "hallucination_detected"` queries return matches. See `notes/debug/003-publish-size.md`.
+    </completion-notes>
+  </metadata>
+
+  <prompt>Author a NEW `EntityNameValidatorNodeExecutor.cs` in `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/`, mirroring the pattern of the sibling `LookupUserMembershipNodeExecutor.cs`. Inputs: `{candidateText, allowList[]}`. Outputs: `{scrubbedText, removedTerms[]}`. Per-removal, log a structured `hallucination_detected` event via ILogger. Then author `EntityNameValidatorNodeExecutorTests.cs` at `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/`, mirroring `LookupUserMembershipNodeExecutorTests.cs`, with the 5 required tests below.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF AI NodeExecutor author with deep knowledge of the post-LLM scrubbing pattern, the Singleton-with-Scoped-dependency DI convention, and xUnit fixture authoring conventions.</role>
+
+  <goal>Two new files exist: (a) production NodeExecutor implementing Validate + ExecuteAsync against the input contract above; (b) xUnit test file with all 5 required tests passing. `dotnet test` succeeds. `dotnet build` succeeds. Publish-size delta ≤ +0.2 MB.</goal>
+
+  <context>
+    <background>R4 FR-3 (lines 116-122) ships post-LLM output scrubbing as defense-in-depth against AI hallucination. R3 UAT confirmed grounding alone is insufficient: the LLM emitted fictional firm names ("Johnson &amp; Lee LLP", "Davis v. Metro Transit") even when prompt instructions said "use only names from input." This NodeExecutor compares LLM output text against an explicit allow-list built from input payload; sentences mentioning entities not in the list are removed; each removal is logged for monitoring. AC-3b mandates the xUnit test scrubs "Johnson &amp; Lee LLP" when not in allow-list AND emits the hallucination_detected event.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/QueryDataverseNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/LookupUserMembershipNodeExecutorTests.cs</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </relevant-files>
+  </context>
+
+  <justification>
+    <existing>The closest existing surface is `LookupUserMembershipNodeExecutor.cs` (sibling NodeExecutor pattern, also ActionType-anchored). Survey of `Services/Ai/Nodes/` shows no current post-LLM output-scrubbing executor — verified via Grep for "scrub" / "validate.*name" / "hallucinat" in the Nodes folder (zero hits).</existing>
+    <extension>No — LookupUserMembershipNodeExecutor performs INPUT lookup (queries Dataverse for user memberships); EntityNameValidator performs OUTPUT scrubbing (post-process LLM text against allow-list). The responsibilities and DI dependencies are fundamentally different (Dataverse client vs string analysis only). Extending the existing executor would conflate input-resolution and output-validation responsibilities; this fails the Single Responsibility Principle and violates the node-executor-authoring pattern.</extension>
+    <cost-of-doing-nothing>Concrete failure mode: R3 UAT verified the LLM emits hallucinated entity names (Johnson &amp; Lee LLP, Davis v. Metro Transit) into the narration output, even with grounding instructions in the prompt. Without this executor, those names reach the widget and the user perceives the AI as fabricating client data. Grounding + temperature 0 alone are demonstrably insufficient (verified by R3 UAT trace).</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-013">All AI logic in BFF; new NodeExecutor extends established framework — no facade-layer extraction needed (executor is internal to AI orchestration).</constraint>
+    <constraint source="ADR-010">DI Minimalism — register via existing NodeExecutorModule extension; no new DI module.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — verify publish-size delta + CVE check + bff-extensions.md §A checklist. Expected delta ≤ +0.2 MB.</constraint>
+    <constraint source="spec AC-3b">xUnit test passes — input with "Johnson &amp; Lee LLP" (not in allow-list) → output has it removed AND warning event emitted.</constraint>
+    <constraint source="project">Mandatory tests: Validate_MissingCandidateText, Validate_MissingAllowList, ExecuteAsync_ScrubsHallucination, ExecuteAsync_AllowListPassThrough, ExecuteAsync_EmitsHallucinationEventPerRemoval.</constraint>
+    <constraint source="project">Per-removal structured log event MUST use the literal key `hallucination_detected` (App Insights query target per docs/guides/AI-MONITORING-DASHBOARD.md).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>projects/spaarke-daily-update-service-r4/CLAUDE.md</file>
+      <file>projects/spaarke-daily-update-service-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="node-executor-authoring" location=".claude/patterns/ai/node-executor-authoring.md">Validate() + ExecuteAsync() canonical signatures; Singleton-with-Scoped-dependency DI; mandatory test cases.</pattern>
+      <pattern name="unit-test-structure" location=".claude/patterns/testing/unit-test-structure.md">xUnit fixture pattern for NodeExecutor tests.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load all knowledge files. Read spec.md FR-3 (lines 116-122) + AC-3b. Verify task 002 enum value is committed (EntityNameValidator = 141).</step>
+    <step order="2">Read `LookupUserMembershipNodeExecutor.cs` end-to-end to understand the class shape: namespace, base class / interface, constructor DI (logger), Validate(), ExecuteAsync(), input/output node-data conventions.</step>
+    <step order="3">Read `LookupUserMembershipNodeExecutorTests.cs` end-to-end to understand the test fixture pattern: Mock&lt;ILogger&gt;, arrange/act/assert layout, how Validate tests assert error messages, how ExecuteAsync tests build NodeContext.</step>
+    <step order="4">Author `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs`: implement Validate (require candidateText non-null, allowList non-null), implement ExecuteAsync (sentence-level scan; if a sentence mentions a token not in allowList, remove that sentence; log `hallucination_detected` with structured properties `{removedTerm, sentence, allowListSize}`; return `{scrubbedText, removedTerms[]}`).</step>
+    <step order="5">Register the new executor in the existing NodeExecutorModule (or equivalent DI registration block used by LookupUserMembershipNodeExecutor). Confirm no new DI module needed.</step>
+    <step order="6">Author `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/EntityNameValidatorNodeExecutorTests.cs` with the 5 required tests: Validate_MissingCandidateText (asserts validation error); Validate_MissingAllowList (asserts validation error); ExecuteAsync_ScrubsHallucination (input "Acme Corp filed a brief. Johnson &amp; Lee LLP responded." with allowList=["Acme Corp"]; assert output contains "Acme Corp" and NOT "Johnson &amp; Lee LLP"); ExecuteAsync_AllowListPassThrough (all names in allow-list → scrubbedText == candidateText); ExecuteAsync_EmitsHallucinationEventPerRemoval (verify Mock&lt;ILogger&gt; received `hallucination_detected` event exactly once per removed term).</step>
+    <step order="7">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/` filtered to EntityNameValidator — all 5 tests pass.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors.</step>
+    <step order="9">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed delta; record vs baseline (~45.65 MB).</step>
+    <step order="10">Run `dotnet list package --vulnerable --include-transitive` — no new HIGH-severity CVE.</step>
+    <step order="11">Update TASK-INDEX.md: change this task's status to ✅.</step>
+    <step order="12">If deviations from plan, document in projects/spaarke-daily-update-service-r4/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish, CVE-scan .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/EntityNameValidatorNodeExecutorTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EntityNameValidatorNodeExecutor.cs exists; implements Validate + ExecuteAsync per the input/output contract; registered in DI module.</criterion>
+    <criterion testable="true">EntityNameValidatorNodeExecutorTests.cs exists with all 5 required tests; `dotnet test` passes all 5.</criterion>
+    <criterion testable="true">AC-3b: "Johnson &amp; Lee LLP" input not in allow-list is scrubbed AND `hallucination_detected` event emitted.</criterion>
+    <criterion testable="true">All unit tests pass; `dotnet build` succeeds; publish-size delta ≤ +0.2 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec references: FR-3 (lines 116-122), AC-3b (line 120). Mirror the LookupUserMembershipNodeExecutor pattern strictly (per spec line 261: sibling executor; in-process service invocation pattern). The structured log key is `hallucination_detected` (App Insights query target per docs/guides/AI-MONITORING-DASHBOARD.md). Sentence-level scrubbing is the proposed default behavior; if a configurable scrub-strategy is needed later it can be added in a follow-up task without changing the wire format.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist (CLAUDE.md §4).</protocol>
+  </execution>
+</task>

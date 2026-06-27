@@ -70,14 +70,13 @@ public static class OfficeModule
         // ============================================================================
         // Singleton for efficient Redis pub/sub handling
         // Bridges background workers to SSE clients for real-time job status updates
-        // Redis connection is injected via IConnectionMultiplexer (optional - graceful degradation)
-        // Use factory to gracefully handle case when Redis is not configured
-        services.AddSingleton<IJobStatusService>(sp =>
-        {
-            var redis = sp.GetService<StackExchange.Redis.IConnectionMultiplexer>();
-            var logger = sp.GetRequiredService<ILogger<JobStatusService>>();
-            return new JobStatusService(redis, logger);
-        });
+        //
+        // Per ADR-032 symmetric DI + spaarke-redis-cache-remediation-r1 task 005:
+        // IConnectionMultiplexer is always registered (real impl when Redis is enabled,
+        // NullConnectionMultiplexer P2 Quiet no-op when in-memory cache fallback is
+        // active in Development). Use GetRequiredService — graceful degradation is
+        // handled inside JobStatusService via IConnectionMultiplexer.IsConnected.
+        services.AddSingleton<IJobStatusService, JobStatusService>();
 
         // ============================================================================
         // Authorization Filters (to be added in task 033)

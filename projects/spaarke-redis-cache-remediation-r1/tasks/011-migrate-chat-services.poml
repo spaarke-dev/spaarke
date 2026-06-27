@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Migrate Chat services to ITenantCache</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>012</blocks>
+    <tags>bff-api, cache, redis, refactoring, ai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + ai + .cs modifications + atomic migration (NFR-07)</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Atomic migration ordering (single PR)</parallel-reason>
+  </metadata>
+  <prompt>Migrate every direct `IDistributedCache.` call in BFF Chat services (`Services/Ai/Chat/`) to `ITenantCache`. Includes `SessionFilesCleanupJob`, `ChatContextMappingService`. Tenant context = session's tenant claim.</prompt>
+  <role>Spaarke .NET developer with chat session model familiarity.</role>
+  <goal>`grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/Services/Ai/Chat/` returns ZERO outside flagged exceptions.</goal>
+  <context>
+    <background>Chat session keys follow `spaarke:tenant:{tenantId}:session:{id}:v1` per FR-14 smoke-test format. Migration must produce keys matching this format.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-06 atomic migration.</constraint>
+    <constraint source="spec">FR-14 — smoke-test key format `spaarke:tenant:{tenantId}:session:{id}:v1`.</constraint>
+    <constraint source="ADR-013">Preserve `SemaphoreSlim` rate-limit patterns.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/ITenantCache.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Open inventory Chat section. Identify sites.</step>
+    <step order="2">For each: inject `ITenantCache`; rewrite calls. Use `resource="session"` for chat session caches; `id` = session ID; `version` = 1.</step>
+    <step order="3">Verify any `SemaphoreSlim` rate-limit code is preserved (ADR-013).</step>
+    <step order="4">Run `dotnet build` + `dotnet test` for Chat tests; fix breakages.</step>
+    <step order="5">Update inventory checkboxes.</step>
+    <step order="6">Update `TASK-INDEX.md` + `current-task.md`.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Inventory + call sites</tool>
+    <tool name="Edit">Per-file migration</tool>
+    <tool name="Bash">dotnet build + test</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/* (modified)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/Services/Ai/Chat/` returns ZERO unflagged matches.</criterion>
+    <criterion testable="true">Smoke-test key format `spaarke:tenant:{tenantId}:session:{id}:v1` is producible from chat-session creation path.</criterion>
+    <criterion testable="true">`dotnet build` + `dotnet test` Chat tests pass.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor.</protocol>
+  </execution>
+</task>

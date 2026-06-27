@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Project Wrap-up</title>
+    <phase>Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>064</dependencies>
+    <blocks>none</blocks>
+    <tags>devops, docs, repo-cleanup, code-review</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Mandatory wrap-up per task-create Step 3.7; binds code-review + adr-check + repo-cleanup</rigor-reason>
+    <parallel-group>Wrap</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task</parallel-reason>
+  </metadata>
+  <prompt>Mandatory project wrap-up per `task-create` Step 3.7. Run final quality gates (`/code-review`, `/adr-check`), run `/repo-cleanup`, update README to Complete, finalize lessons-learned, archive artifacts. Mark sister-project gate signal as cleared in the wrap-up record.</prompt>
+  <role>Spaarke developer; project closer.</role>
+  <goal>Project marked Complete; all artifacts current; repo cleaned per `repo-cleanup` skill; sister project gate-cleared signal recorded.</goal>
+  <context><background>Final mandatory task. Per `task-create` Step 3.7 + Spaarke project hygiene.</background><relevant-files><file>projects/spaarke-redis-cache-remediation-r1/</file></relevant-files></context>
+  <constraints>
+    <constraint source="task-create">Step 3.7 mandatory wrap-up format.</constraint>
+    <constraint source="project">All TASK-INDEX entries marked ✅.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/README.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/plan.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/lessons-learned.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Run `/code-review` on the full project (final pass). Resolve any critical findings (should be none post-task-059).</step>
+    <step order="2">Run `/adr-check` on the full project (final pass). Resolve any violations (should be none post-task-060).</step>
+    <step order="3">Run `/repo-cleanup projects/spaarke-redis-cache-remediation-r1`. Review report; approve removals (ephemeral notes); archive handoffs.</step>
+    <step order="4">Update `README.md`: Status = Complete, Phase = Complete, Progress = 100%, Completed Date = today, all Graduation Criteria checkboxes ✅, Changelog entry.</step>
+    <step order="5">Update `plan.md`: Status = Complete; all milestone statuses ✅.</step>
+    <step order="6">Verify `notes/lessons-learned.md` is comprehensive.</step>
+    <step order="7">Mark all entries in `TASK-INDEX.md` as ✅ completed.</step>
+    <step order="8">Append wrap-up record to sister-project handoff (task 038 file) confirming the project closed.</step>
+    <step order="9">Update `current-task.md`: status = "none"; next action = "run /repo-cleanup (done)".</step>
+  </steps>
+  <tools>
+    <tool name="Skill">code-review</tool>
+    <tool name="Skill">adr-check</tool>
+    <tool name="Skill">repo-cleanup</tool>
+    <tool name="Edit">README + plan + TASK-INDEX</tool>
+    <tool name="Write">handoff append</tool>
+  </tools>
+  <outputs>
+    <output type="docs">projects/spaarke-redis-cache-remediation-r1/README.md (Status = Complete)</output>
+    <output type="docs">projects/spaarke-redis-cache-remediation-r1/plan.md (Status = Complete)</output>
+    <output type="docs">projects/spaarke-redis-cache-remediation-r1/tasks/TASK-INDEX.md (all ✅)</output>
+    <output type="docs">projects/spaarke-redis-cache-remediation-r1/current-task.md (status none)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">README Status = Complete; all 16 Graduation Criteria checked.</criterion>
+    <criterion testable="true">plan.md Status = Complete; all phase deliverables checked.</criterion>
+    <criterion testable="true">TASK-INDEX.md all entries ✅.</criterion>
+    <criterion testable="true">repo-cleanup completed with report.</criterion>
+    <criterion testable="true">No unresolved critical findings or ADR violations.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>

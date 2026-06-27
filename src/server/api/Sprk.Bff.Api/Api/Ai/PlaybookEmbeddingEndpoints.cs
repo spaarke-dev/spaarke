@@ -5,7 +5,7 @@ namespace Sprk.Bff.Api.Api.Ai;
 
 /// <summary>
 /// Playbook embedding pipeline trigger endpoints following ADR-001 (Minimal API).
-/// Provides fire-and-forget indexing of playbooks into the playbook-embeddings AI Search index.
+/// Provides fire-and-forget indexing of playbooks into the spaarke-playbook-embeddings AI Search index.
 /// </summary>
 /// <remarks>
 /// <para>

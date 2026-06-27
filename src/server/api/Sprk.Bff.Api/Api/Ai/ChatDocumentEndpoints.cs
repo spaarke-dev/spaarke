@@ -1,10 +1,10 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -67,6 +67,19 @@ public static class ChatDocumentEndpoints
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
+
+    // ITenantCache resources (FR-05 redis remediation r1). Final on-wire keys:
+    //   spaarke:tenant:{tenantId}:doc-upload-text:{sessionId}:{documentId}:v1
+    //   spaarke:tenant:{tenantId}:doc-upload-binary:{sessionId}:{documentId}:v1
+    //   spaarke:tenant:{tenantId}:doc-upload-meta:{sessionId}:{documentId}:v1
+    //   spaarke:tenant:{tenantId}:doc-upload-persist:{sessionId}:{documentId}:v1
+    private const string DocTextResource = "doc-upload-text";
+    private const string DocBinaryResource = "doc-upload-binary";
+    private const string DocMetaResource = "doc-upload-meta";
+    private const string DocPersistResource = "doc-upload-persist";
+    private const int CacheVersion = 1;
+
+    private static string DocCacheId(string sessionId, string documentId) => $"{sessionId}:{documentId}";
 
     /// <summary>
     /// Registers chat document upload endpoints on the provided route builder.
@@ -139,7 +152,7 @@ public static class ChatDocumentEndpoints
         string sessionId,
         HttpContext httpContext,
         ITextExtractor textExtractor,
-        IDistributedCache cache,
+        ITenantCache cache,
         ChatSessionManager sessionManager,
         IContextEventEmitter contextEventEmitter,
         ILoggerFactory loggerFactory)
@@ -350,35 +363,28 @@ public static class ChatDocumentEndpoints
                     ?? "No text could be extracted from the uploaded document");
         }
 
-        // 9. Store extracted text in Redis with session-scoped TTL (ADR-009, NFR-06)
-        // Key pattern: doc-upload:{sessionId}:{documentId}
+        // 9. Store extracted text in Redis with session-scoped TTL (ADR-009, NFR-06 + FR-05)
         // ADR-015: Do NOT log extracted text content — only metadata
-        var cacheKey = $"doc-upload:{sessionId}:{documentId}";
+        var docCacheId = DocCacheId(sessionId, documentId);
         var tokenEstimate = extractionResult.EstimatedTokenCount;
         var wasTruncated = tokenEstimate > DocumentContextService.MaxTokenBudget;
 
         try
         {
-            var textBytes = Encoding.UTF8.GetBytes(extractionResult.Text);
             await cache.SetAsync(
-                cacheKey,
-                textBytes,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = UploadDocumentTtl
-                },
-                httpContext.RequestAborted);
+                tenantId, DocTextResource, docCacheId, CacheVersion,
+                extractionResult.Text, UploadDocumentTtl, ct: httpContext.RequestAborted);
 
             logger.LogInformation(
-                "Stored uploaded document in Redis: Key={CacheKey}, TokenEstimate={TokenEstimate}, " +
+                "Stored uploaded document in Redis: CacheId={CacheId}, TokenEstimate={TokenEstimate}, " +
                 "CharCount={CharCount}, TTL={TtlHours}h",
-                cacheKey, tokenEstimate, extractionResult.Text.Length, UploadDocumentTtl.TotalHours);
+                docCacheId, tokenEstimate, extractionResult.Text.Length, UploadDocumentTtl.TotalHours);
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
-                "Failed to store uploaded document in Redis: Key={CacheKey}, DocumentId={DocumentId}",
-                cacheKey, documentId);
+                "Failed to store uploaded document in Redis: CacheId={CacheId}, DocumentId={DocumentId}",
+                docCacheId, documentId);
 
             return Results.Problem(
                 statusCode: 500,
@@ -387,53 +393,39 @@ public static class ChatDocumentEndpoints
         }
 
         // 9b. Store original binary in Redis for optional SPE persistence (R2-014)
-        // Key pattern: doc-binary:{sessionId}:{documentId}
         // ADR-015: Do NOT log binary content — only metadata
-        var binaryCacheKey = $"doc-binary:{sessionId}:{documentId}";
         try
         {
             await cache.SetAsync(
-                binaryCacheKey,
-                originalBinary,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = UploadDocumentTtl
-                },
-                httpContext.RequestAborted);
+                tenantId, DocBinaryResource, docCacheId, CacheVersion,
+                originalBinary, UploadDocumentTtl, ct: httpContext.RequestAborted);
 
             logger.LogInformation(
-                "Stored original binary in Redis: Key={BinaryCacheKey}, SizeBytes={SizeBytes}, TTL={TtlHours}h",
-                binaryCacheKey, originalBinary.Length, UploadDocumentTtl.TotalHours);
+                "Stored original binary in Redis: CacheId={CacheId}, SizeBytes={SizeBytes}, TTL={TtlHours}h",
+                docCacheId, originalBinary.Length, UploadDocumentTtl.TotalHours);
         }
         catch (Exception ex)
         {
             // Non-fatal: binary cache miss means SPE persist won't work, but AI context is still available
             logger.LogWarning(ex,
-                "Failed to store original binary in Redis: Key={BinaryCacheKey}, DocumentId={DocumentId}",
-                binaryCacheKey, documentId);
+                "Failed to store original binary in Redis: CacheId={CacheId}, DocumentId={DocumentId}",
+                docCacheId, documentId);
         }
 
         // 10. Also store document metadata for retrieval (filename, etc.)
-        var metadataCacheKey = $"doc-upload-meta:{sessionId}:{documentId}";
         var metadata = new UploadedDocumentMetadata(documentId, filename, tokenEstimate, wasTruncated);
         try
         {
-            var metadataJson = JsonSerializer.SerializeToUtf8Bytes(metadata, JsonOptions);
             await cache.SetAsync(
-                metadataCacheKey,
-                metadataJson,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = UploadDocumentTtl
-                },
-                httpContext.RequestAborted);
+                tenantId, DocMetaResource, docCacheId, CacheVersion,
+                metadata, UploadDocumentTtl, ct: httpContext.RequestAborted);
         }
         catch (Exception ex)
         {
             // Non-fatal: metadata cache miss is recoverable, text is already stored
             logger.LogWarning(ex,
-                "Failed to cache document metadata: Key={MetadataCacheKey}, DocumentId={DocumentId}",
-                metadataCacheKey, documentId);
+                "Failed to cache document metadata: CacheId={CacheId}, DocumentId={DocumentId}",
+                docCacheId, documentId);
         }
 
         // 10a. R5 task 032 — wire upload into the session-files RAG index + ChatSession manifest.
@@ -626,7 +618,7 @@ public static class ChatDocumentEndpoints
         string documentId,
         SpeFilePersistRequest? request,
         HttpContext httpContext,
-        IDistributedCache cache,
+        ITenantCache cache,
         ChatSessionManager sessionManager,
         SpeFileStore speFileStore,
         IConfiguration configuration,
@@ -663,39 +655,36 @@ public static class ChatDocumentEndpoints
         }
 
         // 3. Check idempotency: if already persisted, return existing metadata (200 OK)
-        var persistKey = $"doc-persist:{sessionId}:{documentId}";
+        var docCacheId = DocCacheId(sessionId, documentId);
         try
         {
-            var existingBytes = await cache.GetAsync(persistKey, httpContext.RequestAborted);
-            if (existingBytes != null)
+            var existingResponse = await cache.GetAsync<SpeFilePersistResponse>(
+                tenantId, DocPersistResource, docCacheId, CacheVersion, ct: httpContext.RequestAborted);
+            if (existingResponse != null)
             {
-                var existingResponse = JsonSerializer.Deserialize<SpeFilePersistResponse>(existingBytes, JsonOptions);
-                if (existingResponse != null)
-                {
-                    logger.LogInformation(
-                        "Document already persisted (idempotent): DocumentId={DocumentId}, SpeFileId={SpeFileId}, SessionId={SessionId}",
-                        documentId, existingResponse.SpeFileId, sessionId);
+                logger.LogInformation(
+                    "Document already persisted (idempotent): DocumentId={DocumentId}, SpeFileId={SpeFileId}, SessionId={SessionId}",
+                    documentId, existingResponse.SpeFileId, sessionId);
 
-                    return Results.Ok(existingResponse);
-                }
+                return Results.Ok(existingResponse);
             }
         }
         catch (Exception ex)
         {
             // Non-fatal: if idempotency check fails, proceed with upload
             logger.LogWarning(ex,
-                "Idempotency check failed for doc-persist:{SessionId}:{DocumentId} — proceeding with upload",
+                "Idempotency check failed for doc-persist {SessionId}:{DocumentId} — proceeding with upload",
                 sessionId, documentId);
         }
 
         // 4. Retrieve original binary from Redis
-        var binaryCacheKey = $"doc-binary:{sessionId}:{documentId}";
-        var binaryContent = await cache.GetAsync(binaryCacheKey, httpContext.RequestAborted);
+        var binaryContent = await cache.GetAsync<byte[]>(
+            tenantId, DocBinaryResource, docCacheId, CacheVersion, ct: httpContext.RequestAborted);
         if (binaryContent == null || binaryContent.Length == 0)
         {
             logger.LogWarning(
-                "Document binary not found in Redis: Key={BinaryCacheKey}, DocumentId={DocumentId}, SessionId={SessionId}",
-                binaryCacheKey, documentId, sessionId);
+                "Document binary not found in Redis: CacheId={CacheId}, DocumentId={DocumentId}, SessionId={SessionId}",
+                docCacheId, documentId, sessionId);
 
             return Results.Problem(
                 statusCode: 404,
@@ -704,21 +693,13 @@ public static class ChatDocumentEndpoints
         }
 
         // 5. Retrieve document metadata for filename resolution
-        var metadataCacheKey = $"doc-upload-meta:{sessionId}:{documentId}";
         string filename;
         string contentType;
         try
         {
-            var metadataBytes = await cache.GetAsync(metadataCacheKey, httpContext.RequestAborted);
-            if (metadataBytes != null)
-            {
-                var metadata = JsonSerializer.Deserialize<UploadedDocumentMetadata>(metadataBytes, JsonOptions);
-                filename = request?.Filename ?? metadata?.Filename ?? "document";
-            }
-            else
-            {
-                filename = request?.Filename ?? "document";
-            }
+            var metadata = await cache.GetAsync<UploadedDocumentMetadata>(
+                tenantId, DocMetaResource, docCacheId, CacheVersion, ct: httpContext.RequestAborted);
+            filename = request?.Filename ?? metadata?.Filename ?? "document";
         }
         catch
         {
@@ -798,22 +779,16 @@ public static class ChatDocumentEndpoints
             // Store idempotency marker with same TTL as session (4 hours)
             try
             {
-                var responseJson = JsonSerializer.SerializeToUtf8Bytes(speResponse, JsonOptions);
                 await cache.SetAsync(
-                    persistKey,
-                    responseJson,
-                    new DistributedCacheEntryOptions
-                    {
-                        AbsoluteExpirationRelativeToNow = UploadDocumentTtl
-                    },
-                    httpContext.RequestAborted);
+                    tenantId, DocPersistResource, docCacheId, CacheVersion,
+                    speResponse, UploadDocumentTtl, ct: httpContext.RequestAborted);
             }
             catch (Exception ex)
             {
                 // Non-fatal: upload succeeded but idempotency marker failed — next call may re-upload
                 logger.LogWarning(ex,
-                    "Failed to store idempotency marker: Key={PersistKey}, DocumentId={DocumentId}",
-                    persistKey, documentId);
+                    "Failed to store idempotency marker: CacheId={CacheId}, DocumentId={DocumentId}",
+                    docCacheId, documentId);
             }
 
             logger.LogInformation(

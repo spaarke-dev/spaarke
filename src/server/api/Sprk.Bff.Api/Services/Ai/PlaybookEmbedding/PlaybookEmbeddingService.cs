@@ -10,7 +10,7 @@ using Sprk.Bff.Api.Models.Ai;
 namespace Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 
 /// <summary>
-/// Generates embeddings for playbook content and manages the playbook-embeddings AI Search index.
+/// Generates embeddings for playbook content and manages the spaarke-playbook-embeddings AI Search index.
 /// Supports indexing, vector similarity search, and deletion of playbook documents.
 /// </summary>
 /// <remarks>
@@ -22,7 +22,7 @@ namespace Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 /// </code>
 /// </para>
 /// <para>
-/// Index: playbook-embeddings (infrastructure/ai-search/playbook-embeddings.json)
+/// Index: spaarke-playbook-embeddings (infrastructure/ai-search/spaarke-playbook-embeddings.json)
 /// Vector: text-embedding-3-large (3072 dimensions), HNSW with cosine metric
 /// </para>
 /// <para>
@@ -43,7 +43,7 @@ public sealed class PlaybookEmbeddingService
     /// <summary>
     /// Index name in Azure AI Search.
     /// </summary>
-    internal const string IndexName = "playbook-embeddings";
+    internal const string IndexName = "spaarke-playbook-embeddings";
 
     /// <summary>
     /// Vector field name in the index (3072-dim text-embedding-3-large).
@@ -80,7 +80,7 @@ public sealed class PlaybookEmbeddingService
 
     /// <summary>
     /// Generates an embedding from playbook content and upserts the document into the
-    /// playbook-embeddings index.
+    /// spaarke-playbook-embeddings index.
     /// </summary>
     /// <param name="playbookId">Playbook record identifier (sprk_aiplaybook GUID).</param>
     /// <param name="document">Playbook embedding document with metadata fields populated.
@@ -181,7 +181,7 @@ public sealed class PlaybookEmbeddingService
     }
 
     /// <summary>
-    /// Performs a vector similarity search against the playbook-embeddings index.
+    /// Performs a vector similarity search against the spaarke-playbook-embeddings index.
     /// Returns the top-K most semantically similar playbooks to the query.
     /// </summary>
     /// <param name="query">Natural language query to match against playbooks.</param>
@@ -206,7 +206,7 @@ public sealed class PlaybookEmbeddingService
     }
 
     /// <summary>
-    /// Performs a vector similarity search against the playbook-embeddings index with an
+    /// Performs a vector similarity search against the spaarke-playbook-embeddings index with an
     /// optional <c>documentTypes</c> pre-filter. This overload is the entry point for the
     /// Hybrid C primary path (chat-routing-redesign-r1 FR-17 v2, task 112): when the
     /// per-file classifier has produced a <see cref="ChatSessionFile.ClassifiedDocType"/>
@@ -333,7 +333,7 @@ public sealed class PlaybookEmbeddingService
     }
 
     /// <summary>
-    /// Deletes a playbook document from the playbook-embeddings index.
+    /// Deletes a playbook document from the spaarke-playbook-embeddings index.
     /// </summary>
     /// <param name="playbookId">Playbook record identifier to remove.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

@@ -1,7 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Graph.Models.ODataErrors;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -371,10 +370,12 @@ public static class DataverseDocumentsEndpoints
                     id, document.GraphDriveId, document.GraphItemId);
 
                 // Step 4: Download file stream from SPE using app-only auth
-                var fileStream = await speFileStore.DownloadFileAsync(
-                    document.GraphDriveId,
-                    document.GraphItemId,
-                    ct);
+                var fileStream = await GraphCallScope.Run(
+                    () => speFileStore.DownloadFileAsync(
+                        document.GraphDriveId,
+                        document.GraphItemId,
+                        ct),
+                    "document.download");
 
                 if (fileStream == null)
                 {
@@ -414,11 +415,11 @@ public static class DataverseDocumentsEndpoints
                     fileDownloadName: fileName,
                     enableRangeProcessing: true); // Support partial downloads for large files
             }
-            catch (ODataError ex)
+            catch (SpaarkeStorageException ex)
             {
                 logger.LogError(ex, "Graph API error downloading file for document {DocumentId}", id);
-                documentTelemetry.RecordDownloadFailure(stopwatch, id, userId, $"graph_error_{ex.Error?.Code ?? "unknown"}");
-                return ProblemDetailsHelper.FromGraphException(ex);
+                documentTelemetry.RecordDownloadFailure(stopwatch, id, userId, $"graph_error_{ex.ErrorCode ?? "unknown"}");
+                return ex.ToProblemDetails();
             }
             catch (Exception ex)
             {

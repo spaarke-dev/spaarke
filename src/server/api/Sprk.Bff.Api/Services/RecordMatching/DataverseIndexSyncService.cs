@@ -356,9 +356,17 @@ public class DataverseIndexSyncService : IDataverseIndexSyncService
         var reference = GetPropertyString(record, config.ReferenceField);
         var modifiedOn = GetPropertyDateTime(record, "modifiedon");
 
+        // FR-12: populate tenantId from Azure AD tenant context so the records-index can
+        // enforce tenant isolation at the search layer. The BFF runs against a single
+        // Dataverse environment which is itself tied to one Azure AD tenant; the canonical
+        // tenant source is AzureAd:TenantId (matches the pattern used by Email, Workers/Office,
+        // Communication background services that lack user context).
+        var tenantId = _configuration["AzureAd:TenantId"] ?? string.Empty;
+
         var document = new SearchIndexDocument
         {
             Id = $"{entityName}_{recordId}",
+            TenantId = tenantId,
             RecordType = entityName,
             DataverseEntityName = entityName,
             DataverseRecordId = recordId,

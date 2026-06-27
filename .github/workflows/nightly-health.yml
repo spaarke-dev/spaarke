@@ -353,11 +353,314 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   # -------------------------------------------------------------------------
+  # full-integration: Tier 3 — full integration test suite (no filters)
+  # Per spec FR-A04. Runtime ~10-15 min. Failures surface in report but do NOT
+  # block any PR (this is nightly, not on the PR critical path).
+  # -------------------------------------------------------------------------
+  full-integration:
+    name: Full integration tests (Tier 3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      passed_count: ${{ steps.run.outputs.passed_count }}
+      failed_count: ${{ steps.run.outputs.failed_count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore + build
+        run: |
+          dotnet restore
+          dotnet build -c Release --no-restore
+
+      - name: Run integration tests
+        id: run
+        shell: bash
+        run: |
+          set +e  # don't abort on test failure — we want the report to render
+          mkdir -p integration-results
+          # Discover all Spe.Integration.Tests csproj files (current: 1 project).
+          # Pattern matches spec FR-A04 wording (tests/integration/**/Spe.Integration.Tests/).
+          mapfile -t projs < <(find tests/integration -type d -name 'Spe.Integration.Tests' | sort)
+          if [ ${#projs[@]} -eq 0 ]; then
+            echo "::warning::No Spe.Integration.Tests projects found"
+            echo "passed_count=0" >> "$GITHUB_OUTPUT"
+            echo "failed_count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for d in "${projs[@]}"; do
+            echo "::group::dotnet test $d"
+            dotnet test "$d" \
+              -c Release --no-build \
+              --logger "trx;LogFileName=$(basename "$d").trx" \
+              --results-directory integration-results/ \
+              || echo "Test failures in $d (continuing for full report)"
+            echo "::endgroup::"
+          done
+
+          # Aggregate pass/fail across all TRX files
+          python3 <<'PY'
+          import xml.etree.ElementTree as ET
+          import os
+          from pathlib import Path
+
+          passed = failed = 0
+          ns = {"x": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+          for trx in Path("integration-results").glob("*.trx"):
+              try:
+                  tree = ET.parse(trx)
+              except ET.ParseError:
+                  continue
+              for r in tree.findall(".//x:UnitTestResult", ns):
+                  outcome = r.get("outcome") or "Unknown"
+                  if outcome == "Passed":
+                      passed += 1
+                  elif outcome == "Failed":
+                      failed += 1
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"passed_count={passed}\n")
+              f.write(f"failed_count={failed}\n")
+          PY
+
+      - name: Upload TRX artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-integration-trx
+          path: integration-results/
+          retention-days: 14
+
+  # -------------------------------------------------------------------------
+  # coverage-observation: Tier 3 — measure coverage across unit + integration.
+  # OBSERVATION ONLY. NEVER a gate, NEVER fails the build on a coverage threshold.
+  # Per ADR-038 + spec FR-A04 MUST NOT (binding for ≥6 months).
+  # -------------------------------------------------------------------------
+  coverage-observation:
+    name: Coverage observation (Tier 3, never a gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      coverage_pct: ${{ steps.measure.outputs.coverage_pct }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore + build
+        run: |
+          dotnet restore
+          dotnet build -c Release --no-restore
+
+      - name: Run tests with coverage
+        shell: bash
+        run: |
+          set +e  # coverage observation NEVER blocks even on test failures
+          mkdir -p coverage-results
+          dotnet test \
+            -c Release --no-build \
+            --collect:"XPlat Code Coverage" \
+            --settings config/coverlet.runsettings \
+            --results-directory coverage-results/ \
+            || echo "Tests had failures (coverage observation continues)"
+
+      - name: Aggregate coverage
+        id: measure
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Combine all cobertura.xml files into a single line-rate average
+          python3 <<'PY'
+          import xml.etree.ElementTree as ET
+          import os
+          from pathlib import Path
+
+          total_lines = covered_lines = 0
+          for cob in Path("coverage-results").rglob("coverage.cobertura.xml"):
+              try:
+                  tree = ET.parse(cob)
+              except ET.ParseError:
+                  continue
+              root = tree.getroot()
+              # Cobertura: <coverage line-rate="..." lines-valid="..." lines-covered="...">
+              lv = int(root.get("lines-valid") or 0)
+              lc = int(root.get("lines-covered") or 0)
+              total_lines += lv
+              covered_lines += lc
+
+          if total_lines == 0:
+              pct = "0.0"
+          else:
+              pct = f"{(covered_lines / total_lines) * 100:.1f}"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"coverage_pct={pct}\n")
+          print(f"Aggregated coverage: {pct}% (observation only, no gate)")
+          PY
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-coverage
+          path: coverage-results/
+          retention-days: 30
+
+  # -------------------------------------------------------------------------
+  # trivy-fs: Tier 3 — full filesystem vulnerability scan.
+  # Complements the lighter PR-level vuln-scan job above.
+  # -------------------------------------------------------------------------
+  trivy-fs:
+    name: Trivy filesystem scan (Tier 3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      high_or_critical_count: ${{ steps.parse.outputs.high_or_critical_count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'json'
+          output: 'trivy-fs.json'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          exit-code: '0'  # NEVER fail the job — we report counts, not gate
+        env:
+          TRIVY_DISABLE_VEX_NOTICE: true
+
+      - name: Parse counts
+        id: parse
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f trivy-fs.json ]; then
+            echo "::warning::trivy-fs.json missing"
+            echo "high_or_critical_count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Sum all HIGH + CRITICAL findings across all results
+          count=$(jq '[.Results[]? | .Vulnerabilities[]? | select(.Severity == "HIGH" or .Severity == "CRITICAL")] | length' trivy-fs.json 2>/dev/null || echo 0)
+          echo "high_or_critical_count=$count" >> "$GITHUB_OUTPUT"
+          echo "Trivy HIGH/CRITICAL findings: $count"
+
+      - name: Upload Trivy report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-trivy-fs
+          path: trivy-fs.json
+          retention-days: 14
+
+  # -------------------------------------------------------------------------
+  # dep-audit: Tier 3 — full transitive dependency audit.
+  # Broader than the PR-level vuln-scan (which is HIGH/CRITICAL only on key pkgs);
+  # this counts all severities across all package.json roots.
+  # -------------------------------------------------------------------------
+  dep-audit:
+    name: Dependency audit (Tier 3, full transitive)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      vuln_count: ${{ steps.audit.outputs.vuln_count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: dotnet transitive vuln scan
+        id: dotnet
+        shell: bash
+        run: |
+          set +e
+          dotnet restore > /dev/null
+          out=$(dotnet list package --vulnerable --include-transitive 2>&1)
+          echo "$out" > dotnet-audit.txt
+          # Count any non-empty severity line (Low/Moderate/High/Critical)
+          count=$(echo "$out" | grep -cE '>(Low|Moderate|High|Critical)<|\b(Low|Moderate|High|Critical)\b' || true)
+          echo "dotnet_count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: npm audit (all package.json roots)
+        id: npm
+        shell: bash
+        run: |
+          set +e
+          total=0
+          # Find every package.json that has a lockfile (npm audit requires a lock)
+          while IFS= read -r lock; do
+            pkg_dir=$(dirname "$lock")
+            # Skip node_modules
+            case "$pkg_dir" in
+              */node_modules/*) continue ;;
+            esac
+            (cd "$pkg_dir" && \
+              json=$(npm audit --json 2>/dev/null || true) && \
+              vulns=$(echo "$json" | jq -r '
+                (.metadata.vulnerabilities.low // 0) +
+                (.metadata.vulnerabilities.moderate // 0) +
+                (.metadata.vulnerabilities.high // 0) +
+                (.metadata.vulnerabilities.critical // 0)
+              ' 2>/dev/null || echo 0) && \
+              echo "$pkg_dir: $vulns" && \
+              total=$((total + vulns)) && \
+              echo "total=$total" > /tmp/npm-audit-total
+            )
+            # Re-read total (subshell side-effect workaround)
+            if [ -f /tmp/npm-audit-total ]; then
+              total=$(cat /tmp/npm-audit-total | sed 's/total=//')
+            fi
+          done < <(find . -name package-lock.json -not -path '*/node_modules/*' 2>/dev/null)
+          echo "npm_count=$total" >> "$GITHUB_OUTPUT"
+
+      - name: Aggregate
+        id: audit
+        shell: bash
+        run: |
+          dc=${{ steps.dotnet.outputs.dotnet_count }}
+          nc=${{ steps.npm.outputs.npm_count }}
+          total=$((dc + nc))
+          echo "vuln_count=$total" >> "$GITHUB_OUTPUT"
+          echo "dotnet vulnerabilities: $dc"
+          echo "npm vulnerabilities: $nc"
+          echo "Total: $total"
+
+      - name: Upload audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-dep-audit
+          path: dotnet-audit.txt
+          retention-days: 14
+
+  # -------------------------------------------------------------------------
   # report: create/update single tracking issue
   # -------------------------------------------------------------------------
   report:
     name: Update tracking issue
-    needs: [flake-hunt, bundle-size, vuln-scan]
+    needs: [flake-hunt, bundle-size, vuln-scan, full-integration, coverage-observation, trivy-fs, dep-audit]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -374,15 +677,26 @@ jobs:
           REGRESSIONS_FOUND: ${{ needs.bundle-size.outputs.regressions_found }}
           VULN_SUMMARY: ${{ needs.vuln-scan.outputs.vuln_summary }}
           HIGH_OR_CRITICAL: ${{ needs.vuln-scan.outputs.high_or_critical }}
+          INTEGRATION_PASSED: ${{ needs.full-integration.outputs.passed_count }}
+          INTEGRATION_FAILED: ${{ needs.full-integration.outputs.failed_count }}
+          COVERAGE_PCT: ${{ needs.coverage-observation.outputs.coverage_pct }}
+          TRIVY_HIGH_OR_CRITICAL: ${{ needs.trivy-fs.outputs.high_or_critical_count }}
+          DEP_VULN_COUNT: ${{ needs.dep-audit.outputs.vuln_count }}
         shell: bash
         run: |
           set -euo pipefail
           today=$(date -u +%Y-%m-%d)
           title="Nightly Health — $today"
 
-          # Status emoji
+          # Status emoji. NOTE: coverage_pct is OBSERVATION-ONLY per ADR-038 + spec FR-A04
+          # MUST NOT — it is NEVER a gate and does not influence the status emoji.
           status="✅"
-          if [ "${FLAKES_FOUND:-0}" -gt 0 ] || [ "${REGRESSIONS_FOUND:-0}" -gt 0 ] || [ "${HIGH_OR_CRITICAL:-0}" -gt 0 ]; then
+          if [ "${FLAKES_FOUND:-0}" -gt 0 ] \
+             || [ "${REGRESSIONS_FOUND:-0}" -gt 0 ] \
+             || [ "${HIGH_OR_CRITICAL:-0}" -gt 0 ] \
+             || [ "${INTEGRATION_FAILED:-0}" -gt 0 ] \
+             || [ "${TRIVY_HIGH_OR_CRITICAL:-0}" -gt 0 ] \
+             || [ "${DEP_VULN_COUNT:-0}" -gt 0 ]; then
             status="⚠️"
           fi
 
@@ -401,10 +715,33 @@ jobs:
 
           ${DRIFT_SUMMARY:-(no summary)}
 
-          ## Vulnerability scan
+          ## Vulnerability scan (PR-level)
           - HIGH/CRITICAL: **${HIGH_OR_CRITICAL:-?}**
 
           ${VULN_SUMMARY:-(no summary)}
+
+          ## Full integration tests (Tier 3)
+          - Passed: **${INTEGRATION_PASSED:-?}**
+          - Failed: **${INTEGRATION_FAILED:-?}**
+
+          Suite: \`tests/integration/Spe.Integration.Tests/\` (full run, no filters).
+
+          ## Coverage observation (Tier 3 — OBSERVATION ONLY, never a gate)
+          - Coverage: **${COVERAGE_PCT:-?}%**
+
+          Per ADR-038 + spec FR-A04 MUST NOT: this number is tracked over time, never gated.
+          Artifact published as \`nightly-coverage\` in the workflow run.
+
+          ## Trivy filesystem scan (Tier 3)
+          - HIGH/CRITICAL findings: **${TRIVY_HIGH_OR_CRITICAL:-?}**
+
+          See workflow run for the full Trivy report.
+
+          ## Dependency audit (Tier 3 — full transitive)
+          - Vulnerabilities: **${DEP_VULN_COUNT:-?}**
+
+          Combined: \`dotnet list package --vulnerable --include-transitive\` + \`npm audit\`
+          across key client packages.
 
           ---
           _Generated by \`.github/workflows/nightly-health.yml\`. Each night a new comment is appended; the issue stays open until a clean night._

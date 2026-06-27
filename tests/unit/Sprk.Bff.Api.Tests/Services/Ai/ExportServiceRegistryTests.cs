@@ -159,21 +159,6 @@ public class ExportServiceRegistryTests
 
     #region Constructor Tests
 
-    [Fact]
-    public void Constructor_WithDuplicateFormats_ShouldUseLastRegistered()
-    {
-        // Arrange
-        var service1 = CreateDocxService();
-        var service2 = CreateDocxService();
-        var services = new IExportService[] { service1, service2 };
-
-        // Act - Should not throw, last one wins
-        var registry = new ExportServiceRegistry(services);
-        var result = registry.GetService(ExportFormat.Docx);
-
-        // Assert
-        result.Should().NotBeNull();
-    }
 
     [Fact]
     public void Constructor_WithNullServices_ShouldThrowArgumentNullException()

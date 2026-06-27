@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Final grep verification — ZERO direct IDistributedCache calls outside wrapper + tests</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>017</dependencies>
+    <blocks>019</blocks>
+    <tags>bff-api, cache, refactoring, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification task; binds FR-06 + Success Criterion #9</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final verification of atomic migration outcome</parallel-reason>
+  </metadata>
+  <prompt>Run final grep verification — `grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/` must return ZERO matches outside `Infrastructure/Cache/` (the wrapper itself), `Infrastructure/DI/CacheModule.cs` (registration), tests, and SYSTEM-LEVEL EXCEPTION-tagged lines from task 017. Verifies FR-06.</prompt>
+  <role>Spaarke developer running verification gates.</role>
+  <goal>Documented evidence in `notes/migration-grep-verification.md` that FR-06 + Success Criterion #9 are satisfied.</goal>
+  <context><background>This task is the gate between Phase 1 migration and Phase 1 build/test verification. If grep returns unflagged matches, return to tasks 010–017 to migrate them.</background><relevant-files><file>src/server/api/Sprk.Bff.Api/</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">FR-06 — ZERO direct calls outside wrapper + tests + flagged exceptions.</constraint>
+    <constraint source="spec">Success Criterion #9.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Run `grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/`. Capture output.</step>
+    <step order="2">Filter out: wrapper files (`Infrastructure/Cache/TenantCache.cs`, `ITenantCache.cs`), DI module (`Infrastructure/DI/CacheModule.cs`), tests (`tests/`), allow-listed exception lines (containing `SYSTEM-LEVEL EXCEPTION`).</step>
+    <step order="3">If filtered list is non-empty: produce report listing each unexpected match; return to tasks 010–016 for cleanup. Mark this task blocked until clean.</step>
+    <step order="4">Write `notes/migration-grep-verification.md` — date, raw count, filtered count = 0, evidence + allow-list reference.</step>
+    <step order="5">Also run `grep -rn "sdap" src/server/api/Sprk.Bff.Api/` — verify ZERO matches (Success Criterion #10).</step>
+    <step order="6">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Grep">verification</tool><tool name="Write">verification notes</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/migration-grep-verification.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rn "IDistributedCache\." src/server/api/Sprk.Bff.Api/` returns ZERO matches outside wrapper + DI module + tests + flagged exceptions.</criterion>
+    <criterion testable="true">`grep -rn "sdap" src/server/api/Sprk.Bff.Api/` returns ZERO matches.</criterion>
+    <criterion testable="true">Verification notes file documents the run.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

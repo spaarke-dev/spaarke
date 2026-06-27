@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Doc-drift sweep — zero `sdap:` references in docs/</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>050,051,052,053,054,055</dependencies>
+    <blocks>none</blocks>
+    <tags>docs, verification</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification gate</rigor-reason>
+    <parallel-group>Wrap</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wrap-up gate</parallel-reason>
+  </metadata>
+  <prompt>Sweep `docs/` and `.claude/` for any remaining `sdap:` references (post FR-07). Where found in active docs, update to `spaarke:`. Where found in archived docs (`.claude/archive/`), leave as-is and note exclusion.</prompt>
+  <role>Spaarke doc maintainer.</role>
+  <goal>`grep -rn "sdap:" docs/ .claude/` returns only archived references or zero matches.</goal>
+  <context><background>Post FR-07 + FR-18 + FR-20 amendments, no active doc should still reference `sdap:`.</background><relevant-files><file>docs/</file><file>.claude/</file></relevant-files></context>
+  <constraints><constraint source="spec">FR-07 + Success Criterion #10 doc consistency.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">`grep -rn "sdap:" docs/ .claude/` — capture all matches.</step>
+    <step order="2">Categorize: archived (leave), active doc (fix), code example using historical name (case-by-case).</step>
+    <step order="3">Edit active docs.</step>
+    <step order="4">Document the sweep in `notes/doc-drift-sweep.md`.</step>
+    <step order="5">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Grep">sweep</tool><tool name="Edit">fix active docs</tool><tool name="Write">notes</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/doc-drift-sweep.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Post-sweep, `grep -rn "sdap:" docs/ .claude/` returns only archived references (documented in the sweep notes).</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

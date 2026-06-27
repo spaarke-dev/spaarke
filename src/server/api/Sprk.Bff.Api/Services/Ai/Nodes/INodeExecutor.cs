@@ -239,5 +239,40 @@ public enum ActionType
     /// observation-emission portion of the code-defined <c>IngestOrchestrator</c>
     /// (retired Wave C-G4 / task 022). NEW in Wave C1 per design-a5 §4 Node 6.
     /// </summary>
-    ObservationEmit = 140
+    ObservationEmit = 140,
+
+    /// <summary>
+    /// Post-LLM output scrubber. Validates entity names in LLM output against an allow-list
+    /// and removes hallucinated names. Logs <c>hallucination_detected</c> event per removal.
+    /// Slots into the post-LLM cluster alongside <see cref="Sanitization"/> (130) and
+    /// <see cref="ObservationEmit"/> (140). NEW in R4 per spaarke-daily-update-service-r4
+    /// FR-3 / AC-3a (PR 1 / W0).
+    /// </summary>
+    EntityNameValidator = 141,
+
+    /// <summary>
+    /// Canvas-only Control node — pass-through knowledge binding. For R4, evaluates
+    /// optional <c>configJson.passthroughBinding</c> templates against scope variables
+    /// and binds the resolved object map to the node's OutputVariable (default
+    /// "channelRegistry"). Forward-compat for R5: when
+    /// <c>configJson.r5BindingPlan.knowledgeSourceCode</c> is set, an info log is
+    /// emitted so future R5 wiring can pick up the AI Search binding. Pairs with
+    /// <see cref="Nodes.LoadKnowledgeNodeExecutor"/>. NEW in R4 daily-update-service-r4
+    /// (control-flow-executors task, 2026-06-26) — closes UAT "LoadKnowledge"
+    /// Condition-fallback validation failure.
+    /// </summary>
+    LoadKnowledge = 142,
+
+    /// <summary>
+    /// Canvas-only Control node — terminal "return response" projection. Reads
+    /// <c>configJson.responseBinding</c> (a name→template map, plus optional
+    /// <c>_validationMetadata</c> sidecar) and binds the resolved object to the
+    /// node's OutputVariable (default "response"). The InvokePlaybookAi facade /
+    /// playbook-execution method reads the final scope variable as the run return
+    /// value. Missing template variables resolve to empty strings (does not throw).
+    /// Pairs with <see cref="Nodes.ReturnResponseNodeExecutor"/>. NEW in R4
+    /// daily-update-service-r4 (control-flow-executors task, 2026-06-26) — closes
+    /// UAT "ReturnResponse" Condition-fallback validation failure.
+    /// </summary>
+    ReturnResponse = 143
 }

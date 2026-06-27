@@ -1,0 +1,140 @@
+{
+  "$comment": "Canonical source-of-truth for sprk_analysisaction row SYS-LOOKUP-MEMBERSHIP (ActionType 52). Per R4 FR-1 (spec line 109-110) — deploys the missing Action row for the C# LookupUserMembershipNodeExecutor that shipped in R3 (platform-foundations-r3 task 041). Deploy via mcp__dataverse__create_record / mcp__dataverse__update_record (upsert pattern per spec line 343). The C# executor consumes PlaybookNodeDto.ConfigJson at runtime — sprk_systemprompt is here in JPS format for catalog discoverability + playbook designer documentation, NOT for LLM rendering (this is a system data-ops action, not an AI analysis action; sprk_temperature = 0 + sprk_executoractiontype = 52 ensures no AiAnalysis dispatch).",
+  "dataverseEntity": "sprk_analysisaction",
+  "deploymentMode": "upsert",
+  "lookupKey": "sprk_actioncode",
+  "fields": {
+    "sprk_actioncode": "SYS-LOOKUP-MEMBERSHIP",
+    "sprk_name": "Lookup User Membership",
+    "sprk_description": "System primitive that resolves the executing user's record memberships for a given Dataverse entity type via MembershipResolverService (in-process, per ADR-034). Binds resolved ID set to the node's OutputVariable for downstream consumption by QueryDataverseNodeExecutor or similar filters. Used by notification-* playbooks to scope queries to 'records the user is involved with' (owner / assignedAttorney / assignedParalegal / custom roles).",
+    "sprk_executoractiontype": 52,
+    "sprk_temperature": 0,
+    "statecode": 0,
+    "statuscode": 1,
+    "sprk_systemprompt": {
+      "$schema": "https://spaarke.com/schemas/prompt/v1",
+      "$version": 1,
+      "instruction": {
+        "role": "System data-ops primitive (ActionType 52 = LookupUserMembership). Not invoked against an LLM — the BFF resolves this via LookupUserMembershipNodeExecutor calling IMembershipResolverService.ResolveAsync in-process per FR-1B.1 of platform-foundations-r3.",
+        "task": "Resolve the executing user's record memberships for a given Dataverse entity type. Return a deduplicated + sorted ID set bound to the node's OutputVariable, plus per-role attribution under byRole.",
+        "constraints": [
+          "MUST be run in a per-user scheduling context (NodeExecutionContext.UserId is required, non-empty Guid)",
+          "MUST NOT be invoked against an LLM — sprk_executoractiontype = 52 routes execution to the C# node executor, not to AiAnalysisNodeExecutor",
+          "MUST resolve via IMembershipResolverService.ResolveAsync (in-process), NOT via HTTP round-trip to /api/users/me/memberships/{entityType}",
+          "Output ids list MUST be de-duplicated + suitable for downstream consumption via {{joinIds <outputVar>.ids}}"
+        ],
+        "context": "This action is the canonical replacement for the broken non-existent team-member junction FetchXml join discovered in R3 FR-1C.1 / A1 defect. Per ADR-034 (User-record Membership Resolution Pattern), MembershipResolverService is the single primitive every playbook MUST use when filtering Dataverse records by 'records the user is involved with'."
+      },
+      "input": {
+        "entityType": {
+          "type": "string",
+          "required": true,
+          "description": "Dataverse entity logical name to resolve memberships against (e.g., 'sprk_matter', 'sprk_document', 'sprk_task'). Forwarded to MembershipResolverService.ResolveAsync as the entityType parameter."
+        },
+        "roles": {
+          "type": "array",
+          "items": { "type": "string" },
+          "required": false,
+          "description": "Optional role filter (case-insensitive). Empty/null means 'all discovered roles for the entity'. Typical values for sprk_matter: ['owner', 'assignedAttorney', 'assignedParalegal']. Pass-through to MembershipResolveOptions.Roles."
+        },
+        "identityTypes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "required": false,
+          "description": "Optional identity-type filter forwarded to MembershipResolveOptions.IdentityTypes. Empty/null means 'all'. NOTE: LookupUserMembershipNodeConfig in BFF does not currently expose this field — to use it, extend the config record (see src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs LookupUserMembershipNodeConfig). Documented here for forward compatibility + designer discoverability."
+        },
+        "includeRelated": {
+          "type": "boolean",
+          "required": false,
+          "default": false,
+          "description": "Phase 1D transitive-expansion flag. Q3 owner clarification: 1-hop max. When true, the resolver is asked to include related-entity memberships (currently accepted-but-ignored — platform-foundations-r3 task 054 implements). When true, executor passes sentinel ['*'] to MembershipResolveOptions.IncludeRelated."
+        },
+        "limit": {
+          "type": "integer",
+          "required": false,
+          "default": 500,
+          "description": "Maximum number of memberships to return. Defaults to MembershipResolveOptions.DefaultLimit (500). Capped at MembershipResolveOptions.MaxLimit by the resolver. NOTE: LookupUserMembershipNodeConfig in BFF does not currently expose this field — documented here for forward compatibility."
+        }
+      },
+      "output": {
+        "fields": [
+          {
+            "name": "entityType",
+            "type": "string",
+            "description": "Echo of the input entity logical name (e.g., 'sprk_matter')."
+          },
+          {
+            "name": "count",
+            "type": "number",
+            "description": "Number of distinct memberships resolved (length of ids array)."
+          },
+          {
+            "name": "ids",
+            "type": "array",
+            "items": { "type": "string", "format": "uuid" },
+            "description": "De-duplicated + sorted list of Dataverse record IDs the executing user is a member of (for the given entityType, after role/identityType filtering). Consumed downstream via {{joinIds <outputVar>.ids}} in QueryDataverseNodeExecutor FetchXml templates."
+          },
+          {
+            "name": "byRole",
+            "type": "object",
+            "description": "Per-role attribution map { roleName: [ids] }. Allows downstream nodes that need per-role grouping to use the StructuredData/template-engine surface."
+          },
+          {
+            "name": "continuationToken",
+            "type": "string",
+            "description": "Opaque continuation token for paged retrieval (null when no more results). Currently always null in Phase 1A — task 054 implements paging."
+          },
+          {
+            "name": "cacheExpiresAt",
+            "type": "string",
+            "format": "date-time",
+            "description": "When the cached resolver response expires (ISO 8601 UTC). Allows downstream nodes / dashboards to surface freshness."
+          }
+        ],
+        "structuredOutput": true
+      },
+      "examples": [
+        {
+          "input": {
+            "entityType": "sprk_matter",
+            "roles": ["owner", "assignedAttorney", "assignedParalegal"],
+            "includeRelated": false
+          },
+          "output": {
+            "entityType": "sprk_matter",
+            "count": 3,
+            "ids": [
+              "00000000-0000-0000-0000-000000000001",
+              "00000000-0000-0000-0000-000000000002",
+              "00000000-0000-0000-0000-000000000003"
+            ],
+            "byRole": {
+              "owner": ["00000000-0000-0000-0000-000000000001"],
+              "assignedAttorney": ["00000000-0000-0000-0000-000000000002"],
+              "assignedParalegal": ["00000000-0000-0000-0000-000000000003"]
+            },
+            "continuationToken": null,
+            "cacheExpiresAt": "2026-06-25T15:34:00Z"
+          }
+        }
+      ],
+      "metadata": {
+        "author": "spaarke-daily-update-service-r4 task 005",
+        "authorLevel": 0,
+        "createdAt": "2026-06-25T00:00:00Z",
+        "description": "System data-ops primitive: resolves user-record memberships via MembershipResolverService. Canonical action backing the in-process path for ActionType 52. Deployed by R4 task 005 to close the platform-foundations-r3 deployment gap (executor shipped, Action row missing).",
+        "tags": ["system", "data-ops", "membership", "user-scope", "platform-foundation", "adr-034"]
+      }
+    }
+  },
+  "sourceReferences": {
+    "executor": "src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs",
+    "configRecord": "src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs#LookupUserMembershipNodeConfig",
+    "options": "src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IMembershipResolverService.cs#MembershipResolveOptions",
+    "service": "src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs",
+    "adr": ".claude/adr/ADR-034-user-record-membership.md",
+    "playbookExample": "projects/spaarke-daily-update-service/notes/playbooks/notification-new-documents.json (NP-003 Lookup My Matters node — actionType 52)",
+    "specFR": "projects/spaarke-daily-update-service-r4/spec.md FR-1 (lines 109-110), AC-1",
+    "taskPOML": "projects/spaarke-daily-update-service-r4/tasks/005-deploy-sys-lookup-membership-action-row.poml"
+  }
+}
