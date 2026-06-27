@@ -44,13 +44,12 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 
 namespace Sprk.Bff.Api.Services.Ai.Membership;
@@ -64,38 +63,37 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 public sealed class MembershipResolverService : IMembershipResolverService
 {
     /// <summary>
-    /// Redis cache key prefix for per-user resolved membership results.
+    /// Cache resource label (per ITenantCache contract). The on-wire key becomes
+    /// <c>tenant:{tenantId}:membership-resolved:{systemUserId:D}:{entityType}:{optionsHash}:v1</c>
+    /// (with the configured <c>InstanceName</c> prepended by StackExchangeRedisCache).
     /// </summary>
     /// <remarks>
-    /// Format: <c>membership:resolved:{systemUserId:D}:{entityType}:{optionsHash}</c>.
-    /// The <c>membership:</c> namespace prefix aligns with the Phase 2 invalidation
-    /// channel (FR-2P2.8) — a future per-user invalidation can wipe entries under
-    /// <c>membership:resolved:{systemUserId:D}:*</c> without affecting other Redis
-    /// namespaces.
+    /// Phase 2 invalidation channel (FR-2P2.8) — a future per-user invalidation can
+    /// target this resource label without affecting other Redis namespaces.
     /// </remarks>
-    internal const string CacheKeyPrefix = "membership:resolved:";
+    internal const string CacheResource = "membership-resolved";
+
+    /// <summary>Cache schema version per ADR-009.</summary>
+    private const int CacheVersion = 1;
 
     /// <summary>Phase 1A per-user cache TTL (FR-1A.8).</summary>
     internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
-
     private readonly IMembershipFieldDiscoveryService _discovery;
     private readonly IIdentityNormalizationService _identity;
     private readonly IDataverseService _dataverse;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
     private readonly ILogger<MembershipResolverService> _logger;
 
     public MembershipResolverService(
         IMembershipFieldDiscoveryService discovery,
         IIdentityNormalizationService identity,
         IDataverseService dataverse,
-        IDistributedCache cache,
+        ITenantCache cache,
         IOptions<MembershipOptions> options,
-        ILogger<MembershipResolverService> logger)
+        ILogger<MembershipResolverService> logger,
+        IHttpContextAccessor? httpContextAccessor = null)
     {
         ArgumentNullException.ThrowIfNull(discovery);
         ArgumentNullException.ThrowIfNull(identity);
@@ -108,11 +106,24 @@ public sealed class MembershipResolverService : IMembershipResolverService
         _identity = identity;
         _dataverse = dataverse;
         _cache = cache;
+        _httpContextAccessor = httpContextAccessor;
         _logger = logger;
         _ = options.Value; // Reserved for future tuning (Phase 1D depth, paging
                            // strategy, etc.). Resolving here surfaces binding
                            // errors at construction rather than first call.
     }
+
+    /// <summary>
+    /// Resolves the tenant ID for tenant-scoped cache keys (FR-05).
+    /// Reads the AAD <c>tid</c> claim from the current HttpContext per ADR-028;
+    /// falls back to <c>"anonymous"</c> when no HttpContext is available (e.g.,
+    /// background-job invocations or unit tests). Mirrors the RecordSearchService
+    /// precedent.
+    /// </summary>
+    private string GetTenantId()
+        => _httpContextAccessor?.HttpContext?.User?.FindFirst("tid")?.Value
+            ?? _httpContextAccessor?.HttpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? "anonymous";
 
     /// <inheritdoc/>
     public async Task<MembershipResponse> ResolveAsync(
@@ -168,8 +179,9 @@ public sealed class MembershipResolverService : IMembershipResolverService
         }
 
         // ── Cache lookup ────────────────────────────────────────────────────
-        var cacheKey = BuildCacheKey(systemUserId, normalizedEntity, effectiveOptions);
-        var cached = await TryGetFromCacheAsync(cacheKey, ct).ConfigureAwait(false);
+        var tenantId = GetTenantId();
+        var cacheId = BuildCacheId(systemUserId, normalizedEntity, effectiveOptions);
+        var cached = await TryGetFromCacheAsync(tenantId, cacheId, ct).ConfigureAwait(false);
         if (cached is not null)
         {
             _logger.LogDebug(
@@ -228,7 +240,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
                         ct).ConfigureAwait(false)
                 : null;
             var emptyResponse = BuildEmptyResponse(normalizedEntity, identity, descriptors, emptyTransitive);
-            await TrySetCacheAsync(cacheKey, emptyResponse, ct).ConfigureAwait(false);
+            await TrySetCacheAsync(tenantId, cacheId, emptyResponse, ct).ConfigureAwait(false);
             return emptyResponse;
         }
 
@@ -264,7 +276,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
                         ct).ConfigureAwait(false)
                 : null;
             var emptyResponse = BuildEmptyResponse(normalizedEntity, identity, descriptors, emptyTransitive);
-            await TrySetCacheAsync(cacheKey, emptyResponse, ct).ConfigureAwait(false);
+            await TrySetCacheAsync(tenantId, cacheId, emptyResponse, ct).ConfigureAwait(false);
             return emptyResponse;
         }
 
@@ -313,7 +325,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
             ContinuationToken: nextToken,
             RelatedByRole: relatedByRole);
 
-        await TrySetCacheAsync(cacheKey, response, ct).ConfigureAwait(false);
+        await TrySetCacheAsync(tenantId, cacheId, response, ct).ConfigureAwait(false);
 
         sw.Stop();
         _logger.LogInformation(
@@ -990,7 +1002,12 @@ public sealed class MembershipResolverService : IMembershipResolverService
     }
 
     // ── Cache helpers ──────────────────────────────────────────────────────
-    private string BuildCacheKey(Guid systemUserId, string entityType, MembershipResolveOptions options)
+    /// <summary>
+    /// Builds the resource-id segment passed to <see cref="ITenantCache"/>.
+    /// Tenant ID is supplied separately at the call site (per FR-05); the
+    /// returned string carries the user + entity + options-hash composition.
+    /// </summary>
+    private static string BuildCacheId(Guid systemUserId, string entityType, MembershipResolveOptions options)
     {
         // Options hash — deterministic across equivalent option values regardless of
         // ordering. Includes Roles, IdentityTypes, IncludeRelated, Limit, and the
@@ -1007,7 +1024,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
         // First 8 bytes → 16 hex chars. Collision risk negligible at this scope.
         var optionsHash = Convert.ToHexString(hashBytes, 0, 8).ToLowerInvariant();
 
-        return $"{CacheKeyPrefix}{systemUserId:D}:{entityType}:{optionsHash}";
+        return $"{systemUserId:D}:{entityType}:{optionsHash}";
     }
 
     private static string HashSorted(IReadOnlyList<string>? values)
@@ -1024,16 +1041,16 @@ public sealed class MembershipResolverService : IMembershipResolverService
         return string.Join(",", sorted);
     }
 
-    private async Task<MembershipResponse?> TryGetFromCacheAsync(string cacheKey, CancellationToken ct)
+    private async Task<MembershipResponse?> TryGetFromCacheAsync(string tenantId, string cacheId, CancellationToken ct)
     {
         try
         {
-            var bytes = await _cache.GetAsync(cacheKey, ct).ConfigureAwait(false);
-            if (bytes is null || bytes.Length == 0)
-            {
-                return null;
-            }
-            return JsonSerializer.Deserialize<MembershipResponse>(bytes, JsonOptions);
+            return await _cache.GetAsync<MembershipResponse>(
+                tenantId,
+                CacheResource,
+                cacheId,
+                CacheVersion,
+                ct: ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -1043,23 +1060,25 @@ public sealed class MembershipResolverService : IMembershipResolverService
         {
             // Cache failure must NOT break resolution — fall through to re-resolve.
             _logger.LogWarning(ex,
-                "MembershipResolverService failed to read cache for {CacheKey}; " +
+                "MembershipResolverService failed to read cache for tenant={TenantId} id={CacheId}; " +
                 "falling through to live resolve",
-                cacheKey);
+                tenantId, cacheId);
             return null;
         }
     }
 
-    private async Task TrySetCacheAsync(string cacheKey, MembershipResponse response, CancellationToken ct)
+    private async Task TrySetCacheAsync(string tenantId, string cacheId, MembershipResponse response, CancellationToken ct)
     {
         try
         {
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(response, JsonOptions);
             await _cache.SetAsync(
-                cacheKey,
-                bytes,
-                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheTtl },
-                ct).ConfigureAwait(false);
+                tenantId,
+                CacheResource,
+                cacheId,
+                CacheVersion,
+                response,
+                CacheTtl,
+                ct: ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -1068,9 +1087,9 @@ public sealed class MembershipResolverService : IMembershipResolverService
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "MembershipResolverService failed to write cache for {CacheKey}; " +
+                "MembershipResolverService failed to write cache for tenant={TenantId} id={CacheId}; " +
                 "next call will re-resolve (no functional impact)",
-                cacheKey);
+                tenantId, cacheId);
         }
     }
 

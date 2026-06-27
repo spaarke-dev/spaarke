@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>NEW Deploy-RedisCache.ps1 (idempotent, multi-env)</title>
+    <phase>2: Bicep + provisioning artifacts</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>022,023,024</dependencies>
+    <blocks>027,028,031</blocks>
+    <tags>azure, deploy, devops, infrastructure, script</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>NEW deploy script — irreversible Azure operations; extracted from Provision-Customer.ps1; idempotency + safety gates required</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocks tasks 027, 028, 031</parallel-reason>
+  </metadata>
+  <prompt>Create `scripts/Deploy-RedisCache.ps1` extracting Redis provisioning logic from `Provision-Customer.ps1:422-492`. Parameters: `-Environment {dev|staging|prod}`, `-WhatIf`, `-VerifyOnly`, `-CutoverBffSettings`, `-Force` (required to touch prod/demo per NFR-05). Idempotent (`az deployment group create`); KV secret upsert (`Redis-ConnectionString`); post-deploy verification via `RedisValidationTests.ps1`. Returns non-zero exit on failure.</prompt>
+  <role>Spaarke infrastructure developer with PowerShell + Az CLI familiarity. Apply `script-aware` skill (load `scripts/README.md` first).</role>
+  <goal>`scripts/Deploy-RedisCache.ps1` exists; all parameter combinations exercised in `-WhatIf` mode produce sensible plans; passes PSScriptAnalyzer (if configured).</goal>
+  <context><background>Extracts existing Redis provisioning logic from `Provision-Customer.ps1` into a standalone, env-aware, idempotent script. Follows the pattern of `infrastructure/ai-search/deploy-session-files-index.ps1` (reference per spec).</background><relevant-files><file>scripts/Deploy-RedisCache.ps1 (NEW)</file><file>scripts/Provision-Customer.ps1 (SOURCE — lines 422-492)</file><file>infrastructure/ai-search/deploy-session-files-index.ps1 (REFERENCE PATTERN)</file><file>tests/manual/RedisValidationTests.ps1 (POST-DEPLOY VERIFICATION)</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">FR-11 — script behavior (params, idempotency, KV upsert, post-deploy verification).</constraint>
+    <constraint source="spec">NFR-01 — idempotent (re-running safe).</constraint>
+    <constraint source="spec">NFR-05 — reject prod/demo without explicit `-Force`.</constraint>
+    <constraint source="spec">NFR-06 — `-WhatIf` (plan) + `-VerifyOnly` modes.</constraint>
+    <constraint source="azure-deployment.md">KV references for secrets; idempotent deploy.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>scripts/Provision-Customer.ps1</file>
+      <file>infrastructure/ai-search/deploy-session-files-index.ps1</file>
+      <file>tests/manual/RedisValidationTests.ps1</file>
+      <file>scripts/README.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read `Provision-Customer.ps1:422-492` Redis block. Extract: Bicep deploy invocation, output extraction (redisHostName, connection string), KV secret upsert.</step>
+    <step order="2">Read reference pattern `deploy-session-files-index.ps1` for: pre-flight checks, post-deploy invariant verification, exit codes.</step>
+    <step order="3">Read `scripts/README.md` for Spaarke script conventions.</step>
+    <step order="4">Author `Deploy-RedisCache.ps1` with `[CmdletBinding(SupportsShouldProcess)]`. Parameters per FR-11. Header doc-comment block (Spaarke conventions).</step>
+    <step order="5">Implement env-to-paramfile mapping: dev → `redis-dev.bicepparam`, staging → `redis-staging.bicepparam`, prod → `redis-prod.bicepparam` (with `-Force` gate).</step>
+    <step order="6">Implement deploy: `az deployment group create` against the appropriate RG (dev → `spe-infrastructure-westus2` per spec). Capture outputs.</step>
+    <step order="7">Implement KV secret upsert: parse outputs; build connection string (host + SSL port + password); `az keyvault secret set` to `Redis-ConnectionString` in target KV. Determine KV via parameter or env mapping.</step>
+    <step order="8">Implement `-VerifyOnly`: skip deploy; run `RedisValidationTests.ps1` against existing instance; return non-zero on any failure.</step>
+    <step order="9">Implement `-CutoverBffSettings`: after deploy success, optionally update `spaarke-bff-{env}` App Settings (`Redis__Enabled=true`, `Redis__InstanceName=spaarke:`, `ConnectionStrings__Redis=@Microsoft.KeyVault(...)`, `Redis__AllowInMemoryFallback=false`).</step>
+    <step order="10">Implement `-WhatIf`: log what would happen; do not execute.</step>
+    <step order="11">Add `Test-DeployRedisCache` smoke run via `-WhatIf -Environment dev`. Verify output matches expectations.</step>
+    <step order="12">Run PSScriptAnalyzer if configured.</step>
+    <step order="13">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">Source script + reference patterns</tool><tool name="Write">Deploy-RedisCache.ps1</tool><tool name="Bash">PowerShell linting</tool></tools>
+  <outputs><output type="code">scripts/Deploy-RedisCache.ps1 (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Script accepts `-Environment {dev|staging|prod}`, `-WhatIf`, `-VerifyOnly`, `-CutoverBffSettings`, `-Force`.</criterion>
+    <criterion testable="true">`-Environment prod` without `-Force` exits non-zero with clear "prod requires -Force" message.</criterion>
+    <criterion testable="true">`-WhatIf -Environment dev` produces a sensible plan without making changes.</criterion>
+    <criterion testable="true">PSScriptAnalyzer passes (or absent — note in PR).</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>

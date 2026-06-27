@@ -1,16 +1,15 @@
 using System.Diagnostics;
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
@@ -64,15 +63,15 @@ public class ContextResolverIntegrationTests
     // =========================================================================
 
     private readonly Mock<IGenericEntityService> _entityServiceMock;
-    private readonly MemoryDistributedCache _cache;
+    private readonly InMemoryTenantCache _cache;
     private readonly ILogger<AnalysisChatContextResolver> _resolverLogger;
     private readonly AnalysisChatContextResolver _sut;
+    private const string ContextResource = "analysis-chat-context";
 
     public ContextResolverIntegrationTests()
     {
         _entityServiceMock = new Mock<IGenericEntityService>();
-        _cache = new MemoryDistributedCache(
-            Options.Create(new MemoryDistributedCacheOptions()));
+        _cache = new InMemoryTenantCache();
         _resolverLogger = new LoggerFactory().CreateLogger<AnalysisChatContextResolver>();
 
         _sut = new AnalysisChatContextResolver(
@@ -90,12 +89,9 @@ public class ContextResolverIntegrationTests
     {
         // Arrange — populate the cache with a pre-built response (warm cache scenario)
         var warmResponse = BuildContractReviewResponse();
-        var cacheKey = AnalysisChatContextResolver.BuildCacheKey(TenantA, AnalysisIdA.ToString());
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(warmResponse);
-        await _cache.SetAsync(cacheKey, bytes, new DistributedCacheEntryOptions
-        {
-            AbsoluteExpirationRelativeToNow = AnalysisChatContextResolver.ContextCacheTtl
-        });
+        await _cache.SetAsync<AnalysisChatContextResponse>(
+            TenantA, ContextResource, AnalysisIdA.ToString(), 1,
+            warmResponse, AnalysisChatContextResolver.ContextCacheTtl);
 
         // Act — time the resolution
         var stopwatch = Stopwatch.StartNew();
@@ -217,8 +213,7 @@ public class ContextResolverIntegrationTests
         firstResult!.DefaultPlaybookName.Should().Be("Contract Review");
 
         // Simulate cache invalidation: remove the cached entry
-        var cacheKey = AnalysisChatContextResolver.BuildCacheKey(TenantA, AnalysisIdA.ToString());
-        await _cache.RemoveAsync(cacheKey);
+        await _cache.RemoveAsync(TenantA, ContextResource, AnalysisIdA.ToString(), 1);
 
         // Reconfigure Dataverse to return Patent Claims playbook instead
         _entityServiceMock.Reset();
@@ -324,26 +319,11 @@ public class ContextResolverIntegrationTests
     // =========================================================================
 
     [Fact]
-    public async Task UsesIDistributedCache_NotInMemoryDictionary()
+    public async Task UsesITenantCache_NotInMemoryDictionary()
     {
-        // Arrange — use a mock to verify IDistributedCache interactions
-        var cacheMock = new Mock<IDistributedCache>();
+        // Arrange — use a tracking ITenantCache to verify Redis-style interactions
+        var cache = new TrackingContextCache();
         var analysisId = AnalysisIdA.ToString();
-        var cacheKey = AnalysisChatContextResolver.BuildCacheKey(TenantA, analysisId);
-
-        // Cache miss
-        cacheMock
-            .Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-
-        // Allow cache write
-        cacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
 
         SetupDataverseForPlaybook(
             AnalysisIdA, PlaybookIdContractReview,
@@ -352,28 +332,21 @@ public class ContextResolverIntegrationTests
 
         var resolver = new AnalysisChatContextResolver(
             _entityServiceMock.Object,
-            cacheMock.Object,
+            cache,
             _resolverLogger);
 
         // Act
         await resolver.ResolveAsync(analysisId, TenantA, hostContext: null);
 
-        // Assert — IDistributedCache.GetAsync was called (not some internal Dictionary)
-        cacheMock.Verify(
-            c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()),
-            Times.Once,
-            "ADR-009: resolver must use IDistributedCache.GetAsync (Redis-first), not an in-memory Dictionary");
+        // Assert — ITenantCache.GetAsync was called (not some internal Dictionary)
+        cache.GetCalls.Should().BeGreaterThan(0,
+            "ADR-009: resolver must use ITenantCache.GetAsync (Redis-first), not an in-memory Dictionary");
 
-        // Assert — IDistributedCache.SetAsync was called with correct TTL options
-        cacheMock.Verify(
-            c => c.SetAsync(
-                cacheKey,
-                It.IsAny<byte[]>(),
-                It.Is<DistributedCacheEntryOptions>(opts =>
-                    opts.AbsoluteExpirationRelativeToNow == TimeSpan.FromMinutes(30)),
-                It.IsAny<CancellationToken>()),
-            Times.Once,
-            "ADR-009: resolver must cache via IDistributedCache.SetAsync with 30-minute absolute TTL");
+        // Assert — ITenantCache.SetAsync was called with correct TTL options
+        cache.LastSetTtl.Should().Be(TimeSpan.FromMinutes(30),
+            "ADR-009: resolver must cache with 30-minute absolute TTL");
+        cache.LastSetResource.Should().Be(ContextResource);
+        cache.LastSetId.Should().Be(analysisId);
     }
 
     // =========================================================================
@@ -611,5 +584,41 @@ public class ContextResolverIntegrationTests
                 ScopeName: "Default Scope",
                 Description: "Default analysis scope",
                 FocusArea: "legal"));
+    }
+
+    /// <summary>
+    /// Tracking decorator over <see cref="InMemoryTenantCache"/> for assertions on
+    /// resolver↔cache interaction shape (replaces former IDistributedCache mock).
+    /// </summary>
+    private sealed class TrackingContextCache : ITenantCache
+    {
+        private readonly InMemoryTenantCache _inner = new();
+        public int GetCalls { get; private set; }
+        public TimeSpan? LastSetTtl { get; private set; }
+        public string? LastSetResource { get; private set; }
+        public string? LastSetId { get; private set; }
+
+        public Task<T?> GetAsync<T>(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default)
+        {
+            GetCalls++;
+            return _inner.GetAsync<T>(tenantId, resource, id, version, cacheInstance, ct);
+        }
+        public Task SetAsync<T>(string tenantId, string resource, string id, int version, T value, TimeSpan? ttl = null, string cacheInstance = "default", CancellationToken ct = default)
+        {
+            LastSetTtl = ttl; LastSetResource = resource; LastSetId = id;
+            return _inner.SetAsync(tenantId, resource, id, version, value, ttl, cacheInstance, ct);
+        }
+        public Task RemoveAsync(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default)
+            => _inner.RemoveAsync(tenantId, resource, id, version, cacheInstance, ct);
+        public Task<T> GetOrCreateAsync<T>(string tenantId, string resource, string id, int version, Func<CancellationToken, Task<T>> factory, TimeSpan? ttl = null, string cacheInstance = "default", CancellationToken ct = default)
+            => _inner.GetOrCreateAsync(tenantId, resource, id, version, factory, ttl, cacheInstance, ct);
+        public Task<string?> GetStringAsync(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default)
+            => _inner.GetStringAsync(tenantId, resource, id, version, cacheInstance, ct);
+        public Task SetStringAsync(string tenantId, string resource, string id, int version, string value, TimeSpan? ttl = null, TimeSpan? slidingExpiration = null, string cacheInstance = "default", CancellationToken ct = default)
+            => _inner.SetStringAsync(tenantId, resource, id, version, value, ttl, slidingExpiration, cacheInstance, ct);
+        public Task RefreshAsync(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default)
+            => _inner.RefreshAsync(tenantId, resource, id, version, cacheInstance, ct);
+        public Task SetSlidingAsync<T>(string tenantId, string resource, string id, int version, T value, TimeSpan slidingExpiration, string cacheInstance = "default", CancellationToken ct = default)
+            => _inner.SetSlidingAsync(tenantId, resource, id, version, value, slidingExpiration, cacheInstance, ct);
     }
 }

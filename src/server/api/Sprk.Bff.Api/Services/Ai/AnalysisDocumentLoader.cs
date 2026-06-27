@@ -1,6 +1,6 @@
 using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -15,29 +15,26 @@ public class AnalysisDocumentLoader
     private readonly IDocumentDataverseService _documentService;
     private readonly ISpeFileOperations _speFileStore;
     private readonly ITextExtractor _textExtractor;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<AnalysisDocumentLoader> _logger;
 
-    /// <summary>
-    /// Cache key pattern for analysis state in Redis.
-    /// </summary>
-    private const string AnalysisCacheKeyPrefix = "sdap:ai:analysis:";
+    // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
+    // spaarke:tenant:{tenantId}:document-analysis:{analysisId}:v1
+    private const string CacheResource = "document-analysis";
+    private const int CacheVersion = 1;
 
     /// <summary>
     /// TTL for cached analysis entries. Entries expire after 2 hours of inactivity.
     /// </summary>
-    private static readonly DistributedCacheEntryOptions AnalysisCacheTtl = new()
-    {
-        AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(2)
-    };
+    private static readonly TimeSpan AnalysisCacheTtl = TimeSpan.FromHours(2);
 
     public AnalysisDocumentLoader(
         IAnalysisDataverseService analysisService,
         IDocumentDataverseService documentService,
         ISpeFileOperations speFileStore,
         ITextExtractor textExtractor,
-        IDistributedCache cache,
+        ITenantCache cache,
         IHttpContextAccessor httpContextAccessor,
         ILogger<AnalysisDocumentLoader> logger)
     {
@@ -51,7 +48,22 @@ public class AnalysisDocumentLoader
     }
 
     /// <summary>
-    /// Store an analysis model in Redis via IDistributedCache with 2-hour TTL.
+    /// Resolve the current request's tenantId from JWT claims for ITenantCache scoping (FR-05).
+    /// Falls back to "system" sentinel when no HttpContext is available (e.g., background job
+    /// reload of a persisted analysis); justified as system-level NFR-08 exception because the
+    /// underlying analysis record itself is keyed by Guid and re-loadable from Dataverse on miss.
+    /// </summary>
+    private string ResolveTenantIdForCache()
+    {
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user == null) return "system";
+        return user.FindFirst("tid")?.Value
+            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? "system";
+    }
+
+    /// <summary>
+    /// Store an analysis model in Redis via ITenantCache with 2-hour TTL.
     /// </summary>
     public async Task CacheAnalysisAsync(Guid analysisId, AnalysisInternalModel analysis)
     {
@@ -64,8 +76,9 @@ public class AnalysisDocumentLoader
             CreatedAt = DateTimeOffset.UtcNow
         };
 
-        var json = JsonSerializer.SerializeToUtf8Bytes(entry);
-        await _cache.SetAsync($"{AnalysisCacheKeyPrefix}{analysisId}", json, AnalysisCacheTtl);
+        var tenantId = ResolveTenantIdForCache();
+        await _cache.SetAsync(
+            tenantId, CacheResource, analysisId.ToString(), CacheVersion, entry, AnalysisCacheTtl);
     }
 
     /// <summary>
@@ -74,10 +87,9 @@ public class AnalysisDocumentLoader
     /// </summary>
     public async Task<AnalysisCacheEntry?> GetCachedAnalysisAsync(Guid analysisId)
     {
-        var bytes = await _cache.GetAsync($"{AnalysisCacheKeyPrefix}{analysisId}");
-        if (bytes == null || bytes.Length == 0) return null;
-
-        return JsonSerializer.Deserialize<AnalysisCacheEntry>(bytes);
+        var tenantId = ResolveTenantIdForCache();
+        return await _cache.GetAsync<AnalysisCacheEntry>(
+            tenantId, CacheResource, analysisId.ToString(), CacheVersion);
     }
 
     /// <summary>

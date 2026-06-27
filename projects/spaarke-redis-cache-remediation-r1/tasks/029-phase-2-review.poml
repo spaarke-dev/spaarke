@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Phase 2 review (PSScriptAnalyzer + Bicep linter)</title>
+    <phase>2: Bicep + provisioning artifacts</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>020,021,022,023,024,025,026,027,028</dependencies>
+    <blocks>030</blocks>
+    <tags>devops, infrastructure, verification, ci-cd</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Lint/review gate before Phase 3</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final Phase 2 gate</parallel-reason>
+  </metadata>
+  <prompt>Run lint passes on all Phase 2 artifacts: PSScriptAnalyzer on `Deploy-RedisCache.ps1` + extended `RedisValidationTests.ps1`; `bicep build` on `redis.bicep` + 3 new `.bicepparam` files. No BFF code change in this phase, so skip publish-size check. Document in `notes/phase-2-review.md`.</prompt>
+  <role>Spaarke developer; lint gate.</role>
+  <goal>`notes/phase-2-review.md` — all Phase 2 artifacts pass lint/build checks. Any deviations documented.</goal>
+  <context><background>Pre-Phase-3 gate. Phase 3 has irreversible Azure operations; Phase 2 artifacts must be clean before invoking them.</background><relevant-files><file>scripts/Deploy-RedisCache.ps1</file><file>tests/manual/RedisValidationTests.ps1</file><file>infrastructure/bicep/</file></relevant-files></context>
+  <constraints><constraint source="project">No BFF code change — skip publish-size verification this phase.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Run PSScriptAnalyzer if configured.</step>
+    <step order="2">Run `bicep build` on each `.bicepparam` file.</step>
+    <step order="3">Write `notes/phase-2-review.md`.</step>
+    <step order="4">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">PSScriptAnalyzer + bicep build</tool><tool name="Write">notes</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/phase-2-review.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">PSScriptAnalyzer (if configured) passes on new/modified scripts.</criterion>
+    <criterion testable="true">`bicep build` succeeds on all `.bicepparam` files.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

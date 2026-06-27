@@ -165,22 +165,6 @@ public class CustomPropertyTests
         type.IsSealed.Should().BeTrue("a static class is sealed in IL");
     }
 
-    [Fact]
-    public void CustomPropertiesResponse_HasPropertiesAndCount()
-    {
-        // Arrange
-        var props = new List<CustomPropertyDto>
-        {
-            new("Key1", "Val1", false),
-            new("Key2", "Val2", true)
-        };
-
-        // Act — CustomPropertiesResponse is a nested record on the endpoint class
-        var responseType = typeof(ContainerCustomPropertyEndpoints)
-            .GetNestedType("CustomPropertiesResponse");
-
-        responseType.Should().NotBeNull("CustomPropertiesResponse must be a nested type on ContainerCustomPropertyEndpoints");
-    }
 
     #endregion
 

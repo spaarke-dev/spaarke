@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Telemetry;
 
@@ -75,10 +75,15 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
     /// </remarks>
     public const string DeclineToFindNodeName = "declineInsufficient";
 
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ILogger<InsightsPlaybookExecutionCache> _logger;
     private readonly InsightsCacheMetrics? _metrics;
     private readonly TopicRegistryTtlLookup? _registryTtl;
+
+    // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
+    // spaarke:tenant:{tenantId}:insights-playbook:{hashKey}:v1
+    private const string CacheResource = "insights-playbook";
+    private const int CacheVersion = 1;
 
     /// <summary>
     /// Per-key semaphores for in-process concurrent-invocation dedup (r1 Insights Widgets task 053
@@ -101,7 +106,7 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _perKeyLocks = new();
 
     public InsightsPlaybookExecutionCache(
-        IDistributedCache cache,
+        ITenantCache cache,
         ILogger<InsightsPlaybookExecutionCache> logger,
         InsightsCacheMetrics? metrics = null,
         TopicRegistryTtlLookup? registryTtl = null)
@@ -159,14 +164,15 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
 
         var ttlSeconds = (int)ttl.TotalSeconds;
 
-        // ---- HOT PATH: try Redis first (ADR-009) ----
+        // ---- HOT PATH: try Redis first (ADR-009 + FR-05 via ITenantCache wrapper) ----
         // Note: declines are NEVER cached (task 071), so any cached bytes deserialise to
         // an InsightArtifact only. A cache HIT therefore always means sufficient-evidence path.
         var sw = Stopwatch.StartNew();
-        byte[]? cachedBytes = null;
+        InsightArtifact? cached = null;
         try
         {
-            cachedBytes = await _cache.GetAsync(key, cancellationToken);
+            cached = await _cache.GetAsync<InsightArtifact>(
+                request.TenantId, CacheResource, key, CacheVersion, ct: cancellationToken);
         }
         catch (Exception ex)
         {
@@ -178,31 +184,13 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
         }
         sw.Stop();
 
-        if (cachedBytes is not null)
+        if (cached is not null)
         {
-            try
-            {
-                var cached = JsonSerializer.Deserialize<InsightArtifact>(cachedBytes);
-                if (cached is not null)
-                {
-                    _metrics?.RecordHit(request.PlaybookId, request.TenantId, ttlSeconds, sw.Elapsed.TotalMilliseconds);
-                    _logger.LogDebug(
-                        "Insights playbook cache HIT for playbook {PlaybookId}, subject {Subject}, key {Key}",
-                        request.PlaybookId, request.Subject, key);
-                    return InsightsEngineRunResult.FromArtifact(cached);
-                }
-
-                // Corrupt entry — log + treat as miss. Don't throw; we have a recovery path (re-run engine).
-                _logger.LogWarning(
-                    "Insights playbook cache returned non-null bytes but deserialisation produced null for key {Key}; treating as miss",
-                    key);
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex,
-                    "Insights playbook cache entry for key {Key} could not be deserialised; treating as miss and overwriting",
-                    key);
-            }
+            _metrics?.RecordHit(request.PlaybookId, request.TenantId, ttlSeconds, sw.Elapsed.TotalMilliseconds);
+            _logger.LogDebug(
+                "Insights playbook cache HIT for playbook {PlaybookId}, subject {Subject}, key {Key}",
+                request.PlaybookId, request.Subject, key);
+            return InsightsEngineRunResult.FromArtifact(cached);
         }
 
         // ---- CACHE MISS: acquire per-key semaphore to dedup concurrent invocations (FR-22) ----
@@ -223,18 +211,15 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
             // engine. This is the dedup payoff path for FR-22.
             try
             {
-                var raceCheckBytes = await _cache.GetAsync(key, cancellationToken).ConfigureAwait(false);
-                if (raceCheckBytes is not null)
+                var raceCached = await _cache.GetAsync<InsightArtifact>(
+                    request.TenantId, CacheResource, key, CacheVersion, ct: cancellationToken).ConfigureAwait(false);
+                if (raceCached is not null)
                 {
-                    var raceCached = JsonSerializer.Deserialize<InsightArtifact>(raceCheckBytes);
-                    if (raceCached is not null)
-                    {
-                        _metrics?.RecordHit(request.PlaybookId, request.TenantId, ttlSeconds, 0);
-                        _logger.LogDebug(
-                            "Insights playbook cache HIT after per-key lock acquisition (concurrent-dedup, FR-22) for playbook {PlaybookId}, subject {Subject}, key {Key}",
-                            request.PlaybookId, request.Subject, key);
-                        return InsightsEngineRunResult.FromArtifact(raceCached);
-                    }
+                    _metrics?.RecordHit(request.PlaybookId, request.TenantId, ttlSeconds, 0);
+                    _logger.LogDebug(
+                        "Insights playbook cache HIT after per-key lock acquisition (concurrent-dedup, FR-22) for playbook {PlaybookId}, subject {Subject}, key {Key}",
+                        request.PlaybookId, request.Subject, key);
+                    return InsightsEngineRunResult.FromArtifact(raceCached);
                 }
             }
             catch (Exception ex)
@@ -292,12 +277,9 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
         var artifact = runResult.Artifact!;
         try
         {
-            var serialised = JsonSerializer.SerializeToUtf8Bytes(artifact);
             await _cache.SetAsync(
-                key,
-                serialised,
-                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = ttl },
-                cancellationToken);
+                request.TenantId, CacheResource, key, CacheVersion,
+                artifact, ttl, ct: cancellationToken);
 
             _logger.LogDebug(
                 "Cached InsightArtifact for playbook {PlaybookId}, subject {Subject}, TTL={TtlSeconds}s",
@@ -326,7 +308,7 @@ public class InsightsPlaybookExecutionCache : IInsightsPlaybookExecutionCache
         var key = InsightsPlaybookCacheKey.Compose(playbookId, subject, parameters, accessibleScopeHash);
         try
         {
-            await _cache.RemoveAsync(key, cancellationToken);
+            await _cache.RemoveAsync(tenantId, CacheResource, key, CacheVersion, ct: cancellationToken);
             _metrics?.RecordEviction(playbookId, tenantId);
             _logger.LogDebug(
                 "Evicted Insights playbook cache entry for playbook {PlaybookId}, subject {Subject}, key {Key}",

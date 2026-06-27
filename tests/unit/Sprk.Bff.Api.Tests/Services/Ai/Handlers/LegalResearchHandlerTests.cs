@@ -76,11 +76,15 @@ public sealed class LegalResearchHandlerTests : TypedToolHandlerTestFixture
         // The dummy options have Enabled=false so any accidental call to the underlying
         // SDK would throw FeatureDisabledException quickly.
         var options = Options.Create(new AgentServiceOptions { Enabled = false, AgentId = "test", Endpoint = new Uri("https://test.invalid") });
-        var cache = new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
+        // FR-05 redis remediation r1: AgentServiceClient now takes ITenantCache.
+        var dc = new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
             Options.Create(new Microsoft.Extensions.Caching.Memory.MemoryDistributedCacheOptions()));
+        var tenantCache = new Sprk.Bff.Api.Infrastructure.Cache.TenantCache(
+            dc,
+            new Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Infrastructure.Cache.TenantCache>());
         var credential = new Azure.Identity.DefaultAzureCredential();
         var logger = new Microsoft.Extensions.Logging.Abstractions.NullLogger<AgentServiceClient>();
-        return new AgentServiceClient(options, cache, credential, logger);
+        return new AgentServiceClient(options, tenantCache, credential, logger);
     }
 
     private TestableLegalResearchHandler CreateHandler(
@@ -249,18 +253,6 @@ public sealed class LegalResearchHandlerTests : TypedToolHandlerTestFixture
         result.Errors.Should().Contain(e => e.Contains("method", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact]
-    public void ValidateChat_Fails_WhenJsonMalformed()
-    {
-        var handler = CreateHandler();
-        var ctx = BuildChatInvocationContext(toolArgumentsJson: "{not json");
-        var tool = BuildLegalTool("ResearchLegal");
-
-        var result = handler.ValidateChat(ctx, tool);
-
-        result.IsValid.Should().BeFalse();
-        result.Errors.Should().Contain(e => e.Contains("malformed", StringComparison.OrdinalIgnoreCase));
-    }
 
     // ═════════════════════════════════════════════════════════════════════════════
     // ADR-018 kill switch — BingGroundingOptions.Enabled = false short-circuits

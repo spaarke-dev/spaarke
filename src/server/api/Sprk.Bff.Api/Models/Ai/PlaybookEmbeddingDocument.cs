@@ -5,13 +5,13 @@ using Azure.Search.Documents.Indexes.Models;
 namespace Sprk.Bff.Api.Models.Ai;
 
 /// <summary>
-/// Represents a playbook document in the Azure AI Search playbook-embeddings index.
+/// Represents a playbook document in the Azure AI Search spaarke-playbook-embeddings index.
 /// Used for semantic playbook matching via vector similarity search.
 /// </summary>
 /// <remarks>
 /// <para>
-/// This model maps to the "playbook-embeddings" index in Azure AI Search.
-/// Index schema: infrastructure/ai-search/playbook-embeddings.json.
+/// This model maps to the "spaarke-playbook-embeddings" index in Azure AI Search.
+/// Index schema: infrastructure/ai-search/spaarke-playbook-embeddings.json.
 /// </para>
 /// <para>
 /// Unlike the knowledge index (100K+ document chunks), this index contains ~100 short

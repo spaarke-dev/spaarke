@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Migrate Spaarke.Core consumers in BFF to ITenantCache</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>017</blocks>
+    <tags>bff-api, cache, redis, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + .cs modifications + shared-lib boundary</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Atomic migration ordering</parallel-reason>
+  </metadata>
+  <prompt>Migrate remaining BFF call sites that go through `Spaarke.Core/Cache/DistributedCacheExtensions.cs` directly (using `CreateKey()` helper without `ITenantCache`). Goal: every BFF code path that touches the distributed cache does so via `ITenantCache`.</prompt>
+  <role>Spaarke .NET developer.</role>
+  <goal>Outside the wrapper itself + tests, BFF has ZERO direct `DistributedCacheExtensions.CreateKey` or `IDistributedCache.*` calls.</goal>
+  <context><background>`Spaarke.Core/Cache/DistributedCacheExtensions.cs` remains as a shared helper (other consumers may still use it outside BFF). BFF moves to `ITenantCache` for tenant-scope enforcement.</background><relevant-files><file>src/server/api/Sprk.Bff.Api/</file></relevant-files></context>
+  <constraints><constraint source="spec">FR-06 atomic migration.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/notes/cache-call-site-inventory.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>src/server/shared/Spaarke.Core/Cache/DistributedCacheExtensions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/ITenantCache.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Open inventory Shared section.</step>
+    <step order="2">For each BFF site using `DistributedCacheExtensions.CreateKey`: rewrite via `ITenantCache`.</step>
+    <step order="3">`dotnet build` + `dotnet test`.</step>
+    <step order="4">Update inventory + TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">Sites</tool><tool name="Edit">Migration</tool><tool name="Bash">build/test</tool></tools>
+  <outputs><output type="code">Various BFF files using shared helper (modified)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rn "DistributedCacheExtensions" src/server/api/Sprk.Bff.Api/` returns ZERO unflagged matches outside tests.</criterion>
+    <criterion testable="true">Build + tests pass.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>

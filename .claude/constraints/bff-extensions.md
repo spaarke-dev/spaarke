@@ -217,6 +217,34 @@ DO NOT collapse fixture-config gaps into "upstream cluster fix subsumes it" — 
 
 ---
 
+### G. Hot-Path Declaration (Binding per ci-cd-unit-test-remediation-r1 FR-C04, added 2026-06-26)
+
+Any project that touches BFF (`src/server/api/Sprk.Bff.Api/**`, `src/server/shared/Spaarke.Core/**`, or `src/server/shared/Spaarke.Dataverse/**`) — or that touches the parallel SpaarkeAi code page at `src/solutions/SpaarkeAi/**` — MUST include a `<hot-path-declaration>` XML block in its `design.md`. The block enumerates the project's hot-path touches across five surfaces so concurrent projects can coordinate ordering.
+
+**Required block format**:
+
+```xml
+<hot-path-declaration>
+  <bff-api>YES | NO — describe what's touched if YES</bff-api>
+  <spaarke-ai>YES | NO — describe what's touched if YES</spaarke-ai>
+  <ci-workflows>YES | NO — describe which workflows if YES</ci-workflows>
+  <skill-directives>YES | NO — describe which .claude/skills/* if YES</skill-directives>
+  <root-CLAUDE-md>YES | NO — describe which sections if YES</root-CLAUDE-md>
+</hot-path-declaration>
+```
+
+**Enforcement points**:
+
+- **`/project-pipeline` Step 3** (modified by ci-cd-unit-test-remediation-r1 task CICD-061): emits HARD WARNING if a new BFF/SpaarkeAi-touching project's design.md is missing this block. Pipeline proceeds (informational only) but flags for backfill.
+- **`/task-execute` Step 0.5** (modified by ci-cd-unit-test-remediation-r1 task CICD-060): cross-references `projects/INDEX.md` against the project's hot-path declaration; auto-invokes `/conflict-check` if changed files match the watchlist in `.claude/skills/conflict-check/SKILL.md`.
+- **Code review**: PR reviewer checks the block exists and matches the actual changes. Discrepancy = update one or the other.
+
+**Why this rule exists** (evidence): the 2026-06-26 sweep by `ci-cd-unit-test-remediation-r1` task CICD-030 found **17 active worktrees** with **13 touching BFF** and **8 touching SpaarkeAi**. Without coordination, concurrent edits to `Program.cs`, `Services/Ai/*Module.cs`, widget/route registries, and `package.json` produce avoidable rebase pain and deploy reordering. The declaration is the cheap up-front signal that lets the operator sequence merges intelligently.
+
+**Cross-reference**: [`projects/INDEX.md`](../../projects/INDEX.md) (the live registry of active worktrees + their hot-path declarations). The pipeline appends rows; task-execute reads rows.
+
+---
+
 ## MUST NOT Rules
 
 - **MUST NOT** add new code to the BFF without considering "should this go elsewhere?" — even one sentence in the PR description satisfies the rule; absence does not

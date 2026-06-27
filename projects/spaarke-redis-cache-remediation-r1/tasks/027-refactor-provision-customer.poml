@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Refactor Provision-Customer.ps1 to call Deploy-RedisCache.ps1</title>
+    <phase>2: Bicep + provisioning artifacts</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>025</dependencies>
+    <blocks>none</blocks>
+    <tags>azure, deploy, devops, script, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Refactor production deploy script; touches customer provisioning path</rigor-reason>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Refactor `scripts/Provision-Customer.ps1` lines 422–492 (Redis provisioning block) to call `Deploy-RedisCache.ps1` instead. Per Q-E, deprecate per-customer Redis path — header comment explaining "per Architecture 1, per-customer Redis is deprecated. If a customer needs dedicated Redis, register via wrapper named-instance pattern (NFR-12)."</prompt>
+  <role>Spaarke infrastructure developer.</role>
+  <goal>`Provision-Customer.ps1` no longer contains inline Redis provisioning logic at lines 422–492; instead calls `Deploy-RedisCache.ps1`. Header comment documents the deprecation rationale.</goal>
+  <context><background>Per Q-E Architecture 1, per-customer Redis is deprecated. This refactor removes the dead path from `Provision-Customer.ps1` and points future customers at the per-environment platform Redis.</background><relevant-files><file>scripts/Provision-Customer.ps1</file><file>scripts/Deploy-RedisCache.ps1</file></relevant-files></context>
+  <constraints>
+    <constraint source="spec">FR-12 — refactor + deprecation rationale documented.</constraint>
+    <constraint source="spec">Q-E Architecture 1.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>scripts/Provision-Customer.ps1</file>
+      <file>scripts/Deploy-RedisCache.ps1</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read `Provision-Customer.ps1` Step 3 + KV upsert section.</step>
+    <step order="2">Replace inline Redis provisioning with: `pwsh ./scripts/Deploy-RedisCache.ps1 -Environment $env -CutoverBffSettings` (or similar invocation).</step>
+    <step order="3">Add header comment block above the removed lines documenting deprecation per Q-E + pointer to wrapper named-instance pattern (NFR-12).</step>
+    <step order="4">Verify `Provision-Customer.ps1` still passes `-WhatIf` (smoke test).</step>
+    <step order="5">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Read">script</tool><tool name="Edit">refactor</tool><tool name="Bash">PowerShell smoke</tool></tools>
+  <outputs><output type="code">scripts/Provision-Customer.ps1 (modified)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Lines 422–492 no longer contain inline Redis provisioning.</criterion>
+    <criterion testable="true">Header comment documents Q-E deprecation + NFR-12 pointer.</criterion>
+    <criterion testable="true">Script still passes its existing `-WhatIf` invocation.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>FULL rigor.</protocol></execution>
+</task>

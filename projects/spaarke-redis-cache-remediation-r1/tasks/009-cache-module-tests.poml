@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>CacheModuleTests: 4 branches + Null-Object + GetDatabase throws</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>005,006,007,008</dependencies>
+    <blocks>010</blocks>
+    <tags>bff-api, cache, testing, unit-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tags include bff-api + testing; creates new test file with 6+ test methods; binds FR-08 + NFR-13</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Tests depend on completed 003+004+006</parallel-reason>
+  </metadata>
+  <prompt>Create `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/CacheModuleTests.cs` with at least 4 test methods covering CacheModule's 4 branches (Redis-on, Redis-off-AllowFallback-Dev, Redis-off-AllowFallback-non-Dev throws, Redis-off-NoFallback throws), plus tests for NullConnectionMultiplexer (Subscribe = no-op, Publish returns 0, GetDatabase throws NotSupportedException). FR-08 + NFR-13.</prompt>
+  <role>Spaarke .NET developer with xUnit/Moq familiarity. Use xUnit `[Fact]` style consistent with other unit tests in the project.</role>
+  <goal>Test class `CacheModuleTests` with ≥6 test methods. All pass via `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Tests are deterministic (no actual Redis dependency — Redis-on path mocks `IConnectionMultiplexer.Connect`).</goal>
+  <context>
+    <background>FR-08 requires test coverage for all 4 CacheModule branches. NFR-13 makes this binding (no scenario may be skipped). The existing `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/` directory is empty — `CacheModuleTests.cs` does not yet exist.</background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/CacheModuleTests.cs (NEW)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/NullObjects/NullConnectionMultiplexer.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-08 + NFR-13 — coverage for all 4 branches is mandatory; tests run in CI as part of `dotnet test`.</constraint>
+    <constraint source="bff-extensions.md">Test-update obligation: modifying `Infrastructure/DI/CacheModule.cs` requires updated tests.</constraint>
+    <constraint source="ADR-022">Testing standards.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read CacheModule.cs (post-task-003 state). Identify the 4 branches and their externally observable effects.</step>
+    <step order="2">Read NullConnectionMultiplexer.cs (post-task-004 state). Identify observable surface: Subscribe is no-op, Publish returns 0, GetDatabase throws.</step>
+    <step order="3">Create `CacheModuleTests.cs`. Use existing test conventions in `Sprk.Bff.Api.Tests/` (xUnit, FluentAssertions probably).</step>
+    <step order="4">Test 1 — Redis_On_RegistersConnectionMultiplexer: mock ConnectionMultiplexer via test fixture; verify `IConnectionMultiplexer` resolves to a non-null instance; verify `IDistributedCache` resolves to RedisCache (not memory cache).</step>
+    <step order="5">Test 2 — Redis_Off_AllowFallback_Dev_RegistersInMemoryAndNullMultiplexer: set `IHostEnvironment` mock to Development; verify `IDistributedCache` resolves to `MemoryDistributedCache`; verify `IConnectionMultiplexer` resolves to `NullConnectionMultiplexer`.</step>
+    <step order="6">Test 3 — Redis_Off_AllowFallback_NonDev_Throws: set `IHostEnvironment` to "Staging"; assert `InvalidOperationException` thrown during `BuildServiceProvider()`; verify message contains "Development environments" + actual env name.</step>
+    <step order="7">Test 4 — Redis_Off_NoFallbackOptIn_Throws: assert `InvalidOperationException`; verify message contains "Set Redis:Enabled=true".</step>
+    <step order="8">Test 5 — NullConnectionMultiplexer_Subscribe_IsNoOp: instantiate directly; verify `GetSubscriber().Subscribe(...)` does not throw; verify callback is never invoked (use a sentinel bool).</step>
+    <step order="9">Test 6 — NullConnectionMultiplexer_GetDatabase_Throws: verify `GetDatabase().StringGetAsync("foo")` throws `NotSupportedException` with the prescribed message.</step>
+    <step order="10">Run `dotnet test tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/CacheModuleTests.cs --filter "FullyQualifiedName~CacheModuleTests"`. All 6 pass.</step>
+    <step order="11">Update `TASK-INDEX.md` + `current-task.md`.</step>
+  </steps>
+  <tools>
+    <tool name="Read">CacheModule.cs + NullConnectionMultiplexer.cs + existing test patterns</tool>
+    <tool name="Write">CacheModuleTests.cs</tool>
+    <tool name="Bash">dotnet test</tool>
+  </tools>
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/CacheModuleTests.cs (NEW)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Test class exists with ≥6 `[Fact]` methods covering 4 CacheModule branches + Null-Object subscribe + Null-Object database-throws.</criterion>
+    <criterion testable="true">`dotnet test tests/unit/Sprk.Bff.Api.Tests/` passes 100% of CacheModuleTests methods.</criterion>
+    <criterion testable="true">Tests have no actual Redis dependency (deterministic in CI).</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Quality gates at Step 9.5.</protocol>
+  </execution>
+</task>

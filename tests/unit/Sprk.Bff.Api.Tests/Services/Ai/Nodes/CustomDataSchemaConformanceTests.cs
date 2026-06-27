@@ -24,7 +24,6 @@
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -32,10 +31,12 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Xunit;
 
@@ -435,80 +436,6 @@ public class CustomDataSchemaConformanceTests
     // when it invokes LookupUserMembership at runtime.
     // ─────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public async Task ContactOnlyMember_LogsMemberSkipped()
-    {
-        // Arrange — wire MembershipResolverService directly with mocks for boundaries.
-        // Discovery returns a Contact-typed descriptor; identity has NO ContactId.
-        var discoveryMock = new Mock<IMembershipFieldDiscoveryService>();
-        var discovery = new DiscoveryResult(
-            EntityType: "sprk_matter",
-            DiscoveredAt: DateTimeOffset.UtcNow,
-            DiscoveredFields: new[]
-            {
-                new MembershipDescriptor(
-                    Field: "ownerid",
-                    Role: "owner",
-                    IdentityType: "SystemUser",
-                    TargetTable: "systemuser",
-                    Source: "auto"),
-                new MembershipDescriptor(
-                    Field: "sprk_assignedattorney1",
-                    Role: "assignedAttorney",
-                    IdentityType: "Contact",
-                    TargetTable: "contact",
-                    Source: "auto"),
-            },
-            ExcludedFields: Array.Empty<IgnoredField>(),
-            IgnoredFields: Array.Empty<IgnoredField>());
-        discoveryMock.Setup(d => d.DiscoverAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(discovery);
-
-        var systemUserId = Guid.NewGuid();
-        var identityMock = new Mock<IIdentityNormalizationService>();
-        identityMock.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PersonIdentity(
-                SystemUserId: systemUserId,
-                ContactId: null, // ← the trigger for member_skipped
-                PrimaryEmail: null,
-                TeamIds: Array.Empty<Guid>(),
-                BusinessUnitId: null,
-                AccountId: null,
-                OrganizationIds: Array.Empty<Guid>()));
-
-        var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection());
-
-        var loggerMock = new Mock<ILogger<MembershipResolverService>>();
-        var resolver = new MembershipResolverService(
-            discoveryMock.Object,
-            identityMock.Object,
-            dataverseMock.Object,
-            new InMemoryCache(),
-            Options.Create(new MembershipOptions()),
-            loggerMock.Object);
-
-        // Act
-        await resolver.ResolveAsync(systemUserId, "sprk_matter", options: null, CancellationToken.None);
-
-        // Assert — exactly one member_skipped warning with the required structured fields
-        loggerMock.Verify(
-            l => l.Log(
-                LogLevel.Warning,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((o, _) =>
-                    o.ToString()!.Contains("member_skipped")
-                    && o.ToString()!.Contains("sprk_matter")
-                    && o.ToString()!.Contains("assignedAttorney")
-                    && o.ToString()!.Contains("no_systemuser_mapping")
-                    && o.ToString()!.Contains(systemUserId.ToString())),
-                It.IsAny<Exception?>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once,
-            "AC-11: Contact-only member MUST emit exactly one structured member_skipped warning with matter/contact/role/reason fields");
-    }
 
     // ─────────────────────────────────────────────────────────────────────
     // Helpers
@@ -672,29 +599,8 @@ public class CustomDataSchemaConformanceTests
         return doc.RootElement.GetProperty("customData").Clone();
     }
 
-    /// <summary>
-    /// Tiny <see cref="IDistributedCache"/> stub backed by a dictionary so we don't pull
-    /// Redis into a unit test.
-    /// </summary>
-    private sealed class InMemoryCache : IDistributedCache
-    {
-        private readonly Dictionary<string, byte[]> _store = new(StringComparer.Ordinal);
-
-        public byte[]? Get(string key) => _store.TryGetValue(key, out var v) ? v : null;
-        public Task<byte[]?> GetAsync(string key, CancellationToken token = default) => Task.FromResult(Get(key));
-        public void Refresh(string key) { }
-        public Task RefreshAsync(string key, CancellationToken token = default) => Task.CompletedTask;
-        public void Remove(string key) => _store.Remove(key);
-        public Task RemoveAsync(string key, CancellationToken token = default)
-        {
-            _store.Remove(key);
-            return Task.CompletedTask;
-        }
-        public void Set(string key, byte[] value, DistributedCacheEntryOptions options) => _store[key] = value;
-        public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default)
-        {
-            _store[key] = value;
-            return Task.CompletedTask;
-        }
-    }
+    // Note: a local `InMemoryCache : IDistributedCache` stub previously lived here. Removed
+    // when `MembershipResolverService` migrated from `IDistributedCache` to `ITenantCache`
+    // (PR #458 / spaarke-redis-cache-remediation-r1 — Wave 6 task 012). The canonical test
+    // stand-in is now `Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache`.
 }

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>FR-17 verification: rag-references golden-reference roundtrip</title>
+    <phase>5: Deploy + Validate</phase>
+    <status>completed</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>016, 050</dependencies>
+    <blocks>054</blocks>
+    <tags>azure-search, integration-test, verification, bug-fix</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification: bug-fix landing confirmation per FR-17 + NFR-08</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Verify the FR-17 schema field-name fix (`domain` → `documentType`) landed correctly via golden-reference roundtrip: write via Add-ReferenceToIndex.ps1, read via ReferenceRetrievalService, confirm `documentType` populated.
+    Reindex any pre-existing PS-written documents that have only `domain`.
+  </prompt>
+
+  <role>
+    Spaarke platform QA + ingestion engineer.
+  </role>
+
+  <goal>
+    Golden-reference roundtrip succeeds; PS-indexed documents have `documentType` populated and visible to C# readers.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>scripts/ai-search/Add-ReferenceToIndex.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-17">Roundtrip MUST return document with documentType populated</constraint>
+    <constraint source="FR-17">Reindex any pre-existing PS-written documents that have only `domain`</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>scripts/ai-search/Add-ReferenceToIndex.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Write a test reference via Add-ReferenceToIndex.ps1 to deployed spaarke-rag-references</step>
+    <step order="2">Read via ReferenceRetrievalService (BFF endpoint or direct service call); verify `documentType` populated</step>
+    <step order="3">Check existing docs in index (if any survived deletion or were re-added): grep for those with only `domain` field</step>
+    <step order="4">Reindex those docs to populate documentType</step>
+    <step order="5">Document evidence in notes/fr-17-verification.md</step>
+    <step order="6">Update TASK-INDEX.md: task 051 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">Add-ReferenceToIndex.ps1</tool>
+    <tool name="dotnet">BFF + ReferenceRetrievalService call</tool>
+  </tools>
+
+  <outputs>
+    <output type="evidence">projects/spaarke-ai-azure-setup-dev-r1/notes/fr-17-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Roundtrip returns document with `documentType` populated (NOT `domain`)</criterion>
+    <criterion testable="true">Any pre-existing PS-written docs reindexed</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

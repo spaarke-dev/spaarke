@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>Conflict-check vs PRs merged since branch start</title>
+    <phase>5: Canonical docs + ADR amendments</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>062</dependencies>
+    <blocks>064</blocks>
+    <tags>devops, verification, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Pre-merge conflict check</rigor-reason>
+    <parallel-group>Wrap</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wrap-up gate sequence</parallel-reason>
+  </metadata>
+  <prompt>Run `/conflict-check` skill or manual rebase against current `origin/master`. Especially check PR #253 (NuGet bumps for Microsoft.Extensions.Caching.StackExchangeRedis) — if it landed, rebase. Other Sprk.Bff.Api dep PRs (#289, #293, #266, #265, #248) — verify no conflicts.</prompt>
+  <role>Spaarke developer.</role>
+  <goal>Branch cleanly rebases on `origin/master`; no merge conflicts; tests still pass post-rebase.</goal>
+  <context><background>Per Step 1.5 overlap analysis, PR #253 was the most likely conflict source.</background><relevant-files><file>origin/master</file></relevant-files></context>
+  <constraints><constraint source="project">No conflicts at merge.</constraint></constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">`git fetch origin`. `git rebase origin/master` (or `merge`).</step>
+    <step order="2">Resolve conflicts.</step>
+    <step order="3">Re-run `dotnet test`.</step>
+    <step order="4">Update TASK-INDEX + current-task.</step>
+  </steps>
+  <tools><tool name="Bash">git, dotnet test</tool></tools>
+  <outputs><output type="notes">projects/spaarke-redis-cache-remediation-r1/notes/conflict-check-report.md (NEW)</output></outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Branch cleanly rebases or merges with master.</criterion>
+    <criterion testable="true">Post-rebase `dotnet test` passes.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>STANDARD rigor.</protocol></execution>
+</task>

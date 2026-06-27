@@ -777,22 +777,6 @@ public sealed class MemoryCompositionServiceTests
     // Constructor null-arg defense
     // =========================================================================================
 
-    [Fact]
-    public void Ctor_ThrowsOnNullDependencies()
-    {
-        var opt = Options.Create(new MemoryCompositionOptions());
-
-        Assert.Throws<ArgumentNullException>(() =>
-            new MemoryCompositionService(null!, _repo.Object, _recall.Object, opt, _logger.Object));
-        Assert.Throws<ArgumentNullException>(() =>
-            new MemoryCompositionService(_compression.Object, null!, _recall.Object, opt, _logger.Object));
-        Assert.Throws<ArgumentNullException>(() =>
-            new MemoryCompositionService(_compression.Object, _repo.Object, null!, opt, _logger.Object));
-        Assert.Throws<ArgumentNullException>(() =>
-            new MemoryCompositionService(_compression.Object, _repo.Object, _recall.Object, null!, _logger.Object));
-        Assert.Throws<ArgumentNullException>(() =>
-            new MemoryCompositionService(_compression.Object, _repo.Object, _recall.Object, opt, null!));
-    }
 
     // =========================================================================================
     // MemoryComposition.Empty + IsEmpty

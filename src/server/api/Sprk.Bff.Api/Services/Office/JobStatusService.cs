@@ -39,8 +39,8 @@ public class JobStatusService : IJobStatusService, IDisposable
     private const string ChannelPrefix = "sdap:job:";
     private const string ChannelSuffix = ":status";
 
-    private readonly IConnectionMultiplexer? _redis;
-    private readonly ISubscriber? _subscriber;
+    private readonly IConnectionMultiplexer _redis;
+    private readonly ISubscriber _subscriber;
     private readonly ILogger<JobStatusService> _logger;
     private readonly SemaphoreSlim _sequenceLock = new(1, 1);
     private readonly Dictionary<Guid, long> _jobSequences = new();
@@ -57,21 +57,25 @@ public class JobStatusService : IJobStatusService, IDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="JobStatusService"/> class.
     /// </summary>
-    /// <param name="redis">Optional Redis connection multiplexer (null if Redis not configured).</param>
+    /// <param name="redis">Redis connection multiplexer. Per ADR-032 symmetric
+    /// DI registration (spaarke-redis-cache-remediation-r1 task 005), this is
+    /// always non-null: real <c>ConnectionMultiplexer</c> when Redis is
+    /// enabled, otherwise <c>NullConnectionMultiplexer</c> (P2 Quiet no-op
+    /// Pub/Sub) when in-memory cache fallback is active.</param>
     /// <param name="logger">Logger instance.</param>
     public JobStatusService(
-        IConnectionMultiplexer? redis,
+        IConnectionMultiplexer redis,
         ILogger<JobStatusService> logger)
     {
-        _redis = redis;
-        _subscriber = redis?.GetSubscriber();
-        _logger = logger;
+        _redis = redis ?? throw new ArgumentNullException(nameof(redis));
+        _subscriber = _redis.GetSubscriber();
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        if (redis is null)
+        if (!_redis.IsConnected)
         {
             _logger.LogWarning(
-                "JobStatusService initialized without Redis - pub/sub will be disabled, " +
-                "SSE will fall back to polling");
+                "JobStatusService initialized without Redis (Null peer active) - " +
+                "pub/sub will be a no-op; SSE will fall back to polling");
         }
         else
         {
@@ -89,8 +93,12 @@ public class JobStatusService : IJobStatusService, IDisposable
         activity?.SetTag("job.id", update.JobId.ToString());
         activity?.SetTag("update.type", update.UpdateType.ToString());
 
-        if (_subscriber is null)
+        if (!_redis.IsConnected)
         {
+            // Symmetric DI (ADR-032): _redis is NullConnectionMultiplexer when
+            // Redis is disabled. Skip the Publish call — Null peer would return
+            // 0 subscribers anyway, but the explicit short-circuit avoids
+            // hitting GetSubscriber paths that aren't exercised in the no-op.
             _logger.LogDebug(
                 "Redis not available, skipping pub/sub for job {JobId}",
                 update.JobId);
@@ -169,8 +177,11 @@ public class JobStatusService : IJobStatusService, IDisposable
         using var activity = ActivitySource.StartActivity("SubscribeToJob");
         activity?.SetTag("job.id", jobId.ToString());
 
-        if (_subscriber is null)
+        if (!_redis.IsConnected)
         {
+            // Symmetric DI (ADR-032): _redis is NullConnectionMultiplexer when
+            // Redis is disabled. The Null subscriber would accept callbacks but
+            // never deliver — short-circuit to a clean stream completion.
             _logger.LogDebug(
                 "Redis not available, subscription will complete immediately for job {JobId}",
                 jobId);
@@ -369,7 +380,11 @@ public class JobStatusService : IJobStatusService, IDisposable
     /// <inheritdoc />
     public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
     {
-        if (_redis is null)
+        // Symmetric DI (ADR-032): _redis is NullConnectionMultiplexer when
+        // Redis is disabled — IsConnected is always false, and GetDatabase()
+        // would throw NotSupportedException (P3 fail-fast). Short-circuit
+        // BEFORE touching the database to keep this method safe.
+        if (!_redis.IsConnected)
         {
             return false;
         }

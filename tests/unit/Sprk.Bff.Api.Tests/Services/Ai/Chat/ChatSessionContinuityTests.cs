@@ -1,8 +1,8 @@
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Sessions;
@@ -52,9 +52,11 @@ public class ChatSessionContinuityTests
 {
     private const string TenantId = "tenant-118a";
     private const string SessionId = "session-118a";
+    private const string CacheResource = ChatSessionManager.CacheResource;
+    private const int CacheVersion = ChatSessionManager.CacheVersion;
     private static readonly Guid PlaybookId = Guid.Parse("11118888-1111-1111-1111-111111111111");
 
-    private readonly Mock<IDistributedCache> _cacheMock;
+    private readonly Mock<ITenantCache> _cacheMock;
     private readonly Mock<IChatDataverseRepository> _repoMock;
     private readonly Mock<ILogger<ChatSessionManager>> _sessionManagerLoggerMock;
     private readonly Mock<ILogger<ChatHistoryManager>> _historyLoggerMock;
@@ -63,7 +65,7 @@ public class ChatSessionContinuityTests
 
     public ChatSessionContinuityTests()
     {
-        _cacheMock = new Mock<IDistributedCache>();
+        _cacheMock = new Mock<ITenantCache>();
         _repoMock = new Mock<IChatDataverseRepository>();
         _sessionManagerLoggerMock = new Mock<ILogger<ChatSessionManager>>();
         _historyLoggerMock = new Mock<ILogger<ChatHistoryManager>>();
@@ -257,14 +259,16 @@ public class ChatSessionContinuityTests
         // Arrange — Redis holds a session with 1 enriched file
         var file = BuildEnrichedFile("f-hit", "brief.pdf", classifiedDocType: "brief");
         var cachedSession = BuildSessionWithFiles(new[] { file });
-        var cachedBytes = JsonSerializer.SerializeToUtf8Bytes(cachedSession);
-        var cacheKey = ChatSessionManager.BuildCacheKey(TenantId, SessionId);
 
         _cacheMock
-            .Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(cachedBytes);
+            .Setup(c => c.GetAsync<ChatSession>(
+                TenantId, CacheResource, SessionId, CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cachedSession);
         _cacheMock
-            .Setup(c => c.RefreshAsync(cacheKey, It.IsAny<CancellationToken>()))
+            .Setup(c => c.RefreshAsync(
+                TenantId, CacheResource, SessionId, CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         // Act — simulate 5 sequential turns: each turn GetSession is called by the chat endpoint
@@ -307,25 +311,35 @@ public class ChatSessionContinuityTests
         // Arrange — session has 1 file
         var file = BuildEnrichedFile("f-cycle", "agreement.pdf", classifiedDocType: "agreement");
         var session = BuildSessionWithFiles(new[] { file });
-        var cacheKey = ChatSessionManager.BuildCacheKey(TenantId, SessionId);
 
-        byte[]? lastWrittenBytes = null;
+        // The wrapper's SetSlidingAsync persists the live ChatSession reference;
+        // the Get mock returns whatever was last written. Mirrors the per-turn
+        // Redis serialize → deserialize roundtrip (records are immutable so writes
+        // produce fresh instances; mocking the reference roundtrip is faithful).
+        ChatSession? lastWritten = null;
         _cacheMock
-            .Setup(c => c.SetAsync(
-                cacheKey,
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
+            .Setup(c => c.SetSlidingAsync(
+                TenantId,
+                CacheResource,
+                SessionId,
+                CacheVersion,
+                It.IsAny<ChatSession>(),
+                It.IsAny<TimeSpan>(),
+                It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<string, byte[], DistributedCacheEntryOptions, CancellationToken>(
-                (_, bytes, _, _) => lastWrittenBytes = bytes)
+            .Callback<string, string, string, int, ChatSession, TimeSpan, string, CancellationToken>(
+                (_, _, _, _, s, _, _, _) => lastWritten = s)
             .Returns(Task.CompletedTask);
 
-        // When GetSessionAsync is called, the mock returns whatever was last written
         _cacheMock
-            .Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => lastWrittenBytes);
+            .Setup(c => c.GetAsync<ChatSession>(
+                TenantId, CacheResource, SessionId, CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => lastWritten);
         _cacheMock
-            .Setup(c => c.RefreshAsync(cacheKey, It.IsAny<CancellationToken>()))
+            .Setup(c => c.RefreshAsync(
+                TenantId, CacheResource, SessionId, CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
         _repoMock
@@ -333,8 +347,7 @@ public class ChatSessionContinuityTests
             .Returns(Task.CompletedTask);
 
         // Seed the cache with the initial session (sim: file just uploaded)
-        var initialBytes = JsonSerializer.SerializeToUtf8Bytes(session);
-        lastWrittenBytes = initialBytes;
+        lastWritten = session;
 
         ChatSession current = session;
 
@@ -436,10 +449,14 @@ public class ChatSessionContinuityTests
     private void SetupCacheSetSuccess()
     {
         _cacheMock
-            .Setup(c => c.SetAsync(
+            .Setup(c => c.SetSlidingAsync(
                 It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<ChatSession>(),
+                It.IsAny<TimeSpan>(),
+                It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
     }

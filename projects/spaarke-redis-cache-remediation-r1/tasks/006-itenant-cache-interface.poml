@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarke-redis-cache-remediation-r1">
+  <metadata>
+    <title>ITenantCache interface + default implementation</title>
+    <phase>1: CacheModule hardening + wrapper + atomic migration</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>005</dependencies>
+    <blocks>009,010,011,012,013,014,015,016,017</blocks>
+    <tags>bff-api, cache, redis, di, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Tag bff-api + new interface (.cs) + ADR-010 + CLAUDE.md §11 justification + blocks all migration tasks</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create `src/server/api/Sprk.Bff.Api/Infrastructure/Cache/ITenantCache.cs` (interface) + `TenantCache.cs` (default impl wrapping `IDistributedCache`). Mandatory `tenantId` parameter at every cache call. Key format `tenant:{tenantId}:{resource}:{id}:v{version}` (the Redis `InstanceName="spaarke:"` prepends → final key `spaarke:tenant:...`). Future-extensible `cacheInstance: string = "default"` parameter (NFR-12). Methods: `GetAsync<T>`, `SetAsync<T>`, `RemoveAsync`, `GetOrCreateAsync<T>`.
+  </prompt>
+
+  <role>
+    Spaarke .NET developer. Apply CLAUDE.md §11 three-question justification (`ITenantCache` already justified in `plan.md` §2 — copy into PR description). Apply ADR-010 (≥2 future implementations satisfied per NFR-12).
+  </role>
+
+  <goal>
+    `ITenantCache` interface + `TenantCache` default implementation registered in DI alongside the existing `IDistributedCache`. Internal key construction enforces the mandated format. Wrapper acts as the single seam for FR-16 custom metrics emission (added in task 041). Existing AI service cache wrappers (`GraphTokenCache`, `EmbeddingCache`) preserve their `SemaphoreSlim` rate-limit invariants — they migrate INTERNAL `IDistributedCache` calls to `ITenantCache` but keep their public APIs.
+  </goal>
+
+  <context>
+    <background>
+      The wrapper is the multi-tenant invariant enforcement point. By requiring `tenantId` at the public API, no future cache call can accidentally produce a non-tenant-scoped key. The `cacheInstance` parameter is the seam for future multi-Redis (NFR-12 — additive change, not redesign). Default and only registered instance today is `"default"`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/ITenantCache.cs (NEW)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs (NEW)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs (REGISTER)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-009">Cache key format MUST be `{InstanceName}tenant:{tenantId}:{resource}:{id}:v{version}` (added MUST per amendment).</constraint>
+    <constraint source="ADR-010">New interface MUST have ≥2 future implementations — satisfied by default today + future named instances per NFR-12.</constraint>
+    <constraint source="ADR-013">Preserve existing `SemaphoreSlim` rate-limit patterns in AI service caches.</constraint>
+    <constraint source="CLAUDE.md §11">Three-question justification documented (already in `plan.md` §2; copy to PR description).</constraint>
+    <constraint source="spec">FR-05 — mandatory `tenantId` parameter; key format; methods listed.</constraint>
+    <constraint source="spec">NFR-12 — `cacheInstance` parameter accepted; defaults "default"; only "default" registered today.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r1/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/CLAUDE.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r1/plan.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>src/server/shared/Spaarke.Core/Cache/DistributedCacheExtensions.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read existing `DistributedCacheExtensions.cs` to understand current key construction (`sdap:` prefix; will become `spaarke:` via InstanceName + the wrapper's `tenant:` prefix).</step>
+    <step order="2">Create `ITenantCache.cs`. Methods (async only — no sync wrappers per CODING-STANDARDS rule 22): `Task&lt;T?&gt; GetAsync&lt;T&gt;(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default)`, `Task SetAsync&lt;T&gt;(string tenantId, string resource, string id, int version, T value, TimeSpan? ttl = null, string cacheInstance = "default", CancellationToken ct = default)`, `Task RemoveAsync(string tenantId, string resource, string id, int version, string cacheInstance = "default", CancellationToken ct = default)`, `Task&lt;T&gt; GetOrCreateAsync&lt;T&gt;(string tenantId, string resource, string id, int version, Func&lt;CancellationToken, Task&lt;T&gt;&gt; factory, TimeSpan? ttl = null, string cacheInstance = "default", CancellationToken ct = default)`.</step>
+    <step order="3">Create `TenantCache.cs` (sealed class implementing `ITenantCache`). Constructor injects `IDistributedCache` + `ILogger&lt;TenantCache&gt;`. Private helper `BuildKey(string tenantId, string resource, string id, int version)` → `"tenant:{tenantId}:{resource}:{id}:v{version}"` (no InstanceName prefix in the wrapper — that's the StackExchangeRedisCache responsibility).</step>
+    <step order="4">Implement methods with JSON serialization via `System.Text.Json` (`JsonSerializer.SerializeAsync` / `DeserializeAsync` to a `MemoryStream`). Throw `ArgumentException` on null/empty `tenantId` or `resource` or `id`.</step>
+    <step order="5">Validate `cacheInstance == "default"` (reject other values today; throw `NotSupportedException` "Cache instance '{cacheInstance}' is not registered. Only 'default' is supported today. See NFR-12 for future multi-instance pattern.").</step>
+    <step order="6">Register `ITenantCache` → `TenantCache` in `CacheModule.AddCachingServices` (singleton lifetime; uses the `IDistributedCache` already registered).</step>
+    <step order="7">Add XML doc comments to interface methods naming the key format and `cacheInstance` future-extensibility.</step>
+    <step order="8">Run `dotnet build`. Run any existing tests — none should break (no existing consumers).</step>
+    <step order="9">Update `TASK-INDEX.md` + `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Inspect DistributedCacheExtensions.cs + spec.md FR-05</tool>
+    <tool name="Write">Create ITenantCache.cs + TenantCache.cs</tool>
+    <tool name="Edit">Register in CacheModule.cs</tool>
+    <tool name="Bash">dotnet build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Cache/ITenantCache.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs (modified — register)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ITenantCache` interface exists with all 4 method shapes per Step 2; all parameters as specified; XML doc comments present.</criterion>
+    <criterion testable="true">`TenantCache` default impl exists; key construction produces `tenant:{tenantId}:{resource}:{id}:v{version}`.</criterion>
+    <criterion testable="true">DI registration in `CacheModule` (singleton).</criterion>
+    <criterion testable="true">Argument validation throws on null/empty `tenantId`, `resource`, `id`; `cacheInstance != "default"` throws `NotSupportedException` with the prescribed message.</criterion>
+    <criterion testable="true">`dotnet build` succeeds; no new warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Three-question justification (copy to PR description from `plan.md` §2 Placement Justification): Existing = none (no tenant-scoping abstraction); Extension = not viable on static helpers (`DistributedCacheExtensions` has no DI seam); Cost-of-doing-nothing = read-old/write-new bug class + no central metrics seam + no future multi-Redis seam.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor. Quality gates at Step 9.5.</protocol>
+  </execution>
+</task>

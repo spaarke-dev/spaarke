@@ -238,6 +238,7 @@ public sealed class MetadataService
         var sw = Stopwatch.StartNew();
         try
         {
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): Dataverse entity schema metadata is org-wide (one BFF / one Redis instance per org per ADR-029); tenant-scoping would defeat the purpose of the schema cache.
             var cached = await _cache.GetStringAsync(cacheKey, ct).ConfigureAwait(false);
             sw.Stop();
 
@@ -268,6 +269,7 @@ public sealed class MetadataService
         {
             var json = JsonSerializer.Serialize(dto, JsonOptions);
 
+            // SYSTEM-LEVEL EXCEPTION (NFR-08): Dataverse entity schema metadata is org-wide (one BFF / one Redis instance per org per ADR-029); tenant-scoping would defeat the purpose of the schema cache.
             await _cache.SetStringAsync(
                 cacheKey,
                 json,

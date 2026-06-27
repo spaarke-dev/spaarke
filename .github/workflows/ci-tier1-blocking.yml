@@ -1,0 +1,421 @@
+# ============================================================================
+# ci-tier1-blocking.yml — Tier 1 Blocking CI
+# ============================================================================
+#
+# PURPOSE
+#   Reusable workflow invoked by ci-router.yml. Implements spec FR-A02:
+#   the narrow blocking-tier surface that must hold the p95 ≤ 3 min budget
+#   (NFR-01) at <1% flake (NFR-03).
+#
+# CONTENTS (strict scope list — do not extend without spec amendment)
+#   1. compile                — Debug-only, no -warnaserror (<60s warm cache)
+#   2. arch-tests             — critical NetArchTest MUST-NOT subset (<30s)
+#   3. changed-surface-smoke  — Spe.Integration.Tests filtered by changed src/ paths (60-90s)
+#   4. auth-smoke             — auth integration tests (conditional, <60s)
+#
+# NOT IN TIER 1 (live in ci-tier2-advisory.yml or nightly-health.yml):
+#   format, lint, markdown link validator, dependency audit, Trivy,
+#   full unit/integration test suite.
+#
+# INPUTS (from ci-router.yml `classify` job)
+#   bff_changed       — true if src/server/api/Sprk.Bff.Api/** or shared server changed
+#   spaarke_ai_changed — true if src/solutions/SpaarkeAi/** or AI client libs changed
+#
+# AUTH + NAMESPACE DETECTION
+#   Done in-workflow via a dedicated classify-tier1 job using dorny/paths-filter.
+#   Keeps this workflow's contract with the router small (bff_changed,
+#   spaarke_ai_changed) while preserving fine-grained auth + changed-surface
+#   routing locally. ADR-028 (Spaarke Auth v2) requires the auth-smoke job to
+#   exercise OBO + app-only Graph paths whenever Infrastructure/Auth/** or
+#   claims handling is touched.
+#
+# STATUS
+#   SHADOW MODE. Per spec MUST §122, sdap-ci.yml remains the required check
+#   for ≥14 days post-cutover; this workflow runs in parallel and reports
+#   results via the ci-router.yml composite gate. Branch protection flip
+#   happens in task 071.
+#
+# REFERENCES
+#   - projects/ci-cd-unit-test-remediation-r1/spec.md FR-A02, NFR-01, NFR-03
+#   - .claude/adr/ADR-028-spaarke-auth-architecture.md (auth-smoke alignment)
+#   - tests/Spaarke.ArchTests/ — ArchTests source (MUST-NOT subset selected by
+#     name; rationale documented inline at the arch-tests job)
+# ============================================================================
+
+name: CI Tier 1 (Blocking)
+
+on:
+  workflow_call:
+    inputs:
+      bff_changed:
+        description: 'True if PR diff touches BFF server code (per router classification)'
+        required: false
+        type: string
+        default: 'true'
+      spaarke_ai_changed:
+        description: 'True if PR diff touches SpaarkeAi (per router classification)'
+        required: false
+        type: string
+        default: 'false'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read   # required by dorny/paths-filter inside classify-tier1
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Job 0 — classify-tier1
+  # Local-to-tier1 path classification for auth-smoke + changed-surface-smoke.
+  # The router classifies coarse surfaces (BFF / SpaarkeAi / docs); this job
+  # adds fine-grained Tier-1-only signals (auth paths, AI namespace, semantic
+  # search namespace, workspace namespace).
+  # Budget: ~10s. Always runs.
+  # --------------------------------------------------------------------------
+  classify-tier1:
+    name: Classify Tier 1 Surfaces
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      auth: ${{ steps.filter.outputs.auth }}
+      ai_surface: ${{ steps.filter.outputs.ai_surface }}
+      semantic_search_surface: ${{ steps.filter.outputs.semantic_search_surface }}
+      workspace_surface: ${{ steps.filter.outputs.workspace_surface }}
+      reporting_surface: ${{ steps.filter.outputs.reporting_surface }}
+      changed_namespaces: ${{ steps.derive-namespaces.outputs.value }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 1 || 0 }}
+
+      - name: Classify Tier 1 surfaces
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            auth:
+              - 'src/server/api/Sprk.Bff.Api/Infrastructure/Auth/**'
+              - 'src/server/api/Sprk.Bff.Api/Infrastructure/Graph/**'
+              - 'src/server/api/Sprk.Bff.Api/**/Claims*.cs'
+              - 'src/server/api/Sprk.Bff.Api/**/Authorization*.cs'
+              - 'src/server/api/Sprk.Bff.Api/**/Authentication*.cs'
+            ai_surface:
+              - 'src/server/api/Sprk.Bff.Api/Services/Ai/**'
+              - 'src/server/api/Sprk.Bff.Api/Endpoints/Ai*.cs'
+            semantic_search_surface:
+              - 'src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/**'
+              - 'src/server/api/Sprk.Bff.Api/Services/Ai/RecordSearch/**'
+            workspace_surface:
+              - 'src/server/api/Sprk.Bff.Api/Services/Workspace/**'
+              - 'src/server/api/Sprk.Bff.Api/Endpoints/Workspace*.cs'
+            reporting_surface:
+              - 'src/server/api/Sprk.Bff.Api/Services/Reporting/**'
+              - 'src/server/api/Sprk.Bff.Api/Endpoints/Reporting*.cs'
+
+      - name: Derive Spe.Integration.Tests namespaces from changed surface
+        id: derive-namespaces
+        # Maps fine-grained surface flags to Spe.Integration.Tests namespaces.
+        # Output is a space-separated list of FullyQualifiedName~<ns> targets
+        # consumed by the changed-surface-smoke job's xUnit filter.
+        # Empty output = no-op for the smoke job (it has an `if:` guard).
+        shell: bash
+        run: |
+          set -euo pipefail
+          ns=()
+          if [[ "${{ steps.filter.outputs.ai_surface }}" == "true" ]]; then
+            ns+=("Spe.Integration.Tests.Api.Ai")
+          fi
+          if [[ "${{ steps.filter.outputs.semantic_search_surface }}" == "true" ]]; then
+            ns+=("Spe.Integration.Tests.SemanticSearch")
+          fi
+          if [[ "${{ steps.filter.outputs.workspace_surface }}" == "true" ]]; then
+            ns+=("Spe.Integration.Tests.Workspace")
+          fi
+          if [[ "${{ steps.filter.outputs.reporting_surface }}" == "true" ]]; then
+            ns+=("Spe.Integration.Tests.Reporting")
+          fi
+          value="${ns[*]:-}"
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+          if [[ -n "$value" ]]; then
+            echo "::notice::Changed-surface smoke namespaces: $value"
+          else
+            echo "::notice::No changed-surface namespaces — smoke job will no-op"
+          fi
+
+      - name: Classification summary
+        shell: bash
+        run: |
+          {
+            echo "### Tier 1 — Surface Classification"
+            echo ""
+            echo "| Surface | Changed |"
+            echo "|---|---|"
+            echo "| auth (Infrastructure/Auth, claims, authentication) | ${{ steps.filter.outputs.auth }} |"
+            echo "| ai_surface (Services/Ai, Ai endpoints) | ${{ steps.filter.outputs.ai_surface }} |"
+            echo "| semantic_search_surface | ${{ steps.filter.outputs.semantic_search_surface }} |"
+            echo "| workspace_surface | ${{ steps.filter.outputs.workspace_surface }} |"
+            echo "| reporting_surface | ${{ steps.filter.outputs.reporting_surface }} |"
+            echo ""
+            echo "**BFF changed (from router)**: ${{ inputs.bff_changed }}"
+            echo "**Smoke namespaces**: ${{ steps.derive-namespaces.outputs.value }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # --------------------------------------------------------------------------
+  # Job 1 — compile (Debug only, no -warnaserror)
+  # Budget: <60s warm cache. Scoped to BFF csproj for speed. WarningsAsErrors
+  # policy lives in Directory.Build.props (TreatWarningsAsErrors=true +
+  # WarningsNotAsErrors=CS0109;CS0618;CS1998;CS8601;CS8604), so the CLI does
+  # NOT pass -warnaserror — see
+  # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
+  # --------------------------------------------------------------------------
+  compile:
+    name: Compile (Debug)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-tier1-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-tier1-
+            ${{ runner.os }}-nuget-
+
+      - name: Restore (BFF project only)
+        run: dotnet restore src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj --verbosity minimal
+
+      - name: Build (Debug, BFF project only)
+        # No -warnaserror — Directory.Build.props centralizes that policy.
+        run: dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Debug --no-restore
+
+  # --------------------------------------------------------------------------
+  # Job 2 — arch-tests (MUST-NOT subset only)
+  # Budget: <30s. Runs the 6 load-bearing NetArchTest MUST-NOT facts via xUnit
+  # FullyQualifiedName filter. The remaining ~15 ArchTests (existence checks,
+  # ceiling heuristics, source-scan exemptions like
+  # KnownPluginViolationCountShouldNotIncrease, OptionsPatternShouldBeUsedForConfiguration,
+  # ServicesShouldBeConcreteUnlessSeamRequired) live in Tier 2.
+  #
+  # MUST-NOT subset (selected because each test (a) detects a real production
+  # regression that the architecture cannot tolerate, AND (b) is deterministic
+  # — pure assembly inspection, no source scans, no ceiling counters that can
+  # drift, no `NotEmpty` heuristics):
+  #   - ADR-001 NoAzureFunctionsPackages      — bans Functions packages
+  #   - ADR-002 EndpointsShouldNotReferencePluginInterfaces — plugin isolation
+  #   - ADR-007 ControllersShouldNotReferenceGraphSdk      — Graph seam (controllers)
+  #   - ADR-007 EndpointsShouldNotReferenceGraphSdk        — Graph seam (endpoints)
+  #   - ADR-009 MemoryCacheShouldNotBeSingleton            — Redis-first caching
+  #   - ADR-009 NoHybridCachingLibraries                   — bans hybrid cache libs
+  # --------------------------------------------------------------------------
+  arch-tests:
+    name: Arch Tests (MUST-NOT subset)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-tier1-arch-${{ hashFiles('**/Directory.Packages.props', 'tests/Spaarke.ArchTests/**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-tier1-arch-
+            ${{ runner.os }}-nuget-tier1-
+            ${{ runner.os }}-nuget-
+
+      - name: Restore ArchTests project
+        run: dotnet restore tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --verbosity minimal
+
+      - name: Build ArchTests project (Debug)
+        run: dotnet build tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj -c Debug --no-restore
+
+      - name: Run MUST-NOT arch tests
+        # xUnit --filter accepts pipe-separated ORs. Each fact name is the
+        # method-level test; FullyQualifiedName=<full>.<method> targets it
+        # exactly. (Display names are descriptive but FullyQualifiedName is
+        # the canonical xUnit filter target — display names contain spaces.)
+        run: |
+          dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj \
+            -c Debug \
+            --no-build \
+            --filter "FullyQualifiedName=Spaarke.ArchTests.ADR001_MinimalApiTests.NoAzureFunctionsPackages|FullyQualifiedName=Spaarke.ArchTests.ADR002_PluginTests.EndpointsShouldNotReferencePluginInterfaces|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.ControllersShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.EndpointsShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.MemoryCacheShouldNotBeSingleton|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.NoHybridCachingLibraries" \
+            --logger "trx;LogFileName=arch-must-not.trx" \
+            --results-directory ./TestResults
+        shell: bash
+
+      - name: Upload arch test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tier1-arch-must-not-results
+          path: ./TestResults/arch-must-not.trx
+          if-no-files-found: warn
+
+  # --------------------------------------------------------------------------
+  # Job 3 — changed-surface-smoke
+  # Budget: 60-90s. Runs Spe.Integration.Tests filtered to namespaces matching
+  # the changed src/ paths (per classify-tier1 derivation). No-op when BFF
+  # was untouched OR no matching namespace was derived (per task 010 catalog,
+  # Spe.Integration.Tests is the "stable signal" project — top-5 flaky tests
+  # all live in Sprk.Bff.Api.Tests / Spaarke.Scheduling.Tests, which are NOT
+  # in Tier 1).
+  # --------------------------------------------------------------------------
+  changed-surface-smoke:
+    name: Changed-Surface Integration Smoke
+    needs: classify-tier1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ inputs.bff_changed == 'true' && needs.classify-tier1.outputs.changed_namespaces != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-tier1-spe-${{ hashFiles('**/Directory.Packages.props', 'tests/integration/Spe.Integration.Tests/**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-tier1-spe-
+            ${{ runner.os }}-nuget-tier1-
+            ${{ runner.os }}-nuget-
+
+      - name: Restore Spe.Integration.Tests
+        run: dotnet restore tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj --verbosity minimal
+
+      - name: Build Spe.Integration.Tests (Debug)
+        run: dotnet build tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj -c Debug --no-restore
+
+      - name: Run changed-surface integration smoke
+        # classify-tier1 emits a space-separated namespace list. Compose into
+        # pipe-OR xUnit filter. Example:
+        #   in : "Spe.Integration.Tests.Api.Ai Spe.Integration.Tests.SemanticSearch"
+        #   out: "FullyQualifiedName~Spe.Integration.Tests.Api.Ai|FullyQualifiedName~Spe.Integration.Tests.SemanticSearch"
+        env:
+          NAMESPACES: ${{ needs.classify-tier1.outputs.changed_namespaces }}
+        run: |
+          set -euo pipefail
+          FILTER=""
+          for ns in $NAMESPACES; do
+            if [ -z "$FILTER" ]; then
+              FILTER="FullyQualifiedName~${ns}"
+            else
+              FILTER="${FILTER}|FullyQualifiedName~${ns}"
+            fi
+          done
+          if [ -z "$FILTER" ]; then
+            echo "::notice::No namespaces derived — smoke job no-op"
+            exit 0
+          fi
+          echo "Using xUnit filter: $FILTER"
+          dotnet test tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj \
+            -c Debug \
+            --no-build \
+            --filter "$FILTER" \
+            --logger "trx;LogFileName=changed-surface-smoke.trx" \
+            --results-directory ./TestResults
+        shell: bash
+
+      - name: Upload changed-surface results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tier1-changed-surface-results
+          path: ./TestResults/changed-surface-smoke.trx
+          if-no-files-found: warn
+
+  # --------------------------------------------------------------------------
+  # Job 4 — auth-smoke (conditional on auth-related diff)
+  # Budget: <60s. Runs only when classify-tier1 detected a diff touching
+  # Infrastructure/Auth/**, Infrastructure/Graph/**, or claims/authorization
+  # handling. Exercises OBO + app-only Graph token paths via the existing
+  # AuthorizationIntegrationTests fixture (ADR-028 Spaarke Auth v2 alignment)
+  # plus the semantic-search authorization smoke.
+  # --------------------------------------------------------------------------
+  auth-smoke:
+    name: Auth Smoke
+    needs: classify-tier1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ needs.classify-tier1.outputs.auth == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-tier1-auth-${{ hashFiles('**/Directory.Packages.props', 'tests/integration/Spe.Integration.Tests/**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-tier1-auth-
+            ${{ runner.os }}-nuget-tier1-spe-
+            ${{ runner.os }}-nuget-tier1-
+            ${{ runner.os }}-nuget-
+
+      - name: Restore Spe.Integration.Tests
+        run: dotnet restore tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj --verbosity minimal
+
+      - name: Build Spe.Integration.Tests (Debug)
+        run: dotnet build tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj -c Debug --no-restore
+
+      - name: Run auth smoke tests
+        # AuthorizationIntegrationTests exercises 401/403 paths through the test
+        # WebApplicationFactory; ADR-028 alignment covers OBO + app-only token
+        # validation via Microsoft.IdentityModel JWT. SemanticSearchAuthorizationTests
+        # adds the second auth-relevant integration class (privacy filter +
+        # caller-claims propagation through SemanticSearch).
+        # Add additional auth-relevant FQN fragments here if/when new auth
+        # integration test classes land.
+        run: |
+          dotnet test tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj \
+            -c Debug \
+            --no-build \
+            --filter "FullyQualifiedName~Spe.Integration.Tests.AuthorizationIntegrationTests|FullyQualifiedName~Spe.Integration.Tests.SemanticSearch.SemanticSearchAuthorizationTests" \
+            --logger "trx;LogFileName=auth-smoke.trx" \
+            --results-directory ./TestResults
+        shell: bash
+
+      - name: Upload auth smoke results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tier1-auth-smoke-results
+          path: ./TestResults/auth-smoke.trx
+          if-no-files-found: warn

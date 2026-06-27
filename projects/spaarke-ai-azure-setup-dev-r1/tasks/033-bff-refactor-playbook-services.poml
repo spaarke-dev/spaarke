@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-ai-azure-setup-dev-r1">
+  <metadata>
+    <title>BFF refactor: PlaybookEmbedding services (FR-13 + FR-10 code side)</title>
+    <phase>4: Code + Config Refactor</phase>
+    <status>completed</status>
+    <estimated-hours>1.5</estimated-hours>
+    <dependencies>013, 030</dependencies>
+    <blocks>046</blocks>
+    <tags>bff-api, refactoring, ai, playbook</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Code implementation: 4 PlaybookEmbedding files (Service + IndexingService + BackgroundService + DriftDetectionJob)</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Refactor 4 PlaybookEmbedding services per FR-13 + FR-10 code side: PlaybookEmbeddingService.cs (line 46 constant from FR-10), PlaybookIndexingService.cs, PlaybookIndexingBackgroundService.cs, PlaybookIndexDriftDetectionJob.cs.
+    Replace `spaarke-knowledge-index-v2` + `playbook-embeddings` (unprefixed) with canonical names.
+  </prompt>
+
+  <role>
+    Spaarke platform .NET 8 BFF developer.
+  </role>
+
+  <goal>
+    All 4 services use canonical names: `spaarke-files-index` + `spaarke-playbook-embeddings`.
+  </goal>
+
+  <context>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexingBackgroundService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexDriftDetectionJob.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-13">Replace spaarke-knowledge-index-v2 with spaarke-files-index</constraint>
+    <constraint source="FR-10">PlaybookEmbeddingService.cs:46 constant: `playbook-embeddings` → `spaarke-playbook-embeddings`</constraint>
+    <constraint source="ADR-017">Preserve background service / job contract</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-ai-azure-setup-dev-r1/spec.md</file>
+      <file>.claude/adr/ADR-017-background-jobs-service-bus.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Grep within 4 files for `spaarke-knowledge-index-v2` AND `playbook-embeddings` (unprefixed)</step>
+    <step order="2">Edit each file to replace with canonical names</step>
+    <step order="3">Build BFF</step>
+    <step order="4">Update TASK-INDEX.md: task 033 ✅ completed</step>
+  </steps>
+
+  <tools>
+    <tool name="Grep">Find references</tool>
+    <tool name="Edit">Replace</tool>
+    <tool name="dotnet">Build</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">4 PlaybookEmbedding files</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep in 4 files returns zero matches for stale names</criterion>
+    <criterion testable="true">BFF builds</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor: code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

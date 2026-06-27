@@ -172,6 +172,24 @@ Retrieval mode is configured per-node via `ConfigJson` (`auto`/`always`/`never`,
 
 ---
 
+## AI Search Consumer Map
+
+> **Canonical source**: [`AI-SEARCH-INDEX-CATALOG.md`](AI-SEARCH-INDEX-CATALOG.md) — single source of truth for per-index schema, naming convention, property policy, vector config, retired-index history, and post-deploy invariants. **This section is the consumer-map view only**; it does NOT duplicate catalog content. If consumer info here disagrees with the catalog, the catalog wins — open a PR to update this table.
+
+The seven active Spaarke AI Search indexes and their primary BFF consumers (services + endpoints) and data-flow direction. Flow direction = `inbound` (write-only from BFF), `outbound` (read-only from BFF), or `bidirectional`.
+
+| Index name | Primary consumers (services + endpoints) | Data flow direction |
+|---|---|---|
+| `spaarke-files-index` | `RagService`, `RagIndexingPipeline`, `FileIndexingService`, `IndexRetrieveNode`, `KnowledgeBaseEndpoints`, `BulkRagIndexingJobHandler`, `RagIndexingJobHandler` · endpoints `POST /api/ai/rag/query`, `POST /api/ai/rag/index-file`, semantic search endpoints | bidirectional |
+| `spaarke-records-index` | `DataverseIndexSyncService`, `RecordSyncJob`, `RecordSearchAuthorizationFilter` · endpoint `POST /api/ai/search` (scope=entity) | bidirectional |
+| `spaarke-rag-references` | `ReferenceIndexingService`, `ReferenceRetrievalService` · ingestion via PowerShell `scripts/ai-search/Add-ReferenceToIndex.ps1` + `Index-AllReferences.ps1` (KNW-*.md golden references); read path via L1 knowledge retrieval | bidirectional |
+| `spaarke-insights-index` | `PrecedentProjectionSync` + insights projection pipeline · endpoint `POST /api/ai/insights/search` | bidirectional |
+| `spaarke-session-files` | `SessionFilesCleanupJob` (cleanup only) · schema-only in this project per FR-18 (no ingestion path) | outbound (cleanup reads only) |
+| `spaarke-invoices-index` | `InvoiceIndexingJobHandler`, `InvoiceSearchService` · schema-only in this project per FR-18 (no ingestion) | outbound (search reads only) |
+| `spaarke-playbook-embeddings` | `PlaybookEmbeddingService`, `PlaybookIndexingService`, `PlaybookIndexingBackgroundService`, `PlaybookIndexDriftDetectionJob` · consumed by playbook dispatch routing | bidirectional |
+
+---
+
 ## AI Public Contracts Facade Boundary (Phase 4 Outcome E, 2026-05-25)
 
 Refined **ADR-013** (2026-05-20) requires external CRUD code to consume AI capabilities through a **stable, narrow facade**, not by directly injecting AI-internal types like `IOpenAiClient` or `IPlaybookService`. Boundary intent: AI internals stay AI-internal; CRUD-tier code consumes only what it needs through purpose-built interfaces.

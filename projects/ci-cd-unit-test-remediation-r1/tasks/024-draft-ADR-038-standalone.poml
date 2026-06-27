@@ -1,0 +1,70 @@
+<task id="CICD-024" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Draft new ADR-038 (Testing Strategy) as STANDALONE — NOT a supersession of ADR-022</title>
+    <status>complete</status>
+    <estimated-effort>1.5 hours</estimated-effort>
+    <phase>1 - Stream B</phase>
+    <stream>B - Test reset</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies></dependencies>
+    <tags>testing, ADR, standalone, no-supersession</tags>
+  </metadata>
+
+  <prompt>
+    Author `docs/adr/ADR-038-testing-strategy.md` as a STANDALONE testing strategy ADR. Critical: this is NOT a supersession of ADR-022 (which is PCF Platform Libraries, not testing). The spec's FR-B03 wording is incorrect; user clarification (2026-06-25) confirms standalone. Include the evidence section from design.md (S-5: tests test wiring not behavior; S-6: real bugs not caught — 9-bug daily-briefing cascade caught 0). The ADR documents the policy reversal: coverage is observation, not gate; integration-heavy pyramid; path-based KEEP categories enforce deletion-safety at code-review.
+  </prompt>
+
+  <role>Architecture decision authoring engineer.</role>
+
+  <goal>ADR-038 exists at `docs/adr/ADR-038-testing-strategy.md`; `docs/adr/INDEX.md` updated to list it; status: Active; NO supersession relationship to ADR-022.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/ci-cd-unit-test-remediation-r1/spec.md</file>
+    <file purpose="design">projects/ci-cd-unit-test-remediation-r1/design.md</file>
+    <file purpose="adr-index">docs/adr/INDEX.md</file>
+    <file purpose="existing-022">docs/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file purpose="adr-template">docs/adr/000-ADR-TEMPLATE.md (or nearest existing ADR for format reference)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="user-clarification">ADR-038 is STANDALONE. Do NOT mark ADR-022 superseded. ADR-022 is PCF Platform Libraries and is independent.</constraint>
+    <constraint source="spec FR-B03">Include evidence section: S-5 (wiring tests break on refactors), S-6 (9-bug cascade caught 0).</constraint>
+    <constraint source="adr-convention">Use Spaarke ADR format (Status, Context, Decision, Consequences, Evidence, References).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Spaarke ADR authoring</topic>
+    <files>
+      <file>docs/adr/INDEX.md (next available number is 038; confirm)</file>
+      <file>docs/adr/ADR-037-* (most recent ADR for format reference)</file>
+      <file>.claude/adr/INDEX.md (concise ADR pointer index)</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `docs/adr/INDEX.md`. Confirm next available number is 038.</step>
+    <step order="2">Read the most recent ADR (037 or whichever is highest) for format reference.</step>
+    <step order="3">Read `docs/adr/ADR-022-pcf-platform-libraries.md` first 30 lines to confirm scope is PCF, not testing.</step>
+    <step order="4">Draft ADR-038 sections: Status (Active, not Superseded; do NOT reference ADR-022), Context (why a new testing strategy is needed — design.md §2, §3, §4 condensed), Decision (integration-heavy pyramid, 6 KEEP categories as MUST, coverage = observation never gate, mock at module boundaries, TimeProvider over Stopwatch), Consequences (bans wiring antipatterns; ~60% test count reduction expected; CI tier budgets become achievable), Evidence (S-5 + S-6 from design.md), References (TEST-ARCHITECTURE.md, tests/CLAUDE.md, constraints/testing.md)</step>
+    <step order="5">Write `docs/adr/ADR-038-testing-strategy.md`</step>
+    <step order="6">Update `docs/adr/INDEX.md` to list ADR-038 (status: Active; NO supersession of ADR-022)</step>
+    <step order="7">Update `.claude/adr/INDEX.md` with a concise constraint summary for ADR-038</step>
+  </steps>
+
+  <outputs>
+    <output type="docs">docs/adr/ADR-038-testing-strategy.md</output>
+    <output type="docs">docs/adr/INDEX.md (updated)</output>
+    <output type="docs">.claude/adr/INDEX.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ADR-038 exists with all required sections</criterion>
+    <criterion testable="true">`grep -i "supersed" docs/adr/ADR-038-testing-strategy.md` returns nothing (no supersession claim)</criterion>
+    <criterion testable="true">`grep -i "ADR-022" docs/adr/ADR-038-testing-strategy.md` returns nothing (or only an explanatory note clarifying ADR-022 scope is unrelated PCF)</criterion>
+    <criterion testable="true">docs/adr/INDEX.md shows ADR-038 status Active</criterion>
+    <criterion testable="true">docs/adr/ADR-022's status unchanged</criterion>
+    <criterion testable="true">Evidence section contains S-5 and S-6 explicitly</criterion>
+  </acceptance-criteria>
+</task>

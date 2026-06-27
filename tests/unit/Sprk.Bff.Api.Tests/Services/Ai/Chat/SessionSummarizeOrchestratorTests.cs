@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
-using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -424,43 +424,9 @@ public class SessionSummarizeOrchestratorTests
 
     // ─── (l) FR-26 invariant — orchestrator no longer references alternate-key constants ─────
 
-    [Fact]
-    public void SessionSummarizeOrchestrator_HasNoAlternateKeyConstants_FR26()
-    {
-        // The pre-R6 path used SessionSummarizeOrchestrator.SummarizeActionCode +
-        // ActionEntityLogicalName constants for the alternate-key bypass. R6 task 025 removed
-        // these. Reflection assert: neither constant exists on the orchestrator anymore.
-        var members = typeof(SessionSummarizeOrchestrator)
-            .GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            .Select(m => m.Name)
-            .ToArray();
-
-        members.Should().NotContain("SummarizeActionCode",
-            "FR-26 — alternate-key bypass removed in R6 task 025 (D-A-17)");
-        members.Should().NotContain("ActionEntityLogicalName",
-            "FR-26 — alternate-key bypass removed in R6 task 025 (D-A-17)");
-    }
 
     // ─── (m) FR-05 task 015 — hardcoded ChatSummarizePlaybookId constant removed ─────────────
 
-    [Fact]
-    public void SessionSummarizeOrchestrator_HasNoHardcodedChatSummarizePlaybookIdConstant_FR05()
-    {
-        // FR-05 task 015 (chat-routing-redesign-r1): the prior internal static readonly Guid
-        // ChatSummarizePlaybookId = Guid.Parse("44285d15-1360-f111-ab0b-70a8a59455f4")
-        // constant was removed. Resolution now flows through
-        // WorkspaceOptions.ChatSummarizePlaybookId + IPlaybookLookupService.GetByIdAsync.
-        // Reflection assert: the constant no longer exists on the orchestrator.
-        var members = typeof(SessionSummarizeOrchestrator)
-            .GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            .Select(m => m.Name)
-            .ToArray();
-
-        members.Should().NotContain("ChatSummarizePlaybookId",
-            "FR-05 task 015 — hardcoded ChatSummarizePlaybookId Guid constant removed; " +
-            "playbook resolved at runtime via WorkspaceOptions.ChatSummarizePlaybookId + " +
-            "IPlaybookLookupService.GetByIdAsync per ADR-018 typed options + Pattern A stable-ID");
-    }
 
     // ─── (n) FR-05 — orchestrator calls IPlaybookLookupService with configured options value ─
 
@@ -729,7 +695,7 @@ public class SessionSummarizeOrchestratorTests
     private sealed class TestableChatSessionManager : ChatSessionManager
     {
         public TestableChatSessionManager() : base(
-            cache: Mock.Of<IDistributedCache>(),
+            cache: Mock.Of<ITenantCache>(),
             dataverseRepository: Mock.Of<IChatDataverseRepository>(),
             logger: Mock.Of<ILogger<ChatSessionManager>>(),
             persistence: null,

@@ -1,0 +1,47 @@
+<task id="CICD-000" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Pre-flight: confirm branch, clean tree, baseline build green</title>
+    <status>not-started</status>
+    <estimated-effort>0.5 hours</estimated-effort>
+    <phase>0 - Pre-flight</phase>
+    <stream>cross-cutting</stream>
+    <rigor-level>MINIMAL</rigor-level>
+    <autonomous>true</autonomous>
+    <parallel-safe>false</parallel-safe>
+    <dependencies></dependencies>
+    <tags>preflight, baseline, ci</tags>
+  </metadata>
+
+  <prompt>
+    Optional pre-flight verification. If /project-pipeline Step 0.3 already covered this (it did at 2026-06-25 pipeline run), this task is a no-op confirmation. Otherwise: verify branch is `work/ci-cd-unit-test-remediation-r1`, working tree clean, master current, and the baseline solution builds green.
+  </prompt>
+
+  <role>Build engineer running standard pre-flight checks.</role>
+
+  <goal>Confirmation note that the project starts on a clean, green baseline. No file artifact required unless a check fails.</goal>
+
+  <inputs>
+    <file purpose="project-CLAUDE">projects/ci-cd-unit-test-remediation-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Autonomous mode — no approval gates between checks. Report failures and stop only on hard failure.</constraint>
+  </constraints>
+
+  <steps>
+    <step order="1">git branch --show-current → expect `work/ci-cd-unit-test-remediation-r1`</step>
+    <step order="2">git status --porcelain → expect empty</step>
+    <step order="3">git fetch origin &amp;&amp; git rev-list --count HEAD..origin/master → expect 0</step>
+    <step order="4">dotnet build src/server/api/Sprk.Bff.Api/ → expect success (warnings ok)</step>
+    <step order="5">Skip to next task — auto-advance per autonomous mode</step>
+  </steps>
+
+  <outputs>
+    <output type="report">In-conversation confirmation note (no file)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 pre-flight checks pass</criterion>
+    <criterion testable="true">No file modifications in this task</criterion>
+  </acceptance-criteria>
+</task>

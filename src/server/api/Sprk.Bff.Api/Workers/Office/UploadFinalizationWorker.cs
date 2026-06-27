@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai;
@@ -44,7 +44,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 {
     private readonly ILogger<UploadFinalizationWorker> _logger;
     private readonly SpeFileStore _speFileStore;
-    private readonly IDistributedCache _cache;
+    private readonly ITenantCache _cache;
     private readonly ServiceBusClient _serviceBusClient;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ServiceBusOptions _serviceBusOptions;
@@ -78,7 +78,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     public UploadFinalizationWorker(
         ILogger<UploadFinalizationWorker> logger,
         SpeFileStore speFileStore,
-        IDistributedCache cache,
+        ITenantCache cache,
         ServiceBusClient serviceBusClient,
         IServiceScopeFactory scopeFactory,
         IOptions<ServiceBusOptions> serviceBusOptions,
@@ -555,8 +555,13 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 
     private async Task<bool> IsAlreadyProcessedAsync(string idempotencyKey, CancellationToken cancellationToken)
     {
-        var cacheKey = $"office:upload:processed:{idempotencyKey}";
-        var cached = await _cache.GetStringAsync(cacheKey, cancellationToken);
+        var tenantId = GetTenantIdForCache();
+        var cached = await _cache.GetAsync<string>(
+            tenantId,
+            resource: "office-upload-processed",
+            id: idempotencyKey,
+            version: 1,
+            ct: cancellationToken);
         return !string.IsNullOrEmpty(cached);
     }
 
@@ -565,12 +570,27 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         Guid documentId,
         CancellationToken cancellationToken)
     {
-        var cacheKey = $"office:upload:processed:{idempotencyKey}";
-        await _cache.SetStringAsync(
-            cacheKey,
-            documentId.ToString(),
-            new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = IdempotencyKeyTtl },
-            cancellationToken);
+        var tenantId = GetTenantIdForCache();
+        await _cache.SetAsync<string>(
+            tenantId,
+            resource: "office-upload-processed",
+            id: idempotencyKey,
+            version: 1,
+            value: documentId.ToString(),
+            ttl: IdempotencyKeyTtl,
+            ct: cancellationToken);
+    }
+
+    /// <summary>
+    /// Resolves the BFF's tenant ID from configuration for cache scoping.
+    /// Per ADR-029 the BFF is single-tenant per Redis instance; this tenant ID
+    /// is the BFF's own AAD tenant (TENANT_ID or AzureAd:TenantId).
+    /// Falls back to "bff" if neither is configured (defensive — should not happen in deployed envs).
+    /// </summary>
+    private string GetTenantIdForCache()
+    {
+        var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"];
+        return string.IsNullOrWhiteSpace(tenantId) ? "bff" : tenantId;
     }
 
     private static UploadFinalizationPayload? DeserializePayload(JsonElement payload)

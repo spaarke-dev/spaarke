@@ -135,8 +135,8 @@ if ([string]::IsNullOrWhiteSpace($OutputMarkdownPath))  { $OutputMarkdownPath = 
 # §5.1 hardcoded container -> index map (design.md §5.1)
 # -----------------------------------------------------------------------------
 $ContainerIndexMap = @{
-    'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50' = 'spaarke-knowledge-index-v2'
-    'b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh' = 'spaarke-file-index'
+    'b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50' = 'spaarke-files-index'
+    'b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh' = 'spaarke-files-index'
 }
 
 # -----------------------------------------------------------------------------
