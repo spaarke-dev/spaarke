@@ -634,8 +634,7 @@ function validateEntityNameValidatorNode(nodeId: string, node: Node<PlaybookNode
       nodeId,
       severity: 'error',
       rule: 'entity-name-validator-missing-candidate-text',
-      message:
-        'Entity Name Validator: Candidate text source binding is required (e.g. {{narrate.output.result}}).',
+      message: 'Entity Name Validator: Candidate text source binding is required (e.g. {{narrate.output.result}}).',
     });
   }
 
@@ -644,8 +643,7 @@ function validateEntityNameValidatorNode(nodeId: string, node: Node<PlaybookNode
       nodeId,
       severity: 'error',
       rule: 'entity-name-validator-missing-allow-list',
-      message:
-        'Entity Name Validator: Allow-list source binding is required (string[] of permitted entity names).',
+      message: 'Entity Name Validator: Allow-list source binding is required (string[] of permitted entity names).',
     });
   }
 
