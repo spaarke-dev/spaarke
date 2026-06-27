@@ -1,6 +1,12 @@
 # Spaarke Environment Factory — Design Specification
 
-> **Status**: Draft — pending owner review, then `/design-to-spec`
+> **Status**: ⚠️ SUPERSEDED (2026-06-13) by `projects/customer-provisioning-orchestration-r1/`.
+> This draft remains as input/source material — its lifecycle coverage matrix, gap analysis, and
+> registry-extension thinking carry forward into that project's Phase 0 discovery report. The
+> *execution architecture* here (operator-run PowerShell orchestrator as the end state) is replaced
+> by the locked three-layer model (ADR-004 job handlers → control-plane API + MCP server → swappable
+> front ends). Read the successor project, not this, for current direction.
+>
 > **Created**: 2026-06-12
 > **Author**: Ralph Schroeder / Claude Code
 > **Project**: spaarke-environment-factory-r1
