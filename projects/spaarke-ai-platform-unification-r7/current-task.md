@@ -11,9 +11,9 @@
 | Field | Value |
 |---|---|
 | **Task** | 002 — Scaffold AiCompletionNodeExecutor.cs (interface impl, ctor, Validate skeleton) |
-| **Step** | 0 of N: not yet started |
-| **Status** | not-started |
-| **Next Action** | User says "execute task 002" → invokes `task-execute` skill with `tasks/002-scaffold-aicompletion-node-executor.poml` |
+| **Step** | 2 of 11: initializing |
+| **Status** | in-progress |
+| **Next Action** | Step 4 — Create AiCompletionNodeExecutor.cs |
 
 ### Files Modified This Session
 
@@ -35,8 +35,11 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 | **Task File** | `tasks/002-scaffold-aicompletion-node-executor.poml` |
 | **Title** | Scaffold AiCompletionNodeExecutor.cs (interface impl, ctor, Validate skeleton) |
 | **Phase / Wave** | Wave 1 — AiCompletionNodeExecutor build (FR-12 to FR-15) |
-| **Status** | not-started |
-| **Started** | — |
+| **Status** | in-progress |
+| **Started** | 2026-06-28 |
+| **Rigor Level** | FULL (per POML <rigor-level>) — code-impl, .cs files, ADRs 010/013/029 |
+| **Knowledge Files Loaded** | .claude/patterns/ai/node-executor-authoring.md, .claude/constraints/bff-extensions.md, src/server/api/Sprk.Bff.Api/CLAUDE.md, notes/spikes/aicompletion-pattern-decision.md |
+| **Sibling pattern source** | src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs |
 
 ---
 
@@ -45,6 +48,7 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 ### Completed Tasks
 
 - ✅ **Task 001** (2026-06-28) — Audit complete. Decision doc at `notes/spikes/aicompletion-pattern-decision.md`. Key findings: mirror EntityNameValidator structure (Singleton, ILogger + IOpenAiClient ctor); Validate REQUIRES Action FK + SystemPrompt + OutputSchema, PROHIBITS Tool, NOT-REQUIRES Document (FR-13); PromptSchemaOverrideMerger plugs in just before LLM call (reuse `ApplyPromptSchemaOverride` logic from AiAnalysisNodeExecutor); GetStructuredCompletionRawAsync returns raw JSON string → parse once + bind to NodeOutput.StructuredData with TextContent = raw JSON; Singleton DI registration per ADR-010 in `AnalysisServicesModule.AddNodeExecutors`. One open question for task 002: OutputSchemaJson carrier on AnalysisAction record (extend record or read from ConfigJson).
+- ✅ **Task 080** (2026-06-28, Wave 8 parallel-safe pre-flight) — PlaybookBuilder `sprk_nodetype` + `__actionType` audit complete. Inventory at `notes/spikes/playbookbuilder-sprk-nodetype-audit.md`. Findings: 9 `sprk_nodetype` refs in 3 files (`types/canvas.ts`, `types/playbook.ts`, `services/playbookNodeSync.ts`); 3 `__actionType` refs in same 3 files; zero refs in `src/client/shared/`. Replacement strategy categorized (direct rename for query/payload, delete for `DataverseNodeType`/`NodeTypeToDataverse`/`NodeTypeToActionType` constructs, rewrite for JSDoc). Task 088 has a 5-step plan + cross-task coordination matrix (depends on task 022 enum rename + task 024 dispatch refactor + task 081 form update).
 
 ### Current Step
 

@@ -92,7 +92,7 @@
 
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
-| 040 | ⏸️ | Audit all callers of AnalysisOrchestrationService.ExecuteAnalysisAsync | audit, bff-api | yes | — |
+| 040 | ✅ | Audit all callers of AnalysisOrchestrationService.ExecuteAnalysisAsync | audit, bff-api | yes | — |
 | 041 | ⏸️ | Migrate non-chat callers to PlaybookOrchestrationService.ExecuteAsync (FR-11) | bff-api, code-impl | yes | 040, 091 (W9 chat-summarize done) |
 | 042 | ⏸️ | DELETE ExecuteAnalysisAsync + cascading dead code (FR-11) | bff-api, code-impl, deletion | no | 041 |
 | 043 | ⏸️ | Drop sprk_analysisaction.sprk_actiontypeid (lookup) via dataverse-create-schema (FR-03) | dataverse-schema, deletion | no | 042 |
@@ -157,7 +157,7 @@
 
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
-| 080 | ⏸️ | Audit PlaybookBuilder canvas state for `sprk_nodetype` references | audit, code-page | yes | — |
+| 080 | ✅ | Audit PlaybookBuilder canvas state for `sprk_nodetype` references | audit, code-page | yes | — |
 | 081 | ⏸️ | Replace Node Type field with Executor Type Choice on Power Apps form (FR-21) | dataverse, form-update | yes | 024 |
 | 082 | ⏸️ | Update canvas Node Types left panel — 33 categorized entries (FR-22) | code-page, ui | yes | 024 |
 | 083 | ⏸️ | Wire typed config form renderer driven by schema endpoint (FR-23) | code-page, ui | yes | 033 (W3 endpoint) |
