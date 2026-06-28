@@ -61,7 +61,7 @@ namespace Sprk.Bff.Api.Tests.Api.Insights;
 /// </list>
 /// </para>
 /// </remarks>
-public class InsightsSearchEndpointTests : IClassFixture<InsightsSearchEndpointTestFixture>
+public class InsightsSearchEndpointContractTests : IClassFixture<InsightsSearchEndpointTestFixture>
 {
     private readonly InsightsSearchEndpointTestFixture _fixture;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
@@ -69,7 +69,7 @@ public class InsightsSearchEndpointTests : IClassFixture<InsightsSearchEndpointT
     private const string SampleProjectSubject = "project:11111111-2222-3333-4444-555555555555";
     private const string SampleInvoiceSubject = "invoice:11111111-2222-3333-4444-555555555555";
 
-    public InsightsSearchEndpointTests(InsightsSearchEndpointTestFixture fixture)
+    public InsightsSearchEndpointContractTests(InsightsSearchEndpointTestFixture fixture)
     {
         _fixture = fixture;
     }
@@ -549,7 +549,7 @@ public class InsightsSearchEndpointTests : IClassFixture<InsightsSearchEndpointT
 }
 
 /// <summary>
-/// Test fixture for <see cref="InsightsSearchEndpointTests"/>. Hosts the BFF API
+/// Test fixture for <see cref="InsightsSearchEndpointContractTests"/>. Hosts the BFF API
 /// in-process via <see cref="WebApplicationFactory{TEntryPoint}"/>, replaces
 /// <see cref="IInsightsAi"/> with a mock so each test asserts against deterministic
 /// facade behavior, and provides clients with / without a <c>tid</c> claim so the

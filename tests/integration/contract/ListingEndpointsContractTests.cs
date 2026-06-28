@@ -8,11 +8,11 @@ using Xunit;
 
 namespace Sprk.Bff.Api.Tests;
 
-public class ListingEndpointsTests : IClassFixture<CustomWebAppFactory>
+public class ListingEndpointsContractTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;
 
-    public ListingEndpointsTests(CustomWebAppFactory factory)
+    public ListingEndpointsContractTests(CustomWebAppFactory factory)
     {
         _client = factory.CreateClient();
     }

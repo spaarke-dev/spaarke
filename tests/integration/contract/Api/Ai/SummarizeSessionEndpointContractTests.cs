@@ -55,7 +55,7 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// (no closure capture — verified via orchestrator constructor signature inspection).
 /// </para>
 /// </remarks>
-public class SummarizeSessionEndpointTests : IClassFixture<SummarizeSessionEndpointTestFixture>
+public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSessionEndpointTestFixture>
 {
     private readonly SummarizeSessionEndpointTestFixture _fx;
 
@@ -64,7 +64,7 @@ public class SummarizeSessionEndpointTests : IClassFixture<SummarizeSessionEndpo
     private const string TestUserOid = "test-user-r5-summarize-endpoint";
     private const string TestBearer = "summarize-session-test-bearer";
 
-    public SummarizeSessionEndpointTests(SummarizeSessionEndpointTestFixture fx)
+    public SummarizeSessionEndpointContractTests(SummarizeSessionEndpointTestFixture fx)
     {
         _fx = fx;
     }
@@ -372,7 +372,7 @@ public class SummarizeSessionEndpointTests : IClassFixture<SummarizeSessionEndpo
 }
 
 /// <summary>
-/// Test fixture for <see cref="SummarizeSessionEndpointTests"/>. Hosts a minimal
+/// Test fixture for <see cref="SummarizeSessionEndpointContractTests"/>. Hosts a minimal
 /// <see cref="WebApplication"/> that maps ONLY
 /// <see cref="SummarizeSessionEndpoint.MapSummarizeSessionEndpoint"/> against test-double
 /// dependencies — no production-app config required.

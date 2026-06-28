@@ -12,12 +12,12 @@ namespace Sprk.Bff.Api.Tests.Integration;
 /// Integration tests for Dataverse Web API operations using WireMock.
 /// Tests HTTP interactions with the Dataverse Web API endpoints for document management.
 /// </summary>
-public class DataverseWebApiWireMockTests : IDisposable
+public class DataverseWebApiWireMockContractTests : IDisposable
 {
     private readonly WireMockServer _mockServer;
     private readonly HttpClient _httpClient;
 
-    public DataverseWebApiWireMockTests()
+    public DataverseWebApiWireMockContractTests()
     {
         _mockServer = WireMockServer.Start();
         _httpClient = new HttpClient

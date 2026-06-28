@@ -53,13 +53,13 @@ namespace Sprk.Bff.Api.Tests.Api.Insights;
 /// the facade in production. This matches the Wave E1 + E2 test pattern.
 /// </para>
 /// </remarks>
-public class InsightsAssistantEndpointTests : IClassFixture<InsightsAssistantEndpointTestFixture>
+public class InsightsAssistantEndpointContractTests : IClassFixture<InsightsAssistantEndpointTestFixture>
 {
     private readonly InsightsAssistantEndpointTestFixture _fixture;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
     private const string SampleMatterSubject = "matter:11111111-2222-3333-4444-555555555555";
 
-    public InsightsAssistantEndpointTests(InsightsAssistantEndpointTestFixture fixture)
+    public InsightsAssistantEndpointContractTests(InsightsAssistantEndpointTestFixture fixture)
     {
         _fixture = fixture;
     }
@@ -456,7 +456,7 @@ public class InsightsAssistantEndpointTests : IClassFixture<InsightsAssistantEnd
 }
 
 /// <summary>
-/// Test fixture for <see cref="InsightsAssistantEndpointTests"/>. Hosts the BFF API
+/// Test fixture for <see cref="InsightsAssistantEndpointContractTests"/>. Hosts the BFF API
 /// in-process via <see cref="WebApplicationFactory{TEntryPoint}"/>, replaces
 /// <see cref="IInsightsAi"/> with a mock, and provides clients with / without a
 /// <c>tid</c> claim. Mirrors the <c>InsightsSearchEndpointTestFixture</c> pattern.
