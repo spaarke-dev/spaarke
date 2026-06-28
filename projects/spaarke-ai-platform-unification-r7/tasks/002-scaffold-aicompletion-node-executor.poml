@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-002" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Scaffold AiCompletionNodeExecutor.cs (interface impl, constructor, Validate skeleton)</title>
+    <status>not-started</status>
+    <wave>1</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-1</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+    <fr-coverage>FR-12 (scaffold portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Create the AiCompletionNodeExecutor class skeleton — INodeExecutor implementation,
+    constructor with required dependencies, Validate() skeleton (full impl in task 005),
+    ExecuteAsync() skeleton (full impl in tasks 003-004), DI registration (full registration in task 006).
+    This task delivers a class that compiles and is wired through DI; downstream tasks fill in the meat.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer. Mirror the EntityNameValidatorNodeExecutor pattern documented in task 001.
+    Singleton, ILogger only, ConfigJson read + Validate. Do NOT over-engineer.
+  </role>
+
+  <goal>
+    A new file `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs` that:
+    1. Implements `INodeExecutor`
+    2. Has constructor injecting `IOpenAiClient`, `PromptSchemaOverrideMerger`, `ILogger&lt;AiCompletionNodeExecutor&gt;`
+    3. Returns `ExecutorType.AiCompletion` (enum value 1) from SupportedExecutorTypes (note: enum still `ActionType` pre-Wave 2; refactor in Wave 2)
+    4. Has Validate() skeleton with TODO comment pointing to task 005
+    5. Has ExecuteAsync() skeleton with TODO comment pointing to tasks 003-004
+    6. Compiles clean with no warnings
+    7. Is registered as Singleton in `AnalysisServicesModule.AddNodeExecutors` (skeleton registration; full validation wiring in task 006)
+  </goal>
+
+  <inputs>
+    <file purpose="pattern-decision">projects/spaarke-ai-platform-unification-r7/notes/spikes/aicompletion-pattern-decision.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="sibling-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — Singleton registration; no extra abstraction layers, no factories.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — leaf executor only; do not introduce new public types beyond the executor class itself.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — verify publish-size delta at end of task (expected: minimal increase, well under +2 MB NFR-01).</constraint>
+    <constraint source="ADR-038">Testing Strategy — unit tests follow in tasks 007-009. This task's "compiles" gate satisfies the build-clean precondition.</constraint>
+    <constraint source="CLAUDE.md §11">New component justification triple:
+      1. Existing: AiAnalysisNodeExecutor exists but requires Tool + Document — wrong contract for prompt-only calls (R4 /narrate failed because of this).
+      2. Extension: cannot extend AiAnalysisNodeExecutor without breaking its existing contract (it's used by Insights pipeline). New executor is required.
+      3. Cost-of-doing-nothing: R4 /narrate cannot ship; ExecutorType.AiCompletion = 1 enum value remains unimplemented; "prompt-only LLM call" workflow remains impossible in the platform.
+    </constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist applies. Placement decision: keep IN BFF — AiCompletionNodeExecutor is a leaf executor in the existing Services/Ai/Nodes/ pattern, NOT a new AI surface.</constraint>
+    <constraint source="bff-extensions.md §F.1">Asymmetric-Registration Tier 1.5 Anti-Pattern — this executor is registered unconditionally (not behind a feature flag), so no Null-Object pattern needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="EntityNameValidatorNodeExecutor" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs">
+        Primary scaffold reference per task 001 decision doc.
+      </pattern>
+      <pattern name="AnalysisServicesModule.AddNodeExecutors" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs">
+        DI registration pattern — Singleton call.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 001 produced the pattern decision. This task makes it concrete: a compilable, wired class.
+      Subsequent tasks (003, 004, 005, 006) flesh out the behavior. Tasks 007-009 add tests.
+      Wave 1 completes at task 010 with BFF publish + size check.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started-but-required">Pattern-decision document at notes/spikes/aicompletion-pattern-decision.md</dependency>
+    </dependencies>
+    <related-work>
+      <item>R4 /narrate endpoint at src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs:201-374 will route through this executor after task 015.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF (.cs file modification, tag bff-api, ADR-010+013+029 applicable) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md + plan.md + .claude/constraints/bff-extensions.md + task 001 pattern-decision doc.
+    </step>
+    <step order="2" name="Verify dependency">
+      Confirm `notes/spikes/aicompletion-pattern-decision.md` exists. If not, STOP — task 001 must complete first.
+    </step>
+    <step order="3" name="Read EntityNameValidatorNodeExecutor as template">
+      Open the sibling file. Identify the structural elements to mirror (namespace, class declaration, constructor injection, Validate signature, ExecuteAsync signature).
+    </step>
+    <step order="4" name="Create AiCompletionNodeExecutor.cs">
+      Write the new file with:
+      - Namespace: Sprk.Bff.Api.Services.Ai.Nodes
+      - Class: internal sealed class AiCompletionNodeExecutor : INodeExecutor
+      - Constructor: IOpenAiClient openAiClient, PromptSchemaOverrideMerger overrideMerger, ILogger&lt;AiCompletionNodeExecutor&gt; logger
+      - Property: SupportedActionTypes (will become SupportedExecutorTypes in Wave 2) returning [ActionType.AiCompletion]
+      - Method skeleton: Task&lt;NodeValidationResult&gt; ValidateAsync(...) with TODO: see task 005
+      - Method skeleton: Task&lt;NodeExecutionResult&gt; ExecuteAsync(...) with TODO: see tasks 003-004
+      - One-line non-obvious comment ONLY if needed (e.g., "// AiCompletion does NOT require Tool/Document — distinguishes from AiAnalysis (FR-13)")
+    </step>
+    <step order="5" name="Register in AnalysisServicesModule.AddNodeExecutors">
+      Add Singleton registration: services.AddSingleton&lt;INodeExecutor, AiCompletionNodeExecutor&gt;();
+      Place alphabetically near other executor registrations.
+    </step>
+    <step order="6" name="Build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Goal: 0 errors, 0 NEW warnings. Pre-existing warnings carry forward.
+    </step>
+    <step order="7" name="Verify DI resolution at startup">
+      Spot check: the registration appears in the module + the constructor compiles + no DI-graph cycles.
+    </step>
+    <step order="8" name="Publish + size check (NFR-01 partial)">
+      Run: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-task002/
+      Measure compressed size; compare against task baseline (no expected change yet since skeleton has minimal LOC).
+      Document size in task notes.
+    </step>
+    <step order="9" name="Verify acceptance">
+      Open the new file in editor; confirm all goal bullets satisfied.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the new file. Run `/adr-check` against ADR-010 + ADR-013 + ADR-029 + bff-extensions.md.
+      Fix any findings before commit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 002 status complete; advance current-task.md to task 003.
+    </step>
+    <step order="11" name="Commit">
+      Commit AiCompletionNodeExecutor.cs + AnalysisServicesModule.cs change with conventional message.
+      Example: feat(bff/r7): scaffold AiCompletionNodeExecutor (Wave 1 task 002, FR-12)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (sibling executor + DI module + interface)</tool>
+    <tool>Write (new AiCompletionNodeExecutor.cs)</tool>
+    <tool>Edit (AnalysisServicesModule.cs DI registration)</tool>
+    <tool>Bash (dotnet build, dotnet publish, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</output>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 003)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 002 ✅)</output>
+    <output type="commit">feat(bff/r7): scaffold AiCompletionNodeExecutor (Wave 1 task 002, FR-12)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>File AiCompletionNodeExecutor.cs exists at src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/</criterion>
+    <criterion>Class implements INodeExecutor</criterion>
+    <criterion>Constructor injects IOpenAiClient, PromptSchemaOverrideMerger, ILogger</criterion>
+    <criterion>SupportedActionTypes returns [ActionType.AiCompletion]</criterion>
+    <criterion>Validate() + ExecuteAsync() skeleton present with TODO comments pointing to downstream tasks</criterion>
+    <criterion>Registered as Singleton in AnalysisServicesModule.AddNodeExecutors</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Publish size delta documented (expected: negligible, +0 to +10 KB)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

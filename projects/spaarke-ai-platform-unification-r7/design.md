@@ -12,6 +12,16 @@
 
 > **Out of scope — agent-building (Action Engine R1 owns)**: The "Agent Builder", "Spaarke Claw", customer-facing agent UX, Action Templates, Tool Registry classification, gate approvals, phase deny-tools, meta-tools (`FindResources` / `GetResourceDetail` / `InvokeResource`), etc. all live in [`ai-spaarke-action-engine-r1`](../ai-spaarke-action-engine-r1/). R7 is the dispatch + schema foundation that Action Engine sits on top of. R7 does NOT include substantive agent-builder work. See §11 (pointer only, not scope).
 
+<hot-path-declaration>
+  <bff>YES</bff>
+  <spaarke-ai>NO</spaarke-ai>
+  <ci-workflows>NO</ci-workflows>
+  <skill-directives>YES</skill-directives>
+  <root-claude-md>NO</root-claude-md>
+</hot-path-declaration>
+
+> **Hot-path rationale**: BFF=YES (AiCompletionNodeExecutor + PlaybookOrchestrationService refactor + enum rename + endpoint additions, per spec §"Affected Areas"). Skill-directives=YES (FR-32/FR-33 rewrite jps-action-create, jps-playbook-design, jps-playbook-audit, jps-validate; minor update to jps-scope-refresh). SpaarkeAi=NO (PlaybookBuilder lives at `src/client/code-pages/PlaybookBuilder/`, not `src/solutions/SpaarkeAi/**`). CI-workflows=NO. Root-CLAUDE.md=NO.
+
 ---
 
 ## 1. Why this project exists (problem statement)

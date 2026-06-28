@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-001" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Audit existing AiAnalysisNodeExecutor + EntityNameValidatorNodeExecutor for AiCompletion patterns</title>
+    <status>not-started</status>
+    <wave>1</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>audit, bff-api, planning, wave-1</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <fr-coverage>FR-12 (preparatory)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wave 1 starts here. Before writing AiCompletionNodeExecutor, audit the two sibling executors
+    that will inform its design: AiAnalysisNodeExecutor (the closest existing prompt-driven executor,
+    but it requires Tool + Document) and EntityNameValidatorNodeExecutor (the spec's "Existing Patterns to Follow"
+    sibling — Singleton, ILogger only, ConfigJson read + Validate). Produce a clean pattern-decision
+    document that the next task (002 scaffold) can follow without re-reading source.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer familiar with the Spaarke BFF playbook orchestration model.
+    Goal: extract the right pattern, not re-implement.
+  </role>
+
+  <goal>
+    A pattern-decision document at `projects/spaarke-ai-platform-unification-r7/notes/spikes/aicompletion-pattern-decision.md`
+    that answers:
+    1. Which sibling pattern does AiCompletionNodeExecutor adopt for class structure (constructor injection, validation, execute)?
+    2. What does AiCompletionNodeExecutor REQUIRE from Action (SystemPrompt + OutputSchema + Temperature) vs PROHIBIT (Tool, Document)?
+    3. Where does PromptSchemaOverrideMerger plug in?
+    4. How does IOpenAiClient.GetStructuredCompletionRawAsync return shape map to the `node.OutputVariable`?
+    5. What DI registration shape (Singleton vs Scoped) is correct per ADR-010?
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="sibling-pattern">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs</file>
+    <file purpose="closest-prompt-executor">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="prompt-override-merger">src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaOverrideMerger.cs</file>
+    <file purpose="di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="openai-client-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — AiCompletionNodeExecutor registers as Singleton via existing AnalysisServicesModule.AddNodeExecutors pattern. No new abstraction layers.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — IInvokePlaybookAi triangle stays canonical. AiCompletionNodeExecutor is a leaf executor, not a new dispatch surface.</constraint>
+    <constraint source="spec FR-13">Validation requires Action FK; does NOT require Tool; does NOT require Document.</constraint>
+    <constraint source="spec Q2 KEEP">Per-node prompt overrides via PromptSchemaOverrideMerger MUST be preserved.</constraint>
+    <constraint source="CLAUDE.md §11">Audit only — do NOT scaffold new components in this task. Justification triple (Existing/Extension/Cost-of-doing-nothing) applies to task 002 scaffold, not this audit.</constraint>
+    <constraint source="bff-extensions.md">Audit task does not modify BFF; no publish-size check needed for this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="EntityNameValidatorNodeExecutor sibling" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs">
+        Spec-blessed sibling pattern. Singleton, ILogger only, ConfigJson read in Validate, no scoped deps.
+      </pattern>
+      <pattern name="AiAnalysisNodeExecutor closest LLM-call cousin" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs">
+        Calls IOpenAiClient. Requires Tool + Document — AiCompletion DOES NOT. Examine the difference.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      AiCompletionNodeExecutor closes R4's /narrate gap. R4 surfaced the bug: AiAnalysisNodeExecutor requires a Tool
+      to be configured, but /narrate is a prompt-only payload-driven call (TL;DR generation, channel narration).
+      The enum value `AiCompletion = 1` was clearly intended for this case but never implemented.
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">No prior tasks — Wave 1 starts here.</dependency>
+    </dependencies>
+    <related-work>
+      <item>R4 worktree `spaarke-daily-update-service-r4` HOLDS open until R7 ships. R7 task 015 (FR-15) closes R4 graduation gate.</item>
+      <item>spec.md §"Existing Patterns to Follow" calls EntityNameValidatorNodeExecutor as the model.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: audit-only task, no source modification, planning artifact only · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md + plan.md + .claude/constraints/bff-extensions.md.
+    </step>
+    <step order="2" name="Read sibling EntityNameValidatorNodeExecutor">
+      Read the full source file. Note: constructor shape, validate() logic, execute() logic, DI registration in AnalysisServicesModule.
+    </step>
+    <step order="3" name="Read AiAnalysisNodeExecutor">
+      Read the full source file. Note: where IOpenAiClient is called, what Action fields are read (SystemPrompt, OutputSchema, Temperature), where Tool + Document are required.
+    </step>
+    <step order="4" name="Read PromptSchemaOverrideMerger">
+      Understand the merge semantics: how node-level Role/Task/Constraints/Output Fields overrides apply to Action's prompt before LLM call.
+    </step>
+    <step order="5" name="Read IOpenAiClient.GetStructuredCompletionRawAsync signature">
+      Identify return shape (likely JsonElement or string). Confirm input parameters (SystemPrompt, schema, temperature, etc.).
+    </step>
+    <step order="6" name="Read INodeExecutor interface">
+      Document method signatures: Validate, ExecuteAsync. Confirm AiCompletionNodeExecutor implements them.
+    </step>
+    <step order="7" name="Write pattern-decision document">
+      Create `notes/spikes/aicompletion-pattern-decision.md` answering the 5 goal questions. Include code snippets where helpful but keep concise (target: 100-150 lines).
+    </step>
+    <step order="8" name="Update current-task.md + TASK-INDEX">
+      Mark task 001 status complete; advance current-task.md to task 002.
+    </step>
+    <step order="9" name="Commit">
+      Commit notes/spikes/aicompletion-pattern-decision.md with conventional message. No PR yet (Wave 1 ships as a single PR at task 010).
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (Spaarke BFF source files)</tool>
+    <tool>Grep (search for IOpenAiClient call sites)</tool>
+    <tool>Write (pattern-decision document)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/spikes/aicompletion-pattern-decision.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 002)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 001 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Pattern-decision document exists at notes/spikes/aicompletion-pattern-decision.md</criterion>
+    <criterion>Document answers all 5 goal questions explicitly</criterion>
+    <criterion>Document cites EntityNameValidatorNodeExecutor as primary pattern; AiAnalysisNodeExecutor as LLM-call reference</criterion>
+    <criterion>Document explicitly addresses Action FK requirement (required) and Tool/Document (NOT required)</criterion>
+    <criterion>Document confirms Singleton DI registration per ADR-010</criterion>
+    <criterion>current-task.md updated to point at task 002 as next</criterion>
+    <criterion>TASK-INDEX.md shows 001 ✅, 002 🔲 ready</criterion>
+  </acceptance-criteria>
+</task>
