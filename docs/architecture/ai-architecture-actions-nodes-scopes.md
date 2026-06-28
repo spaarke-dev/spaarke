@@ -195,7 +195,7 @@ The policy is not yet binding — capture in this doc so it's not lost between R
 | Question | Read |
 |---|---|
 | How runtime reads these columns (precedence, mode detection) | `ai-architecture-playbook-runtime.md` §3-5 |
-| How a consumer surface dispatches a playbook | `ai-architecture-consumer-routing.md` |
+| How a consumer surface dispatches a playbook | `ai-architecture-playbook-consumer-routing.md` |
 | How to author the JSON file the deploy script consumes | `ai-guide-playbook-deploy-recipe.md` |
 | JPS schema for action prompts + structured output | `ai-guide-jps-authoring.md` |
 | Maker recipe for a real `sprk_event` notification playbook | `PLAYBOOK-AUTHOR-GUIDE.md` |

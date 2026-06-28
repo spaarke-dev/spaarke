@@ -13,7 +13,7 @@
 This doc covers the **4-tier AI platform overview only**. After the canonical-truth loop (2026-06-26), runtime detail has been moved out:
 
 - **Playbook runtime** (dispatch shapes, mode detection, action lookup, three config columns, scope-array semantics, empty-payload contract, Legacy-mode log catalog, the two parallel orchestrators) → `ai-architecture-playbook-runtime.md` (LOAD-BEARING)
-- **Consumer routing & Path A.5** (`sprk_playbookconsumer`, `IConsumerRoutingService`, `IInvokePlaybookAi`) → `ai-architecture-consumer-routing.md`
+- **Consumer routing & Path A.5** (`sprk_playbookconsumer`, `IConsumerRoutingService`, `IInvokePlaybookAi`) → `ai-architecture-playbook-consumer-routing.md`
 - **Where new config fields belong** (Action vs Node vs Playbook decision tree; `sprk_configjson` boundary) → `ai-architecture-actions-nodes-scopes.md`
 - **Deploy procedure** (`Deploy-Playbook.ps1` recipe) → `ai-guide-playbook-deploy-recipe.md`
 
