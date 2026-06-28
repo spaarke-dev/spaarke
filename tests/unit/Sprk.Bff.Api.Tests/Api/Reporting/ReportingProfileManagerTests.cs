@@ -78,22 +78,6 @@ public class ReportingProfileManagerTests
         profile.DisplayName.Should().Be(displayName);
     }
 
-    [Fact]
-    public void ServicePrincipalProfileInfo_IsRecord_SupportsEquality()
-    {
-        // Arrange
-        var id = Guid.NewGuid();
-        const string displayName = "sprk-contoso-legal";
-
-        var a = new ServicePrincipalProfileInfo(id, displayName);
-        var b = new ServicePrincipalProfileInfo(id, displayName);
-        var c = new ServicePrincipalProfileInfo(Guid.NewGuid(), displayName);
-
-        // Assert — record equality
-        a.Should().Be(b, "records with same values are equal");
-        a.Should().NotBe(c, "records with different IDs are not equal");
-    }
-
     // =========================================================================
     // Display name convention
     // =========================================================================

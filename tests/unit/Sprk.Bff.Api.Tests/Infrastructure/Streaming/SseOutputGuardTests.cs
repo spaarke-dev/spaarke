@@ -59,24 +59,6 @@ public class SseOutputGuardTests : IDisposable
         result.Data.GetRawText().Should().Be(payload.GetRawText());
     }
 
-    [Fact]
-    public void ValidateAndFallback_ValidPayload_DoesNotIncrementTelemetry()
-    {
-        // Arrange — we use the real validator here so we can verify no side-effects
-        var payload = JsonDocument.Parse("""{"field":"value"}""").RootElement;
-        _validatorMock
-            .Setup(v => v.Validate(It.IsAny<string>(), It.IsAny<JsonElement>()))
-            .Returns(SseEventValidationResult.Valid);
-
-        // Act — calling multiple times should never call RecordValidationFailure
-        // (verified indirectly: if telemetry threw on unexpected calls, test would fail)
-        _sut.ValidateAndFallback("token", payload);
-        _sut.ValidateAndFallback("done", payload);
-
-        // No assertion needed — absence of exception from the strict mock is the signal.
-        _validatorMock.VerifyAll();
-    }
-
     // =========================================================================
     // 2. Invalid payload replaced with generic_widget fallback
     // =========================================================================

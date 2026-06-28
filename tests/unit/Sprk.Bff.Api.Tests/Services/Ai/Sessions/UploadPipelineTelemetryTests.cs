@@ -158,15 +158,6 @@ public class UploadPipelineTelemetryTests
         AssertNoForbiddenContent(record);
     }
 
-    [Fact(Skip = "Phase 4 follow-up — FileClassificationService.ClassifyAsync does not yet exist (per task 074 evidence). Contract: emit context.upload_classified with {sessionId, fileId, documentType (short enum label), confidence, durationMs, tenantId}. Reactivate when FileClassificationService is implemented.")]
-    public void FileClassificationService_ClassifyAsync_Emits_UploadClassified_ServiceSite()
-    {
-        // Placeholder: when FileClassificationService.ClassifyAsync ships, wire the
-        // IContextEventEmitter mock and assert UploadClassified was invoked Times.Once
-        // with the documentType enum label (not the freeform classifier reasoning text).
-        Assert.Fail("Reactivate when FileClassificationService is implemented (task 074 contract).");
-    }
-
     // ── context.upload_summarized ─────────────────────────────────────────────
     //
     // EMITTER LAYER ACTIVE; SERVICE LAYER ABSENT. See note on UploadClassified above.
@@ -197,12 +188,6 @@ public class UploadPipelineTelemetryTests
         record.Should().NotContainKey("text");
         record.Should().NotContainKey("content");
         AssertNoForbiddenContent(record);
-    }
-
-    [Fact(Skip = "Phase 4 follow-up — FileSummarizationService.SummarizeAsync does not yet exist (per task 074 evidence). Contract: emit context.upload_summarized with {sessionId, fileId, summaryCharCount (LENGTH ONLY — NEVER the summary text), durationMs, tenantId}. Reactivate when FileSummarizationService is implemented.")]
-    public void FileSummarizationService_SummarizeAsync_Emits_UploadSummarized_ServiceSite()
-    {
-        Assert.Fail("Reactivate when FileSummarizationService is implemented (task 074 contract).");
     }
 
     // ── context.upload_manifest_extracted ─────────────────────────────────────
@@ -236,12 +221,6 @@ public class UploadPipelineTelemetryTests
         record.Should().NotContainKey("sectionNames");
         record.Should().NotContainKey("tableContent");
         AssertNoForbiddenContent(record);
-    }
-
-    [Fact(Skip = "Phase 4 follow-up — FileManifestExtractor.ExtractAsync does not yet exist (per task 074 evidence). Contract: emit context.upload_manifest_extracted with {sessionId, fileId, sectionCount, tableCount, pageCount, durationMs, tenantId}. Reactivate when FileManifestExtractor is implemented.")]
-    public void FileManifestExtractor_ExtractAsync_Emits_UploadManifestExtracted_ServiceSite()
-    {
-        Assert.Fail("Reactivate when FileManifestExtractor is implemented (task 074 contract).");
     }
 
     // ── context.upload_indexed ────────────────────────────────────────────────
