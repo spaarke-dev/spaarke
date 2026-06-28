@@ -5,13 +5,16 @@
 .DESCRIPTION
     Orchestrates the build of all Spaarke client components in the required order:
     1. Shared libraries (8 packages in src/client/shared/ — Auth, SdapClient, AI.Context, AI.Outputs, Events.Components, SmartTodo.Components, UI.Components, AI.Widgets)
-    2. Vite solutions (20 projects in src/solutions/)
+       NOTE: Spaarke.DailyBriefing.Components is intentionally excluded — it's a source-only lib
+       (tsc --noEmit) with @spaarke peerDependencies; type-check happens via the consumer's tsc pass.
+    2. Vite solutions (19 projects in src/solutions/)
     3. Webpack code pages (4 projects in src/client/code-pages/)
     4. PCF controls (src/client/pcf/)
     5. External SPA (src/client/external-spa/)
 
-    Each component runs npm ci followed by npm run build. Shared libraries must build first
-    because downstream components depend on them.
+    Each component runs `npm install --legacy-peer-deps --no-audit --no-fund` (only when needed —
+    see the in-line "Install dependencies" comment for the trigger logic) followed by
+    `npm run build`. Shared libraries must build first because downstream components depend on them.
 
 .PARAMETER SkipSharedLibs
     Skip the shared library builds (step 1). Use when shared libs are already built
@@ -52,11 +55,18 @@ $ErrorActionPreference = "Stop"
 if ($Component) {
     $Component = $Component | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ }
 }
+# (The "SharedLibs"/"PCF"/"ExternalSPA" shortcut expansions are applied below, AFTER $SharedLibs is defined.)
 
 # --- Configuration ---
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 
 # Shared libraries (build order matters — downstream deps must come after their dependencies)
+#
+# Spaarke.DailyBriefing.Components is intentionally EXCLUDED from this list. Its build script is
+# `tsc --noEmit` and its `@spaarke/*` deps are listed as peerDependencies (not regular deps),
+# so it cannot type-check standalone — the type-check is performed by each consumer's tsc pass
+# (SpaarkeAi, DailyBriefing). Tried adding it 2026-06-28 → orchestrator failed on TS2307
+# "Cannot find module '@spaarke/ui-components'" etc. Excluded by design.
 $SharedLibs = @(
     @{ Name = "Spaarke.Auth";                 Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
     @{ Name = "Spaarke.SdapClient";           Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }
@@ -67,6 +77,11 @@ $SharedLibs = @(
     @{ Name = "Spaarke.UI.Components";        Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }        # depends on Auth, SdapClient
     @{ Name = "Spaarke.AI.Widgets";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Widgets" }           # depends on UI.Components, AI.Outputs
 )
+
+# Expand the "SharedLibs" special shortcut into the actual lib names so the filter at line ~113 matches.
+if ($Component -and "SharedLibs" -in $Component) {
+    $Component = @($Component | Where-Object { $_ -ne "SharedLibs" }) + ($SharedLibs | ForEach-Object { $_.Name })
+}
 
 # Vite solutions (src/solutions/ - each has vite.config.ts)
 $ViteSolutions = @(
@@ -145,14 +160,27 @@ function Invoke-ComponentBuild {
             # caret ranges. Strategy:
             #   1. If node_modules is missing, run `npm install --legacy-peer-deps`
             #      (resolves loosely; deterministic-enough for build).
-            #   2. If node_modules exists, skip install entirely and build directly
-            #      (the existing tree is already valid).
-            #   3. Tracked separately: scheduled regeneration of locks once we have
+            #   2. If node_modules exists BUT package.json is newer (added/changed
+            #      a sibling file: dep), re-run install so symlinks get created.
+            #      [2026-06-28 fix: prior "skip if node_modules exists" optimization
+            #      left stale state when package.json gained a new `file:..` ref
+            #      between branches — SpaarkeAi missed daily-briefing-components.]
+            #   3. Otherwise skip install entirely and build directly.
+            #   4. Tracked separately: scheduled regeneration of locks once we have
             #      bandwidth to deploy-verify the transitive upgrades. Until then,
             #      do NOT call `npm ci` here.
             $nodeModulesPath = Join-Path $BuildPath "node_modules"
+            $packageJsonPath = Join-Path $BuildPath "package.json"
+            $needsInstall = $false
             if (-not (Test-Path $nodeModulesPath)) {
+                $needsInstall = $true
                 Write-Host "        installing (no node_modules)..." -ForegroundColor DarkGray
+            }
+            elseif ((Test-Path $packageJsonPath) -and (Get-Item $packageJsonPath).LastWriteTime -gt (Get-Item $nodeModulesPath).LastWriteTime) {
+                $needsInstall = $true
+                Write-Host "        installing (package.json newer than node_modules — sibling-dep drift)..." -ForegroundColor DarkGray
+            }
+            if ($needsInstall) {
                 # Localize $ErrorActionPreference inside the script block so
                 # benign stderr emissions from npm don't become terminating
                 # exceptions under the script's outer 'Stop' preference. See
