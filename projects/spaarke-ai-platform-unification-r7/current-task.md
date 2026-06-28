@@ -19,7 +19,8 @@
 
 - `projects/spaarke-ai-platform-unification-r7/notes/spikes/aicompletion-pattern-decision.md` — Created — task 001 decision doc (5 goal questions answered, ~150 lines)
 - `projects/spaarke-ai-platform-unification-r7/current-task.md` — Modified — advance to task 002
-- `projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md` — Modified — mark 001 ✅
+- `projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md` — Modified — mark 001 ✅, 040 ✅, 080 ✅
+- `projects/spaarke-ai-platform-unification-r7/notes/spikes/executeanalysisasync-caller-audit.md` — Created — task 040 deliverable (Wave 4 parallel-safe pre-flight; current-task remains 002)
 
 ### Critical Context
 
@@ -49,6 +50,7 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 
 - ✅ **Task 001** (2026-06-28) — Audit complete. Decision doc at `notes/spikes/aicompletion-pattern-decision.md`. Key findings: mirror EntityNameValidator structure (Singleton, ILogger + IOpenAiClient ctor); Validate REQUIRES Action FK + SystemPrompt + OutputSchema, PROHIBITS Tool, NOT-REQUIRES Document (FR-13); PromptSchemaOverrideMerger plugs in just before LLM call (reuse `ApplyPromptSchemaOverride` logic from AiAnalysisNodeExecutor); GetStructuredCompletionRawAsync returns raw JSON string → parse once + bind to NodeOutput.StructuredData with TextContent = raw JSON; Singleton DI registration per ADR-010 in `AnalysisServicesModule.AddNodeExecutors`. One open question for task 002: OutputSchemaJson carrier on AnalysisAction record (extend record or read from ConfigJson).
 - ✅ **Task 080** (2026-06-28, Wave 8 parallel-safe pre-flight) — PlaybookBuilder `sprk_nodetype` + `__actionType` audit complete. Inventory at `notes/spikes/playbookbuilder-sprk-nodetype-audit.md`. Findings: 9 `sprk_nodetype` refs in 3 files (`types/canvas.ts`, `types/playbook.ts`, `services/playbookNodeSync.ts`); 3 `__actionType` refs in same 3 files; zero refs in `src/client/shared/`. Replacement strategy categorized (direct rename for query/payload, delete for `DataverseNodeType`/`NodeTypeToDataverse`/`NodeTypeToActionType` constructs, rewrite for JSDoc). Task 088 has a 5-step plan + cross-task coordination matrix (depends on task 022 enum rename + task 024 dispatch refactor + task 081 form update).
+- ✅ **Task 040** (2026-06-28, Wave 4 parallel-safe pre-flight) — `ExecuteAnalysisAsync` caller audit complete. Inventory at `notes/spikes/executeanalysisasync-caller-audit.md`. Key findings: only **1 production caller** (`AnalysisEndpoints.cs:261` `POST /api/ai/analysis/execute`); **SessionSummarizeOrchestrator does NOT call it** (contradicts POML expected-callers assumption — Wave 9 task 091 still required for FR-17 but independent of Wave 4); 13 unit-test references + 1 integration-test mock; replacement = degenerate 3-node playbook via `PlaybookOrchestrationService.ExecuteAsync` (Option A — recommended). **Plan implication**: Wave 4 dependency "blocked on Wave 9 + Wave 2" can be downgraded to "blocked on Wave 2 only" at task 041 kickoff. Risk register includes SSE chunk-shape mapping (`AnalysisStreamChunk` → `PlaybookStreamEvent`).
 
 ### Current Step
 

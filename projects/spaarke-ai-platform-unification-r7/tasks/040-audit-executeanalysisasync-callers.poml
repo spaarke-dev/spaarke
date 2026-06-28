@@ -2,7 +2,7 @@
 <task id="R7-040" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Audit all callers of AnalysisOrchestrationService.ExecuteAnalysisAsync</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>4</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>audit, bff-api, wave-4</tags>
