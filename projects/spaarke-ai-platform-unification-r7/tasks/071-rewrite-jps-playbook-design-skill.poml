@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-071" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>REWRITE `.claude/skills/jps-playbook-design/SKILL.md` (FR-32)</title>
+    <status>not-started</status>
+    <wave>7</wave>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <tags>skill-directives, docs, wave-7</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>070</dependencies>
+    <fr-coverage>FR-32</fr-coverage>
+  </metadata>
+
+  <prompt>
+    REWRITE the `.claude/skills/jps-playbook-design/SKILL.md` body to reflect the R7 node-first dispatch
+    model. This is the LARGEST skill (~25 KB) and arguably the most consequential — it teaches authors
+    how to design end-to-end playbooks.
+
+    Today this skill teaches authors to think "pick an Action; the Action's ActionType drives dispatch."
+    After R7 the mental model is INVERTED: pick an Executor Type FIRST (the node's `sprk_executortype`
+    Choice), then OPTIONALLY pick an Action (if the executor is prompt-driven — AiAnalysis / AiCompletion /
+    AiEmbedding). Pure executors (Condition, Start, ReturnResponse, EntityNameValidator, CreateNotification,
+    QueryDataverse, LookupUserMembership, etc.) have `sprk_actionid` NULL.
+
+    Cite the §3.1 WHY (R3.1 history of dispatch-model confusion) so future authors understand WHY the
+    mental model inverted, not just what changed.
+
+    **Sub-Agent Write Boundary applies — main session executes this. No parallel dispatch.** Per CLAUDE.md §3,
+    `.claude/skills/` writes happen only in main session.
+  </prompt>
+
+  <role>
+    Senior skill author for the Spaarke skill library. You understand the OLD playbook-design mental model
+    (Action-first: pick an Action, the Action's ActionType determines runtime executor) and the NEW R7 model
+    (Executor-first: pick an Executor Type Choice on the node, then optional Action if prompt-driven).
+    Your job: rewrite the workflow steps so a future playbook author produces correct node configuration
+    that survives the new single-hop dispatch.
+  </role>
+
+  <goal>
+    Updated `.claude/skills/jps-playbook-design/SKILL.md` that:
+    1. Inverts the mental model: Executor Type FIRST (node-first), then optional Action.
+    2. Teaches the 33-executor categorized selector (matches the global Choice set `sprk_playbookexecutortype`) — what each executor expects in config + scopes + Action FK.
+    3. Distinguishes prompt-driven executors (require Action FK) from pure executors (Action FK NULL).
+    4. Cites the §3.1 WHY (R3.1 history of dispatch-model confusion) inline so future authors understand the rationale.
+    5. Validates against `sprk_executortype` Choice — NOT against legacy ActionType lookup.
+    6. References the Wave 8 PlaybookBuilder UI updates (FR-21 to FR-27) so the skill teaches what the UI will eventually render.
+    7. Updates the 4-Home decision tree references — Home C (per-node config) is where executor-specific knobs live.
+    8. Preserves the multi-node compose-strategy guidance (ADR-037 DeliverComposite stays unaffected).
+    9. `last-reviewed: 2026-06-28`; `Reviewed By: spaarke-ai-platform-unification-r7 task 071 (FR-32)`.
+  </goal>
+
+  <inputs>
+    <file purpose="rewrite-target">.claude/skills/jps-playbook-design/SKILL.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design-doc-WHY">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="task-070-output">.claude/skills/jps-action-create/SKILL.md (just-rewritten in task 070; aligned narrative)</file>
+    <file purpose="dispatch-source-of-truth">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="executor-catalog">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ (33 executors)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3 Sub-Agent Write Boundary">Sub-agents CANNOT write to `.claude/` paths. Main session executes this task directly. Do NOT dispatch parallel agents.</constraint>
+    <constraint source="spec FR-32">Each rewritten skill cites the §3.1 WHY history and validates against `node.sprk_executortype`, not Action lookup.</constraint>
+    <constraint source="design.md §2 Invariant 2">Executor dispatch lives on the NODE via `sprk_executortype` Choice. Single hop. No 3-layer chain.</constraint>
+    <constraint source="design.md §2 Invariant 3">Action is a reusable prompt template (when prompt-driven). Pure executors have Action FK NULL.</constraint>
+    <constraint source="design.md §3.1">R3.1 history is the WHY — cite inline.</constraint>
+    <constraint source="ADR-037">Multinode output composition (`DeliverComposite`) is unaffected by dispatch reform. Compose-strategy guidance preserved.</constraint>
+    <constraint source="CLAUDE.md §11">REWRITE of existing skill — §11 triple does not apply.</constraint>
+    <constraint source="design.md §2 Invariant 4">Two-tier Tool/Handler stays general — available to ANY executor that needs delegation. NOT narrowed to AiAnalysis.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps-skill-authoring</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r7/design.md (§2 invariants 1-6, §3 component model, §3.1 WHY)</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md (FR-21 to FR-27 — Wave 8 UI; FR-32 acceptance)</file>
+      <file>.claude/skills/jps-playbook-design/SKILL.md (rewrite target)</file>
+      <file>docs/architecture/ai-architecture-actions-nodes-scopes.md (4-Home decision tree)</file>
+      <file>docs/adr/ADR-037-multinode-output-composition.md</file>
+    </files>
+    <patterns>
+      <pattern name="Executor-first workflow" location="design.md §2 Invariant 2">
+        Author picks `sprk_executortype` FIRST from 33-value Choice set. If executor is prompt-driven, author then picks Action FK. Otherwise Action FK stays NULL.
+      </pattern>
+      <pattern name="33-executor catalog" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/">
+        Each executor maps to one `ExecutorType` enum value (Wave 2 task 022 renamed from `ActionType`). The skill body should reference the categorized selector planned for Wave 8 (FR-22).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 7 (FR-32) rewrites jps-* skill bodies. Task 070 just rewrote jps-action-create to reflect Action
+      as a prompt template, not a dispatch identity carrier. THIS task rewrites the playbook-design skill
+      to invert the mental model: Executor Type first (node-first), then optional Action.
+
+      The skill body is ~25 KB — biggest of the 5 rewrites. Take care to preserve the multi-node guidance,
+      scope wiring, ADR-037 compose strategy — only the dispatch wiring narrative changes.
+    </background>
+    <dependencies>
+      <dependency task="070" status="prerequisite">jps-action-create rewrite must complete first — aligned terminology + Config-Home Guard.</dependency>
+      <dependency task="024" status="prerequisite">Wave 2 single-hop dispatch refactor merged.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 072 rewrites jps-playbook-audit (the inverse — audits playbooks against the new model).</item>
+      <item>Wave 8 (FR-21 to FR-27) ships the PlaybookBuilder UI that this skill will eventually teach authors to use. Skill body should foreshadow the UI shape (categorized 33-executor selector, typed config forms, Action tab).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: skill body rewrite (not ADR-bound code); STANDARD per CLAUDE.md §8 · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-32 + design.md §2 Invariants 1-6 + §3 component model + §3.1 WHY.
+    </step>
+    <step order="2" name="Read existing skill body">
+      Read full current `.claude/skills/jps-playbook-design/SKILL.md` (~25 KB). Note: structural sections (Purpose, Applies When, multi-step workflow, scope wiring guidance, compose strategy).
+    </step>
+    <step order="3" name="Read task 070 rewrite for terminology alignment">
+      Read the just-rewritten `.claude/skills/jps-action-create/SKILL.md` so terminology + cross-references match.
+    </step>
+    <step order="4" name="Inventory legacy dispatch references">
+      Grep skill body for: `ActionType`, `action.actiontype`, `sprk_actiontypeid`, `sprk_executoractiontype`, "lookup row", "ActionType lookup", "dispatch via Action". List each; rewrite or delete.
+    </step>
+    <step order="5" name="Rewrite Purpose + Applies When">
+      Reframe: "Designs end-to-end Spaarke playbooks under the R7 node-first dispatch model. Author picks an Executor Type FIRST per node (the `sprk_executortype` Choice — 33 values matching the C# `ExecutorType` enum). For prompt-driven executors, author then references a reusable Action template."
+    </step>
+    <step order="6" name="Rewrite the workflow — Executor-first sequence">
+      Reorder workflow steps:
+      1. Define playbook intent + consumer + scope (unchanged).
+      2. NEW STEP: For each node, pick the Executor Type FIRST from the 33-value categorized selector (foreshadow Wave 8 UI).
+      3. Distinguish prompt-driven (AiAnalysis, AiCompletion, AiEmbedding) — REQUIRE Action FK — from pure executors — Action FK NULL.
+      4. For pure executors: per-node config goes in `sprk_configjson` (Home C); no Action involved.
+      5. For prompt-driven executors: pick or author Action (uses task 070's jps-action-create skill).
+      6. Wire bindings, output variables, scopes (unchanged structurally).
+      7. Compose strategy (ADR-037 DeliverComposite) — unchanged.
+    </step>
+    <step order="7" name="Insert R7 dispatch-model section">
+      Add a new short subsection: "## The R7 dispatch model — what changed and why" citing design.md §3.1 + §2 Invariants 1-3. Explicit WHY: the 3-layer storage drift caused every release to ship a different version of the same bug; the single-hop `node.sprk_executortype` read is the canonical contract.
+    </step>
+    <step order="8" name="Update 4-Home decision tree references">
+      Home A = Action-intrinsic (prompt + schema + temperature ONLY — dispatch removed).
+      Home B = Playbook-level identity/scheduling.
+      Home C = Per-node runtime config including `sprk_executortype` Choice + `sprk_configjson` knobs.
+      Home D = Declarative N:N scope relationships.
+      Update the table + worked examples.
+    </step>
+    <step order="9" name="Reference Wave 8 UI shape (forward-looking)">
+      Add a short paragraph: "When PlaybookBuilder UI updates land (Wave 8, FR-21 to FR-27), the Executor Type selector renders the 33 values categorized by tier (per design.md §2 Invariant 5 + FR-22). Typed config forms render per executor type (FR-23). The Action tab (FR-24) is only enabled for prompt-driven executors."
+    </step>
+    <step order="10" name="Update validation guidance">
+      Validate against `sprk_executortype` Choice values — NOT against Action lookup. List the 5-step validation:
+      1. Every node has `sprk_executortype` set to a valid Choice value.
+      2. Prompt-driven executors have non-NULL `sprk_actionid`.
+      3. Pure executors have NULL `sprk_actionid`.
+      4. Configs match the executor's typed config schema (Wave 3 FR-16; foreshadow only).
+      5. Compose strategy is set for multi-output playbooks (ADR-037).
+    </step>
+    <step order="11" name="Bump frontmatter">
+      `last-reviewed: 2026-06-28`; `Reviewed By: spaarke-ai-platform-unification-r7 task 071 (FR-32 — node-first dispatch rewrite)`.
+    </step>
+    <step order="12" name="Verify acceptance">
+      Re-read rewritten skill body. Confirm: (a) Executor-first mental model dominant throughout, (b) prompt-driven vs pure executor distinction explicit, (c) §3.1 WHY cited inline, (d) 4-Home decision tree updated, (e) Wave 8 UI shape foreshadowed, (f) validation guidance updated.
+    </step>
+    <step order="13" name="Update current-task.md + TASK-INDEX">
+      Mark task 071 status complete; advance current-task.md to task 072.
+    </step>
+    <step order="14" name="Commit-deferred">
+      DO NOT commit. Wave 7 commits at task 075.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (existing skill body + task-070 output + design.md)</tool>
+    <tool>Grep (legacy dispatch references)</tool>
+    <tool>Edit (rewrite skill body sections in place)</tool>
+    <tool>Write (full rewrite if Edit churn is excessive)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">.claude/skills/jps-playbook-design/SKILL.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 072)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 071 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Workflow inverts mental model: Executor Type FIRST (node), Action OPTIONAL (only if prompt-driven)</criterion>
+    <criterion>Prompt-driven (AiAnalysis, AiCompletion, AiEmbedding) vs pure executor distinction is explicit and binding</criterion>
+    <criterion>33-executor categorized selector referenced (matches `sprk_playbookexecutortype` Choice set)</criterion>
+    <criterion>§3.1 WHY (R3.1 history of dispatch-model confusion) cited inline with rationale</criterion>
+    <criterion>Validation guidance: validate against `node.sprk_executortype` Choice, NOT against Action lookup</criterion>
+    <criterion>4-Home decision tree updated — Home A dispatch signal removed; Home C carries executor knobs</criterion>
+    <criterion>Wave 8 PlaybookBuilder UI shape (FR-21 to FR-27) foreshadowed for forward alignment</criterion>
+    <criterion>ADR-037 compose-strategy guidance preserved unchanged</criterion>
+    <criterion>Frontmatter `last-reviewed: 2026-06-28`; `Reviewed By: R7 task 071`</criterion>
+    <criterion>No commit (Wave 7 batches at task 075)</criterion>
+    <criterion>current-task.md updated to point at task 072</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-005" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Implement Validate() — Action FK required; Tool + Document NOT required (FR-13)</title>
+    <status>not-started</status>
+    <wave>1</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-1</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>002</dependencies>
+    <fr-coverage>FR-13 (validation contract)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Replace the task-002 Validate() skeleton with the binding contract from FR-13: Action FK is REQUIRED
+    (AiCompletion is prompt-driven and cannot run without a prompt source); Tool FK is PROHIBITED;
+    Document FK is PROHIBITED. Return NodeValidationResult with explicit per-error messages so the
+    orchestrator can fast-fail before any LLM cost is incurred. Tests in task 009 assert the contract.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer. The contract here is binding semantics — get the message text right so
+    consumers (Playbook Builder UI, orchestrator logs, error responses) can show users exactly which field
+    is wrong.
+  </role>
+
+  <goal>
+    AiCompletionNodeExecutor.Validate() complete:
+    1. Returns NodeValidationResult.Failure if context.Action is null OR context.Node.ActionId is missing
+       — error message: "AiCompletion node requires an Action FK (prompt source). Set sprk_actionid on the node."
+    2. Returns NodeValidationResult.Failure if context.Tool is present
+       — error message: "AiCompletion node MUST NOT have a Tool. Tools are used by AiAnalysis nodes; AiCompletion is prompt-only."
+    3. Returns NodeValidationResult.Failure if context.Document is present
+       — error message: "AiCompletion node MUST NOT have a Document. Documents are used by AiAnalysis nodes for grounding; AiCompletion is prompt-only."
+    4. Returns NodeValidationResult.Failure if context.Node.OutputVariable is null or whitespace
+       — error message: "AiCompletion node requires OutputVariable to be set on the node."
+    5. Returns NodeValidationResult.Failure if Action.SystemPrompt is null or whitespace
+       — error message: "AiCompletion node's Action {ActionId} has no SystemPrompt. Set sprk_systemprompt on the Action."
+    6. Aggregates all errors into a single NodeValidationResult.Failure result (don't bail on first error)
+    7. Returns NodeValidationResult.Success only when ALL conditions pass
+  </goal>
+
+  <inputs>
+    <file purpose="scaffolded-executor">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</file>
+    <file purpose="pattern-decision">projects/spaarke-ai-platform-unification-r7/notes/spikes/aicompletion-pattern-decision.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="sibling-validation">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs</file>
+    <file purpose="reference-llm-validation">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-13">Validation: requires Action FK; does NOT require Tool; does NOT require Document. Fast-fail via NodeValidationResult.</constraint>
+    <constraint source="spec FR-06">Action FK is OPTIONAL at SCHEMA level but required at executor Validate() for prompt-driven executors (AiAnalysis, AiCompletion, AiEmbedding). This is the AiCompletion enforcement point.</constraint>
+    <constraint source="ADR-010">DI Minimalism — Validate() does not require any new dependencies beyond what the task-002 ctor already injects (logger only).</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — Validate() is a leaf-executor concern; do not introduce a new validation framework.</constraint>
+    <constraint source="ADR-038">Testing Strategy — task 009 covers each error path. Validation logic must be deterministic + side-effect-free (no logging at warning+ level for ordinary validation failures; rely on caller to log).</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — placement unchanged.</constraint>
+    <constraint source="bff-extensions.md §F">Test update obligation — task 009 covers Validate() error paths.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="EntityNameValidatorNodeExecutor.Validate" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs">
+        Sibling Validate() pattern. Aggregates errors into a List&lt;string&gt;, returns NodeValidationResult.Failure with all messages, else NodeValidationResult.Success. AiCompletion follows the same shape with different conditions.
+      </pattern>
+      <pattern name="NodeValidationResult.Failure / Success" location="src/server/api/Sprk.Bff.Api/Models/Ai/">
+        Existing result type. Accepts string[] error messages. AiCompletion uses it identically.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 002 scaffolded Validate() with a TODO. This task fills in the contract from FR-13. The key
+      semantic distinction: AiCompletion is prompt-only — it requires the Action (for SystemPrompt + OutputSchema
+      + Temperature) but prohibits Tool + Document (which are AiAnalysis-only concepts for grounded calls).
+      The Playbook Builder UI (Wave 8) consumes these messages directly in the form's error display.
+    </background>
+    <dependencies>
+      <dependency task="002" status="not-started-but-required">AiCompletionNodeExecutor.cs scaffolded with Validate() skeleton.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 003 (parallel-safe with this) implements the merge logic; both modify ExecuteAsync vs Validate respectively — main session sequences edits to the same file.</item>
+      <item>Task 009 (depends on task 007 ordering) asserts each error path here.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF (.cs file modification, tag bff-api, FR-13 validation contract is semantically load-bearing — Playbook Builder UI consumes the messages directly) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-13 + .claude/constraints/bff-extensions.md + task 001 pattern-decision doc + task 002 scaffolded file.
+    </step>
+    <step order="2" name="Re-read EntityNameValidatorNodeExecutor.Validate as template">
+      Note: error-aggregation pattern (List&lt;string&gt;), early-return on missing ConfigJson, NodeValidationResult.Failure(array) vs Success().
+    </step>
+    <step order="3" name="Re-read AiAnalysisNodeExecutor.Validate for comparison">
+      Note where AiAnalysis REQUIRES Tool + Document — AiCompletion does the OPPOSITE (prohibits them).
+    </step>
+    <step order="4" name="Implement Validate() body">
+      Replace the task-002 Validate() skeleton with the FR-13 contract. Use the goal list above as the literal error-message text (precise wording matters — UI consumes these). Aggregate all errors into a single List&lt;string&gt;; return Failure(list.ToArray()) if any, else Success().
+    </step>
+    <step order="5" name="Add brief XML doc on Validate()">
+      One-paragraph &lt;remarks&gt; explaining: AiCompletion is prompt-only (requires Action FK, prohibits Tool + Document). Cite FR-13.
+    </step>
+    <step order="6" name="Build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/ — expect 0 errors, 0 new warnings.
+    </step>
+    <step order="7" name="Verify existing tests still pass">
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/ — expect no regression.
+    </step>
+    <step order="8" name="Publish + size check (partial)">
+      Run: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-task005/ — measure compressed size delta. Document.
+    </step>
+    <step order="9" name="Verify acceptance">
+      Re-read Validate(). Confirm all 7 goal bullets satisfied + error messages match the literal text.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the modified file. Run `/adr-check` against ADR-010 + ADR-013 + ADR-029 + ADR-038. Fix findings before commit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 005 status complete; advance current-task.md.
+    </step>
+    <step order="11" name="Commit">
+      Commit AiCompletionNodeExecutor.cs change with conventional message.
+      Example: feat(bff/r7): Validate() — Action FK required + Tool/Document prohibited in AiCompletionNodeExecutor (Wave 1 task 005, FR-13)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (EntityNameValidatorNodeExecutor + AiAnalysisNodeExecutor for comparison)</tool>
+    <tool>Edit (AiCompletionNodeExecutor.cs Validate body)</tool>
+    <tool>Bash (dotnet build, dotnet test, dotnet publish, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 005 ✅)</output>
+    <output type="commit">feat(bff/r7): Validate() — Action FK required + Tool/Document prohibited in AiCompletionNodeExecutor (Wave 1 task 005, FR-13)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Validate() returns Failure with explicit message if Action FK missing</criterion>
+    <criterion>Validate() returns Failure with explicit message if Tool is present</criterion>
+    <criterion>Validate() returns Failure with explicit message if Document is present</criterion>
+    <criterion>Validate() returns Failure with explicit message if OutputVariable missing/whitespace</criterion>
+    <criterion>Validate() returns Failure with explicit message if Action.SystemPrompt missing/whitespace</criterion>
+    <criterion>Multiple errors are aggregated into one Failure result (no bail-on-first-error)</criterion>
+    <criterion>Validate() returns Success when all conditions pass</criterion>
+    <criterion>Error message text matches the literal wording in goal bullets (UI displays them verbatim)</criterion>
+    <criterion>XML &lt;remarks&gt; cite FR-13 + AiCompletion-is-prompt-only rationale</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

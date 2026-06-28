@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-066" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>MAJOR UPDATE PLAYBOOK-AUTHOR-GUIDE.md for node-first dispatch model</title>
+    <status>not-started</status>
+    <wave>6</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>docs, wave-6</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+    <fr-coverage>FR-30 (PLAYBOOK-AUTHOR-GUIDE major update)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    MAJOR UPDATE `docs/guides/PLAYBOOK-AUTHOR-GUIDE.md` to reflect the R7 node-first dispatch model.
+    The current guide teaches playbook authors to wire nodes by Action ActionType + Node Type. The new
+    guide teaches: pick executor type per node FIRST (drives dispatch), then choose Action (only if
+    prompt-driven), then configure typed config, then wire edges + scope. Sibling to task 065 but
+    focused on playbook-level authoring (not JPS-file-level). Per NFR-08, UPDATE in place: no
+    SUPERSEDED markers.
+  </prompt>
+
+  <role>
+    Documentation editor + playbook author. Rewrite the playbook-authoring flow + worked examples +
+    decision points. Audience: makers + AI engineers wiring multi-node playbooks.
+  </role>
+
+  <goal>
+    `docs/guides/PLAYBOOK-AUTHOR-GUIDE.md` updated such that:
+    1. Playbook-authoring flow REWRITTEN to node-first:
+       - Step 1: Identify nodes (start → ... → end). For each node, pick executor type (33 values)
+       - Step 2: For prompt-driven nodes (AiAnalysis, AiCompletion, AiEmbedding), choose Action
+       - Step 3: Configure each node's typed config (FR-16)
+       - Step 4: Wire edges between nodes + scope variables
+       - Step 5: Deploy via `Deploy-Playbook.ps1` (writes `node.sprk_executortype` explicitly per FR-20)
+    2. Worked examples REWRITTEN:
+       - Example 1: A 3-node prompt-driven playbook (Start → AiCompletion → ReturnResponse) — closes R4 /narrate
+       - Example 2: A multi-node Insights playbook (mix of pure + prompt-driven executors)
+       - At least one Condition / branching example
+    3. Decision points REWRITTEN — "which executor per node?" replaces "which ActionType per node?"
+    4. WHY section ADDED — 1-paragraph history of R7 dispatch unification (parallel to task 065)
+    5. Per-node prompt override section UPDATED (Q2 KEEP) — preserved; cite PromptSchemaOverrideMerger
+    6. NO SUPERSEDED markers (NFR-08)
+    7. Cross-references spec FR-07 + FR-12 + FR-15 + FR-30 + CLAUDE.md §10 BFF Hygiene + `.claude/constraints/bff-extensions.md` §G
+  </goal>
+
+  <inputs>
+    <file purpose="disposition">projects/spaarke-ai-platform-unification-r7/notes/drafts/wave6-doc-disposition.md</file>
+    <file purpose="target-doc">docs/guides/PLAYBOOK-AUTHOR-GUIDE.md</file>
+    <file purpose="spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="sibling-guide">docs/guides/JPS-AUTHORING-GUIDE.md (post-task-065)</file>
+    <file purpose="updated-decision-tree">docs/architecture/ai-architecture-actions-nodes-scopes.md (post-task-062)</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-30">MAJOR UPDATE — guide reflects node-first dispatch model.</constraint>
+    <constraint source="spec Q2 KEEP">Per-node prompt overrides via PromptSchemaOverrideMerger preserved. Guide must teach how to use them.</constraint>
+    <constraint source="spec FR-28">UPDATE in place. No SUPERSEDED markers.</constraint>
+    <constraint source="spec NFR-08">Documentation discipline.</constraint>
+    <constraint source="CLAUDE.md §11">Cost-of-doing-nothing: playbook authors continue to wire nodes around Action ActionType, producing playbooks that don't dispatch as expected when run through the new orchestrator.</constraint>
+    <constraint source="LENGTH">Maintain guide length within ±30% of original. Major REWRITE of authoring flow + examples + decision points; structure stays.</constraint>
+    <constraint source="audience">Audience is makers + AI engineers authoring multi-node playbooks. Use plain language; code-snippet-heavy; diagrams (Mermaid or ASCII) where helpful.</constraint>
+    <constraint source="parallel-with-task-065">Sibling to task 065 (JPS-AUTHORING-GUIDE) — keep consistent terminology, examples, WHY paragraph wording. If 065 has shipped, reuse exact WHY paragraph for consistency.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documentation</topic>
+    <files>
+      <file>docs/guides/PLAYBOOK-AUTHOR-GUIDE.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      PLAYBOOK-AUTHOR-GUIDE.md teaches how to author a complete playbook (multi-node graph). It's the
+      maker-facing companion to JPS-AUTHORING-GUIDE.md (which is JPS-file-level). Pre-R7, the guide
+      oriented around Action ActionType per node. Post-R7, each node carries its dispatch decision
+      via `sprk_executortype`; the guide needs a node-first rewrite.
+    </background>
+    <dependencies>
+      <dependency task="024" status="not-started-but-required">Single-hop dispatch shipped — guide describes actual runtime.</dependency>
+      <dependency task="062" status="not-started-but-helpful">Decision-tree update lands; this guide cross-references it.</dependency>
+      <dependency task="064" status="not-started-but-helpful">Constraint §G update lands; this guide cross-references it.</dependency>
+      <dependency task="065" status="not-started-but-helpful">JPS-AUTHORING-GUIDE rewritten — this guide shares terminology + WHY paragraph wording.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 7 (tasks 070-074) rewrites jps-* skills — those skills cite this guide.</item>
+      <item>Task 067 creates `ai-guide-consumer-wiring.md` — adjacent guide, cross-reference if appropriate.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: docs MAJOR UPDATE task (no .cs / .ts / .tsx / .ps1 modification, tag docs only) · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-07 + FR-12 + FR-15 + FR-30 + Q2 KEEP + (if shipped) JPS-AUTHORING-GUIDE rewrite from task 065 + decision tree update from task 062 + constraint §G from task 064.
+    </step>
+    <step order="2" name="Open target doc">
+      Read `docs/guides/PLAYBOOK-AUTHOR-GUIDE.md` in full. Note its structure. Identify the playbook-authoring-flow section + worked-examples section + per-node-override section + decision-points section.
+    </step>
+    <step order="3" name="Plan rewrite scope">
+      List sections needing rewriting + sections that can stay. Goal: rewrite authoring flow + decision points + 2-3 examples + add 1 WHY paragraph + verify per-node-override section still correct (Q2 KEEP).
+    </step>
+    <step order="4" name="Add WHY paragraph">
+      Add a 1-paragraph history near the top. Reuse exact wording from task 065 if shipped (for consistency).
+    </step>
+    <step order="5" name="Rewrite playbook-authoring flow">
+      Replace the step-by-step authoring flow with the new 5-step process (executor type per node → Action when prompt-driven → typed config → edges + scope → deploy).
+    </step>
+    <step order="6" name="Rewrite decision points">
+      Update "which X per node?" sections to lead with executor type. Provide a table of 33 executor types with 1-line descriptions OR a pointer to the rewritten decision tree in actions-nodes-scopes.md.
+    </step>
+    <step order="7" name="Rewrite worked examples (3 minimum)">
+      - Example 1: 3-node prompt-driven playbook (Start → AiCompletion → ReturnResponse) — closes R4 /narrate; cite spec FR-12 + FR-15. Show node JSON with explicit `sprk_executortype` values.
+      - Example 2: Multi-node Insights playbook with mix of pure + prompt-driven executors (showing Action FK absent on pure nodes, present on prompt-driven). 5-7 nodes.
+      - Example 3: Condition / branching example (executor=30, configJson with branching, edges showing branch routing).
+    </step>
+    <step order="8" name="Verify per-node-override section (Q2 KEEP)">
+      Confirm the existing per-node-override section is preserved + accurate. PromptSchemaOverrideMerger still applies node-level Role/Task/Constraints/Output Fields. Cite spec Q2 + Wave 1 task 003.
+    </step>
+    <step order="9" name="Update cross-references">
+      Spec FR-07, FR-12, FR-15, FR-30; CLAUDE.md §10 BFF Hygiene; `.claude/constraints/bff-extensions.md` §G; rewritten decision tree in actions-nodes-scopes.md; sibling JPS-AUTHORING-GUIDE.md.
+    </step>
+    <step order="10" name="Verify NFR-08 discipline">
+      Grep modified doc for "SUPERSEDED", "deprecated", "old way", "(previously)". Zero new instances.
+    </step>
+    <step order="11" name="Verify guide still reads coherently">
+      Read end-to-end as a future playbook author. Could they wire a working multi-node playbook from this guide alone? If not, tighten.
+    </step>
+    <step order="12" name="Update current-task.md + TASK-INDEX">
+      Mark task 066 status complete; advance current-task.md to next pending Wave 6 task.
+    </step>
+    <step order="13" name="Commit">
+      Commit `docs/guides/PLAYBOOK-AUTHOR-GUIDE.md` with conventional message.
+      Example: docs(guides/r7): major update PLAYBOOK-AUTHOR-GUIDE for node-first dispatch (Wave 6 task 066, FR-30)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (target doc + sibling guide + decision tree + constraint §G + spec)</tool>
+    <tool>Grep (cross-reference + NFR-08 marker search)</tool>
+    <tool>Edit (rewrite authoring flow + decision points + worked examples + add WHY paragraph)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">docs/guides/PLAYBOOK-AUTHOR-GUIDE.md (major update — authoring flow + decision points + examples + WHY paragraph)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to next Wave 6 task)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 066 ✅)</output>
+    <output type="commit">docs(guides/r7): major update PLAYBOOK-AUTHOR-GUIDE for node-first dispatch (Wave 6 task 066, FR-30)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Playbook-authoring flow rewritten to 5-step process (executor type per node first)</criterion>
+    <criterion>Decision points rewritten — "which executor per node?" replaces "which ActionType per node?"</criterion>
+    <criterion>At least 3 worked examples present (3-node prompt-driven, multi-node Insights, Condition)</criterion>
+    <criterion>WHY paragraph added explaining R7 dispatch unification</criterion>
+    <criterion>Per-node-override section preserved + accurate (Q2 KEEP)</criterion>
+    <criterion>Cross-references to spec FR-07, FR-12, FR-15, FR-30, CLAUDE.md §10, constraint §G present</criterion>
+    <criterion>No SUPERSEDED markers (NFR-08)</criterion>
+    <criterion>Doc reads coherently end-to-end</criterion>
+    <criterion>Future author could wire working playbook from this guide alone</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>TASK-INDEX.md shows 066 ✅</criterion>
+  </acceptance-criteria>
+</task>

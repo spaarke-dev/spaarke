@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-084" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Implement typed config forms for 5 priority executors (FR-23)</title>
+    <status>not-started</status>
+    <wave>8</wave>
+    <estimated-effort>4-5 hours</estimated-effort>
+    <tags>code-page, ui, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>083 (renderer wired)</dependencies>
+    <fr-coverage>FR-23 (priority schemas)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Implement rich typed config forms for the 5 priority executors per spec FR-16/FR-23:
+    AI Analysis, AI Completion (built in Wave 1), Condition, EntityNameValidator (sibling pattern),
+    CreateNotification. Each form: text inputs, dropdowns, JSON sub-editors as needed; validates
+    input against schema. These 5 are the proof-of-concept that the schema-driven renderer
+    (task 083) produces usable forms for real-world authoring scenarios.
+  </prompt>
+
+  <role>
+    Senior React + Fluent UI v9 developer. Comfortable iterating on schema-driven UI to match
+    hand-crafted form quality. Familiar with the 5 specific executors' config shapes.
+  </role>
+
+  <goal>
+    Rich `ExecutorConfigSchema` definitions returned by the BFF `GetConfigSchema()` method on
+    these 5 executors (work happens BFF-side in `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/`):
+    1. `AiAnalysisNodeExecutor.GetConfigSchema()` — fields: documentScope, toolBindings (JSON), temperature (number), promptOverride (JSON sub-editor)
+    2. `AiCompletionNodeExecutor.GetConfigSchema()` — fields: temperature (number 0-2), maxOutputTokens (number), promptOverride (JSON sub-editor)
+    3. `ConditionNodeExecutor.GetConfigSchema()` — fields: expression (string), trueBranch (string), falseBranch (string)
+    4. `EntityNameValidatorNodeExecutor.GetConfigSchema()` — fields: entitySetName (string), uniqueCheck (boolean), maxLength (number)
+    5. `CreateNotificationNodeExecutor.GetConfigSchema()` — fields: recipientType (enum), template (string), priority (enum)
+
+    After BFF schemas are populated, the canvas `TypedConfigForm.tsx` (task 083) automatically renders
+    the 5 forms with full field-typed inputs. No new canvas-side files needed — just verify rendering.
+    Add canvas-side __tests__ for the 5 specific forms (Vitest + RTL).
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="ai-analysis-executor">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+    <file purpose="ai-completion-executor">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</file>
+    <file purpose="condition-executor">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ConditionNodeExecutor.cs</file>
+    <file purpose="entityname-executor">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs</file>
+    <file purpose="notification-executor">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</file>
+    <file purpose="hand-crafted-reference">src/client/code-pages/PlaybookBuilder/src/components/properties/AiCompletionForm.tsx</file>
+    <file purpose="typed-renderer">src/client/code-pages/PlaybookBuilder/src/components/properties/TypedConfigForm.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Fluent UI v9 ONLY.</constraint>
+    <constraint source="ADR-021">Dark mode binding. Semantic tokens only.</constraint>
+    <constraint source="ADR-029">BFF changes: per-task publish-size + CVE verification (NFR-01 ceiling).</constraint>
+    <constraint source="spec FR-23">5 priority executors get rich typed forms in initial implementation. Form-state syncs to `sprk_configjson`.</constraint>
+    <constraint source="bff-extensions.md">Modifying `Services/Ai/Nodes/*.cs` is BFF work. State placement decision: schemas stay IN BFF — each executor owns its schema declaration. No new public types beyond the schema DTO (defined in Wave 3 task 030).</constraint>
+    <constraint source="ADR-038">Test additions: add Vitest + RTL tests for canvas-side 5-form rendering. Mock the schema fetch in tests (do NOT mock HttpMessageHandler per ADR-038).</constraint>
+    <constraint source="CLAUDE.md §10">BFF task: run `dotnet publish` size check + `dotnet list package --vulnerable` CVE scan.</constraint>
+    <constraint source="CLAUDE.md §12">Build command: `npm run build:prod` for canvas; `dotnet build src/server/api/Sprk.Bff.Api/` for BFF.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/adr/ADR-006-pcf-fluent-ui-v9.md</file>
+      <file>docs/adr/ADR-021-dark-mode-semantic-tokens.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Spec FR-16 requires every executor to declare a config schema via `GetConfigSchema()`. Task 032
+      (Wave 3) added the method to all 33 executors with placeholder schemas. This task fleshes out the
+      5 priority executor schemas with real fields, defaults, descriptions, required-flags. The canvas
+      renderer (task 083) consumes these schemas automatically — no canvas-side rendering work needed,
+      only schema-DTO authoring on BFF side and tests on canvas side.
+    </background>
+    <dependencies>
+      <dependency task="083" status="prerequisite">Schema-driven renderer must exist before its schemas are useful.</dependency>
+      <dependency task="032" status="prerequisite">Wave 3 task 032 added placeholder schemas — this task replaces placeholders with rich content for the 5 priority executors.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 085 fills out remaining 28 executor schemas (placeholder forms OK).</item>
+      <item>Task 089b runs UI tests against these 5 forms in the browser.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: BFF code-impl + canvas tests, ADR-006+021+029+038 applicable, quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-23 + Wave 3 task 030 design notes + AiCompletionForm.tsx (hand-crafted reference).
+    </step>
+    <step order="2" name="Verify W3 task 033 deployed">
+      Confirm BFF endpoint deployed. If not, STOP.
+    </step>
+    <step order="3" name="Author rich schema for AiAnalysisNodeExecutor.GetConfigSchema()">
+      Replace placeholder schema with: `documentScope` (string, required), `toolBindings` (json), `temperature` (number, default 0.7, min 0, max 2), `promptOverride` (json, optional). Field descriptions reference Action's prompt template.
+    </step>
+    <step order="4" name="Author rich schema for AiCompletionNodeExecutor.GetConfigSchema()">
+      Fields: `temperature` (number 0-2, default 0.7), `maxOutputTokens` (number, default 4096), `promptOverride` (json, optional). NOTE: AiCompletion does NOT take Tool or Document per FR-13.
+    </step>
+    <step order="5" name="Author rich schema for ConditionNodeExecutor.GetConfigSchema()">
+      Fields: `expression` (string, required, description "JavaScript-like condition expression"), `trueBranch` (string, required), `falseBranch` (string, required).
+    </step>
+    <step order="6" name="Author rich schema for EntityNameValidatorNodeExecutor.GetConfigSchema()">
+      Fields: `entitySetName` (string, required), `uniqueCheck` (boolean, default true), `maxLength` (number, default 100).
+    </step>
+    <step order="7" name="Author rich schema for CreateNotificationNodeExecutor.GetConfigSchema()">
+      Fields: `recipientType` (enum: user/team/contact, required), `template` (string, required), `priority` (enum: low/normal/high, default normal).
+    </step>
+    <step order="8" name="Build BFF + canvas">
+      `dotnet build src/server/api/Sprk.Bff.Api/` + `cd src/client/code-pages/PlaybookBuilder && npm run build:prod`.
+      Both: 0 errors, 0 new warnings.
+    </step>
+    <step order="9" name="Add canvas-side Vitest tests">
+      Create `src/client/code-pages/PlaybookBuilder/src/components/properties/__tests__/TypedConfigForm.test.tsx` with tests for:
+      - Renders all 5 priority executor schemas without errors
+      - Required-field marker shows for required fields
+      - Validation error fires on empty required field
+      - JSON sub-editor validates JSON syntax
+      Mock the schema fetch (do NOT mock HttpMessageHandler — direct schema injection).
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the 5 modified BFF executors + new test file.
+      Run `/adr-check` against ADR-006 + ADR-021 + ADR-029 + ADR-038.
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-task084/` — measure publish size, report delta vs baseline. Expect minimal (each schema is ~30 LOC).
+      Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.
+      Fix findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 084 status complete; advance to next Wave 8 task.
+    </step>
+    <step order="11" name="Commit">
+      Commit message:
+      `feat(bff+playbookbuilder/r7): typed config schemas + form tests for 5 priority executors (Wave 8 task 084, FR-23)`. No PR yet.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (BFF executors + canvas form references)</tool>
+    <tool>Edit (5 BFF executor .cs files)</tool>
+    <tool>Write (TypedConfigForm.test.tsx)</tool>
+    <tool>Bash (dotnet build, dotnet publish, dotnet list package, npm run build:prod, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs (GetConfigSchema)</output>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs (GetConfigSchema)</output>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ConditionNodeExecutor.cs (GetConfigSchema)</output>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs (GetConfigSchema)</output>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs (GetConfigSchema)</output>
+    <output type="new-file">src/client/code-pages/PlaybookBuilder/src/components/properties/__tests__/TypedConfigForm.test.tsx</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 084 ✅)</output>
+    <output type="commit">feat(bff+playbookbuilder/r7): typed config schemas + form tests for 5 priority executors (Wave 8 task 084, FR-23)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>5 BFF executors return rich `ExecutorConfigSchema` with real fields, defaults, descriptions</criterion>
+    <criterion>Canvas renderer (task 083) automatically displays typed forms for these 5 — no canvas code changes needed</criterion>
+    <criterion>Vitest tests cover rendering + required-field markers + validation for the 5 schemas</criterion>
+    <criterion>dotnet build + npm run build:prod pass: 0 errors, 0 new warnings</criterion>
+    <criterion>Publish-size delta documented (expected: minimal)</criterion>
+    <criterion>No new HIGH-severity CVE</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 084 ✅</criterion>
+  </acceptance-criteria>
+</task>

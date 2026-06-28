@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-074" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>MINOR UPDATE `.claude/skills/jps-scope-refresh/SKILL.md` (FR-33)</title>
+    <status>not-started</status>
+    <wave>7</wave>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>skill-directives, docs, wave-7</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>073</dependencies>
+    <fr-coverage>FR-33</fr-coverage>
+  </metadata>
+
+  <prompt>
+    MINOR UPDATE to `.claude/skills/jps-scope-refresh/SKILL.md` to reflect renamed C# enum
+    (`ActionType` → `ExecutorType` per Wave 2 task 022) and the new schema columns
+    (`sprk_playbooknode.sprk_executortype` Choice from the global Choice set `sprk_playbookexecutortype`).
+
+    Scope refresh is operationally unchanged — it regenerates `.claude/catalogs/scope-model-index.json`
+    from Dataverse. But the catalog's executor catalog section must now reflect:
+    - Renamed enum name in C#-side comments and references.
+    - New schema columns (Choice column on node + global Choice set).
+    - Updated dispatch-surface note in the "What This Skill DOES NOT Do" section — the model-driven app
+      form's Node Type OptionSet is REPLACED by the Executor Type Choice (Wave 8 task 081).
+
+    This is a MINOR UPDATE, not a full rewrite. Most of the skill body is operationally unchanged.
+
+    **Sub-Agent Write Boundary applies — main session executes this. No parallel dispatch.** Per CLAUDE.md §3.
+  </prompt>
+
+  <role>
+    Senior skill author for the Spaarke skill library. You understand that jps-scope-refresh is the
+    operational refresh of the scope catalog — it does NOT teach dispatch. Your job: surgical updates
+    to terminology + schema references only.
+  </role>
+
+  <goal>
+    Updated `.claude/skills/jps-scope-refresh/SKILL.md` with:
+    1. Renamed C# enum reference: `ActionType` → `ExecutorType` (post-Wave 2 task 022 rename).
+    2. New schema columns documented: `sprk_playbooknode.sprk_executortype` (Choice column on node) + `sprk_playbookexecutortype` (global Choice set, 33 values).
+    3. Updated "Two authoring surfaces, one catalog" table — Node Type OptionSet REPLACED by Executor Type Choice Set; brief note on Wave 8 task 081 (form update).
+    4. Scope catalog generation behavior UNCHANGED operationally — the skill still runs `Refresh-ScopeModelIndex.ps1` and commits the JSON.
+    5. Brief reference to R7 design.md §3.1 WHY for context (much briefer than FR-32 skills — this is FR-33 MINOR UPDATE).
+    6. `last-reviewed: 2026-06-28`; `Reviewed By: R7 task 074 (FR-33 — enum + schema rename touch-up)`.
+  </goal>
+
+  <inputs>
+    <file purpose="update-target">.claude/skills/jps-scope-refresh/SKILL.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md (FR-33)</file>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/design.md (§2 invariants, §3 component model)</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="aligned-prior-rewrites">.claude/skills/jps-action-create/SKILL.md (task 070)</file>
+    <file purpose="aligned-prior-rewrites">.claude/skills/jps-playbook-design/SKILL.md (task 071)</file>
+    <file purpose="aligned-prior-rewrites">.claude/skills/jps-playbook-audit/SKILL.md (task 072)</file>
+    <file purpose="aligned-prior-rewrites">.claude/skills/jps-validate/SKILL.md (task 073)</file>
+    <file purpose="refresh-script">scripts/dataverse/Refresh-ScopeModelIndex.ps1 (operational unchanged)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3 Sub-Agent Write Boundary">Sub-agents CANNOT write to `.claude/` paths. Main session executes this task. No parallel dispatch.</constraint>
+    <constraint source="spec FR-33">MINOR UPDATE only — operationally unchanged; reflects renamed enum + new schema columns. Acceptance: "file updated; scope catalog generation accurate."</constraint>
+    <constraint source="design.md §2 Invariant 2">Reference the column/Choice-set naming distinction: `sprk_executortype` (column on node) vs `sprk_playbookexecutortype` (global Choice set).</constraint>
+    <constraint source="Wave 2 task 022">C# enum renamed `ActionType` → `ExecutorType`. Skill references must match.</constraint>
+    <constraint source="Wave 8 task 081">Model-driven app form's Node Type OptionSet REPLACED by Executor Type Choice. Skill body must note this — but operational responsibility stays with form-customization owner (not this skill).</constraint>
+    <constraint source="CLAUDE.md §11">MINOR UPDATE of existing skill — §11 triple does not apply.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps-skill-authoring</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md (FR-33)</file>
+      <file>projects/spaarke-ai-platform-unification-r7/design.md (§2 Invariant 2 naming distinction; §3 component model)</file>
+      <file>.claude/skills/jps-scope-refresh/SKILL.md (update target, ~5 KB)</file>
+      <file>scripts/dataverse/Refresh-ScopeModelIndex.ps1 (operational behavior unchanged)</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      jps-scope-refresh keeps the scope catalog in sync with Dataverse. The catalog is consumed by
+      jps-playbook-design + PlaybookBuilder UI dropdowns for authoring hints (advisory, not runtime
+      enforcement). R7 doesn't change the skill operationally — it only touches the catalog content
+      (renamed enum, new Choice column) so the dropdown population is accurate.
+
+      This is the smallest skill update in Wave 7. After this, task 075 runs `/jps-validate` smoke test
+      to confirm all 5 skill rewrites are functional end-to-end.
+    </background>
+    <dependencies>
+      <dependency task="073" status="prerequisite">jps-validate rewrite complete (aligned terminology).</dependency>
+      <dependency task="024" status="prerequisite">Wave 2 single-hop dispatch refactor merged (enum rename done).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 8 task 081 replaces Node Type OptionSet with Executor Type Choice on the model-driven app form. Skill's "two authoring surfaces" table reflects this.</item>
+      <item>Task 075 (next) runs `/jps-validate` against representative playbooks to confirm Wave 7 functional.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: minor skill body update (not ADR-bound code) · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-33 + design.md §2 Invariant 2 (naming distinction) + §3 component model.
+    </step>
+    <step order="2" name="Read existing skill body">
+      Read full current `.claude/skills/jps-scope-refresh/SKILL.md` (~5 KB).
+    </step>
+    <step order="3" name="Inventory legacy references">
+      Grep skill body for: `ActionType` (C# enum name), `sprk_nodetype`, "Node Type OptionSet", references to dispatch terminology. List each.
+    </step>
+    <step order="4" name="Update C# enum references">
+      Rename `ActionType` → `ExecutorType` everywhere it appears as a C# enum reference (post Wave 2 task 022).
+    </step>
+    <step order="5" name="Update schema column references">
+      Add the new schema columns to whatever inventory the skill references:
+      - `sprk_playbooknode.sprk_executortype` (Choice column on node).
+      - Global Choice set `sprk_playbookexecutortype` (33 values).
+      Cite design.md §2 Invariant 2 naming distinction explicitly.
+    </step>
+    <step order="6" name="Update 'Two authoring surfaces, one catalog' table">
+      Replace the row "Node Type OptionSet (Model-Driven App form) — NodeType values (AIAnalysis, Output, Control, Workflow, DeliverComposite)" with:
+      "Executor Type Choice Set (Model-Driven App form) — Executor Type values (33 from `sprk_playbookexecutortype`) — updated independently via Wave 8 task 081".
+      Document that the Node Type column + 6-value OptionSet are REMOVED (Wave 4 schema cleanup).
+    </step>
+    <step order="7" name="Add brief R7 context note">
+      Insert a 5-line note: "Why renamed? Wave 2 (FR-07 to FR-10) collapsed the legacy 3-layer dispatch model to a single-hop `node.sprk_executortype` read. The C# enum rename + Dataverse Choice naming aligns naming with reality. See R7 design.md §3.1 for the WHY history." Briefer than FR-32 skills — this is MINOR UPDATE.
+    </step>
+    <step order="8" name="Verify operational behavior unchanged">
+      Confirm: the `Refresh-ScopeModelIndex.ps1` invocation pattern is unchanged; the JSON catalog shape is unchanged structurally; only the terminology + scope values updated.
+    </step>
+    <step order="9" name="Bump frontmatter">
+      `last-reviewed: 2026-06-28`; `Reviewed By: spaarke-ai-platform-unification-r7 task 074 (FR-33 — enum + schema rename touch-up)`.
+    </step>
+    <step order="10" name="Verify acceptance">
+      Re-read updated skill body. Confirm: (a) `ActionType` → `ExecutorType` rename applied, (b) new Choice column + Choice set documented, (c) two-authoring-surfaces table updated, (d) operational steps unchanged, (e) frontmatter bumped.
+    </step>
+    <step order="11" name="Update current-task.md + TASK-INDEX">
+      Mark task 074 status complete; advance current-task.md to task 075.
+    </step>
+    <step order="12" name="Commit-deferred">
+      DO NOT commit. Wave 7 commits at task 075.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (existing skill body + design.md + tasks 070-073 outputs)</tool>
+    <tool>Grep (legacy enum/column references in skill body)</tool>
+    <tool>Edit (surgical updates — minor changes only)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">.claude/skills/jps-scope-refresh/SKILL.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 075)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 074 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>C# enum reference `ActionType` → `ExecutorType` applied throughout</criterion>
+    <criterion>Schema columns `sprk_executortype` (node column) + `sprk_playbookexecutortype` (global Choice set) documented per design.md §2 Invariant 2 naming distinction</criterion>
+    <criterion>"Two authoring surfaces" table updated — Node Type OptionSet REPLACED by Executor Type Choice Set; Wave 8 task 081 referenced</criterion>
+    <criterion>Operational behavior (Refresh-ScopeModelIndex.ps1 invocation + JSON catalog shape) UNCHANGED</criterion>
+    <criterion>Brief R7 context note inserted referencing design.md §3.1 WHY</criterion>
+    <criterion>Frontmatter `last-reviewed: 2026-06-28`; `Reviewed By: R7 task 074`</criterion>
+    <criterion>No commit (Wave 7 batches at task 075)</criterion>
+    <criterion>current-task.md updated to point at task 075</criterion>
+  </acceptance-criteria>
+</task>

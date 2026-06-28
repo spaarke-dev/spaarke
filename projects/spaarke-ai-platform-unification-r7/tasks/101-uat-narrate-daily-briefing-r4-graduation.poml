@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-101" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>UAT — /narrate via Daily Briefing widget (R4 graduation gate, FR-15)</title>
+    <status>not-started</status>
+    <wave>10</wave>
+    <estimated-effort>1-2 hours (owner-mediated UAT)</estimated-effort>
+    <tags>uat, testing, wave-10</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>100 (graduation verification report PASSED)</dependencies>
+    <fr-coverage>FR-15 (closes R4 graduation gate via AiCompletion + /narrate end-to-end)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    The R4 graduation gate. Open the Daily Briefing widget in spaarkedev1, trigger /narrate, and confirm the
+    response is a valid narrative with TL;DR + per-channel bullets. This is owner-mediated UAT — Claude Code
+    walks the owner through the steps, captures the screen output, and writes the sign-off note. The owner
+    types their sign-off line into the handoff doc. On PASS, R4 worktree can archive; on FAIL, R7 has NOT
+    closed the gate and owner triages remediation.
+  </prompt>
+
+  <role>
+    UAT facilitator. Mechanically simple — open widget, run /narrate, capture output, write sign-off. The
+    real load is the owner's judgment: is the narrative actually useful, or is it a structurally-correct but
+    semantically-empty response? Surface that distinction to the owner.
+  </role>
+
+  <goal>
+    R4 graduation gate closed:
+    1. spaarkedev1 environment open in browser; Daily Briefing widget visible (or canonical surface for /narrate)
+    2. /narrate triggered against a representative briefing payload (e.g., daily briefing for today)
+    3. Response captured: TL;DR present, per-channel bullets present, no 503 / no error state
+    4. LLM output matches structured schema (validated against AiCompletion executor's contract)
+    5. Owner reviews the narrative content for quality (not just structural validity)
+    6. Owner sign-off captured at `projects/spaarke-ai-platform-unification-r7/notes/handoffs/r4-graduation-uat.md`
+    7. R4 worktree (`spaarke-daily-update-service-r4`) cleared to archive on owner confirmation
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="graduation-report">projects/spaarke-ai-platform-unification-r7/notes/handoffs/graduation-verification.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="ai-completion-executor">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</file>
+    <file purpose="narrate-endpoint">src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+    <file purpose="narrate-playbook">DAILY-BRIEFING-NARRATE playbook in spaarkedev1 (deployed via Deploy-Playbook.ps1)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-15">UAT: open Daily Briefing widget → /narrate returns narrative response with TL;DR + per-channel bullets; no 503; LLM output matches structured schema. Closes R4 graduation gate.</constraint>
+    <constraint source="CLAUDE.md §6">Human Escalation — owner UAT is itself the escalation. Do NOT mark task complete without explicit owner sign-off line in the handoff doc.</constraint>
+    <constraint source="CLAUDE.md §7">Task Completion — current-task.md state advance + TASK-INDEX update on owner sign-off.</constraint>
+    <constraint source="ADR-038">Testing Strategy — UAT is integration-heavy by design; any companion smoke tests created here follow ADR-038 (real LLM, no Mock&lt;HttpMessageHandler&gt;).</constraint>
+    <constraint source="bff-extensions.md">No new code; UAT-only task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>uat/r4-graduation</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md (FR-15)</file>
+      <file>projects/spaarke-daily-update-service-r4/README.md (R4 graduation criteria — reference if reachable)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs (lines 201-374 — /narrate endpoint)</file>
+    </files>
+    <patterns>
+      <pattern name="Owner UAT handoff" location="notes/handoffs/">
+        Owner-typed sign-off line is load-bearing; Claude Code can prepare the doc but cannot substitute the sign-off.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R4 (`spaarke-daily-update-service-r4`) shipped Daily Briefing but /narrate failed UAT due to missing
+      AiCompletionNodeExecutor. R4 has held open since 2026-06-28 awaiting R7. R7 Wave 1 built the executor
+      (tasks 001-010); Wave 2 wired single-hop dispatch (tasks 022-024); Wave 5 backfilled
+      DAILY-BRIEFING-NARRATE playbook nodes (task 054); Wave 8 deployed the PlaybookBuilder UI (task 089d).
+      Task 100 (Wave 10) just confirmed all 15 success criteria PASS — including criterion 4 which is
+      AiCompletionNodeExecutor static verification. This task 101 is the LIVE end-to-end smoke that closes
+      R4 and unblocks `ai-spaarke-action-engine-r1` from its Phase 0 spike hold.
+    </background>
+    <dependencies>
+      <dependency task="100" status="not-started-but-required">Graduation verification report PASSED (15/15 or owner-approved AMBIGUOUS).</dependency>
+    </dependencies>
+    <related-work>
+      <item>R4 worktree archives on owner sign-off here (task 090-project-wrap-up Step 9 lists this as a sibling-sync action).</item>
+      <item>Action Engine R1 holds at Phase 0 spike until R7 ships; this UAT close is the gate.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: UAT gate (tag uat+testing, closes R4 graduation gate, owner sign-off required, FR-15 binding) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project spec.md FR-15, graduation-verification.md from task 100 (confirm criterion 4 PASSED), CLAUDE.md §6 + §7.
+    </step>
+    <step order="2" name="Verify pre-conditions">
+      Confirm BFF deployed to spaarkedev1 with Wave 1-9 code (latest commit on work/spaarke-ai-platform-unification-r7).
+      Confirm DAILY-BRIEFING-NARRATE playbook deployed with sprk_executortype = 1 (AiCompletion) on the AI nodes per task 054.
+      Confirm AiCompletionNodeExecutor registered as Singleton per task 006.
+    </step>
+    <step order="3" name="Prepare UAT script">
+      Draft the owner-facing UAT walk-through:
+      - Step A: Open spaarkedev1 in browser; navigate to Daily Briefing widget (or canonical /narrate trigger surface).
+      - Step B: Trigger /narrate against today's briefing (or a representative recent briefing).
+      - Step C: Observe response. Expected: TL;DR section + per-channel bullets, no 503, response time &lt; 15s.
+      - Step D: Inspect LLM output against AiCompletion's structured schema contract.
+      - Step E: Owner reviews narrative quality (not just structural validity).
+    </step>
+    <step order="4" name="Walk owner through UAT">
+      Present the UAT script. Wait for owner to execute Steps A-E. Capture:
+      - Screenshot (or text capture) of the narrative response
+      - Response time (approximate)
+      - Any errors or unexpected behavior
+    </step>
+    <step order="5" name="Validate against FR-15 acceptance">
+      Check each FR-15 criterion:
+      - /narrate returns valid narrative response: YES / NO
+      - TL;DR present in response: YES / NO
+      - Per-channel bullets present: YES / NO
+      - No 503 error: YES / NO
+      - LLM output matches structured schema: YES / NO
+      If any NO: FAIL — surface to owner for remediation. R4 does NOT graduate.
+    </step>
+    <step order="6" name="Owner judgment on narrative quality">
+      Beyond structural validity, owner assesses: is the narrative actually useful? Or structurally valid but semantically empty (e.g., hallucinated channel summaries, generic TL;DR)?
+      Capture owner's qualitative judgment in the handoff doc.
+    </step>
+    <step order="7" name="Draft sign-off handoff document">
+      Create `projects/spaarke-ai-platform-unification-r7/notes/handoffs/r4-graduation-uat.md` with:
+      - Header: date, environment (spaarkedev1), commit SHA, BFF deployment SHA, briefing payload reference
+      - UAT walk-through results (Steps A-E outputs)
+      - FR-15 acceptance check table (5 criteria, YES/NO each)
+      - Narrative response capture (truncated; full at separate file if long)
+      - Owner judgment on narrative quality (qualitative)
+      - **Owner sign-off line** (left blank for owner to type): "R4 graduation gate closed: [PASS/FAIL] — [owner name] — [date]"
+    </step>
+    <step order="8" name="Request owner sign-off">
+      Display the draft handoff doc to owner. Owner types the sign-off line directly (or instructs Claude to type it with owner attribution).
+      ABSOLUTE: do NOT type the sign-off without explicit owner confirmation.
+    </step>
+    <step order="9" name="Verify acceptance">
+      Confirm owner sign-off line is filled in with PASS (R4 graduation gate closed) or FAIL (gate NOT closed; owner triages).
+      If FAIL: STOP — task 101 is INCOMPLETE; task 090-project-wrap-up cannot proceed.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the handoff doc (validates format + completeness + owner sign-off present). Run `/adr-check` against ADR-038 (UAT tests are integration by design; no Mock&lt;HttpMessageHandler&gt; introduced).
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 101 status complete (only if owner sign-off is PASS).
+      Advance current-task.md to task 090-project-wrap-up.
+      Mark TASK-INDEX 101 ✅ and 090-project-wrap-up 🔲 ready.
+    </step>
+    <step order="11" name="Notify R4 worktree archive-ready">
+      In the handoff doc, add a Sibling Worktree Status section noting:
+      - R4 (`spaarke-daily-update-service-r4`): cleared to archive on owner confirmation
+      - Action Engine R1 (`ai-spaarke-action-engine-r1`): cleared to resume past Phase 0 spike
+
+      These actions are executed in task 090-project-wrap-up Step 9 (sibling-sync).
+    </step>
+    <step order="12" name="Commit">
+      Commit notes/handoffs/r4-graduation-uat.md with conventional message.
+      Example: docs(r7): Wave 10 task 101 — R4 graduation UAT signed off (FR-15 PASSED)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (spec FR-15, graduation-verification.md, AiCompletionNodeExecutor.cs)</tool>
+    <tool>Write (notes/handoffs/r4-graduation-uat.md)</tool>
+    <tool>Bash (git commit, optional smoke curl against /narrate if owner unavailable for live UAT — but live UAT preferred)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">projects/spaarke-ai-platform-unification-r7/notes/handoffs/r4-graduation-uat.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 090-project-wrap-up)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 101 ✅; 090-project-wrap-up 🔲 ready)</output>
+    <output type="commit">docs(r7): Wave 10 task 101 — R4 graduation UAT signed off (FR-15 PASSED)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>UAT walk-through executed in spaarkedev1 against Daily Briefing widget (or canonical /narrate surface)</criterion>
+    <criterion>/narrate returns narrative response with TL;DR + per-channel bullets (no 503, structured schema match)</criterion>
+    <criterion>Handoff doc at notes/handoffs/r4-graduation-uat.md captures: walk-through results, FR-15 acceptance table, narrative capture, owner qualitative judgment</criterion>
+    <criterion>Owner sign-off captured at notes/handoffs/r4-graduation-uat.md (line: "R4 graduation gate closed: PASS — [owner name] — [date]")</criterion>
+    <criterion>Sibling worktree status documented (R4 clear to archive; Action Engine R1 clear to resume)</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 on the handoff doc</criterion>
+    <criterion>current-task.md updated to point at task 090-project-wrap-up (only if owner sign-off is PASS)</criterion>
+    <criterion>TASK-INDEX.md shows 101 ✅, 090-project-wrap-up 🔲 ready</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

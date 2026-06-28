@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-062" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>UPDATE ai-architecture-actions-nodes-scopes.md 4-Home decision tree for new node-dispatch model</title>
+    <status>not-started</status>
+    <wave>6</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>docs, wave-6</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+    <fr-coverage>FR-28 (4-Home decision tree update)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    REWRITE the 4-Home decision tree in `docs/architecture/ai-architecture-actions-nodes-scopes.md`
+    to reflect the R7 node-dispatch model. The old tree asked "where does Action ActionType live?";
+    the new answer is "nowhere — `node.sprk_executortype` carries the dispatch decision." The tree
+    collapses. Rewrite the section so a future maker reading it understands the single-hop model
+    without re-learning the three-layer chain. Per NFR-08, this is UPDATE in place — no SUPERSEDED
+    markers, no parallel content.
+  </prompt>
+
+  <role>
+    Documentation editor + AI-platform architect. Mirror the existing doc style (tables, decision
+    tables, code snippets). Don't add new sections; REWRITE the decision-tree section in place.
+  </role>
+
+  <goal>
+    `docs/architecture/ai-architecture-actions-nodes-scopes.md` updated such that:
+    1. The 4-Home decision tree section is REWRITTEN to reflect the new model:
+       - Question shifts from "where does Action ActionType live?" → "what is the dispatch axis?"
+       - Answer: node carries dispatch (`node.sprk_executortype`); Action carries prompt template (when prompt-driven); lookup table is decorative
+       - The tree collapses to 1-2 nodes (node-first; Action when prompt-driven) instead of the legacy 4-home branching
+    2. NO SUPERSEDED markers (NFR-08)
+    3. NO parallel content — the section is rewritten in place, not appended
+    4. Worked examples updated to reflect new model (e.g., "AiCompletion node has node.sprk_executortype=1 + Action FK pointing to BRIEF-NARRATE-TLDR's prompt template")
+    5. Cross-reference spec FR-07, FR-12, CLAUDE.md §10 BFF Hygiene (config boundary)
+    6. Preserves doc-level structure (table-of-contents, sibling sections); only the decision-tree section body changes
+  </goal>
+
+  <inputs>
+    <file purpose="disposition">projects/spaarke-ai-platform-unification-r7/notes/drafts/wave6-doc-disposition.md</file>
+    <file purpose="target-doc">docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+    <file purpose="spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="reference-claudemd-section">CLAUDE.md (§10 BFF Hygiene config boundary)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-28">UPDATE in place. No SUPERSEDED markers, no redirect stubs, no parallel "old vs new" sections.</constraint>
+    <constraint source="spec FR-07">Dispatch reads `node.sprk_executortype` directly — single hop. Decision tree must reflect this.</constraint>
+    <constraint source="spec NFR-08">Documentation discipline — every overlapping doc gets explicit disposition; this section's disposition is UPDATE.</constraint>
+    <constraint source="CLAUDE.md §11">Cost-of-doing-nothing if NOT updated: the doc continues to teach future makers a wrong mental model (Action carries dispatch). The decision-tree section is the "where do things live?" mental-map artifact — the central piece of authoring intuition.</constraint>
+    <constraint source="surgical-rewrite">REWRITE the decision-tree section only. Do not refactor sibling sections. If sibling sections cross-reference the tree, update those references inline.</constraint>
+    <constraint source="LENGTH">Target: rewritten section should be SHORTER than the original (the tree collapses). 30-80 lines for the rewritten section.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documentation</topic>
+    <files>
+      <file>docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+      <file>CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/notes/drafts/wave6-doc-disposition.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Pre-R7, the doc explained that a node's dispatch axis could be inferred from one of four
+      "homes": Node Type Choice column, Action ActionType lookup, Action's executor field on the
+      lookup row, or structural fallback. R7 collapses that — the only home is
+      `node.sprk_executortype`. The decision-tree section is the prime artifact authors reach for
+      when learning where things live; rewriting it sets the new mental model correctly.
+    </background>
+    <dependencies>
+      <dependency task="024" status="not-started-but-required">Single-hop dispatch shipped in PlaybookOrchestrationService — the doc describes the actual runtime, not a future state.</dependency>
+      <dependency task="060" status="not-started-but-required">Disposition list confirms this section is UPDATE (not DELETE) and gives the exact section bounds.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 061 deletes §5 + structural-fallback in the sibling doc playbook-runtime.md. Both tasks together remove the 3-layer mental model from canon docs.</item>
+      <item>Tasks 064, 065, 066 update other docs to reinforce the new model in constraints + author guides.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: docs UPDATE task (no .cs / .ts / .tsx / .ps1 modification, tag docs only) · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-07 + FR-28 + NFR-08 + task 060 disposition list + CLAUDE.md §10 BFF Hygiene "config boundary" framing.
+    </step>
+    <step order="2" name="Open target doc">
+      Read `docs/architecture/ai-architecture-actions-nodes-scopes.md` in full. Locate the 4-Home decision tree by exact heading. Note the original section bounds.
+    </step>
+    <step order="3" name="Identify cross-references">
+      Grep within the same file for references to "4-Home", "Node Type", "ActionType", "executor lookup", "structural fallback". Note any sibling text that depends on the tree.
+    </step>
+    <step order="4" name="Draft the rewritten section">
+      Write the new section. Structure:
+      - **Section heading** (preserve or adjust per doc convention)
+      - **One-sentence framing**: "Dispatch reads `node.sprk_executortype` directly. Action FK is optional (required only for prompt-driven executors)."
+      - **Decision table** (2 columns: "What you need to express" → "Where it lives"):
+        | Need | Lives on |
+        |---|---|
+        | Which executor handles the node | `node.sprk_executortype` (Choice; required) |
+        | Prompt template (when prompt-driven) | Action via `node.sprk_actionid` (Lookup; optional) |
+        | Maker categorization / browsing | `sprk_analysisactiontype` lookup table (decorative; advisory only) |
+      - **Two worked examples**: (1) AiCompletion node (node.sprk_executortype=1 + Action FK with prompt); (2) Condition node (node.sprk_executortype=30, no Action FK)
+      - **Cross-references**: cite spec FR-07, FR-12, CLAUDE.md §10 BFF Hygiene config boundary
+    </step>
+    <step order="5" name="Replace the section in the doc">
+      Edit the doc: replace the original 4-Home section body with the new section. Keep section heading consistent with surrounding doc style (or rename heading if the old name "4-Home" no longer fits — e.g., "Where dispatch + prompt + categorization live").
+    </step>
+    <step order="6" name="Update cross-references in sibling sections">
+      For each sibling-section cross-reference identified in step 3, update inline. Don't leave dangling references to the old 4-home framing.
+    </step>
+    <step order="7" name="Verify NFR-08 discipline">
+      Grep the modified doc for "SUPERSEDED", "deprecated", "old model", "legacy 4-home". Confirm zero new instances. The rewrite is clean — no parallel content.
+    </step>
+    <step order="8" name="Verify doc still reads coherently">
+      Read the doc end-to-end. New section flows; no dangling references; worked examples match real R7 schema.
+    </step>
+    <step order="9" name="Update current-task.md + TASK-INDEX">
+      Mark task 062 status complete; advance current-task.md to next pending Wave 6 task.
+    </step>
+    <step order="10" name="Commit">
+      Commit `docs/architecture/ai-architecture-actions-nodes-scopes.md` with conventional message.
+      Example: docs(architecture/r7): update 4-Home decision tree for single-hop dispatch (Wave 6 task 062, FR-28)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (target doc + disposition list + CLAUDE.md)</tool>
+    <tool>Grep (cross-reference search)</tool>
+    <tool>Edit (rewrite decision-tree section + update cross-refs)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">docs/architecture/ai-architecture-actions-nodes-scopes.md (4-Home decision tree rewritten)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to next Wave 6 task)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 062 ✅)</output>
+    <output type="commit">docs(architecture/r7): update 4-Home decision tree for single-hop dispatch (Wave 6 task 062, FR-28)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>4-Home decision tree section rewritten in ai-architecture-actions-nodes-scopes.md</criterion>
+    <criterion>New section describes single-hop dispatch via node.sprk_executortype</criterion>
+    <criterion>Decision table maps "what you need to express" → "where it lives" (3 rows minimum)</criterion>
+    <criterion>Two worked examples present (one prompt-driven, one pure executor)</criterion>
+    <criterion>Cross-references to spec FR-07, FR-12, CLAUDE.md §10 BFF Hygiene config boundary</criterion>
+    <criterion>No SUPERSEDED markers (NFR-08)</criterion>
+    <criterion>No parallel "old vs new" sections (NFR-08)</criterion>
+    <criterion>Sibling-section cross-references updated</criterion>
+    <criterion>Doc reads coherently end-to-end</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>TASK-INDEX.md shows 062 ✅</criterion>
+  </acceptance-criteria>
+</task>

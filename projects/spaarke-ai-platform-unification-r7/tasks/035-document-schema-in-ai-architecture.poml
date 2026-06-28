@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-035" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Document schema shape in docs/architecture/AI-ARCHITECTURE.md</title>
+    <status>not-started</status>
+    <wave>3</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>docs, wave-3</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>030</dependencies>
+    <fr-coverage>FR-16 (documentation)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Document the typed config schema model (FR-16 / Invariant 5) in `docs/architecture/AI-ARCHITECTURE.md`.
+    Cover: what GetConfigSchema() returns, the endpoint URL + payload shape, who the consumer is
+    (PlaybookBuilder canvas, Wave 8 task 083), the forward-compat strategy for new field types, and
+    a worked example. Audience: future authors of new executors + canvas maintainers.
+  </prompt>
+
+  <role>
+    Technical writer + architect. Concise sections, worked examples, no over-explanation. Mirror the
+    existing AI-ARCHITECTURE.md style (sectioned, code-snippet-heavy, cross-referenced to ADRs).
+  </role>
+
+  <goal>
+    A new section in `docs/architecture/AI-ARCHITECTURE.md` (placement: alongside the existing
+    node-executor pattern documentation) covering:
+    1. WHAT — the GetConfigSchema() method on INodeExecutor and the ExecutorConfigSchema/ConfigFieldDescriptor records
+    2. WHY — Invariant 5 / FR-16 motivation: PlaybookBuilder canvas drives typed forms from data
+    3. ENDPOINT — `GET /api/ai/playbook-builder/executor-config-schemas` URL + auth + payload example
+    4. WORKED EXAMPLE — one rich schema (AiCompletionNodeExecutor) + one placeholder
+    5. AUTHOR GUIDANCE — when adding a new executor, declare its schema; how to choose field types; how to handle conditional fields
+    6. FORWARD-COMPAT — what happens when canvas encounters an unknown field `type` (warning state per FR-27 pattern)
+    7. CROSS-REFERENCE — link to FR-16, ADR-010, ADR-013, `.claude/patterns/ai/node-executor-authoring.md`
+  </goal>
+
+  <inputs>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="target-doc">docs/architecture/AI-ARCHITECTURE.md</file>
+    <file purpose="pattern-reference">.claude/patterns/ai/node-executor-authoring.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §2">Code is source of truth — this doc DESCRIBES the schema model; it does not redefine it. If code and doc disagree later, code wins; this doc is a teaching artifact.</constraint>
+    <constraint source="NFR-08 documentation discipline">No SUPERSEDED markers, no redirect stubs. If this addition overlaps with existing content, UPDATE in place — don't add parallel content.</constraint>
+    <constraint source="spec FR-16">Spec assumption: endpoint URL is `GET /api/ai/playbook-builder/executor-config-schemas`. If task 033 ended up using a different URL (sibling convention override), this doc uses the ACTUAL URL shipped in task 033 — not the spec assumption.</constraint>
+    <constraint source="CONSISTENCY">Cite the worked example by the actual ExecutorType integer values (post-Wave-2 rename), not legacy ActionType names. If Wave 2 has NOT shipped at the time of this task, cite both names with a note.</constraint>
+    <constraint source="LENGTH">Target 100-200 lines added to AI-ARCHITECTURE.md. Concise, scannable, code-snippet-led. Do NOT duplicate spec.md content.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documentation</topic>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      AI-ARCHITECTURE.md is the canonical entry-point doc for the AI pipeline. Wave 3 adds a new
+      contract (the schema endpoint) and a new responsibility for executor authors (declaring a
+      schema). Both deserve a dedicated section so future authors don't have to reverse-engineer
+      from the test suite or the canvas.
+    </background>
+    <dependencies>
+      <dependency task="030" status="not-started-but-required">Design doc at notes/spikes/getconfigschema-design.md (the shape this doc describes).</dependency>
+      <dependency task="033" status="not-required-but-helpful">Endpoint exists; this doc cites it. If 033 hasn't shipped, this doc can still be written from the design; verify URL after 033 ships and update if different.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 6 documentation tasks (060-069) may further UPDATE this doc to reflect dispatch reform; coordinate to avoid stomping.</item>
+      <item>Wave 7 skill rewrites (070-075) may reference this section.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: docs task (no .cs / .ts / .tsx / .ps1 modification, tag docs only) · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-16 + plan.md Wave 3 + task 030 design doc + existing AI-ARCHITECTURE.md.
+    </step>
+    <step order="2" name="Find best placement in AI-ARCHITECTURE.md">
+      Skim the doc for the node-executor section (usually titled something like "Node Executors" or "Playbook Runtime"). Decide whether to add a sub-section "Typed Config Schemas (FR-16)" inside it OR add a top-level section near it.
+    </step>
+    <step order="3" name="Verify endpoint URL shipped">
+      If task 033 has shipped, verify the actual URL the endpoint uses. If it differs from the spec assumption `/api/ai/playbook-builder/executor-config-schemas`, this doc uses the ACTUAL URL + notes the divergence at the bottom of the section.
+    </step>
+    <step order="4" name="Draft the section">
+      Write the new section covering all 7 goal bullets. Use code blocks for the C# record shape, JSON payload examples, and the worked example. Cross-reference FR-16 + ADRs + the pattern file.
+    </step>
+    <step order="5" name="Worked example: AiCompletion rich schema">
+      Inline a 10-15 line JSON snippet showing what AiCompletionNodeExecutor.GetConfigSchema() returns when serialized. Pull the exact field names from task 032's implementation if shipped; otherwise from task 030 design doc.
+    </step>
+    <step order="6" name="Worked example: placeholder">
+      One-line JSON: `{ "fields": {} }`. Note that 28 of 33 executors use this shape in v1 and will be enriched in follow-on waves.
+    </step>
+    <step order="7" name="Cross-references + author guidance">
+      Close with bullet points: when adding a new executor, declare a schema; pick field types from {string, number, boolean, object, array}; use `required: true` only for fields the executor's Validate() actually requires; use `default` to communicate the executor's default behavior to the canvas.
+    </step>
+    <step order="8" name="Verify acceptance">
+      Read the section as a future executor author. Could they implement a new schema from this section alone, without reading source? If not, tighten.
+    </step>
+    <step order="9" name="Update current-task.md + TASK-INDEX">
+      Mark task 035 status complete; advance current-task.md to task 036.
+    </step>
+    <step order="10" name="Commit">
+      Commit AI-ARCHITECTURE.md change with conventional message.
+      Example: docs(architecture/r7): document FR-16 typed config schema model (Wave 3 task 035)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (AI-ARCHITECTURE.md + design doc + spec)</tool>
+    <tool>Grep (find existing node-executor section in AI-ARCHITECTURE.md)</tool>
+    <tool>Edit (AI-ARCHITECTURE.md to insert new section)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">docs/architecture/AI-ARCHITECTURE.md (new section added)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 036)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 035 ✅)</output>
+    <output type="commit">docs(architecture/r7): document FR-16 typed config schema model (Wave 3 task 035)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>New section added to docs/architecture/AI-ARCHITECTURE.md covering FR-16 typed config schemas</criterion>
+    <criterion>Section describes GetConfigSchema() method + ExecutorConfigSchema/ConfigFieldDescriptor records</criterion>
+    <criterion>Section documents the endpoint URL (actual shipped URL, not just spec assumption)</criterion>
+    <criterion>Section includes a JSON payload example</criterion>
+    <criterion>Section includes a worked example for a rich schema (AiCompletion)</criterion>
+    <criterion>Section includes the placeholder shape</criterion>
+    <criterion>Section provides author guidance for adding a schema to a new executor</criterion>
+    <criterion>Section explains forward-compat behavior (unknown field type → warning state per FR-27)</criterion>
+    <criterion>Cross-references to FR-16, ADR-010, ADR-013, and .claude/patterns/ai/node-executor-authoring.md present</criterion>
+    <criterion>No SUPERSEDED markers / redirect stubs added (NFR-08)</criterion>
+    <criterion>Length within 100-200 lines</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>TASK-INDEX.md shows 035 ✅, 036 🔲 ready</criterion>
+  </acceptance-criteria>
+</task>

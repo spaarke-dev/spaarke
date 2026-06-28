@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-089d" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Deploy PlaybookBuilder Code Page to spaarkedev1</title>
+    <status>not-started</status>
+    <wave>8</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>code-page, deploy, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>089a-c (UI tests passed)</dependencies>
+    <fr-coverage>Wave 8 deployment gate</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Final Wave 8 task. Build + deploy the updated PlaybookBuilder Code Page to spaarkedev1 via
+    the `code-page-deploy` skill. Verifies deployed version matches expected (build hash, bundle
+    contents). Smoke-test after deploy. This task gates Wave 9 + Wave 10 readiness — without
+    PlaybookBuilder deployed, makers cannot author with the new dispatch model.
+  </prompt>
+
+  <role>
+    DevOps + frontend engineer. Familiar with the `code-page-deploy` skill, Power Pages /
+    Code Pages solution import, and post-deploy smoke testing.
+  </role>
+
+  <goal>
+    PlaybookBuilder Code Page deployed to spaarkedev1:
+    1. Build runs cleanly via `npm run build:prod` (CLAUDE.md §12)
+    2. Bundle size measured + documented (no per-task ceiling defined but document baseline + delta for trend)
+    3. Solution import / Power Pages deploy via `code-page-deploy` skill
+    4. Deployed version verified (build hash matches local build)
+    5. Smoke test: open PlaybookBuilder → drop AI Completion node → save → verify Dataverse row has `sprk_executortype = 1`
+    6. Smoke test: reload PlaybookBuilder → confirm tabs render in new order (Overview, Action, Prompt, Skills, Knowledge, Tools, Configuration)
+    7. Deploy artifact + manifest recorded in `notes/handoffs/089d-deploy.md`
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="code-page-deploy-skill">.claude/skills/code-page-deploy/SKILL.md</file>
+    <file purpose="ui-test-089a-results">projects/spaarke-ai-platform-unification-r7/notes/handoffs/089a-ui-test-results.md</file>
+    <file purpose="ui-test-089b-results">projects/spaarke-ai-platform-unification-r7/notes/handoffs/089b-ui-test-results.md</file>
+    <file purpose="ui-test-089c-results">projects/spaarke-ai-platform-unification-r7/notes/handoffs/089c-dark-mode-results.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §12">Build command MUST be `npm run build:prod` (NOT `npm run build`) per FAILURE-MODES AP-1.</constraint>
+    <constraint source="code-page-deploy SKILL">Follow the skill's standard procedure: build → pack → import → publish → verify.</constraint>
+    <constraint source="ADR-029">Not BFF — no publish-size ceiling. Document Code Page bundle size for trend tracking.</constraint>
+    <constraint source="ADR-021">Verified by task 089c — this task assumes 089c PASS.</constraint>
+    <constraint source="CLAUDE.md §11">No new components — deploying existing artifact.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deployment/code-page</topic>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md (related deploy patterns)</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 8 final task. After this deploy:
+      - Wave 9 (consumer migration) can proceed using the deployed PlaybookBuilder
+      - Wave 10 wrap-up runs UAT against the deployed state
+      - R4 graduation gate (FR-15) close depends on full /narrate end-to-end working in spaarkedev1
+    </background>
+    <dependencies>
+      <dependency task="089a" status="prerequisite">Dropdown + tier UI tests PASSED.</dependency>
+      <dependency task="089b" status="prerequisite">Typed config form UI tests PASSED.</dependency>
+      <dependency task="089c" status="prerequisite">ADR-021 dark mode UI tests PASSED.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 9 task 094 wires Playbook Library modal into spaarke-ai chat surface — uses the deployed PlaybookBuilder modal pattern.</item>
+      <item>Wave 10 task 100 verifies all 15 success criteria end-to-end including PlaybookBuilder UI.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: deploy tag + code-page tag + production-affecting change to spaarkedev1, quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md + code-page-deploy SKILL + 3 UI test results docs.
+    </step>
+    <step order="2" name="Verify 089a-c PASS">
+      Confirm all 3 UI test result docs show PASS status. If any FAIL, STOP and fix before deploy.
+    </step>
+    <step order="3" name="Build PlaybookBuilder">
+      Run: `cd src/client/code-pages/PlaybookBuilder && npm install --legacy-peer-deps --no-audit --no-fund && npm run build:prod`.
+      Verify: 0 errors, 0 new warnings, build artifacts in `dist/` (or equivalent output folder).
+    </step>
+    <step order="4" name="Measure bundle size">
+      Capture compressed bundle size from build output. Document in task notes for trend tracking.
+    </step>
+    <step order="5" name="Invoke code-page-deploy skill">
+      Use Skill tool: `code-page-deploy` with target environment = spaarkedev1.
+      Skill handles: solution pack → solution import → publish customizations.
+    </step>
+    <step order="6" name="Verify deployment">
+      Open the deployed PlaybookBuilder Code Page URL.
+      Inspect build hash / version metadata; confirm matches local build.
+    </step>
+    <step order="7" name="Smoke test 1 — new node creation writes sprk_executortype">
+      In deployed app: drop AI Completion node → save playbook → query Dataverse via MCP:
+      `mcp__dataverse__read_query` on `sprk_playbooknode` → verify newest row has `sprk_executortype = 1`.
+    </step>
+    <step order="8" name="Smoke test 2 — new tab order">
+      Open NodePropertiesDialog on any node → verify tab order is: Overview, Action, Prompt, Skills, Knowledge, Tools, Configuration.
+    </step>
+    <step order="9" name="Document deployment">
+      Write `notes/handoffs/089d-deploy.md`:
+      - Deploy timestamp
+      - Build hash / commit SHA
+      - Bundle size (compressed + uncompressed)
+      - Smoke test results (both PASS)
+      - Rollback procedure (in case of regression discovered post-Wave 9+)
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on deploy doc.
+      Run `/adr-check` against ADR-021 + ADR-029 (Code Page deploy hygiene proxy).
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 089d status complete; Wave 8 complete; advance current-task.md to first pending Wave 9 task per dependency graph.
+    </step>
+    <step order="11" name="Commit">
+      Commit message:
+      `feat(playbookbuilder/r7): deploy PlaybookBuilder Code Page to spaarkedev1 (Wave 8 task 089d)`. No PR yet — Wave 8 closes; PR happens at project wrap-up (Wave 10).
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (ui-test results + code-page-deploy SKILL)</tool>
+    <tool>Bash (npm install, npm run build:prod, git commit)</tool>
+    <tool>Skill (code-page-deploy for actual deploy)</tool>
+    <tool>MCP (mcp__dataverse__read_query for smoke-test verification)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+    <tool>Write (deploy doc)</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">PlaybookBuilder Code Page deployed to spaarkedev1</output>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/handoffs/089d-deploy.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to first Wave 9 task)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 089d ✅, mark Wave 8 complete)</output>
+    <output type="commit">feat(playbookbuilder/r7): deploy PlaybookBuilder Code Page to spaarkedev1 (Wave 8 task 089d)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>089a + 089b + 089c UI test results all PASS before deploy</criterion>
+    <criterion>npm run build:prod passes: 0 errors, 0 new warnings</criterion>
+    <criterion>code-page-deploy skill completes without error</criterion>
+    <criterion>Deployed version verified (build hash matches local)</criterion>
+    <criterion>Smoke test 1: dropped AI Completion node writes sprk_executortype=1 to Dataverse — PASS</criterion>
+    <criterion>Smoke test 2: tab order matches Overview, Action, Prompt, Skills, Knowledge, Tools, Configuration — PASS</criterion>
+    <criterion>Bundle size documented</criterion>
+    <criterion>Rollback procedure documented in deploy doc</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows Wave 8 complete (all 14 tasks ✅)</criterion>
+  </acceptance-criteria>
+</task>

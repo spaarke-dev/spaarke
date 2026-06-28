@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-068" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>UPDATE root CLAUDE.md if §13 System Entry Points or §17 Pointers table affected by R7</title>
+    <status>not-started</status>
+    <wave>6</wave>
+    <estimated-effort>30-60 min</estimated-effort>
+    <tags>docs, wave-6</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>067</dependencies>
+    <fr-coverage>FR-28 (root CLAUDE.md disposition)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Check whether root `CLAUDE.md` needs updating after Wave 6 doc work lands. Two candidate areas:
+    (1) §13 System Entry Points table — may need updates if R7 changed canonical entry-point files
+    (likely NO — R7 doesn't add new subsystems, just refactors dispatch within `Sprk.Bff.Api`);
+    (2) §17 Pointers table — may want a new pointer to `ai-guide-consumer-wiring.md` (created in
+    task 067). This task is SEQUENTIAL per CLAUDE.md §3 Sub-Agent Write Boundary — root `CLAUDE.md`
+    is in `.claude/`'s reachable governance surface; modifications happen only in main session.
+  </prompt>
+
+  <role>
+    Documentation editor. Conservative — root CLAUDE.md changes have wide blast radius. ONLY modify
+    if the change is clearly warranted by spec FR-28 or by Wave 6 changes. If NO change is needed,
+    document the decision (audit-only output).
+  </role>
+
+  <goal>
+    One of two outcomes:
+    1. **IF root CLAUDE.md needs updating**: update §13 System Entry Points table and/or §17 Pointers
+       table to reflect R7 changes. Specifically:
+       - §13: Likely NO change (R7 doesn't add new subsystems; the BFF entry point is still `Program.cs`)
+       - §17: Likely YES — add a pointer to `docs/guides/ai-guide-consumer-wiring.md` (new doc from task 067)
+       - §10 BFF Hygiene: NO change in this task (handled by task 064 on `.claude/constraints/bff-extensions.md`)
+       - Update CHANGELOG entry per CLAUDE.md "Every PR touching this file MUST add an entry to .claude/CHANGELOG.md"
+    2. **IF root CLAUDE.md does NOT need updating**: produce an audit note at
+       `notes/handoffs/wave6-claudemd-audit.md` documenting the review + decision-to-skip. The note
+       cites which sections were reviewed + why no change was needed.
+
+    The default expected outcome (per project CLAUDE.md guidance "Likely no change since R7 doesn't
+    add new subsystems"): MINIMAL update — at most, add a single §17 Pointers row for
+    `ai-guide-consumer-wiring.md`. Plus possibly a CHANGELOG entry.
+  </goal>
+
+  <inputs>
+    <file purpose="disposition">projects/spaarke-ai-platform-unification-r7/notes/drafts/wave6-doc-disposition.md</file>
+    <file purpose="root-claudemd">CLAUDE.md (root)</file>
+    <file purpose="claudemd-changelog">.claude/CHANGELOG.md</file>
+    <file purpose="new-guide">docs/guides/ai-guide-consumer-wiring.md (created in task 067)</file>
+    <file purpose="spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3 Sub-Agent Write Boundary">SEQUENTIAL — root `CLAUDE.md` writes happen only in main session.</constraint>
+    <constraint source="CLAUDE.md Footer">"Every PR touching this file MUST add an entry to .claude/CHANGELOG.md." If we modify root CLAUDE.md, ALSO update `.claude/CHANGELOG.md`.</constraint>
+    <constraint source="spec NFR-08">No SUPERSEDED markers anywhere — if we add to §17 Pointers, the addition is clean.</constraint>
+    <constraint source="conservative-default">Conservative — root CLAUDE.md is binding governance for every session. Only modify if R7 produced changes that warrant a pointer update.</constraint>
+    <constraint source="dependency">Task 067 must have shipped — `ai-guide-consumer-wiring.md` must exist before §17 Pointers can cite it.</constraint>
+    <constraint source="CLAUDE.md §11">Cost-of-doing-nothing if NOT updated: future readers of root CLAUDE.md §17 can't easily find the new consumer-wiring guide. But this is mitigated because `PLAYBOOK-AUTHOR-GUIDE.md` (task 066) and `ai-architecture-actions-nodes-scopes.md` (task 062) both cross-reference the new guide.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documentation</topic>
+    <files>
+      <file>CLAUDE.md</file>
+      <file>.claude/CHANGELOG.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Root CLAUDE.md is the binding instruction file loaded every session. §13 System Entry Points
+      table maps subsystems → starting source files. §17 Pointers table maps topics → files. R7 might
+      affect §17 (new consumer-wiring guide deserves a pointer) but is unlikely to affect §13 (BFF
+      entry remains Program.cs). This task makes the explicit determination.
+    </background>
+    <dependencies>
+      <dependency task="067" status="not-started-but-required">ai-guide-consumer-wiring.md must exist before §17 can cite it.</dependency>
+      <dependency task="060" status="not-started-but-required">Disposition list confirmed root CLAUDE.md is in Wave 6 scope (this task).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 064 updated `.claude/constraints/bff-extensions.md` §G — root CLAUDE.md §10 BFF Hygiene cites that doc, so the cross-reference remains valid (no change needed in root CLAUDE.md).</item>
+      <item>Task 069 post-audits docs/ for SUPERSEDED markers — root CLAUDE.md is reviewed there too.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: docs UPDATE task to root CLAUDE.md (Sub-Agent Write Boundary applies — main session only) — sequential per CLAUDE.md §3 · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-28 + task 060 disposition list + root CLAUDE.md §13 + §17 + §10.
+    </step>
+    <step order="2" name="Determine §13 System Entry Points disposition">
+      Review §13 table. R7 doesn't add new subsystems (no new BFF API, no new PCF, no new code page). Likely NO change. Document the audit decision.
+    </step>
+    <step order="3" name="Determine §17 Pointers disposition">
+      Review §17 table. R7 creates `docs/guides/ai-guide-consumer-wiring.md` (task 067). Determine whether §17 should add a pointer to this guide. Likely YES — but as a single new row, not a refactor of the table.
+    </step>
+    <step order="4" name="Determine §10 BFF Hygiene disposition">
+      Confirm §10 already cites `.claude/constraints/bff-extensions.md` — task 064 updated §G within that file, not the citation from root CLAUDE.md. No change needed in §10 in this task.
+    </step>
+    <step order="5" name="Branch on outcome">
+      IF any change is needed (Step 3 likely yields YES): proceed to Step 6 (Apply update).
+      IF no change is needed: proceed to Step 7 (Audit-only output).
+    </step>
+    <step order="6" name="Apply update (if needed)">
+      Add a row to §17 Pointers table. Suggested row:
+      | Topic | Pointer |
+      |---|---|
+      | **Wiring a new consumer (maker tutorial)** | [`docs/guides/ai-guide-consumer-wiring.md`](docs/guides/ai-guide-consumer-wiring.md) — what a consumer is, step-by-step wiring procedure, chat-summarize migration case study (R7 FR-31) |
+      Place alphabetically or near "Module-specific CLAUDE.md" / similar pointer entries.
+
+      ALSO update `.claude/CHANGELOG.md`: add a single line entry citing this task + the §17 addition.
+    </step>
+    <step order="7" name="Audit-only output (if no change)">
+      Create `projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave6-claudemd-audit.md` with:
+      - Date + author
+      - Review summary (§13 / §17 / §10 checked)
+      - Decision: no change needed + rationale per section
+      - Next-action: none (Wave 6 task 069 post-audits independently)
+    </step>
+    <step order="8" name="Verify Sub-Agent Write Boundary respected">
+      Confirm this task ran in main session (no sub-agent tool calls modifying root CLAUDE.md or `.claude/CHANGELOG.md`).
+    </step>
+    <step order="9" name="Verify NFR-08 discipline">
+      Grep any modified file for "SUPERSEDED" / "deprecated" added during this task. Zero new instances.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 068 status complete; advance current-task.md to next pending Wave 6 task (069).
+    </step>
+    <step order="11" name="Commit">
+      Commit any modified files with conventional message.
+      Example (update path): docs(claudemd/r7): add §17 pointer to ai-guide-consumer-wiring (Wave 6 task 068, FR-28)
+      Example (audit-only path): docs(audit/r7): root CLAUDE.md no-change audit (Wave 6 task 068, FR-28)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (root CLAUDE.md + CHANGELOG + new guide + spec)</tool>
+    <tool>Grep (verify cross-references + NFR-08 markers)</tool>
+    <tool>Edit (root CLAUDE.md + .claude/CHANGELOG.md, if needed)</tool>
+    <tool>Write (audit-only output, if no change needed)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="conditional-modified-file">CLAUDE.md (if §17 Pointers updated)</output>
+    <output type="conditional-modified-file">.claude/CHANGELOG.md (if root CLAUDE.md was modified)</output>
+    <output type="conditional-new-file">projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave6-claudemd-audit.md (if audit-only path)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 069)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 068 ✅)</output>
+    <output type="commit">conventional commit per outcome path</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>§13 System Entry Points table reviewed; disposition documented (likely no change)</criterion>
+    <criterion>§17 Pointers table reviewed; disposition documented (likely add ai-guide-consumer-wiring.md row)</criterion>
+    <criterion>§10 BFF Hygiene reviewed; no change needed (citation to constraints file already correct)</criterion>
+    <criterion>IF modified: .claude/CHANGELOG.md updated per Footer rule</criterion>
+    <criterion>IF no change: audit note at notes/handoffs/wave6-claudemd-audit.md exists</criterion>
+    <criterion>Task ran sequentially (no parallel sub-agent invocations on root CLAUDE.md or .claude/CHANGELOG.md)</criterion>
+    <criterion>No SUPERSEDED markers (NFR-08)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>TASK-INDEX.md shows 068 ✅</criterion>
+  </acceptance-criteria>
+</task>

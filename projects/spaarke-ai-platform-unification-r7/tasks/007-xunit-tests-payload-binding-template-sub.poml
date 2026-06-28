@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-007" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>xUnit tests — payload binding + schema rendering + template substitution (FR-14)</title>
+    <status>not-started</status>
+    <wave>1</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>bff-api, testing, wave-1</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>003</dependencies>
+    <fr-coverage>FR-14 (test coverage — payload + schema + template paths)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Author the first batch of AiCompletionNodeExecutor xUnit tests at
+    tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiCompletionNodeExecutorTests.cs. Cover the happy-path
+    payload-binding surface: reads Action's SystemPrompt + OutputSchema + Temperature, renders the prompt
+    schema correctly, and substitutes template variables from previous outputs. Mock IOpenAiClient at the
+    executor boundary per ADR-038 (DO NOT use Mock&lt;HttpMessageHandler&gt;). Target ~5-7 tests in this batch.
+  </prompt>
+
+  <role>
+    Senior .NET test author. Tests are integration-of-behavior, not implementation introspection. Mock the
+    LLM client to return a canned JsonElement; assert the executor reads the right Action fields, passes
+    them through PromptSchemaOverrideMerger correctly, substitutes template variables, and produces a valid
+    NodeOutput.Ok. Tests must be deterministic and runnable on CI without network access.
+  </role>
+
+  <goal>
+    AiCompletionNodeExecutorTests.cs created at tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/ with ~5-7 tests:
+    1. ExecuteAsync_ReadsActionSystemPrompt_PassesToOpenAiClient — asserts the SystemPrompt sent to the mock
+       IOpenAiClient matches Action.SystemPrompt
+    2. ExecuteAsync_ReadsActionOutputSchema_PassesToOpenAiClient — asserts the OutputSchema sent matches Action.OutputSchema
+    3. ExecuteAsync_RendersFullPrompt_WhenNoNodeOverrides — happy path with no node-level Role/Task/Constraints
+    4. ExecuteAsync_SubstitutesTemplateVariables_FromPreviousOutputs — asserts {{var}} placeholders resolve
+       against context.PreviousOutputs
+    5. ExecuteAsync_BindsJsonElementResponse_ToOutputVariable — asserts NodeOutput.Ok carries the parsed
+       JsonElement at node.OutputVariable
+    6. ExecuteAsync_EmitsTelemetry_WithActionTypeTag — assert telemetry includes action_type=AiCompletion
+    7. (optional) ExecuteAsync_ResolvesNestedTemplateVariables — multi-level {{a.b}} substitution test
+  </goal>
+
+  <inputs>
+    <file purpose="executor-under-test">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</file>
+    <file purpose="sibling-test-pattern">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiAnalysisNodeExecutorTests.cs</file>
+    <file purpose="sibling-test-pattern-2">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/EntityNameValidatorNodeExecutorTests.cs</file>
+    <file purpose="pattern-decision">projects/spaarke-ai-platform-unification-r7/notes/spikes/aicompletion-pattern-decision.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="adr-038">docs/adr/ADR-038-testing-strategy.md</file>
+    <file purpose="openai-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-038">Testing Strategy — integration-heavy pyramid. Mock at executor boundary (IOpenAiClient), NOT at HttpMessageHandler. NO DI-registration tests, NO ctor-null-check tests, NO Mock&lt;HttpMessageHandler&gt;.</constraint>
+    <constraint source="spec FR-14">Tests cover: payload binding, schema rendering, template substitution. Total Wave 1 test count ~15-20 across tasks 007/008/009.</constraint>
+    <constraint source="spec NFR-05">Coverage target: AiCompletionNodeExecutor line coverage &gt;85%. Tasks 007+008+009 together must reach this — track per-task incremental coverage.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — test-modifying tasks run FULL rigor per ADR-038 override row in CLAUDE.md §8.</constraint>
+    <constraint source="CLAUDE.md §8 TEST-MODIFYING">Override row — testing tag triggers FULL rigor unconditionally. Step 9.5 quality gates required.</constraint>
+    <constraint source="bff-extensions.md §F">Test update obligation — this task is the obligated coverage for FR-12 happy-path code added in task 003.</constraint>
+    <constraint source="ADR-038 §7 build-vs-maintain">Tests added in this task are MAINTAIN-class (not scaffolding) — they verify a contract (FR-14) that the BFF must honor in production. They survive the project-close test-diet gate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/xunit-bff-pattern</topic>
+    <files>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>docs/procedures/test-fixture-contracts.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="AiAnalysisNodeExecutorTests" location="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiAnalysisNodeExecutorTests.cs">
+        Canonical sibling test file. Uses Moq for IOpenAiClient; constructs NodeExecutionContext via test helpers; asserts NodeOutput.Ok shape. Mirror the structure.
+      </pattern>
+      <pattern name="NodeExecutionContext test-helper" location="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/">
+        Existing helper builders for NodeExecutionContext — reuse to avoid hand-constructing the context in every test.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 003 implemented the merge-and-substitute logic in ExecuteAsync. This task validates that logic
+      via xUnit. Tasks 008 (temperature + per-node override) and 009 (error paths) round out Wave 1 test
+      coverage. Total target: ~15-20 tests across 007/008/009, &gt;85% line coverage of the executor.
+    </background>
+    <dependencies>
+      <dependency task="003" status="not-started-but-required">Merge logic implemented in ExecuteAsync.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 008 (parallel-safe with this) covers temperature override + per-node prompt override paths in the same test file.</item>
+      <item>Task 009 (depends on 007) covers error paths (missing prompt, malformed JSON, LLM HTTP error) in the same test file.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: TEST-MODIFYING override (tag testing + tests/** modification per CLAUDE.md §8 override row — FULL rigor UNCONDITIONAL per ADR-038). Quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-14 + ADR-038 + docs/standards/TEST-ARCHITECTURE.md + tests/CLAUDE.md.
+    </step>
+    <step order="2" name="Read sibling test file as template">
+      Open tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiAnalysisNodeExecutorTests.cs. Note: Moq usage for IOpenAiClient, NodeExecutionContext construction, NodeOutput.Ok assertions.
+    </step>
+    <step order="3" name="Read EntityNameValidatorNodeExecutorTests for simpler patterns">
+      Open the sibling test file. Useful for: error aggregation, simple ExecuteAsync structure, FluentAssertions usage patterns.
+    </step>
+    <step order="4" name="Create AiCompletionNodeExecutorTests.cs">
+      File path: tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiCompletionNodeExecutorTests.cs
+      Namespace: Sprk.Bff.Api.Tests.Services.Ai.Nodes
+      Class: public sealed class AiCompletionNodeExecutorTests
+      Test fields:
+      - Mock&lt;IOpenAiClient&gt; _openAiClient
+      - PromptSchemaOverrideMerger _merger (real instance — pure logic)
+      - Mock&lt;ILogger&lt;AiCompletionNodeExecutor&gt;&gt; _logger
+      - AiCompletionNodeExecutor _sut (system under test)
+    </step>
+    <step order="5" name="Write the 5-7 tests">
+      Implement the goal-list tests:
+      1. ExecuteAsync_ReadsActionSystemPrompt_PassesToOpenAiClient — _openAiClient.Verify the SystemPrompt parameter equals Action.SystemPrompt
+      2. ExecuteAsync_ReadsActionOutputSchema_PassesToOpenAiClient — _openAiClient.Verify the OutputSchema parameter equals Action.OutputSchema
+      3. ExecuteAsync_RendersFullPrompt_WhenNoNodeOverrides — context with empty ConfigJson; assert no override merge applied; SystemPrompt unchanged
+      4. ExecuteAsync_SubstitutesTemplateVariables_FromPreviousOutputs — context.PreviousOutputs has {"matterName":"ACME"}; Action.SystemPrompt has "{{matterName}}"; assert "ACME" appears in the SystemPrompt sent to the LLM
+      5. ExecuteAsync_BindsJsonElementResponse_ToOutputVariable — mock LLM returns JsonElement; assert NodeOutput.Ok.StructuredData equals that JsonElement; assert OutputVariable matches node.OutputVariable
+      6. ExecuteAsync_EmitsTelemetry_WithActionTypeTag — use ActivityListener to capture activity; assert action_type tag present
+      7. (optional) Nested template substitution test
+      Use FluentAssertions per project convention.
+    </step>
+    <step order="6" name="Run tests">
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiCompletionNodeExecutorTests.cs
+      Expect: all 5-7 tests pass.
+    </step>
+    <step order="7" name="Measure coverage delta">
+      Run: dotnet test --collect:"XPlat Code Coverage" — generate coverage report scoped to AiCompletionNodeExecutor. Document the line-coverage % after this task in task notes; tracks toward NFR-05 &gt;85%.
+    </step>
+    <step order="8" name="Verify acceptance">
+      Re-read AiCompletionNodeExecutorTests.cs. Confirm all 5-7 tests cover the goal bullets + no ADR-038 banned patterns used.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the new test file. Run `/adr-check` against ADR-038 (test pyramid + banned patterns).
+      Run `/test-diet` preview (read-only) — confirm tests classify as MAINTAIN per ADR-038 §7 (not SCAFFOLDING).
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 007 status complete; advance current-task.md (007 unblocks 008 and 009).
+    </step>
+    <step order="11" name="Commit">
+      Commit AiCompletionNodeExecutorTests.cs with conventional message.
+      Example: test(bff/r7): payload binding + schema rendering + template substitution (Wave 1 task 007, FR-14)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (sibling test files + executor under test + interface)</tool>
+    <tool>Write (new AiCompletionNodeExecutorTests.cs)</tool>
+    <tool>Bash (dotnet test, dotnet test coverage, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiCompletionNodeExecutorTests.cs</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 007 ✅)</output>
+    <output type="commit">test(bff/r7): payload binding + schema rendering + template substitution (Wave 1 task 007, FR-14)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AiCompletionNodeExecutorTests.cs exists at tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/</criterion>
+    <criterion>5-7 tests pass covering the goal bullets</criterion>
+    <criterion>IOpenAiClient is mocked at the executor boundary (no Mock&lt;HttpMessageHandler&gt; per ADR-038)</criterion>
+    <criterion>No DI-registration or ctor-null-check tests added (per ADR-038 ban)</criterion>
+    <criterion>Tests use FluentAssertions and Moq per project convention</criterion>
+    <criterion>Coverage delta documented in task notes (cumulative target &gt;85% by task 009)</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>Tests classify as MAINTAIN (not SCAFFOLDING) per ADR-038 §7</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-093" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Audit Playbook Library Code Page modal current routing</title>
+    <status>not-started</status>
+    <wave>9</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>audit, code-page, wave-9</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <fr-coverage>FR-18 (audit portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    FR-18 requires wiring the Playbook Library modal into 3 consumer surfaces (spaarke-ai chat,
+    briefing widget, ad-hoc launcher). Before wiring (tasks 094-096), audit the current state of
+    the Playbook Library: does the modal exist? Where is it (Code Page, shared component, both)?
+    Is it routed from any consumer today? What is its contract (props, expected callbacks)?
+    Produce an audit doc that tasks 094-096 can follow without re-reading source.
+  </prompt>
+
+  <role>
+    Senior React / Power Platform developer familiar with Spaarke Code Pages, the
+    Spaarke.UI.Components shared library, and the consumer-routing model. Goal: extract the
+    current modal contract + wire-up state, not modify anything yet.
+  </role>
+
+  <goal>
+    An audit document at `projects/spaarke-ai-platform-unification-r7/notes/spikes/playbook-library-audit.md`
+    that answers:
+    1. Where does the Playbook Library modal live today? (PlaybookLibraryPage at external-spa,
+       PlaybookLibraryShell at Spaarke.UI.Components, or both? Document file paths + roles.)
+    2. What is the modal's public contract — props, callbacks, expected payload to launch a playbook?
+    3. What consumer surfaces (if any) currently route to it today? Audit: spaarke-ai chat surface
+       (src/solutions/SpaarkeAi/), Daily Briefing widget (src/client/shared/Spaarke.DailyBriefing.Components/),
+       LegalWorkspace ad-hoc launchers, any other.
+    4. How does the modal list playbooks? Does it query sprk_analysisplaybook directly, consume an
+       endpoint, or use Xrm.WebApi?
+    5. How does the modal launch a playbook today (if it does)? Direct PlaybookOrchestrationService
+       call, IInvokePlaybookAi, or some other path? Confirm it eventually flows through Path A.5
+       routing (consumer code -> IConsumerRoutingService -> IInvokePlaybookAi).
+    6. For each of the 3 target consumer surfaces (tasks 094-096), identify the natural mount point
+       for a "Browse Playbooks" affordance — file path + component name.
+    7. What is the modal's intended UX — list every playbook + its consumer mapping (per FR-18
+       acceptance criterion)? If the modal lists playbooks without showing consumer mapping today,
+       note this as a gap tasks 094-096 may need to close.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="library-page">src/client/external-spa/src/pages/PlaybookLibraryPage.tsx</file>
+    <file purpose="library-shell-component">src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/PlaybookLibraryShell.tsx</file>
+    <file purpose="spaarke-ai-app">src/solutions/SpaarkeAi/src/App.tsx</file>
+    <file purpose="spaarke-ai-conversation">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+    <file purpose="briefing-widget">src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx</file>
+    <file purpose="canonical-doc">docs/architecture/ai-architecture-consumer-routing.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">BFF AI Architecture — Playbook Library invocations MUST flow through IInvokePlaybookAi triangle (canonical). Audit confirms or flags gap.</constraint>
+    <constraint source="spec FR-18">Acceptance: at least 3 consumer surfaces have "Browse Playbooks" affordance; modal lists every playbook WITH consumer mapping; clicking a playbook invokes it through proper Path A.5 routing.</constraint>
+    <constraint source="CLAUDE.md §11">Audit task — modification justification triple applies to tasks 094-096 (the wire-up tasks), not this audit.</constraint>
+    <constraint source="MUST NOT modify">docs/architecture/ai-architecture-consumer-routing.md — READ-ONLY in R7.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-pages/playbook-library</topic>
+    <files>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/ai-architecture-consumer-routing.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="PlaybookLibraryShell shared component" location="src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/">
+        Shared lib component — likely the modal body. Audit: is it a Dialog or an inline shell?
+      </pattern>
+      <pattern name="PlaybookLibraryPage external-spa" location="src/client/external-spa/src/pages/PlaybookLibraryPage.tsx">
+        Standalone page route — likely a non-modal mount. Audit: is this the routed page or the modal?
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      FR-18 was identified in design.md as a gap: the modal exists (shared component or external-spa
+      page) but isn't routed from the in-flow consumer surfaces (spaarke-ai chat, briefing widget,
+      ad-hoc launchers). Users currently have no in-flow path to "browse + invoke any playbook" from
+      these consumer UIs. Tasks 094-096 close this. This audit task scopes the work and identifies
+      the natural mount points before any code changes.
+    </background>
+    <dependencies>
+      <dependency task="none" status="parallel">Can run in parallel with tasks 090-092 (the orchestrator migration); FR-18 is independent of FR-17 except for shared design context.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 092 (Wave 9) — adds the chat-summarize row to sprk_playbookconsumer. The Library modal's "consumer mapping" column reads this table.</item>
+      <item>Task 067 (Wave 6) — author docs/guides/ai-guide-consumer-wiring.md uses the Library modal as a maker discoverability surface.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: audit-only task, no source modification, planning artifact only · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md (FR-18) + plan.md (Wave 9).
+    </step>
+    <step order="2" name="Read PlaybookLibraryShell shared component">
+      Open src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/PlaybookLibraryShell.tsx
+      and any sibling files. Document: props, callbacks, internal state, how it lists playbooks
+      (data source: BFF endpoint vs Xrm.WebApi vs hardcoded), how it launches a playbook (callback
+      to host, direct API call, or routing config).
+    </step>
+    <step order="3" name="Read PlaybookLibraryPage external-spa">
+      Open src/client/external-spa/src/pages/PlaybookLibraryPage.tsx. Document: route mount point,
+      relationship to PlaybookLibraryShell (consumer / wrapper / duplicate?), launch flow.
+    </step>
+    <step order="4" name="Audit spaarke-ai chat surface mount opportunities">
+      Read src/solutions/SpaarkeAi/src/App.tsx + ConversationPane.tsx + WelcomePanel.tsx +
+      ChatHistoryPanel.tsx. Identify: where would a "Browse Playbooks" affordance naturally mount?
+      A button in the toolbar? An item in CommandHelpPanel? A slash command in ConversationPane?
+      Recommend 1-2 candidate mount points for task 094.
+    </step>
+    <step order="5" name="Audit Daily Briefing widget mount opportunities">
+      Read src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx
+      (+ surrounding files in same directory). Identify: where would a "Browse Playbooks"
+      affordance naturally mount? Recommend 1-2 candidate mount points for task 095.
+    </step>
+    <step order="6" name="Audit ad-hoc launcher candidates">
+      Examine LegalWorkspace + any other ad-hoc playbook launcher. Glob for "ad-hoc" / "playbook"
+      / "invoke" components in src/client/. Identify a candidate launcher surface that would
+      naturally host a "Browse Playbooks" affordance. Recommend 1 candidate for task 096.
+    </step>
+    <step order="7" name="Map playbook listing data source">
+      Trace how PlaybookLibraryShell lists playbooks. If it uses Xrm.WebApi, document whether that
+      complies with DATA-ACCESS-DECISION-CRITERIA.md. If it uses a BFF endpoint, document the
+      endpoint path and whether it exposes consumer mappings. If listing-with-consumer-mapping is
+      NOT yet supported, flag this as a gap tasks 094-096 may need to close (likely a small BFF
+      endpoint addition — call this out for downstream task scoping).
+    </step>
+    <step order="8" name="Trace playbook launch path">
+      Trace what happens when the user clicks a playbook in PlaybookLibraryShell. Document the call
+      chain. Confirm it eventually flows through IInvokePlaybookAi (Path A.5). If it bypasses
+      Path A.5, flag as gap.
+    </step>
+    <step order="9" name="Write audit document">
+      Create notes/spikes/playbook-library-audit.md answering the 7 goal questions. Include:
+      - File map (PlaybookLibraryShell + PlaybookLibraryPage roles + relationship)
+      - Public contract / props / callbacks of the Shell component
+      - Current routing state (which consumers route to it today — likely "none in-flow")
+      - Recommended mount points per consumer surface (1-2 candidates for spaarke-ai, briefing, ad-hoc)
+      - Playbook listing data source + any gaps (esp. consumer-mapping column)
+      - Launch path: confirmed Path A.5 OR gap to close
+      Target: 150-220 lines.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 093 status complete; advance current-task.md to task 094.
+    </step>
+    <step order="11" name="Commit">
+      Commit notes/spikes/playbook-library-audit.md with conventional message.
+      Example: docs(r7/wave9): audit Playbook Library modal current routing state (task 093, FR-18)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (PlaybookLibrary files, consumer surfaces, canonical docs)</tool>
+    <tool>Grep (search for PlaybookLibrary mounts, "Browse Playbooks" strings, consumer-routing wiring)</tool>
+    <tool>Glob (find ad-hoc launcher candidates)</tool>
+    <tool>Write (audit document)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/spikes/playbook-library-audit.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 094)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 093 ✅)</output>
+    <output type="commit">docs(r7/wave9): audit Playbook Library modal current routing state (task 093, FR-18)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Audit document exists at notes/spikes/playbook-library-audit.md</criterion>
+    <criterion>Document answers all 7 goal questions explicitly</criterion>
+    <criterion>Document maps PlaybookLibraryShell + PlaybookLibraryPage roles + relationship</criterion>
+    <criterion>Document captures the modal's props/callbacks/contract</criterion>
+    <criterion>Document recommends 1-2 mount points per consumer surface (spaarke-ai, briefing, ad-hoc)</criterion>
+    <criterion>Document confirms (or flags gap with) playbook listing data source + consumer-mapping column availability</criterion>
+    <criterion>Document confirms (or flags gap with) launch flow going through IInvokePlaybookAi / Path A.5</criterion>
+    <criterion>current-task.md updated to point at task 094 as next</criterion>
+    <criterion>TASK-INDEX.md shows 093 ✅, 094 🔲 ready</criterion>
+  </acceptance-criteria>
+</task>

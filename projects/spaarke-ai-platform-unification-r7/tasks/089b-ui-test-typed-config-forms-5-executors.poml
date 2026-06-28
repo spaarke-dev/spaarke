@@ -1,0 +1,221 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-089b" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>UI test — typed config forms for 5 priority executors</title>
+    <status>not-started</status>
+    <wave>8</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>code-page, testing, ui-test, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>084</dependencies>
+    <fr-coverage>FR-23 (typed forms UI test coverage)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Browser-based UI test of the typed config forms for the 5 priority executors per FR-23.
+    Uses Claude Code Chrome integration per `/ui-test` skill. Verifies:
+    - AiAnalysis form renders with documentScope, toolBindings, temperature, promptOverride fields
+    - AiCompletion form renders with temperature, maxOutputTokens, promptOverride fields
+    - Condition form renders with expression, trueBranch, falseBranch fields
+    - EntityNameValidator form renders with entitySetName, uniqueCheck, maxLength fields
+    - CreateNotification form renders with recipientType, template, priority fields
+    - Each form's per-field validation works (required-field empty → error shown)
+    - Form-state syncs to `sprk_configjson` (legacy field preserved)
+    Tests run against deployed PlaybookBuilder Code Page in spaarkedev1.
+  </prompt>
+
+  <role>
+    QA + frontend engineer. Familiar with Claude Code Chrome integration, schema-driven UI testing,
+    and form-validation testing patterns.
+  </role>
+
+  <goal>
+    Documented UI test results:
+    1. Browser-based test pass/fail report for each of the 5 priority forms
+    2. Screenshots of each form in default + validation-error states
+    3. Console logs capture (zero errors expected)
+    4. `sprk_configjson` round-trip verification (1 spot check)
+    5. Results recorded in `projects/spaarke-ai-platform-unification-r7/notes/handoffs/089b-ui-test-results.md`
+    6. Any FAILs filed via `/project-defer-issue-tracking`
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="ui-test-skill">.claude/skills/ui-test/SKILL.md</file>
+    <file purpose="typed-form">src/client/code-pages/PlaybookBuilder/src/components/properties/TypedConfigForm.tsx</file>
+    <file purpose="adr-021">docs/adr/ADR-021-dark-mode-semantic-tokens.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ui-test SKILL.md">Browser-based testing requires `--chrome`. If not available, manual fallback.</constraint>
+    <constraint source="ADR-021">Verify semantic-token colors visually — task 089c covers dedicated dark-mode pass. This task focuses on functional behavior.</constraint>
+    <constraint source="ADR-038">UI tests at KEEP path. Results documented in handoffs.</constraint>
+    <constraint source="CLAUDE.md §11">No new components — testing existing UI.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/ui-tests</topic>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Tasks 083 + 084 built the typed config form renderer + the 5 priority executor schemas. This task
+      verifies in the browser that the schemas → forms pipeline works end-to-end against deployed BFF.
+    </background>
+    <dependencies>
+      <dependency task="084" status="prerequisite">5 priority schemas authored.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 089a UI tests for dropdown + tier grouping.</item>
+      <item>Task 089c UI tests for ADR-021 dark mode compliance.</item>
+      <item>Task 089d deploys after all 3 UI tests pass.</item>
+    </related-work>
+  </context>
+
+  <ui-tests>
+    <test name="AiAnalysis typed form">
+      <url>https://spaarke-dev.crm.dynamics.com/main.aspx?appid={app-id}&pagetype=custom&name=sprk_playbookbuilder</url>
+      <steps>
+        <step>Drop AI Analysis tile to canvas</step>
+        <step>Open NodePropertiesDialog → Configuration tab</step>
+        <step>Verify fields: documentScope (Input, required), toolBindings (JSON textarea), temperature (SpinButton 0-2), promptOverride (JSON textarea)</step>
+        <step>Leave documentScope empty → verify required-field error</step>
+        <step>Fill documentScope = "Contract"; set temperature = 0.5; verify saved to canvas state</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>All fields render with correct types; required-field validation fires; no console errors</expected>
+    </test>
+
+    <test name="AiCompletion typed form">
+      <steps>
+        <step>Drop AI Completion tile to canvas</step>
+        <step>Open Configuration tab</step>
+        <step>Verify fields: temperature (SpinButton 0-2, default 0.7), maxOutputTokens (SpinButton, default 4096), promptOverride (JSON textarea)</step>
+        <step>Set temperature = 1.0; maxOutputTokens = 2048; verify saved</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>3 fields render; SpinButton honors min/max; values persist</expected>
+    </test>
+
+    <test name="Condition typed form">
+      <steps>
+        <step>Drop Condition tile to canvas</step>
+        <step>Open Configuration tab</step>
+        <step>Verify fields: expression (Input, required), trueBranch (Input, required), falseBranch (Input, required)</step>
+        <step>Leave all empty → verify 3 required-field errors</step>
+        <step>Fill all → verify saved</step>
+      </steps>
+      <expected>3 required fields validate correctly; values persist</expected>
+    </test>
+
+    <test name="EntityNameValidator typed form">
+      <steps>
+        <step>Drop EntityNameValidator tile to canvas</step>
+        <step>Open Configuration tab</step>
+        <step>Verify fields: entitySetName (Input, required), uniqueCheck (Switch, default true), maxLength (SpinButton, default 100)</step>
+        <step>Fill entitySetName = "contacts"; toggle uniqueCheck; verify saved</step>
+      </steps>
+      <expected>3 fields render correctly; Switch toggles; values persist</expected>
+    </test>
+
+    <test name="CreateNotification typed form">
+      <steps>
+        <step>Drop CreateNotification tile to canvas</step>
+        <step>Open Configuration tab</step>
+        <step>Verify fields: recipientType (Dropdown: user/team/contact, required), template (Input, required), priority (Dropdown: low/normal/high, default normal)</step>
+        <step>Select recipientType = "team"; fill template = "test"; set priority = "high"; verify saved</step>
+      </steps>
+      <expected>3 fields render with correct types; dropdowns populated; values persist</expected>
+    </test>
+
+    <test name="sprk_configjson round-trip spot check">
+      <steps>
+        <step>After completing AiCompletion typed form (test 2), save playbook</step>
+        <step>Via Dataverse MCP: query sprk_playbooknode row; verify sprk_configjson contains: `{ "temperature": 1.0, "maxOutputTokens": 2048, ... }`</step>
+        <step>Reload PlaybookBuilder Code Page</step>
+        <step>Open the same node → verify form fields show saved values</step>
+      </steps>
+      <expected>Form values written to sprk_configjson + read back correctly on reload</expected>
+    </test>
+  </ui-tests>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: testing tag + ui-test tag + ADR-038 TEST-MODIFYING override applies · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-23 + `.claude/skills/ui-test/SKILL.md`.
+    </step>
+    <step order="2" name="Verify Chrome integration">
+      Run `/chrome` — confirm connected. If not, document skip + manual fallback.
+    </step>
+    <step order="3" name="Verify PlaybookBuilder deployed">
+      Confirm Code Page accessible at spaarkedev1 URL OR use local dev fallback.
+    </step>
+    <step order="4" name="Execute Tests 1-5 — 5 priority executor forms">
+      Run each test per `<ui-tests>` section. Capture screenshot of each form (default + error states).
+    </step>
+    <step order="5" name="Execute Test 6 — sprk_configjson round-trip">
+      Use Dataverse MCP `mcp__dataverse__read_query` to inspect sprk_configjson after a save.
+    </step>
+    <step order="6" name="Document results">
+      Write `notes/handoffs/089b-ui-test-results.md`:
+      - Test results table (6 tests, PASS/FAIL with notes)
+      - Console error capture
+      - 5 form screenshots + 1 round-trip evidence
+      - Defect list (if any)
+    </step>
+    <step order="7" name="File defects if any">
+      For each FAIL, invoke `/project-defer-issue-tracking`.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on results doc.
+      Run `/adr-check` against ADR-038.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 089b status complete; advance to next Wave 8 task.
+    </step>
+    <step order="11" name="Commit">
+      Commit message:
+      `test(playbookbuilder/r7): UI test results for 5 priority typed config forms (Wave 8 task 089b, FR-23)`. No PR yet.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (ui-test SKILL + spec)</tool>
+    <tool>Skill (ui-test for browser test execution)</tool>
+    <tool>Bash (chrome connectivity check)</tool>
+    <tool>Write (results doc)</tool>
+    <tool>MCP (mcp__dataverse__read_query for round-trip verification)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/handoffs/089b-ui-test-results.md</output>
+    <output type="screenshots">projects/spaarke-ai-platform-unification-r7/assets/089b-{form}.png (5 screenshots)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 089b ✅)</output>
+    <output type="commit">test(playbookbuilder/r7): UI test results for 5 priority typed config forms (Wave 8 task 089b, FR-23)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Test 1: AiAnalysis form — all 4 fields render + required-field validation — PASS</criterion>
+    <criterion>Test 2: AiCompletion form — all 3 fields render + SpinButton min/max — PASS</criterion>
+    <criterion>Test 3: Condition form — all 3 required fields validate — PASS</criterion>
+    <criterion>Test 4: EntityNameValidator form — all 3 fields incl. Switch — PASS</criterion>
+    <criterion>Test 5: CreateNotification form — all 3 fields incl. 2 Dropdowns — PASS</criterion>
+    <criterion>Test 6: sprk_configjson round-trip works — PASS</criterion>
+    <criterion>5 form screenshots + 1 round-trip evidence captured</criterion>
+    <criterion>Results doc exists at notes/handoffs/089b-ui-test-results.md</criterion>
+    <criterion>Any FAILs filed via /project-defer-issue-tracking</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 089b ✅</criterion>
+  </acceptance-criteria>
+</task>

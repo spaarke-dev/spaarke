@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-065" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>MAJOR UPDATE JPS-AUTHORING-GUIDE.md for node-first dispatch model</title>
+    <status>not-started</status>
+    <wave>6</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>docs, wave-6</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+    <fr-coverage>FR-30 (JPS-AUTHORING-GUIDE major update)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    MAJOR UPDATE `docs/guides/JPS-AUTHORING-GUIDE.md` to reflect the R7 node-first dispatch model.
+    The current guide teaches authors to choose Action ActionType first, then configure the rest.
+    The new guide teaches: pick executor type FIRST (drives dispatch + which Action types are
+    compatible), then choose an Action (only if prompt-driven), then configure. Per NFR-08, UPDATE
+    in place: no SUPERSEDED markers, no "(old version was)" leave-behinds.
+  </prompt>
+
+  <role>
+    Documentation editor + JPS author. Rewrite the guide's authoring flow + worked examples + decision
+    points. Keep the structure (sections, code blocks, tables) but rewrite the load-bearing content.
+    Audience: makers + AI engineers writing new JPS files.
+  </role>
+
+  <goal>
+    `docs/guides/JPS-AUTHORING-GUIDE.md` updated such that:
+    1. Authoring flow REWRITTEN to node-first:
+       - Step 1: Pick executor type (33 values from `sprk_playbookexecutortype` Choice) — this drives dispatch
+       - Step 2: Choose Action (only for prompt-driven executors: AiAnalysis, AiCompletion, AiEmbedding)
+       - Step 3: Configure node config (typed schema per executor — FR-16; see Wave 3)
+       - Step 4: Test + deploy via Deploy-Playbook.ps1
+    2. Worked examples REWRITTEN to show new model:
+       - AiCompletion example (executor=1 + Action FK with prompt) — closes R4 /narrate gap
+       - Condition example (executor=30, no Action FK, configJson with branching logic)
+       - At least one more from the 33 executors
+    3. Decision points REWRITTEN — old "which ActionType?" → new "which executor type fits the job?"
+    4. WHY section ADDED — brief 1-paragraph history: "Prior to R7, dispatch was split across three storage layers. R7 unified to `node.sprk_executortype`. This guide reflects the unified model. See spec FR-07."
+    5. NO SUPERSEDED markers (NFR-08)
+    6. NO parallel "old way / new way" sections
+    7. Cross-references spec FR-07 + FR-12 + FR-30 + CLAUDE.md §10 BFF Hygiene + `.claude/constraints/bff-extensions.md` §G (after task 064 ships)
+  </goal>
+
+  <inputs>
+    <file purpose="disposition">projects/spaarke-ai-platform-unification-r7/notes/drafts/wave6-doc-disposition.md</file>
+    <file purpose="target-doc">docs/guides/JPS-AUTHORING-GUIDE.md</file>
+    <file purpose="spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="updated-decision-tree">docs/architecture/ai-architecture-actions-nodes-scopes.md (post-task-062)</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-30">MAJOR UPDATE — guide reflects node-first dispatch model.</constraint>
+    <constraint source="spec FR-28">UPDATE in place. No SUPERSEDED markers.</constraint>
+    <constraint source="spec NFR-08">Documentation discipline.</constraint>
+    <constraint source="CLAUDE.md §11">Cost-of-doing-nothing: future JPS authors learning from this guide adopt the wrong mental model (Action carries dispatch), then produce JPS files that contradict the runtime.</constraint>
+    <constraint source="LENGTH">Maintain guide length within ±30% of original. Major REWRITE of authoring flow + examples + decision points; structure stays.</constraint>
+    <constraint source="audience">Audience is makers + AI engineers. Use plain language; code-snippet-heavy; minimize jargon.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documentation</topic>
+    <files>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      JPS-AUTHORING-GUIDE.md is the canonical maker-facing guide for writing JSON Prompt Schema (JPS)
+      files — the input format for AI actions. Pre-R7, the guide oriented around the Action ActionType
+      lookup as the dispatch source. Post-R7, dispatch is on the node, and JPS files are the source
+      of the prompt content (consumed by the node's Action via PromptSchemaOverrideMerger when the
+      node is prompt-driven). The guide needs a major rewrite to teach the new ordering.
+    </background>
+    <dependencies>
+      <dependency task="024" status="not-started-but-required">Single-hop dispatch shipped — the guide describes actual runtime.</dependency>
+      <dependency task="062" status="not-started-but-helpful">Decision-tree update lands; this guide cross-references it.</dependency>
+      <dependency task="064" status="not-started-but-helpful">Constraint §G update lands; this guide cross-references it.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 066 updates PLAYBOOK-AUTHOR-GUIDE.md (sibling guide) similarly.</item>
+      <item>Wave 7 (tasks 070-074) rewrites jps-* skills — those skills cite this guide.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: docs MAJOR UPDATE task (no .cs / .ts / .tsx / .ps1 modification, tag docs only) · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-07 + FR-30 + task 060 disposition list + (if shipped) the rewritten decision tree from task 062 + the rewritten §G from task 064.
+    </step>
+    <step order="2" name="Open target doc">
+      Read `docs/guides/JPS-AUTHORING-GUIDE.md` in full. Note its structure (sections, code blocks, examples). Identify the authoring-flow section + decision-points section + worked examples.
+    </step>
+    <step order="3" name="Plan rewrite scope">
+      List the sections that need rewriting + sections that can stay. Goal: rewrite the authoring-flow + decision-points + at least 2 examples + add 1 WHY paragraph. Structure stays; load-bearing prose changes.
+    </step>
+    <step order="4" name="Add WHY paragraph">
+      Add a 1-paragraph history near the top: "Prior to R7, dispatch was split across three storage layers... R7 unified to `node.sprk_executortype`. This guide reflects the unified model. See spec FR-07." Cite the WHY so future authors learn the lesson (per CLAUDE.md instruction in skill rewrites — also applies here).
+    </step>
+    <step order="5" name="Rewrite authoring flow">
+      Replace the step-by-step authoring flow with the new 4-step process (executor type first, then Action if prompt-driven, then config, then deploy). Use code blocks for JPS snippets.
+    </step>
+    <step order="6" name="Rewrite decision points">
+      Update each "which X should I pick?" section. Old: "which ActionType matches my use case?" → New: "which executor type fits the job? (table of 33 values with 1-line descriptions or pointer to the rewritten decision tree in actions-nodes-scopes.md)"
+    </step>
+    <step order="7" name="Rewrite worked examples (3 minimum)">
+      - Example 1: AiCompletion node (executor=1 + Action FK with prompt) — closes R4 /narrate; cite spec FR-12 + FR-15
+      - Example 2: Condition node (executor=30, no Action FK, configJson with branching) — pure executor
+      - Example 3: AiAnalysis node (executor=0 + Action FK + Tool FK + Document) — preserved use case
+    </step>
+    <step order="8" name="Update cross-references">
+      Spec FR-07, FR-12, FR-30; CLAUDE.md §10 BFF Hygiene; `.claude/constraints/bff-extensions.md` §G; rewritten decision tree in actions-nodes-scopes.md.
+    </step>
+    <step order="9" name="Verify NFR-08 discipline">
+      Grep modified doc for "SUPERSEDED", "deprecated", "old way", "(previously)". Confirm zero new instances. Discipline: REWRITE in place; don't preserve old prose as ghost content.
+    </step>
+    <step order="10" name="Verify guide still reads coherently">
+      Read the guide end-to-end as a future JPS author. Could they write a working JPS file from this guide alone? If not, tighten.
+    </step>
+    <step order="11" name="Update current-task.md + TASK-INDEX">
+      Mark task 065 status complete; advance current-task.md to next pending Wave 6 task.
+    </step>
+    <step order="12" name="Commit">
+      Commit `docs/guides/JPS-AUTHORING-GUIDE.md` with conventional message.
+      Example: docs(guides/r7): major update JPS-AUTHORING-GUIDE for node-first dispatch (Wave 6 task 065, FR-30)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (target doc + decision tree + constraint §G + spec)</tool>
+    <tool>Grep (cross-reference + NFR-08 marker search)</tool>
+    <tool>Edit (rewrite authoring flow + decision points + worked examples + add WHY paragraph)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">docs/guides/JPS-AUTHORING-GUIDE.md (major update — authoring flow + decision points + examples + WHY paragraph)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to next Wave 6 task)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 065 ✅)</output>
+    <output type="commit">docs(guides/r7): major update JPS-AUTHORING-GUIDE for node-first dispatch (Wave 6 task 065, FR-30)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Authoring flow rewritten to 4-step process (executor type first)</criterion>
+    <criterion>Decision points rewritten — "which executor type?" replaces "which ActionType?"</criterion>
+    <criterion>At least 3 worked examples present (AiCompletion + Condition + AiAnalysis)</criterion>
+    <criterion>WHY paragraph added explaining R7 dispatch unification</criterion>
+    <criterion>Cross-references to spec FR-07, FR-12, FR-30, CLAUDE.md §10, constraint §G present</criterion>
+    <criterion>No SUPERSEDED markers (NFR-08)</criterion>
+    <criterion>No parallel "old/new" sections (NFR-08)</criterion>
+    <criterion>Doc reads coherently end-to-end</criterion>
+    <criterion>Future author could write working JPS file from this guide alone</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>TASK-INDEX.md shows 065 ✅</criterion>
+  </acceptance-criteria>
+</task>

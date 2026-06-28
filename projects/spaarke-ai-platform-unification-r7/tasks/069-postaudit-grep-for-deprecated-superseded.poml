@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-069" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Post-audit: grep docs/ for new "deprecated"/"superseded" instances (NFR-08 verification)</title>
+    <status>not-started</status>
+    <wave>6</wave>
+    <estimated-effort>30-60 min</estimated-effort>
+    <tags>docs, audit, wave-6</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>061, 062, 063, 064, 065, 066, 067, 068</dependencies>
+    <fr-coverage>NFR-08 (documentation discipline verification)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wave 6 closes here. Per spec NFR-08, after all Wave 6 doc work lands, post-R7 grep for
+    "deprecated" / "superseded" in `docs/` MUST show zero NEW instances. Pre-existing matches (e.g.,
+    historical commit messages quoted in docs, references to deprecated third-party APIs in
+    operational guides) carry forward unchanged. This task: run the grep, classify each hit as
+    PRE-EXISTING or NEW, fail if any NEW hit exists, document the count.
+  </prompt>
+
+  <role>
+    Documentation auditor. Mechanical verification — run the grep, classify hits, produce the report.
+    Do NOT add SUPERSEDED markers (that's the very thing being audited against).
+  </role>
+
+  <goal>
+    A post-audit report at `projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave6-post-audit.md`
+    that:
+    1. Documents the grep command run: `Grep "deprecated|superseded" -i path=docs/` (case-insensitive)
+    2. Lists every hit with file path + line number + 1-line excerpt
+    3. Classifies each hit as PRE-EXISTING (carries forward from pre-Wave-6 state) or NEW (introduced in Wave 6)
+    4. PASS criterion: zero NEW hits
+    5. FAIL response: if any NEW hit exists, identify the file + section, file a defer issue, request the responsible Wave 6 task be reopened to remove the marker
+    6. Sister grep for `.claude/` (the Wave 6 task 064 update target): same audit applies — zero NEW SUPERSEDED markers in `.claude/constraints/bff-extensions.md` §G
+    7. Document the count: TOTAL hits / PRE-EXISTING / NEW
+  </goal>
+
+  <inputs>
+    <file purpose="disposition">projects/spaarke-ai-platform-unification-r7/notes/drafts/wave6-doc-disposition.md</file>
+    <file purpose="spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="audit-target-1">docs/ (entire tree)</file>
+    <file purpose="audit-target-2">.claude/constraints/bff-extensions.md</file>
+    <file purpose="audit-target-3">CLAUDE.md (root)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-08">Post-R7 grep for "deprecated"/"superseded" in `docs/` returns zero NEW instances. This task verifies the constraint.</constraint>
+    <constraint source="spec FR-28">DELETE outdated content (no SUPERSEDED markers, no redirect stubs, no archive folders). PR review gates drift.</constraint>
+    <constraint source="audit-only">This task does NOT modify any doc. It produces a verification report. If FAIL, file a defer issue + request task reopen — do NOT silently fix.</constraint>
+    <constraint source="CLAUDE.md §11">Cost-of-doing-nothing: NFR-08 is a binding spec constraint. Without verification, Wave 6 can claim completion while leaving SUPERSEDED markers behind.</constraint>
+    <constraint source="false-positive-classification">Pre-existing matches in operational guides (e.g., "Azure deprecated this API in 2024") are EXPECTED and PASS. The audit identifies which hits are NEW (introduced by Wave 6 tasks 061-068).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documentation</topic>
+    <files>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+      <file>docs/guides/ai-guide-playbook-deploy-recipe.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>docs/guides/PLAYBOOK-AUTHOR-GUIDE.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      NFR-08 is the binding documentation discipline rule. Pre-R7, the codebase had some legitimate
+      uses of "deprecated" / "superseded" (e.g., references to third-party APIs Azure has deprecated;
+      historical mentions of pre-R3 architecture). Those are PRE-EXISTING and PASS. Wave 6 modifies
+      8 docs (5 architecture/guide updates + 1 constraint update + 1 new guide + 1 root CLAUDE.md
+      check); the post-audit verifies that no Wave 6 task introduced a NEW SUPERSEDED marker.
+    </background>
+    <dependencies>
+      <dependency task="061" status="not-started-but-required">DELETE §5 + structural-fallback shipped.</dependency>
+      <dependency task="062" status="not-started-but-required">UPDATE 4-Home decision tree shipped.</dependency>
+      <dependency task="063" status="not-started-but-required">UPDATE deploy-recipe shipped.</dependency>
+      <dependency task="064" status="not-started-but-required">UPDATE §G shipped.</dependency>
+      <dependency task="065" status="not-started-but-required">UPDATE JPS-AUTHORING-GUIDE shipped.</dependency>
+      <dependency task="066" status="not-started-but-required">UPDATE PLAYBOOK-AUTHOR-GUIDE shipped.</dependency>
+      <dependency task="067" status="not-started-but-required">CREATE ai-guide-consumer-wiring.md shipped.</dependency>
+      <dependency task="068" status="not-started-but-required">root CLAUDE.md disposition resolved.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 10 task 100 end-to-end verification of 15 success criteria — depends on this audit's PASS to mark criterion 8 (canonical-truth docs reflect new model).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: docs audit task (no source/doc modification, verification only) · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md NFR-08 + FR-28 + task 060 disposition list.
+    </step>
+    <step order="2" name="Run grep on docs/">
+      Grep with `pattern="deprecated|superseded"`, `path="docs/"`, `-i=true`, `output_mode="content"`, `-n=true`. Capture full output.
+    </step>
+    <step order="3" name="Run grep on .claude/constraints/">
+      Grep with `pattern="deprecated|superseded"`, `path=".claude/constraints/"`, `-i=true`, `output_mode="content"`, `-n=true`. Capture output (especially for `bff-extensions.md` §G from task 064).
+    </step>
+    <step order="4" name="Run grep on root CLAUDE.md">
+      Grep with `pattern="deprecated|superseded"`, `path="CLAUDE.md"`, `-i=true`, `output_mode="content"`, `-n=true`. Capture output. (NB: root CLAUDE.md mentions "Deprecate and DELETE `AnalysisOrchestrationService.ExecuteAnalysisAsync`" in code-related sections — that's existing language about code behavior, not a doc marker; classify accordingly.)
+    </step>
+    <step order="5" name="Classify each hit">
+      For each hit, classify as PRE-EXISTING or NEW. Use git log + git blame as needed:
+      - PRE-EXISTING: hit was present before Wave 6 began (any commit before task 060)
+      - NEW: hit was introduced by a Wave 6 task (061-068)
+      Document the classification in a table.
+    </step>
+    <step order="6" name="Verify PASS criterion">
+      Count NEW hits. PASS = zero. If zero, the audit succeeds. If non-zero, the audit FAILS.
+    </step>
+    <step order="7" name="On FAIL: file defer issue + flag tasks for reopen">
+      For each NEW hit:
+      - Identify the offending file + line
+      - Identify the responsible Wave 6 task (which task touched that file last)
+      - File a defer issue via `/project-defer-issue-tracking` (ISS) describing the NFR-08 violation
+      - Request the task be reopened to remove the marker
+      Do NOT silently fix — NFR-08 violations need traceability.
+    </step>
+    <step order="8" name="Write post-audit report">
+      Create `projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave6-post-audit.md`:
+      - Date + author
+      - Grep commands run
+      - Total hits / PRE-EXISTING / NEW counts
+      - Full classification table
+      - PASS/FAIL summary
+      - If FAIL: list of defer issues filed + tasks to reopen
+    </step>
+    <step order="9" name="Update Wave 6 completion status">
+      If PASS: mark Wave 6 complete in TASK-INDEX.md. Update current-task.md to next pending wave's task (likely Wave 7 first task).
+      If FAIL: Wave 6 stays open until offending tasks are reopened + fixed; rerun this audit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 069 status complete (regardless of PASS/FAIL — the AUDIT itself ran; the OUTCOME is the report). If PASS, advance to Wave 7. If FAIL, advance to the first reopened task.
+    </step>
+    <step order="11" name="Commit">
+      Commit the post-audit report with conventional message.
+      Example (PASS): docs(audit/r7): Wave 6 post-audit PASS — zero new SUPERSEDED markers (task 069, NFR-08)
+      Example (FAIL): docs(audit/r7): Wave 6 post-audit FAIL — N new SUPERSEDED markers; tasks reopened (task 069, NFR-08)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (spec + disposition list)</tool>
+    <tool>Grep (docs/ + .claude/constraints/ + root CLAUDE.md)</tool>
+    <tool>Bash (git log / git blame for classification)</tool>
+    <tool>Write (post-audit report)</tool>
+    <tool>Skill (/project-defer-issue-tracking — on FAIL only)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave6-post-audit.md</output>
+    <output type="conditional-issue">defer issues filed via /defer (on FAIL only)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to next wave / reopened task)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 069 ✅; mark Wave 6 complete if PASS)</output>
+    <output type="commit">conventional commit per PASS/FAIL path</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Post-audit report exists at notes/handoffs/wave6-post-audit.md</criterion>
+    <criterion>Grep commands documented (docs/ + .claude/constraints/ + root CLAUDE.md)</criterion>
+    <criterion>Total / PRE-EXISTING / NEW hit counts present</criterion>
+    <criterion>Classification table present (every hit classified)</criterion>
+    <criterion>PASS/FAIL summary present</criterion>
+    <criterion>IF PASS: Wave 6 marked complete; current-task advanced to Wave 7</criterion>
+    <criterion>IF FAIL: defer issues filed; tasks flagged for reopen; Wave 6 stays open</criterion>
+    <criterion>Audit task itself did NOT add any SUPERSEDED markers</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>TASK-INDEX.md shows 069 ✅</criterion>
+  </acceptance-criteria>
+</task>

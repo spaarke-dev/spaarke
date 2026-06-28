@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-009" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>xUnit tests — error paths (missing prompt, malformed JSON, LLM error) (FR-14)</title>
+    <status>not-started</status>
+    <wave>1</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>bff-api, testing, wave-1</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>007</dependencies>
+    <fr-coverage>FR-14 (error-path coverage), FR-13 (Validate() error contract), NFR-05 (&gt;85% coverage)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Round out Wave 1 test coverage with ~5 error-path tests in AiCompletionNodeExecutorTests.cs covering:
+    Validate() error messages (FR-13 contract), missing-prompt fast-fail, malformed JSON response from LLM,
+    LLM HTTP error wrapping, and cancellation propagation. After this task, AiCompletionNodeExecutor line
+    coverage must be &gt;85% per NFR-05 — measure and report.
+  </prompt>
+
+  <role>
+    Senior .NET test author. Error paths are the failure modes that block production rollout — every error
+    code the executor can return must have a deterministic test. Mock IOpenAiClient to throw / return
+    malformed responses; assert NodeOutput.Error carries the right NodeErrorCodes value + an actionable
+    message.
+  </role>
+
+  <goal>
+    AiCompletionNodeExecutorTests.cs extended with ~5 tests:
+    1. Validate_Fails_WhenActionFkMissing — context with null Action → NodeValidationResult.Failure with FR-13 message
+    2. Validate_Fails_WhenToolPresent — context with Tool populated → Failure with "AiCompletion node MUST NOT have a Tool" message
+    3. ExecuteAsync_ReturnsError_WhenLlmReturnsMalformedJson — mock IOpenAiClient returns invalid JSON → NodeOutput.Error with InvalidResponse-equivalent code
+    4. ExecuteAsync_ReturnsError_WhenLlmThrowsHttpException — mock throws HttpRequestException → NodeOutput.Error with LlmCallFailed-equivalent code; original exception message visible in the error
+    5. ExecuteAsync_PropagatesCancellation_WhenTokenCancelled — pre-cancelled CancellationToken → either OperationCanceledException OR NodeOutput.Error with Cancelled code (mirror AiAnalysisNodeExecutor pattern)
+    Coverage target: AiCompletionNodeExecutor &gt;85% line coverage after this task (NFR-05). Measure and report.
+  </goal>
+
+  <inputs>
+    <file purpose="executor-under-test">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</file>
+    <file purpose="existing-test-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiCompletionNodeExecutorTests.cs</file>
+    <file purpose="sibling-error-tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiAnalysisNodeExecutorTests.cs</file>
+    <file purpose="error-codes">src/server/api/Sprk.Bff.Api/Models/Ai/NodeErrorCodes.cs</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="adr-038">docs/adr/ADR-038-testing-strategy.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-038">Testing Strategy — integration-heavy pyramid. Mock at executor boundary. NO Mock&lt;HttpMessageHandler&gt;.</constraint>
+    <constraint source="spec FR-13">Validate() error messages must match the literal wording from task 005 (UI displays verbatim). Tests assert message text.</constraint>
+    <constraint source="spec FR-14">Tests cover error paths (missing prompt, malformed JSON, LLM error).</constraint>
+    <constraint source="spec NFR-05">Coverage target: &gt;85% line coverage for AiCompletionNodeExecutor. This is the closing task — must reach the threshold.</constraint>
+    <constraint source="CLAUDE.md §8 TEST-MODIFYING">Override row — testing tag triggers FULL rigor unconditionally.</constraint>
+    <constraint source="bff-extensions.md §F">Test update obligation — this task closes the FR-12 + FR-13 + FR-14 test obligation for Wave 1.</constraint>
+    <constraint source="ADR-038 §7 build-vs-maintain">Error-path tests are MAINTAIN-class — they verify the error contract surfaced to consumers (UI / orchestrator / logs).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/xunit-bff-pattern</topic>
+    <files>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="AiAnalysisNodeExecutor error tests" location="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiAnalysisNodeExecutorTests.cs">
+        Sibling error-path tests. Mock LLM to throw / return malformed; assert NodeOutput.Error code + message. Mirror exactly for the equivalent AiCompletion paths.
+      </pattern>
+      <pattern name="NodeErrorCodes" location="src/server/api/Sprk.Bff.Api/Models/Ai/NodeErrorCodes.cs">
+        Existing error-code class. Tests assert against these named constants, not magic strings.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Tasks 007 + 008 covered happy paths + override paths. This task closes Wave 1 test coverage with the
+      error paths. After this task, AiCompletionNodeExecutor coverage must be &gt;85% per NFR-05. Task 010
+      then runs the BFF publish + size + CVE checks to close the wave.
+    </background>
+    <dependencies>
+      <dependency task="007" status="not-started-but-required">Test file scaffolded.</dependency>
+      <dependency task="005" status="parallel-soft-dependency">Validate() implementation finalized (tests assert against its error messages).</dependency>
+      <dependency task="004" status="parallel-soft-dependency">LLM call + error mapping implemented (tests assert against error-mapping behavior).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 010 (Wave 1 close) runs full BFF publish + CVE check after this task completes the coverage gate.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: TEST-MODIFYING override (tag testing + tests/** modification per CLAUDE.md §8 override row — FULL rigor UNCONDITIONAL per ADR-038). Quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-13 + FR-14 + NFR-05 + ADR-038 + the existing AiCompletionNodeExecutorTests.cs from tasks 007/008.
+    </step>
+    <step order="2" name="Read NodeErrorCodes class">
+      Confirm the named codes available: InvalidResponse, LlmCallFailed, Cancelled, InternalError, ValidationFailed (or equivalents). Tests assert against these names.
+    </step>
+    <step order="3" name="Read AiAnalysisNodeExecutor error tests as reference">
+      Note: how malformed-JSON / HTTP-exception / cancellation tests are shaped. Mirror exactly for AiCompletion.
+    </step>
+    <step order="4" name="Add 5 error-path tests">
+      Append to AiCompletionNodeExecutorTests.cs:
+      1. Validate_Fails_WhenActionFkMissing — assert error message text matches FR-13 contract from task 005
+      2. Validate_Fails_WhenToolPresent — assert error message text matches
+      3. ExecuteAsync_ReturnsError_WhenLlmReturnsMalformedJson — _openAiClient.Setup returns invalid JSON; assert NodeOutput.Error.Code == InvalidResponse-equivalent
+      4. ExecuteAsync_ReturnsError_WhenLlmThrowsHttpException — _openAiClient.Setup throws HttpRequestException; assert NodeOutput.Error.Code == LlmCallFailed-equivalent; assert original exception message appears in the wrapped error message
+      5. ExecuteAsync_PropagatesCancellation_WhenTokenCancelled — pre-cancelled token; either OperationCanceledException propagates OR NodeOutput.Error with Cancelled code (whichever matches AiAnalysisNodeExecutor pattern)
+    </step>
+    <step order="5" name="Run tests">
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiCompletionNodeExecutorTests.cs
+      Expect: 15-17 total tests passing (5-7 from 007 + 5 from 008 + 5 from 009).
+    </step>
+    <step order="6" name="Measure coverage — MUST exceed 85%">
+      Run: dotnet test --collect:"XPlat Code Coverage" scoped to AiCompletionNodeExecutor.
+      ASSERT: line coverage &gt; 85%. If &lt; 85%, add additional targeted tests for uncovered branches. Document final coverage % in task notes.
+    </step>
+    <step order="7" name="Verify acceptance">
+      Re-read the 5 added tests. Confirm: each error code path tested + message text matches FR-13 contract + no ADR-038 banned patterns.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the modified test file. Run `/adr-check` against ADR-038. Run `/test-diet` preview — confirm tests classify as MAINTAIN.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 009 status complete; advance current-task.md (009 unblocks 010).
+    </step>
+    <step order="11" name="Commit">
+      Commit AiCompletionNodeExecutorTests.cs change with conventional message.
+      Example: test(bff/r7): error-path tests + &gt;85% coverage gate (Wave 1 task 009, FR-13, FR-14, NFR-05)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (existing test file + NodeErrorCodes + sibling error tests)</tool>
+    <tool>Edit (AiCompletionNodeExecutorTests.cs — append tests)</tool>
+    <tool>Bash (dotnet test, coverage measurement, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiCompletionNodeExecutorTests.cs</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 009 ✅)</output>
+    <output type="commit">test(bff/r7): error-path tests + &gt;85% coverage gate (Wave 1 task 009, FR-13, FR-14, NFR-05)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>5 new error-path tests added to AiCompletionNodeExecutorTests.cs</criterion>
+    <criterion>Validate() error message tests match FR-13 contract literal wording from task 005</criterion>
+    <criterion>Malformed-JSON LLM response → NodeOutput.Error with InvalidResponse-equivalent code</criterion>
+    <criterion>LLM HTTP exception → NodeOutput.Error with LlmCallFailed-equivalent code + original message visible</criterion>
+    <criterion>Cancellation behavior matches AiAnalysisNodeExecutor sibling pattern</criterion>
+    <criterion>15-17 total tests passing in the file (007 + 008 + 009 cumulative)</criterion>
+    <criterion>Line coverage of AiCompletionNodeExecutor &gt; 85% per NFR-05 — final % documented in task notes</criterion>
+    <criterion>No ADR-038 banned patterns used</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>Tests classify as MAINTAIN (not SCAFFOLDING) per ADR-038 §7</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

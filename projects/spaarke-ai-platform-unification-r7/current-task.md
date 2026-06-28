@@ -71,8 +71,8 @@ Run `task-execute` for task 001 when ready.
 | CLAUDE.md | ✅ Done |
 | current-task.md (this file) | ✅ Done |
 | tasks/TASK-INDEX.md (full WBS) | ✅ Done |
-| Wave 1 task POMLs (001, 002) | ✅ Done — seeds for Wave 1 |
-| Waves 2-10 task POMLs | ⏸️ Deferred — `/task-create` per-wave as work advances |
-| Initial commit + push | ⏸️ Pending operator confirmation |
-| projects/INDEX.md row | ⏸️ Pending append |
-| Target Date set on Project #2 | ⏸️ Pending operator input |
+| **All 82 task POMLs (Waves 1-10)** | ✅ Done — generated 2026-06-28 via 10 parallel subagents |
+| Initial commit + push (foundation artifacts) | ✅ Done — commit `f6a85a1b0` |
+| projects/INDEX.md row | ✅ Done — R7 appended (BFF=Y, skill-directives=Y) |
+| Target Date set on Project #501 | ✅ Done — 2026-07-31 |
+| **Full task-set commit + push** | ⏸️ Pending (this session) |

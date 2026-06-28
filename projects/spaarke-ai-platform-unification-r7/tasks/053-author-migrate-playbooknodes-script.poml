@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-053" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Author Migrate-PlaybookNodes-to-ExecutorType.ps1 (idempotent + dry-run)</title>
+    <status>not-started</status>
+    <wave>5</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>script, dataverse, wave-5</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>052</dependencies>
+    <fr-coverage>FR-19 (migration-script authoring portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Author the idempotent migration script that reads the owner-output CSV (from task 052)
+    and writes `sprk_executortype` to every node row in spaarkedev1. The script must support
+    dry-run mode (print planned writes without committing) and idempotency (re-runs are no-ops
+    if the value already matches).
+
+    Pattern: same as Review-PlaybookNodes-Dispatch.ps1 (task 050) — PowerShell 7 + Azure CLI
+    auth + Web API REST, modeled on `Add-EntityNameValidatorNodeTypeOption.ps1`.
+  </prompt>
+
+  <role>
+    Senior platform engineer. Migration scripts MUST be idempotent + reversible (or at least
+    safe to re-run). The dry-run mode is the safety gate before any Dataverse write.
+  </role>
+
+  <goal>
+    A new file `scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1` that:
+    1. Authenticates to Dataverse via `az account get-access-token` (same pattern as task 050)
+    2. Reads the owner-output CSV (path defaulting to `notes/drafts/playbook-node-review-output.csv`; overridable via `-InputCsv` parameter to accommodate owner's filename choice)
+    3. For each row, looks up the current `sprk_executortype` value of the corresponding `sprk_playbooknode` row in Dataverse
+    4. If current value matches the CSV's `owner_decision_executortype` → SKIP (idempotent no-op; log "already correct")
+    5. Else PATCH the node row with the CSV value
+    6. Supports `-DryRun` switch that prints planned writes (FROM → TO) without making the PATCH call
+    7. Supports `-DataverseUrl` override (default: `$env:DATAVERSE_URL`)
+    8. Supports `-InputCsv` override (default: `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-output.csv`)
+    9. Logs every action: skip count, write count, error count, total runtime
+    10. Adapts to flexible CSV column shape — required minimum is two columns: `node_id` (GUID) + `owner_decision_executortype` (integer). Other columns ignored. If a different schema is detected (e.g., owner used different column names), exit with clear error message instructing how to remap.
+    11. Halts on first error (does NOT continue) — defensive against partial corruption
+  </goal>
+
+  <inputs>
+    <file purpose="owner-output-csv">projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-output.csv</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</file>
+    <file purpose="pattern-reference-1">scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1</file>
+    <file purpose="pattern-reference-2">scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1</file>
+    <file purpose="deploy-script-auth-pattern">scripts/Deploy-Playbook.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-19">Idempotent migration script writes reviewed values. Acceptance: review tool produces complete list; owner-decision applied to every row; migration script runs cleanly; post-migration audit confirms no node has null `sprk_executortype`.</constraint>
+    <constraint source="spec NFR-05">Migration scripts: idempotent + dry-run mode. Manual idempotent rerun confirmed.</constraint>
+    <constraint source="pattern Add-EntityNameValidatorNodeTypeOption.ps1">Follow exact PowerShell + Azure CLI auth + Web API patterns. `[switch]$DryRun` is non-negotiable.</constraint>
+    <constraint source="defensive-write">Halt on first error. Do NOT continue past a failure — partial migration is harder to recover from than a halted migration with clean state.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification triple:
+      1. Existing: no migration script exists for this column. `Deploy-Playbook.ps1` deploys new playbooks but does not retroactively patch existing node rows.
+      2. Extension: cannot extend `Deploy-Playbook.ps1` — different intent (deploy from JSON vs patch from owner CSV).
+      3. Cost-of-doing-nothing: 94 nodes remain with null `sprk_executortype`; FR-07 single-hop dispatch returns null at runtime → orchestrator falls back to nothing → playbooks fail. Wave 10 graduation gate blocks.
+    </constraint>
+    <constraint source="CLAUDE.md §10">No BFF surface touched — no publish-size verification needed.</constraint>
+    <constraint source="csv-schema-flexibility">Owner may have used a different CSV column name (e.g., `executortype_decision` instead of `owner_decision_executortype`). Script auto-detects + falls back to clear error message.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/web-api-patch-patterns</topic>
+    <files>
+      <file>scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1</file>
+      <file>scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1</file>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Web API PATCH pattern" location="scripts/Deploy-Playbook.ps1">
+        `Invoke-RestMethod -Method PATCH -Uri "$ApiBase/sprk_playbooknodes($nodeId)" -Headers $headers -Body $jsonPayload`. Use `If-Match: *` header for unconditional update; check for HTTP 204.
+      </pattern>
+      <pattern name="Idempotent skip" location="scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1">
+        Read current state → compare to desired → skip if equal → write if different. Log skip vs write.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the writer half of the FR-19 backfill. Task 050 + 051 produced the input CSV;
+      task 052 captured the owner's authoritative decisions; this task makes them real in Dataverse.
+
+      Idempotency is critical because owner may want to:
+      - Run dry-run, review output, then run real
+      - Re-run after a partial failure to "pick up where left off"
+      - Re-run later to apply additional decisions for any rows initially skipped
+
+      The script reads the owner-output CSV path from current-task.md (recorded in task 052)
+      or accepts an override via `-InputCsv` parameter.
+    </background>
+    <dependencies>
+      <dependency task="052" status="must-be-complete">Owner-output CSV must exist with `owner_decision_executortype` (or equivalent column) populated for every row.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 054 runs this script (dry-run → real run) + audits post-migration state.</item>
+      <item>Task 055 updates `Deploy-Playbook.ps1` to write executor type explicitly going forward (FR-20).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: new script in `scripts/dataverse/`, tags include `script`+`dataverse`, modifies `.ps1`, writes to Dataverse (high-risk operation), 6+ steps · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-19 + plan.md Wave 5 + task 050 script + task 052 POML to confirm owner-output CSV path + columns.
+    </step>
+    <step order="2" name="Verify dependencies">
+      Confirm task 052 status in TASK-INDEX.md is ✅. Confirm owner-output CSV exists at expected path.
+      Read the first 5 rows of the output CSV to confirm column structure.
+    </step>
+    <step order="3" name="Author the script">
+      Create `scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1`. Structure:
+      - Header comment block (Synopsis, Description, Parameters, Examples, Notes) — mirror `Add-EntityNameValidatorNodeTypeOption.ps1`
+      - `param()` block: `[ValidateSet('dev')] [string]$Environment = 'dev'`, `[string]$DataverseUrl = $env:DATAVERSE_URL`, `[switch]$DryRun`, `[string]$InputCsv = 'projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-output.csv'`
+      - `$ErrorActionPreference = 'Stop'`
+      - Auth: `az account get-access-token --resource $DataverseUrl` → bearer token + headers (`Accept: application/json`, `OData-MaxVersion: 4.0`, `OData-Version: 4.0`, `Content-Type: application/json`, `If-Match: *`)
+      - Read CSV via `Import-Csv`
+      - Auto-detect column for decision value: prefer `owner_decision_executortype`, fall back to `executortype_decision`, `decision`, or whatever else makes sense from the owner's structure. If detection fails, exit 1 with explicit instruction "rename the decision column to `owner_decision_executortype` and re-run".
+      - For each row: GET current `sprk_executortype` from Dataverse (single REST call); if equal to CSV value → log skip, continue; else if `$DryRun` → log "WOULD PATCH {nodeId} FROM {current} TO {target}", continue; else PATCH the node row + log success
+      - Halt on first PATCH error (let `$ErrorActionPreference = 'Stop'` do its job)
+      - Print summary: total rows, skipped (already correct), patched, errors, total runtime
+    </step>
+    <step order="4" name="Self-test the script with -DryRun against a single test row (manual)">
+      Pick one row from the owner-output CSV (e.g., row 1). Run:
+      `pwsh ./scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1 -DryRun`
+      Confirm: auth succeeds, all rows enumerated, dry-run log shows correct FROM → TO mapping per row, no Dataverse writes happen. Verify by re-running the review tool (task 050) — values should be unchanged.
+    </step>
+    <step order="5" name="Build defensive checks">
+      Verify the script:
+      - Handles empty CSV row (skip with warning)
+      - Handles invalid `owner_decision_executortype` value (e.g., non-integer, out of Choice-set range — exit 1 with clear error)
+      - Handles node_id not found in Dataverse (skip with warning + log; don't halt — node may have been deleted between review + migration)
+      - Handles CSV without expected columns (exit 1 with helpful error)
+    </step>
+    <step order="6" name="Verify acceptance">
+      Open the script in editor; confirm all goal bullets satisfied + step 5 defensive checks present.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the new script. Run `/adr-check` against ADR-029 + CLAUDE.md §11 (component justification).
+      Fix any findings before commit. PARTICULAR ATTENTION: idempotency claim is load-bearing — code review should verify "current value read + comparison + conditional write" pattern actually skips correctly when value already matches.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 053 status complete; advance current-task.md to task 054.
+    </step>
+    <step order="11" name="Commit">
+      Commit `scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1` with conventional message.
+      Example: `feat(scripts/r7): add Migrate-PlaybookNodes-to-ExecutorType.ps1 (Wave 5 task 053, FR-19)`
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (reference scripts + owner CSV first 5 rows + spec + project CLAUDE.md)</tool>
+    <tool>mcp__dataverse__read_query (sanity-check single GET against spaarkedev1)</tool>
+    <tool>Write (new Migrate-PlaybookNodes-to-ExecutorType.ps1)</tool>
+    <tool>Bash (pwsh ./script.ps1 -DryRun for self-test, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 054)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 053 ✅)</output>
+    <output type="commit">feat(scripts/r7): add Migrate-PlaybookNodes-to-ExecutorType.ps1 (Wave 5 task 053, FR-19)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>File `scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1` exists</criterion>
+    <criterion>Script uses Azure CLI auth pattern matching task 050 + Deploy-Playbook.ps1</criterion>
+    <criterion>Script reads owner-output CSV via `Import-Csv`; auto-detects decision column with fallback error</criterion>
+    <criterion>Script PATCHes `sprk_executortype` per row via Dataverse Web API; halts on first error</criterion>
+    <criterion>Script is IDEMPOTENT — reads current value first, skips if already matches CSV value</criterion>
+    <criterion>Script supports `-DryRun` (logs planned writes, makes no PATCH calls)</criterion>
+    <criterion>Script supports `-InputCsv` override + `-DataverseUrl` override</criterion>
+    <criterion>Script handles defensive cases: empty rows, invalid values, missing node_id, missing columns</criterion>
+    <criterion>Script prints summary: total / skipped / patched / errors / runtime</criterion>
+    <criterion>Self-test with -DryRun against owner CSV produces sensible log without state mutation</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

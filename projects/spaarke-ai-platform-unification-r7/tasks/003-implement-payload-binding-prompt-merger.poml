@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-003" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Implement payload binding + PromptSchemaOverrideMerger integration</title>
+    <status>not-started</status>
+    <wave>1</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-1</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>002</dependencies>
+    <fr-coverage>FR-12 (payload binding + override merging)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Fill in the AiCompletionNodeExecutor.ExecuteAsync() body up to the LLM call. Read Action's SystemPrompt,
+    OutputSchema, and Temperature from NodeExecutionContext. Apply node-level Role/Task/Constraints/Output Fields
+    overrides via the existing PromptSchemaOverrideMerger. Resolve template variables from scope (existing
+    template-substitution mechanism, mirror AiAnalysisNodeExecutor). The actual IOpenAiClient call happens
+    in task 004 — this task prepares the merged inputs and asserts they are correct.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer extending the AiCompletionNodeExecutor scaffold. Reuse PromptSchemaOverrideMerger
+    exactly as AiAnalysisNodeExecutor does — do NOT introduce new merge semantics. Mirror the existing template-
+    substitution code path; do NOT clone it.
+  </role>
+
+  <goal>
+    AiCompletionNodeExecutor.ExecuteAsync() partially implemented up to (but not including) the LLM call:
+    1. Reads Action.SystemPrompt + Action.OutputSchema + Action.Temperature from context
+    2. Applies node-level overrides via PromptSchemaOverrideMerger (preserves per-node Role/Task/Constraints/Output Fields personalization per Q2 KEEP)
+    3. Resolves template variables ({{var}} placeholders) from previous node outputs in scope
+    4. Produces a fully-merged (SystemPrompt, OutputSchema, Temperature) tuple ready for the next-task LLM call
+    5. Returns NodeOutput.Error if Action is missing (will be hardened by task 005 Validate())
+    6. Compiles clean; existing test suite (pre-W1) still green
+  </goal>
+
+  <inputs>
+    <file purpose="scaffolded-executor">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</file>
+    <file purpose="pattern-decision">projects/spaarke-ai-platform-unification-r7/notes/spikes/aicompletion-pattern-decision.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="reference-llm-executor">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+    <file purpose="merger">src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaOverrideMerger.cs</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — reuse PromptSchemaOverrideMerger as already injected in task 002 constructor; do NOT introduce a new abstraction.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — leaf executor only; no new public types; do not add a new prompt-merge surface.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — task 010 runs full publish + CVE; this task contributes a small delta.</constraint>
+    <constraint source="spec FR-12">Pattern: read Action's SystemPrompt + OutputSchema + Temperature; apply node-level overrides via PromptSchemaOverrideMerger; resolve template variables from scope.</constraint>
+    <constraint source="spec Q2 KEEP">Per-node prompt overrides (Role/Task/Constraints/Output Fields) MUST apply via PromptSchemaOverrideMerger.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — placement decision restated in PR description: AiCompletionNodeExecutor stays IN BFF (leaf executor per existing Services/Ai/Nodes/ pattern, not a new AI surface).</constraint>
+    <constraint source="CLAUDE.md §11">Component Justification — task modifies existing scaffolded file; no new public surface introduced. Justification triple was answered at task 002.</constraint>
+    <constraint source="bff-extensions.md §F">Test update obligation — corresponding tests will be added in tasks 007-009 (this task's behavior is covered by 007 payload-binding tests).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="AiAnalysisNodeExecutor merge-and-render path" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs">
+        Canonical pattern for how an executor reads Action prompt fields + applies PromptSchemaOverrideMerger + resolves template variables. AiCompletionNodeExecutor follows the SAME path; the only difference is it skips Tool + Document loading.
+      </pattern>
+      <pattern name="PromptSchemaOverrideMerger" location="src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaOverrideMerger.cs">
+        Existing service. Merges node-level Role/Task/Constraints/Output Fields overrides over Action defaults. AiCompletionNodeExecutor reuses unchanged.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 002 scaffolded the class with constructor + interface impl + skeleton bodies. This task adds the
+      prompt-merge logic up to the LLM call boundary. The split between 003 (merge) and 004 (LLM call + binding)
+      is intentional — keeps each task small and code-review-able. The actual LLM call lands in task 004.
+    </background>
+    <dependencies>
+      <dependency task="002" status="not-started-but-required">AiCompletionNodeExecutor.cs scaffolded + DI-registered.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 005 (parallel) implements Validate() to fail-fast when Action FK is missing — this task can assume Action is present in the happy path.</item>
+      <item>Task 004 (dependent on this) wires the LLM call using the merged tuple produced here.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF (.cs file modification, tag bff-api, ADR-010+013+029 applicable, prompt-handling code is semantically load-bearing) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-12 + .claude/constraints/bff-extensions.md + task 001 pattern-decision doc + task 002 scaffolded file.
+    </step>
+    <step order="2" name="Re-read AiAnalysisNodeExecutor merge path">
+      Open AiAnalysisNodeExecutor.cs. Identify exactly: (a) where Action.SystemPrompt is read, (b) where PromptSchemaOverrideMerger is invoked, (c) where template-variable substitution occurs, (d) what data shape the merged result has.
+    </step>
+    <step order="3" name="Re-read PromptSchemaOverrideMerger signature">
+      Confirm method signatures + parameter types — node config JSON shape vs Action prompt fields. AiCompletionNodeExecutor calls it identically to AiAnalysisNodeExecutor.
+    </step>
+    <step order="4" name="Implement payload binding in ExecuteAsync()">
+      Edit AiCompletionNodeExecutor.cs ExecuteAsync():
+      - Read context.Action (assume not-null in happy path; task 005 Validate() guarantees this)
+      - Extract SystemPrompt, OutputSchema, Temperature from Action
+      - Call PromptSchemaOverrideMerger with node.ConfigJson overrides
+      - Resolve template variables ({{var}}) from context.PreviousOutputs using the existing helper (mirror AiAnalysisNodeExecutor)
+      - Store merged (SystemPrompt, OutputSchema, Temperature) in local variables for the task-004 LLM call
+      - Leave a TODO: "LLM call wired in task 004 — see plan.md Wave 1"
+    </step>
+    <step order="5" name="Add structured logging">
+      Log at Debug level: node ID, Action ID, merged-prompt length, merged-schema field count. Do NOT log prompt contents (PII / cost).
+    </step>
+    <step order="6" name="Build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/ — expect 0 errors, 0 new warnings.
+    </step>
+    <step order="7" name="Verify existing tests still pass">
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/ — expect no regression. The new file has no tests yet (tasks 007-009 add them).
+    </step>
+    <step order="8" name="Publish + size check (partial)">
+      Run: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-task003/ — measure compressed size delta vs task 002 baseline. Document in task notes (expected: minimal increase).
+    </step>
+    <step order="9" name="Verify acceptance">
+      Re-read AiCompletionNodeExecutor.cs; confirm all goal bullets satisfied.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the modified file. Run `/adr-check` against ADR-010 + ADR-013 + ADR-029 + bff-extensions.md. Fix findings before commit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 003 status complete; advance current-task.md to next pending (003 unblocks 004, 005, 007).
+    </step>
+    <step order="11" name="Commit">
+      Commit AiCompletionNodeExecutor.cs change with conventional message.
+      Example: feat(bff/r7): payload binding + PromptSchemaOverrideMerger integration in AiCompletionNodeExecutor (Wave 1 task 003, FR-12)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (AiAnalysisNodeExecutor.cs sibling reference + PromptSchemaOverrideMerger.cs)</tool>
+    <tool>Edit (AiCompletionNodeExecutor.cs ExecuteAsync body)</tool>
+    <tool>Bash (dotnet build, dotnet test, dotnet publish, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 003 ✅)</output>
+    <output type="commit">feat(bff/r7): payload binding + PromptSchemaOverrideMerger integration in AiCompletionNodeExecutor (Wave 1 task 003, FR-12)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ExecuteAsync reads Action.SystemPrompt, Action.OutputSchema, Action.Temperature from context</criterion>
+    <criterion>PromptSchemaOverrideMerger is invoked with node.ConfigJson overrides (same call-shape as AiAnalysisNodeExecutor)</criterion>
+    <criterion>Template variables in the merged SystemPrompt resolve against context.PreviousOutputs</criterion>
+    <criterion>Merged tuple (SystemPrompt, OutputSchema, Temperature) is available as locals ready for task-004 LLM call</criterion>
+    <criterion>TODO comment marks the LLM-call insertion point with reference to task 004</criterion>
+    <criterion>Structured logging emits node ID, Action ID, merged-prompt length WITHOUT logging prompt contents</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>Existing test suite (pre-W1) still green</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Publish size delta documented (expected: +5-20 KB)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

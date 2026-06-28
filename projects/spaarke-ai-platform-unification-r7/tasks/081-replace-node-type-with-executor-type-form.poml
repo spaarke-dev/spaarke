@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-081" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Replace Node Type field with Executor Type Choice on Power Apps form (FR-21)</title>
+    <status>not-started</status>
+    <wave>8</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>dataverse, form-update, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024 (W2 dispatch ready)</dependencies>
+    <fr-coverage>FR-21</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Update the Power Apps model-driven Playbook Node form (entity `sprk_playbooknode`) to replace
+    the Node Type field with an Executor Type Choice selector. The Executor Type Choice draws from
+    the global Choice set `sprk_playbookexecutortype` (33 values). New rows default to a sensible
+    value (AiCompletion = 1). This is a Maker portal operation against form metadata —
+    NOT a React code change. Wave 8 task 081 is the model-driven form portion of the dispatch reform.
+  </prompt>
+
+  <role>
+    Power Apps maker / Dataverse customizer. Familiar with model-driven form editing, default-value rules,
+    and `dataverse-deploy` solution roundtrip. Coordinated with project owner who has Maker portal access.
+  </role>
+
+  <goal>
+    The `sprk_playbooknode` model-driven form (Main form):
+    1. NO LONGER displays the Node Type field (which is gone from schema per spec FR-02 schema-removal-DONE)
+    2. DISPLAYS the Executor Type Choice selector bound to `sprk_executortype`
+    3. Defaults Executor Type to AiCompletion (value = 1) on new-row create
+    4. Choice values match the 33-value global Choice set `sprk_playbookexecutortype`
+    5. Form layout is consistent with existing styling (no new tabs, no new sections)
+    6. Form is published + exported as part of the PlaybookBuilder solution
+    7. Verified in spaarkedev1 via UAT spot-check before code-page tasks 082-089 proceed
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="audit-doc">projects/spaarke-ai-platform-unification-r7/notes/spikes/playbookbuilder-sprk-nodetype-audit.md</file>
+    <file purpose="solution-folder">src/solutions/SpaarkePlaybookCore/ (or wherever sprk_playbooknode form lives)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-21">Form replaces Node Type with Executor Type Choice; defaults to AiCompletion (value 1) on new row.</constraint>
+    <constraint source="spec FR-02">`sprk_nodetype` column is already removed from schema (DONE 2026-06-27). Form must not reference it.</constraint>
+    <constraint source="ADR-021">No PCF/React work here — model-driven form uses Power Apps default theme which honors dark mode automatically. No hardcoded colors to verify.</constraint>
+    <constraint source="ADR-029">Not a BFF task — no publish-size verification needed.</constraint>
+    <constraint source="CLAUDE.md §11">Component Justification — this is a modification of an existing form, not a new component. Justification triple does not apply.</constraint>
+    <constraint source="bff-extensions.md">N/A — Wave 8 task 081 is code-page / form change, not BFF.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/form-customization</topic>
+    <files>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md (for solution import patterns)</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md (entity context only)</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-deploy skill" location=".claude/skills/dataverse-deploy/SKILL.md">
+        Standard pattern for solution export → import → publish.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The R7 dispatch reform requires the maker-facing model-driven form to reflect the new
+      Executor Type Choice column. Without this update, makers editing nodes via the model-driven
+      record form (not via the PlaybookBuilder canvas) would have no way to set the new dispatch column.
+      The schema work is DONE (Wave 1-2). This task is the maker-facing surface change.
+    </background>
+    <dependencies>
+      <dependency task="024" status="prerequisite">Wave 2 task 024 — orchestrator reads `sprk_executortype` single-hop. Without W2 done, form change risks deploying a form that writes a value the runtime ignores.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 082 updates the PlaybookBuilder canvas Node Types left panel (sibling work — different surface, same model).</item>
+      <item>Task 086 promotes Action selection to its own tab in the canvas Node Properties dialog (Code Page side).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: dataverse form-update modifies maker-facing surface; FR-21 is dispatch-critical; quality gates Step 9.5 required to verify form metadata matches schema · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-21 + audit doc (task 080) + design.md §11.
+    </step>
+    <step order="2" name="Verify W2 task 024 complete">
+      Confirm `PlaybookOrchestrationService.ExecuteNodeAsync` reads `node.sprk_executortype` single-hop (Wave 2 done). If not, STOP.
+    </step>
+    <step order="3" name="Locate the form definition">
+      Identify which solution holds the `sprk_playbooknode` Main form. Confirm via `pac solution list` or by searching `src/solutions/` for form XML. Note the form's logical name + GUID.
+    </step>
+    <step order="4" name="Export solution">
+      Use `pac solution export` (or owner's Maker portal) to pull the current form definition into the working directory.
+    </step>
+    <step order="5" name="Edit form to remove Node Type + add Executor Type">
+      In the form XML (or Maker portal):
+      - Remove any control bound to `sprk_nodetype` (already removed from schema, so this is cleanup)
+      - Add control bound to `sprk_executortype` (Choice) — place where Node Type was
+      - Set business rule / default to AiCompletion (value=1) on new-row create
+      - Verify Choice dropdown shows 33 values from `sprk_playbookexecutortype` global Choice
+    </step>
+    <step order="6" name="Pack + import solution to spaarkedev1">
+      Use `pac solution pack` + `pac solution import` (or owner Maker portal). Publish all customizations.
+    </step>
+    <step order="7" name="UAT spot-check in spaarkedev1">
+      Open the model-driven app; navigate to a `sprk_playbooknode` record; verify:
+      - No Node Type field visible
+      - Executor Type Choice visible with 33 values
+      - Create new row → default = AiCompletion (1)
+      - Save → record persists `sprk_executortype` correctly
+    </step>
+    <step order="8" name="Verify acceptance">
+      Confirm all goal bullets satisfied. Capture screenshot(s) of edited form for project notes.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on any changed solution XML / form definition files.
+      Run `/adr-check` against ADR-021 (dark mode honored automatically for model-driven forms).
+      Fix any findings before commit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 081 status complete; advance current-task.md to next Wave 8 task per dependency graph.
+    </step>
+    <step order="11" name="Commit">
+      Commit form XML changes (if exported as source) with conventional message:
+      `feat(r7): replace Node Type with Executor Type on sprk_playbooknode form (Wave 8 task 081, FR-21)`. No PR yet — Wave 8 ships at task 089d.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (audit doc + spec + design)</tool>
+    <tool>Edit (form XML if file-based)</tool>
+    <tool>Bash (pac solution export/import/pack)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+    <tool>Skill (dataverse-deploy for solution operations)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/solutions/.../sprk_playbooknode Main form XML (if file-based)</output>
+    <output type="dataverse-change">spaarkedev1 model-driven form updated + published</output>
+    <output type="screenshot">projects/spaarke-ai-platform-unification-r7/notes/spikes/081-form-screenshot.png (optional but recommended)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 081 ✅)</output>
+    <output type="commit">feat(r7): replace Node Type with Executor Type on sprk_playbooknode form (Wave 8 task 081, FR-21)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`sprk_playbooknode` Main form no longer displays Node Type field</criterion>
+    <criterion>Form displays Executor Type Choice selector with 33 values from `sprk_playbookexecutortype`</criterion>
+    <criterion>New-row default = AiCompletion (value=1)</criterion>
+    <criterion>Form imports + publishes cleanly to spaarkedev1</criterion>
+    <criterion>UAT spot-check confirms behavior (screenshot captured)</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 081 ✅</criterion>
+  </acceptance-criteria>
+</task>

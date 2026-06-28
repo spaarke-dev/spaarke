@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-040" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Audit all callers of AnalysisOrchestrationService.ExecuteAnalysisAsync</title>
+    <status>not-started</status>
+    <wave>4</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>audit, bff-api, wave-4</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none (parallel-safe within Wave 4 — can run before W9 091)</dependencies>
+    <fr-coverage>FR-11 (preparatory)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wave 4 begins with a complete inventory of every caller of `AnalysisOrchestrationService.ExecuteAnalysisAsync`.
+    This is the legacy direct-invocation AI path that FR-11 deletes entirely. Before deletion can happen
+    (task 042), every caller must be enumerated and a migration plan documented. The chat-summarize caller
+    (`SessionSummarizeOrchestrator`) is migrated separately by Wave 9 task 091 — this audit identifies it
+    plus any OTHER callers that task 041 will migrate. Produce a caller-graph document the next tasks
+    consume without re-greping.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer auditing the Spaarke BFF call graph. Goal: produce an exhaustive
+    caller inventory with migration disposition per caller. Read-only — no source modifications.
+  </role>
+
+  <goal>
+    A caller-inventory document at `projects/spaarke-ai-platform-unification-r7/notes/spikes/executeanalysisasync-caller-audit.md`
+    that lists every caller of `AnalysisOrchestrationService.ExecuteAnalysisAsync` with:
+    1. File path + line number
+    2. Calling context (what the caller is doing — chat summarize, daily briefing, etc.)
+    3. Migration disposition: Wave 9 (chat-summarize) OR Wave 4 task 041 (this wave) OR not-applicable (test fixtures)
+    4. Replacement target (PlaybookOrchestrationService.ExecuteAsync via degenerate 3-node playbook OR consumer-routing dispatch)
+    5. Risk flags (any caller whose contract subtly differs from a playbook dispatch shape)
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="deletion-target">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    <file purpose="replacement-canonical">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="invoke-facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs</file>
+    <file purpose="consumer-routing">src/server/api/Sprk.Bff.Api/Services/Ai/IConsumerRoutingService.cs</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-11">DELETE `AnalysisOrchestrationService.ExecuteAnalysisAsync` (legacy direct invocation path). Audit + migrate all callers to `PlaybookOrchestrationService.ExecuteAsync` via degenerate 3-node playbook OR consumer-routing dispatch.</constraint>
+    <constraint source="spec NFR-06">Backward compatibility NOT a concern (Q6 RESOLVED). No legacy compatibility shim. Old dispatch paths get DELETED.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — `IInvokePlaybookAi` facade triangle is the canonical AI invocation pathway. Direct-invocation path violates Invariant 1.</constraint>
+    <constraint source="CLAUDE.md §11">Audit-only task — no new components. Read-only.</constraint>
+    <constraint source="bff-extensions.md">Audit task does not modify BFF source; no publish-size check needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/bff-architecture</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/ai-architecture-consumer-routing.md</file>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="IInvokePlaybookAi facade" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs">
+        Canonical AI invocation surface. All callers route here post-FR-11 deletion.
+      </pattern>
+      <pattern name="Consumer routing Path A.5" location="src/server/api/Sprk.Bff.Api/Services/Ai/IConsumerRoutingService.cs">
+        For named-consumer callers (chat-summarize, daily briefing, etc.) — Path A.5 dispatch.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      `AnalysisOrchestrationService.ExecuteAnalysisAsync` is the legacy direct-invocation path that pre-dates
+      the playbook orchestrator. It was kept alive in R5/R6 as a fallback for "simple" AI calls but is now
+      a strict liability — it bypasses consumer routing, ignores playbook semantics, and creates a parallel
+      execution path the orchestrator does not own. FR-11 deletes it entirely. This audit task enumerates
+      every caller so deletion (task 042) is safe.
+    </background>
+    <expected-callers>
+      Per spec §"Affected Areas", at minimum:
+      <caller>SessionSummarizeOrchestrator (chat-summarize) — handled by Wave 9 task 091; identify but do NOT migrate here</caller>
+      <caller>Possibly other internal call sites discovered during grep — these become Wave 4 task 041 targets</caller>
+      <caller>Test fixtures referencing the legacy method — identified for cleanup; not blocking</caller>
+    </expected-callers>
+    <dependencies>
+      <dependency task="none" status="parallel-safe">Wave 4 task 040 has no upstream dependency within Wave 4. CAN run before Wave 9 task 091 — this audit informs both 091's migration plan and Wave 4's deletion plan.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 9 task 091 migrates SessionSummarizeOrchestrator using the disposition identified here.</item>
+      <item>Wave 4 task 041 migrates any non-chat callers identified here.</item>
+      <item>Wave 4 task 042 deletes the method after all callers migrated — depends on this audit's completeness.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: audit-only task, no source modification, planning artifact only · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md (FR-11 + NFR-06) + plan.md Wave 4 + .claude/constraints/bff-extensions.md.
+    </step>
+    <step order="2" name="Grep ExecuteAnalysisAsync — full repo">
+      Run: Grep pattern="ExecuteAnalysisAsync" glob="**/*.cs" output_mode="content" -n true
+      Capture every hit (declaration site + call sites + tests). Expect: 1 declaration + N call sites + M test references.
+    </step>
+    <step order="3" name="Read AnalysisOrchestrationService.ExecuteAnalysisAsync signature">
+      Open the source. Document: method signature, inputs, return shape, side effects. This is what callers depend on.
+    </step>
+    <step order="4" name="Classify each caller">
+      For each grep hit (excluding the declaration), determine:
+      - File + line
+      - Calling context (chat, briefing, ad-hoc launcher, test fixture)
+      - Disposition (Wave 9 / Wave 4 task 041 / test cleanup / not-applicable)
+      - Replacement: degenerate 3-node playbook (single AiAnalysis node) OR consumer-routing dispatch via `IInvokePlaybookAi`
+      - Risk: subtle contract differences (e.g., return-shape mismatch, missing logging hooks)
+    </step>
+    <step order="5" name="Identify SessionSummarizeOrchestrator explicitly">
+      Locate the chat-summarize caller (per spec FR-17). Confirm it is the Wave 9 task 091 migration target. Flag any OTHER chat-related callers separately.
+    </step>
+    <step order="6" name="Read PlaybookOrchestrationService.ExecuteAsync signature">
+      Confirm the replacement target's contract. Document the shape callers must adopt. Note: a degenerate 3-node playbook (Start → AiAnalysis → ReturnResponse) is the simplest equivalent path.
+    </step>
+    <step order="7" name="Write caller-inventory document">
+      Create `notes/spikes/executeanalysisasync-caller-audit.md` with sections:
+      <section>Caller table (file, line, context, disposition, replacement, risk)</section>
+      <section>SessionSummarizeOrchestrator deep-dive (chat-summarize migration handoff to Wave 9 task 091)</section>
+      <section>Test-fixture cleanup list (not blocking but tracked)</section>
+      <section>Wave 4 task 041 work list (non-chat callers, if any)</section>
+      <section>Risk register (subtle contract mismatches)</section>
+      <section>Acceptance signal: total caller count, expected post-deletion grep hit count = 0</section>
+      Keep concise — target 120-180 lines.
+    </step>
+    <step order="8" name="Update current-task.md + TASK-INDEX">
+      Mark task 040 status complete; advance current-task.md to task 041 (note 041 blocked on Wave 9 091).
+    </step>
+    <step order="9" name="Commit">
+      Commit notes/spikes/executeanalysisasync-caller-audit.md with conventional message.
+      Example: docs(r7/wave-4): audit ExecuteAnalysisAsync callers for FR-11 deletion (task 040)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (Spaarke BFF source files)</tool>
+    <tool>Grep (ExecuteAnalysisAsync, IConsumerRoutingService, PlaybookOrchestrationService.ExecuteAsync)</tool>
+    <tool>Write (caller-inventory document)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/spikes/executeanalysisasync-caller-audit.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 041)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 040 ✅)</output>
+    <output type="commit">docs(r7/wave-4): audit ExecuteAnalysisAsync callers for FR-11 deletion (task 040)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Caller-inventory document exists at notes/spikes/executeanalysisasync-caller-audit.md</criterion>
+    <criterion>Every grep hit of `ExecuteAnalysisAsync` (production + test) accounted for with disposition</criterion>
+    <criterion>SessionSummarizeOrchestrator explicitly identified and flagged for Wave 9 task 091</criterion>
+    <criterion>Wave 4 task 041 work list enumerated (may be empty if chat-summarize is the only caller — document that explicitly)</criterion>
+    <criterion>Replacement target (PlaybookOrchestrationService.ExecuteAsync OR consumer-routing dispatch) named per caller</criterion>
+    <criterion>Risk flags raised for any caller with subtle contract mismatch</criterion>
+    <criterion>current-task.md updated to point at task 041 as next</criterion>
+    <criterion>TASK-INDEX.md shows 040 ✅</criterion>
+  </acceptance-criteria>
+</task>

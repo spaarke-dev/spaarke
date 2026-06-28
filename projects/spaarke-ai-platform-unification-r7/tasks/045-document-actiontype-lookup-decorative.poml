@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-045" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Document sprk_analysisactiontype as decorative (FR-05)</title>
+    <status>not-started</status>
+    <wave>4</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>docs, wave-4</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none (parallel-safe within Wave 4)</dependencies>
+    <fr-coverage>FR-05</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Per FR-05, `sprk_analysisactiontype` lookup table is PRESERVED but repurposed: it becomes decorative
+    maker categorization (lets makers browse "what kinds of actions exist") but the runtime ignores it.
+    This task adds documentation notes to existing canonical-truth docs to record this disposition. No new
+    doc file created — update existing data-model + architecture docs in place. Wave 6 task 062 may
+    further rewrite `docs/architecture/ai-architecture-actions-nodes-scopes.md`; this task makes the
+    minimum required note so readers post-Wave-4 don't mistake the table as load-bearing.
+  </prompt>
+
+  <role>
+    Technical writer + data modeler. Goal: add precise, brief notes to existing docs marking
+    `sprk_analysisactiontype` as decorative. No file creation; in-place updates only per NFR-08
+    "delete or update — no SUPERSEDED markers, no stubs".
+  </role>
+
+  <goal>
+    1. `docs/architecture/ai-architecture-actions-nodes-scopes.md` updated with a note (1-2 paragraphs)
+       declaring `sprk_analysisactiontype` is now decorative (maker categorization only; runtime ignores)
+    2. If `docs/data-model/` contains an entry for `sprk_analysisactiontype`, update it; if not, do NOT create one (Wave 6 task 062 may consolidate this)
+    3. The `sprk_executoractiontype` field on lookup-table ROWS remains (per spec FR-05: "field on lookup table rows remains but is documented as advisory only") — note this disposition explicitly
+    4. NO SUPERSEDED markers (NFR-08), NO redirect stubs, NO archive folders
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="canonical-doc-update-target">docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+    <file purpose="possible-data-model-doc">docs/data-model/ (check for sprk_analysisactiontype entry; do NOT create new file)</file>
+    <file purpose="adr-reference">docs/adr/ADR-013-bff-ai-architecture.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-05">KEEP `sprk_analysisactiontype` lookup table (decorative role; maker categorization). `sprk_executoractiontype` field on lookup table rows remains but is advisory only (not load-bearing). Acceptance: table preserved; doc note added that runtime ignores the field.</constraint>
+    <constraint source="spec NFR-08">Documentation discipline — DELETE outdated, UPDATE current. NO SUPERSEDED markers, NO redirect stubs, NO archive folders. PR review gates drift.</constraint>
+    <constraint source="spec Q4 RESOLVED">Lookup-table fate: REPURPOSE as decorative for maker browsing. NOT dropped.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — runtime dispatch lives on `node.sprk_executortype` only. Lookup table is informational, not load-bearing.</constraint>
+    <constraint source="CLAUDE.md §11">No new component, no new doc file in this task (Wave 6 task 062 may consolidate further). In-place update only.</constraint>
+    <constraint source="bff-extensions.md">Doc-only task; no BFF source change; no publish-size impact.</constraint>
+    <constraint source="ownership-boundary">DO NOT modify `docs/architecture/ai-architecture-consumer-routing.md` (chat-routing-redesign-r1 owns; READ-ONLY in R7 per project CLAUDE.md).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>docs/data-model + architecture</topic>
+    <files>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="In-place doc update" location="NFR-08 discipline">
+        Update doc body; do not add SUPERSEDED banners, archive folders, or redirect stubs. PR review gates drift.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      `sprk_analysisactiontype` lookup table previously sat at the apex of the pre-R7 dispatch model
+      (Action → ActionType lookup → executor INT). R7 collapses dispatch onto `node.sprk_executortype`,
+      so the lookup-table role disappears at runtime. Per Q4 RESOLVED, the table is REPURPOSED as a
+      decorative maker-browsing surface ("what action types do we offer?") rather than dropped. This task
+      makes that disposition explicit in docs so future readers don't reinstate runtime references to it.
+      Wave 6 task 062 (4-Home decision tree rewrite) may further elaborate; this task makes the minimum
+      note required at end of Wave 4.
+    </background>
+    <dependencies>
+      <dependency task="none" status="parallel-safe">Can run before, during, or after the 042-044 schema cascade. Doc note describes the post-cascade end state.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Tasks 043 + 044 drop the FK + INT fields ON `sprk_analysisaction` — they do NOT drop the lookup table itself (this task documents that distinction).</item>
+      <item>Wave 6 task 062 rewrites `ai-architecture-actions-nodes-scopes.md` 4-Home decision tree — may absorb or supersede this task's note (acceptable; Wave 6 owns final shape).</item>
+      <item>Task 067 (consumer-wiring guide) may reference this note when explaining "Actions are prompt templates, not dispatch markers".</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: doc-only update; tag docs; no source/schema modification · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-05 + plan.md Wave 4 + canonical doc `docs/architecture/ai-architecture-actions-nodes-scopes.md`.
+    </step>
+    <step order="2" name="Locate target sections">
+      In `docs/architecture/ai-architecture-actions-nodes-scopes.md`, identify the section that discusses `sprk_analysisactiontype` (likely the 4-Home decision tree section, action-types overview, or similar). Note the location for in-place update.
+    </step>
+    <step order="3" name="Check docs/data-model/ for an entry">
+      Run: Glob pattern="docs/data-model/sprk_analysisactiontype*"
+      If a file exists, plan an in-place update. If absent, DO NOT create a new file (Wave 6 task 062 may consolidate).
+    </step>
+    <step order="4" name="Author the decorative-note text">
+      Write 1-2 paragraphs that:
+      - State explicitly: `sprk_analysisactiontype` lookup TABLE is preserved (FR-05); it is decorative maker categorization
+      - State explicitly: the runtime dispatch path (PlaybookOrchestrationService.ExecuteNodeAsync) does NOT read it
+      - State explicitly: the `sprk_executoractiontype` field on lookup-table ROWS remains but is advisory only
+      - State explicitly: dispatch identity lives ONLY on `node.sprk_executortype` (Choice column)
+      - Cite FR-03, FR-04, FR-05, FR-07 from spec for traceability
+      - Do NOT use words "deprecated", "superseded", "legacy" — per NFR-08, use forward-looking framing ("decorative", "advisory", "informational")
+    </step>
+    <step order="5" name="Apply in-place update to ai-architecture-actions-nodes-scopes.md">
+      Edit the target section with the new note. Preserve surrounding doc structure. Keep concise (1-2 paragraphs).
+    </step>
+    <step order="6" name="Apply in-place update to docs/data-model/ entry if exists">
+      If a data-model entry was found in step 3, add a similar note. Do NOT create the file if absent.
+    </step>
+    <step order="7" name="Post-update grep — confirm no banned vocabulary">
+      Run: Grep pattern="(deprecated|superseded|SUPERSEDED)" path="docs/architecture/ai-architecture-actions-nodes-scopes.md"
+      Required: zero new instances introduced by this task's edits (pre-existing instances elsewhere are NOT this task's scope — Wave 6 task 069 handles them).
+    </step>
+    <step order="8" name="Update current-task.md + TASK-INDEX">
+      Mark task 045 status complete; advance current-task.md.
+    </step>
+    <step order="9" name="Commit">
+      Commit doc edits with conventional message.
+      Example: docs(r7/wave-4): document sprk_analysisactiontype as decorative (Wave 4 task 045, FR-05)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (spec, plan, target doc, ADR-013)</tool>
+    <tool>Glob (check docs/data-model/ for existing entry)</tool>
+    <tool>Grep (post-update banned-vocabulary check)</tool>
+    <tool>Edit (in-place doc update)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">docs/architecture/ai-architecture-actions-nodes-scopes.md (decorative-note section added/updated)</output>
+    <output type="possibly-modified-file">docs/data-model/sprk_analysisactiontype.md (IF such a file exists; do NOT create if absent)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 045 ✅)</output>
+    <output type="commit">docs(r7/wave-4): document sprk_analysisactiontype as decorative (Wave 4 task 045, FR-05)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`docs/architecture/ai-architecture-actions-nodes-scopes.md` contains a clear note declaring `sprk_analysisactiontype` decorative + runtime-ignored</criterion>
+    <criterion>Note cites FR-03 + FR-04 + FR-05 + FR-07 for traceability</criterion>
+    <criterion>Note uses forward-looking vocabulary ("decorative", "advisory", "informational") — NOT "deprecated" / "superseded" per NFR-08</criterion>
+    <criterion>If a data-model entry already exists, similar note added; if absent, NO new file created (Wave 6 owns consolidation)</criterion>
+    <criterion>Post-task grep confirms no NEW "deprecated"/"superseded" vocabulary introduced</criterion>
+    <criterion>`docs/architecture/ai-architecture-consumer-routing.md` NOT modified (ownership boundary respected)</criterion>
+    <criterion>TASK-INDEX.md shows 045 ✅</criterion>
+  </acceptance-criteria>
+</task>

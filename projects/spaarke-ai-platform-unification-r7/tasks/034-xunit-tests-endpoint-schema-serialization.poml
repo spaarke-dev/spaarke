@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-034" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>xUnit tests for endpoint + schema serialization</title>
+    <status>not-started</status>
+    <wave>3</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>bff-api, testing, wave-3</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>033</dependencies>
+    <fr-coverage>FR-16 (test coverage)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Add xUnit tests proving the executor-config-schemas endpoint returns valid JSON with the expected
+    shape. Per ADR-038, tests favor real integration over micro-mocks: the executor instances are real;
+    only `IOpenAiClient` (and other heavy outbound dependencies) is mocked. The schema content itself
+    is verified by serializing + asserting against expected JSON for at least the 5 priority executors.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer + test author. Honor ADR-038 KEEP-category patterns:
+    integration-style endpoint test via WebApplicationFactory or test server; serialization assertions
+    against the actual `JsonSerializerOptions` used by BFF; no banned `Mock&lt;HttpMessageHandler&gt;`,
+    no DI-registration tests, no ctor null-check tests.
+  </role>
+
+  <goal>
+    1. New test file `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ExecutorConfigSchemasEndpointTests.cs` (or sibling location matching existing endpoint test layout)
+    2. Test: endpoint returns 200 OK and a JSON object keyed by integer ExecutorType values
+    3. Test: endpoint requires authentication (401 when no token)
+    4. Test: response contains an entry for all 33 ExecutorType values (post-Wave-2 enum)
+    5. Test: AiAnalysisNodeExecutor schema is non-empty and serializes with expected field names (camelCase per BFF convention)
+    6. Test: AiCompletionNodeExecutor schema is non-empty and serializes with expected field names
+    7. Test: ConditionNodeExecutor / EntityNameValidatorNodeExecutor / CreateNotificationNodeExecutor schemas are non-empty
+    8. Test: a placeholder executor returns `{ fields: {} }` (or design-doc's exact empty shape)
+    9. All tests pass; coverage report shows endpoint code touched
+  </goal>
+
+  <inputs>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="endpoint-impl">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookBuilderEndpoints.cs (or sibling, per task 033)</file>
+    <file purpose="schema-record">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ExecutorConfigSchema.cs</file>
+    <file purpose="existing-endpoint-tests">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ — find sibling endpoint test pattern</file>
+    <file purpose="test-architecture">docs/standards/TEST-ARCHITECTURE.md</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-038">Testing Strategy — integration-heavy pyramid. KEEP-category test: endpoint integration via WebApplicationFactory; real executors (Singleton-registered) participate; only outbound deps (e.g., IOpenAiClient) mocked. BAN: Mock&lt;HttpMessageHandler&gt;, DI-registration tests, ctor null-check tests, "method-presence" tests.</constraint>
+    <constraint source="ADR-010">DI Minimalism — test setup uses real DI graph (WebApplicationFactory + ConfigureTestServices for the one mocked dep).</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — tests validate the contract (route + payload shape), not implementation internals.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — tests do not change publish artifact; verify at task 036.</constraint>
+    <constraint source="CLAUDE.md §7 TEST-MODIFYING override">This task modifies tests/** — FULL rigor applies UNCONDITIONALLY (already declared via task tag). code-review + adr-check at Step 9.5 are MANDATORY.</constraint>
+    <constraint source="CLAUDE.md §10 test-update-obligation">Endpoints that map unconditionally MUST have unconditional service registration backing the test. Wave 3 endpoint maps unconditionally and executors are Singleton-registered unconditionally — no asymmetric-registration risk.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist applies. Placement decision: tests next to other endpoint tests under `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/`.</constraint>
+    <constraint source="DO NOT TEST">Do NOT write tests that merely assert "GetConfigSchema method exists" or "DI registration calls AddSingleton" — these are banned scaffolding patterns per ADR-038 §7.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring + testing</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="existing endpoint integration tests" location="tests/unit/Sprk.Bff.Api.Tests/Api/Ai/">
+        Pattern reference — find a sibling test using WebApplicationFactory + ConfigureTestServices to mirror.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 033 shipped the endpoint. This task locks in the contract via tests: the URL, auth
+      requirement, payload shape, and content for the 5 priority executors. ADR-038 forbids the
+      common anti-pattern of asserting "method X exists on class Y" — tests must exercise BEHAVIOR
+      through the endpoint, not implementation reflection.
+    </background>
+    <dependencies>
+      <dependency task="033" status="not-started-but-required">Endpoint exists at the spec URL.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 035 documents the schema shape in docs.</item>
+      <item>Task 036 verifies BFF publish-size + CVE for the wave.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: TEST-MODIFYING override (task modifies tests/**, tag testing) — FULL rigor + Step 9.5 quality gates UNCONDITIONAL per CLAUDE.md §7 + ADR-038 · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-16 + task 030 design doc + ADR-038 + `tests/CLAUDE.md` + `docs/standards/TEST-ARCHITECTURE.md`.
+    </step>
+    <step order="2" name="Verify dependency">
+      Confirm task 033 shipped: endpoint exists; manually inspect the route registration.
+    </step>
+    <step order="3" name="Read existing endpoint test pattern">
+      Find an existing endpoint test in `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/` that uses WebApplicationFactory + ConfigureTestServices. Note the test base class / fixture used.
+    </step>
+    <step order="4" name="Create test file">
+      Create `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ExecutorConfigSchemasEndpointTests.cs` following the sibling pattern. Use the same WebApplicationFactory fixture.
+    </step>
+    <step order="5" name="Write tests in priority order">
+      Add tests covering goal items 2-8 sequentially. Each test is named per pattern: `Endpoint_When_Then` (e.g., `GetExecutorConfigSchemas_WhenAuthenticated_Returns200`).
+      For schema-content assertions: deserialize the response body, look up the integer key for ExecutorType.AiAnalysis (= 0), assert `Fields` is non-empty AND contains the expected field names from task 032's rich schema.
+    </step>
+    <step order="6" name="Mock IOpenAiClient if needed">
+      The endpoint should NOT call IOpenAiClient (it only invokes `GetConfigSchema()` which is data-only).
+      If the BFF startup wires IOpenAiClient with strict credentials, mock it via `ConfigureTestServices` to a no-op stub — this prevents test bootstrap failure.
+      Do NOT mock INodeExecutor itself; use the real registrations.
+    </step>
+    <step order="7" name="Run tests">
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~ExecutorConfigSchemasEndpoint"
+      Goal: all tests pass.
+    </step>
+    <step order="8" name="Run full BFF test suite">
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/
+      Goal: no regression in the broader suite.
+    </step>
+    <step order="9" name="Verify acceptance">
+      Open the test file; confirm tests cover goal items 2-8; confirm no banned patterns (no Mock&lt;HttpMessageHandler&gt;, no DI-reflection assertions, no method-presence reflection tests).
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor — UNCONDITIONAL per TEST-MODIFYING override)">
+      Run `/code-review` on the new test file. Run `/adr-check` against ADR-038 + ADR-010 + bff-extensions.md.
+      Verify no ADR-038-banned patterns. Fix findings before commit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 034 status complete; advance current-task.md to task 035.
+    </step>
+    <step order="11" name="Commit">
+      Commit test file with conventional message.
+      Example: test(bff/r7): xunit tests for executor-config-schemas endpoint (Wave 3 task 034, FR-16)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (sibling test patterns, endpoint impl, schema record)</tool>
+    <tool>Grep (find WebApplicationFactory fixtures already in tests/)</tool>
+    <tool>Write (new test file)</tool>
+    <tool>Bash (dotnet test, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ExecutorConfigSchemasEndpointTests.cs</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 035)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 034 ✅)</output>
+    <output type="commit">test(bff/r7): xunit tests for executor-config-schemas endpoint (Wave 3 task 034, FR-16)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Test file exists at tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ExecutorConfigSchemasEndpointTests.cs</criterion>
+    <criterion>Test: endpoint returns 200 OK for authenticated request</criterion>
+    <criterion>Test: endpoint returns 401 for unauthenticated request</criterion>
+    <criterion>Test: response contains all 33 ExecutorType integer keys</criterion>
+    <criterion>Test: AiAnalysisNodeExecutor schema has non-empty Fields with expected field names</criterion>
+    <criterion>Test: AiCompletionNodeExecutor schema has non-empty Fields with expected field names</criterion>
+    <criterion>Test: ConditionNodeExecutor schema has non-empty Fields</criterion>
+    <criterion>Test: EntityNameValidatorNodeExecutor schema has non-empty Fields</criterion>
+    <criterion>Test: CreateNotificationNodeExecutor schema has non-empty Fields</criterion>
+    <criterion>Test: placeholder executor returns empty Fields per design-doc shape</criterion>
+    <criterion>No banned patterns: no Mock&lt;HttpMessageHandler&gt;, no DI-registration assertions, no method-presence reflection tests</criterion>
+    <criterion>dotnet test passes for the new test class</criterion>
+    <criterion>Full Sprk.Bff.Api.Tests suite passes (no regression)</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor, UNCONDITIONAL per TEST-MODIFYING)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>TASK-INDEX.md shows 034 ✅, 035 🔲 ready</criterion>
+  </acceptance-criteria>
+</task>

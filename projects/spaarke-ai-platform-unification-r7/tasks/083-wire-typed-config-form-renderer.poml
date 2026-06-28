@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-083" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Wire typed config form renderer driven by schema endpoint (FR-23)</title>
+    <status>not-started</status>
+    <wave>8</wave>
+    <estimated-effort>4-5 hours</estimated-effort>
+    <tags>code-page, ui, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>033 (W3 schema endpoint)</dependencies>
+    <fr-coverage>FR-23 (renderer)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wire a typed config form renderer in the PlaybookBuilder canvas that consumes the Wave 3
+    BFF endpoint (`GET /api/ai/playbook-builder/executor-config-schemas`) and renders Fluent v9
+    forms from those schemas. Replace the free-form JSON editing of `sprk_configjson` with typed
+    inputs. The renderer is generic — it takes a schema (field types, defaults, required/optional,
+    descriptions) and produces a form. Task 084 implements the 5 priority executor schemas;
+    task 085 fills out the remaining 28. This task wires the rendering INFRASTRUCTURE.
+  </prompt>
+
+  <role>
+    Senior React + Fluent UI v9 developer. Comfortable with schema-driven UI generation
+    (akin to JSON Schema → React form), Zustand state, and Dataverse round-trip for `sprk_configjson`.
+  </role>
+
+  <goal>
+    A schema-driven form renderer component + supporting service:
+    1. New file `src/client/code-pages/PlaybookBuilder/src/services/executorSchemaService.ts` — fetches schemas from BFF endpoint, caches them in-memory + sessionStorage
+    2. New file `src/client/code-pages/PlaybookBuilder/src/components/properties/TypedConfigForm.tsx` — renders a form from a schema
+    3. Form-state syncs to `sprk_configjson` (legacy field kept for backward compat with deployed playbook records per FR-23)
+    4. Per-field validation against schema (required, type, pattern if any)
+    5. Renderer handles: string input, number input (SpinButton), boolean (Switch), enum (Dropdown), JSON sub-editor (Textarea with JSON validation)
+    6. Renderer gracefully handles UNKNOWN executor type → empty form with "No schema available" placeholder (paves the way for task 089 unknown-type warning)
+    7. All colors use Fluent v9 semantic tokens (ADR-021)
+    8. Build passes (`npm run build:prod`)
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="properties-dialog">src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesDialog.tsx</file>
+    <file purpose="existing-form-example">src/client/code-pages/PlaybookBuilder/src/components/properties/AiCompletionForm.tsx</file>
+    <file purpose="canvas-types">src/client/code-pages/PlaybookBuilder/src/types/canvas.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Fluent UI v9 ONLY. NO v8 patterns.</constraint>
+    <constraint source="ADR-021">Dark mode binding. Semantic tokens only.</constraint>
+    <constraint source="spec FR-23">Form-state syncs to `sprk_configjson` (legacy field kept for backward compat with deployed playbook records). Per-field validation works.</constraint>
+    <constraint source="spec FR-16">Schemas served by Wave 3 endpoint — this task is the consumer.</constraint>
+    <constraint source="CLAUDE.md §11">Component Justification triple:
+      1. Existing: 12+ per-executor form files exist (AiCompletionForm.tsx, CreateNotificationForm.tsx, etc.). Each is hand-crafted.
+      2. Extension: hand-crafted forms cannot scale to 33 executors without significant per-form work. A schema-driven renderer replaces hand-crafted forms with one generic component. Extension wins.
+      3. Cost-of-doing-nothing: makers must edit 33 free-form JSON config blobs by hand. UX is unusable. Spec FR-23 acceptance explicitly requires this renderer.
+    </constraint>
+    <constraint source="CLAUDE.md §12">Build command: `npm run build:prod`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/playbookbuilder</topic>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/adr/ADR-006-pcf-fluent-ui-v9.md</file>
+      <file>docs/adr/ADR-021-dark-mode-semantic-tokens.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/notes/spikes/ (any task 030 design notes)</file>
+    </files>
+    <patterns>
+      <pattern name="hand-crafted form" location="src/client/code-pages/PlaybookBuilder/src/components/properties/AiCompletionForm.tsx">
+        Reference for the form patterns that schema-driven renderer must reproduce (Input, SpinButton, Textarea, etc.).
+      </pattern>
+      <pattern name="dataverseClient" location="src/client/code-pages/PlaybookBuilder/src/services/dataverseClient.ts">
+        Sibling service for the new `executorSchemaService.ts` to mirror.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 030 (Wave 3) designed the schema DTO shape. Tasks 031-033 added `GetConfigSchema()` to all
+      33 BFF executors + a BFF endpoint that returns the full registry. This task is the canvas-side consumer
+      of that registry. The renderer infrastructure is generic — it doesn't know about specific executor types.
+      Tasks 084-085 supply the executor schemas with rich content (084 for 5 priority, 085 for remaining 28).
+    </background>
+    <dependencies>
+      <dependency task="033" status="prerequisite">Wave 3 BFF endpoint must be deployed before this task can fetch live schemas. Without it, this task uses a temporary mock fixture.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 084 implements 5 priority typed forms ON TOP OF this renderer.</item>
+      <item>Task 085 implements remaining 28 placeholder forms.</item>
+      <item>Task 089 handles unknown-executor-type warning state — coordinates with this renderer's "no schema available" path.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-page UI infra component, FR-23 critical, ADR-006+021 applicable, quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-23 + Wave 3 task 030 design notes (if exist) + AiCompletionForm.tsx as a reference for what generated forms must look like.
+    </step>
+    <step order="2" name="Verify W3 task 033 endpoint status">
+      Confirm `GET /api/ai/playbook-builder/executor-config-schemas` is deployed and returns valid JSON. If not, STOP or use a temporary local fixture.
+    </step>
+    <step order="3" name="Write executorSchemaService.ts">
+      Create `src/client/code-pages/PlaybookBuilder/src/services/executorSchemaService.ts`:
+      - `fetchExecutorSchemas(apiBaseUrl): Promise<Record<number, ExecutorConfigSchema>>` — calls the BFF endpoint, caches result in sessionStorage with a TTL (5 min)
+      - `getSchemaForExecutorType(value: number): ExecutorConfigSchema | undefined` — convenience accessor against cached map
+      - Type definitions matching the BFF schema DTO shape
+    </step>
+    <step order="4" name="Write TypedConfigForm.tsx">
+      Create `src/client/code-pages/PlaybookBuilder/src/components/properties/TypedConfigForm.tsx`:
+      - Props: `schema: ExecutorConfigSchema | undefined`, `value: Record<string, unknown>` (parsed `sprk_configjson`), `onChange: (newValue: Record<string, unknown>) => void`
+      - For each field in `schema.fields`: render the right Fluent v9 input based on field type:
+        * `string` → Input
+        * `number` → SpinButton
+        * `boolean` → Switch
+        * `enum` → Dropdown (with field.options)
+        * `json` → Textarea with JSON-parse validation badge
+      - Required-field markers
+      - Inline per-field validation errors
+      - Description as Label tooltip / helper text
+      - If `schema` is undefined → render `<Text>No schema available for this executor type. Use Configuration tab JSON editor as fallback.</Text>` (paves for task 089 warning)
+    </step>
+    <step order="5" name="Sync form-state to sprk_configjson">
+      In `onChange` handler: serialize the form values to JSON and write to `node.data.configJson` via canvas store.
+      Validate JSON before write. Per FR-23 "form-state syncs to sprk_configjson (legacy field kept for backward compat)".
+    </step>
+    <step order="6" name="Integrate into NodePropertiesDialog.tsx">
+      In the Configuration tab section, render `<TypedConfigForm schema={...} ... />` based on the selected node's `sprk_executortype`.
+      Leave existing hand-crafted forms (AiCompletionForm.tsx etc.) untouched FOR NOW — they're replaced incrementally in tasks 084-085.
+    </step>
+    <step order="7" name="Build">
+      Run: `cd src/client/code-pages/PlaybookBuilder && npm run build:prod`.
+      Goal: 0 errors, 0 new warnings.
+    </step>
+    <step order="8" name="Verify acceptance">
+      Spot-check: open the canvas, drop a node, open properties → Configuration tab should render the new typed form (empty schema OK at this stage).
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the three modified/new files.
+      Run `/adr-check` against ADR-006 + ADR-021.
+      Grep for hardcoded colors. Fix findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 083 status complete; advance to next Wave 8 task.
+    </step>
+    <step order="11" name="Commit">
+      Commit message:
+      `feat(playbookbuilder/r7): wire typed config form renderer (Wave 8 task 083, FR-23)`. No PR yet.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (source files + Wave 3 design notes)</tool>
+    <tool>Grep (hardcoded colors)</tool>
+    <tool>Write (executorSchemaService.ts, TypedConfigForm.tsx)</tool>
+    <tool>Edit (NodePropertiesDialog.tsx)</tool>
+    <tool>Bash (npm run build:prod, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">src/client/code-pages/PlaybookBuilder/src/services/executorSchemaService.ts</output>
+    <output type="new-file">src/client/code-pages/PlaybookBuilder/src/components/properties/TypedConfigForm.tsx</output>
+    <output type="modified-file">src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesDialog.tsx</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 083 ✅)</output>
+    <output type="commit">feat(playbookbuilder/r7): wire typed config form renderer (Wave 8 task 083, FR-23)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>executorSchemaService.ts fetches schemas from BFF endpoint with sessionStorage cache</criterion>
+    <criterion>TypedConfigForm.tsx renders Fluent v9 inputs based on field types (string/number/boolean/enum/json)</criterion>
+    <criterion>Form-state syncs to `sprk_configjson` on every change (legacy field preserved per FR-23)</criterion>
+    <criterion>Per-field validation runs against schema (required, type)</criterion>
+    <criterion>Unknown schema → "No schema available" placeholder (paves for task 089)</criterion>
+    <criterion>All colors via Fluent v9 semantic tokens (ADR-021); no hardcoded hex</criterion>
+    <criterion>`npm run build:prod` passes: 0 errors, 0 new warnings</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 083 ✅</criterion>
+  </acceptance-criteria>
+</task>

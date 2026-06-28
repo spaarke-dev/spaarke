@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-046" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Update AnalysisActionService to remove references to dropped fields</title>
+    <status>not-started</status>
+    <wave>4</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-4</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>044</dependencies>
+    <fr-coverage>FR-03 + FR-04 (code cleanup portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Tasks 043 + 044 dropped `sprk_actiontypeid` and `sprk_executoractiontype` from `sprk_analysisaction`
+    schema. `AnalysisActionService.cs` previously read these fields when materializing Action POCOs from
+    Dataverse. With the fields gone, those reads will fail at runtime (Dataverse returns "attribute not
+    found"). Find every reference to these two fields in `AnalysisActionService.cs` (and anywhere else
+    in `src/server/`) and remove them. Simplify the Action read path per spec affected-areas note:
+    "Action read path simplifies (no ActionType from lookup)".
+  </prompt>
+
+  <role>
+    Senior .NET backend developer simplifying a Dataverse read service. Goal: AnalysisActionService no
+    longer reads dropped fields; build green; tests green. Mirror task 042's cascade-deletion discipline:
+    remove the read; remove any private helper / mapping logic that becomes unused; verify build at each step.
+  </role>
+
+  <goal>
+    1. Grep `src/server/` for `sprk_actiontypeid` + `sprk_executoractiontype` — should hit `AnalysisActionService.cs` (plus possibly DTOs, mapping code, tests)
+    2. Every read of those fields removed from `AnalysisActionService.cs`
+    3. Any DTO properties bound to those columns removed (cascade — if no other consumer)
+    4. Any column-selection lists ("Cols" / `$select=…`) that name those fields updated to omit them
+    5. Tests for `AnalysisActionService` updated to remove fixture setups for those fields
+    6. `dotnet build` passes; `dotnet test` passes
+    7. Post-task grep for both field names returns ZERO hits in `src/server/` + `tests/`
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="cleanup-target">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs</file>
+    <file purpose="possible-cleanup-target">src/server/api/Sprk.Bff.Api/Services/Ai/Models/ (DTOs that bind sprk_analysisaction fields)</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+    <file purpose="prior-tasks">043-drop-sprk-actiontypeid-lookup.poml, 044-drop-sprk-executoractiontype-int.poml (cite for traceability)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-03 acceptance">Field removed from Dataverse; Action read path (AnalysisActionService) no longer references it.</constraint>
+    <constraint source="spec FR-04 acceptance">Field removed; no code reads it.</constraint>
+    <constraint source="spec affected-areas">`AnalysisActionService.cs` — Action read path simplifies (no ActionType from lookup).</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — Action represents prompt template + schema + temperature only (post-R7). Dispatch lives on node, not on Action.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — verify publish-size delta (expected: small NEGATIVE; modest dead-code removal).</constraint>
+    <constraint source="ADR-038">Testing Strategy — fixture cleanup MUST happen with code change (no "deferred test update"). Tests don't gain new mocks; they shrink to match the simpler service.</constraint>
+    <constraint source="CLAUDE.md §11">No new component. Cleanup of existing service. Justification rule does not apply.</constraint>
+    <constraint source="bff-extensions.md §F.6">Test-update obligation — caller test updates MUST happen with code change, not deferred.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/bff-architecture</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Cascade-deletion discipline" location="task 042 POML">
+        Delete reads → build → identify unused helpers/DTOs → delete → repeat until build clean.
+      </pattern>
+      <pattern name="Dataverse $select column-list trimming" location="src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs">
+        Many read services maintain explicit "Cols" arrays for $select. Trim the dropped field names from these arrays.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      With schema dropped (tasks 043 + 044), reading the dropped fields would 404 at runtime. This task
+      mops up `AnalysisActionService.cs` and any related DTO/mapping code so the build represents the
+      post-FR-03 + FR-04 reality. The Action POCO becomes simpler: just prompt template + schema +
+      temperature (per spec's Action-as-prompt-template framing).
+    </background>
+    <dependencies>
+      <dependency task="044" status="must-complete-first">Schema-cascade pair complete. Both fields dropped. Reading them would fail.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 042 deleted the largest reader (`ExecuteAnalysisAsync`) of these fields; remaining reads concentrate in `AnalysisActionService`.</item>
+      <item>Task 045 documents the lookup table as decorative — note may inform commit message framing.</item>
+      <item>Task 047 cumulative wave publish-size check follows immediately.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF (.cs file modification, tag bff-api+code-impl, ADR-013+029+038 applicable) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-03 + FR-04 + plan.md Wave 4 + .claude/constraints/bff-extensions.md + AnalysisActionService.cs.
+    </step>
+    <step order="2" name="Verify prerequisite">
+      Confirm tasks 043 + 044 marked ✅ in TASK-INDEX. If either is incomplete, STOP and report — runtime schema is not yet in the post-deletion state.
+    </step>
+    <step order="3" name="Grep dropped field names — production code">
+      Run: Grep pattern="(sprk_actiontypeid|sprk_executoractiontype)" glob="**/*.cs" output_mode="content" -n true
+      Capture every hit (file + line + surrounding code). Expected: AnalysisActionService.cs + possibly DTOs + tests.
+    </step>
+    <step order="4" name="Read AnalysisActionService.cs in full">
+      Identify: where the fields are read in $select / column lists, where they are bound to DTOs, where they are projected to Action POCOs. Track the cascade.
+    </step>
+    <step order="5" name="Remove dropped-field reads + cascade DTO/mapping">
+      For each grep hit in production code:
+      - Remove from $select / column-list array
+      - Remove from DTO bindings
+      - Remove any private helper that consumed only the dropped field
+      - Simplify Action POCO if either dropped field had a property exposed on it
+    </step>
+    <step order="6" name="Build — first sweep">
+      Run: `dotnet build src/server/api/Sprk.Bff.Api/`
+      Capture compiler warnings about newly-unused members. Cascade through deletes until build is clean.
+    </step>
+    <step order="7" name="Update tests">
+      Find tests for `AnalysisActionService` and any DTO classes touched. Remove fixture setups for dropped fields. Per ADR-038: no new mocks; tests shrink (no DI-registration tests, no ctor null-check tests added).
+    </step>
+    <step order="8" name="Build + run tests">
+      Run: `dotnet build src/server/api/Sprk.Bff.Api/`
+      Run: `dotnet test tests/unit/Sprk.Bff.Api.Tests/`
+      Goal: 0 errors, 0 NEW warnings, all tests pass.
+    </step>
+    <step order="9" name="Verify grep state">
+      Run: Grep pattern="(sprk_actiontypeid|sprk_executoractiontype)" glob="**/*.cs"
+      Required: ZERO hits in `src/server/` + `tests/`. Pre-existing historical references in COMMIT MESSAGES are NOT in scope (untracked by this grep).
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on modified files. Run `/adr-check` against ADR-013 + ADR-029 + ADR-038 + bff-extensions.md.
+      Fix any findings before commit.
+    </step>
+    <step order="10" name="Publish + size check (running tally toward task 047)">
+      Run: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-task046/
+      Measure compressed size. Expected: small NEGATIVE delta.
+    </step>
+    <step order="11" name="Update current-task.md + TASK-INDEX">
+      Mark task 046 status complete; advance current-task.md to task 047.
+    </step>
+    <step order="12" name="Commit">
+      Commit cleanup + test updates with conventional message.
+      Example: refactor(bff/r7): drop AnalysisActionService refs to deleted Action fields (Wave 4 task 046, FR-03+FR-04)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (AnalysisActionService.cs + DTOs + tests)</tool>
+    <tool>Grep (dropped field names — pre + post)</tool>
+    <tool>Edit (cleanup of reads + cascade)</tool>
+    <tool>Bash (dotnet build, dotnet test, dotnet publish, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs</output>
+    <output type="possibly-modified-files">DTOs / mapping classes that bound dropped fields</output>
+    <output type="modified-tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisActionService* (fixture cleanup)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 047)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 046 ✅)</output>
+    <output type="commit">refactor(bff/r7): drop AnalysisActionService refs to deleted Action fields (Wave 4 task 046, FR-03+FR-04)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Grep `sprk_actiontypeid` returns zero hits in `src/server/` + `tests/`</criterion>
+    <criterion>Grep `sprk_executoractiontype` returns zero hits in `src/server/` + `tests/`</criterion>
+    <criterion>AnalysisActionService.cs simplified (Action read path no longer projects dropped fields)</criterion>
+    <criterion>DTOs / mapping cleaned up if they exposed dropped fields</criterion>
+    <criterion>Tests updated — fixture setups for dropped fields removed</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>dotnet test passes: all surviving tests green</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Publish size delta documented (expected: small NEGATIVE)</criterion>
+    <criterion>current-task.md advanced to task 047</criterion>
+  </acceptance-criteria>
+</task>

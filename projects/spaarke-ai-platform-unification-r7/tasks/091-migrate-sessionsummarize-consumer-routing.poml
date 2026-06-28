@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-091" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Migrate SessionSummarizeOrchestrator to IConsumerRoutingService + IInvokePlaybookAi (FR-17)</title>
+    <status>not-started</status>
+    <wave>9</wave>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-9</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>090</dependencies>
+    <fr-coverage>FR-17 (refactor portion)</fr-coverage>
+    <blocking>Wave 4 task 042 (cannot delete ExecuteAnalysisAsync until this completes)</blocking>
+  </metadata>
+
+  <prompt>
+    Refactor SessionSummarizeOrchestrator to use Path A.5 per task 090's design doc. Today the
+    orchestrator already consults IConsumerRoutingService.ResolveAsync but still dispatches via
+    IPlaybookExecutionEngine.ExecuteChatSummarizeAsync (a streaming-specific path). Target:
+    dispatch through the canonical IInvokePlaybookAi.InvokePlaybookAsync triangle per ADR-013 while
+    preserving streaming semantics (Structured Outputs + IncrementalJsonParser field-delta emission).
+    Add an integration test that confirms chat summarization works end-to-end through playbook
+    dispatch. THIS TASK IS BLOCKING FOR WAVE 4 TASK 042 (cannot delete ExecuteAnalysisAsync legacy
+    direct path until this completes).
+  </prompt>
+
+  <role>
+    Senior .NET backend developer. Apply the migration design from task 090 verbatim. Do not
+    re-design at code-write time. Preserve all FR-26 / FR-30 convergence invariants documented in
+    SessionSummarizeOrchestrator's existing XML comments.
+  </role>
+
+  <goal>
+    SessionSummarizeOrchestrator refactored to:
+    1. Inject IInvokePlaybookAi (the canonical triangle per ADR-013) in addition to existing deps.
+    2. Resolve the playbook ID via IConsumerRoutingService.ResolveAsync(ConsumerTypes.ChatSummarize)
+       with WorkspaceOptions.ChatSummarizePlaybookId graceful-degrade fallback (preserved from
+       chat-routing-redesign-r1 task 028d).
+    3. Dispatch through IInvokePlaybookAi.InvokePlaybookAsync(playbookId, payload) instead of
+       IPlaybookExecutionEngine.ExecuteChatSummarizeAsync.
+    4. Preserve streaming semantics: Structured Outputs streaming + IncrementalJsonParser
+       field-delta emission + byte-equivalent AnalysisChunk shape (FR-26 invariant).
+    5. Remove any remaining transitive call to AnalysisOrchestrationService.ExecuteAnalysisAsync
+       (if present in the dispatch graph).
+    6. Integration test added at tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestrator.PathA5.IntegrationTest.cs
+       confirming chat summarization works end-to-end through playbook dispatch.
+    7. dotnet build + dotnet test passes; ADR-013 + ADR-014 compliance verified at Step 9.5.
+  </goal>
+
+  <inputs>
+    <file purpose="migration-design">projects/spaarke-ai-platform-unification-r7/notes/spikes/chat-summarize-migration-design.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="refactor-target">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+    <file purpose="canonical-triangle">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs</file>
+    <file purpose="canonical-triangle-impl">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvokePlaybookAi.cs</file>
+    <file purpose="reference-impl">src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+    <file purpose="consumer-routing-doc">docs/architecture/ai-architecture-consumer-routing.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — re-inject IConsumerRoutingService + IInvokePlaybookAi (both already DI-registered). No new abstraction layers. No new interfaces beyond what already exists.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — IInvokePlaybookAi triangle is canonical. Dispatch MUST route through this surface, NOT through IPlaybookExecutionEngine.ExecuteChatSummarizeAsync. SessionSummarizeOrchestrator becomes a thin chat-session boundary that forwards to the canonical triangle.</constraint>
+    <constraint source="ADR-014">Caching — IConsumerRoutingService 5-min TTL is preserved verbatim. No new invalidation logic (NFR-04 explicitly out of R7 scope).</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — verify publish-size delta at end of task (expected: minimal change since IInvokePlaybookAi is already registered; net code change is small refactor).</constraint>
+    <constraint source="ADR-038">Testing Strategy — integration test mocks IConsumerRoutingService + IInvokePlaybookAi at the boundary. Do NOT use Mock&lt;HttpMessageHandler&gt; (banned). No DI-registration tests, no ctor null-check tests.</constraint>
+    <constraint source="spec FR-17">Acceptance: chat-summarize consumer row in sprk_playbookconsumer table (task 092); SessionSummarizeOrchestrator uses Path A.5; integration test confirms chat summarization works end-to-end through playbook dispatch.</constraint>
+    <constraint source="spec NFR-04">Cache invalidation hook NOT in R7 scope — do NOT add new invalidation logic.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — load .claude/constraints/bff-extensions.md before designing the addition. State placement decision: keep in BFF (chat orchestration is BFF-internal). Verify publish-size impact. Verify no new HIGH-severity CVE. Update corresponding tests (per Test update obligation §F).</constraint>
+    <constraint source="CLAUDE.md §11">Component justification triple:
+      1. Existing: SessionSummarizeOrchestrator + IConsumerRoutingService both exist; partial migration landed in chat-routing-redesign-r1 task 028d.
+      2. Extension: this task extends the existing orchestrator to complete the canonical-triangle migration. NO new component introduced.
+      3. Cost-of-doing-nothing: ExecuteAnalysisAsync legacy direct path cannot be deleted in Wave 4 task 042; ADR-013 canonical-triangle invariant remains violated; chat-summarize stays on a streaming-specific dispatch surface that is incompatible with the R7 "every consumer dispatches a real playbook" uniformity goal.
+    </constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist applies. Placement decision: KEEP IN BFF — SessionSummarizeOrchestrator is the chat-session boundary; this task only re-wires dispatch, does not move the orchestrator. No facade change. No public-contract change.</constraint>
+    <constraint source="bff-extensions.md §F">Test update obligation — PR modifying Services/Ai/Chat/ MUST add/update tests in tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/. Integration test added per goal item 6.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/consumer-routing</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-014-caching.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/ai-architecture-consumer-routing.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="DailyBriefingEndpoints /narrate" location="src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs:201-374">
+        Reference impl of "consumer code -> IConsumerRoutingService.ResolveAsync -> IInvokePlaybookAi.InvokePlaybookAsync" wiring.
+      </pattern>
+      <pattern name="IInvokePlaybookAi triangle" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs">
+        Canonical AI public contract per ADR-013.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 090 produced the migration design. This task makes it concrete. The refactor is small in
+      LOC (the orchestrator already takes IConsumerRoutingService; we add IInvokePlaybookAi and swap
+      the dispatch step) but high in architectural alignment value: it completes ADR-013's canonical
+      triangle invariant for the chat-summarize consumer.
+    </background>
+    <dependencies>
+      <dependency task="090" status="required">Migration-design doc at notes/spikes/chat-summarize-migration-design.md</dependency>
+      <dependency task="024" status="required">Wave 2 single-hop dispatch ready (so PlaybookOrchestrationService that IInvokePlaybookAi forwards to is on the new dispatch model).</dependency>
+    </dependencies>
+    <related-work>
+      <item>chat-routing-redesign-r1 task 028d — landed the partial IConsumerRoutingService consultation; this task completes the migration.</item>
+      <item>R7 task 092 (next in Wave 9) — adds the sprk_playbookconsumer row keyed on consumer code "chat-summarize".</item>
+      <item>**WAVE 4 TASK 042 DEPENDS ON THIS COMPLETING** — cannot delete AnalysisOrchestrationService.ExecuteAnalysisAsync until chat-summarize is fully off the legacy direct path.</item>
+      <item>R6 task 025 (D-A-17) moved the streaming pipeline into PlaybookExecutionEngine; this task re-routes the dispatch to flow through the canonical IInvokePlaybookAi triangle instead.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF (.cs file modification, tags bff-api + code-impl, ADR-010+013+014+029+038 applicable, BLOCKING for Wave 4 task 042) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md (FR-17 + NFR-04) + plan.md (Wave 9) + .claude/constraints/bff-extensions.md + task 090 migration-design doc.
+    </step>
+    <step order="2" name="Verify dependency">
+      Confirm notes/spikes/chat-summarize-migration-design.md exists. If not, STOP — task 090 must complete first.
+    </step>
+    <step order="3" name="Read SessionSummarizeOrchestrator current state">
+      Open the file. Identify: (a) the existing IConsumerRoutingService.ResolveAsync call site,
+      (b) the existing IPlaybookExecutionEngine.ExecuteChatSummarizeAsync dispatch site that needs to swap,
+      (c) the NullSessionSummarizeOrchestrator subclass (ADR-030 P3 kill-switch — must continue to compile).
+    </step>
+    <step order="4" name="Refactor — inject IInvokePlaybookAi">
+      Add IInvokePlaybookAi field + ctor parameter. Update the protected ctor used by
+      NullSessionSummarizeOrchestrator. Verify DI module already registers IInvokePlaybookAi
+      (it does — see Grep result on existing references).
+    </step>
+    <step order="5" name="Refactor — swap dispatch step">
+      Replace the IPlaybookExecutionEngine.ExecuteChatSummarizeAsync call with an
+      IInvokePlaybookAi.InvokePlaybookAsync(resolvedPlaybookId, payload) call. Map the existing
+      payload shape to the IInvokePlaybookAi input contract. Preserve FR-26 convergence invariant
+      (both slash /summarize + NL agent-tool dispatch end up here with the same resolved Guid).
+    </step>
+    <step order="6" name="Preserve streaming semantics">
+      Confirm Structured Outputs streaming + IncrementalJsonParser field-delta emission +
+      byte-equivalent AnalysisChunk shape continue to flow back to the caller. If IInvokePlaybookAi
+      surface does not natively support streaming, follow the migration-design doc's strategy
+      (likely: orchestrator continues to own streaming bridge; IInvokePlaybookAi handles dispatch).
+    </step>
+    <step order="7" name="Verify no remaining transitive call to ExecuteAnalysisAsync">
+      Grep SessionSummarizeOrchestrator + IInvokePlaybookAi + PlaybookOrchestrationService graph for
+      any remaining call to AnalysisOrchestrationService.ExecuteAnalysisAsync. Must return zero hits
+      from this orchestrator's path (Wave 4 task 042 will delete the method outright).
+    </step>
+    <step order="8" name="Update existing unit tests">
+      Update tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestrator* tests for
+      the new ctor signature + mocked IInvokePlaybookAi. Add NullInvokePlaybookAi (already exists)
+      for kill-switch scenarios. Do NOT add ctor null-check tests (banned per ADR-038).
+    </step>
+    <step order="9" name="Add integration test">
+      Create tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestrator.PathA5.IntegrationTest.cs
+      with at least one [Fact] that:
+      - mocks IConsumerRoutingService to return a playbook Guid for "chat-summarize"
+      - mocks IInvokePlaybookAi to return a known structured response
+      - drives SessionSummarizeOrchestrator.SummarizeSessionFilesAsync end-to-end
+      - asserts the response shape matches the documented AnalysisChunk contract
+      - asserts the dispatch went through IInvokePlaybookAi (verify Mock invocation count)
+      - asserts NO call to legacy AnalysisOrchestrationService.ExecuteAnalysisAsync
+    </step>
+    <step order="10" name="Build + test">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~SessionSummarizeOrchestrator"
+      Goal: 0 errors; new integration test passes; existing tests still pass.
+    </step>
+    <step order="11" name="Publish + size check (NFR-01)">
+      Run: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-task091/
+      Measure compressed size; compare against baseline. Document size + delta in task notes.
+      Expected: negligible change (small refactor; no new packages).
+    </step>
+    <step order="12" name="CVE scan (NFR-02)">
+      Run: dotnet list package --vulnerable --include-transitive
+      Goal: no NEW HIGH-severity CVE. Pre-existing Kiota 1.21.x CVEs carry forward unchanged.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on SessionSummarizeOrchestrator.cs + integration test.
+      Run `/adr-check` against ADR-010 + ADR-013 + ADR-014 + ADR-029 + ADR-038 + bff-extensions.md.
+      Fix any findings before commit. Cite ADR-013 + ADR-014 in PR description.
+    </step>
+    <step order="13" name="Update current-task.md + TASK-INDEX">
+      Mark task 091 status complete; advance current-task.md to task 092.
+    </step>
+    <step order="14" name="Commit">
+      Commit SessionSummarizeOrchestrator.cs + integration test + updated unit tests with conventional message.
+      Example: feat(bff/r7): migrate SessionSummarizeOrchestrator to IInvokePlaybookAi triangle (Wave 9 task 091, FR-17 — unblocks Wave 4 task 042)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (orchestrator + canonical triangle + reference impl)</tool>
+    <tool>Edit (SessionSummarizeOrchestrator.cs ctor + dispatch site)</tool>
+    <tool>Write (new integration test file)</tool>
+    <tool>Grep (verify no remaining ExecuteAnalysisAsync calls in dispatch graph)</tool>
+    <tool>Bash (dotnet build, dotnet test, dotnet publish, dotnet list package, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</output>
+    <output type="modified-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestrator*.cs (existing tests updated for new ctor)</output>
+    <output type="new-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestrator.PathA5.IntegrationTest.cs</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 092)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 091 ✅)</output>
+    <output type="unblocks">Wave 4 task 042 (depends on this completing — can now delete ExecuteAnalysisAsync legacy direct path)</output>
+    <output type="commit">feat(bff/r7): migrate SessionSummarizeOrchestrator to IInvokePlaybookAi triangle (Wave 9 task 091, FR-17 — unblocks Wave 4 task 042)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>SessionSummarizeOrchestrator injects IInvokePlaybookAi (canonical triangle per ADR-013)</criterion>
+    <criterion>Dispatch step calls IInvokePlaybookAi.InvokePlaybookAsync (NOT IPlaybookExecutionEngine.ExecuteChatSummarizeAsync as primary path)</criterion>
+    <criterion>IConsumerRoutingService.ResolveAsync(ConsumerTypes.ChatSummarize) preserved with WorkspaceOptions fallback (chat-routing-redesign-r1 task 028d behavior unchanged)</criterion>
+    <criterion>Streaming semantics preserved: Structured Outputs streaming + IncrementalJsonParser field-delta emission + byte-equivalent AnalysisChunk shape</criterion>
+    <criterion>NullSessionSummarizeOrchestrator kill-switch subclass continues to compile + behave per ADR-030 P3</criterion>
+    <criterion>Grep confirms zero remaining call to AnalysisOrchestrationService.ExecuteAnalysisAsync in SessionSummarizeOrchestrator dispatch graph</criterion>
+    <criterion>Integration test at SessionSummarizeOrchestrator.PathA5.IntegrationTest.cs passes — confirms chat summarization works end-to-end through playbook dispatch</criterion>
+    <criterion>Existing unit tests updated for new ctor signature + pass</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>dotnet test passes for SessionSummarizeOrchestrator filter</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor) citing ADR-013 + ADR-014 compliance</criterion>
+    <criterion>Publish size delta documented (expected: negligible)</criterion>
+    <criterion>No new HIGH-severity CVE</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>**WAVE 4 TASK 042 DEPENDS ON THIS COMPLETING** — outputs section flags this for downstream visibility</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-094" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Wire Library modal into spaarke-ai chat surface (FR-18)</title>
+    <status>not-started</status>
+    <wave>9</wave>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <tags>code-page, ui, wave-9</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>093</dependencies>
+    <fr-coverage>FR-18 (consumer surface 1 of 3)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wire the Playbook Library modal into the spaarke-ai chat surface (src/solutions/SpaarkeAi/).
+    Add a "Browse Playbooks" affordance at the mount point recommended by task 093's audit. When
+    clicked, the affordance opens the PlaybookLibraryShell modal. The modal lists every playbook
+    with its consumer mapping. Clicking a playbook invokes it through proper Path A.5 routing
+    (consumer code -> IConsumerRoutingService.ResolveAsync -> IInvokePlaybookAi.InvokePlaybookAsync).
+    Reuse the shared PlaybookLibraryShell component — do not duplicate its UI.
+  </prompt>
+
+  <role>
+    Senior React / Fluent UI v9 developer familiar with the spaarke-ai code page (Spaarke.UI.Components,
+    @spaarke/auth, Path A.5 dispatch). Reuse over invention.
+  </role>
+
+  <goal>
+    spaarke-ai chat surface now has a "Browse Playbooks" affordance such that:
+    1. Affordance mounted at the location task 093 audit recommended (e.g., ConversationPane toolbar,
+       CommandHelpPanel, or WelcomePanel — pick the recommended candidate).
+    2. Affordance triggers a modal Dialog wrapping PlaybookLibraryShell (the shared component from
+       Spaarke.UI.Components). Modal opens; modal closes on cancel/backdrop.
+    3. Modal lists every playbook with its consumer mapping (consumer code visible per row).
+    4. Clicking a playbook invokes it through Path A.5 routing — verified by inspecting BFF log
+       or behavioral check (the invocation must NOT bypass IConsumerRoutingService /
+       IInvokePlaybookAi).
+    5. Affordance follows ADR-021 (dark-mode-compliant semantic tokens; no hardcoded colors).
+    6. Component test added at src/solutions/SpaarkeAi/src/components/conversation/__tests__/PlaybookLibraryAffordance.test.tsx
+       (or equivalent — mirror existing __tests__ pattern in same dir) confirming affordance opens
+       modal + selection callback fires.
+    7. No new app-level state management library introduced (use existing pattern in the code page).
+  </goal>
+
+  <inputs>
+    <file purpose="audit-doc">projects/spaarke-ai-platform-unification-r7/notes/spikes/playbook-library-audit.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="shared-modal-component">src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/PlaybookLibraryShell.tsx</file>
+    <file purpose="spaarke-ai-app">src/solutions/SpaarkeAi/src/App.tsx</file>
+    <file purpose="spaarke-ai-conversation">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+    <file purpose="spaarke-ai-welcome">src/solutions/SpaarkeAi/src/components/conversation/CommandHelpPanel.tsx</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">BFF AI Architecture — playbook launch from modal MUST flow through IInvokePlaybookAi triangle (Path A.5). NO direct PlaybookOrchestrationService call, NO bypass.</constraint>
+    <constraint source="ADR-021 (referenced)">Dark mode compliance — affordance + modal use semantic Fluent UI tokens, no hardcoded colors.</constraint>
+    <constraint source="spec FR-18">Acceptance: "Browse Playbooks" affordance opens modal; modal lists every playbook + consumer mapping; clicking invokes through Path A.5 routing.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification triple:
+      1. Existing: PlaybookLibraryShell shared component already exists. Reuse without modification (or with minimal additive prop if affordance-host needs callback).
+      2. Extension: this task adds a thin affordance + Dialog wrapper in the spaarke-ai code page. NO new shared component.
+      3. Cost-of-doing-nothing: spaarke-ai users have no in-flow path to browse + invoke any playbook outside the current conversation context; FR-18 acceptance criterion (≥3 consumer surfaces wired) not met.
+    </constraint>
+    <constraint source="bff-extensions.md">N/A — this is a Code Page task, not a BFF task. No publish-size check needed for BFF. (Code-page deploy bundle size is monitored separately by code-page-deploy skill.)</constraint>
+    <constraint source="fluent-v9-component skill">Apply Fluent UI v9 patterns + Spaarke conventions (load skill before coding the affordance + Dialog wrapper).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-pages/spaarke-ai</topic>
+    <files>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="PlaybookLibraryShell shared component" location="src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/PlaybookLibraryShell.tsx">
+        Modal body — reuse with Dialog wrapper in the spaarke-ai code page.
+      </pattern>
+      <pattern name="Existing __tests__ pattern" location="src/solutions/SpaarkeAi/src/components/conversation/__tests__/">
+        Test scaffold mirror.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 093 produced the audit recommending mount point(s) for the spaarke-ai chat surface.
+      This task makes the wiring concrete. The Library modal already exists as a shared component;
+      task 094-096 reuse it from 3 consumer surfaces. spaarke-ai is consumer surface 1 of 3.
+    </background>
+    <dependencies>
+      <dependency task="093" status="required">Audit doc at notes/spikes/playbook-library-audit.md — recommends mount point.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 092 (Wave 9) — adds the chat-summarize row to sprk_playbookconsumer; the Library modal "consumer mapping" column reads this table.</item>
+      <item>Task 095 (next) — wires Library modal into Daily Briefing widget (consumer surface 2 of 3).</item>
+      <item>Task 096 — wires Library modal into ad-hoc launcher (consumer surface 3 of 3).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in Code Page (.tsx file modification, tags code-page + ui, ADR-013+021 applicable, FR-18 acceptance criterion) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md (FR-18) + plan.md (Wave 9) + task 093 audit doc.
+      Invoke the fluent-v9-component skill to load Fluent UI v9 patterns + Spaarke conventions.
+    </step>
+    <step order="2" name="Verify dependency">
+      Confirm notes/spikes/playbook-library-audit.md exists. If not, STOP — task 093 must complete first.
+      Confirm the audit's recommended mount point is unambiguous; if 2 candidates, pick the
+      "ConversationPane toolbar / CommandHelpPanel" candidate (whichever is more in-flow).
+    </step>
+    <step order="3" name="Read PlaybookLibraryShell contract">
+      Re-confirm the modal body's props + callbacks per task 093 audit. Specifically: how does
+      onPlaybookSelected fire? Does the Shell internally invoke through Path A.5, or does the host
+      provide an invocation callback?
+    </step>
+    <step order="4" name="Wire affordance at recommended mount point">
+      Add a "Browse Playbooks" Button (Fluent UI v9 Button component, semantic tokens) at the
+      recommended mount point. Wire onClick to open Dialog state. Use the existing app state
+      management pattern (likely useState in the host component — do NOT introduce new state lib).
+    </step>
+    <step order="5" name="Wrap PlaybookLibraryShell in Dialog">
+      Use Fluent UI v9 Dialog / DialogSurface / DialogBody / DialogContent / DialogActions per
+      Spaarke conventions. Mount PlaybookLibraryShell as the DialogContent body. Wire close
+      on cancel + backdrop click. Pass any required props from the host (auth token, BFF base URL,
+      etc. per the audit-confirmed contract).
+    </step>
+    <step order="6" name="Wire playbook-selected callback to Path A.5 invocation">
+      When the modal fires onPlaybookSelected (or equivalent), the host invokes the selected playbook.
+      Per task 093 audit:
+      - If PlaybookLibraryShell already routes through Path A.5 internally, the host just closes the modal.
+      - If the host owns invocation, call IInvokePlaybookAi via the spaarke-ai BFF surface (likely
+        via authenticatedFetch + /api/ai/playbook/invoke or equivalent). MUST go through Path A.5;
+        do NOT call AnalysisOrchestrationService directly.
+    </step>
+    <step order="7" name="ADR-021 dark mode compliance">
+      Verify affordance + Dialog use semantic tokens (tokens.colorNeutralBackground1, etc.).
+      No hardcoded hex colors. Run dark-mode toggle smoke test in dev.
+    </step>
+    <step order="8" name="Component test">
+      Create src/solutions/SpaarkeAi/src/components/conversation/__tests__/PlaybookLibraryAffordance.test.tsx
+      (or place adjacent to host component if more natural). Test:
+      - Affordance renders
+      - Click opens Dialog (test by querying for PlaybookLibraryShell mock)
+      - onPlaybookSelected callback fires with expected payload
+      - Dialog closes on cancel
+      Mock PlaybookLibraryShell as a thin stub (don't re-test its internals).
+    </step>
+    <step order="9" name="Build + test">
+      Run: npm run build:prod (the production build per CLAUDE.md §12) in src/solutions/SpaarkeAi/
+      Run: npm test for the new test file
+      Goal: 0 errors; new test passes.
+    </step>
+    <step order="10" name="Manual smoke">
+      Deploy the code page to spaarkedev1 dev via code-page-deploy skill (or document for owner to deploy).
+      Manual smoke: open spaarke-ai chat → click "Browse Playbooks" → modal opens → modal lists
+      playbooks WITH consumer mapping → click a playbook → invocation flows through Path A.5
+      (verify by checking BFF logs for IConsumerRoutingService.ResolveAsync invocation).
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the new affordance code + test.
+      Run `/adr-check` against ADR-013 + ADR-021 + spec FR-18.
+      Fix any findings before commit.
+    </step>
+    <step order="11" name="Update current-task.md + TASK-INDEX">
+      Mark task 094 status complete; advance current-task.md to task 095.
+    </step>
+    <step order="12" name="Commit">
+      Commit affordance + Dialog wrapper + test with conventional message.
+      Example: feat(spaarke-ai/r7): wire Playbook Library modal into chat surface (Wave 9 task 094, FR-18)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (audit doc, shared component, host code-page files)</tool>
+    <tool>Edit (add affordance + Dialog wrapper in host component)</tool>
+    <tool>Write (component test file)</tool>
+    <tool>Bash (npm run build:prod, npm test, git commit)</tool>
+    <tool>Skill (fluent-v9-component for patterns)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/solutions/SpaarkeAi/src/components/conversation/{host-component}.tsx (affordance + Dialog wrapper)</output>
+    <output type="new-file">src/solutions/SpaarkeAi/src/components/conversation/__tests__/PlaybookLibraryAffordance.test.tsx</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 095)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 094 ✅)</output>
+    <output type="commit">feat(spaarke-ai/r7): wire Playbook Library modal into chat surface (Wave 9 task 094, FR-18)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>"Browse Playbooks" affordance mounted at the audit-recommended location in spaarke-ai chat surface</criterion>
+    <criterion>Click opens a Dialog wrapping PlaybookLibraryShell (shared component reused without duplication)</criterion>
+    <criterion>Modal lists every playbook with its consumer mapping visible per row</criterion>
+    <criterion>Clicking a playbook invokes it through Path A.5 routing (verified via BFF log inspection during manual smoke)</criterion>
+    <criterion>NO direct call to AnalysisOrchestrationService.ExecuteAnalysisAsync from the launch path</criterion>
+    <criterion>ADR-021 dark mode compliance — semantic tokens only, no hardcoded colors</criterion>
+    <criterion>Component test passes — affordance renders + opens Dialog + callback fires</criterion>
+    <criterion>npm run build:prod passes</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Manual smoke in spaarkedev1 dev confirms end-to-end flow</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

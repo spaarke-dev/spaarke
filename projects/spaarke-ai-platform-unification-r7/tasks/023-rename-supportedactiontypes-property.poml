@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-023" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Rename INodeExecutor.SupportedActionTypes → SupportedExecutorTypes</title>
+    <status>not-started</status>
+    <wave>2</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-2</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>022</dependencies>
+    <fr-coverage>FR-10</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Companion rename to task 022. The `INodeExecutor.SupportedActionTypes` property name is the second misnamed
+    surface — it returns `ExecutorType[]` (post-022), so the property name should match. Rename across the interface
+    + all implementations + all call sites + tests. Mechanical change; build + tests stay green.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer. Mechanical rename — no behavior change.
+  </role>
+
+  <goal>
+    Property + override sites renamed:
+    - `INodeExecutor.SupportedActionTypes` → `INodeExecutor.SupportedExecutorTypes`
+    - Every implementation (~33 executors) renames the override
+    - Every call site (NodeExecutorRegistry, tests) updates the property reference
+    Build + tests green. No behavior change.
+  </goal>
+
+  <inputs>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="dispatch-registry">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeExecutorRegistry.cs</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — pure rename; no new abstractions.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — facade triangle unchanged.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — size neutral expected.</constraint>
+    <constraint source="ADR-038">Testing Strategy — existing tests must continue passing.</constraint>
+    <constraint source="spec FR-10">Rename in BFF only.</constraint>
+    <constraint source="CLAUDE.md §11">No new components — pure rename. Justification triple NOT required.</constraint>
+    <constraint source="bff-extensions.md">No new asymmetric registrations; no Null-Object pattern needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/interface-rename</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 022 renamed the enum. This task renames the interface property that returns instances of that enum.
+      Together they complete the type-level rename surface. Tasks 024-028 then update the dispatch logic itself.
+    </background>
+    <dependencies>
+      <dependency task="022" status="must-be-complete">Enum renamed; `ExecutorType` symbol exists in the codebase.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 027 updates NodeExecutorRegistry dispatch to use the renamed property.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF; modifies interface + ~33 implementations; ADR-010+038 applicable; quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read CLAUDE.md + spec FR-10 + plan.md Wave 2 + bff-extensions.md.
+    </step>
+    <step order="2" name="Pre-baseline build + test">
+      Run: `dotnet build src/server/api/Sprk.Bff.Api/` and `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Confirm green.
+    </step>
+    <step order="3" name="Rename interface property">
+      Open `INodeExecutor.cs`. Rename `SupportedActionTypes` → `SupportedExecutorTypes`. Use Roslyn refactor so overrides update.
+    </step>
+    <step order="4" name="Verify all implementations updated">
+      Grep `SupportedActionTypes` — should be zero hits. Grep `SupportedExecutorTypes` — should equal previous count plus interface definition.
+    </step>
+    <step order="5" name="Update call sites">
+      Sweep `NodeExecutorRegistry.cs` + any test code reading the property. Roslyn rename usually handles this; verify manually.
+    </step>
+    <step order="6" name="Post-rename build + test">
+      Run: `dotnet build` + `dotnet test`. Must be green.
+    </step>
+    <step order="7" name="Verify grep zero hits">
+      Grep `SupportedActionTypes` across `src/` + `tests/`. Expected: zero.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the diff. Run `/adr-check` against ADR-010 + ADR-038 + bff-extensions.md. Fix any findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 023 complete; advance current-task.md.
+    </step>
+    <step order="11" name="Commit">
+      Conventional commit: `refactor(bff/r7): rename SupportedActionTypes → SupportedExecutorTypes (Wave 2 task 023, FR-10)`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (interface, registry)</tool>
+    <tool>Edit (property rename + call site updates)</tool>
+    <tool>Grep (verify zero hits)</tool>
+    <tool>Bash (dotnet build, dotnet test, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</output>
+    <output type="modified-files">~33 executor implementations + NodeExecutorRegistry + tests</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 023 ✅)</output>
+    <output type="commit">refactor(bff/r7): rename SupportedActionTypes → SupportedExecutorTypes (Wave 2 task 023, FR-10)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Interface property renamed from `SupportedActionTypes` to `SupportedExecutorTypes`</criterion>
+    <criterion>All ~33 executor implementations updated</criterion>
+    <criterion>NodeExecutorRegistry + tests updated</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>dotnet test passes: full suite green</criterion>
+    <criterion>Grep for `SupportedActionTypes` returns zero hits in BFF source + tests</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>Commit pushed</criterion>
+  </acceptance-criteria>
+</task>

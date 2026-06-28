@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-026" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Delete "Action ActionType is canonical regardless of NodeType" override branch (lines 1241-1278, FR-09)</title>
+    <status>not-started</status>
+    <wave>2</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>bff-api, code-impl, deletion, wave-2</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+    <fr-coverage>FR-09</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Pure deletion. Targets the override branch added in the Insights Engine r2 Wave B project — the code block at
+    `PlaybookOrchestrationService.cs` lines 1241-1278 that overrides node-based dispatch with Action.ActionType.
+    Post-task 024, this branch is unreachable. Per FR-09 + spec Q6: DELETE, not deprecate. Integration tests for
+    Insights pipeline must continue to pass on the new single-hop dispatch path.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer executing a targeted deletion. Discipline: delete only the override branch + any
+    helpers it exclusively owned. Do NOT touch unrelated dispatch code.
+  </role>
+
+  <goal>
+    Lines 1241-1278 (Insights Engine r2 Wave B override) of `PlaybookOrchestrationService.cs` deleted.
+    Integration tests for Insights pipeline (universal-ingest, matter-health-*) pass on single-hop dispatch.
+    Publish-size shrinks measurably.
+  </goal>
+
+  <inputs>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — deletion only; no new abstractions.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — facade unchanged; orchestrator simplification.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — expected SHRINK (~1-3 KB compressed for ~40 LOC removed).</constraint>
+    <constraint source="ADR-038">Testing Strategy — integration tests for Insights pipeline are KEEP (real behavior assertion). Tests asserting the override-branch precedence are SCAFFOLDING (no behavior remains to assert) — DELETE.</constraint>
+    <constraint source="spec FR-09">REMOVE the override branch. Hard delete.</constraint>
+    <constraint source="spec Q6 RESOLVED">No backward compatibility.</constraint>
+    <constraint source="CLAUDE.md §11">Deletion of existing surface — justification triple NOT required.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist applies; test obligation per §F.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/playbook-runtime</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Insights Engine r2 Wave B (2026-04 era) added a branch that said "if Action.ActionType is set, it wins regardless
+      of node-level dispatch." That was a workaround for the Insights pipeline's ActionType=0 dispatch by Tool/Handler
+      semantics. R7 makes node dispatch authoritative. The Insights pipeline's actual dispatch needs are met by the
+      single-hop path (each Insights node will declare `sprk_executortype` after Wave 5 backfill).
+    </background>
+    <dependencies>
+      <dependency task="024" status="must-be-complete">Single-hop dispatch is primary path; override branch is unreachable code.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 025 deletes the structural fallback ladder (parallel cleanup).</item>
+      <item>Wave 5 backfill ensures every Insights node has explicit `sprk_executortype`.</item>
+      <item>Q-unresolved (spec.md): "Insights pipeline ActionType migration" — confirm semantics unchanged during Wave 5.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF; deletion tag; modifies orchestrator hot path + tests; ADR-038 TEST-MODIFYING override applies (FULL rigor unconditional); quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read CLAUDE.md + spec FR-09 + plan.md Wave 2 + bff-extensions.md.
+    </step>
+    <step order="2" name="Pre-baseline build + test">
+      `dotnet build` + `dotnet test`. Confirm green.
+    </step>
+    <step order="3" name="Locate lines 1241-1278">
+      Open `PlaybookOrchestrationService.cs`. Locate the override branch. Read 20 lines above + 20 lines below for context. Confirm intent matches FR-09 description.
+    </step>
+    <step order="4" name="Delete the override branch">
+      Remove the if-block (or switch-case) that implements "Action ActionType is canonical regardless of NodeType". If the branch had supporting helpers used only here, delete those too.
+    </step>
+    <step order="5" name="Sweep adjacent dead code">
+      Conservative — only delete code if grep confirms zero references. Note: any `NodeType` reads that were only used by this branch can be deleted; otherwise leave them (NodeType is internal graph-traversal hint per spec FR-02 acceptance).
+    </step>
+    <step order="6" name="Update tests">
+      Find tests in `tests/unit/Sprk.Bff.Api.Tests/` asserting the override precedence. Per ADR-038 build-vs-maintain: these are SCAFFOLDING — DELETE. Integration tests for Insights pipeline are KEEP — confirm they still pass.
+    </step>
+    <step order="7" name="Build + test">
+      `dotnet build` + `dotnet test`. Green. Insights pipeline integration tests still pass.
+    </step>
+    <step order="8" name="Verify deletion">
+      Grep for distinctive text from the override branch (e.g., "canonical regardless"). Expected: zero hits.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the diff. Run `/adr-check` against ADR-029 + ADR-038 + bff-extensions.md. Fix any findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 026 complete; advance current-task.md.
+    </step>
+    <step order="11" name="Commit">
+      `refactor(bff/r7): delete Action ActionType override branch (Wave 2 task 026, FR-09)`.
+      Body: cite FR-09; note Insights Engine r2 Wave B legacy code; confirm Insights pipeline tests still pass.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (orchestrator, tests)</tool>
+    <tool>Edit (PlaybookOrchestrationService.cs — delete override branch)</tool>
+    <tool>Grep (locate distinctive text + verify deletion)</tool>
+    <tool>Bash (dotnet build, dotnet test, git commit, git rm)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (~40 LOC removed)</output>
+    <output type="deleted-files">Tests asserting override-branch precedence (per ADR-038 scaffolding classification)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 026 ✅)</output>
+    <output type="commit">refactor(bff/r7): delete Action ActionType override branch (Wave 2 task 026, FR-09)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Lines 1241-1278 (Action ActionType override branch) DELETED</criterion>
+    <criterion>Grep for distinctive override-branch text returns zero hits</criterion>
+    <criterion>Scaffolding tests asserting override precedence deleted per ADR-038</criterion>
+    <criterion>Insights pipeline integration tests still pass on single-hop dispatch</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>dotnet test passes: full suite green</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>Commit pushed</criterion>
+  </acceptance-criteria>
+</task>

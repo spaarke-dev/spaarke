@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-090-wrapup" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Wrap-up — README → Complete, lessons-learned.md, archive project</title>
+    <status>not-started</status>
+    <wave>10</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>wrapup, wave-10</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>101 (R4 graduation UAT signed off PASS)</dependencies>
+    <fr-coverage>Project close + test-diet gate (BINDING per CLAUDE.md §7) + portfolio/sibling-worktree sync</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Project close. Invoke /test-diet BINDING gate first (reconciles tests added during R7 against ADR-038
+    build-vs-maintain criteria), then flip project state to Complete across README + CLAUDE + current-task,
+    write lessons-learned.md, update portfolio INDEX, close GitHub Issue #501, and document sibling-worktree
+    unblocks. Optional final step: invoke /repo-cleanup for hygiene audit. NO commit yet — main session commits
+    the wrap-up bundle.
+
+    The 090-project-wrap-up filename is reserved (not 102) per CLAUDE.md §7 + task-create convention; the
+    "090" prefix triggers test-diet binding per task-execute Step 11.
+  </prompt>
+
+  <role>
+    Project-close steward. Mechanical sequence — test-diet, README flip, lessons capture, portfolio update,
+    sibling unblock. The judgment work is the lessons-learned: be honest about what hurt, what spec missed,
+    what would change next time. R7 is the dispatch-reform project that closes R4 and unblocks Action Engine R1;
+    the lessons here inform the next 2-3 projects.
+  </role>
+
+  <goal>
+    R7 project closed:
+    1. /test-diet invoked; report at `notes/test-diet-report.md`; reviewer applied DELETE/KEEP/MOVE commands
+    2. README.md Status flipped from "In Progress" to "Complete"; Last Updated bumped to project-close date
+    3. CLAUDE.md Phase: Complete; Current Task: none; Next Action: archived
+    4. current-task.md: Status: none; Next action: /repo-cleanup
+    5. notes/handoffs/lessons-learned.md exists — what went well, what hurt, what would change, anything spec missed
+    6. projects/INDEX.md updated — R7 row marked Archived (or removed per Maintenance Contract)
+    7. GitHub Issue #501 Status: Completed; Closed Date: today (via gh GraphQL)
+    8. Sibling worktrees unblocked: R4 (`spaarke-daily-update-service-r4`) cleared to archive; Action Engine R1 (`ai-spaarke-action-engine-r1`) cleared to resume past Phase 0
+    9. Optional: /repo-cleanup hygiene audit invoked
+    10. Wrap-up PR description cites notes/test-diet-report.md per CLAUDE.md §7 (or documents skip rationale)
+  </goal>
+
+  <inputs>
+    <file purpose="readme">projects/spaarke-ai-platform-unification-r7/README.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="current-task">projects/spaarke-ai-platform-unification-r7/current-task.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</file>
+    <file purpose="graduation-report">projects/spaarke-ai-platform-unification-r7/notes/handoffs/graduation-verification.md</file>
+    <file purpose="uat-handoff">projects/spaarke-ai-platform-unification-r7/notes/handoffs/r4-graduation-uat.md</file>
+    <file purpose="portfolio-index">projects/INDEX.md</file>
+    <file purpose="root-claude-§7">CLAUDE.md (§7 Task Completion + test-diet gate BINDING)</file>
+    <file purpose="test-diet-skill">.claude/skills/test-diet/SKILL.md</file>
+    <file purpose="repo-cleanup-skill">.claude/skills/repo-cleanup/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §7 (BINDING)">090-wrapup-* tasks MUST invoke /test-diet before marking project complete. /test-diet reconciles tests added/modified during R7 against ADR-038 17-ban classifier. Output: projects/spaarke-ai-platform-unification-r7/notes/test-diet-report.md. Skipping is a HARD WARNING — wrap-up PR description MUST cite the report or document skip rationale. Binding ≥6 months from 2026-06-26.</constraint>
+    <constraint source="CLAUDE.md §7">Task Completion — reset current-task.md for next task; update TASK-INDEX 🔲 → ✅; project close means current-task.md status = "none" + next action = /repo-cleanup.</constraint>
+    <constraint source="ADR-038">Testing Strategy — /test-diet enforces ADR-038 §7 build-vs-maintain criteria. MAINTAIN-class tests stay at KEEP path; SCAFFOLDING-class deleted; AMBIGUOUS require reviewer judgment.</constraint>
+    <constraint source="task-create skill convention">Filename is `090-project-wrap-up.poml` (not 102); "090" prefix is the skill's reserved id for project-close. Task ID is `R7-090-wrapup` (distinguishable from any other 090-prefixed task).</constraint>
+    <constraint source="projects/INDEX.md Maintenance Contract">R7 row marked Archived (or removed per the contract's archived-project convention).</constraint>
+    <constraint source="bff-extensions.md">Wrap-up task does NOT modify BFF; no publish-size check needed.</constraint>
+    <constraint source="DO NOT commit">Main session commits the full wrap-up bundle at end; do not commit individual files in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-close</topic>
+    <files>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>CLAUDE.md (§7 Task Completion + test-diet BINDING)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md (17-ban classifier)</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/design.md</file>
+      <file>projects/INDEX.md (Maintenance Contract)</file>
+    </files>
+    <patterns>
+      <pattern name="Project-close test-diet gate" location=".claude/skills/test-diet/SKILL.md">
+        Reconcile tests touched during project against ADR-038 17-ban classifier. Emit git rm / git mv commands; do NOT auto-execute.
+      </pattern>
+      <pattern name="Lessons-learned doc" location="notes/handoffs/lessons-learned.md">
+        Honest retrospective: what went well, what hurt, what would change, spec gaps/errors. Reference R4 graduation closure + Action Engine R1 unblock.
+      </pattern>
+      <pattern name="Sibling worktree sync" location="notes/handoffs/r4-graduation-uat.md">
+        On R7 close, R4 archive + Action Engine R1 resume past Phase 0 spike.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R7 ran from 2026-06-28 to project-close. Key deliverables:
+      - Dispatch reform: 3-layer → single-hop sprk_executortype Choice column
+      - AiCompletionNodeExecutor built; closed R4 /narrate gap
+      - Typed config schemas + PlaybookBuilder UI updates
+      - 94 existing playbook nodes backfilled via owner manual review
+      - Documentation cleanup (DELETE outdated, UPDATE current)
+      - jps-* skill rewrites
+      - chat-summarize migration to consumer-routing Path A.5
+      - Playbook Library wired into 3 consumer surfaces
+
+      Sibling unblocks at R7 close:
+      - R4 (`spaarke-daily-update-service-r4`) archives (held since 2026-06-28 for /narrate)
+      - Action Engine R1 (`ai-spaarke-action-engine-r1`) resumes past Phase 0 spike (held since Q14 2026-06-28)
+    </background>
+    <dependencies>
+      <dependency task="101" status="not-started-but-required">R4 graduation UAT signed off PASS — gate to project close.</dependency>
+    </dependencies>
+    <related-work>
+      <item>GitHub Issue #501 (portfolio Project Issue) — close on R7 wrap-up.</item>
+      <item>Parent Epic #421 SPAARKE AI — remains open; R7 contributes to epic but does not close it.</item>
+      <item>chat-routing-redesign-r1 follow-on owns docs/data-model/sprk_playbookconsumer.md + ai-architecture-consumer-routing.md updates (not R7).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: wrap-up task (tag wrapup, doc + state updates only, no code change, no BFF modification) — Step 9.5 quality gates skipped per STANDARD rigor; HOWEVER /test-diet invocation at Step 2 is BINDING per CLAUDE.md §7 · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read CLAUDE.md §7 (test-diet BINDING + Task Completion), spec.md, design.md, graduation-verification.md, r4-graduation-uat.md (confirm PASS sign-off present), test-diet SKILL.md, repo-cleanup SKILL.md.
+    </step>
+    <step order="2" name="Invoke /test-diet (BINDING per CLAUDE.md §7)">
+      Invoke Skill tool with skill="test-diet" args="projects/spaarke-ai-platform-unification-r7".
+      The skill:
+      - Enumerates test files touched during R7 (git log start-commit..HEAD)
+      - Classifies each test method as MAINTAIN / SCAFFOLDING / AMBIGUOUS per ADR-038 17 bans
+      - Emits git rm / git mv commands (does NOT auto-execute)
+      - Writes report at projects/spaarke-ai-platform-unification-r7/notes/test-diet-report.md
+      If skipping: document reason in lessons-learned (HARD WARNING per CLAUDE.md §7).
+    </step>
+    <step order="3" name="Apply test-diet recommendations">
+      Review test-diet report. Apply DELETE/KEEP/MOVE per recommendations (reviewer judgment on AMBIGUOUS).
+      Confirm tests still pass: dotnet test src/server/api/Sprk.Bff.Api/ (or full suite if scope warrants).
+    </step>
+    <step order="4" name="Update README.md — flip Status to Complete">
+      Edit projects/spaarke-ai-platform-unification-r7/README.md:
+      - Status: In Progress → Complete
+      - Last Updated: bump to today's date
+      - Changelog: add entry "R7 project closed. R4 graduation gate closed via FR-15. Action Engine R1 unblocked."
+    </step>
+    <step order="5" name="Update CLAUDE.md — Phase: Complete">
+      Edit projects/spaarke-ai-platform-unification-r7/CLAUDE.md:
+      - Phase: Complete
+      - Current Task: none
+      - Next Action: archived
+      - Last Updated: today
+    </step>
+    <step order="6" name="Update current-task.md — Status: none">
+      Edit projects/spaarke-ai-platform-unification-r7/current-task.md:
+      - Status: none
+      - Next action: /repo-cleanup
+      - Active steps: cleared
+      - Files in flight: cleared
+    </step>
+    <step order="7" name="Write lessons-learned.md">
+      Create projects/spaarke-ai-platform-unification-r7/notes/handoffs/lessons-learned.md with sections:
+      - **What went well**: e.g., spec rigor + 33 FRs, sibling worktree coordination, manual per-node review at FR-19
+      - **What hurt**: e.g., C# enum rename diff size, owner-checkpoint timing, Wave 4-9 ordering subtlety
+      - **What would change next time**: e.g., earlier Wave 9 (chat-summarize) start, automated sync mechanism choice in Wave 1
+      - **What spec missed or got wrong**: e.g., assumptions section items that hit reality differently
+      - **R4 graduation closure**: reference notes/handoffs/r4-graduation-uat.md sign-off
+      - **Action Engine R1 unblock**: reference Q14 hold release
+      - **Test-diet outcome**: reference notes/test-diet-report.md (counts: N MAINTAIN, M SCAFFOLDING deleted, K AMBIGUOUS)
+    </step>
+    <step order="8" name="Update projects/INDEX.md">
+      Edit projects/INDEX.md:
+      - Mark R7 row as Archived (per Maintenance Contract)
+      - Or remove the row if the contract specifies removal for archived projects
+      - Update 17-active-project counts and BFF/SpaarkeAi touch counts if affected
+    </step>
+    <step order="9" name="Close GitHub Issue #501 + sibling-worktree sync">
+      Run gh GraphQL/CLI to:
+      - Set Issue #501 Status: Completed
+      - Set Issue #501 Closed Date: today
+      - Add closing comment citing notes/handoffs/lessons-learned.md + notes/handoffs/graduation-verification.md
+
+      Sibling worktree sync (informational only — do NOT execute the sibling archives from here):
+      - Document R4 cleared to archive (next action: `/devops-project-archive` on R4 worktree)
+      - Document Action Engine R1 cleared to resume (next action: resume Phase 1 design)
+    </step>
+    <step order="10" name="Optional — invoke /repo-cleanup">
+      If owner approves, invoke Skill tool with skill="repo-cleanup" args="projects/spaarke-ai-platform-unification-r7". The skill validates structure compliance + removes ephemeral notes/* files per spec. If declined, mark as deferred to next maintenance cycle.
+    </step>
+    <step order="11" name="Verify acceptance">
+      Re-read all 10 goal bullets. Confirm each satisfied:
+      - test-diet invoked + report exists
+      - README + CLAUDE + current-task flipped to Complete
+      - lessons-learned.md written
+      - INDEX.md updated
+      - Issue #501 closed
+      - Sibling unblocks documented
+      - /repo-cleanup decision recorded
+    </step>
+    <step order="12" name="DO NOT commit — main session commits">
+      Per task brief: do NOT commit. Main session commits the full wrap-up bundle at end with a single conventional message.
+      Mark task 090-project-wrap-up status complete in TASK-INDEX (last row 🔲 → ✅).
+      Project state: COMPLETE.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (CLAUDE.md §7, spec, design, graduation-verification.md, r4-graduation-uat.md, test-diet + repo-cleanup SKILL files)</tool>
+    <tool>Edit (README.md, CLAUDE.md, current-task.md, projects/INDEX.md)</tool>
+    <tool>Write (notes/handoffs/lessons-learned.md)</tool>
+    <tool>Skill (test-diet — BINDING per CLAUDE.md §7)</tool>
+    <tool>Skill (repo-cleanup — optional)</tool>
+    <tool>Bash (gh GraphQL/CLI for Issue #501 close, dotnet test post-diet to verify suite still green)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">projects/spaarke-ai-platform-unification-r7/notes/test-diet-report.md (via /test-diet skill)</output>
+    <output type="new-file">projects/spaarke-ai-platform-unification-r7/notes/handoffs/lessons-learned.md</output>
+    <output type="modified-file">projects/spaarke-ai-platform-unification-r7/README.md (Status → Complete)</output>
+    <output type="modified-file">projects/spaarke-ai-platform-unification-r7/CLAUDE.md (Phase → Complete)</output>
+    <output type="modified-file">projects/spaarke-ai-platform-unification-r7/current-task.md (Status → none)</output>
+    <output type="modified-file">projects/INDEX.md (R7 row Archived)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 090-project-wrap-up ✅; Wave 10 🟢 COMPLETE; project COMPLETE)</output>
+    <output type="github">Issue #501 Status: Completed; Closed Date: today; closing comment cites lessons-learned</output>
+    <output type="DO-NOT-commit">Main session commits the wrap-up bundle at end.</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>/test-diet skill invoked; report exists at projects/spaarke-ai-platform-unification-r7/notes/test-diet-report.md (BINDING per CLAUDE.md §7)</criterion>
+    <criterion>Test-diet recommendations applied (MAINTAIN-class kept at KEEP path; SCAFFOLDING-class deleted; AMBIGUOUS resolved by reviewer)</criterion>
+    <criterion>Test suite still green post-diet (dotnet test passes)</criterion>
+    <criterion>README.md Status flipped from "In Progress" to "Complete"; Last Updated bumped</criterion>
+    <criterion>CLAUDE.md Phase: Complete; Current Task: none; Next Action: archived</criterion>
+    <criterion>current-task.md Status: none; Next action: /repo-cleanup</criterion>
+    <criterion>notes/handoffs/lessons-learned.md exists with what-went-well + what-hurt + what-would-change + spec-gaps sections, plus R4 graduation closure reference + Action Engine R1 unblock reference + test-diet outcome reference</criterion>
+    <criterion>projects/INDEX.md updated — R7 row marked Archived per Maintenance Contract</criterion>
+    <criterion>GitHub Issue #501 Status: Completed; Closed Date: today; closing comment cites lessons-learned</criterion>
+    <criterion>Sibling worktree unblocks documented (R4 clear to archive; Action Engine R1 clear to resume past Phase 0)</criterion>
+    <criterion>/repo-cleanup invocation decision recorded (invoked OR deferred with reason)</criterion>
+    <criterion>TASK-INDEX.md shows 090-project-wrap-up ✅; Wave 10 row → 🟢 COMPLETE; project COMPLETE</criterion>
+    <criterion>NO commit from this task — main session commits the wrap-up bundle</criterion>
+  </acceptance-criteria>
+</task>

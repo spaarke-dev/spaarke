@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-042" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>DELETE AnalysisOrchestrationService.ExecuteAnalysisAsync + cascading dead code (FR-11)</title>
+    <status>not-started</status>
+    <wave>4</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>bff-api, code-impl, deletion, wave-4</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>041</dependencies>
+    <fr-coverage>FR-11 (deletion portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    All callers of `AnalysisOrchestrationService.ExecuteAnalysisAsync` have been migrated (Wave 9 task 091
+    handled chat-summarize, Wave 4 task 041 handled the rest). This task DELETES the method itself plus
+    every helper/branch/private method that becomes unreachable as a result. Per spec Q6 (RESOLVED) and
+    FR-11, there is NO backward-compatibility shim. Big-bang delete. This is a pure-deletion task — no
+    replacement code. The whole point of Wave 4 is to remove this dead path.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer performing a precise deletion + cascading-dead-code cleanup. Goal:
+    every line associated with the legacy direct-invocation path is gone. Use Roslyn / IDE "find usages"
+    + grep to identify cascade. Verify build + tests after each deletion sweep.
+  </role>
+
+  <goal>
+    After this task:
+    1. `ExecuteAnalysisAsync` method DELETED from `AnalysisOrchestrationService.cs`
+    2. Any private helper methods used ONLY by `ExecuteAnalysisAsync` DELETED (cascade cleanup)
+    3. Any DTOs / response types used ONLY by `ExecuteAnalysisAsync` DELETED (if their only consumer was this method)
+    4. Test fixtures referencing `ExecuteAnalysisAsync` DELETED (per task 040 audit list)
+    5. DI registration for `IAnalysisOrchestrationService` re-evaluated: if the interface still has OTHER methods serving live consumers, keep it; if `ExecuteAnalysisAsync` was its only public method, DELETE the interface too
+    6. `dotnet build` passes; `dotnet test` passes
+    7. Post-task grep for `ExecuteAnalysisAsync` returns zero hits across `src/` + `tests/`
+    8. Publish-size SHRINK documented (this is dead-code removal)
+  </goal>
+
+  <inputs>
+    <file purpose="caller-audit">projects/spaarke-ai-platform-unification-r7/notes/spikes/executeanalysisasync-caller-audit.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="deletion-target">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    <file purpose="di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-11">DELETE `AnalysisOrchestrationService.ExecuteAnalysisAsync` + cascading dead code. Grep for the method returns zero hits post-deletion.</constraint>
+    <constraint source="spec Q6 RESOLVED">No backward compatibility. No transition shim. Pure deletion.</constraint>
+    <constraint source="spec NFR-06">Backward compatibility NOT a concern. Old paths fully removed.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — Invariant 1: Playbook is the only AI invocation model. Legacy direct path violates this; deletion enforces it.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — verify publish-size delta at end of task (expected: NEGATIVE — dead code removal).</constraint>
+    <constraint source="ADR-038">Testing Strategy — test fixtures referencing deleted method DELETED here (per task 040 audit). No "preserving the old fixture as a smoke test" — full removal per discipline.</constraint>
+    <constraint source="CLAUDE.md §11">No new components — pure deletion. Justification rule does not apply.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — placement decision recorded (deletion only, no new placement). Publish-size verification per NFR-01 (expect shrink, not grow).</constraint>
+    <constraint source="bff-extensions.md §F.6 test-update obligation">Tests for deleted code MUST be deleted in same PR. Not deferred to follow-on.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/bff-architecture</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Cascading dead-code removal" location="repo-wide">
+        Pattern: delete the public method first; build; find newly-unused helpers (compiler warnings + IDE "find usages"); delete; repeat until build is clean AND no orphan code remains.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 041 (and Wave 9 task 091 before it) migrated every caller. This task does the deletion that
+      makes the migration meaningful: the legacy method goes away, plus any helper/branch/DTO it owned
+      exclusively. This is the FR-11 acceptance gate: grep for `ExecuteAnalysisAsync` returns zero hits.
+      Subsequent Wave 4 tasks 043-044 then drop the schema fields that were inputs to this method (Action lookup
+      + executor INT) — those schema fields no longer have any runtime reader after this task.
+    </background>
+    <dependencies>
+      <dependency task="041" status="must-complete-first">Non-chat callers migrated (or documented as zero callers).</dependency>
+      <dependency task="091" status="must-complete-first">Wave 9 chat-summarize migrated SessionSummarizeOrchestrator.</dependency>
+      <dependency task="040" status="must-complete-first">Caller audit drives cascade scope (test fixtures, etc.).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 4 task 043 drops `sprk_analysisaction.sprk_actiontypeid` after this — that field's runtime reader was in `ExecuteAnalysisAsync`'s call chain.</item>
+      <item>Wave 4 task 044 drops `sprk_analysisaction.sprk_executoractiontype` similarly.</item>
+      <item>Wave 4 task 046 cleans `AnalysisActionService` references to dropped fields.</item>
+      <item>Wave 4 task 047 verifies cumulative SHRINK in publish size — this task contributes the largest deletion.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF (.cs deletion, tag bff-api+code-impl+deletion, ADR-013+029+038 applicable) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-11 + plan.md Wave 4 + .claude/constraints/bff-extensions.md + task 040 audit doc.
+    </step>
+    <step order="2" name="Verify prerequisites">
+      Confirm task 041 marked ✅ AND task 091 marked ✅ in TASK-INDEX.
+      Run Grep pattern="ExecuteAnalysisAsync" glob="**/*.cs" output_mode="content" -n true. Expected: ONLY the method declaration + any test fixtures from audit. If a production caller remains, STOP and report — go back to task 041.
+    </step>
+    <step order="3" name="Read AnalysisOrchestrationService.cs in full">
+      Open the file. Identify: `ExecuteAnalysisAsync` method body, every private helper it calls (record their names), every DTO it constructs/returns (record their names).
+    </step>
+    <step order="4" name="Delete ExecuteAnalysisAsync">
+      Remove the method body, signature, and XML doc comment. Save.
+    </step>
+    <step order="5" name="Build — surface cascade">
+      Run: `dotnet build src/server/api/Sprk.Bff.Api/`
+      Capture compiler warnings about unused private members. This is the cascade list.
+    </step>
+    <step order="6" name="Delete cascade — first sweep">
+      For each warning-flagged private member (helper method, field, constant): verify it has no other consumer; if confirmed unused, DELETE. Save.
+    </step>
+    <step order="7" name="Build — second sweep">
+      Repeat build → identify next round of newly-unused members. Delete. Continue until build is clean and no orphan-private-member warnings.
+    </step>
+    <step order="8" name="Re-evaluate IAnalysisOrchestrationService interface">
+      Inspect the interface. If `ExecuteAnalysisAsync` was its only method, DELETE the interface, the implementation class boilerplate, and the DI registration. If other live methods remain, leave interface in place but remove the deleted method's signature.
+    </step>
+    <step order="9" name="Delete test fixtures">
+      For each test reference identified in task 040 audit, DELETE the test method (or entire test class if all its methods reference the deleted method). Per ADR-038: do NOT keep "smoke tests" of removed functionality.
+    </step>
+    <step order="10" name="Build + run tests">
+      Run: `dotnet build src/server/api/Sprk.Bff.Api/`
+      Run: `dotnet test tests/unit/Sprk.Bff.Api.Tests/`
+      Goal: 0 errors, 0 NEW warnings, all surviving tests pass.
+    </step>
+    <step order="11" name="Verify grep state — FR-11 acceptance gate">
+      Run: Grep pattern="ExecuteAnalysisAsync" glob="**/*.cs" output_mode="files_with_matches"
+      Required: ZERO hits across `src/` and `tests/`. If non-zero, find + delete remaining references before proceeding.
+    </step>
+    <step order="11.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the modified file(s). Run `/adr-check` against ADR-013 + ADR-029 + ADR-038 + bff-extensions.md.
+      Fix any findings before commit.
+    </step>
+    <step order="12" name="Publish + size check (NFR-01 partial — running tally toward task 047 wave check)">
+      Run: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-task042/
+      Measure compressed size; document delta vs prior baseline. Expected: NEGATIVE shrink (this is the largest single deletion in Wave 4).
+    </step>
+    <step order="13" name="Update current-task.md + TASK-INDEX">
+      Mark task 042 status complete; advance current-task.md to task 043.
+    </step>
+    <step order="14" name="Commit">
+      Commit deletion with conventional message.
+      Example: refactor(bff/r7)!: DELETE AnalysisOrchestrationService.ExecuteAnalysisAsync + cascade (Wave 4 task 042, FR-11)
+      Use `!` to flag breaking-change in commit per conventional-commits convention (legacy direct path removed per Q6 RESOLVED — no compatibility shim).
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (AnalysisOrchestrationService.cs + audit doc + interface + DI module)</tool>
+    <tool>Grep (post-deletion verification — ExecuteAnalysisAsync must return zero hits)</tool>
+    <tool>Edit (deletion + cascade cleanup)</tool>
+    <tool>Bash (dotnet build, dotnet test, dotnet publish, git commit)</tool>
+    <tool>Skill (code-review at Step 11.5)</tool>
+    <tool>Skill (adr-check at Step 11.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (ExecuteAnalysisAsync deleted + cascade)</output>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (DI re-evaluation)</output>
+    <output type="deleted-files">Test fixtures referencing ExecuteAnalysisAsync (per task 040 audit)</output>
+    <output type="possibly-deleted">src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisOrchestrationService.cs (if no surviving methods)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 043)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 042 ✅)</output>
+    <output type="commit">refactor(bff/r7)!: DELETE AnalysisOrchestrationService.ExecuteAnalysisAsync + cascade (Wave 4 task 042, FR-11)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ExecuteAnalysisAsync method removed from AnalysisOrchestrationService.cs</criterion>
+    <criterion>All private helpers used ONLY by ExecuteAnalysisAsync DELETED (cascade clean)</criterion>
+    <criterion>Test fixtures referencing ExecuteAnalysisAsync DELETED per task 040 audit list</criterion>
+    <criterion>IAnalysisOrchestrationService interface re-evaluated: kept if other live methods, deleted otherwise</criterion>
+    <criterion>DI registration in AnalysisServicesModule adjusted to match interface state</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>dotnet test passes: all surviving tests green</criterion>
+    <criterion>Grep `ExecuteAnalysisAsync` across `src/` + `tests/` returns ZERO hits — this is the FR-11 acceptance gate</criterion>
+    <criterion>code-review + adr-check pass at Step 11.5 (FULL rigor)</criterion>
+    <criterion>Publish size delta documented (expected: NEGATIVE shrink — largest deletion in Wave 4)</criterion>
+    <criterion>Commit pushed with `!` flag for breaking-change per conventional-commits</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-008" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>xUnit tests — temperature override + per-node prompt override (FR-14)</title>
+    <status>not-started</status>
+    <wave>1</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>bff-api, testing, wave-1</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>007</dependencies>
+    <fr-coverage>FR-14 (test coverage — temperature + per-node prompt overrides), Q2 KEEP</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Extend AiCompletionNodeExecutorTests.cs with ~5 tests covering: (a) temperature override semantics
+    (Action.Temperature vs config-default; node ConfigJson can override Action), and (b) per-node prompt
+    overrides via PromptSchemaOverrideMerger — Role / Task / Constraints / Output Fields. This is the
+    Q2 KEEP feature: per-node personalization layers on top of Action defaults.
+  </prompt>
+
+  <role>
+    Senior .NET test author. The merger semantics are owned by PromptSchemaOverrideMerger — these tests
+    confirm AiCompletionNodeExecutor invokes the merger correctly + the merged values flow through to the
+    IOpenAiClient call. Mock IOpenAiClient at the executor boundary; do NOT test the merger's internal logic
+    here (that's covered by PromptSchemaOverrideMergerTests).
+  </role>
+
+  <goal>
+    AiCompletionNodeExecutorTests.cs extended with ~5 tests:
+    1. ExecuteAsync_UsesActionTemperature_WhenNoNodeOverride — Action.Temperature=0.0 → IOpenAiClient receives 0.0
+    2. ExecuteAsync_UsesNodeTemperatureOverride_WhenConfigJsonOverrides — node ConfigJson sets temperature=0.7 → IOpenAiClient receives 0.7 (NOT Action.Temperature)
+    3. ExecuteAsync_MergesNodeRoleOverride_OverActionRole — node ConfigJson sets role override; merged prompt sent to LLM contains the node's role text
+    4. ExecuteAsync_MergesNodeConstraintsOverride_OverActionConstraints — node ConfigJson sets constraints override; merged prompt reflects node's constraints
+    5. ExecuteAsync_MergesNodeOutputFieldsOverride_OverActionOutputSchema — node ConfigJson sets output-field overrides; merged OutputSchema sent to LLM reflects the override per PromptSchemaOverrideMerger semantics
+  </goal>
+
+  <inputs>
+    <file purpose="executor-under-test">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</file>
+    <file purpose="existing-test-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiCompletionNodeExecutorTests.cs</file>
+    <file purpose="merger-source">src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaOverrideMerger.cs</file>
+    <file purpose="merger-tests-reference">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaOverrideMergerTests.cs</file>
+    <file purpose="sibling-test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiAnalysisNodeExecutorTests.cs</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="adr-038">docs/adr/ADR-038-testing-strategy.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-038">Testing Strategy — integration-heavy pyramid. Mock at executor boundary. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null-check tests.</constraint>
+    <constraint source="spec FR-14">Test coverage includes temperature override + per-node prompt overrides.</constraint>
+    <constraint source="spec Q2 KEEP">Per-node prompt overrides (Role / Task / Constraints / Output Fields) MUST be preserved. Tests confirm this contract from the executor side.</constraint>
+    <constraint source="CLAUDE.md §8 TEST-MODIFYING">Override row — testing tag triggers FULL rigor unconditionally.</constraint>
+    <constraint source="bff-extensions.md §F">Test update obligation — this task continues the FR-14 obligation started in task 007.</constraint>
+    <constraint source="ADR-038 §7 build-vs-maintain">Tests added are MAINTAIN-class — they verify the Q2-KEEP contract that the BFF honors in production.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/xunit-bff-pattern</topic>
+    <files>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="PromptSchemaOverrideMergerTests" location="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaOverrideMergerTests.cs">
+        Existing merger tests cover the merger's internal logic. This task does NOT re-test merger logic — only that the executor invokes it correctly and the merged result reaches the LLM call.
+      </pattern>
+      <pattern name="Moq Verify with parameter capture" location="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiAnalysisNodeExecutorTests.cs">
+        Use It.Is&lt;T&gt;(predicate) on _openAiClient.Setup/.Verify to capture the parameters passed to GetStructuredCompletionRawAsync and assert their merged values.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 007 covered happy-path payload binding. This task adds the per-node override surface — the
+      Q2 KEEP feature confirming AiCompletion preserves personalization without forcing makers to create
+      a new Action for every minor variant. Tests use Moq's parameter capture to assert the merged values
+      reach the LLM call.
+    </background>
+    <dependencies>
+      <dependency task="007" status="not-started-but-required">Test file scaffolded + sibling tests pattern established.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 009 (depends on 007) covers error paths in the same file.</item>
+      <item>PromptSchemaOverrideMergerTests (existing) covers the merger's internal logic — DO NOT duplicate here.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: TEST-MODIFYING override (tag testing + tests/** modification per CLAUDE.md §8 override row — FULL rigor UNCONDITIONAL per ADR-038). Quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-14 + Q2 KEEP rationale + ADR-038 + the existing AiCompletionNodeExecutorTests.cs from task 007.
+    </step>
+    <step order="2" name="Read PromptSchemaOverrideMerger source">
+      Confirm the merger's input/output shapes: what node-config JSON keys map to which override (role, task, constraints, output fields).
+    </step>
+    <step order="3" name="Read PromptSchemaOverrideMergerTests (reference, not duplicate)">
+      Note: merger tests cover INTERNAL merger logic. AiCompletion executor tests cover INVOCATION + RESULT-FLOW. Boundary clear.
+    </step>
+    <step order="4" name="Add 5 tests to AiCompletionNodeExecutorTests.cs">
+      Append to the existing file (created in task 007):
+      1. ExecuteAsync_UsesActionTemperature_WhenNoNodeOverride
+      2. ExecuteAsync_UsesNodeTemperatureOverride_WhenConfigJsonOverrides
+      3. ExecuteAsync_MergesNodeRoleOverride_OverActionRole
+      4. ExecuteAsync_MergesNodeConstraintsOverride_OverActionConstraints
+      5. ExecuteAsync_MergesNodeOutputFieldsOverride_OverActionOutputSchema
+      Use Moq It.Is&lt;T&gt; predicates on _openAiClient.Verify to assert merged values reach the LLM call.
+    </step>
+    <step order="5" name="Run tests">
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiCompletionNodeExecutorTests.cs
+      Expect: 10-12 total tests passing (5-7 from task 007 + 5 new).
+    </step>
+    <step order="6" name="Measure coverage delta">
+      Run: dotnet test --collect:"XPlat Code Coverage" scoped to AiCompletionNodeExecutor. Document cumulative coverage % vs task 007 baseline. Tracks toward NFR-05 &gt;85%.
+    </step>
+    <step order="7" name="Verify acceptance">
+      Re-read the 5 added tests. Confirm they cover the goal bullets + no ADR-038 banned patterns used + merger-internal logic NOT duplicated.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the modified test file. Run `/adr-check` against ADR-038. Confirm tests are MAINTAIN-class.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 008 status complete; advance current-task.md.
+    </step>
+    <step order="11" name="Commit">
+      Commit AiCompletionNodeExecutorTests.cs change with conventional message.
+      Example: test(bff/r7): temperature + per-node prompt override tests (Wave 1 task 008, FR-14, Q2 KEEP)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (existing test file + PromptSchemaOverrideMerger + sibling tests)</tool>
+    <tool>Edit (AiCompletionNodeExecutorTests.cs — append tests)</tool>
+    <tool>Bash (dotnet test, coverage measurement, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiCompletionNodeExecutorTests.cs</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 008 ✅)</output>
+    <output type="commit">test(bff/r7): temperature + per-node prompt override tests (Wave 1 task 008, FR-14, Q2 KEEP)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>5 new tests added to AiCompletionNodeExecutorTests.cs</criterion>
+    <criterion>Temperature: Action default and node-override paths both covered</criterion>
+    <criterion>Per-node prompt overrides: Role / Constraints / Output Fields paths covered</criterion>
+    <criterion>Moq It.Is&lt;T&gt; predicates assert merged values reach IOpenAiClient call</criterion>
+    <criterion>PromptSchemaOverrideMerger internal logic NOT duplicated (boundary respected)</criterion>
+    <criterion>10-12 total tests passing in the file (task 007 + task 008)</criterion>
+    <criterion>Cumulative coverage % documented (tracks toward NFR-05 &gt;85%)</criterion>
+    <criterion>No ADR-038 banned patterns used</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>
