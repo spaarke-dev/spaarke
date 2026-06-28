@@ -18,7 +18,7 @@
 
 | Wave | Goal | Status | Tasks |
 |---|---|---|---|
-| Wave 1 | AiCompletionNodeExecutor build (FR-12 to FR-15) | 🔲 not-started | 001-010 ✅ generated (10 files) |
+| Wave 1 | AiCompletionNodeExecutor build (FR-12 to FR-15) | 🔄 in-progress | 001-010 ✅ generated (10 files) |
 | Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | ⏸️ blocked on Wave 1 | 020-029 ✅ generated (10 files) |
 | Wave 3 | Typed config schemas (FR-16) | ⏸️ blocked on Wave 1 | 030-036 ✅ generated (7 files) |
 | Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | ⏸️ blocked on Wave 9 + Wave 2 | 040-047 ✅ generated (8 files) |
@@ -40,7 +40,7 @@
 
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
-| 001 | 🔲 | Audit existing AiAnalysisNodeExecutor + EntityNameValidatorNodeExecutor for AiCompletion patterns | audit, bff-api | yes | — |
+| 001 | ✅ | Audit existing AiAnalysisNodeExecutor + EntityNameValidatorNodeExecutor for AiCompletion patterns | audit, bff-api | yes | — |
 | 002 | 🔲 | Scaffold AiCompletionNodeExecutor.cs (interface impl, ctor, Validate skeleton) | bff-api, code-impl | yes | 001 |
 | 003 | (to be generated) | Implement payload binding + PromptSchemaOverrideMerger integration | bff-api, code-impl | yes | 002 |
 | 004 | (to be generated) | Implement IOpenAiClient.GetStructuredCompletionRawAsync call + JsonElement binding | bff-api, code-impl | yes (with 003) | 003 |

@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-28 21:30
+> **Last Updated**: 2026-06-28
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,22 +10,16 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 001 — Audit existing AiAnalysisNodeExecutor + EntityNameValidatorNodeExecutor for AiCompletion patterns |
+| **Task** | 002 — Scaffold AiCompletionNodeExecutor.cs (interface impl, ctor, Validate skeleton) |
 | **Step** | 0 of N: not yet started |
 | **Status** | not-started |
-| **Next Action** | User says "execute task 001" → invokes `task-execute` skill with `tasks/001-audit-aianalysis-aicompletion-patterns.poml` |
+| **Next Action** | User says "execute task 002" → invokes `task-execute` skill with `tasks/002-scaffold-aicompletion-node-executor.poml` |
 
 ### Files Modified This Session
 
-- `projects/spaarke-ai-platform-unification-r7/design.md` — Modified — added `<hot-path-declaration>` block (BFF=Y, SpaarkeAi=N, ci-workflows=N, skill-directives=Y, root-CLAUDE.md=N)
-- `projects/spaarke-ai-platform-unification-r7/README.md` — Created — full project overview + graduation criteria + portfolio pointer (#501)
-- `projects/spaarke-ai-platform-unification-r7/plan.md` — Created — WBS 10 waves, ~80-110 tasks, critical path
-- `projects/spaarke-ai-platform-unification-r7/CLAUDE.md` — Created — AI context file, ADR list, sibling impls
-- `projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md` — Created — wave breakdown + parallel groups + dependencies
-- `projects/spaarke-ai-platform-unification-r7/tasks/001-audit-aianalysis-aicompletion-patterns.poml` — Created — Wave 1 seed task
-- `projects/spaarke-ai-platform-unification-r7/tasks/002-scaffold-aicompletion-node-executor.poml` — Created — Wave 1 seed task
-- GitHub Issue #501 — Created — portfolio Project Issue under Epic #421
-- `projects/INDEX.md` — Modified — appended R7 row (hot-path: BFF=Y, skill-directives=Y)
+- `projects/spaarke-ai-platform-unification-r7/notes/spikes/aicompletion-pattern-decision.md` — Created — task 001 decision doc (5 goal questions answered, ~150 lines)
+- `projects/spaarke-ai-platform-unification-r7/current-task.md` — Modified — advance to task 002
+- `projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md` — Modified — mark 001 ✅
 
 ### Critical Context
 
@@ -37,9 +31,9 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 
 | Field | Value |
 |---|---|
-| **Task ID** | 001 |
-| **Task File** | `tasks/001-audit-aianalysis-aicompletion-patterns.poml` |
-| **Title** | Audit existing AiAnalysisNodeExecutor + EntityNameValidatorNodeExecutor for AiCompletion patterns |
+| **Task ID** | 002 |
+| **Task File** | `tasks/002-scaffold-aicompletion-node-executor.poml` |
+| **Title** | Scaffold AiCompletionNodeExecutor.cs (interface impl, ctor, Validate skeleton) |
 | **Phase / Wave** | Wave 1 — AiCompletionNodeExecutor build (FR-12 to FR-15) |
 | **Status** | not-started |
 | **Started** | — |
@@ -48,15 +42,15 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 
 ## Progress
 
-### Completed Steps
+### Completed Tasks
 
-*No steps completed yet*
+- ✅ **Task 001** (2026-06-28) — Audit complete. Decision doc at `notes/spikes/aicompletion-pattern-decision.md`. Key findings: mirror EntityNameValidator structure (Singleton, ILogger + IOpenAiClient ctor); Validate REQUIRES Action FK + SystemPrompt + OutputSchema, PROHIBITS Tool, NOT-REQUIRES Document (FR-13); PromptSchemaOverrideMerger plugs in just before LLM call (reuse `ApplyPromptSchemaOverride` logic from AiAnalysisNodeExecutor); GetStructuredCompletionRawAsync returns raw JSON string → parse once + bind to NodeOutput.StructuredData with TextContent = raw JSON; Singleton DI registration per ADR-010 in `AnalysisServicesModule.AddNodeExecutors`. One open question for task 002: OutputSchemaJson carrier on AnalysisAction record (extend record or read from ConfigJson).
 
 ### Current Step
 
 **Step 0**: not yet started
 
-Run `task-execute` for task 001 when ready.
+Run `task-execute` for task 002 when ready.
 
 ---
 

@@ -2,7 +2,7 @@
 <task id="R7-001" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Audit existing AiAnalysisNodeExecutor + EntityNameValidatorNodeExecutor for AiCompletion patterns</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>1</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>audit, bff-api, planning, wave-1</tags>
