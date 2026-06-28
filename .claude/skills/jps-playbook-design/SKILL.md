@@ -57,7 +57,7 @@ Before designing, internalize these runtime rules from [`docs/architecture/ai-ar
 1. **Mode is emergent, not declarative**. There is NO `sprk_playbookmode` column read at runtime. The orchestrator (`PlaybookOrchestrationService.cs:246-253`) checks for `sprk_playbooknode` rows; zero rows → Legacy mode log + fallback. **Do NOT instruct the user to set a "mode" field on the playbook row** — instead instruct them to deploy node rows.
 2. **The playbook's `sprk_configjson` is NOT the node graph**. The node graph MUST be deployed as `sprk_playbooknode` rows via `Deploy-Playbook.ps1` per [`ai-guide-playbook-deploy-recipe.md`](../../../docs/guides/ai-guide-playbook-deploy-recipe.md). Putting nodes inline in playbook `sprk_configjson` is the R4 deploy bug — runtime ignores it.
 3. **Action lookup precedence at runtime**: Action FK → ConfigJson `__actionType` → NodeType-default. The deploy script's actionCode lint at `Deploy-Playbook.ps1:331-356` ensures every dispatchable node carries `actionCode`, which is resolved to FK at deploy time. **Authoring by code; runtime by FK.**
-4. **Empty-payload contract** (Path A.5): if the playbook is a non-document dispatch (e.g., `/narrate`, `/summarize` invoked via `IInvokePlaybookAi` facade), the playbook **MUST** have nodes — otherwise Legacy fallback fires + returns 503 `PLAYBOOK_INVOCATION_FAILED`. See [`ai-architecture-consumer-routing.md`](../../../docs/architecture/ai-architecture-consumer-routing.md) §3.
+4. **Empty-payload contract** (Path A.5): if the playbook is a non-document dispatch (e.g., `/narrate`, `/summarize` invoked via `IInvokePlaybookAi` facade), the playbook **MUST** have nodes — otherwise Legacy fallback fires + returns 503 `PLAYBOOK_INVOCATION_FAILED`. See [`ai-architecture-playbook-consumer-routing.md`](../../../docs/architecture/ai-architecture-playbook-consumer-routing.md) §3.
 5. **Config-bag boundary** (from [`ai-architecture-actions-nodes-scopes.md`](../../../docs/architecture/ai-architecture-actions-nodes-scopes.md) §4): every config field has a single Home — Action / Playbook columns / Node row / N:N scopes. When designing nodes, do NOT inline scope decisions in node configJson; use the N:N relationships.
 
 ### Step 2: Load Architecture Context
@@ -66,7 +66,7 @@ Before designing, internalize these runtime rules from [`docs/architecture/ai-ar
 LOAD knowledge files:
   - .claude/catalogs/scope-model-index.json (REQUIRED — scope catalog + model rules)
   - docs/architecture/ai-architecture-playbook-runtime.md (CANONICAL runtime contract — mode-emergent, action precedence, scope advisory)
-  - docs/architecture/ai-architecture-consumer-routing.md (Path A.5 dispatch for non-document playbooks)
+  - docs/architecture/ai-architecture-playbook-consumer-routing.md (Path A.5 dispatch for non-document playbooks)
   - docs/architecture/ai-architecture-actions-nodes-scopes.md (config-home decision tree §4 — load BEFORE Step 4)
   - docs/guides/ai-guide-playbook-deploy-recipe.md (Deploy-Playbook.ps1 12-step contract)
   - docs/guides/JPS-AUTHORING-GUIDE.md (JPS schema reference — trimmed to schema-only)
