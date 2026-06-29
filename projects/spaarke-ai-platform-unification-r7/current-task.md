@@ -10,17 +10,18 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 021 — Plan rename strategy (PR sizing, conflict-risk windows) |
+| **Task** | 022 — Rename C# enum `ActionType` → `ExecutorType` (full refactor, BFF only) |
 | **Step** | 0 of N: not-started |
 | **Status** | not-started |
-| **Next Action** | Run `task-execute` for task 021. Wave 2 task 020 ✅ COMPLETE — audit at `notes/spikes/actiontype-audit.md` (464 actual `ActionType` refs across 82 files; not ~1000 as spec FR-10 estimated). Task 021 consumes the audit to draft the rename plan + PR sizing + conflict windows for task 022 (mechanical rename). Key inputs from audit: largest cluster is PlaybookOrchestrationService.cs (25 hits — much disappears in task 024 dispatch refactor); 1 unrelated `InlineActionInfo.ActionType` string discriminator MUST be excluded from regex (§4a of audit); 32 lowercase `"actionType"` JSON property hits are Wave 6 territory; SupportedActionTypes (97 refs) deferred to task 023. |
+| **Next Action** | Run `task-execute` for task 022. Wave 2 tasks 020 ✅ (audit) + 021 ✅ (rename strategy plan) COMPLETE. Plan at `notes/spikes/rename-strategy-plan.md` is the binding execution guide: single-PR hybrid Roslyn rename, ~500-530 line est. diff, exclusion list (§3) hand-verified post-rename, conflict-risk window (§9) coordinated via `/conflict-check` immediately before commit. Task 022 is NOT parallel-safe — single large diff intentionally batched. NFR-01 publish-size delta expected 0.00 MB (IL-neutral rename); CVE delta 0 (no new packages). |
 
-### Files Modified This Session (task 020)
+### Files Modified This Session (task 021)
 
-- `projects/spaarke-ai-platform-unification-r7/notes/spikes/actiontype-audit.md` — Created — 464-reference inventory across BFF + tests; categorized into 7 reference kinds; 1 unrelated-symbol disambiguation flagged (`InlineActionInfo.ActionType` string discriminator MUST be excluded from rename); 32 out-of-scope lowercase `"actionType"` JSON refs deferred to Wave 6; recommended rename strategy for task 021 to consume.
-- `projects/spaarke-ai-platform-unification-r7/current-task.md` — Modified — advance to task 021 (after 020 ✅)
-- `projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md` — Modified — mark 020 ✅ + Wave 2 status to 🔄 in-progress
-- No source-code changes — task 020 was a read-only audit per POML rigor: STANDARD.
+- `projects/spaarke-ai-platform-unification-r7/notes/spikes/rename-strategy-plan.md` — Created — 10-section operational plan: decisions at a glance, hybrid Roslyn rename mechanism, exclusion list (5 categories), 10-step execution sequence, risk register (7 risks), PR sizing (~500-530 lines / 50-80 KB), CI gate strategy, rollback plan, conflict-risk window coordination per `projects/INDEX.md` 2026-06-26 sweep (HIGH-prob conflicts: R6, chat-routing-redesign-r1).
+- `projects/spaarke-ai-platform-unification-r7/tasks/021-plan-rename-strategy-pr-sizing.poml` — Status → completed
+- `projects/spaarke-ai-platform-unification-r7/current-task.md` — Modified — advance to task 022 (after 021 ✅)
+- `projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md` — Modified — mark 021 ✅
+- No source-code changes — task 021 was a planning task per POML rigor: STANDARD.
 
 ### Critical Context
 
@@ -32,9 +33,9 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 
 | Field | Value |
 |---|---|
-| **Task ID** | 021 |
-| **Task File** | `tasks/021-plan-rename-strategy-pr-sizing.poml` |
-| **Title** | Plan rename strategy (PR sizing, conflict-risk windows) |
+| **Task ID** | 022 |
+| **Task File** | `tasks/022-rename-actiontype-enum-bff.poml` |
+| **Title** | Rename C# enum `ActionType` → `ExecutorType` (full refactor, BFF only) |
 | **Phase / Wave** | Wave 2 — Dispatch refactor + enum rename (FR-07 to FR-10) |
 | **Status** | not-started |
 | **Started** | — |
@@ -64,7 +65,7 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 
 **Step 0**: not yet started
 
-Run `task-execute` for task 021 (rename plan + PR sizing). Wave 1 ✅ COMPLETE (10/10). Wave 2 progress: 020 ✅ — remaining 021-029. Tasks 022 is a SINGLE LARGE DIFF (not parallel-safe per POML); 023 + 024-028 parallel-safe after 022 merges. Audit deliverable at `notes/spikes/actiontype-audit.md` is the binding input for task 021.
+Run `task-execute` for task 022 (mechanical Roslyn rename per `notes/spikes/rename-strategy-plan.md` §4 step-by-step). Wave 1 ✅ COMPLETE (10/10). Wave 2 progress: 020 ✅ + 021 ✅ — remaining 022-029. Task 022 is a SINGLE LARGE DIFF (not parallel-safe per POML); 023 + 024-028 parallel-safe after 022 merges. Critical pre-commit step: invoke `/conflict-check` per plan §9 (HIGH-prob siblings: R6, chat-routing-redesign-r1).
 
 ---
 

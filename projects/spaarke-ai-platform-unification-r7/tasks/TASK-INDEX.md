@@ -19,7 +19,7 @@
 | Wave | Goal | Status | Tasks |
 |---|---|---|---|
 | Wave 1 | AiCompletionNodeExecutor build (FR-12 to FR-15) | 🟢 COMPLETE | 001-010 ✅ all done; publish-hygiene gate PASSED 2026-06-28 (46.71 MB compressed; +1.06 MB vs 45.65 baseline; 0 new HIGH CVE; 20/20 AiCompletionNodeExecutor tests pass) |
-| Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | 🔄 in-progress (020 ✅ audit complete; 464 ActionType refs across 82 BFF+test files; rename strategy hand-off to 021) | 020 ✅, 021-029 generated (9 files) |
+| Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | 🔄 in-progress (020 ✅ audit + 021 ✅ rename strategy plan; task 022 ready — single-PR hybrid Roslyn rename; ~500-line est. diff) | 020 ✅, 021 ✅, 022-029 generated (8 files) |
 | Wave 3 | Typed config schemas (FR-16) | ⏸️ blocked on Wave 1 | 030-036 ✅ generated (7 files) |
 | Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | ⏸️ blocked on Wave 2 ONLY (task 040 audit confirmed Wave 9 NOT a prerequisite — SessionSummarizeOrchestrator does NOT call ExecuteAnalysisAsync; only 1 production caller at AnalysisEndpoints.cs:261) | 040 ✅, 041-047 generated (8 files) |
 | Wave 5 | Existing-playbook backfill (FR-19, FR-20) | ⏸️ blocked on Wave 2 | 050-056 ✅ generated (7 files) |
@@ -60,7 +60,7 @@
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
 | 020 | ✅ | Audit all `ActionType` references via grep (464 actual, not ~1000+) | audit, bff-api | yes | W1 complete |
-| 021 | ⏸️ | Plan rename strategy (PR sizing, conflict-risk windows) | planning | yes | 020 |
+| 021 | ✅ | Plan rename strategy (PR sizing, conflict-risk windows) | planning | yes | 020 |
 | 022 | ⏸️ | Rename C# enum ActionType → ExecutorType (full refactor, BFF only) | bff-api, code-impl, refactor | no (single large diff) | 021 |
 | 023 | ⏸️ | Rename `INodeExecutor.SupportedActionTypes` → `SupportedExecutorTypes` | bff-api, code-impl | yes | 022 |
 | 024 | ⏸️ | Update `PlaybookOrchestrationService.ExecuteNodeAsync` to read single-hop (FR-07) | bff-api, code-impl | yes | 022 |

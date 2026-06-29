@@ -2,7 +2,7 @@
 <task id="R7-021" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Plan rename strategy (PR sizing, conflict-risk windows, rollback plan)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>2</wave>
     <estimated-effort>1-2 hours</estimated-effort>
     <tags>planning, wave-2</tags>
