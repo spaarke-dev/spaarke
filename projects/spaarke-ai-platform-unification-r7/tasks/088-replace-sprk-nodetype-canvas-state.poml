@@ -2,7 +2,7 @@
 <task id="R7-088" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Replace `sprk_nodetype` references in canvas state (FR-26)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>8</wave>
     <estimated-effort>3-4 hours</estimated-effort>
     <tags>code-page, code-impl, wave-8</tags>

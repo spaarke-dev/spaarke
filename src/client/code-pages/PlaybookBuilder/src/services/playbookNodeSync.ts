@@ -29,12 +29,8 @@ import {
   disassociate,
 } from './dataverseClient';
 import type { DataverseRecord } from './dataverseClient';
-import {
-  type PlaybookNodeData,
-  type PlaybookNodeType,
-  NodeTypeToDataverse,
-  NodeTypeToActionType,
-} from '../types/playbook';
+import { type PlaybookNodeData } from '../types/playbook';
+import { getExecutorByName } from '../config/executorMetadata';
 import type { PromptSchema } from '../types/promptSchema';
 import { validatePromptSchema } from '../types/promptSchema';
 import {
@@ -96,7 +92,7 @@ function isGuid(value: string): boolean {
  */
 export async function loadPlaybookNodes(playbookId: string): Promise<DataverseRecord[]> {
   const queryOptions =
-    '$select=sprk_playbooknodeid,sprk_name,sprk_nodetype,sprk_executionorder,' +
+    '$select=sprk_playbooknodeid,sprk_name,sprk_executortype,sprk_executionorder,' +
     'sprk_outputvariable,sprk_configjson,sprk_position_x,sprk_position_y,' +
     'sprk_isactive,sprk_timeoutseconds,sprk_retrycount,sprk_conditionjson,' +
     'sprk_dependsonjson,_sprk_playbookid_value,_sprk_actionid_value,' +
@@ -324,10 +320,11 @@ export {
  * @returns JSON string for sprk_configjson.
  */
 export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): string {
-  const actionType = NodeTypeToActionType[data.type as PlaybookNodeType];
+  // R7 FR-20 / FR-26: server reads `sprk_executortype` (Choice) directly via
+  // single-hop dispatch (FR-07); `sprk_configjson` carries only executor-specific
+  // config (no synthetic dispatch keys).
   const config: Record<string, unknown> = {
     __canvasNodeId: canvasNodeId,
-    __actionType: actionType ?? 0,
   };
 
   switch (data.type) {
@@ -575,16 +572,39 @@ function extractRelatedIds(collection: unknown, idField: string): string[] {
     .filter((id: string) => id.length > 0);
 }
 
+/**
+ * Derive the `sprk_executortype` Choice value to persist for a node (R7 FR-26).
+ *
+ * Priority: `data.executorType` (canonical, set by NodePalette drag-drop +
+ * ExecutorTypeSelector property panel) — falls back to looking up the executor
+ * by the canvas type discriminator name (camelCase → PascalCase) for legacy
+ * nodes that pre-date task 082.
+ *
+ * Returns `undefined` if no executor can be derived (caller logs + skips field).
+ */
+function resolveExecutorType(data: PlaybookNodeData, canvasType: string): number | undefined {
+  // Canonical: explicit executorType on the canvas node data (R7 task 082).
+  if (typeof data.executorType === 'number') {
+    return data.executorType;
+  }
+  // Fallback: derive from canvas type discriminator (camelCase → PascalCase).
+  // Used for legacy nodes loaded before task 082 wrote executorType into data.
+  const pascal = canvasType.charAt(0).toUpperCase() + canvasType.slice(1);
+  const meta = getExecutorByName(pascal);
+  if (meta) return meta.value;
+  console.warn(`${LOG_PREFIX} Could not resolve executor type for canvas type '${canvasType}' (no executorType in data and no name match)`);
+  return undefined;
+}
+
 async function createNodeRecord(playbookId: string, node: CanvasNode, executionOrder: number): Promise<string> {
   const data = node.data;
   const name = asString(data.label) ?? asString(data.name as unknown) ?? node.type;
   const outputVariable = asString(data.outputVariable) ?? `output_${node.id}`;
   const configJson = buildConfigJson(node.id, data);
-  const nodeType = NodeTypeToDataverse[node.type as PlaybookNodeType];
+  const executorType = resolveExecutorType(data, node.type);
 
   const payload: Record<string, unknown> = {
     sprk_name: name,
-    sprk_nodetype: nodeType,
     'sprk_playbookid@odata.bind': `/sprk_analysisplaybooks(${playbookId})`,
     sprk_executionorder: executionOrder,
     sprk_outputvariable: outputVariable,
@@ -593,6 +613,11 @@ async function createNodeRecord(playbookId: string, node: CanvasNode, executionO
     sprk_position_y: Math.round(node.position.y),
     sprk_isactive: data.isActive ?? true,
   };
+
+  // R7 FR-26: write sprk_executortype (Choice) — the single dispatch field.
+  // Skipped when the helper couldn't derive a value (logged a warning); the
+  // node record will surface as unknown-executor (see FR-27 / task 089).
+  if (executorType != null) payload['sprk_executortype'] = executorType;
 
   // Optional lookup bindings (only if real GUIDs, skip mock IDs)
   const actionId = asString(data.actionId);
@@ -621,15 +646,17 @@ async function createNodeRecord(playbookId: string, node: CanvasNode, executionO
 async function updateNodeRecord(nodeId: string, node: CanvasNode, executionOrder: number): Promise<void> {
   const data = node.data;
   const configJson = buildConfigJson(node.id, data);
-  const nodeType = NodeTypeToDataverse[node.type as PlaybookNodeType];
+  const executorType = resolveExecutorType(data, node.type);
 
   const payload: Record<string, unknown> = {
-    sprk_nodetype: nodeType,
     sprk_executionorder: executionOrder,
     sprk_configjson: configJson,
     sprk_position_x: Math.round(node.position.x),
     sprk_position_y: Math.round(node.position.y),
   };
+
+  // R7 FR-26: write sprk_executortype (Choice) on update — single dispatch field.
+  if (executorType != null) payload['sprk_executortype'] = executorType;
 
   const name = asString(data.label) ?? asString(data.name as unknown);
   if (name) payload['sprk_name'] = name;
