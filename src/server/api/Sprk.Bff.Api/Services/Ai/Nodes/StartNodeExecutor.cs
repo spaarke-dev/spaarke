@@ -6,7 +6,7 @@
 //   metadata but NO `__actionType` field (Deploy-Playbook.ps1 does not inject it the
 //   way NodeService.BuildConfigJson does on the canvas-sync path). The orchestrator's
 //   structural fallback (PlaybookOrchestrationService.cs:1117-1127) therefore mapped
-//   NodeType.Control → ActionType.Condition → ConditionNodeExecutor, which then rejected
+//   NodeType.Control → ExecutorType.Condition → ConditionNodeExecutor, which then rejected
 //   the Start node with "Condition expression is required; At least one branch
 //   (trueBranch or falseBranch) must be specified".
 //
@@ -17,7 +17,7 @@
 //
 // Semantics (per docs/architecture/ai-architecture-playbook-runtime.md §6 + §9):
 //   - NodeType: Control (no Action FK, no scope resolution required).
-//   - ActionType: Start = 33 (already in INodeExecutor.cs enum; this executor is the
+//   - ExecutorType: Start = 33 (already in INodeExecutor.cs enum; this executor is the
 //     pairing piece that was missing).
 //   - Execute: read the dispatch payload from one of three sources (in priority order)
 //     and bind it as JsonElement to `context.Node.OutputVariable` (default "start").
@@ -32,12 +32,12 @@
 //     error chunk. Mode `lenient` (default) logs warnings only.
 //
 // Why a dedicated executor, not orchestrator special-casing (Option A vs Option B):
-//   - Per canonical-truth §9: NodeType (5 values) and ActionType (31 enum values) are
-//     orthogonal; the dispatch axis is ActionType. canvasType is a UX concept that the
-//     canvas-sync path maps into ActionType — coupling canvasType to the orchestrator
+//   - Per canonical-truth §9: NodeType (5 values) and ExecutorType (31 enum values) are
+//     orthogonal; the dispatch axis is ExecutorType. canvasType is a UX concept that the
+//     canvas-sync path maps into ExecutorType — coupling canvasType to the orchestrator
 //     would re-create the same UX/runtime entanglement the canonical doc warns against.
 //   - Per node-executor-authoring pattern: every dispatchable node-type has its own
-//     INodeExecutor; the registry indexes by ActionType. Adding Start as the 19th
+//     INodeExecutor; the registry indexes by ExecutorType. Adding Start as the 19th
 //     executor in this registry is the canonical shape.
 //   - The brittle inline detection at PlaybookOrchestrationService.cs:1031-1046 (which
 //     only fires for `__actionType=33` OR empty configJson OR Name=="Start" with
@@ -51,7 +51,7 @@
 //   "Node 'Start' failed: Validation failed: Condition expression is required; At
 //   least one branch (trueBranch or falseBranch) must be specified");
 //   notes/canonical-truth/01-code-archaeology.md §6 (ExtractActionTypeFromConfig +
-//   NodeType→ActionType default switch); docs/architecture/ai-architecture-playbook-runtime.md
+//   NodeType→ExecutorType default switch); docs/architecture/ai-architecture-playbook-runtime.md
 //   §6 (Action lookup precedence); .claude/patterns/ai/node-executor-authoring.md.
 
 using System.Text.Json;
@@ -65,7 +65,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Implements <see cref="INodeExecutor"/> for <see cref="ActionType.Start"/> (value
+/// Implements <see cref="INodeExecutor"/> for <see cref="ExecutorType.Start"/> (value
 /// 33). Registered as a Singleton in <c>AnalysisServicesModule.AddNodeExecutors</c>
 /// alongside the other 18 executors (no scope-factory needed — reads only ConfigJson
 /// + Parameters; ILogger is the only dependency).
@@ -117,9 +117,9 @@ public sealed class StartNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.Start
+        ExecutorType.Start
     };
 
     /// <inheritdoc />

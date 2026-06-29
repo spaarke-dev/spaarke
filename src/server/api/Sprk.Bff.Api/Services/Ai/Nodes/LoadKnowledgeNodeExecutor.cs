@@ -6,17 +6,17 @@
 //   nodeType=Control + canvasType=loadKnowledge + a placeholder configJson with a
 //   `passthroughBinding` map but NO `__actionType`. Without an explicit __actionType,
 //   the orchestrator structural fallback (PlaybookOrchestrationService.cs) routes
-//   Control → ActionType.Condition → ConditionNodeExecutor, which rejects the node
+//   Control → ExecutorType.Condition → ConditionNodeExecutor, which rejects the node
 //   with "Condition expression is required" — the same UAT failure class the Start
 //   fix closed.
 //
-//   This executor is the first-class pairing for ActionType.LoadKnowledge (= 142),
+//   This executor is the first-class pairing for ExecutorType.LoadKnowledge (= 142),
 //   modelled exactly on StartNodeExecutor.cs (sibling pattern just landed).
 //
 // Semantics (per daily-briefing-narrate.json LoadKnowledge node + R4 spec line 58
 // "AI Search matter context knowledge node deferred to R5"):
 //   - NodeType: Control (no Action FK, no scope resolution required).
-//   - ActionType: LoadKnowledge = 142.
+//   - ExecutorType: LoadKnowledge = 142.
 //   - Execute (R4 pass-through placeholder):
 //       1. Read configJson.passthroughBinding (optional name→template map, e.g.
 //          { "channels": "{{start.channels}}" }).
@@ -32,8 +32,8 @@
 //     succeed.
 //
 // Why a dedicated executor, not orchestrator special-casing (mirrors Start's rationale):
-//   - Per canonical-truth §9: NodeType (5 values) and ActionType (31+ enum values) are
-//     orthogonal; dispatch axis is ActionType. The registry indexes by ActionType.
+//   - Per canonical-truth §9: NodeType (5 values) and ExecutorType (31+ enum values) are
+//     orthogonal; dispatch axis is ExecutorType. The registry indexes by ExecutorType.
 //   - Per node-executor-authoring pattern: every dispatchable node-type has its own
 //     INodeExecutor. Adding LoadKnowledge as a new executor preserves the canonical shape.
 //   - Future R5 work substitutes the placeholder bind with the AI Search retrieval
@@ -61,7 +61,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Implements <see cref="INodeExecutor"/> for <see cref="ActionType.LoadKnowledge"/>
+/// Implements <see cref="INodeExecutor"/> for <see cref="ExecutorType.LoadKnowledge"/>
 /// (value 142). Registered as a Singleton in <c>AnalysisServicesModule.AddNodeExecutors</c>
 /// (no scope-factory needed — uses <see cref="ITemplateEngine"/> + ILogger only).
 /// </para>
@@ -102,9 +102,9 @@ public sealed class LoadKnowledgeNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.LoadKnowledge
+        ExecutorType.LoadKnowledge
     };
 
     /// <inheritdoc />

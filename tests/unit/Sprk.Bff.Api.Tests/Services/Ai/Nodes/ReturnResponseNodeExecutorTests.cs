@@ -44,7 +44,7 @@ public class ReturnResponseNodeExecutorTests
     [Fact]
     public void SupportedActionTypes_ContainsReturnResponse()
     {
-        _executor.SupportedActionTypes.Should().Contain(ActionType.ReturnResponse);
+        _executor.SupportedActionTypes.Should().Contain(ExecutorType.ReturnResponse);
         _executor.SupportedActionTypes.Should().HaveCount(1);
     }
 
@@ -301,9 +301,9 @@ public class ReturnResponseNodeExecutorTests
             {
                 Id = Guid.Empty,
                 Name = "ReturnResponse",
-                ActionType = ActionType.ReturnResponse
+                ExecutorType = ExecutorType.ReturnResponse
             },
-            ActionType = ActionType.ReturnResponse,
+            ExecutorType = ExecutorType.ReturnResponse,
             Scopes = new ResolvedScopes([], [], []),
             PreviousOutputs = previousOutputs ?? new Dictionary<string, NodeOutput>(),
             Parameters = new Dictionary<string, string>(),

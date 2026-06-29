@@ -22,7 +22,7 @@ public sealed class ReturnInsightArtifactNodeTests
     public void SupportedActionTypes_ContainsReturnInsightArtifact()
     {
         CreateNode().SupportedActionTypes.Should()
-            .ContainSingle().Which.Should().Be(ActionType.ReturnInsightArtifact);
+            .ContainSingle().Which.Should().Be(ExecutorType.ReturnInsightArtifact);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public sealed class ReturnInsightArtifactNodeTests
         }
         """;
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.ReturnInsightArtifact,
+            ExecutorType.ReturnInsightArtifact,
             config,
             previousOutputs: new Dictionary<string, NodeOutput> { ["synthesize"] = upstream });
 
@@ -93,7 +93,7 @@ public sealed class ReturnInsightArtifactNodeTests
         }
         """;
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.ReturnInsightArtifact,
+            ExecutorType.ReturnInsightArtifact,
             config,
             previousOutputs: new Dictionary<string, NodeOutput> { ["synthesize"] = upstream });
 
@@ -121,7 +121,7 @@ public sealed class ReturnInsightArtifactNodeTests
         }
         """;
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.ReturnInsightArtifact,
+            ExecutorType.ReturnInsightArtifact,
             config,
             previousOutputs: new Dictionary<string, NodeOutput> { ["synthesize"] = upstream });
 
@@ -145,7 +145,7 @@ public sealed class ReturnInsightArtifactNodeTests
         }
         """;
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.ReturnInsightArtifact,
+            ExecutorType.ReturnInsightArtifact,
             config,
             previousOutputs: new Dictionary<string, NodeOutput> { ["synthesize"] = upstream });
 
@@ -160,7 +160,7 @@ public sealed class ReturnInsightArtifactNodeTests
     {
         var node = CreateNode();
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.ReturnInsightArtifact,
+            ExecutorType.ReturnInsightArtifact,
             """{ "from": "synthesize" }""");
 
         var result = await node.ExecuteAsync(context, CancellationToken.None);

@@ -51,9 +51,9 @@ public sealed class DeliverToIndexNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.DeliverToIndex
+        ExecutorType.DeliverToIndex
     };
 
     /// <inheritdoc />

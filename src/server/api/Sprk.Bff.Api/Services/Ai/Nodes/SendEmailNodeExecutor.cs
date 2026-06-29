@@ -51,9 +51,9 @@ public sealed class SendEmailNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.SendEmail
+        ExecutorType.SendEmail
     };
 
     /// <inheritdoc />

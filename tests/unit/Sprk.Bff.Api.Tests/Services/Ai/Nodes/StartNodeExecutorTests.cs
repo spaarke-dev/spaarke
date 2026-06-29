@@ -38,7 +38,7 @@ public class StartNodeExecutorTests
     [Fact]
     public void SupportedActionTypes_ContainsStart()
     {
-        _executor.SupportedActionTypes.Should().Contain(ActionType.Start);
+        _executor.SupportedActionTypes.Should().Contain(ExecutorType.Start);
         _executor.SupportedActionTypes.Should().HaveCount(1);
     }
 
@@ -438,9 +438,9 @@ public class StartNodeExecutorTests
             {
                 Id = Guid.Empty,
                 Name = "Start",
-                ActionType = ActionType.Start
+                ExecutorType = ExecutorType.Start
             },
-            ActionType = ActionType.Start,
+            ExecutorType = ExecutorType.Start,
             Scopes = new ResolvedScopes([], [], []),
             Parameters = parameters ?? new Dictionary<string, string>(),
             TenantId = "test-tenant",

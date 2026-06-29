@@ -1,5 +1,5 @@
 // R7 spaarke-ai-platform-unification-r7 — AiCompletionNodeExecutor (task 002 / FR-12).
-// Implements ActionType.AiCompletion = 1 (enum value present since the original node
+// Implements ExecutorType.AiCompletion = 1 (enum value present since the original node
 // system, but never wired to an executor — R4 /narrate could not ship as a result).
 //
 // Purpose (prompt-only structured LLM call per FR-12 / FR-13):
@@ -48,7 +48,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Implements <see cref="INodeExecutor"/> for <see cref="ActionType.AiCompletion"/>
+/// Implements <see cref="INodeExecutor"/> for <see cref="ExecutorType.AiCompletion"/>
 /// (value 1). Registered as a Singleton in
 /// <c>AnalysisServicesModule.AddNodeExecutors</c> (UNCONDITIONAL per CLAUDE.md §F.1
 /// asymmetric-registration governance). The injected <see cref="IOpenAiClient"/> is also
@@ -104,9 +104,9 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.AiCompletion
+        ExecutorType.AiCompletion
     };
 
     /// <summary>
@@ -154,7 +154,7 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
         }
 
         // FR-13 inversion vs AiAnalysis: AiCompletion PROHIBITS Tool presence. A Tool means
-        // the playbook author chose the wrong ActionType — should be AiAnalysis.
+        // the playbook author chose the wrong ExecutorType — should be AiAnalysis.
         if (context.Tool is not null)
         {
             errors.Add(
@@ -212,7 +212,7 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
             "ai.completion.node_execute", ActivityKind.Internal);
         activity?.SetTag("node.id", context.Node.Id.ToString());
         activity?.SetTag("node.name", context.Node.Name);
-        activity?.SetTag("action_type", (int)ActionType.AiCompletion);
+        activity?.SetTag("action_type", (int)ExecutorType.AiCompletion);
 
         _logger.LogDebug(
             "Executing AiCompletion node {NodeId} ({NodeName})",

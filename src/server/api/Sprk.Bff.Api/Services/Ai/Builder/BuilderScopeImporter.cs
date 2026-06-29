@@ -141,7 +141,7 @@ public class BuilderScopeImporter
             Name = scope.Name ?? scope.DisplayName ?? "Unknown",
             Description = scope.Description,
             SystemPrompt = scope.SystemPrompt ?? string.Empty,
-            ActionType = Sprk.Bff.Api.Services.Ai.Nodes.ActionType.AiAnalysis
+            ExecutorType = Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType.AiAnalysis
         };
 
         try

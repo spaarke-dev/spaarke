@@ -860,8 +860,8 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverOutputNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverToIndexNodeExecutor>();
         // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery node executor.
-        // ActionType.DeliverComposite (= 42) paired with NodeType.DeliverComposite (= 100_000_004).
-        // Existing DeliverOutputNodeExecutor for ActionType.DeliverOutput is UNCHANGED
+        // ExecutorType.DeliverComposite (= 42) paired with NodeType.DeliverComposite (= 100_000_004).
+        // Existing DeliverOutputNodeExecutor for ExecutorType.DeliverOutput is UNCHANGED
         // (backward-compat invariant — single-action Output Node behavior preserved).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.DeliverCompositeNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.ConditionNodeExecutor>();
@@ -869,17 +869,17 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateNotificationNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.QueryDataverseNodeExecutor>();
 
-        // AgentServiceNodeExecutor — ActionType.AgentService = 60 (Phase 2, ADR-010, AIPU-061).
+        // AgentServiceNodeExecutor — ExecutorType.AgentService = 60 (Phase 2, ADR-010, AIPU-061).
         // Requires AgentServiceClient singleton (AIPU-060). Kill switch: AgentService:Enabled.
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Foundry.AgentServiceClient>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AgentServiceNodeExecutor>();
 
-        // LookupUserMembershipNodeExecutor — ActionType.LookupUserMembership = 52 (R3 Part 1, FR-1B.1, task 041).
+        // LookupUserMembershipNodeExecutor — ExecutorType.LookupUserMembership = 52 (R3 Part 1, FR-1B.1, task 041).
         // Singleton+Scoped DI pattern: injects IServiceScopeFactory to resolve the Scoped
         // IMembershipResolverService per execution. In-process call (NOT HTTP round-trip).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.LookupUserMembershipNodeExecutor>();
 
-        // AiCompletionNodeExecutor — ActionType.AiCompletion = 1
+        // AiCompletionNodeExecutor — ExecutorType.AiCompletion = 1
         // (R7 spaarke-ai-platform-unification-r7 / FR-12, task 002).
         // Closes R4 /narrate graduation gate. Singleton: ILogger + IOpenAiClient
         // (both Singleton-safe); no Scoped deps, no IServiceScopeFactory indirection.
@@ -888,7 +888,7 @@ public static class AnalysisServicesModule
         // registration per CLAUDE.md §F.1 asymmetric-registration governance.
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AiCompletionNodeExecutor>();
 
-        // EntityNameValidatorNodeExecutor — ActionType.EntityNameValidator = 141
+        // EntityNameValidatorNodeExecutor — ExecutorType.EntityNameValidator = 141
         // (R4 spaarke-daily-update-service-r4 / FR-3, task 003).
         // Singleton: pure string analysis, no external deps beyond ILogger; matches the
         // SanitizerNodeExecutor / GroundingVerifyNode shape. Post-LLM scrubber that strips
@@ -898,7 +898,7 @@ public static class AnalysisServicesModule
         // per CLAUDE.md §F.1 asymmetric-registration governance (no feature gate).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.EntityNameValidatorNodeExecutor>();
 
-        // StartNodeExecutor — ActionType.Start = 33 (R4 spaarke-daily-update-service-r4,
+        // StartNodeExecutor — ExecutorType.Start = 33 (R4 spaarke-daily-update-service-r4,
         // post canonical-truth deploy UAT 2026-06-25). First-class entry-point executor:
         // binds the dispatching wrapper's payload (Parameters[payloadKey]) as JsonElement
         // into the playbook scope under node.OutputVariable (default "start"). Optional
@@ -907,7 +907,7 @@ public static class AnalysisServicesModule
         // registration per CLAUDE.md §10 BFF Hygiene §F.1.
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.StartNodeExecutor>();
 
-        // LoadKnowledgeNodeExecutor — ActionType.LoadKnowledge = 142 (R4 spaarke-daily-update-service-r4,
+        // LoadKnowledgeNodeExecutor — ExecutorType.LoadKnowledge = 142 (R4 spaarke-daily-update-service-r4,
         // UAT 2026-06-26 same failure class as Start). Pass-through placeholder for the
         // R5 AI Search knowledge-source binding. Reads configJson.passthroughBinding
         // (optional name→template map), renders templates against scope, binds resolved
@@ -916,7 +916,7 @@ public static class AnalysisServicesModule
         // UNCONDITIONAL registration per CLAUDE.md §10 BFF Hygiene §F.1.
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.LoadKnowledgeNodeExecutor>();
 
-        // ReturnResponseNodeExecutor — ActionType.ReturnResponse = 143 (R4 spaarke-daily-update-service-r4,
+        // ReturnResponseNodeExecutor — ExecutorType.ReturnResponse = 143 (R4 spaarke-daily-update-service-r4,
         // UAT 2026-06-26 same failure class as Start). Terminal node — projects upstream
         // node outputs into the run's return value via configJson.responseBinding (optional
         // _validationMetadata sidecar). Bound to node.OutputVariable (default "response").
@@ -936,13 +936,13 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.CitationVerification.IGroundingVerifier,
             Sprk.Bff.Api.Services.Ai.CitationVerification.GroundingVerifier>();
 
-        // GroundingVerifyNode — D-P9 + D-P12 node executor (ActionType.GroundingVerify = 70).
+        // GroundingVerifyNode — D-P9 + D-P12 node executor (ExecutorType.GroundingVerify = 70).
         // Wraps IGroundingVerifier as INodeExecutor for the node-based playbook system.
         // Singleton matches the other INodeExecutor registrations above (executors are stateless).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor,
             Sprk.Bff.Api.Services.Ai.Nodes.GroundingVerifyNode>();
 
-        // D-P12 task 022 — Five new Insights-mode node executors (ActionType 80–120).
+        // D-P12 task 022 — Five new Insights-mode node executors (ExecutorType 80–120).
         // All five are stateless and follow the GroundingVerifyNode singleton pattern.
         // - LiveFactNode (80)           — wraps ILiveFactResolver; emits FactArtifact
         // - IndexRetrieveNode (90)      — config-driven AI Search query against spaarke-insights-index

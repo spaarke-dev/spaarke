@@ -40,15 +40,15 @@ public record NodeExecutionContext
     public required PlaybookNodeDto Node { get; init; }
 
     /// <summary>
-    /// Action definition for this node (determines ActionType).
+    /// Action definition for this node (determines ExecutorType).
     /// Contains system prompt and other action-level settings.
     /// </summary>
     public required AnalysisAction Action { get; init; }
 
     /// <summary>
-    /// The ActionType for this node (extracted from Action for convenience).
+    /// The ExecutorType for this node (extracted from Action for convenience).
     /// </summary>
-    public ActionType ActionType { get; init; }
+    public ExecutorType ExecutorType { get; init; }
 
     /// <summary>
     /// Resolved scopes for this node.

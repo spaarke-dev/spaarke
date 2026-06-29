@@ -63,9 +63,9 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.UpdateRecord
+        ExecutorType.UpdateRecord
     };
 
     /// <inheritdoc />

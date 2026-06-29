@@ -76,9 +76,9 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.CreateNotification
+        ExecutorType.CreateNotification
     };
 
     /// <inheritdoc />

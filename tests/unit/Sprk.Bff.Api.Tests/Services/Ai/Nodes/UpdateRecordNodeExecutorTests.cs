@@ -37,7 +37,7 @@ public class UpdateRecordNodeExecutorTests
     public void SupportedActionTypes_ContainsUpdateRecord()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ActionType.UpdateRecord);
+        _executor.SupportedActionTypes.Should().Contain(ExecutorType.UpdateRecord);
         _executor.SupportedActionTypes.Should().HaveCount(1);
     }
 
@@ -368,7 +368,7 @@ public class UpdateRecordNodeExecutorTests
                 Id = actionId,
                 Name = "Update Record"
             },
-            ActionType = ActionType.UpdateRecord,
+            ExecutorType = ExecutorType.UpdateRecord,
             Scopes = new ResolvedScopes([], [], []),
             TenantId = "test-tenant"
         };

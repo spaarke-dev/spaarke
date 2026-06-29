@@ -67,7 +67,7 @@ public sealed class UniversalIngestPlaybookTests
         }
         """;
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.EvidenceSufficiency,
+            ExecutorType.EvidenceSufficiency,
             config,
             previousOutputs: new Dictionary<string, NodeOutput> { ["layer1"] = upstream });
 
@@ -107,7 +107,7 @@ public sealed class UniversalIngestPlaybookTests
         }
         """;
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.EvidenceSufficiency,
+            ExecutorType.EvidenceSufficiency,
             config,
             previousOutputs: new Dictionary<string, NodeOutput> { ["layer1"] = upstream });
 
@@ -136,7 +136,7 @@ public sealed class UniversalIngestPlaybookTests
         }
         """;
         var contextMissingValue = InsightsNodeTestHelpers.CreateContext(
-            ActionType.EvidenceSufficiency, configMissingValue);
+            ExecutorType.EvidenceSufficiency, configMissingValue);
 
         var node = new EvidenceSufficiencyNode(NullLogger<EvidenceSufficiencyNode>.Instance);
         var validation = node.Validate(contextMissingValue);
@@ -155,7 +155,7 @@ public sealed class UniversalIngestPlaybookTests
           ]
         }
         """;
-        var context = InsightsNodeTestHelpers.CreateContext(ActionType.EvidenceSufficiency, config);
+        var context = InsightsNodeTestHelpers.CreateContext(ExecutorType.EvidenceSufficiency, config);
         var node = new EvidenceSufficiencyNode(NullLogger<EvidenceSufficiencyNode>.Instance);
 
         var validation = node.Validate(context);
@@ -179,7 +179,7 @@ public sealed class UniversalIngestPlaybookTests
         }
         """;
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.EvidenceSufficiency,
+            ExecutorType.EvidenceSufficiency,
             config,
             previousOutputs: new Dictionary<string, NodeOutput> { ["retrieveCohort"] = upstream });
 
@@ -220,7 +220,7 @@ public sealed class UniversalIngestPlaybookTests
         };
 
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.Sanitization,
+            ExecutorType.Sanitization,
             configJson: null,
             outputVariable: "sanitization",
             parameters: parameters);
@@ -251,7 +251,7 @@ public sealed class UniversalIngestPlaybookTests
         var executor = new SanitizerNodeExecutor(sanitizer.Object, NullLogger<SanitizerNodeExecutor>.Instance);
         var parameters = new Dictionary<string, string> { ["documentText"] = "Only retrieval blocks." };
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.Sanitization, configJson: null, parameters: parameters);
+            ExecutorType.Sanitization, configJson: null, parameters: parameters);
 
         // Act
         var result = await executor.ExecuteAsync(context, CancellationToken.None);
@@ -267,7 +267,7 @@ public sealed class UniversalIngestPlaybookTests
         var sanitizer = new Mock<IInsightsContentSanitizer>();
         var executor = new SanitizerNodeExecutor(sanitizer.Object, NullLogger<SanitizerNodeExecutor>.Instance);
 
-        var context = InsightsNodeTestHelpers.CreateContext(ActionType.Sanitization, configJson: null);
+        var context = InsightsNodeTestHelpers.CreateContext(ExecutorType.Sanitization, configJson: null);
 
         var validation = executor.Validate(context);
         validation.IsValid.Should().BeFalse();
@@ -339,7 +339,7 @@ public sealed class UniversalIngestPlaybookTests
         };
 
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.ObservationEmit,
+            ExecutorType.ObservationEmit,
             configJson: null,
             outputVariable: "emission",
             previousOutputs: new Dictionary<string, NodeOutput>
@@ -400,7 +400,7 @@ public sealed class UniversalIngestPlaybookTests
         };
 
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.ObservationEmit,
+            ExecutorType.ObservationEmit,
             configJson: null,
             outputVariable: "emission",
             previousOutputs: new Dictionary<string, NodeOutput>
@@ -459,7 +459,7 @@ public sealed class UniversalIngestPlaybookTests
         };
 
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.ObservationEmit,
+            ExecutorType.ObservationEmit,
             configJson: null,
             outputVariable: "emission",
             previousOutputs: new Dictionary<string, NodeOutput>
@@ -493,7 +493,7 @@ public sealed class UniversalIngestPlaybookTests
             NullLogger<ObservationEmitterNodeExecutor>.Instance);
 
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.ObservationEmit, configJson: null,
+            ExecutorType.ObservationEmit, configJson: null,
             parameters: new Dictionary<string, string> { ["tenantId"] = "tenant-A" }); // missing matterId
 
         var validation = executor.Validate(context);

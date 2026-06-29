@@ -71,7 +71,7 @@ public sealed class LiveFactNodeTests
     public void SupportedActionTypes_ContainsLiveFact()
     {
         var node = BuildNode();
-        node.SupportedActionTypes.Should().ContainSingle().Which.Should().Be(ActionType.LiveFact);
+        node.SupportedActionTypes.Should().ContainSingle().Which.Should().Be(ExecutorType.LiveFact);
     }
 
     [Fact]
@@ -84,7 +84,7 @@ public sealed class LiveFactNodeTests
 
         var node = BuildNode(resolverMock: resolver);
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.LiveFact,
+            ExecutorType.LiveFact,
             $$"""{ "subject": "{{MatterSubject}}", "predicate": "totalSpend" }""");
 
         var result = await node.ExecuteAsync(context, CancellationToken.None);
@@ -102,7 +102,7 @@ public sealed class LiveFactNodeTests
     public async Task ExecuteAsync_MissingConfig_ReturnsValidationError()
     {
         var node = BuildNode();
-        var context = InsightsNodeTestHelpers.CreateContext(ActionType.LiveFact, configJson: null);
+        var context = InsightsNodeTestHelpers.CreateContext(ExecutorType.LiveFact, configJson: null);
 
         var result = await node.ExecuteAsync(context, CancellationToken.None);
 
@@ -120,7 +120,7 @@ public sealed class LiveFactNodeTests
 
         var node = BuildNode(resolverMock: resolver);
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.LiveFact,
+            ExecutorType.LiveFact,
             $$"""{ "subject": "{{MatterSubject}}", "predicate": "nonExistent" }""");
 
         var result = await node.ExecuteAsync(context, CancellationToken.None);
@@ -141,7 +141,7 @@ public sealed class LiveFactNodeTests
         // matter row at the resolver layer (the mock returns null per the contract).
         var notFoundSubject = "matter:99999999-9999-9999-9999-999999999999";
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.LiveFact,
+            ExecutorType.LiveFact,
             $$"""{ "subject": "{{notFoundSubject}}", "predicate": "totalSpend" }""");
 
         var result = await node.ExecuteAsync(context, CancellationToken.None);
@@ -161,7 +161,7 @@ public sealed class LiveFactNodeTests
         var node = BuildNode();
         var unknownSubject = $"client:{Guid.NewGuid()}";
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.LiveFact,
+            ExecutorType.LiveFact,
             $$"""{ "subject": "{{unknownSubject}}", "predicate": "anything" }""");
 
         var result = await node.ExecuteAsync(context, CancellationToken.None);
@@ -186,7 +186,7 @@ public sealed class LiveFactNodeTests
 
         var node = BuildNode(resolvers: resolvers);
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.LiveFact,
+            ExecutorType.LiveFact,
             $$"""{ "subject": "{{MatterSubject}}", "predicate": "attorney" }""");
 
         var result = await node.ExecuteAsync(context, CancellationToken.None);
@@ -203,7 +203,7 @@ public sealed class LiveFactNodeTests
         // surface as InvalidConfiguration via the parser, not as resolver exceptions.
         var node = BuildNode();
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.LiveFact,
+            ExecutorType.LiveFact,
             """{ "subject": "matter:not-a-guid", "predicate": "attorney" }""");
 
         var result = await node.ExecuteAsync(context, CancellationToken.None);

@@ -984,38 +984,38 @@ public class NodeService : INodeService
         "condition" or "parallel" or "wait" or "start" => NodeType.Control,
         // "lookupUserMembership" is a data-ops Workflow node — invokes
         // IMembershipResolverService in-process (R3 P5 / task 042; pairs with
-        // ActionType.LookupUserMembership = 52 + LookupUserMembershipNodeExecutor).
+        // ExecutorType.LookupUserMembership = 52 + LookupUserMembershipNodeExecutor).
         "createTask" or "sendEmail" or "updateRecord" or "callWebhook" or "sendTeamsMessage"
             or "lookupUserMembership" or "createNotification" => NodeType.Workflow,
         _ => NodeType.AIAnalysis // Default to AI for unknown types
     };
 
     /// <summary>
-    /// Maps canvas node type string to specific ActionType for executor dispatch.
+    /// Maps canvas node type string to specific ExecutorType for executor dispatch.
     /// Stored in ConfigJson so the orchestrator can dispatch structural nodes correctly.
     /// </summary>
-    private static ActionType MapCanvasTypeToActionType(string canvasType) => canvasType switch
+    private static ExecutorType MapCanvasTypeToActionType(string canvasType) => canvasType switch
     {
-        "start" => ActionType.Start,
-        "aiAnalysis" => ActionType.AiAnalysis,
-        "aiCompletion" => ActionType.AiCompletion,
-        "aiEmbedding" => ActionType.AiEmbedding,
-        "deliverOutput" => ActionType.DeliverOutput,
-        "deliverToIndex" => ActionType.DeliverToIndex,
+        "start" => ExecutorType.Start,
+        "aiAnalysis" => ExecutorType.AiAnalysis,
+        "aiCompletion" => ExecutorType.AiCompletion,
+        "aiEmbedding" => ExecutorType.AiEmbedding,
+        "deliverOutput" => ExecutorType.DeliverOutput,
+        "deliverToIndex" => ExecutorType.DeliverToIndex,
         // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery — pairs with
         // DeliverCompositeNodeExecutor (registered in AnalysisServicesModule.cs).
-        "deliverComposite" => ActionType.DeliverComposite,
-        "condition" => ActionType.Condition,
-        "parallel" => ActionType.Parallel,
-        "wait" => ActionType.Wait,
-        "createTask" => ActionType.CreateTask,
-        "sendEmail" => ActionType.SendEmail,
-        "updateRecord" => ActionType.UpdateRecord,
-        "callWebhook" => ActionType.CallWebhook,
-        "sendTeamsMessage" => ActionType.SendTeamsMessage,
+        "deliverComposite" => ExecutorType.DeliverComposite,
+        "condition" => ExecutorType.Condition,
+        "parallel" => ExecutorType.Parallel,
+        "wait" => ExecutorType.Wait,
+        "createTask" => ExecutorType.CreateTask,
+        "sendEmail" => ExecutorType.SendEmail,
+        "updateRecord" => ExecutorType.UpdateRecord,
+        "callWebhook" => ExecutorType.CallWebhook,
+        "sendTeamsMessage" => ExecutorType.SendTeamsMessage,
         // R3 P5 / task 042 — pairs with LookupUserMembershipNodeExecutor (task 041)
         // and the client-side PlaybookNodeType.LookupUserMembership canvas string.
-        "lookupUserMembership" => ActionType.LookupUserMembership,
+        "lookupUserMembership" => ExecutorType.LookupUserMembership,
         // R3 P7.1 / task 065 — pre-existing drift discovered by the canvas-server mapping
         // drift integration test (FR-3H3.1 / AC-H3.1): the canvas has emitted
         // `createNotification` since R2 (with __actionType=50 baked into configJson client-side
@@ -1025,14 +1025,14 @@ public class NodeService : INodeService
         // client-driven sync path (playbookNodeSync.ts) was unaffected because that path
         // bakes __actionType from NodeTypeToActionType directly. Fix is minimal-scope and
         // surgical; full G6-class drift prevention is the test itself going forward.
-        "createNotification" => ActionType.CreateNotification,
-        _ => ActionType.AiAnalysis // Default for unknown types
+        "createNotification" => ExecutorType.CreateNotification,
+        _ => ExecutorType.AiAnalysis // Default for unknown types
     };
 
     /// <summary>
     /// Build a configJson string that includes the __canvasNodeId marker plus any unmapped data fields.
     /// </summary>
-    private static string BuildConfigJson(string canvasNodeId, ActionType actionType, Dictionary<string, object?>? data)
+    private static string BuildConfigJson(string canvasNodeId, ExecutorType actionType, Dictionary<string, object?>? data)
     {
         var config = new Dictionary<string, object?>
         {

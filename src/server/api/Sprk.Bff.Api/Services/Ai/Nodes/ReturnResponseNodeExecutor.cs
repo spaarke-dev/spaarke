@@ -5,17 +5,17 @@
 //   DAILY-BRIEFING-NARRATE "ReturnResponse" sprk_playbooknode row carries
 //   nodeType=Control + canvasType=returnResponse + a configJson with a `responseBinding`
 //   (and an `_validationMetadata` sidecar) but NO `__actionType`. Without an explicit
-//   __actionType, the structural fallback routes Control → ActionType.Condition →
+//   __actionType, the structural fallback routes Control → ExecutorType.Condition →
 //   ConditionNodeExecutor, which rejects the node with "Condition expression is
 //   required".
 //
-//   This executor is the first-class pairing for ActionType.ReturnResponse (= 143),
+//   This executor is the first-class pairing for ExecutorType.ReturnResponse (= 143),
 //   modelled exactly on StartNodeExecutor.cs (sibling pattern just landed).
 //
 // Semantics (per daily-briefing-narrate.json ReturnResponse node + design notes
 // projects/spaarke-daily-update-service-r4/notes/design/010-daily-briefing-narrate-node-graph.md):
 //   - NodeType: Control (no Action FK, no scope resolution required).
-//   - ActionType: ReturnResponse = 143.
+//   - ExecutorType: ReturnResponse = 143.
 //   - Terminal node — binds the playbook's final outputs to the run return value,
 //     projected into the DailyBriefingNarrateResponse contract by the playbook-
 //     execution method on AnalysisOrchestrationService.
@@ -30,8 +30,8 @@
 //     value via the existing aggregation contract (code-archaeology §10).
 //
 // Why a dedicated executor, not orchestrator special-casing (mirrors Start's rationale):
-//   - Per canonical-truth §9: NodeType (5 values) and ActionType (31+ enum values) are
-//     orthogonal. Registry indexes by ActionType.
+//   - Per canonical-truth §9: NodeType (5 values) and ExecutorType (31+ enum values) are
+//     orthogonal. Registry indexes by ExecutorType.
 //   - Per node-executor-authoring pattern: every dispatchable node-type has its own
 //     INodeExecutor. The orchestrator stays slim.
 //
@@ -56,7 +56,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Implements <see cref="INodeExecutor"/> for <see cref="ActionType.ReturnResponse"/>
+/// Implements <see cref="INodeExecutor"/> for <see cref="ExecutorType.ReturnResponse"/>
 /// (value 143). Registered as a Singleton in <c>AnalysisServicesModule.AddNodeExecutors</c>
 /// (no scope-factory needed — uses <see cref="ITemplateEngine"/> + ILogger only).
 /// </para>
@@ -107,9 +107,9 @@ public sealed class ReturnResponseNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.ReturnResponse
+        ExecutorType.ReturnResponse
     };
 
     /// <inheritdoc />

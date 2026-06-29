@@ -42,8 +42,8 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </para>
 /// <para>
 /// <b>Backward-compat invariant (FR-52)</b>: existing <see cref="NodeType.Output"/> nodes are
-/// dispatched to <see cref="DeliverOutputNodeExecutor"/> via <see cref="ActionType.DeliverOutput"/>
-/// and are UNCHANGED. This executor handles ONLY the new <see cref="ActionType.DeliverComposite"/>
+/// dispatched to <see cref="DeliverOutputNodeExecutor"/> via <see cref="ExecutorType.DeliverOutput"/>
+/// and are UNCHANGED. This executor handles ONLY the new <see cref="ExecutorType.DeliverComposite"/>
 /// path emitted from <see cref="NodeType.DeliverComposite"/>.
 /// </para>
 /// <para>
@@ -67,9 +67,9 @@ public sealed class DeliverCompositeNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.DeliverComposite
+        ExecutorType.DeliverComposite
     };
 
     /// <inheritdoc />

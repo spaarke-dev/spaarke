@@ -2,7 +2,7 @@
 <task id="R7-022" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Rename C# enum ActionType → ExecutorType (full refactor, BFF only)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>2</wave>
     <estimated-effort>4-6 hours (single large diff; mechanical execution)</estimated-effort>
     <tags>bff-api, code-impl, refactor, wave-2</tags>

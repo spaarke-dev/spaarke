@@ -51,7 +51,7 @@ public class ScopeManagementService : IScopeManagementService
             Description = request.Description,
             SystemPrompt = request.SystemPrompt,
             SortOrder = request.SortOrder,
-            ActionType = request.ActionType
+            ExecutorType = request.ExecutorType
         };
 
         _logger.LogInformation("Created action scope: {Id} - {Name}", action.Id, action.Name);
@@ -87,7 +87,7 @@ public class ScopeManagementService : IScopeManagementService
             Description = request.Description ?? existing.Description,
             SystemPrompt = request.SystemPrompt ?? existing.SystemPrompt,
             SortOrder = request.SortOrder ?? existing.SortOrder,
-            ActionType = request.ActionType ?? existing.ActionType
+            ExecutorType = request.ExecutorType ?? existing.ExecutorType
         };
 
         return updated;

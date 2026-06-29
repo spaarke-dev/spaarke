@@ -20,7 +20,7 @@ public sealed class EvidenceSufficiencyNodeTests
     public void SupportedActionTypes_ContainsEvidenceSufficiency()
     {
         CreateNode().SupportedActionTypes.Should()
-            .ContainSingle().Which.Should().Be(ActionType.EvidenceSufficiency);
+            .ContainSingle().Which.Should().Be(ExecutorType.EvidenceSufficiency);
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public sealed class EvidenceSufficiencyNodeTests
         }
         """;
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.EvidenceSufficiency,
+            ExecutorType.EvidenceSufficiency,
             config,
             previousOutputs: new Dictionary<string, NodeOutput> { ["retrieveComparableMatters"] = upstream });
 
@@ -68,7 +68,7 @@ public sealed class EvidenceSufficiencyNodeTests
         }
         """;
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.EvidenceSufficiency,
+            ExecutorType.EvidenceSufficiency,
             config,
             previousOutputs: new Dictionary<string, NodeOutput> { ["retrieveComparableMatters"] = upstream });
 
@@ -89,7 +89,7 @@ public sealed class EvidenceSufficiencyNodeTests
     public async Task ExecuteAsync_UpstreamMissing_GapEmittedRequirementNotMet()
     {
         var config = """{ "rules": [ { "name": "missing", "from": "neverProduced", "minCount": 1 } ] }""";
-        var context = InsightsNodeTestHelpers.CreateContext(ActionType.EvidenceSufficiency, config);
+        var context = InsightsNodeTestHelpers.CreateContext(ExecutorType.EvidenceSufficiency, config);
 
         var result = await CreateNode().ExecuteAsync(context, CancellationToken.None);
 
@@ -102,7 +102,7 @@ public sealed class EvidenceSufficiencyNodeTests
     public async Task ExecuteAsync_InvalidConfig_ReturnsValidationError()
     {
         var node = CreateNode();
-        var context = InsightsNodeTestHelpers.CreateContext(ActionType.EvidenceSufficiency, "{}");
+        var context = InsightsNodeTestHelpers.CreateContext(ExecutorType.EvidenceSufficiency, "{}");
 
         var result = await node.ExecuteAsync(context, CancellationToken.None);
 
@@ -126,7 +126,7 @@ public sealed class EvidenceSufficiencyNodeTests
         }
         """;
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.EvidenceSufficiency,
+            ExecutorType.EvidenceSufficiency,
             config,
             previousOutputs: new Dictionary<string, NodeOutput> { ["retrievePrecedent"] = upstream });
 

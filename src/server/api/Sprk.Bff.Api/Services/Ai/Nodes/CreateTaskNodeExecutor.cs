@@ -49,9 +49,9 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.CreateTask
+        ExecutorType.CreateTask
     };
 
     /// <inheritdoc />

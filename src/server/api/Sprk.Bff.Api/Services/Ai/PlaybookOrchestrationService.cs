@@ -871,7 +871,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// object verbatim — it does NOT inject <c>__actionType=33</c> the way the
     /// canvas-sync path (<c>NodeService.BuildConfigJson</c>) does. Without an explicit
     /// <c>__actionType</c>, the orchestrator's structural fallback used to default
-    /// <c>NodeType.Control</c> to <c>ActionType.Condition</c>, which then failed
+    /// <c>NodeType.Control</c> to <c>ExecutorType.Condition</c>, which then failed
     /// <c>ConditionNodeExecutor</c> validation ("Condition expression is required").
     /// </para>
     /// <para>
@@ -935,7 +935,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// R4 (2026-06-26, daily-update-service-r4 follow-on after StartNodeExecutor):
     /// same failure class as Start — Deploy-Playbook.ps1 does NOT inject
     /// <c>__actionType=142</c> for the LoadKnowledge row, so without this detection
-    /// the structural fallback would route Control → ActionType.Condition →
+    /// the structural fallback would route Control → ExecutorType.Condition →
     /// ConditionNodeExecutor → "Condition expression is required" validation failure.
     /// </para>
     /// <para>
@@ -1056,7 +1056,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// Extracts the __actionType value from a node's ConfigJson.
     /// Returns null if ConfigJson is missing or doesn't contain the field.
     /// </summary>
-    private static ActionType? ExtractActionTypeFromConfig(string? configJson)
+    private static ExecutorType? ExtractActionTypeFromConfig(string? configJson)
     {
         if (string.IsNullOrEmpty(configJson))
             return null;
@@ -1067,7 +1067,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             if (doc.RootElement.TryGetProperty("__actionType", out var actionTypeProp) &&
                 actionTypeProp.TryGetInt32(out var actionTypeInt))
             {
-                return (ActionType)actionTypeInt;
+                return (ExecutorType)actionTypeInt;
             }
         }
         catch
@@ -1214,7 +1214,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             }
 
             // R4 spaarke-daily-update-service-r4 (2026-06-25): Start nodes are now
-            // first-class executable nodes routed to StartNodeExecutor (ActionType.Start
+            // first-class executable nodes routed to StartNodeExecutor (ExecutorType.Start
             // = 33). The previous inline "passthrough" handler did not bind the dispatch
             // payload into the scope variable, which made {{start.channels}} references
             // in downstream nodes resolve to null. The executor reads the wrapper's
@@ -1222,24 +1222,24 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // node.OutputVariable.
             //
             // Detection is centralised in IsDeployedStartNode (below) and applied by
-            // the structural fallback at the NodeType→ActionType switch — Control nodes
-            // matching the Start shape get ActionType.Start regardless of whether
+            // the structural fallback at the NodeType→ExecutorType switch — Control nodes
+            // matching the Start shape get ExecutorType.Start regardless of whether
             // ConfigJson carries __actionType.
             var configActionType = ExtractActionTypeFromConfig(node.ConfigJson);
 
             // Note: ConditionJson on nodes is for conditional execution guards (Phase 5).
-            // The Condition ActionType is handled by ConditionNodeExecutor (Phase 4) which
+            // The Condition ExecutorType is handled by ConditionNodeExecutor (Phase 4) which
             // returns ConditionResult with branch selection for orchestrator-level branching.
 
             // NodeType-driven scope resolution and action lookup.
             // AI nodes require an Action record and resolve all scopes (skills, knowledge, tools).
             // Structural nodes (Output, Control) need neither.
             AnalysisAction action;
-            ActionType actionType;
+            ExecutorType actionType;
             ResolvedScopes scopes;
 
             // Per Insights Engine r2 Wave B (2026-06-02): when sprk_actionid is set,
-            // the action's ActionType is the canonical dispatch source REGARDLESS of
+            // the action's ExecutorType is the canonical dispatch source REGARDLESS of
             // nodeType. Insights nodes like checkSufficiency (Control), groundCitations
             // (Control), ReturnInsightArtifactNode (Output), and declineInsufficient
             // (Output) all need their specific executor (EvidenceSufficiency, GroundingVerify,
@@ -1274,7 +1274,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 }
 
                 action = resolved;
-                actionType = action.ActionType;
+                actionType = action.ExecutorType;
             }
             else if (node.NodeType == NodeType.AIAnalysis)
             {
@@ -1299,7 +1299,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 // R4 (2026-06-25, daily-update-service-r4): when the structural fallback
                 // resolves a Control node that matches the deployed-Start shape AND
                 // ConfigJson did not carry an explicit __actionType, route to
-                // ActionType.Start so StartNodeExecutor handles it instead of the
+                // ExecutorType.Start so StartNodeExecutor handles it instead of the
                 // legacy Condition default. Deploy-Playbook.ps1 does not inject
                 // __actionType=33 (only the canvas-sync path does that), so without
                 // this branch the deployed Start row falls into ConditionNodeExecutor
@@ -1314,30 +1314,30 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 // expression is required" — the same UAT class that StartNodeExecutor closed
                 // on 2026-06-25.
                 actionType = configActionType
-                    ?? (IsDeployedStartNode(node) ? ActionType.Start : (ActionType?)null)
-                    ?? (IsDeployedLoadKnowledgeNode(node) ? ActionType.LoadKnowledge : (ActionType?)null)
-                    ?? (IsDeployedReturnResponseNode(node) ? ActionType.ReturnResponse : (ActionType?)null)
+                    ?? (IsDeployedStartNode(node) ? ExecutorType.Start : (ExecutorType?)null)
+                    ?? (IsDeployedLoadKnowledgeNode(node) ? ExecutorType.LoadKnowledge : (ExecutorType?)null)
+                    ?? (IsDeployedReturnResponseNode(node) ? ExecutorType.ReturnResponse : (ExecutorType?)null)
                     ?? node.NodeType switch
                     {
-                        NodeType.Output => ActionType.DeliverOutput,
-                        NodeType.Control => ActionType.Condition,
-                        NodeType.Workflow => ActionType.CreateTask,
+                        NodeType.Output => ExecutorType.DeliverOutput,
+                        NodeType.Control => ExecutorType.Condition,
+                        NodeType.Workflow => ExecutorType.CreateTask,
                         // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery node maps to a
-                        // SEPARATE ActionType so the legacy Output → DeliverOutput dispatch is
+                        // SEPARATE ExecutorType so the legacy Output → DeliverOutput dispatch is
                         // UNCHANGED (backward-compat invariant). The DeliverCompositeNodeExecutor
                         // is the only executor for DeliverComposite.
-                        NodeType.DeliverComposite => ActionType.DeliverComposite,
-                        _ => ActionType.DeliverOutput
+                        NodeType.DeliverComposite => ExecutorType.DeliverComposite,
+                        _ => ExecutorType.DeliverOutput
                     };
                 action = new AnalysisAction
                 {
                     Id = Guid.Empty,
                     Name = node.Name,
-                    ActionType = actionType
+                    ExecutorType = actionType
                 };
 
                 _logger.LogDebug(
-                    "Structural node '{NodeName}' (NodeType={NodeType}) — using ActionType {ActionType}, no scopes",
+                    "Structural node '{NodeName}' (NodeType={NodeType}) — using ExecutorType {ExecutorType}, no scopes",
                     node.Name, node.NodeType, actionType);
             }
 
@@ -1473,7 +1473,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 // Existing NodeType.Output → DeliverOutput path emits ZERO section events; its
                 // `FieldDelta` stream (via PlaybookExecutionEngine.ExecuteChatSummarizeAsync)
                 // continues UNCHANGED until migrated by FR-58 (task 118R).
-                if (actionType == ActionType.DeliverComposite)
+                if (actionType == ExecutorType.DeliverComposite)
                 {
                     await EmitDeliverCompositeSectionEventsAsync(
                         runContext, node, output, writer, cancellationToken).ConfigureAwait(false);
@@ -1561,7 +1561,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // Only collect nodes that are likely UpdateRecord type.
             // Check ConfigJson for __actionType == UpdateRecord (22).
             var dependentActionType = ExtractActionTypeFromConfig(dependentNode.ConfigJson);
-            if (dependentActionType != Nodes.ActionType.UpdateRecord)
+            if (dependentActionType != Nodes.ExecutorType.UpdateRecord)
                 continue;
 
             // Only include if ConfigJson exists (it should contain fieldMappings)

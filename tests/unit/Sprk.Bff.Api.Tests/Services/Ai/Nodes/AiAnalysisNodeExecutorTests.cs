@@ -58,7 +58,7 @@ public class AiAnalysisNodeExecutorTests
     public void SupportedActionTypes_ContainsAiAnalysis()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ActionType.AiAnalysis);
+        _executor.SupportedActionTypes.Should().Contain(ExecutorType.AiAnalysis);
         _executor.SupportedActionTypes.Should().HaveCount(1);
     }
 
@@ -426,7 +426,7 @@ public class AiAnalysisNodeExecutorTests
                 Name = "Test Action",
                 SystemPrompt = "You are a test assistant."
             },
-            ActionType = ActionType.AiAnalysis,
+            ExecutorType = ExecutorType.AiAnalysis,
             Scopes = new ResolvedScopes([], [],
             [
                 new AnalysisTool
@@ -466,7 +466,7 @@ public class NodeExecutorRegistryTests
     public void Constructor_RegistersExecutors()
     {
         // Arrange
-        var executor = CreateMockExecutor(ActionType.AiAnalysis);
+        var executor = CreateMockExecutor(ExecutorType.AiAnalysis);
         var executors = new[] { executor };
 
         // Act
@@ -474,18 +474,18 @@ public class NodeExecutorRegistryTests
 
         // Assert
         registry.ExecutorCount.Should().Be(1);
-        registry.HasExecutor(ActionType.AiAnalysis).Should().BeTrue();
+        registry.HasExecutor(ExecutorType.AiAnalysis).Should().BeTrue();
     }
 
     [Fact]
     public void GetExecutor_WithRegisteredType_ReturnsExecutor()
     {
         // Arrange
-        var executor = CreateMockExecutor(ActionType.AiAnalysis);
+        var executor = CreateMockExecutor(ExecutorType.AiAnalysis);
         var registry = new NodeExecutorRegistry(new[] { executor }, _loggerMock.Object);
 
         // Act
-        var result = registry.GetExecutor(ActionType.AiAnalysis);
+        var result = registry.GetExecutor(ExecutorType.AiAnalysis);
 
         // Assert
         result.Should().BeSameAs(executor);
@@ -495,11 +495,11 @@ public class NodeExecutorRegistryTests
     public void GetExecutor_WithUnregisteredType_ReturnsNull()
     {
         // Arrange
-        var executor = CreateMockExecutor(ActionType.AiAnalysis);
+        var executor = CreateMockExecutor(ExecutorType.AiAnalysis);
         var registry = new NodeExecutorRegistry(new[] { executor }, _loggerMock.Object);
 
         // Act
-        var result = registry.GetExecutor(ActionType.SendEmail);
+        var result = registry.GetExecutor(ExecutorType.SendEmail);
 
         // Assert
         result.Should().BeNull();
@@ -509,8 +509,8 @@ public class NodeExecutorRegistryTests
     public void GetAllExecutors_ReturnsAllRegistered()
     {
         // Arrange
-        var executor1 = CreateMockExecutor(ActionType.AiAnalysis);
-        var executor2 = CreateMockExecutor(ActionType.CreateTask);
+        var executor1 = CreateMockExecutor(ExecutorType.AiAnalysis);
+        var executor2 = CreateMockExecutor(ExecutorType.CreateTask);
         var registry = new NodeExecutorRegistry(new[] { executor1, executor2 }, _loggerMock.Object);
 
         // Act
@@ -526,8 +526,8 @@ public class NodeExecutorRegistryTests
     public void GetSupportedActionTypes_ReturnsAllTypes()
     {
         // Arrange
-        var executor1 = CreateMockExecutor(ActionType.AiAnalysis);
-        var executor2 = CreateMockExecutor(ActionType.CreateTask);
+        var executor1 = CreateMockExecutor(ExecutorType.AiAnalysis);
+        var executor2 = CreateMockExecutor(ExecutorType.CreateTask);
         var registry = new NodeExecutorRegistry(new[] { executor1, executor2 }, _loggerMock.Object);
 
         // Act
@@ -535,23 +535,23 @@ public class NodeExecutorRegistryTests
 
         // Assert
         result.Should().HaveCount(2);
-        result.Should().Contain(ActionType.AiAnalysis);
-        result.Should().Contain(ActionType.CreateTask);
+        result.Should().Contain(ExecutorType.AiAnalysis);
+        result.Should().Contain(ExecutorType.CreateTask);
     }
 
     [Fact]
     public void Constructor_WithDuplicateActionType_KeepsFirst()
     {
         // Arrange
-        var executor1 = CreateMockExecutor(ActionType.AiAnalysis, "Executor1");
-        var executor2 = CreateMockExecutor(ActionType.AiAnalysis, "Executor2");
+        var executor1 = CreateMockExecutor(ExecutorType.AiAnalysis, "Executor1");
+        var executor2 = CreateMockExecutor(ExecutorType.AiAnalysis, "Executor2");
 
         // Act
         var registry = new NodeExecutorRegistry(new[] { executor1, executor2 }, _loggerMock.Object);
 
         // Assert
         registry.ExecutorCount.Should().Be(2); // Both registered as executors
-        var result = registry.GetExecutor(ActionType.AiAnalysis);
+        var result = registry.GetExecutor(ExecutorType.AiAnalysis);
         result.Should().BeSameAs(executor1); // First one wins for lookup
     }
 
@@ -559,25 +559,25 @@ public class NodeExecutorRegistryTests
     public void Constructor_WithMultipleActionTypes_RegistersAll()
     {
         // Arrange
-        var executor = CreateMockExecutor(new[] { ActionType.AiAnalysis, ActionType.AiCompletion });
+        var executor = CreateMockExecutor(new[] { ExecutorType.AiAnalysis, ExecutorType.AiCompletion });
 
         // Act
         var registry = new NodeExecutorRegistry(new[] { executor }, _loggerMock.Object);
 
         // Assert
         registry.ExecutorCount.Should().Be(1);
-        registry.HasExecutor(ActionType.AiAnalysis).Should().BeTrue();
-        registry.HasExecutor(ActionType.AiCompletion).Should().BeTrue();
-        registry.GetExecutor(ActionType.AiAnalysis).Should().BeSameAs(executor);
-        registry.GetExecutor(ActionType.AiCompletion).Should().BeSameAs(executor);
+        registry.HasExecutor(ExecutorType.AiAnalysis).Should().BeTrue();
+        registry.HasExecutor(ExecutorType.AiCompletion).Should().BeTrue();
+        registry.GetExecutor(ExecutorType.AiAnalysis).Should().BeSameAs(executor);
+        registry.GetExecutor(ExecutorType.AiCompletion).Should().BeSameAs(executor);
     }
 
-    private static INodeExecutor CreateMockExecutor(ActionType actionType, string? name = null)
+    private static INodeExecutor CreateMockExecutor(ExecutorType actionType, string? name = null)
     {
         return CreateMockExecutor(new[] { actionType }, name);
     }
 
-    private static INodeExecutor CreateMockExecutor(ActionType[] actionTypes, string? name = null)
+    private static INodeExecutor CreateMockExecutor(ExecutorType[] actionTypes, string? name = null)
     {
         var mock = new Mock<INodeExecutor>();
         mock.Setup(e => e.SupportedActionTypes).Returns(actionTypes);

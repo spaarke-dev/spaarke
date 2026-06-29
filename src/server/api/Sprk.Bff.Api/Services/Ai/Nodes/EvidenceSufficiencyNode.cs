@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// Reads prior node outputs and evaluates a configured evidence-sufficiency rule per D-P12 +
 /// D-49 (LAVERN Pattern #7). Emits a deterministic <c>sufficient</c> / <c>insufficient</c>
 /// verdict + structured gap analysis. Used as the pre-condition gate before a
-/// <see cref="ActionType.DeclineToFind"/> branch in Insights synthesis playbooks.
+/// <see cref="ExecutorType.DeclineToFind"/> branch in Insights synthesis playbooks.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -41,7 +41,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// <para>
 /// All rules MUST pass for the verdict to be <c>sufficient</c>. When any rule fails, the
 /// verdict is <c>insufficient</c> and the gap analysis records every failing rule with its
-/// observed-vs-required values so <see cref="ActionType.DeclineToFind"/> can render a
+/// observed-vs-required values so <see cref="ExecutorType.DeclineToFind"/> can render a
 /// structured <see cref="Sprk.Bff.Api.Models.Insights.DeclineResponse"/> per D-49.
 /// </para>
 /// <para>
@@ -70,9 +70,9 @@ public sealed class EvidenceSufficiencyNode : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.EvidenceSufficiency
+        ExecutorType.EvidenceSufficiency
     };
 
     /// <inheritdoc />
@@ -425,8 +425,8 @@ internal sealed record EvidenceSufficiencyRule
 
 /// <summary>
 /// Structured output of <see cref="EvidenceSufficiencyNode"/>.
-/// Consumed by downstream <see cref="ActionType.DeclineToFind"/> +
-/// <see cref="ActionType.ReturnInsightArtifact"/> nodes.
+/// Consumed by downstream <see cref="ExecutorType.DeclineToFind"/> +
+/// <see cref="ExecutorType.ReturnInsightArtifact"/> nodes.
 /// </summary>
 public sealed record EvidenceSufficiencyResult
 {

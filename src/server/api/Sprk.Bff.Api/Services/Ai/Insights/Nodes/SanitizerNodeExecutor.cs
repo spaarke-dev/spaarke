@@ -7,7 +7,7 @@ using Sprk.Bff.Api.Services.Ai.Nodes;
 namespace Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 
 /// <summary>
-/// Wave C1 task 020 — node executor for <see cref="ActionType.Sanitization"/> (130). Wraps
+/// Wave C1 task 020 — node executor for <see cref="ExecutorType.Sanitization"/> (130). Wraps
 /// <see cref="IInsightsContentSanitizer"/> (D-50 / D-A25) as the first node of the
 /// universal-ingest@v1 JPS playbook per design-a5 §4 Node 1. Replaced the inline sanitization
 /// step in the code-defined <c>IngestOrchestrator.RunAsync</c> (retired Wave C-G4 / task 022).
@@ -76,9 +76,9 @@ public sealed class SanitizerNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.Sanitization
+        ExecutorType.Sanitization
     };
 
     /// <inheritdoc />

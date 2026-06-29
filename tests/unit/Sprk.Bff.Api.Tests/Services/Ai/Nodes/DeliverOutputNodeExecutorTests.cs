@@ -33,7 +33,7 @@ public class DeliverOutputNodeExecutorTests
     public void SupportedActionTypes_ContainsDeliverOutput()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ActionType.DeliverOutput);
+        _executor.SupportedActionTypes.Should().Contain(ExecutorType.DeliverOutput);
         _executor.SupportedActionTypes.Should().HaveCount(1);
     }
 
@@ -419,7 +419,7 @@ public class DeliverOutputNodeExecutorTests
                 Id = actionId,
                 Name = "Deliver Output"
             },
-            ActionType = ActionType.DeliverOutput,
+            ExecutorType = ExecutorType.DeliverOutput,
             Scopes = new ResolvedScopes([], [], []),
             TenantId = "test-tenant"
         };

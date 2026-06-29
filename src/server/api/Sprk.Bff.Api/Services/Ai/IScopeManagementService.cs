@@ -207,7 +207,7 @@ public record CreateActionRequest
     public int SortOrder { get; init; } = 100;
 
     /// <summary>Action type for executor routing.</summary>
-    public Sprk.Bff.Api.Services.Ai.Nodes.ActionType ActionType { get; init; } = Sprk.Bff.Api.Services.Ai.Nodes.ActionType.AiAnalysis;
+    public Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType ExecutorType { get; init; } = Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType.AiAnalysis;
 }
 
 /// <summary>
@@ -219,7 +219,7 @@ public record UpdateActionRequest
     public string? Description { get; init; }
     public string? SystemPrompt { get; init; }
     public int? SortOrder { get; init; }
-    public Sprk.Bff.Api.Services.Ai.Nodes.ActionType? ActionType { get; init; }
+    public Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType? ExecutorType { get; init; }
 }
 
 /// <summary>

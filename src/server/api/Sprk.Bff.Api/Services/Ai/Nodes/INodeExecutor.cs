@@ -4,7 +4,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
 /// <summary>
 /// Interface for node executors that process specific action types.
-/// Each executor handles one or more ActionTypes and produces NodeOutput.
+/// Each executor handles one or more ExecutorTypes and produces NodeOutput.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -14,16 +14,16 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </para>
 /// <para>
 /// Follows the registry pattern per ADR-010 - executors register with
-/// INodeExecutorRegistry for ActionType-based dispatch.
+/// INodeExecutorRegistry for ExecutorType-based dispatch.
 /// </para>
 /// </remarks>
 public interface INodeExecutor
 {
     /// <summary>
-    /// Gets the ActionTypes this executor can handle.
+    /// Gets the ExecutorTypes this executor can handle.
     /// Most executors handle a single type; some may handle multiple.
     /// </summary>
-    IReadOnlyList<ActionType> SupportedActionTypes { get; }
+    IReadOnlyList<ExecutorType> SupportedActionTypes { get; }
 
     /// <summary>
     /// Executes the node and produces output.
@@ -79,7 +79,7 @@ public enum NodeType
     /// <para>
     /// Backward-compat invariant: existing single-action <see cref="Output"/> nodes are UNCHANGED.
     /// This is a NEW node type; legacy playbooks with <see cref="Output"/> nodes continue to use
-    /// <see cref="ActionType.DeliverOutput"/> and <c>DeliverOutputNodeExecutor</c>.
+    /// <see cref="ExecutorType.DeliverOutput"/> and <c>DeliverOutputNodeExecutor</c>.
     /// </para>
     /// <para>
     /// Per-section SSE streaming (<c>section_started</c> / <c>section_data</c> / <c>section_completed</c>)
@@ -91,10 +91,10 @@ public enum NodeType
 }
 
 /// <summary>
-/// Action types available in the node-based playbook system.
+/// Executor types available in the node-based playbook system.
 /// Maps to sprk_analysisaction.sprk_actiontype choice values.
 /// </summary>
-public enum ActionType
+public enum ExecutorType
 {
     /// <summary>AI analysis using tool handlers (existing pipeline).</summary>
     AiAnalysis = 0,
@@ -153,7 +153,7 @@ public enum ActionType
     /// emits one composite output containing a section map plus destination + widget routing.
     /// Pairs with <see cref="NodeType.DeliverComposite"/> and
     /// <c>DeliverCompositeNodeExecutor</c>. Existing <see cref="DeliverOutput"/> behavior is
-    /// UNCHANGED — this is a separate executor on a separate ActionType.
+    /// UNCHANGED — this is a separate executor on a separate ExecutorType.
     /// </summary>
     DeliverComposite = 42,
 

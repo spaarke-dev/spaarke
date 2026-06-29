@@ -287,7 +287,7 @@ public sealed class InsightsActionRouter : IInsightsActionRouter
             }
 
             // Resolve via IScopeResolverService so we get the canonical AnalysisAction shape
-            // (including ActionType from the expanded sprk_ActionTypeId lookup). This is the
+            // (including ExecutorType from the expanded sprk_ActionTypeId lookup). This is the
             // same path PlaybookOrchestrationService uses for default action resolution,
             // ensuring routed actions and default actions look identical to downstream code.
             var actionId = entity.GetAttributeValue<Guid>("sprk_analysisactionid");

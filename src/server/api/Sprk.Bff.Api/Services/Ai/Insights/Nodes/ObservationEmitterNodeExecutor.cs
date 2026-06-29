@@ -10,7 +10,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 namespace Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 
 /// <summary>
-/// Wave C1 task 020 — node executor for <see cref="ActionType.ObservationEmit"/> (140). Final
+/// Wave C1 task 020 — node executor for <see cref="ExecutorType.ObservationEmit"/> (140). Final
 /// node of the universal-ingest@v1 JPS playbook per design-a5 §4 Node 6. Wraps
 /// <see cref="IObservationEmitter"/> + <see cref="IObservationIndexUpserter"/> +
 /// <see cref="IObservationMirror"/>. Replaced the per-field Observation emission portion of
@@ -89,9 +89,9 @@ public sealed class ObservationEmitterNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.ObservationEmit
+        ExecutorType.ObservationEmit
     };
 
     /// <inheritdoc />

@@ -10,18 +10,18 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 022 — Rename C# enum `ActionType` → `ExecutorType` (full refactor, BFF only) |
+| **Task** | 023 — Rename `INodeExecutor.SupportedActionTypes` → `SupportedExecutorTypes` |
 | **Step** | 0 of N: not-started |
 | **Status** | not-started |
-| **Next Action** | Run `task-execute` for task 022. Wave 2 tasks 020 ✅ (audit) + 021 ✅ (rename strategy plan) COMPLETE. Plan at `notes/spikes/rename-strategy-plan.md` is the binding execution guide: single-PR hybrid Roslyn rename, ~500-530 line est. diff, exclusion list (§3) hand-verified post-rename, conflict-risk window (§9) coordinated via `/conflict-check` immediately before commit. Task 022 is NOT parallel-safe — single large diff intentionally batched. NFR-01 publish-size delta expected 0.00 MB (IL-neutral rename); CVE delta 0 (no new packages). |
+| **Next Action** | Run `task-execute` for task 023. Wave 2 022 ✅ COMPLETE (460 refs renamed across 77 files; build clean 0/19 warnings; AiCompletion + Nodes + orchestration tests green; 3 broader-run failures are pre-existing unrelated flakes confirmed by isolation re-run). 023 + 024 are parallel-safe per WBS group W2-C. Task 023 rename is 36 `SupportedActionTypes` declarations + ~75 test assertions; mechanical replace_all by file. |
 
-### Files Modified This Session (task 021)
+### Files Modified This Session (task 022)
 
-- `projects/spaarke-ai-platform-unification-r7/notes/spikes/rename-strategy-plan.md` — Created — 10-section operational plan: decisions at a glance, hybrid Roslyn rename mechanism, exclusion list (5 categories), 10-step execution sequence, risk register (7 risks), PR sizing (~500-530 lines / 50-80 KB), CI gate strategy, rollback plan, conflict-risk window coordination per `projects/INDEX.md` 2026-06-26 sweep (HIGH-prob conflicts: R6, chat-routing-redesign-r1).
-- `projects/spaarke-ai-platform-unification-r7/tasks/021-plan-rename-strategy-pr-sizing.poml` — Status → completed
-- `projects/spaarke-ai-platform-unification-r7/current-task.md` — Modified — advance to task 022 (after 021 ✅)
-- `projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md` — Modified — mark 021 ✅
-- No source-code changes — task 021 was a planning task per POML rigor: STANDARD.
+- 77 source files renamed `ActionType` → `ExecutorType` (BFF + tests): 38 BFF source + 5 playbook JSON + 34 tests. Excluded as planned: `Models/Ai/Chat/AnalysisChatContextResponse.cs` (InlineActionInfo.ActionType string discriminator), `Api/Ai/R2SseEventEmitter.cs` (WorkspaceActionPayload.ActionType string discriminator), `Services/Ai/Chat/AnalysisChatContextResolver.cs` (XML doc cref to string discriminator). `SupportedActionTypes` property + `GetSupportedActionTypes` method preserved for task 023. Lowercase JSON `"actionType"` property names preserved for Wave 6.
+- `projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md` — task 022 marked ✅.
+- `projects/spaarke-ai-platform-unification-r7/current-task.md` — Modified — advance to task 023.
+- Diff: 77 files, 460 insertions, 460 deletions (IL-neutral pure rename, confirms ADR-029 size-neutrality expectation).
+- Build clean: 0 errors, 19 warnings (1 new pre-existing test warning surfaced after rename-touch — unrelated to rename); AiCompletion 20/20 pass, Nodes 318/319 pass (1 pre-existing skip), key orchestration/chat 104/105 (1 pre-existing skip).
 
 ### Critical Context
 
@@ -33,9 +33,9 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 
 | Field | Value |
 |---|---|
-| **Task ID** | 022 |
-| **Task File** | `tasks/022-rename-actiontype-enum-bff.poml` |
-| **Title** | Rename C# enum `ActionType` → `ExecutorType` (full refactor, BFF only) |
+| **Task ID** | 023 |
+| **Task File** | `tasks/023-rename-supported-action-types.poml` |
+| **Title** | Rename `INodeExecutor.SupportedActionTypes` → `SupportedExecutorTypes` |
 | **Phase / Wave** | Wave 2 — Dispatch refactor + enum rename (FR-07 to FR-10) |
 | **Status** | not-started |
 | **Started** | — |
@@ -61,11 +61,13 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 
 - ✅ **Task 004** (2026-06-28, Wave 1) — LLM call + JsonElement output binding complete. Modified `AiCompletionNodeExecutor.ExecuteAsync()`: (a) signature changed `Task<NodeOutput>` → `async Task<NodeOutput>`, removed all `Task.FromResult` wrappers; (b) replaced task-003 TODO staging block with real `await _openAiClient.GetStructuredCompletionRawAsync(prompt: rendered.PromptText, jsonSchema: BinaryData.FromString(outputSchemaJson), schemaName, model: context.ModelDeploymentId?.ToString(), maxOutputTokens: context.MaxTokens, temperature: effectiveTemperature, ct).ConfigureAwait(false)` invocation; (c) parsed raw JSON via `using var doc = JsonDocument.Parse(rawJson); structuredData = doc.RootElement.Clone();` (single-parse pattern matching AiAnalysisNodeExecutor); (d) bound to NodeOutput via direct object initializer (`new NodeOutput { TextContent = rawJson, StructuredData = structuredData, ... }`) — avoids the `Ok(...)→SerializeToElement` round-trip; (e) added specific `JsonException` catch returning `NodeErrorCodes.InternalError` with literal message "AI completion returned malformed JSON" (matches user-provided UI contract); (f) outer `Exception` catch covers HTTP/circuit-breaker/other; `OperationCanceledException` catch covers both caller-cancel and SDK-internal propagation; (g) privacy-safe telemetry per ADR-015 — LogInformation success (NodeId, ActionId, RawJsonLength, DurationMs), LogError on JsonException + outer Exception (ExceptionType, lengths, IDs only — NEVER prompt or response body); (h) activity tags: `node.outcome` (success/malformed_json/cancelled/error), `response.raw_json_length`, status Ok/Error. File header + class XML remarks updated from "SCAFFOLD STATUS" to "IMPLEMENTATION (Wave 1 task 004 complete)". Build clean (0 errors, 18 pre-existing warnings, 0 new). `/code-review` + `/adr-check` both PASS: 0 critical, 0 warnings, 1 cosmetic suggestion applied (`rawJson?.Length ?? 0` → `rawJson.Length` since rawJson is non-null at that point). ADR compliance: ADR-010 (no new deps), ADR-013 (executor IS the AI internals boundary — direct IOpenAiClient permitted; no facade needed), ADR-015 (privacy logging verified), ADR-029 (no new packages, sub-KB IL delta), ADR-038 (no new tests in this task; mocking surface = IOpenAiClient interface). Per POML — per-task publish-size SKIPPED (deferred to Wave 1 task 010). **AiCompletionNodeExecutor is now end-to-end functional** (Validate + Execute both complete); pending only DI registration (task 006) + xUnit tests (tasks 007-009) + publish/CVE check (task 010).
 
+- ✅ **Task 022** (2026-06-28, Wave 2) — The big rename: `ActionType` → `ExecutorType` across BFF + tests, FR-10. 77 files modified, **460 word-boundary renames** (38 BFF source + 5 playbook JSON + 34 test files). Hybrid approach: surgical Edits on enum file + INodeExecutorRegistry.cs (to handle exclusions), then PowerShell `[regex]::Replace` with negative lookbehind `(?<!Supported)(?<!\$comment-)\bActionType\b(?!s)` across remaining 75 files. Excluded as planned per task 021 §3: `Models/Ai/Chat/AnalysisChatContextResponse.cs` (3 refs — InlineActionInfo.ActionType string discriminator), `Api/Ai/R2SseEventEmitter.cs` (1 ref — WorkspaceActionPayload.ActionType string discriminator), `Services/Ai/Chat/AnalysisChatContextResolver.cs` (1 ref — XML doc cref to string discriminator). False-positive over-rename caught + reverted: 10 `action.ExecutorType` accessor renames in `AnalysisChatContextResolverTests.cs` (6) + `AnalysisChatContextEndpointsTests.cs` (4) — both files exclusively test `InlineActionInfo.ActionType` (string discriminator). Preserved per task 023 territory: 36 `SupportedActionTypes` property declarations across 32 files + 2 `GetSupportedActionTypes()` method names. Preserved per Wave 6 territory: lowercase JSON `"actionType"` property names + `$comment-actionType` doc keys. Diff is **IL-neutral** (460 insertions / 460 deletions confirms pure rename). Build clean: 0 errors, 19 warnings (same as baseline; one warning in `MemoryCompositionServiceTests.cs:215` is pre-existing and unrelated). Test verification: AiCompletion 20/20 pass, Nodes 318/319 pass (1 pre-existing skip), key orchestration/chat 104/105 pass (1 pre-existing skip). 3 broader-run failures in `AnalysisToolDtoTests.MapJsonSchema_SemanticInvalid_PropertiesValueIsNumber_ReturnsNull`, `KnowledgeDeploymentConfigTests.KnowledgeDeploymentConfig_DefaultValues_AreCorrect`, `SessionFilesCleanupJobTests.RunScheduledScanAsync_Evicts_Only_Orphans_Not_In_Active_Set` are pre-existing flakes confirmed unrelated to rename (AnalysisToolDtoTests passes in isolation; KnowledgeDeploymentConfig + SessionFilesCleanup pre-existing baseline per Wave 1 task 010 notes). Quality gates (Step 9.5 FULL rigor): code-review on sample (INodeExecutor.cs, PlaybookOrchestrationService.cs, NodeExecutorRegistry.cs) PASS — pure rename, no semantic change, log structured-properties updated cleanly; adr-check PASS — ADR-010 (no new abstractions), ADR-013 (IInvokePlaybookAi triangle unchanged), ADR-029 (IL-neutral), ADR-038 (no tests added/removed). Per POML — per-task publish-size SKIPPED (deferred to Wave 2 task 029). Out-of-scope surfaces (PCF/code-pages/dataverse/scripts/docs/.claude) confirmed untouched via `git diff --name-only`. The Wave 2 enum rename is COMPLETE; ready for tasks 023 + 024 (parallel group W2-C).
+
 ### Current Step
 
 **Step 0**: not yet started
 
-Run `task-execute` for task 022 (mechanical Roslyn rename per `notes/spikes/rename-strategy-plan.md` §4 step-by-step). Wave 1 ✅ COMPLETE (10/10). Wave 2 progress: 020 ✅ + 021 ✅ — remaining 022-029. Task 022 is a SINGLE LARGE DIFF (not parallel-safe per POML); 023 + 024-028 parallel-safe after 022 merges. Critical pre-commit step: invoke `/conflict-check` per plan §9 (HIGH-prob siblings: R6, chat-routing-redesign-r1).
+Run `task-execute` for task 023 (rename `SupportedActionTypes` → `SupportedExecutorTypes` across 36 prod + ~75 test refs). Wave 2 status: 020 ✅ + 021 ✅ + 022 ✅ — remaining 023, 024 (parallel group W2-C), then 025-028 (parallel group W2-D), then 029 (publish gate). Task 023 mechanically renames the property+method name; ADR-038-compliant (no new tests, pure rename).
 
 ---
 

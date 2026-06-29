@@ -21,7 +21,7 @@ public sealed class DeclineToFindNodeTests
     public void SupportedActionTypes_ContainsDeclineToFind()
     {
         CreateNode().SupportedActionTypes.Should()
-            .ContainSingle().Which.Should().Be(ActionType.DeclineToFind);
+            .ContainSingle().Which.Should().Be(ExecutorType.DeclineToFind);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public sealed class DeclineToFindNodeTests
         }
         """;
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.DeclineToFind,
+            ExecutorType.DeclineToFind,
             config,
             previousOutputs: new Dictionary<string, NodeOutput> { ["checkSufficiency"] = upstream });
 
@@ -79,7 +79,7 @@ public sealed class DeclineToFindNodeTests
     {
         var node = CreateNode();
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.DeclineToFind,
+            ExecutorType.DeclineToFind,
             """{ "reason": "insufficient-evidence" }""");
 
         var result = await node.ExecuteAsync(context, CancellationToken.None);
@@ -93,7 +93,7 @@ public sealed class DeclineToFindNodeTests
     {
         // Tolerant degradation: missing upstream should NOT throw — emits generic decline.
         var config = """{ "from": "missingUpstream" }""";
-        var context = InsightsNodeTestHelpers.CreateContext(ActionType.DeclineToFind, config);
+        var context = InsightsNodeTestHelpers.CreateContext(ExecutorType.DeclineToFind, config);
 
         var result = await CreateNode().ExecuteAsync(context, CancellationToken.None);
 

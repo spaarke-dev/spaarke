@@ -1,5 +1,5 @@
 // R4 spaarke-daily-update-service-r4 — Post-LLM Entity-Name Validator (task 003 / FR-3)
-// Implements ActionType.EntityNameValidator = 141 (added by task 002).
+// Implements ExecutorType.EntityNameValidator = 141 (added by task 002).
 //
 // Purpose (defense-in-depth post-LLM scrubbing, per FR-3 / AC-3a / AC-3b):
 //   R3 UAT verified the LLM emits fictional firm/case names (e.g., "Johnson & Lee LLP",
@@ -58,7 +58,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Implements <see cref="INodeExecutor"/> for <see cref="ActionType.EntityNameValidator"/>
+/// Implements <see cref="INodeExecutor"/> for <see cref="ExecutorType.EntityNameValidator"/>
 /// (value 141, added by task 002). Registered as a Singleton in
 /// <c>AnalysisServicesModule.AddNodeExecutors</c> alongside the other executors (no
 /// scope-factory needed — pure string analysis, no external deps beyond ILogger).
@@ -114,9 +114,9 @@ public sealed class EntityNameValidatorNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.EntityNameValidator
+        ExecutorType.EntityNameValidator
     };
 
     /// <inheritdoc />
@@ -181,7 +181,7 @@ public sealed class EntityNameValidatorNodeExecutor : INodeExecutor
             "ai.entity_name_validator.node_execute", ActivityKind.Internal);
         activity?.SetTag("node.id", context.Node.Id.ToString());
         activity?.SetTag("node.name", context.Node.Name);
-        activity?.SetTag("action_type", (int)ActionType.EntityNameValidator);
+        activity?.SetTag("action_type", (int)ExecutorType.EntityNameValidator);
 
         _logger.LogDebug(
             "Executing EntityNameValidator node {NodeId} ({NodeName})",

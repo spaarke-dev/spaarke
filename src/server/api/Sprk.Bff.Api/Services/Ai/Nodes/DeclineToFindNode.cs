@@ -58,9 +58,9 @@ public sealed class DeclineToFindNode : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.DeclineToFind
+        ExecutorType.DeclineToFind
     };
 
     /// <inheritdoc />

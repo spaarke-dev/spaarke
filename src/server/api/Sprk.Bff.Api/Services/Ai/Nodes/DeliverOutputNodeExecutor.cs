@@ -43,9 +43,9 @@ public sealed class DeliverOutputNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.DeliverOutput
+        ExecutorType.DeliverOutput
     };
 
     /// <inheritdoc />

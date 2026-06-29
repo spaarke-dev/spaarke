@@ -67,7 +67,7 @@ public class AiCompletionNodeExecutorTests
     public void SupportedActionTypes_ContainsAiCompletion()
     {
         // Assert — declared SupportedActionTypes binds NodeExecutorRegistry dispatch.
-        _sut.SupportedActionTypes.Should().Contain(ActionType.AiCompletion);
+        _sut.SupportedActionTypes.Should().Contain(ExecutorType.AiCompletion);
         _sut.SupportedActionTypes.Should().HaveCount(1);
     }
 
@@ -208,7 +208,7 @@ public class AiCompletionNodeExecutorTests
     public async Task ExecuteAsync_EmitsTelemetry_WithActionTypeTag()
     {
         // Arrange — verify the activity emitted by AiTelemetry.ActivitySource carries
-        // the action_type tag = (int)ActionType.AiCompletion so OTEL backends can
+        // the action_type tag = (int)ExecutorType.AiCompletion so OTEL backends can
         // group all completion calls regardless of node ID.
         SetupOpenAiClient(rawJson: """{"summary":"ok"}""");
 
@@ -238,8 +238,8 @@ public class AiCompletionNodeExecutorTests
         result.Success.Should().BeTrue();
         capturedActivity.Should().NotBeNull("AiTelemetry activity must start for every node execution");
         var actionTypeTag = capturedActivity!.GetTagItem("action_type");
-        actionTypeTag.Should().Be((int)ActionType.AiCompletion,
-            "telemetry tag action_type must equal (int)ActionType.AiCompletion for OTEL grouping");
+        actionTypeTag.Should().Be((int)ExecutorType.AiCompletion,
+            "telemetry tag action_type must equal (int)ExecutorType.AiCompletion for OTEL grouping");
     }
 
     [Fact]
@@ -646,7 +646,7 @@ public class AiCompletionNodeExecutorTests
                 OutputSchemaJson = outputSchemaJson,
                 Temperature = temperature
             },
-            ActionType = ActionType.AiCompletion,
+            ExecutorType = ExecutorType.AiCompletion,
             Scopes = new ResolvedScopes([], [], []),
             Document = null,
             TenantId = "test-tenant",

@@ -600,7 +600,7 @@ public record AnalysisAction
     /// Action type for executor routing.
     /// Maps to sprk_analysisaction.sprk_actiontype choice value.
     /// </summary>
-    public Sprk.Bff.Api.Services.Ai.Nodes.ActionType ActionType { get; init; } = Sprk.Bff.Api.Services.Ai.Nodes.ActionType.AiAnalysis;
+    public Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType ExecutorType { get; init; } = Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType.AiAnalysis;
 
     // Ownership properties
     /// <summary>

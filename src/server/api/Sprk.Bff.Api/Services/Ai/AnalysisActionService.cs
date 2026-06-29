@@ -58,17 +58,17 @@ public class AnalysisActionService : DataverseHttpServiceBase
 
         var sortOrder = ExtractSortOrderFromTypeName(entity.ActionTypeId?.Name);
 
-        // ActionType dispatch — single source of truth is the lookup target (sprk_analysisactiontype)
+        // ExecutorType dispatch — single source of truth is the lookup target (sprk_analysisactiontype)
         // via the sprk_executoractiontype field. See Insights Engine r2 decisions/D-01 +
         // notes/handoffs/wave-b1-investigation-notes.md for the empirical reasoning. The
         // legacy sprk_actiontype int field on sprk_analysisaction is absent on the entity
         // (Q1 empirically confirmed 2026-06-02) — ActionTypeValue is kept as a safety
         // fallback but is expected to always be null in practice.
         var actionType = entity.ActionTypeId?.ExecutorActionType.HasValue == true
-            ? (Nodes.ActionType)entity.ActionTypeId.ExecutorActionType.Value
+            ? (Nodes.ExecutorType)entity.ActionTypeId.ExecutorActionType.Value
             : entity.ActionTypeValue.HasValue
-                ? (Nodes.ActionType)entity.ActionTypeValue.Value
-                : Nodes.ActionType.AiAnalysis;
+                ? (Nodes.ExecutorType)entity.ActionTypeValue.Value
+                : Nodes.ExecutorType.AiAnalysis;
 
         var action = new AnalysisAction
         {
@@ -77,7 +77,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
             Description = entity.Description,
             SystemPrompt = entity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
             SortOrder = sortOrder,
-            ActionType = actionType,
+            ExecutorType = actionType,
             OwnerType = ScopeOwnerType.System,
             IsImmutable = false,
             // Wave B-G9c1 (B6): per-action temperature override. Null = deterministic 0.0
@@ -219,7 +219,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
             Description = entity.Description ?? request.Description,
             SystemPrompt = entity.SystemPrompt ?? request.SystemPrompt,
             SortOrder = sortOrder,
-            ActionType = request.ActionType,
+            ExecutorType = request.ExecutorType,
             OwnerType = ScopeOwnerType.Customer,
             IsImmutable = false,
             // Wave B-G9c1 (B6): per-action temperature override. Reflects server-side value
@@ -339,7 +339,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
             Description = source.Description,
             SystemPrompt = source.SystemPrompt,
             SortOrder = source.SortOrder,
-            ActionType = source.ActionType
+            ExecutorType = source.ExecutorType
         };
 
         var copy = await CreateActionAsync(createRequest, cancellationToken);
@@ -372,7 +372,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
             Description = parent.Description,
             SystemPrompt = parent.SystemPrompt,
             SortOrder = parent.SortOrder,
-            ActionType = parent.ActionType
+            ExecutorType = parent.ExecutorType
         };
 
         var child = await CreateActionAsync(createRequest, cancellationToken);
@@ -447,11 +447,11 @@ public class AnalysisActionService : DataverseHttpServiceBase
         public string? Name { get; set; }
 
         /// <summary>
-        /// Dispatch ActionType integer. Single source of truth for which INodeExecutor handles
+        /// Dispatch ExecutorType integer. Single source of truth for which INodeExecutor handles
         /// actions of this type. Per Insights Engine r2 D-01 + owner direction 2026-06-02:
         /// lookup target is canonical (not a duplicated int field on sprk_analysisaction).
         /// Backfilled = 0 (AiAnalysis) for existing 11 lookup rows; set to 70/80/90/100/110/120
-        /// for the 6 Insights ActionType lookup rows. Field is being made required (NOT NULL)
+        /// for the 6 Insights ExecutorType lookup rows. Field is being made required (NOT NULL)
         /// post-backfill.
         /// </summary>
         [JsonPropertyName("sprk_executoractiontype")]

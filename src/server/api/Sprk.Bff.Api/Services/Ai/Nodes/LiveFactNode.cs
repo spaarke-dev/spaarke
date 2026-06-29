@@ -75,9 +75,9 @@ public sealed class LiveFactNode : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.LiveFact
+        ExecutorType.LiveFact
     };
 
     /// <inheritdoc />

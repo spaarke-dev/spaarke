@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
 /// <summary>
 /// Node executor that routes playbook nodes to the Azure AI Foundry Agent Service.
-/// Implements <see cref="INodeExecutor"/> for <see cref="ActionType.AgentService"/> (value 60).
+/// Implements <see cref="INodeExecutor"/> for <see cref="ExecutorType.AgentService"/> (value 60).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -54,9 +54,9 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.AgentService
+        ExecutorType.AgentService
     };
 
     /// <inheritdoc />
@@ -110,7 +110,7 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
             "ai.agent.node_execute", ActivityKind.Internal);
         activity?.SetTag("node.id", context.Node.Id.ToString());
         activity?.SetTag("node.name", context.Node.Name);
-        activity?.SetTag("action_type", 60); // ActionType.AgentService = 60
+        activity?.SetTag("action_type", 60); // ExecutorType.AgentService = 60
 
         _logger.LogDebug(
             "Executing AgentService node {NodeId} ({NodeName})",

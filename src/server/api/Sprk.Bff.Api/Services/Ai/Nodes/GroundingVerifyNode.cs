@@ -59,9 +59,9 @@ public sealed class GroundingVerifyNode : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.GroundingVerify
+        ExecutorType.GroundingVerify
     };
 
     /// <inheritdoc />

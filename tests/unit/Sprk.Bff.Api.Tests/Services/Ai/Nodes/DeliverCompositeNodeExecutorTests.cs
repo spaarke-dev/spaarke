@@ -17,11 +17,11 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Nodes;
 /// <remarks>
 /// Backward-compat invariant: existing single-action <see cref="NodeType.Output"/> nodes are
 /// dispatched to <see cref="DeliverOutputNodeExecutor"/> via
-/// <see cref="ActionType.DeliverOutput"/> — UNCHANGED. The
+/// <see cref="ExecutorType.DeliverOutput"/> — UNCHANGED. The
 /// <see cref="DeliverOutputNodeExecutorTests"/> test class covers that path; this test class
 /// covers only the NEW composite path. The invariant test
 /// <see cref="ExistingSingleActionOutputNode_BackwardCompat_DeliverCompositeExecutorDoesNotHandleDeliverOutput"/>
-/// asserts that this executor refuses to handle the legacy ActionType.
+/// asserts that this executor refuses to handle the legacy ExecutorType.
 /// </remarks>
 public class DeliverCompositeNodeExecutorTests
 {
@@ -40,12 +40,12 @@ public class DeliverCompositeNodeExecutorTests
     public void SupportedActionTypes_ContainsOnlyDeliverComposite()
     {
         _executor.SupportedActionTypes.Should().ContainSingle();
-        _executor.SupportedActionTypes.Should().Contain(ActionType.DeliverComposite);
+        _executor.SupportedActionTypes.Should().Contain(ExecutorType.DeliverComposite);
     }
 
     /// <summary>
     /// Backward-compat invariant (FR-52): the composite executor MUST NOT register for
-    /// <see cref="ActionType.DeliverOutput"/> — that path stays owned by
+    /// <see cref="ExecutorType.DeliverOutput"/> — that path stays owned by
     /// <see cref="DeliverOutputNodeExecutor"/>. If this assertion ever fires, the asymmetric
     /// dispatch in <c>PlaybookOrchestrationService</c> (NodeType.Output → DeliverOutput vs
     /// NodeType.DeliverComposite → DeliverComposite) would silently collide.
@@ -53,7 +53,7 @@ public class DeliverCompositeNodeExecutorTests
     [Fact]
     public void ExistingSingleActionOutputNode_BackwardCompat_DeliverCompositeExecutorDoesNotHandleDeliverOutput()
     {
-        _executor.SupportedActionTypes.Should().NotContain(ActionType.DeliverOutput,
+        _executor.SupportedActionTypes.Should().NotContain(ExecutorType.DeliverOutput,
             "FR-52 backward-compat invariant — legacy single-action Output Node dispatch is " +
             "owned by DeliverOutputNodeExecutor; composite executor MUST NOT collide");
     }
@@ -416,9 +416,9 @@ public class DeliverCompositeNodeExecutorTests
             {
                 Id = Guid.Empty,
                 Name = "Composite Output",
-                ActionType = ActionType.DeliverComposite
+                ExecutorType = ExecutorType.DeliverComposite
             },
-            ActionType = ActionType.DeliverComposite,
+            ExecutorType = ExecutorType.DeliverComposite,
             Scopes = new ResolvedScopes([], [], []),
             TenantId = "test-tenant",
             PreviousOutputs = previousOutputs ?? new Dictionary<string, NodeOutput>()

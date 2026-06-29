@@ -1,5 +1,5 @@
 // R3 Part 1 — User-Record Membership Resolution (node executor)
-// Task 041 (2026-06-21): Implements ActionType.LookupUserMembership = 52
+// Task 041 (2026-06-21): Implements ExecutorType.LookupUserMembership = 52
 // (added in task 040). Calls IMembershipResolverService IN-PROCESS per FR-1B.1
 // (NOT an HTTP round-trip to /api/users/me/memberships/{entityType}) and binds
 // the resolved IDs to the node's OutputVariable for downstream consumption
@@ -55,7 +55,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Implements <see cref="INodeExecutor"/> for <see cref="ActionType.LookupUserMembership"/>
+/// Implements <see cref="INodeExecutor"/> for <see cref="ExecutorType.LookupUserMembership"/>
 /// (value 52, added by task 040). Registered as a Singleton in
 /// <c>AnalysisServicesModule.AddNodeExecutors</c> alongside the other executors.
 /// </para>
@@ -90,9 +90,9 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
     {
-        ActionType.LookupUserMembership
+        ExecutorType.LookupUserMembership
     };
 
     /// <inheritdoc />
@@ -151,7 +151,7 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
             "ai.lookup_user_membership.node_execute", ActivityKind.Internal);
         activity?.SetTag("node.id", context.Node.Id.ToString());
         activity?.SetTag("node.name", context.Node.Name);
-        activity?.SetTag("action_type", (int)ActionType.LookupUserMembership);
+        activity?.SetTag("action_type", (int)ExecutorType.LookupUserMembership);
 
         _logger.LogDebug(
             "Executing LookupUserMembership node {NodeId} ({NodeName})",

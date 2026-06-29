@@ -301,7 +301,7 @@ public class PlaybookRunContext
         PlaybookNodeDto node,
         AnalysisAction action,
         ResolvedScopes scopes,
-        Nodes.ActionType actionType)
+        Nodes.ExecutorType actionType)
     {
         return new NodeExecutionContext
         {
@@ -309,7 +309,7 @@ public class PlaybookRunContext
             PlaybookId = PlaybookId,
             Node = node,
             Action = action,
-            ActionType = actionType,
+            ExecutorType = actionType,
             Scopes = scopes,
             Document = Document,
             PreviousOutputs = NodeOutputs,

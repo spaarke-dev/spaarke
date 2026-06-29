@@ -33,7 +33,7 @@ public sealed class IndexRetrieveNodeTests
     public void SupportedActionTypes_ContainsIndexRetrieve()
     {
         CreateNode().SupportedActionTypes.Should()
-            .ContainSingle().Which.Should().Be(ActionType.IndexRetrieve);
+            .ContainSingle().Which.Should().Be(ExecutorType.IndexRetrieve);
     }
 
     [Fact]
@@ -41,7 +41,7 @@ public sealed class IndexRetrieveNodeTests
     {
         var node = CreateNode();
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.IndexRetrieve,
+            ExecutorType.IndexRetrieve,
             """{ "indexName": "spaarke-insights-index" }""");
 
         var result = node.Validate(context);
@@ -57,7 +57,7 @@ public sealed class IndexRetrieveNodeTests
     {
         var node = CreateNode();
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.IndexRetrieve,
+            ExecutorType.IndexRetrieve,
             """{ "artifactType": "observation" }""");
 
         var result = node.Validate(context);
@@ -70,7 +70,7 @@ public sealed class IndexRetrieveNodeTests
     {
         var node = CreateNode();
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.IndexRetrieve,
+            ExecutorType.IndexRetrieve,
             """{ "predicate": "outcomeCategory" }""");
 
         var result = node.Validate(context);
@@ -83,7 +83,7 @@ public sealed class IndexRetrieveNodeTests
     {
         var node = CreateNode();
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.IndexRetrieve,
+            ExecutorType.IndexRetrieve,
             """{ "vectorQuery": "predict cost for IP-licensing matter" }""");
 
         var result = node.Validate(context);
@@ -95,7 +95,7 @@ public sealed class IndexRetrieveNodeTests
     public void Validate_MissingConfig_ReturnsFailureWithGuidance()
     {
         var node = CreateNode();
-        var context = InsightsNodeTestHelpers.CreateContext(ActionType.IndexRetrieve, configJson: null);
+        var context = InsightsNodeTestHelpers.CreateContext(ExecutorType.IndexRetrieve, configJson: null);
 
         var result = node.Validate(context);
 
@@ -107,7 +107,7 @@ public sealed class IndexRetrieveNodeTests
     public async Task ExecuteAsync_ValidationFails_ReturnsValidationFailedError()
     {
         var node = CreateNode();
-        var context = InsightsNodeTestHelpers.CreateContext(ActionType.IndexRetrieve, "{}");
+        var context = InsightsNodeTestHelpers.CreateContext(ExecutorType.IndexRetrieve, "{}");
 
         var result = await node.ExecuteAsync(context, CancellationToken.None);
 

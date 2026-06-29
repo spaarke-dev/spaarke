@@ -155,7 +155,7 @@ public class PlaybookOrchestrationServiceTests
             .ReturnsAsync(NodeOutput.Ok(node.Id, node.OutputVariable, new { result = "test" }));
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -283,7 +283,7 @@ public class PlaybookOrchestrationServiceTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -335,7 +335,7 @@ public class PlaybookOrchestrationServiceTests
                 NodeOutput.Error(ctx.Node.Id, ctx.Node.OutputVariable, "Execution failed"));
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -418,7 +418,7 @@ public class PlaybookOrchestrationServiceTests
             .Returns(NodeValidationResult.Failure("Missing required field"));
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -457,7 +457,7 @@ public class PlaybookOrchestrationServiceTests
 
         // No executor registered
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns((INodeExecutor?)null);
 
         // Act
@@ -531,7 +531,7 @@ public class PlaybookOrchestrationServiceTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -600,7 +600,7 @@ public class PlaybookOrchestrationServiceTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -672,7 +672,7 @@ public class PlaybookOrchestrationServiceTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -730,7 +730,7 @@ public class PlaybookOrchestrationServiceTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -1132,7 +1132,7 @@ public class PlaybookOrchestrationServiceTests
             .ReturnsAsync(NodeOutput.Ok(node.Id, node.OutputVariable, new { result = "test" }, "Test output", 0.95));
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Execute to create a run
@@ -1202,7 +1202,7 @@ public class PlaybookOrchestrationServiceTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Execute to create a run
@@ -1333,7 +1333,7 @@ public class PlaybookOrchestrationServiceTests
             .ReturnsAsync(leakedOutput);
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -1407,7 +1407,7 @@ public class PlaybookOrchestrationServiceTests
             .ReturnsAsync(cleanOutput);
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -1472,7 +1472,7 @@ public class PlaybookOrchestrationServiceTests
             .ReturnsAsync(leakedOutput);
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act

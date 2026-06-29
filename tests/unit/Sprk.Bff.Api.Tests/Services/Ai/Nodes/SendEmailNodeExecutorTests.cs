@@ -42,7 +42,7 @@ public class SendEmailNodeExecutorTests
     public void SupportedActionTypes_ContainsSendEmail()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ActionType.SendEmail);
+        _executor.SupportedActionTypes.Should().Contain(ExecutorType.SendEmail);
         _executor.SupportedActionTypes.Should().HaveCount(1);
     }
 
@@ -289,7 +289,7 @@ public class SendEmailNodeExecutorTests
                 Id = actionId,
                 Name = "Send Email"
             },
-            ActionType = ActionType.SendEmail,
+            ExecutorType = ExecutorType.SendEmail,
             Scopes = new ResolvedScopes([], [], []),
             TenantId = "test-tenant"
         };

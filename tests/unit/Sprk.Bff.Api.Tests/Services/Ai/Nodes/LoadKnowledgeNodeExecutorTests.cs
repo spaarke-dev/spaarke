@@ -46,7 +46,7 @@ public class LoadKnowledgeNodeExecutorTests
     [Fact]
     public void SupportedActionTypes_ContainsLoadKnowledge()
     {
-        _executor.SupportedActionTypes.Should().Contain(ActionType.LoadKnowledge);
+        _executor.SupportedActionTypes.Should().Contain(ExecutorType.LoadKnowledge);
         _executor.SupportedActionTypes.Should().HaveCount(1);
     }
 
@@ -353,9 +353,9 @@ public class LoadKnowledgeNodeExecutorTests
             {
                 Id = Guid.Empty,
                 Name = "LoadKnowledge",
-                ActionType = ActionType.LoadKnowledge
+                ExecutorType = ExecutorType.LoadKnowledge
             },
-            ActionType = ActionType.LoadKnowledge,
+            ExecutorType = ExecutorType.LoadKnowledge,
             Scopes = new ResolvedScopes([], [], []),
             PreviousOutputs = previousOutputs ?? new Dictionary<string, NodeOutput>(),
             Parameters = new Dictionary<string, string>(),

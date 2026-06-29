@@ -120,7 +120,7 @@ public class ActionCodeNormalizerTests
         Id = Guid.NewGuid(),
         Name = "Layer 2 Extract (Generic)",
         SystemPrompt = "generic-outcome-extraction",
-        ActionType = ActionType.AiAnalysis
+        ExecutorType = ExecutorType.AiAnalysis
     };
 
     private static AnalysisAction MakePerPairAction() => new()
@@ -128,7 +128,7 @@ public class ActionCodeNormalizerTests
         Id = PerPairActionId,
         Name = "Layer 2 Extract (CTRNS x Closing)",
         SystemPrompt = "ctrns-closing-extraction",
-        ActionType = ActionType.AiAnalysis
+        ExecutorType = ExecutorType.AiAnalysis
     };
 
     /// <summary>

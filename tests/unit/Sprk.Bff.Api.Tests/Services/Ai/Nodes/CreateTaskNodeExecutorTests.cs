@@ -53,7 +53,7 @@ public class CreateTaskNodeExecutorTests
     public void SupportedActionTypes_ContainsCreateTask()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ActionType.CreateTask);
+        _executor.SupportedActionTypes.Should().Contain(ExecutorType.CreateTask);
         _executor.SupportedActionTypes.Should().HaveCount(1);
     }
 
@@ -305,7 +305,7 @@ public class CreateTaskNodeExecutorTests
                 Id = actionId,
                 Name = "Create Task"
             },
-            ActionType = ActionType.CreateTask,
+            ExecutorType = ExecutorType.CreateTask,
             Scopes = new ResolvedScopes([], [], []),
             TenantId = "test-tenant"
         };
