@@ -10,10 +10,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 028 — Update AnalysisActionService Action read path (FR-07) ✅ COMPLETE |
-| **Step** | 11 of 11: committed |
-| **Status** | completed |
-| **Next Action** | Wave 2 task 029 (BFF publish + size + CVE close) is the remaining Wave 2 task once 026 + 027 land. Tasks 025, 026, 027, 028 marked ✅ in TASK-INDEX (W2-D parallel group). Task 028: AnalysisActionService GetActionAsync + ListActionsAsync no longer $expand=sprk_ActionTypeId; dispatch-derived ExecutorType projection removed (replaced with deterministic AiAnalysis default + TODO citing Wave 4 task 046); SortOrder lookup-derivation removed (defaults to 0 in read paths, honors request.SortOrder in CreateActionAsync); ExtractSortOrderFromTypeName helper + ActionEntity.ActionTypeValue + ActionTypeId + ActionTypeReference all marked dead-code via TODO citing Wave 4 task 046 (deferred deletion per POML "leave field drop to Wave 4"). Tests: targeted Orchestration 60/63 pass (3 pre-existing skips); broader ScopeManagement/AnalysisAction/PlaybookExecution/Builder filter 346/346 pass. Build clean: 0 errors, 19 pre-existing warnings (= baseline). Diff: 1 file, +64/−50, net +14 LOC (TODO comment blocks). Quality gates Step 9.5 PASS: code-review (Quality Improved — 3-branch dispatch ladder removed, complexity −3), 0 critical, 0 warnings, 0 AI smells; adr-check 4/0/0 (ADR-010, ADR-013, ADR-029, ADR-038). Per POML — per-task publish-size SKIPPED (Wave 2 task 029 owns). |
+| **Task** | 041 — Migrate non-chat callers to PlaybookOrchestrationService.ExecuteAsync (FR-11) — parallel-with 029/031/090 |
+| **Step** | Step 8 — implementing migration |
+| **Status** | in-progress |
+| **Next Action** | Refactor AnalysisEndpoints.cs:261 ExecuteAnalysis to inject IPlaybookOrchestrationService + bridge PlaybookStreamEvent→AnalysisStreamChunk. Update MockAnalysisOrchestrationService mock in integration tests. Mark ExecuteAnalysisAsync method with TODO for task 042. Per audit (notes/spikes/executeanalysisasync-caller-audit.md): ONLY 1 production caller; Wave 9 NOT a prereq; SSE chunk-shape adapter required per R-040-1. Files for task 041: AnalysisEndpoints.cs + AnalysisOrchestrationService.cs (TODO) + AnalysisEndpointsIntegrationTests.cs (mock rewrite). Coordinated with 029/031/090 in parallel (different files). |
 
 ### Files Modified This Session (task 022)
 
@@ -33,12 +33,21 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 
 | Field | Value |
 |---|---|
-| **Task ID** | 028 |
-| **Task File** | `tasks/028-update-analysisactionservice-readpath.poml` |
-| **Title** | Update AnalysisActionService Action read path (FR-07) |
-| **Phase / Wave** | Wave 2 — Dispatch refactor + enum rename (FR-07 to FR-10) |
+| **Task ID** | 031 ✅ COMPLETE |
+| **Task File** | `tasks/031-add-getconfigschema-to-interface.poml` |
+| **Title** | Add GetConfigSchema() to INodeExecutor interface |
+| **Phase / Wave** | Wave 3 — Typed config schemas (FR-16) |
 | **Status** | completed |
 | **Started** | 2026-06-28 |
+| **Completed** | 2026-06-28 |
+
+### Rigor & Knowledge
+
+- **Rigor Level**: FULL (tags `bff-api`, `code-impl`; modifies `.cs`; modifies core interface)
+- **Knowledge files loaded**: `notes/spikes/getconfigschema-design.md` (task 030 design, authoritative DTO shape) · `INodeExecutor.cs` (current interface — clean post-Wave-2 rename) · `EntityNameValidatorNodeExecutor.cs` (reference impl style) · `.claude/constraints/bff-extensions.md` (pre-merge checklist) · project CLAUDE.md · task POML
+- **Strategy**: Option A — default interface method returning `ExecutorConfigSchema.Empty(...)`. Confirmed no `Mock<INodeExecutor>` or test-only impl exists (zero `Grep` hits), so default-impl change is purely additive — all 25 concrete `INodeExecutor` impls compile unchanged.
+- **DTO shape**: per task 030 §2 — `ExecutorConfigSchema(ExecutorTypeName, ExecutorTypeValue, Description, Fields)` + `ConfigSchemaField(Name, Type, Required, Description, Default, EnumValues)` + `SchemaFieldType` enum (String/Number/Boolean/Object/Array/Enum). `ExecutorConfigSchema.Empty(ExecutorType, description)` factory replaces the static `Empty` field (need `ExecutorType` context).
+- **Default impl note**: design §1 says "MUST be safe to invoke at any time after construction" and design §4 says placeholders return `Empty(executorType, ...)` — but the default interface method has no `this.SupportedExecutorTypes[0]` early-access guarantee. Strategy: default returns an `Empty` schema using `SupportedExecutorTypes[0]` for `ExecutorType` (every executor has at least one in `SupportedExecutorTypes`); description = `"Default schema for {GetType().Name} (placeholder — task 032 implements real schema)."`. Throws nothing — Range exception impossible because every impl already declares ≥1 supported type.
 
 ---
 

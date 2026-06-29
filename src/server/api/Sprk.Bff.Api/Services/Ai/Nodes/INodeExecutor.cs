@@ -42,6 +42,37 @@ public interface INodeExecutor
     /// <param name="context">Execution context to validate.</param>
     /// <returns>Validation result with success/failure and any error messages.</returns>
     NodeValidationResult Validate(NodeExecutionContext context);
+
+    /// <summary>
+    /// Returns the typed configuration schema this executor reads from
+    /// <see cref="Sprk.Bff.Api.Models.Ai.PlaybookNodeDto.ConfigJson"/>. Used by the Playbook
+    /// Builder canvas (Wave 8 FR-23) to render typed forms instead of free-text JSON editing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Per R7 FR-16 / Invariant 5. Implementations MUST be pure + deterministic (same return
+    /// every call) and safe to invoke at any time after construction (no DI dependencies
+    /// consulted, no I/O). Implementations typically cache the schema in a
+    /// <c>private static readonly</c> field built once.
+    /// </para>
+    /// <para>
+    /// <b>Default implementation</b>: returns an empty placeholder schema keyed on the
+    /// executor's first <see cref="SupportedExecutorTypes"/> entry. This lets task 031 add
+    /// the interface seam without breaking the build across all existing executors; task 032
+    /// overrides this default on every executor (rich schemas for the 5 priority executors —
+    /// AiCompletion, AiAnalysis, AiEmbedding, EntityNameValidator, DeliverComposite — and
+    /// non-default <see cref="ExecutorConfigSchema.Empty"/> calls on the remaining executors
+    /// to supply accurate descriptions).
+    /// </para>
+    /// <para>
+    /// Design authority:
+    /// <c>projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md</c>.
+    /// </para>
+    /// </remarks>
+    ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            SupportedExecutorTypes[0],
+            $"Default placeholder schema for {GetType().Name} — task 032 supplies real schema (FR-16).");
 }
 
 /// <summary>
