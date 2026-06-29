@@ -205,16 +205,23 @@ jobs:
       # Map router classification → tier2's `run-*` toggles per its workflow_call contract.
       # docs_only diffs never reach here (see `if:` above). For everything else, default-on.
       # Skip client-side lint when no client files changed (no spaarke_ai/bff client paths).
-      # All run-* are tier2's string-typed inputs (CICD-086). Literals are quoted
-      # to satisfy actionlint's stricter-than-runtime type check; expressions are
-      # already string-returning per `== 'true'` comparison.
-      run-lint: ${{ needs.classify.outputs.spaarke_ai == 'true' || needs.classify.outputs.bff == 'true' }}
-      run-format: 'true'
-      run-unit-tests: ${{ needs.classify.outputs.bff == 'true' }}
-      run-adr-compliance: 'true'
-      run-markdown: 'true'
-      run-last-reviewed: 'true'
-      run-plugin-size: ${{ needs.classify.outputs.bff == 'true' }}
+      #
+      # All run-* are tier2's string-typed inputs (CICD-086 rationale: avoids
+      # cross-workflow_call coercion surprises that produced startup_failure).
+      # Values MUST be explicit string-returning expressions to satisfy actionlint's
+      # static type check (which treats unwrapped `'true'` literals AND `${{ ==
+      # 'true' }}` boolean comparisons as bool — neither pattern previously worked
+      # despite the now-removed comment claiming otherwise).
+      # Pattern: conditional → `${{ (cond) && 'true' || 'false' }}` (ternary
+      # returns string literal). Always-on → `${{ 'true' }}` (explicit string
+      # expression).
+      run-lint: ${{ (needs.classify.outputs.spaarke_ai == 'true' || needs.classify.outputs.bff == 'true') && 'true' || 'false' }}
+      run-format: ${{ 'true' }}
+      run-unit-tests: ${{ needs.classify.outputs.bff == 'true' && 'true' || 'false' }}
+      run-adr-compliance: ${{ 'true' }}
+      run-markdown: ${{ 'true' }}
+      run-last-reviewed: ${{ 'true' }}
+      run-plugin-size: ${{ needs.classify.outputs.bff == 'true' && 'true' || 'false' }}
 
   # ==========================================================================
   # JOB 4 — Router: THE single required status check (`CI / Router`)

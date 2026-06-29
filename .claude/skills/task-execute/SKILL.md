@@ -647,9 +647,27 @@ AFTER all implementation steps and acceptance criteria verified:
    → Execute /adr-check {file-list}
 
    IF ADR violations found:
-     → STOP - these MUST be fixed
-     → FIX violations
-     → RE-RUN adr-check to verify
+     → DO NOT default to silent fix-until-clean (this is the failure mode CLAUDE.md §6.5 was added to prevent)
+     → Apply CLAUDE.md §6.5 ADR Conflict Resolution Protocol:
+
+       Path C — Pivot to comply (default):
+         If the violation is a genuine mistake or there's a clean ADR-compliant
+         alternative → FIX and re-run adr-check.
+
+       Path A — Project-scoped exception:
+         If strict compliance produces a sub-optimal outcome AND the deviation
+         is narrow → ESCALATE to user with the protocol format from §6.5.
+         If approved: document in design.md/spec.md "ADR Tensions" section
+         + PR description; do NOT silently bypass.
+
+       Path B — ADR amendment:
+         If the ADR rule itself is no longer correct in general → ESCALATE
+         to user; if approved, ADR amendment becomes its own deliverable.
+
+     → Silent violation is forbidden. If unsure, escalate (path A or B) rather
+       than choosing path C reflexively.
+     → Once path is chosen and acted on, RE-RUN adr-check to verify the
+       documented state (clean, OR violation present + cited exception).
 
 3. VERIFY linting (if applicable):
    → TypeScript/PCF: npm run lint
