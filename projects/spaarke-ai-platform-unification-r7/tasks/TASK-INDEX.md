@@ -23,7 +23,7 @@
 | Wave 3 | Typed config schemas (FR-16) | 🔄 in-progress (030 ✅ design; 031 ✅ INodeExecutor seam + ExecutorConfigSchema DTO; 032 ✅ 25 executor overrides; 033 ✅ BFF endpoint shipped; 034-036 ready) | 030 ✅, 031 ✅, 032 ✅, 033 ✅; 034-036 generated |
 | Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | 🔄 in-progress (040 ✅ audit; 041 ✅ migration; 042 ✅ DELETION 524 LOC removed; 045 ✅; 043/044/046/047 remaining — schema drops next) | 040 ✅, 041 ✅, 042 ✅, 045 ✅; 043, 044, 046, 047 pending |
 | Wave 5 | Existing-playbook backfill (FR-19, FR-20) | ⏸️ blocked on Wave 2 | 050-056 ✅ generated (7 files) |
-| Wave 6 | Documentation deletion + updates (FR-28 to FR-31) | 🔄 in-progress (060 ✅ audit/disposition; 061 ✅ DELETE §5 from playbook-runtime.md; 062-068 pending) | 060-069 ✅ generated (10 files); 060 ✅, 061 ✅ executed |
+| Wave 6 | Documentation deletion + updates (FR-28 to FR-31) | 🔄 in-progress (060 ✅ audit/disposition; 061 ✅ DELETE §5 from playbook-runtime.md; 067 ✅ CREATE ai-guide-consumer-wiring.md FR-31; 062-066/068-069 pending) | 060-069 ✅ generated (10 files); 060 ✅, 061 ✅, 067 ✅ executed |
 | Wave 7 | Skill rewrites (FR-32, FR-33) | ⏸️ blocked on Wave 2 | 070-075 ✅ generated (6 files) |
 | Wave 8 | Playbook Builder UI updates (FR-21 to FR-27) | ⏸️ blocked on Wave 2 + Wave 3 | 080-089d ✅ generated (14 files) |
 | Wave 9 | Consumer migration (FR-17, FR-18) | 🔄 in-progress (090 ✅ audit/design; 091 ✅ FR-17 SessionSummarizeOrchestrator migrated to IPlaybookOrchestrationService canonical triangle; 092-096 pending) | 090 ✅, 091 ✅, 092-096 generated (7 files) |
@@ -131,7 +131,7 @@
 | 064 | ⏸️ | UPDATE `.claude/constraints/bff-extensions.md` §G (FR-29) | docs, skill-directives | no (sequential per Sub-Agent Write Boundary) | 024 |
 | 065 | ⏸️ | MAJOR UPDATE JPS-AUTHORING-GUIDE.md (FR-30) | docs | yes | 024 |
 | 066 | ⏸️ | MAJOR UPDATE PLAYBOOK-AUTHOR-GUIDE.md (FR-30) | docs | yes | 024 |
-| 067 | ⏸️ | CREATE ai-guide-consumer-wiring.md (FR-31) | docs | yes | 091 (W9 chat-summarize done) |
+| 067 | ✅ | CREATE ai-guide-consumer-wiring.md (FR-31) | docs | yes | 091 (W9 chat-summarize done) |
 | 068 | ⏸️ | UPDATE root CLAUDE.md if entry-points table affected | docs | no (sequential per Sub-Agent Write Boundary) | 067 |
 | 069 | ⏸️ | Post-audit: grep `docs/` for new "deprecated"/"superseded" instances (NFR-08) | docs, audit | yes | 061-068 |
 
