@@ -2,7 +2,7 @@
 <task id="R7-042" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>DELETE AnalysisOrchestrationService.ExecuteAnalysisAsync + cascading dead code (FR-11)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>4</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>bff-api, code-impl, deletion, wave-4</tags>

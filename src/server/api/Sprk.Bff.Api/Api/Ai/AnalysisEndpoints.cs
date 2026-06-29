@@ -216,27 +216,25 @@ public static class AnalysisEndpoints
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>R7 Wave 4 task 041 (FR-11)</b>: This endpoint was migrated from the legacy
-    /// <c>IAnalysisOrchestrationService.ExecuteAnalysisAsync</c> direct-invocation path to the
-    /// canonical <c>IPlaybookOrchestrationService.ExecuteAsync</c> facade per ADR-013 Invariant 1
-    /// ("IInvokePlaybookAi triangle is the canonical AI invocation surface"). Per task 040 audit
-    /// (<c>notes/spikes/executeanalysisasync-caller-audit.md</c>) this was the sole production
-    /// caller of <c>ExecuteAnalysisAsync</c>.
+    /// <b>R7 Wave 4 (FR-11)</b>: This endpoint dispatches the canonical
+    /// <c>IPlaybookOrchestrationService.ExecuteAsync</c> facade per ADR-013 Invariant 1
+    /// ("IInvokePlaybookAi triangle is the canonical AI invocation surface"). Task 041 migrated
+    /// this endpoint from the legacy direct-invocation path; task 042 deleted the legacy
+    /// pipeline entirely (see <c>notes/spikes/executeanalysisasync-caller-audit.md</c>).
     /// </para>
     /// <para>
-    /// <b>SSE chunk-shape adapter (task 040 R-040-1)</b>: <c>IPlaybookOrchestrationService.ExecuteAsync</c>
+    /// <b>SSE chunk-shape adapter</b>: <c>IPlaybookOrchestrationService.ExecuteAsync</c>
     /// emits <see cref="PlaybookStreamEvent"/>; Code Page consumers parse <see cref="AnalysisStreamChunk"/>.
     /// <see cref="BridgePlaybookEventToAnalysisChunk"/> maps the playbook event surface onto the
     /// stable client SSE contract (PlaybookId-typed); the <c>[DONE]</c> terminator and post-stream
     /// completion notification semantics are preserved unchanged.
     /// </para>
     /// <para>
-    /// <b>Required-PlaybookId post-migration</b>: the canonical orchestrator requires a real
+    /// <b>Required-PlaybookId</b>: the canonical orchestrator requires a real
     /// <c>sprk_analysisplaybook</c> record in Dataverse. The legacy "raw OpenAI call" path (no
-    /// PlaybookId, ActionId only) is rejected with 400 BadRequest — task 042 will delete the
-    /// legacy <c>ExecuteAnalysisAsync</c> body that previously handled this path. Existing
-    /// consumers always supply a PlaybookId per the Analysis Code Page flow (audit R-040-6 —
-    /// endpoint is feature-gated by <see cref="AnalysisOptions.Enabled"/>).
+    /// PlaybookId, ActionId only) is rejected with 400 BadRequest. Existing consumers always
+    /// supply a PlaybookId per the Analysis Code Page flow (endpoint is feature-gated by
+    /// <see cref="AnalysisOptions.Enabled"/>).
     /// </para>
     /// </remarks>
     private static async Task ExecuteAnalysis(
@@ -267,10 +265,9 @@ public static class AnalysisEndpoints
             return;
         }
 
-        // R7 Wave 4 task 041 (FR-11): PlaybookId is REQUIRED for the canonical orchestrator path.
-        // The legacy raw-OpenAI/ActionId-only path is rejected; task 042 deletes its
-        // implementation in AnalysisOrchestrationService.ExecuteAnalysisAsync (currently dead
-        // code post-migration — retained pending the deletion task per WBS ordering).
+        // R7 Wave 4 (FR-11): PlaybookId is REQUIRED for the canonical orchestrator path.
+        // The legacy raw-OpenAI/ActionId-only path was deleted by task 042 (no transition shim
+        // per spec Q6). All Analysis Code Page flows always supply a PlaybookId per the contract.
         if (!request.PlaybookId.HasValue)
         {
             response.StatusCode = StatusCodes.Status400BadRequest;
@@ -296,10 +293,10 @@ public static class AnalysisEndpoints
             "Starting analysis execution for documents [{DocumentIds}], ActionId={ActionId}, PlaybookId={PlaybookId}, TraceId={TraceId}",
             string.Join(",", request.DocumentIds), request.ActionId, request.PlaybookId, context.TraceIdentifier);
 
-        // R7 task 041: Construct PlaybookRunRequest from AnalysisExecuteRequest. Per audit R-040-3,
-        // AnalysisId is not part of PlaybookRunRequest (the existing AnalysisRecord is referenced
-        // elsewhere by AnalysisOrchestrationService.ExecutePlaybookAsync via AdditionalContext
-        // upstream; see task 042 for the AnalysisId pass-through cleanup if any consumer relies on it).
+        // R7 task 041 (FR-11): Construct PlaybookRunRequest from AnalysisExecuteRequest. Per audit
+        // R-040-3, AnalysisId is not part of PlaybookRunRequest (the existing AnalysisRecord is
+        // referenced elsewhere by AnalysisOrchestrationService.ExecutePlaybookAsync via
+        // AdditionalContext upstream; AnalysisId pass-through review left for follow-on as needed).
         var playbookRequest = new PlaybookRunRequest
         {
             PlaybookId = request.PlaybookId.Value,

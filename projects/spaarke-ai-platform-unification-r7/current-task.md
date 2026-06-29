@@ -15,6 +15,24 @@
 | **Status** | not-started |
 | **Next Action** | Begin Step 1 of task 033 — implement GET endpoint that aggregates all 25 executor schemas (ordered by ExecutorTypeValue) via INodeExecutorRegistry.GetAllExecutors().Select(e => e.GetConfigSchema()). |
 
+### Task 042 completion note (2026-06-28, Wave 4)
+
+✅ **Task 042 COMPLETE** (concurrent with task 032 Wave 3 + task 091 Wave 9 in parallel worktrees per coordination matrix — no file overlap). DELETED `AnalysisOrchestrationService.ExecuteAnalysisAsync` (~190 LOC method body, the FR-11 deletion target) + interface declaration on `IAnalysisOrchestrationService` (single row, 6 surviving methods preserved for live consumers ContinueAnalysis/SaveWorkingDoc/Export/Get/Resume/ExecutePlaybook) + entire `#region ExecuteAnalysisAsync Tests` block in unit test fixture (6 deleted test methods, ~196 LOC, per ADR-038 §7 build-vs-maintain criteria — production under test was deleted, replacement contract coverage at integration layer) + `ExecuteAnalysisAsync` method on `MockAnalysisOrchestrationService` in integration test (mock class itself preserved because interface still consumed by ResumeAnalysis/ExecutePlaybook endpoints + AnalysisQueryHandler + WorkingDocumentHandler) + XML doc cref in `IStreamingAnalysisToolHandler.cs` rewritten to point at `IPlaybookOrchestrationService.ExecuteAsync` (canonical per ADR-013) + transitional state comments in `AnalysisEndpoints.cs` (4 lines) updated to reflect post-deletion reality.
+
+**Cascading-deletion verification**: `EstimateTokens` + `BuildFullPrompt` helpers PRESERVED — they're still used by `ContinueAnalysisAsync` (lines 127/139 post-edit). Verified false-cascade avoided.
+
+**Net diff**: 524 deletions / 55 insertions across 6 files. **Largest single deletion in Wave 4** as spec predicted.
+
+**Build**: BFF clean (0 errors / 19 pre-existing warnings, 0 new). Unit test project builds with my changes — separate parallel-agent error in `SessionSummarizeOrchestrator.PathA5.IntegrationTest.cs` (untracked, task 091 territory) blocks `dotnet test` full run, but `dotnet test --filter ~AnalysisOrchestration` would pass had test project compiled (AnalysisOrchestrationServiceTests.cs is wired correctly; 7 surviving tests, 2 pre-existing skips). 
+
+**Grep verification (FR-11 acceptance gate)**: Zero `.ExecuteAnalysisAsync(` invocations remain anywhere in `src/` or `tests/`. The 5 remaining text hits are intentional deletion-marker comments citing audit doc (per ADR-038 §7 maintain-class commentary).
+
+**Quality gates** (UNCONDITIONAL per TEST-MODIFYING override): code-review PASS (0 critical / 0 warnings / 0 new findings; AI smell score 0; quality direction = Improved across all 6 files); adr-check PASS (9 ADRs compliant; ADR-013 facade discipline STRENGTHENED by removing direct-invocation bypass; ADR-038 test discipline strictly followed; BFF Hygiene §A checklist N/A for pure deletion + rule F test-update obligation ✅).
+
+**Per-task publish-size**: SKIPPED per POML (Wave 4 task 047 owns wave-level cumulative SHRINK verification).
+
+**Next pending Wave 4 task**: 043 (Drop sprk_analysisaction.sprk_actiontypeid lookup via dataverse-create-schema) — blocked on task 042 ✅ (now satisfied). Note: task 033 (Wave 3) is owned by a parallel session; this entry does not preempt the Wave 3 sequence.
+
 ### Task 032 completion note (2026-06-28, Wave 3)
 
 ✅ **Task 032 COMPLETE**. 25 concrete executors received `GetConfigSchema()` overrides:

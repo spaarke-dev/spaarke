@@ -13,27 +13,10 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </summary>
 public interface IAnalysisOrchestrationService
 {
-    /// <summary>
-    /// Execute a new analysis with streaming results.
-    /// Creates Analysis record in Dataverse and orchestrates:
-    /// 1. Scope resolution (Skills, Knowledge, Tools)
-    /// 2. Context building (prompt construction)
-    /// 3. File extraction (via ITextExtractor) - supports multiple docs
-    /// 4. AI execution (via IOpenAiClient)
-    /// 5. Working document updates
-    /// </summary>
-    /// <param name="request">Analysis request with document IDs, action, and scopes.</param>
-    /// <param name="httpContext">HTTP context for OBO authentication when downloading files from SPE.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Async enumerable of stream chunks for SSE response.</returns>
-    /// <remarks>
-    /// Phase 1: Only request.DocumentIds[0] is processed.
-    /// Phase 2: All documents in array are processed and synthesized.
-    /// </remarks>
-    IAsyncEnumerable<AnalysisStreamChunk> ExecuteAnalysisAsync(
-        AnalysisExecuteRequest request,
-        HttpContext httpContext,
-        CancellationToken cancellationToken);
+    // R7 Wave 4 task 042 (FR-11, 2026-06-28) — `ExecuteAnalysisAsync` was DELETED here per spec Q6.
+    // Sole production caller (AnalysisEndpoints.ExecuteAnalysis) was migrated by task 041 to
+    // IPlaybookOrchestrationService.ExecuteAsync per ADR-013 Invariant 1 (IInvokePlaybookAi triangle
+    // is the canonical AI invocation surface). No transition shim per spec NFR-06.
 
     /// <summary>
     /// Continue existing analysis via conversational chat.

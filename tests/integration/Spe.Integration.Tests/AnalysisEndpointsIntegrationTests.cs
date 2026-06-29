@@ -694,14 +694,14 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
         // ensuring our mocks replace the real services.
         builder.ConfigureTestServices(services =>
         {
-            // R7 Wave 4 task 041 (FR-11) — the /api/ai/analysis/execute endpoint was
-            // migrated from IAnalysisOrchestrationService.ExecuteAnalysisAsync to
-            // IPlaybookOrchestrationService.ExecuteAsync. The MockAnalysisOrchestrationService
-            // below is retained pending Wave 4 task 042 (which deletes the
-            // IAnalysisOrchestrationService.ExecuteAnalysisAsync method + companion test surface).
-            // For task 041 the active scenario mock is MockPlaybookOrchestrationService (registered
-            // further down — replaces the Mock<IPlaybookOrchestrationService> loose mock that
-            // would otherwise yield an empty SSE stream).
+            // R7 Wave 4 (FR-11) — the /api/ai/analysis/execute endpoint dispatches
+            // IPlaybookOrchestrationService.ExecuteAsync (post-task-041 migration; task 042
+            // deleted the legacy direct-invocation path). The MockAnalysisOrchestrationService
+            // registration below is retained because IAnalysisOrchestrationService is still
+            // consumed by other endpoints/handlers (ContinueAnalysis, ResumeAnalysis, GetAnalysis,
+            // ExportAnalysis, SaveWorkingDocument, ExecutePlaybook, plus AnalysisQueryHandler /
+            // WorkingDocumentHandler). The scenario-driving mock for the migrated
+            // /api/ai/analysis/execute endpoint is MockPlaybookOrchestrationService below.
             services.RemoveAll<IAnalysisOrchestrationService>();
             services.AddScoped<IAnalysisOrchestrationService>(sp =>
                 new MockAnalysisOrchestrationService(_scenario, _authorizedDocumentIds, _authorizationTracker));
@@ -863,77 +863,12 @@ internal class MockAnalysisOrchestrationService : IAnalysisOrchestrationService
         _authorizationTracker = authorizationTracker;
     }
 
-    public async IAsyncEnumerable<AnalysisStreamChunk> ExecuteAnalysisAsync(
-        AnalysisExecuteRequest request,
-        HttpContext httpContext,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        _authorizationTracker.FilterCalled = true;
-
-        if (_scenario == TestScenario.Unauthorized)
-        {
-            yield return AnalysisStreamChunk.FromError("Forbidden: User does not have access to document");
-            yield break;
-        }
-
-        if (_scenario == TestScenario.PlaybookNotFound)
-        {
-            yield return AnalysisStreamChunk.FromError($"Playbook {request.PlaybookId} not found");
-            yield break;
-        }
-
-        if (_scenario == TestScenario.DocumentNotFound)
-        {
-            yield return AnalysisStreamChunk.FromError($"Document {request.DocumentIds[0]} not found");
-            yield break;
-        }
-
-        if (_scenario == TestScenario.PartialAuthorization)
-        {
-            // Only authorize the documents in _authorizedDocumentIds
-            foreach (var docId in request.DocumentIds)
-            {
-                if (_authorizedDocumentIds.Contains(docId))
-                {
-                    // Continue processing
-                }
-                else
-                {
-                    yield return AnalysisStreamChunk.FromError($"User does not have access to document {docId}");
-                    yield break;
-                }
-            }
-        }
-
-        var analysisId = Guid.NewGuid();
-
-        // Metadata event
-        yield return AnalysisStreamChunk.Metadata(analysisId, "test-document.pdf");
-
-        // Simulate streaming text chunks
-        await Task.Delay(10, cancellationToken); // Simulate processing
-        yield return AnalysisStreamChunk.TextChunk("Document analysis:");
-        await Task.Delay(10, cancellationToken);
-        yield return AnalysisStreamChunk.TextChunk(" Summary of key points");
-        await Task.Delay(10, cancellationToken);
-        yield return AnalysisStreamChunk.TextChunk(" and recommendations.");
-
-        // Done event
-        var tokenUsage = new TokenUsage(Input: 1500, Output: 750);
-
-        if (_scenario == TestScenario.SoftFailure)
-        {
-            yield return AnalysisStreamChunk.Completed(
-                analysisId,
-                tokenUsage,
-                partialStorage: true,
-                storageMessage: "Analysis outputs saved to sprk_analysisoutput. Some fields could not be mapped to Document record.");
-        }
-        else
-        {
-            yield return AnalysisStreamChunk.Completed(analysisId, tokenUsage);
-        }
-    }
+    // R7 Wave 4 task 042 (FR-11, 2026-06-28) — `ExecuteAnalysisAsync` was removed from
+    // IAnalysisOrchestrationService. Scenario-driven mocking for the migrated
+    // /api/ai/analysis/execute endpoint now happens via MockPlaybookOrchestrationService below
+    // (the endpoint dispatches IPlaybookOrchestrationService.ExecuteAsync per task 041 migration).
+    // The legacy mock body (Unauthorized / PlaybookNotFound / DocumentNotFound / PartialAuthorization /
+    // SoftFailure / happy-path streaming) has been deleted to mirror the production deletion.
 
     // Other interface methods not used in these tests
     public Task<AnalysisDetailResult> GetAnalysisAsync(Guid analysisId, CancellationToken cancellationToken) =>
@@ -1031,14 +966,14 @@ internal class MockPlaybookOrchestrationService : IPlaybookOrchestrationService
 
         if (_scenario == TestScenario.SoftFailure)
         {
-            // R7 task 041 limitation: PlaybookStreamEvent does not carry the legacy
+            // R7 task 041/042 limitation: PlaybookStreamEvent does not carry the legacy
             // PartialStorage/StorageMessage fields. The soft-failure scenario surface is
             // preserved at the PlaybookRunMetrics layer; the SoftFailure integration test
             // assertion on doneChunk.PartialStorage will require either (a) extending
             // PlaybookStreamEvent.RunCompleted with optional partial-storage metadata, or
             // (b) relocating the soft-failure surface into a dedicated PlaybookEventType.
-            // Both are out of scope for task 041 (audit R-040 does not call this out).
-            // Task 042 owner: re-evaluate when deleting the legacy ExecuteAnalysisAsync path.
+            // Both are out of scope for FR-11 (audit R-040 does not call this out); follow-on
+            // work if PartialStorage assertion becomes load-bearing again.
             yield return PlaybookStreamEvent.RunCompleted(runId, request.PlaybookId, metrics);
         }
         else
