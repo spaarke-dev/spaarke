@@ -95,14 +95,16 @@ public class PlaybookOrchestrationServiceSectionStreamingTests
     {
         Id = Guid.NewGuid(),
         Name = name,
-        // Structural node — no Action FK; orchestrator picks ExecutorType.DeliverComposite
-        // via the NodeType.DeliverComposite switch arm.
+        // Structural node — no Action FK; per R7 FR-07 single-hop dispatch, SprkExecutortype
+        // carries the dispatch target directly (task 024). Previously inferred via the
+        // NodeType.DeliverComposite switch arm in the now-dead structural fallback.
         ActionId = Guid.Empty,
         OutputVariable = name.ToLowerInvariant().Replace(" ", "_"),
         ExecutionOrder = 1,
         DependsOn = Array.Empty<Guid>(),
         IsActive = true,
-        NodeType = NodeType.DeliverComposite
+        NodeType = NodeType.DeliverComposite,
+        SprkExecutortype = ExecutorType.DeliverComposite
     };
 
     private static PlaybookNodeDto CreateLegacyOutputNode(string name) => new()
@@ -114,8 +116,9 @@ public class PlaybookOrchestrationServiceSectionStreamingTests
         ExecutionOrder = 1,
         DependsOn = Array.Empty<Guid>(),
         IsActive = true,
-        // Legacy schema-position path — orchestrator picks ExecutorType.DeliverOutput.
-        NodeType = NodeType.Output
+        // R7 FR-07 single-hop dispatch (task 024) — SprkExecutortype = DeliverOutput.
+        NodeType = NodeType.Output,
+        SprkExecutortype = ExecutorType.DeliverOutput
     };
 
     private static CompositeOutputPayload BuildCompositePayload(params string[] sectionNames)

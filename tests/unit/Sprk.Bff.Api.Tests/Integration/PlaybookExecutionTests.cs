@@ -651,8 +651,11 @@ public class PlaybookExecutionTests
         var deliveryActionId = Guid.NewGuid();
 
         // Create realistic playbook: Analysis -> Delivery
+        // R7 task 024 (FR-07): SprkExecutortype carries dispatch (single-hop). Override
+        // the AIAnalysis default on the delivery node to route to DeliverOutput.
         var analysisNode = CreateNode("AI Analysis", analysisActionId, "analysis_result", 1);
-        var deliveryNode = CreateNode("Deliver Output", deliveryActionId, "delivery_result", 2, analysisNode.Id);
+        var deliveryNode = CreateNode("Deliver Output", deliveryActionId, "delivery_result", 2, analysisNode.Id)
+            with { SprkExecutortype = ExecutorType.DeliverOutput };
 
         var nodes = new[] { analysisNode, deliveryNode };
         var (service, mocks) = CreateTestService();
@@ -828,7 +831,9 @@ public class PlaybookExecutionTests
             ExecutionOrder = order,
             DependsOn = dependsOn,
             IsActive = true,
-            NodeType = NodeType.AIAnalysis
+            NodeType = NodeType.AIAnalysis,
+            // R7 task 024 (FR-07) — single-hop dispatch reads SprkExecutortype directly.
+            SprkExecutortype = ExecutorType.AiAnalysis
         };
     }
 

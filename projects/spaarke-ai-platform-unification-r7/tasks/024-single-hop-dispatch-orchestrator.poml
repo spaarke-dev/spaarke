@@ -2,7 +2,7 @@
 <task id="R7-024" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Update PlaybookOrchestrationService.ExecuteNodeAsync to read single-hop dispatch (FR-07)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>2</wave>
     <estimated-effort>3-4 hours</estimated-effort>
     <tags>bff-api, code-impl, wave-2</tags>

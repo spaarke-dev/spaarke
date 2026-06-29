@@ -887,6 +887,9 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     ///   marker per the R4 playbook authoring convention).</description></item>
     /// </list>
     /// </remarks>
+    // TODO(R7 task 025): DELETE — structural fallback ladder is dead code after FR-07
+    // single-hop dispatch (task 024). Last caller in ExecuteNodeAsync was removed
+    // 2026-06-28; the only remaining callers are within the now-dead fallback chain.
     private static bool IsDeployedStartNode(PlaybookNodeDto node)
     {
         if (node.NodeType != NodeType.Control)
@@ -950,6 +953,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     ///   marker).</description></item>
     /// </list>
     /// </remarks>
+    // TODO(R7 task 025): DELETE — structural fallback ladder is dead code after FR-07
+    // single-hop dispatch (task 024).
     private static bool IsDeployedLoadKnowledgeNode(PlaybookNodeDto node)
     {
         if (node.NodeType != NodeType.Control)
@@ -1013,6 +1018,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     ///   (terminal-node marker per the R4 playbook authoring convention).</description></item>
     /// </list>
     /// </remarks>
+    // TODO(R7 task 025): DELETE — structural fallback ladder is dead code after FR-07
+    // single-hop dispatch (task 024).
     private static bool IsDeployedReturnResponseNode(PlaybookNodeDto node)
     {
         if (node.NodeType != NodeType.Control)
@@ -1213,49 +1220,54 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 }
             }
 
-            // R4 spaarke-daily-update-service-r4 (2026-06-25): Start nodes are now
-            // first-class executable nodes routed to StartNodeExecutor (ExecutorType.Start
-            // = 33). The previous inline "passthrough" handler did not bind the dispatch
-            // payload into the scope variable, which made {{start.channels}} references
-            // in downstream nodes resolve to null. The executor reads the wrapper's
-            // payload from runContext.Parameters and binds it as a JsonElement into
-            // node.OutputVariable.
+            // R7 Wave 2 task 024 (FR-07) — SINGLE-HOP DISPATCH.
+            // Dispatch reads `node.SprkExecutortype` (sprk_executortype Choice column) DIRECTLY.
+            // The legacy 3-layer chain (`node.actionid` → `Action.actiontypeid` → `lookup_row.executoractiontype`)
+            // and structural fallback ladder are no longer in the hot path. Per FR-19, all
+            // production nodes are backfilled (Wave 5 task 054); a null sprk_executortype
+            // indicates an unmigrated row and MUST throw rather than silently fall back —
+            // silent fallback would defeat the refactor.
             //
-            // Detection is centralised in IsDeployedStartNode (below) and applied by
-            // the structural fallback at the NodeType→ExecutorType switch — Control nodes
-            // matching the Start shape get ExecutorType.Start regardless of whether
-            // ConfigJson carries __actionType.
-            var configActionType = ExtractActionTypeFromConfig(node.ConfigJson);
+            // Action FK is still required for prompt-driven executors (AiAnalysis, AiCompletion,
+            // AiEmbedding) via per-executor `Validate()`; it carries the SystemPrompt + OutputSchema.
+            // The orchestrator resolves it as payload, not as dispatch source.
+            //
+            // The pre-R7 fallback code (structural-detect helpers IsDeployedStartNode /
+            // IsDeployedLoadKnowledgeNode / IsDeployedReturnResponseNode / ExtractActionTypeFromConfig
+            // + the Action.ExecutorType override branch) is now DEAD CODE on this hot path —
+            // deletion is owned by tasks 025 (fallback ladder) + 026 (Action override branch).
 
-            // Note: ConditionJson on nodes is for conditional execution guards (Phase 5).
-            // The Condition ExecutorType is handled by ConditionNodeExecutor (Phase 4) which
-            // returns ConditionResult with branch selection for orchestrator-level branching.
-
-            // NodeType-driven scope resolution and action lookup.
-            // AI nodes require an Action record and resolve all scopes (skills, knowledge, tools).
-            // Structural nodes (Output, Control) need neither.
-            AnalysisAction action;
             ExecutorType actionType;
-            ResolvedScopes scopes;
+            if (node.SprkExecutortype.HasValue)
+            {
+                actionType = node.SprkExecutortype.Value;
+            }
+            else
+            {
+                var errorMsg = $"Node '{node.Name}' (id={node.Id}) has null sprk_executortype — backfill required per FR-19. Single-hop dispatch (FR-07) does not fall back to Action lookup.";
+                var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
+                runContext.StoreNodeOutput(errorOutput);
 
-            // Per Insights Engine r2 Wave B (2026-06-02): when sprk_actionid is set,
-            // the action's ExecutorType is the canonical dispatch source REGARDLESS of
-            // nodeType. Insights nodes like checkSufficiency (Control), groundCitations
-            // (Control), ReturnInsightArtifactNode (Output), and declineInsufficient
-            // (Output) all need their specific executor (EvidenceSufficiency, GroundingVerify,
-            // ReturnInsightArtifact, DeclineToFind) — not the nodeType-based default
-            // (Condition / DeliverOutput) that the original logic fell back to.
-            //
-            // The legacy structural-node path is preserved for backward compat: when no
-            // action FK is set, fall back to ConfigJson __actionType (canvas-Designer
-            // convention) or nodeType-based default.
+                await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
+
+                return errorOutput;
+            }
+
+            // Resolve scopes (skills, knowledge, tools) for AI nodes only.
+            // Structural nodes (Control / Output / Workflow) have no resolved scopes.
+            // Use NodeType as the coarse category indicator until Wave 8 collapses it into ExecutorType.
+            ResolvedScopes scopes = node.NodeType == NodeType.AIAnalysis
+                ? await _scopeResolver.ResolveNodeScopesAsync(node.Id, runContext.CancellationToken)
+                : new ResolvedScopes([], [], []);
+
+            // Resolve Action payload (SystemPrompt + OutputSchema) when Action FK is set.
+            // Prompt-driven executors validate the Action presence in their own Validate().
+            AnalysisAction action;
             if (node.ActionId != Guid.Empty)
             {
-                // Resolve scopes only for AI nodes (Control/Output/Workflow have none)
-                scopes = node.NodeType == NodeType.AIAnalysis
-                    ? await _scopeResolver.ResolveNodeScopesAsync(node.Id, runContext.CancellationToken)
-                    : new ResolvedScopes([], [], []);
-
                 var resolved = await _scopeResolver.GetActionAsync(
                     node.ActionId, runContext.CancellationToken);
 
@@ -1274,61 +1286,15 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 }
 
                 action = resolved;
-                actionType = action.ExecutorType;
-            }
-            else if (node.NodeType == NodeType.AIAnalysis)
-            {
-                var errorMsg = $"AI node '{node.Name}' requires an Action but has no ActionId";
-                var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
-                runContext.StoreNodeOutput(errorOutput);
-
-                await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
-                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
-
-                EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
-
-                return errorOutput;
             }
             else
             {
-                // Structural nodes (Output, Control, Workflow) WITHOUT an action FK:
-                // legacy path — uses ConfigJson __actionType, the deployed-Start
-                // detection helper, or nodeType-based default (in that order).
-                scopes = new ResolvedScopes([], [], []);
-
-                // R4 (2026-06-25, daily-update-service-r4): when the structural fallback
-                // resolves a Control node that matches the deployed-Start shape AND
-                // ConfigJson did not carry an explicit __actionType, route to
-                // ExecutorType.Start so StartNodeExecutor handles it instead of the
-                // legacy Condition default. Deploy-Playbook.ps1 does not inject
-                // __actionType=33 (only the canvas-sync path does that), so without
-                // this branch the deployed Start row falls into ConditionNodeExecutor
-                // and fails validation. Detection logic is centralised in
-                // IsDeployedStartNode for reuse + clarity.
-                // R4 (2026-06-26, daily-update-service-r4 follow-on): extended deployed-Start
-                // detection to cover all three canvas-only Control nodes that the R4
-                // DAILY-BRIEFING-NARRATE playbook deploys without __actionType injection.
-                // Each helper centralises the per-shape detection (see IsDeployedStartNode /
-                // IsDeployedLoadKnowledgeNode / IsDeployedReturnResponseNode). Without these
-                // branches the Condition default fires and rejects the node with "Condition
-                // expression is required" — the same UAT class that StartNodeExecutor closed
-                // on 2026-06-25.
-                actionType = configActionType
-                    ?? (IsDeployedStartNode(node) ? ExecutorType.Start : (ExecutorType?)null)
-                    ?? (IsDeployedLoadKnowledgeNode(node) ? ExecutorType.LoadKnowledge : (ExecutorType?)null)
-                    ?? (IsDeployedReturnResponseNode(node) ? ExecutorType.ReturnResponse : (ExecutorType?)null)
-                    ?? node.NodeType switch
-                    {
-                        NodeType.Output => ExecutorType.DeliverOutput,
-                        NodeType.Control => ExecutorType.Condition,
-                        NodeType.Workflow => ExecutorType.CreateTask,
-                        // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery node maps to a
-                        // SEPARATE ExecutorType so the legacy Output → DeliverOutput dispatch is
-                        // UNCHANGED (backward-compat invariant). The DeliverCompositeNodeExecutor
-                        // is the only executor for DeliverComposite.
-                        NodeType.DeliverComposite => ExecutorType.DeliverComposite,
-                        _ => ExecutorType.DeliverOutput
-                    };
+                // Structural nodes (Start, Condition, ReturnResponse, DeliverOutput, etc.) without
+                // an Action FK get a synthetic AnalysisAction shell so the existing NodeExecutionContext
+                // contract (Action non-null) is preserved. Per-executor Validate() enforces FR-13
+                // invariants (e.g., StartNodeExecutor.Validate does NOT require an Action; AiCompletionNodeExecutor.Validate
+                // DOES require one). The ExecutorType field carries the dispatch type for diagnostic display only —
+                // dispatch itself comes from `node.SprkExecutortype` above.
                 action = new AnalysisAction
                 {
                     Id = Guid.Empty,
@@ -1337,7 +1303,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 };
 
                 _logger.LogDebug(
-                    "Structural node '{NodeName}' (NodeType={NodeType}) — using ExecutorType {ExecutorType}, no scopes",
+                    "Structural node '{NodeName}' (NodeType={NodeType}, ExecutorType={ExecutorType}) — no Action FK, no scopes",
                     node.Name, node.NodeType, actionType);
             }
 

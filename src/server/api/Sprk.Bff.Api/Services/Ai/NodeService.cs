@@ -548,7 +548,8 @@ public class NodeService : INodeService
 
     private static string GetSelectFields()
     {
-        return "sprk_playbooknodeid,sprk_name,sprk_nodetype,_sprk_playbookid_value,_sprk_actionid_value," +
+        // R7 Wave 2 task 024 (FR-07): sprk_executortype is the canonical single-hop dispatch source.
+        return "sprk_playbooknodeid,sprk_name,sprk_nodetype,sprk_executortype,_sprk_playbookid_value,_sprk_actionid_value," +
                "_sprk_modeldeploymentid_value,sprk_executionorder,sprk_dependsonjson,sprk_outputvariable," +
                "sprk_conditionjson,sprk_configjson,sprk_timeoutseconds,sprk_retrycount," +
                "sprk_position_x,sprk_position_y,sprk_isactive,createdon,modifiedon";
@@ -598,6 +599,9 @@ public class NodeService : INodeService
             Id = entity.Id,
             PlaybookId = entity.PlaybookId ?? Guid.Empty,
             NodeType = (Nodes.NodeType)(entity.NodeType ?? (int)Nodes.NodeType.AIAnalysis),
+            // R7 Wave 2 task 024 (FR-07): single-hop dispatch reads sprk_executortype directly.
+            // Null indicates an unmigrated row (per FR-19, Wave 5 backfills all 94 production nodes).
+            SprkExecutortype = entity.ExecutorType.HasValue ? (Nodes.ExecutorType)entity.ExecutorType.Value : null,
             ActionId = entity.ActionId ?? Guid.Empty,
             ToolIds = toolIds,
             Name = entity.Name ?? string.Empty,
@@ -1138,6 +1142,10 @@ public class NodeService : INodeService
 
         [JsonPropertyName("sprk_nodetype")]
         public int? NodeType { get; set; }
+
+        // R7 Wave 2 task 024 (FR-07): sprk_executortype Choice column = canonical dispatch source.
+        [JsonPropertyName("sprk_executortype")]
+        public int? ExecutorType { get; set; }
 
         [JsonPropertyName("_sprk_playbookid_value")]
         public Guid? PlaybookId { get; set; }

@@ -75,7 +75,10 @@ public class PlaybookOrchestrationServiceTests
             ExecutionOrder = order,
             DependsOn = dependsOn,
             IsActive = true,
-            NodeType = NodeType.AIAnalysis
+            NodeType = NodeType.AIAnalysis,
+            // R7 task 024 (FR-07) — single-hop dispatch reads SprkExecutortype directly.
+            // Existing AI-analysis tests dispatch via AiAnalysis executor.
+            SprkExecutortype = ExecutorType.AiAnalysis
         };
 
     private static AnalysisAction CreateAction(Guid? id = null, string? name = null) => new()
