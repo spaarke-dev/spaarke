@@ -20,7 +20,7 @@
 |---|---|---|---|
 | Wave 1 | AiCompletionNodeExecutor build (FR-12 to FR-15) | 🟢 COMPLETE | 001-010 ✅ all done; publish-hygiene gate PASSED 2026-06-28 (46.71 MB compressed; +1.06 MB vs 45.65 baseline; 0 new HIGH CVE; 20/20 AiCompletionNodeExecutor tests pass) |
 | Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | 🔄 in-progress (020 ✅ audit + 021 ✅ rename strategy plan; task 022 ready — single-PR hybrid Roslyn rename; ~500-line est. diff) | 020 ✅, 021 ✅, 022-029 generated (8 files) |
-| Wave 3 | Typed config schemas (FR-16) | ⏸️ blocked on Wave 1 | 030-036 ✅ generated (7 files) |
+| Wave 3 | Typed config schemas (FR-16) | 🔄 in-progress (030 ✅ design doc complete; 031 blocked on Wave 2 task 023 interface rename) | 030 ✅; 031-036 generated, blocked on Wave 2 |
 | Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | ⏸️ blocked on Wave 2 ONLY (task 040 audit confirmed Wave 9 NOT a prerequisite — SessionSummarizeOrchestrator does NOT call ExecuteAnalysisAsync; only 1 production caller at AnalysisEndpoints.cs:261) | 040 ✅, 041-047 generated (8 files) |
 | Wave 5 | Existing-playbook backfill (FR-19, FR-20) | ⏸️ blocked on Wave 2 | 050-056 ✅ generated (7 files) |
 | Wave 6 | Documentation deletion + updates (FR-28 to FR-31) | ⏸️ blocked on Wave 2 (partial) | 060-069 ✅ generated (10 files) |
@@ -77,7 +77,7 @@
 
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
-| 030 | ⏸️ | Design GetConfigSchema() signature + schema DTO shape | bff-api, planning | yes | W1 complete |
+| 030 | ✅ | Design GetConfigSchema() signature + schema DTO shape | bff-api, planning | yes | W1 complete |
 | 031 | ⏸️ | Add GetConfigSchema() to INodeExecutor interface | bff-api, code-impl | yes | 030 |
 | 032 | ⏸️ | Implement GetConfigSchema() on all 33 executors | bff-api, code-impl | yes | 031 |
 | 033 | ⏸️ | Implement BFF endpoint GET /api/ai/playbook-builder/executor-config-schemas | bff-api, code-impl | yes | 032 |
