@@ -89,7 +89,21 @@ interface CanvasState {
   selectNode: (nodeId: string | null) => void;
 
   // Drag and drop
-  onDrop: (position: XYPosition, nodeType: PlaybookNodeType, label: string) => void;
+  //
+  // R7 Wave 8 task 082 (FR-22 / FR-26): `executorType` (sprk_executortype Choice
+  // value) + `executorName` (server PascalCase enum name) are written into
+  // `node.data.executorType` and `node.data.executorName` when provided. Both
+  // are OPTIONAL for backward-compat with legacy producers that only pass
+  // `(position, nodeType, label)`. When omitted, no Choice value is baked in —
+  // matches pre-R7 behavior. Task 088 widens canvas-state to require
+  // `executorType` and retires the legacy `data.type` discriminator.
+  onDrop: (
+    position: XYPosition,
+    nodeType: PlaybookNodeType,
+    label: string,
+    executorType?: number,
+    executorName?: string
+  ) => void;
 
   // Persistence
   loadFromCanvasJson: (json: string) => void;
@@ -399,7 +413,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   // Drag and drop
   // -----------------------------------------------------------------------
 
-  onDrop: (position, nodeType, label) => {
+  onDrop: (position, nodeType, label, executorType, executorName) => {
     const baseData: Record<string, unknown> = {
       label,
       type: nodeType,
@@ -407,6 +421,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       isConfigured: false,
       validationErrors: [],
     };
+
+    // R7 FR-26: bake the new sprk_executortype Choice value into node.data when
+    // the drop payload carried it (NodePalette tiles always do). The optional
+    // executorName mirror is kept for diagnostics + future task 088 cleanup.
+    if (typeof executorType === 'number') {
+      baseData.executorType = executorType;
+    }
+    if (executorName) {
+      baseData.executorName = executorName;
+    }
 
     // Set type-specific defaults for structural nodes
     if (nodeType === 'deliverOutput') {

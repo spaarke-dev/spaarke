@@ -2,7 +2,7 @@
 <task id="R7-082" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Update canvas Node Types left panel — 33 categorized entries (FR-22)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>8</wave>
     <estimated-effort>4-6 hours</estimated-effort>
     <tags>code-page, ui, wave-8</tags>
