@@ -73,12 +73,112 @@ public sealed class ReturnInsightArtifactNode : INodeExecutor
         ExecutorType.ReturnInsightArtifact
     };
 
-    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from ReturnInsightArtifactNodeConfig: from (required), predicate (required),
+    // producedById (required), artifactKind (inference/fact/observation, default inference),
+    // id, subject, subjectFrom, displayHint, producedByKind, producedByVersion, valueFrom,
+    // evidenceFrom, confidenceFrom, reasoningFrom, allowEmptyEvidence.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.ReturnInsightArtifact),
+        ExecutorTypeValue: (int)ExecutorType.ReturnInsightArtifact,
+        Description: "Final node of an Insights synthesis playbook — serializes upstream synthesis result into a typed InsightArtifact envelope (D-P12 / D-P1). Runs D-A23/D-48 EvidenceGuard before emit.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "from",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Upstream synthesis node's OutputVariable. Required — supplies value + evidence + confidence + reasoning.",
+                Default: null),
+            new(
+                Name: "predicate",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Claim name (e.g., 'predictedCost', 'outcomeCategory'). Required.",
+                Default: null),
+            new(
+                Name: "producedById",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Producer identifier (e.g., 'playbook://predict-matter-cost@v1'). Required.",
+                Default: null),
+            new(
+                Name: "artifactKind",
+                Type: SchemaFieldType.Enum,
+                Required: false,
+                Description: "Output artifact type. Defaults to 'inference'. Facts may have empty evidence (deterministic); inferences + observations require non-empty evidence unless allowEmptyEvidence=true.",
+                Default: "inference",
+                EnumValues: new[] { "inference", "fact", "observation" }),
+            new(
+                Name: "subject",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Subject for the artifact (e.g., 'matter:M-1234'). Either subject or subjectFrom MUST resolve to a non-empty value at runtime.",
+                Default: null),
+            new(
+                Name: "subjectFrom",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "JSON property name on the upstream output that supplies the subject (alternative to literal subject).",
+                Default: null),
+            new(
+                Name: "id",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional ID template with tokens {runId}, {playbookId}, {subject}, {tenantId} (e.g., 'inf:predict-cost:{subject}:{runId}'). Defaults to 'art:{subject}:{runId}'.",
+                Default: null),
+            new(
+                Name: "displayHint",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Hint to consumers for value rendering (e.g., 'currency-usd', 'date', 'text'). Defaults to 'text'.",
+                Default: "text"),
+            new(
+                Name: "producedByKind",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Producer kind discriminator. Defaults to 'playbook'.",
+                Default: "playbook"),
+            new(
+                Name: "producedByVersion",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Producer version string. Required for observations per D-05.",
+                Default: null),
+            new(
+                Name: "valueFrom",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "JSON property on the upstream output carrying the value. Defaults to 'value'. When the property is absent, the full upstream StructuredData is used.",
+                Default: "value"),
+            new(
+                Name: "evidenceFrom",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "JSON property on the upstream output carrying EvidenceRef[]. Defaults to 'evidence'.",
+                Default: "evidence"),
+            new(
+                Name: "confidenceFrom",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "JSON property on the upstream output carrying the confidence number. Defaults to 'confidence' (or uses upstream.Confidence if not set).",
+                Default: "confidence"),
+            new(
+                Name: "reasoningFrom",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "JSON property on the upstream output carrying the Inference reasoning summary. Defaults to 'reasoning'.",
+                Default: "reasoning"),
+            new(
+                Name: "allowEmptyEvidence",
+                Type: SchemaFieldType.Boolean,
+                Required: false,
+                Description: "Bypass EvidenceGuard (D-A23/D-48). Defaults to false; set true only for deterministic Facts where empty evidence is legitimate.",
+                Default: false)
+        });
+
     /// <inheritdoc />
-    public ExecutorConfigSchema GetConfigSchema() =>
-        ExecutorConfigSchema.Empty(
-            ExecutorType.ReturnInsightArtifact,
-            "Final node of an Insights synthesis playbook — serializes upstream outputs into an InsightArtifact envelope (D-P12 / D-P1).");
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

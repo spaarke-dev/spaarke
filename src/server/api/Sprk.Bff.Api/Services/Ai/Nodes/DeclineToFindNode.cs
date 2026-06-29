@@ -63,12 +63,50 @@ public sealed class DeclineToFindNode : INodeExecutor
         ExecutorType.DeclineToFind
     };
 
-    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from DeclineToFindNodeConfig: from (required), reason, explanationTemplate,
+    // suggestedActions, confidenceInDecline. Per D-49 the response shape is non-negotiable;
+    // makers control reason / template / suggested actions only.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.DeclineToFind),
+        ExecutorTypeValue: (int)ExecutorType.DeclineToFind,
+        Description: "Deterministic exit emitting a structured DeclineResponse when EvidenceSufficiency returns insufficient (zero-LLM, D-49 / LAVERN Pattern #7).",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "from",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Upstream EvidenceSufficiency node's OutputVariable. Required — supplies the gap analysis used to render the decline explanation.",
+                Default: null),
+            new(
+                Name: "reason",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Decline reason code surfaced on DeclineResponse.Reason. Defaults to 'insufficient-evidence'.",
+                Default: "insufficient-evidence"),
+            new(
+                Name: "explanationTemplate",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional template with tokens {rule}, {from}, {have}, {need}, {reason}. Rendered against the first gap. When omitted, the node renders a uniform 'have N, need M' message.",
+                Default: null),
+            new(
+                Name: "suggestedActions",
+                Type: SchemaFieldType.Array,
+                Required: false,
+                Description: "Optional array of human-readable next-step suggestions surfaced on DeclineResponse.SuggestedActions (e.g., 'Broaden the matter-type filter from IP licensing to IP').",
+                Default: null),
+            new(
+                Name: "confidenceInDecline",
+                Type: SchemaFieldType.Number,
+                Required: false,
+                Description: "Confidence in the decline decision (0.0–1.0). Defaults to 0.95 because evidence-sufficiency rules are deterministic.",
+                Default: 0.95)
+        });
+
     /// <inheritdoc />
-    public ExecutorConfigSchema GetConfigSchema() =>
-        ExecutorConfigSchema.Empty(
-            ExecutorType.DeclineToFind,
-            "Deterministic exit emitting a structured DeclineResponse when EvidenceSufficiency returns insufficient (zero-LLM, D-49).");
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

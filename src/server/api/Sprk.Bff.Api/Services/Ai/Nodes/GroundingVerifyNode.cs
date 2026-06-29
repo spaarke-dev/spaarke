@@ -64,12 +64,50 @@ public sealed class GroundingVerifyNode : INodeExecutor
         ExecutorType.GroundingVerify
     };
 
-    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from GroundingVerifyConfig: citationsFrom (required), sourceChunksFrom (required),
+    // citationsJsonPath (default 'evidence'), sourceChunksJsonPath (default 'chunks'),
+    // annotationText (default '[citation could not be verified]').
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.GroundingVerify),
+        ExecutorTypeValue: (int)ExecutorType.GroundingVerify,
+        Description: "Zero-LLM citation verification — checks quoted evidence from prior AI nodes against source chunks. Annotates failures per D-47 / LAVERN ADR 10.6.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "citationsFrom",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "OutputVariable of the prior node producing citations (EvidenceRef[]). Required.",
+                Default: null),
+            new(
+                Name: "sourceChunksFrom",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "OutputVariable of the prior node producing source chunks (ChunkRef[]). Required.",
+                Default: null),
+            new(
+                Name: "citationsJsonPath",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "JSON property name on the citations upstream that holds the EvidenceRef[] array. Defaults to 'evidence'.",
+                Default: "evidence"),
+            new(
+                Name: "sourceChunksJsonPath",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "JSON property name on the source-chunks upstream that holds the ChunkRef[] array. Defaults to 'chunks'.",
+                Default: "chunks"),
+            new(
+                Name: "annotationText",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Annotation appended to failed citations. Defaults to '[citation could not be verified]' per D-47.",
+                Default: "[citation could not be verified]")
+        });
+
     /// <inheritdoc />
-    public ExecutorConfigSchema GetConfigSchema() =>
-        ExecutorConfigSchema.Empty(
-            ExecutorType.GroundingVerify,
-            "Zero-LLM citation verification — checks quoted evidence from prior AI nodes against source chunks (D-P9 / D-47 / LAVERN 10.6).");
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

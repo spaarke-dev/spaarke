@@ -68,12 +68,49 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
         ExecutorType.UpdateRecord
     };
 
-    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from UpdateRecordNodeConfig: entityLogicalName (required), recordId (required,
+    // template-rendered), fieldMappings (typed) OR fields (legacy flat), lookups.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.UpdateRecord),
+        ExecutorTypeValue: (int)ExecutorType.UpdateRecord,
+        Description: "Updates a Dataverse entity record via PATCH. At least one of fieldMappings (typed, preferred) or fields (legacy flat) MUST be set. Supports {{var}} substitution.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "entityLogicalName",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Dataverse entity logical name (e.g., 'sprk_document', 'sprk_matter'). Required.",
+                Default: null),
+            new(
+                Name: "recordId",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Record GUID to update. Required. Supports {{var}} substitution (e.g., '{{document.id}}', '{{recordId}}').",
+                Default: null),
+            new(
+                Name: "fieldMappings",
+                Type: SchemaFieldType.Array,
+                Required: false,
+                Description: "Typed field mappings (preferred). Array of { field, type (string|choice|boolean|number|lookup), value (template), options? (label→int for choice) }. AI string output is coerced to the declared Dataverse type.",
+                Default: null),
+            new(
+                Name: "fields",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Legacy flat field→value dictionary (backward compat). Values support {{var}} substitution and are coerced via heuristic int/decimal/bool parse. Prefer fieldMappings for new playbooks.",
+                Default: null),
+            new(
+                Name: "lookups",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Optional lookup-field map: { fieldName: { targetEntity, targetId } }. Resolved to OData @odata.bind syntax. targetId supports {{var}} substitution.",
+                Default: null)
+        });
+
     /// <inheritdoc />
-    public ExecutorConfigSchema GetConfigSchema() =>
-        ExecutorConfigSchema.Empty(
-            ExecutorType.UpdateRecord,
-            "Updates a Dataverse entity record.");
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

@@ -47,12 +47,37 @@ public sealed class QueryDataverseNodeExecutor : INodeExecutor
         ExecutorType.QueryDataverse
     };
 
-    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from QueryDataverseNodeConfig: entityLogicalName (required), fetchXml (required),
+    // parameters ({ dueSoonDays, timeWindowHours }).
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.QueryDataverse),
+        ExecutorTypeValue: (int)ExecutorType.QueryDataverse,
+        Description: "Executes a FetchXML query against Dataverse and returns results. Resolves template variables ({{todayUtc}}, {{dueSoonWindowUtc}}, {{run.userId}}, etc.) and the eq-userid operator before execution.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "entityLogicalName",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Primary entity logical name targeted by the FetchXML (e.g., 'sprk_matter', 'task'). Required. Used for logging/telemetry; does not override the FetchXML root entity.",
+                Default: null),
+            new(
+                Name: "fetchXml",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "FetchXML query string. Required. Supports {{todayUtc}}, {{dueSoonWindowUtc}}, {{timeWindowHours}}, {{timeWindowStartUtc}}, {{run.userId}} substitution. The eq-userid / ne-userid operators are rewritten to eq/ne against the resolved user ID.",
+                Default: null),
+            new(
+                Name: "parameters",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Optional substitution parameters: { dueSoonDays: int (default 7), timeWindowHours: int (default 24) }. Drives the dueSoonWindowUtc and timeWindowStartUtc tokens.",
+                Default: null)
+        });
+
     /// <inheritdoc />
-    public ExecutorConfigSchema GetConfigSchema() =>
-        ExecutorConfigSchema.Empty(
-            ExecutorType.QueryDataverse,
-            "Executes a FetchXML query against Dataverse and returns results.");
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

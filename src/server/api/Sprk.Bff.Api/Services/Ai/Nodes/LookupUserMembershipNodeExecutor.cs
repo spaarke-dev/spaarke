@@ -95,12 +95,36 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
         ExecutorType.LookupUserMembership
     };
 
-    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from LookupUserMembershipNodeConfig: entityType (required), roles, includeRelated.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.LookupUserMembership),
+        ExecutorTypeValue: (int)ExecutorType.LookupUserMembership,
+        Description: "Resolves the current user's record memberships for a given Dataverse entity type via IMembershipResolverService (FR-1B.1). Emits IDs + by-role map for downstream filter/template consumption.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "entityType",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Dataverse entity logical name to resolve memberships against (e.g., 'sprk_matter', 'sprk_document'). Required.",
+                Default: null),
+            new(
+                Name: "roles",
+                Type: SchemaFieldType.Array,
+                Required: false,
+                Description: "Optional case-insensitive role filter (e.g., ['owner', 'assignedAttorney']). Empty/null means 'all discovered roles for the entity'.",
+                Default: null),
+            new(
+                Name: "includeRelated",
+                Type: SchemaFieldType.Boolean,
+                Required: false,
+                Description: "Phase 1D transitive expansion flag (1-hop max per Q3 owner clarification). Currently accepted-but-ignored by the resolver in Phase 1A; task 054 implements. Defaults to false.",
+                Default: false)
+        });
+
     /// <inheritdoc />
-    public ExecutorConfigSchema GetConfigSchema() =>
-        ExecutorConfigSchema.Empty(
-            ExecutorType.LookupUserMembership,
-            "Resolves current user's record memberships for a given entity type via IMembershipResolverService (FR-1B.1).");
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

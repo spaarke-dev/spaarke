@@ -72,12 +72,38 @@ public sealed class DeliverCompositeNodeExecutor : INodeExecutor
         ExecutorType.DeliverComposite
     };
 
-    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from CompositeNodeConfig: sections (array of {sectionName, inputVariable,
+    // displayLabel}), destination (workspace/chat/formPrefill), widgetType.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.DeliverComposite),
+        ExecutorTypeValue: (int)ExecutorType.DeliverComposite,
+        Description: "Multi-section composite delivery — assembles N upstream Action node outputs keyed by sectionName for consumer routing (FR-52 / Phase 5R Wave 5-C).",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "sections",
+                Type: SchemaFieldType.Array,
+                Required: false,
+                Description: "Array of section bindings. Each item: { sectionName, inputVariable, displayLabel? }. sectionName + inputVariable are required per item; missing upstream variables are dropped silently (partial composite is valid per FR-52).",
+                Default: null),
+            new(
+                Name: "destination",
+                Type: SchemaFieldType.Enum,
+                Required: false,
+                Description: "Consumer routing target. Defaults to 'workspace' (the Phase 5R Wave 5-C anchor case).",
+                Default: "workspace",
+                EnumValues: new[] { "workspace", "chat", "formPrefill" }),
+            new(
+                Name: "widgetType",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional consumer-defined widget identifier (e.g., 'structured-output-stream'). Pass-through to the consumer.",
+                Default: null)
+        });
+
     /// <inheritdoc />
-    public ExecutorConfigSchema GetConfigSchema() =>
-        ExecutorConfigSchema.Empty(
-            ExecutorType.DeliverComposite,
-            "Multi-section composite delivery — assembles N upstream Action node outputs keyed by sectionName for consumer routing (FR-52).");
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

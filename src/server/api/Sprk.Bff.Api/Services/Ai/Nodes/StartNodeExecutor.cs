@@ -122,12 +122,38 @@ public sealed class StartNodeExecutor : INodeExecutor
         ExecutorType.Start
     };
 
-    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Start nodes are pure pass-through anchors but may carry an optional inputContract +
+    // scope hint in ConfigJson (R4 playbooks populate these). Surface them as JSON sub-editors
+    // so makers can author a payload contract without raw JSON editing.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.Start),
+        ExecutorTypeValue: (int)ExecutorType.Start,
+        Description: "Canvas anchor — pass-through with no execution logic. Optional inputContract describes the playbook's expected input payload shape.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "inputContract",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Optional JSON object describing the playbook's expected input payload shape (documentation-only at runtime; surfaced to consumers of the playbook via the Library).",
+                Default: null),
+            new(
+                Name: "scope",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional scope hint — free-form string surfaced to downstream consumers (e.g., 'matter', 'document', 'briefing').",
+                Default: null),
+            new(
+                Name: "description",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional human-readable description of what the Start node represents in this playbook.",
+                Default: null)
+        });
+
     /// <inheritdoc />
-    public ExecutorConfigSchema GetConfigSchema() =>
-        ExecutorConfigSchema.Empty(
-            ExecutorType.Start,
-            "Canvas anchor — pass-through with no execution logic.");
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

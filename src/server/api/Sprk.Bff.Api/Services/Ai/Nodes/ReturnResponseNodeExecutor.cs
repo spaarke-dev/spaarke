@@ -112,12 +112,25 @@ public sealed class ReturnResponseNodeExecutor : INodeExecutor
         ExecutorType.ReturnResponse
     };
 
-    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from ReturnResponseConfig: responseBinding (name→template map plus optional
+    // _validationMetadata sidecar).
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.ReturnResponse),
+        ExecutorTypeValue: (int)ExecutorType.ReturnResponse,
+        Description: "Canvas-only Control node — terminal 'return response' projection. Reads responseBinding (a name→template map) and binds the resolved object to OutputVariable (default 'response') as the playbook's final return value. Missing template variables yield empty/null (does not throw).",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "responseBinding",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Optional name→Handlebars-template map. Each key becomes a top-level field on the bound response; each value is a template rendered against upstream node outputs + run metadata. Reserved key '_validationMetadata' nests another name→template object as a sidecar.",
+                Default: null)
+        });
+
     /// <inheritdoc />
-    public ExecutorConfigSchema GetConfigSchema() =>
-        ExecutorConfigSchema.Empty(
-            ExecutorType.ReturnResponse,
-            "Canvas-only Control node — terminal 'return response' projection. Reads configJson.responseBinding (R4 control-flow-executor).");
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

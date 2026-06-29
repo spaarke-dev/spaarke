@@ -59,12 +59,30 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
         ExecutorType.AgentService
     };
 
-    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from AgentServiceNodeConfig (TenantId + Prompt, both required).
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.AgentService),
+        ExecutorTypeValue: (int)ExecutorType.AgentService,
+        Description: "Routes the playbook node to Azure AI Foundry Agent Service (Phase 2). Creates/resumes a tenant-scoped Agent thread (ADR-009 Redis-first) and streams the response.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "tenantId",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Tenant identifier used to scope the Redis Agent-thread cache key (agent-thread:{tenantId}). Required.",
+                Default: null),
+            new(
+                Name: "prompt",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "User message sent to the Agent thread. Supports {{var}} template substitution against upstream node outputs. Required.",
+                Default: null)
+        });
+
     /// <inheritdoc />
-    public ExecutorConfigSchema GetConfigSchema() =>
-        ExecutorConfigSchema.Empty(
-            ExecutorType.AgentService,
-            "Routes the playbook node to Azure AI Foundry Agent Service (Phase 2).");
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

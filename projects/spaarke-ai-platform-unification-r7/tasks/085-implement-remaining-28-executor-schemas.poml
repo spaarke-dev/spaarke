@@ -2,7 +2,7 @@
 <task id="R7-085" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Implement remaining 28 executor schemas (placeholders OK)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>8</wave>
     <estimated-effort>3-4 hours</estimated-effort>
     <tags>code-page, ui, wave-8</tags>

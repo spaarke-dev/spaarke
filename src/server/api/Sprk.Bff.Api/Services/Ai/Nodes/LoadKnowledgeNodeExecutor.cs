@@ -107,12 +107,37 @@ public sealed class LoadKnowledgeNodeExecutor : INodeExecutor
         ExecutorType.LoadKnowledge
     };
 
-    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from LoadKnowledgeConfig: kind (documentation discriminator),
+    // passthroughBinding (name→template map), r5BindingPlan (R5 forward-compat).
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.LoadKnowledge),
+        ExecutorTypeValue: (int)ExecutorType.LoadKnowledge,
+        Description: "Canvas-only Control node — R4 pass-through placeholder for the R5 AI Search knowledge-source binding. Evaluates optional passthroughBinding templates against scope variables and binds the resolved object map to OutputVariable (default 'channelRegistry').",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "passthroughBinding",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Optional name→Handlebars-template map (e.g., { channels: '{{start.channels}}' }). Each key becomes a field on the bound output; each value is rendered against upstream scope variables.",
+                Default: null),
+            new(
+                Name: "kind",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Documentation-only discriminator (e.g., 'pass-through-placeholder'). Ignored at runtime.",
+                Default: null),
+            new(
+                Name: "r5BindingPlan",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Forward-compat: { knowledgeSourceCode: string }. When set, triggers an INFO log so future R5 wiring (AI Search retrieval) knows where to hook in. NOT honoured in R4.",
+                Default: null)
+        });
+
     /// <inheritdoc />
-    public ExecutorConfigSchema GetConfigSchema() =>
-        ExecutorConfigSchema.Empty(
-            ExecutorType.LoadKnowledge,
-            "Canvas-only Control node — pass-through knowledge binding (R4 control-flow-executor). Evaluates optional passthroughBinding templates against scope variables.");
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

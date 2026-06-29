@@ -54,12 +54,55 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
         ExecutorType.CreateTask
     };
 
-    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from TaskNodeConfig: subject (required), description, regardingObjectId,
+    // regardingObjectType, ownerId, dueDate. All values support {{var}} substitution.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.CreateTask),
+        ExecutorTypeValue: (int)ExecutorType.CreateTask,
+        Description: "Creates a Dataverse task record from playbook context. Fields support {{var}} template substitution against upstream outputs.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "subject",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Task subject line. Supports {{var}} substitution. Required.",
+                Default: null),
+            new(
+                Name: "description",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional task description body. Supports {{var}} substitution.",
+                Default: null),
+            new(
+                Name: "regardingObjectId",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional regarding-object GUID (e.g., '{{recordId}}' or '{{document.id}}'). Pairs with regardingObjectType.",
+                Default: null),
+            new(
+                Name: "regardingObjectType",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional regarding-object entity logical name (e.g., 'sprk_document', 'sprk_matter'). Required when regardingObjectId is set.",
+                Default: null),
+            new(
+                Name: "ownerId",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional systemuserid GUID of the task owner. Supports {{var}} substitution.",
+                Default: null),
+            new(
+                Name: "dueDate",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional ISO-8601 due date (e.g., '2026-07-15T00:00:00Z'). Supports {{var}} substitution; parsed via DateTime.TryParse.",
+                Default: null)
+        });
+
     /// <inheritdoc />
-    public ExecutorConfigSchema GetConfigSchema() =>
-        ExecutorConfigSchema.Empty(
-            ExecutorType.CreateTask,
-            "Creates a Dataverse task record from playbook context.");
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
