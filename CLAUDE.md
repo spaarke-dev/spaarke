@@ -313,8 +313,9 @@ Hooks are **NOT configured** in `.claude/settings.json` beyond what exists. Qual
 | ADRs (full history) | [`docs/adr/`](docs/adr/) |
 | Code patterns (25-line pointer files) | [`.claude/patterns/`](.claude/patterns/) |
 | Cross-cutting constraints | [`.claude/constraints/`](.claude/constraints/) |
-| **BFF additions governance (binding)** | [`.claude/constraints/bff-extensions.md`](.claude/constraints/bff-extensions.md) — load before adding to `Sprk.Bff.Api` |
+| **BFF additions governance (binding)** | [`.claude/constraints/bff-extensions.md`](.claude/constraints/bff-extensions.md) — load before adding to `Sprk.Bff.Api`. §G Config Boundary rewritten 2026-06-29 for R7 single-hop dispatch (FR-29). |
 | **BFF AI extraction assessment (evidence base)** | [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](docs/assessments/bff-ai-extraction-assessment-2026-05-20.md) |
+| **Wiring a new consumer (maker tutorial)** | [`docs/guides/ai-guide-consumer-wiring.md`](docs/guides/ai-guide-consumer-wiring.md) — what a consumer is, step-by-step wiring procedure, chat-summarize migration case study (R7 FR-31, created Wave 6 task 067) |
 | Cross-cutting failure modes (anti-patterns + gotchas) | [`.claude/FAILURE-MODES.md`](.claude/FAILURE-MODES.md) |
 | Procedure-surface changelog | [`.claude/CHANGELOG.md`](.claude/CHANGELOG.md) |
 | Architecture (subsystems, design) | [`docs/architecture/`](docs/architecture/) — includes `AI-ARCHITECTURE.md`, `auth-azure-resources.md` |

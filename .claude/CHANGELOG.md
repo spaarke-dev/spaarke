@@ -23,6 +23,25 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Added (2026-06-29 spaarke-ai-platform-unification-r7 Wave 6 task 068 — root CLAUDE.md §17 pointer to consumer-wiring guide; Wave 6 task 064 — bff-extensions §G rewrite; Wave 7 — jps-* skill rewrites)
+- Root [`CLAUDE.md`](../CLAUDE.md) §17 Pointers — added row for [`docs/guides/ai-guide-consumer-wiring.md`](../docs/guides/ai-guide-consumer-wiring.md) (created Wave 6 task 067 per FR-31). §17 row "BFF additions governance" annotated with §G rewrite date.
+- [`.claude/constraints/bff-extensions.md`](constraints/bff-extensions.md) §G "Action / Node / Playbook Config Boundary" — REWRITTEN for R7 single-hop dispatch (FR-29). New 4-Home table reflects dispatch on the NODE (Home C) + Action as reusable prompt template (Home A, dispatch removed) + decorative `sprk_analysisactiontype` lookup table (Home D). New "Binding MUST rules" + "Binding MUST NOT rules" sections explicitly enumerate dropped columns + structural-fallback delete + categorization-only stance. Hot-Path Declaration section RENUMBERED §G → §H to fix duplicate-§G ambiguity introduced by sibling project ci-cd-unit-test-remediation-r1 landing.
+- [`.claude/skills/jps-action-create/SKILL.md`](skills/jps-action-create/SKILL.md) — Wave 7 task 070 (FR-32). Step 1.5 Config-Home Guard table updated; Step 5.5 MCP verify drops `_sprk_actiontypeid_value`; new "R7 dispatch model" section with §3.1 WHY citation.
+- [`.claude/skills/jps-playbook-design/SKILL.md`](skills/jps-playbook-design/SKILL.md) — Wave 7 task 071. Step 1.5 item 3 replaces 3-tier lookup ladder with single-hop. Step 10 verify-deploy query uses `sprk_executortype`. New 33-executor catalog by tier + Executor-Type-FIRST workflow.
+- [`.claude/skills/jps-playbook-audit/SKILL.md`](skills/jps-playbook-audit/SKILL.md) — Wave 7 task 072. Step 2 query updated; Check 3.5 citation corrected; new Check 3.6 enumerates 7 R7 drift patterns A-G mirroring Wave 5 task 050 CSV shape.
+- [`.claude/skills/jps-validate/SKILL.md`](skills/jps-validate/SKILL.md) — Wave 7 task 073. Step 7.5 CHECK 25 marked LEGACY; CHECK 26 (structural-fallback) DELETED; new Step 7.6 R7-V-01-V-04 + 6 LEGACY-* drift flags; new Step 7.7 typed-config schema check against Wave 3 BFF endpoint.
+- [`.claude/skills/jps-scope-refresh/SKILL.md`](skills/jps-scope-refresh/SKILL.md) — Wave 7 task 074 (FR-33). Two-authoring-surfaces table updated (Node Type OptionSet → Executor Type Choice Set, 33 values). C# enum rename `ActionType` → `ExecutorType` applied throughout. Operational behavior unchanged (terminology touch-up only).
+
+Commits:
+- `d79432f9e` — Wave 4 schema drops (043+044, FR-03+FR-04)
+- `7f28da008` — Wave 4 AnalysisActionService cleanup (046)
+- `dd95dff69` — Wave 4 publish-hygiene gate PASS (047)
+- `79ced1c6a` — Wave 8 form default (081, FR-21)
+- `6e5e070e3` — Wave 8 placeholder schemas (085, FR-23)
+- `2a5ff9e5a` — Wave 8 promptSchemaOverride wiring (087, FR-25)
+- `e020c25e4` — Wave 7 jps-* skill rewrites + smoke test (070-075, FR-32/33)
+- (this commit) — Wave 6 tasks 064 + 068
+
 ### Added (2026-06-25 smart-todo-r4 R4-112 — PCF `noAposStringType` XSD failure mode)
 - `.claude/skills/pcf-deploy/SKILL.md` — new row in Failure Modes & Recovery table for `noAposStringType` XSD validation failure (Dataverse PCF import rejects apostrophes in `description-key` attribute values). Discovered during RegardingResolver v1.2.0 deploy (commit 5b7a62812) — `entity's` and `'sprk_todo'` in description-key blocked the import. Comments are fine (XSD skips them); only attribute values matter. Burned ~10 min on first import attempt; this entry saves the next operator.
 
