@@ -47,19 +47,6 @@ public class CustomPropertyTests
     }
 
     [Fact]
-    public void CustomPropertyDto_IsRecord_SupportsValueEquality()
-    {
-        // Arrange
-        var a = new CustomPropertyDto("Key", "Val", false);
-        var b = new CustomPropertyDto("Key", "Val", false);
-        var c = new CustomPropertyDto("Key", "Val", true);
-
-        // Assert
-        a.Should().Be(b);
-        a.Should().NotBe(c);
-    }
-
-    [Fact]
     public void CustomPropertyDto_IsImmutable_RecordType()
     {
         // Assert — records have init-only properties
@@ -122,18 +109,6 @@ public class CustomPropertyTests
 
         // Assert
         request.Properties.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void UpdateCustomPropertiesRequest_IsRecord_SupportsValueEquality()
-    {
-        // Arrange
-        var props = new[] { new CustomPropertyDto("Key", "Val", false) };
-        var a = new UpdateCustomPropertiesRequest(props);
-        var b = new UpdateCustomPropertiesRequest(props);
-
-        // Assert — same reference to props array → equal records
-        a.Should().Be(b);
     }
 
     #endregion

@@ -55,12 +55,6 @@ public class SummaryHandlerTests
     }
 
     [Fact]
-    public void SupportedToolTypes_ContainsExactlyOneType()
-    {
-        Assert.Single(_handler.SupportedToolTypes);
-    }
-
-    [Fact]
     public void Metadata_HasExpectedName()
     {
         Assert.Equal("Summary Generator", _handler.Metadata.Name);

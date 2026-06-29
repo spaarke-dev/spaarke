@@ -23,6 +23,7 @@ import {
   tokens,
   Text,
   Label,
+  Input,
   Textarea,
   Dropdown,
   Option,
@@ -31,6 +32,7 @@ import {
   shorthands,
 } from '@fluentui/react-components';
 import type {
+  InputOnChangeData,
   OptionOnSelectData,
   SelectionEvents,
   SwitchOnChangeData,
@@ -93,6 +95,25 @@ const DELIVERY_TYPES = [
 
 type DeliveryType = (typeof DELIVERY_TYPES)[number]['value'];
 
+/**
+ * R6 Pillar 5 / DEF-003 — Destination wire values matching the C# NodeDestination
+ * enum (Models/Ai/NodeRoutingConfig.cs NodeDestinationJsonConverter). Five wire
+ * values: chat (default, NodeRoutingConfig.Parse(null) → Chat), workspace (requires
+ * widgetType), both (chat-routing-redesign-r1 — render in chat AND open a workspace
+ * tab), form-prefill (used by pre-fill flows; NFR-07 surface), side-effect
+ * (fire-and-forget side-effect playbooks; no widget render).
+ */
+const DESTINATIONS = [
+  { value: '', label: 'Chat (default)' },
+  { value: 'chat', label: 'Chat (explicit)' },
+  { value: 'workspace', label: 'Workspace' },
+  { value: 'both', label: 'Both — chat + workspace' },
+  { value: 'form-prefill', label: 'Form pre-fill' },
+  { value: 'side-effect', label: 'Side-effect (no render)' },
+] as const;
+
+type Destination = '' | 'chat' | 'workspace' | 'both' | 'form-prefill' | 'side-effect';
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -106,9 +127,19 @@ export const DeliverOutputForm = memo(function DeliverOutputForm({ nodeId, data,
   const includeMetadata = data.includeMetadata ?? false;
   const includeSourceCitations = data.includeSourceCitations ?? false;
   const maxOutputLength = data.maxOutputLength ?? 0;
+  const destination: Destination = (data.destination as Destination) ?? '';
+  const widgetType = data.widgetType ?? '';
 
-  // Find display label for current value
+  // Find display labels for current values
   const deliveryTypeLabel = DELIVERY_TYPES.find(dt => dt.value === deliveryType)?.label ?? 'Markdown';
+  const destinationLabel = DESTINATIONS.find(d => d.value === destination)?.label ?? 'Chat (default)';
+
+  // Conditional gate for widgetType — surfaced for workspace + both; hidden for
+  // chat / form-prefill / side-effect to match the server-side
+  // NodeRoutingConfig.Validate rule (widgetType ignored when destination !=
+  // Workspace, though "both" carries a workspace render too).
+  const widgetTypeRelevant = destination === 'workspace' || destination === 'both';
+  const widgetTypeError = widgetTypeRelevant && widgetType.trim().length === 0;
 
   // -- Handlers --
 
@@ -145,6 +176,29 @@ export const DeliverOutputForm = memo(function DeliverOutputForm({ nodeId, data,
   const handleMaxLengthChange = useCallback(
     (_e: SpinButtonChangeEvent, item: SpinButtonOnChangeData) => {
       onUpdate('maxOutputLength', item.value ?? 0);
+    },
+    [onUpdate]
+  );
+
+  const handleDestinationChange = useCallback(
+    (_event: SelectionEvents, item: OptionOnSelectData) => {
+      // Empty string sentinel = "Chat (default)" — persists as undefined so
+      // NodeRoutingConfig.Parse defaults to Chat (FR-27 backward compatibility).
+      const next = item.optionValue ?? '';
+      onUpdate('destination', next.length === 0 ? undefined : next);
+      // When switching away from workspace/both, clear widgetType so it isn't
+      // resurfaced if the user re-enters workspace.
+      if (next !== 'workspace' && next !== 'both' && widgetType.length > 0) {
+        onUpdate('widgetType', undefined);
+      }
+    },
+    [onUpdate, widgetType]
+  );
+
+  const handleWidgetTypeChange = useCallback(
+    (_e: React.ChangeEvent<HTMLInputElement>, item: InputOnChangeData) => {
+      const next = item.value ?? '';
+      onUpdate('widgetType', next.length === 0 ? undefined : next);
     },
     [onUpdate]
   );
@@ -237,6 +291,54 @@ export const DeliverOutputForm = memo(function DeliverOutputForm({ nodeId, data,
           Maximum characters in output (0 = unlimited). Content beyond this limit is truncated.
         </Text>
       </div>
+
+      {/* R6 Pillar 5 / DEF-003 — Routing destination + widget type */}
+      <div className={styles.field}>
+        <Label htmlFor={`${nodeId}-destination`} size="small">
+          Routing Destination
+        </Label>
+        <Dropdown
+          id={`${nodeId}-destination`}
+          size="small"
+          value={destinationLabel}
+          selectedOptions={[destination]}
+          onOptionSelect={handleDestinationChange}
+        >
+          {DESTINATIONS.map(d => (
+            <Option key={d.value || 'default'} value={d.value}>
+              {d.label}
+            </Option>
+          ))}
+        </Dropdown>
+        <Text className={styles.fieldHint}>
+          Where the playbook output renders. Chat is the default; Workspace opens a tab; Both renders inline AND opens a
+          tab; Form pre-fill targets the existing pre-fill flows; Side-effect runs the playbook with no UI render.
+        </Text>
+      </div>
+
+      {widgetTypeRelevant ? (
+        <div className={styles.field}>
+          <Label htmlFor={`${nodeId}-widgetType`} size="small" required>
+            Widget Type
+          </Label>
+          <Input
+            id={`${nodeId}-widgetType`}
+            size="small"
+            value={widgetType}
+            onChange={handleWidgetTypeChange}
+            placeholder="e.g. structured-output-stream, Summary, DocumentViewer"
+          />
+          <Text
+            className={styles.fieldHint}
+            style={widgetTypeError ? { color: tokens.colorPaletteRedForeground1 } : undefined}
+          >
+            {widgetTypeError
+              ? 'Widget type is required when destination is Workspace or Both.'
+              : 'Workspace widget registry key. Must match a registered widget type ' +
+                '(WorkspaceWidgetRegistry on the SpaarkeAi client). Unknown values fall back to default.'}
+          </Text>
+        </div>
+      ) : null}
     </div>
   );
 });

@@ -148,6 +148,17 @@ export interface PlaybookNodeData {
   includeSourceCitations?: boolean;
   maxOutputLength?: number;
 
+  // R6 Pillar 5 / DEF-003 — per-playbook routing config (NodeRoutingConfig wire shape).
+  // destination: 'chat' is the default (NodeRoutingConfig.Parse(null) → Chat); 'workspace'
+  // requires widgetType (server-side enforced by NodeRoutingConfig.Validate; surfaced as a
+  // form hint here). 'both' is the chat-routing-redesign-r1 addition (renders inline in chat
+  // AND opens a workspace tab). 'form-prefill' / 'side-effect' are the Pillar 5 enums for
+  // pre-fill flows + fire-and-forget paths. Serialized into sprk_configjson via the
+  // DeliverOutput case in buildConfigJson(); read by PlaybookDispatcher /
+  // PlaybookOutputHandler / WorkspaceWidgetRegistry server-side.
+  destination?: 'chat' | 'workspace' | 'both' | 'form-prefill' | 'side-effect';
+  widgetType?: string;
+
   // Deliver to Index config
   indexName?: string;
   indexSource?: 'document' | 'content';

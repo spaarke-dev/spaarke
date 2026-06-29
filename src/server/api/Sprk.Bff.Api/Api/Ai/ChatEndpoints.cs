@@ -492,10 +492,30 @@ public static class ChatEndpoints
 
         var fullResponse = new System.Text.StringBuilder();
 
+        // R6 DEF-001 / task 095 Phase 3 — Resolve the per-request context_event SSE relay
+        // up-front so the finally clause below can always clear Writer (even on exception
+        // paths). The relay forwards typed context.* events emitted by ContextEventEmitter
+        // (singleton) to the frontend ExecutionTraceWidget via "context_event" SSE frames.
+        // When the AI services module is not registered (e.g., AI-OFF builds), GetService
+        // returns null and the attach + finally are no-ops.
+        var contextSseRelay = httpContext.RequestServices
+            .GetService<Sprk.Bff.Api.Services.Ai.Telemetry.IContextSseRelay>();
+
         try
         {
             // Create SSE writer delegate for out-of-band events (progress, document_replace)
             var sseWriter = CreateSseWriter(response);
+
+            // R6 DEF-001 / task 095 Phase 3 — Attach the context_event writer. The relay
+            // serializes concurrent writes via SemaphoreSlim so frames don't interleave with
+            // the token stream + citations/suggestions/done frames written through
+            // WriteChatSSEAsync below. JsonNamingPolicy.CamelCase converts the DTO's
+            // PascalCase properties to camelCase keys matching IChatSseEventData on the FE.
+            if (contextSseRelay is not null)
+            {
+                contextSseRelay.Writer = (dto, ct) =>
+                    WriteChatSSEAsync(response, new ChatSseEvent("context_event", null, dto), ct);
+            }
 
             // === R2: Create the R2 SSE emitter for the six new event types.
             // Available to the response pipeline for duration of this request.
@@ -938,6 +958,16 @@ public static class ChatEndpoints
                     response,
                     new ChatSseEvent("error", errorDetail),
                     CancellationToken.None);
+            }
+        }
+        finally
+        {
+            // R6 DEF-001 / task 095 Phase 3 — Detach the context_event writer so any
+            // late-arriving emissions from background continuations (or the singleton
+            // emitter reused on a parallel request) cannot write to a disposed response.
+            if (contextSseRelay is not null)
+            {
+                contextSseRelay.Writer = null;
             }
         }
     }

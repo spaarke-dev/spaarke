@@ -4,7 +4,7 @@
 > **Authored by**: canonical-truth loop step 3 (spaarke-daily-update-service-r4)
 > **Status**: Canonical. Supersedes runtime sections of `playbook-architecture.md` (now a redirect) and the Tool Handler / Scope Resolution / Known Pitfalls sections of `AI-ARCHITECTURE.md` (now stripped).
 > **Scope**: The load-bearing runtime contract for how BFF executes Spaarke playbooks — dispatch shapes, mode detection, action lookup, config-column ownership, scope semantics, empty-payload behaviour, the two parallel orchestrators, and the Legacy-mode log catalog.
-> **NOT in scope**: JPS schema reference (see `ai-guide-jps-authoring.md`), maker recipes (see `ai-guide-playbook-author.md`), consumer dispatch (see `ai-architecture-consumer-routing.md`), config-bag boundaries (see `ai-architecture-actions-nodes-scopes.md`), deploy procedure (see `ai-guide-playbook-deploy-recipe.md`).
+> **NOT in scope**: JPS schema reference (see `ai-guide-jps-authoring.md`), maker recipes (see `ai-guide-playbook-author.md`), consumer dispatch (see `ai-architecture-playbook-consumer-routing.md`), config-bag boundaries (see `ai-architecture-actions-nodes-scopes.md`), deploy procedure (see `ai-guide-playbook-deploy-recipe.md`).
 
 ---
 
@@ -39,7 +39,7 @@ Three runtime grammars coexist plus one facade non-streaming wrapper. Path A.5 i
 | **Path C (node-based app-only)** | `PlaybookOrchestrationService.ExecuteAppOnlyAsync` (`:129`) | NO | Yes | Same as Path B |
 | **Path A.5 (facade non-streaming)** | `IInvokePlaybookAi.InvokePlaybookAsync` (`InvokePlaybookAi.cs:42`) | NO — passes `Array.Empty<Guid>()` at `:71` | NO — aggregates SSE into `PlaybookInvocationResult` | Delegates to Path B (`_orchestrator.ExecuteAsync` at `:86`) |
 
-R4's `/narrate` endpoint at `DailyBriefingEndpoints.cs:201` is the canonical Path A.5 consumer: it resolves the playbook via `ConsumerRoutingService.ResolveAsync` (`:250`) and invokes via `IInvokePlaybookAi.InvokePlaybookAsync` (`:303`), passing only `parameters` (briefingPayload + scalars) — never `DocumentIds`. For consumer-side wiring see `ai-architecture-consumer-routing.md`.
+R4's `/narrate` endpoint at `DailyBriefingEndpoints.cs:201` is the canonical Path A.5 consumer: it resolves the playbook via `ConsumerRoutingService.ResolveAsync` (`:250`) and invokes via `IInvokePlaybookAi.InvokePlaybookAsync` (`:303`), passing only `parameters` (briefingPayload + scalars) — never `DocumentIds`. For consumer-side wiring see `ai-architecture-playbook-consumer-routing.md`.
 
 ---
 
@@ -192,7 +192,7 @@ The 11 historical pitfalls G1-G11 documented in the former `playbook-architectur
 | Question | Read |
 |---|---|
 | 4-tier AI platform overview, RAG, Cosmos, Safety pipeline, Capability Router | `AI-ARCHITECTURE.md` (now trimmed to overview-only) |
-| How does `/narrate` route a playbook via `sprk_playbookconsumer`? | `ai-architecture-consumer-routing.md` |
+| How does `/narrate` route a playbook via `sprk_playbookconsumer`? | `ai-architecture-playbook-consumer-routing.md` |
 | Where should this new config field live (Action vs Node vs Playbook)? | `ai-architecture-actions-nodes-scopes.md` |
 | How do I deploy a playbook? | `ai-guide-playbook-deploy-recipe.md` |
 | JPS schema features (`$ref`, `$choices`, override merge, structured output) | `ai-guide-jps-authoring.md` (trimmed) |

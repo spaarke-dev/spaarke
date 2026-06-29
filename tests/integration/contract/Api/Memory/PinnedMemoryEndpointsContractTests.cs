@@ -52,12 +52,12 @@ namespace Sprk.Bff.Api.Tests.Api.Memory;
 /// </list>
 /// </para>
 /// </remarks>
-public class PinnedMemoryEndpointsTests : IClassFixture<PinnedMemoryEndpointsTestFixture>
+public class PinnedMemoryEndpointsContractTests : IClassFixture<PinnedMemoryEndpointsTestFixture>
 {
     private readonly PinnedMemoryEndpointsTestFixture _fixture;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
-    public PinnedMemoryEndpointsTests(PinnedMemoryEndpointsTestFixture fixture)
+    public PinnedMemoryEndpointsContractTests(PinnedMemoryEndpointsTestFixture fixture)
     {
         _fixture = fixture;
     }

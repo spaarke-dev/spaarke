@@ -41,13 +41,13 @@ namespace Sprk.Bff.Api.Tests.Api.Insights;
 /// + DONE sentinel + error projection) is what these tests guarantee.
 /// </para>
 /// </remarks>
-public class InsightsAssistantEndpointStreamingTests : IClassFixture<InsightsAssistantEndpointTestFixture>
+public class InsightsAssistantEndpointStreamingContractTests : IClassFixture<InsightsAssistantEndpointTestFixture>
 {
     private readonly InsightsAssistantEndpointTestFixture _fixture;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
     private const string SampleMatterSubject = "matter:11111111-2222-3333-4444-555555555555";
 
-    public InsightsAssistantEndpointStreamingTests(InsightsAssistantEndpointTestFixture fixture)
+    public InsightsAssistantEndpointStreamingContractTests(InsightsAssistantEndpointTestFixture fixture)
     {
         _fixture = fixture;
     }

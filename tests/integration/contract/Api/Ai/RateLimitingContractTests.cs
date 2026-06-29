@@ -42,7 +42,7 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// registered and accept requests within limits. The rate limiting middleware is the
 /// same for all policies — only the limiter parameters differ.
 /// </summary>
-public class RateLimitingIntegrationTests : IAsyncLifetime
+public class RateLimitingContractTests : IAsyncLifetime
 {
     private IHost _host = null!;
 

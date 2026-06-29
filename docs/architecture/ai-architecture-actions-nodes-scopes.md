@@ -244,7 +244,7 @@ The `sprk_analysisactiontype` Dataverse lookup table is KEPT in R7 (not dropped)
 | Question | Read |
 |---|---|
 | How runtime reads these columns (precedence, mode detection) | `ai-architecture-playbook-runtime.md` §3-5 |
-| How a consumer surface dispatches a playbook | `ai-architecture-consumer-routing.md` |
+| How a consumer surface dispatches a playbook | `ai-architecture-playbook-consumer-routing.md` |
 | How to author the JSON file the deploy script consumes | `ai-guide-playbook-deploy-recipe.md` |
 | JPS schema for action prompts + structured output | `ai-guide-jps-authoring.md` |
 | Maker recipe for a real `sprk_event` notification playbook | `PLAYBOOK-AUTHOR-GUIDE.md` |

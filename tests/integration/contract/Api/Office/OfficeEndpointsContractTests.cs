@@ -31,12 +31,12 @@ namespace Sprk.Bff.Api.Tests.Api.Office;
 /// Tests the full HTTP request/response cycle including routing, filters, and serialization.
 /// </summary>
 [Trait("status", "repaired")]
-public class OfficeEndpointsTests : IClassFixture<OfficeTestWebAppFactory>
+public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactory>
 {
     private readonly OfficeTestWebAppFactory _factory;
     private readonly HttpClient _client;
 
-    public OfficeEndpointsTests(OfficeTestWebAppFactory factory)
+    public OfficeEndpointsContractTests(OfficeTestWebAppFactory factory)
     {
         _factory = factory;
         _client = factory.CreateClient();

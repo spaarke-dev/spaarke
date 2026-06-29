@@ -2,7 +2,7 @@
 
 > **Audience**: Makers + AI engineers wiring a new surface (chat window, widget, code page, ad-hoc launcher) to invoke playbooks.
 > **Author**: spaarke-ai-platform-unification-r7 Wave 6 (FR-31)
-> **Status**: Maker-facing tutorial. For runtime mechanics (cache TTL, internal classes, match-conditions JSON predicates), see the canonical reference: [`docs/architecture/ai-architecture-consumer-routing.md`](../architecture/ai-architecture-consumer-routing.md) (READ-ONLY — do not modify).
+> **Status**: Maker-facing tutorial. For runtime mechanics (cache TTL, internal classes, match-conditions JSON predicates), see the canonical reference: [`docs/architecture/ai-architecture-playbook-consumer-routing.md`](../architecture/ai-architecture-playbook-consumer-routing.md) (READ-ONLY — do not modify).
 > **Last Updated**: 2026-06-28
 
 ---
@@ -13,7 +13,7 @@ You have a new place in the product — a chat window, a widget tile, a code pag
 
 What this guide does **not** cover:
 - Authoring the playbook itself → [`PLAYBOOK-AUTHOR-GUIDE.md`](PLAYBOOK-AUTHOR-GUIDE.md)
-- Runtime resolution algorithm, cache semantics, `sprk_matchconditionsjson` JSON predicates → [`docs/architecture/ai-architecture-consumer-routing.md`](../architecture/ai-architecture-consumer-routing.md)
+- Runtime resolution algorithm, cache semantics, `sprk_matchconditionsjson` JSON predicates → [`docs/architecture/ai-architecture-playbook-consumer-routing.md`](../architecture/ai-architecture-playbook-consumer-routing.md)
 - BFF placement / publish-size / CVE governance for new endpoints → [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) + root CLAUDE.md §10
 
 ---
@@ -55,7 +55,7 @@ Are you invoking a playbook from a NEW surface (not already in the table in §5)
     │   │         You still register a consumer; the call site is slightly different.
     │   └── NO → Standard Path A.5. Follow §3 verbatim.
     └── Do you have a document context + need legacy doc-bound semantics?
-        ├── YES → You may not need this guide. See ai-architecture-consumer-routing.md §4
+        ├── YES → You may not need this guide. See ai-architecture-playbook-consumer-routing.md §4
         │         "Path A / A.5 / B decision matrix" for which path to use.
         └── NO → Standard Path A.5. Follow §3 verbatim.
 ```
@@ -326,7 +326,7 @@ If your consumer needs per-token SSE streaming (e.g., chat surfaces with progres
 
 This is the **only** valid reason to bypass `IInvokePlaybookAi`. Per ADR-013, direct injection of `IPlaybookOrchestrationService` from CRUD code is normally a hygiene violation; the SSE streaming requirement is the documented exception. Cite the exception in your XML doc comment when you do this — task 091's `SessionSummarizeOrchestrator` class comment is the reference.
 
-For the runtime detail on what `PlaybookStreamEvent` carries, the SSE adapter pattern, and the Path A / A.5 / B decision matrix: [`docs/architecture/ai-architecture-consumer-routing.md`](../architecture/ai-architecture-consumer-routing.md) §3 and §4 (READ-ONLY — do not modify).
+For the runtime detail on what `PlaybookStreamEvent` carries, the SSE adapter pattern, and the Path A / A.5 / B decision matrix: [`docs/architecture/ai-architecture-playbook-consumer-routing.md`](../architecture/ai-architecture-playbook-consumer-routing.md) §3 and §4 (READ-ONLY — do not modify).
 
 ---
 
@@ -373,7 +373,7 @@ When you add a new consumer, also add it to `ConsumerTypes.All` (Step 1 in §3).
 
 | Document | Why you'd read it |
 |---|---|
-| [`docs/architecture/ai-architecture-consumer-routing.md`](../architecture/ai-architecture-consumer-routing.md) (READ-ONLY) | Runtime mechanics — cache TTL, `SelectBestMatch` algorithm, match-conditions JSON predicates, Path A/A.5/B decision matrix, R4 `/narrate` case study |
+| [`docs/architecture/ai-architecture-playbook-consumer-routing.md`](../architecture/ai-architecture-playbook-consumer-routing.md) (READ-ONLY) | Runtime mechanics — cache TTL, `SelectBestMatch` algorithm, match-conditions JSON predicates, Path A/A.5/B decision matrix, R4 `/narrate` case study |
 | [`docs/guides/PLAYBOOK-AUTHOR-GUIDE.md`](PLAYBOOK-AUTHOR-GUIDE.md) | Authoring the playbook itself (nodes, edges, Handlebars helpers, deploy script) |
 | [`docs/guides/JPS-AUTHORING-GUIDE.md`](JPS-AUTHORING-GUIDE.md) | Authoring the JPS schema referenced by AI-driven nodes inside the playbook |
 | [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) | BFF Hygiene — required pre-merge checklist when your new consumer adds endpoints or services to the BFF |

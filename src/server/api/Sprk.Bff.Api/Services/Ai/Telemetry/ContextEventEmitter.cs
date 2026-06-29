@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Sprk.Bff.Api.Services.Ai.Telemetry;
 
@@ -85,10 +87,26 @@ public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable
     private readonly Counter<long> _uploadCompleted;
 
     private readonly ILogger<ContextEventEmitter> _logger;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
 
     public ContextEventEmitter(ILogger<ContextEventEmitter> logger)
+        : this(logger, httpContextAccessor: null)
+    {
+    }
+
+    /// <summary>
+    /// DEF-001 / task 095 Phase 3 — Production constructor wiring the per-request
+    /// SSE side-channel (<see cref="IContextSseRelay"/>) so the six typed context
+    /// events surface to <c>ExecutionTraceWidget</c> via the chat SSE stream.
+    /// The legacy single-arg constructor remains for tests that don't exercise the
+    /// SSE relay surface.
+    /// </summary>
+    public ContextEventEmitter(
+        ILogger<ContextEventEmitter> logger,
+        IHttpContextAccessor? httpContextAccessor)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _httpContextAccessor = httpContextAccessor;
         _meter = new Meter(MeterName, "1.0.0");
 
         _toolCallStarted = _meter.CreateCounter<long>(ToolCallStartedCounter, unit: "{event}",
@@ -125,6 +143,7 @@ public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable
     public void ToolCallStarted(string toolName, Guid decisionId, Guid? sessionId, string? tenantId)
     {
         // ADR-015: deterministic IDs only — no args payload, no user text.
+        var nowUtc = DateTimeOffset.UtcNow;
         var tags = new TagList
         {
             { "toolName", toolName ?? string.Empty },
@@ -136,13 +155,22 @@ public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable
 
         _logger.LogInformation(
             "[ADR-015][context.tool_call_started] toolName={ToolName} decisionId={DecisionId} sessionId={SessionId} tenantId={TenantId} timestamp={Timestamp:o}",
-            toolName, decisionId.ToString("N"), sessionId?.ToString("N"), tenantId, DateTimeOffset.UtcNow);
+            toolName, decisionId.ToString("N"), sessionId?.ToString("N"), tenantId, nowUtc);
+
+        TryEmitToSse(new ContextSseEventDto
+        {
+            ContextEventType = "tool_call_started",
+            ContextTimestamp = nowUtc.ToString("o"),
+            ContextToolName = toolName,
+            ContextDecisionId = decisionId.ToString("N"),
+        });
     }
 
     /// <inheritdoc />
     public void ToolCallCompleted(string toolName, Guid decisionId, Guid? sessionId, string? tenantId, string outcome, long durationMs)
     {
         // ADR-015: deterministic IDs + enum-like outcome + numeric duration only.
+        var nowUtc = DateTimeOffset.UtcNow;
         var tags = new TagList
         {
             { "toolName", toolName ?? string.Empty },
@@ -155,13 +183,24 @@ public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable
 
         _logger.LogInformation(
             "[ADR-015][context.tool_call_completed] toolName={ToolName} decisionId={DecisionId} sessionId={SessionId} tenantId={TenantId} outcome={Outcome} durationMs={DurationMs} timestamp={Timestamp:o}",
-            toolName, decisionId.ToString("N"), sessionId?.ToString("N"), tenantId, outcome, durationMs, DateTimeOffset.UtcNow);
+            toolName, decisionId.ToString("N"), sessionId?.ToString("N"), tenantId, outcome, durationMs, nowUtc);
+
+        TryEmitToSse(new ContextSseEventDto
+        {
+            ContextEventType = "tool_call_completed",
+            ContextTimestamp = nowUtc.ToString("o"),
+            ContextToolName = toolName,
+            ContextDecisionId = decisionId.ToString("N"),
+            ContextOutcome = outcome,
+            ContextDurationMs = durationMs,
+        });
     }
 
     /// <inheritdoc />
     public void KnowledgeRetrieved(string knowledgeSourceId, double relevanceScore, int resultCount, Guid? sessionId, string? tenantId)
     {
         // ADR-015: deterministic source IDs + numeric metrics only — never chunk text.
+        var nowUtc = DateTimeOffset.UtcNow;
         var tags = new TagList
         {
             { "knowledgeSourceId", knowledgeSourceId ?? string.Empty },
@@ -172,13 +211,23 @@ public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable
 
         _logger.LogInformation(
             "[ADR-015][context.knowledge_retrieved] knowledgeSourceId={KnowledgeSourceId} relevanceScore={RelevanceScore:F4} resultCount={ResultCount} sessionId={SessionId} tenantId={TenantId} timestamp={Timestamp:o}",
-            knowledgeSourceId, relevanceScore, resultCount, sessionId?.ToString("N"), tenantId, DateTimeOffset.UtcNow);
+            knowledgeSourceId, relevanceScore, resultCount, sessionId?.ToString("N"), tenantId, nowUtc);
+
+        TryEmitToSse(new ContextSseEventDto
+        {
+            ContextEventType = "knowledge_retrieved",
+            ContextTimestamp = nowUtc.ToString("o"),
+            ContextKnowledgeSourceId = knowledgeSourceId,
+            ContextRelevanceScore = relevanceScore,
+            ContextResultCount = resultCount,
+        });
     }
 
     /// <inheritdoc />
     public void PlaybookNodeExecuting(Guid playbookId, Guid nodeId, string nodeType, Guid? sessionId, string? tenantId)
     {
         // ADR-015: deterministic GUIDs + enum-like nodeType only.
+        var nowUtc = DateTimeOffset.UtcNow;
         var tags = new TagList
         {
             { "playbookId", playbookId.ToString("N") },
@@ -191,13 +240,23 @@ public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable
 
         _logger.LogInformation(
             "[ADR-015][context.playbook_node_executing] playbookId={PlaybookId} nodeId={NodeId} nodeType={NodeType} sessionId={SessionId} tenantId={TenantId} timestamp={Timestamp:o}",
-            playbookId.ToString("N"), nodeId.ToString("N"), nodeType, sessionId?.ToString("N"), tenantId, DateTimeOffset.UtcNow);
+            playbookId.ToString("N"), nodeId.ToString("N"), nodeType, sessionId?.ToString("N"), tenantId, nowUtc);
+
+        TryEmitToSse(new ContextSseEventDto
+        {
+            ContextEventType = "playbook_node_executing",
+            ContextTimestamp = nowUtc.ToString("o"),
+            ContextPlaybookId = playbookId.ToString("N"),
+            ContextNodeId = nodeId.ToString("N"),
+            ContextNodeType = nodeType,
+        });
     }
 
     /// <inheritdoc />
     public void PlaybookNodeCompleted(Guid playbookId, Guid nodeId, string decision, long durationMs, Guid? sessionId, string? tenantId)
     {
         // ADR-015: deterministic GUIDs + enum-like decision + numeric duration only.
+        var nowUtc = DateTimeOffset.UtcNow;
         var tags = new TagList
         {
             { "playbookId", playbookId.ToString("N") },
@@ -210,13 +269,24 @@ public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable
 
         _logger.LogInformation(
             "[ADR-015][context.playbook_node_completed] playbookId={PlaybookId} nodeId={NodeId} decision={Decision} durationMs={DurationMs} sessionId={SessionId} tenantId={TenantId} timestamp={Timestamp:o}",
-            playbookId.ToString("N"), nodeId.ToString("N"), decision, durationMs, sessionId?.ToString("N"), tenantId, DateTimeOffset.UtcNow);
+            playbookId.ToString("N"), nodeId.ToString("N"), decision, durationMs, sessionId?.ToString("N"), tenantId, nowUtc);
+
+        TryEmitToSse(new ContextSseEventDto
+        {
+            ContextEventType = "playbook_node_completed",
+            ContextTimestamp = nowUtc.ToString("o"),
+            ContextPlaybookId = playbookId.ToString("N"),
+            ContextNodeId = nodeId.ToString("N"),
+            ContextDecision = decision,
+            ContextDurationMs = durationMs,
+        });
     }
 
     /// <inheritdoc />
     public void DecisionMade(string layer, string decision, string? capabilityName, Guid? sessionId, string? tenantId)
     {
         // ADR-015: enum-like layer + decision + capability NAME (config identifier, Tier 1 safe) only.
+        var nowUtc = DateTimeOffset.UtcNow;
         var tags = new TagList
         {
             { "layer", layer ?? string.Empty },
@@ -229,7 +299,46 @@ public sealed class ContextEventEmitter : IContextEventEmitter, IDisposable
 
         _logger.LogInformation(
             "[ADR-015][context.decision_made] layer={Layer} decision={Decision} capabilityName={CapabilityName} sessionId={SessionId} tenantId={TenantId} timestamp={Timestamp:o}",
-            layer, decision, capabilityName, sessionId?.ToString("N"), tenantId, DateTimeOffset.UtcNow);
+            layer, decision, capabilityName, sessionId?.ToString("N"), tenantId, nowUtc);
+
+        TryEmitToSse(new ContextSseEventDto
+        {
+            ContextEventType = "decision_made",
+            ContextTimestamp = nowUtc.ToString("o"),
+            ContextLayer = layer,
+            ContextDecision = decision,
+            ContextCapabilityName = capabilityName,
+        });
+    }
+
+    // =========================================================================
+    // R6 DEF-001 / task 095 Phase 3 — Per-request SSE bridge to ExecutionTraceWidget.
+    // =========================================================================
+    //
+    // Each of the six typed context.* methods above invokes TryEmitToSse after the
+    // meter + log emission. The relay (scoped, per HTTP request) is resolved via
+    // IHttpContextAccessor.RequestServices on each call so the singleton emitter
+    // does not capture a scoped dependency. When invoked outside an HTTP context
+    // (background services, hosted workers), HttpContext is null and the helper
+    // becomes a no-op. ADR-015 / ADR-030 / ADR-033 inherited via ContextSseEventDto.
+
+    private void TryEmitToSse(ContextSseEventDto dto)
+    {
+        if (_httpContextAccessor is null) return;
+        var ctx = _httpContextAccessor.HttpContext;
+        if (ctx is null) return;
+
+        try
+        {
+            var relay = ctx.RequestServices.GetService<IContextSseRelay>();
+            if (relay is null || relay.Writer is null) return;
+            _ = relay.TryWriteAsync(dto, ctx.RequestAborted);
+        }
+        catch
+        {
+            // Never throw from the side-channel. Relay swallows its own failures;
+            // service-resolution failure here also swallows silently.
+        }
     }
 
     // =========================================================================

@@ -72,14 +72,14 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// fixture variant for that scenario).
 /// </para>
 /// </remarks>
-public class ChatDocumentEndpointsTests : IClassFixture<ChatDocumentEndpointsTestFixture>
+public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndpointsTestFixture>
 {
     private readonly ChatDocumentEndpointsTestFixture _fx;
 
     private const string TestTenantId = "00000000-0000-0000-0000-000000000abc";
     private const string TestSessionId = "11111111-2222-3333-4444-555555555555";
 
-    public ChatDocumentEndpointsTests(ChatDocumentEndpointsTestFixture fx)
+    public ChatDocumentEndpointsContractTests(ChatDocumentEndpointsTestFixture fx)
     {
         _fx = fx;
     }
@@ -289,7 +289,7 @@ public class ChatDocumentEndpointsTests : IClassFixture<ChatDocumentEndpointsTes
 }
 
 /// <summary>
-/// Test fixture for <see cref="ChatDocumentEndpointsTests"/>. Hosts a minimal
+/// Test fixture for <see cref="ChatDocumentEndpointsContractTests"/>. Hosts a minimal
 /// <see cref="WebApplication"/> mapping only <c>MapChatDocumentEndpoints()</c> with
 /// test-double dependencies — no production-config matrix wired in.
 /// </summary>

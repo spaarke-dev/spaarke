@@ -47,6 +47,19 @@
     <ProjectReference Include="..\..\..\src\server\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
   </ItemGroup>
 
+  <!--
+    CICD-084 (2026-06-26) — KEEP-path relocation per ADR-038 §2 path #5 (endpoint contract).
+    HTTP-contract tests physically relocated to tests/integration/contract/** but kept compiled
+    into THIS assembly so fixtures (CustomWebAppFactory, WorkspaceTestFixture, AdminJobsTestFixture,
+    etc.) and project-specific package refs (NSubstitute, WireMock.Net, Cosmos SDK, MimeKit,
+    QuestPDF, Newtonsoft.Json) remain accessible without duplication in a second test project.
+    Namespaces preserved (Sprk.Bff.Api.Tests.*) for the same reason. Full assembly migration to
+    Spe.Integration.Tests is deferred to a future task once fixture coupling is untangled.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\integration\contract\**\*.cs" LinkBase="ContractTests" />
+  </ItemGroup>
+
   <!-- Insights Engine test fixtures (task 030+: Layer 1 / Layer 2 / D-P7 ingest tests).
        Linked from tests/Insights/fixtures/ so the same fixtures can be consumed by
        unit tests here, D-P16 smoke tests, and D-P14 synthesis playbook integration

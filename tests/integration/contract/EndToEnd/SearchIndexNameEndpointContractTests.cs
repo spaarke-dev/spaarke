@@ -73,7 +73,7 @@ namespace Sprk.Bff.Api.Tests.EndToEnd;
 /// with a fixed mock that does NOT capture per-call state, so it can't be reused.
 /// </para>
 /// </remarks>
-public class SearchIndexNameEndpointIntegrationTests
+public class SearchIndexNameEndpointContractTests
     : IClassFixture<SearchIndexNameEndpointTestFixture>
 {
     private readonly SearchIndexNameEndpointTestFixture _fixture;
@@ -82,7 +82,7 @@ public class SearchIndexNameEndpointIntegrationTests
     private const string TestTenantId = SearchIndexNameEndpointTestFixture.TestTenantId;
     private const string TestEntityId = "00000000-0000-0000-0000-000000000abc";
 
-    public SearchIndexNameEndpointIntegrationTests(SearchIndexNameEndpointTestFixture fixture)
+    public SearchIndexNameEndpointContractTests(SearchIndexNameEndpointTestFixture fixture)
     {
         _fixture = fixture;
         _fixture.ResetCapture();
@@ -271,7 +271,7 @@ public class SearchIndexNameEndpointIntegrationTests
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// WebApplicationFactory for <see cref="SearchIndexNameEndpointIntegrationTests"/>.
+/// WebApplicationFactory for <see cref="SearchIndexNameEndpointContractTests"/>.
 /// Hosts the real BFF API in-process with two surgical overrides:
 /// <list type="number">
 ///   <item>A capturing/configurable <see cref="ISemanticSearchService"/> mock so

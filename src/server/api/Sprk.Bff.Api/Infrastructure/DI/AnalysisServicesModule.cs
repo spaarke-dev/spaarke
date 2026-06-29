@@ -38,6 +38,16 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter,
             Sprk.Bff.Api.Services.Ai.Telemetry.ContextEventEmitter>();
 
+        // R6 DEF-001 / task 095 Phase 3 — IContextSseRelay is the per-request scoped bridge
+        // from the singleton ContextEventEmitter to the chat SSE stream. ChatEndpoints.SendMessageAsync
+        // assigns the relay's Writer at SSE stream start (writes "context_event" frames) and clears
+        // it in finally. The singleton emitter resolves this scoped relay via IHttpContextAccessor
+        // on each emission. Unconditional registration mirrors IContextEventEmitter above — outside
+        // an active HTTP context, Writer is null and emissions are silent no-ops. ADR-015 / ADR-030 /
+        // ADR-033 inherited via ContextSseEventDto / ContextSseRelay headers.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Telemetry.IContextSseRelay,
+            Sprk.Bff.Api.Services.Ai.Telemetry.ContextSseRelay>();
+
         // Insights Engine Widgets r1 telemetry (project ai-spaarke-insights-engine-widgets-r1 task 050).
         // Meter "Sprk.Bff.Api.InsightWidgets" per Q-U8 evidence resolution (matches all 9 existing BFF
         // meter `Sprk.Bff.Api.<Feature>` convention). Unconditional registration mirrors R5SummarizeTelemetry

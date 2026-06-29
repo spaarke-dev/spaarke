@@ -47,12 +47,12 @@ namespace Sprk.Bff.Api.Tests.Api.Office;
 /// </para>
 /// </remarks>
 [Trait("status", "repaired")]
-public class CommunicationsEndpointsTests : IClassFixture<OfficeCommunicationsTestWebAppFactory>
+public class CommunicationsEndpointsContractTests : IClassFixture<OfficeCommunicationsTestWebAppFactory>
 {
     private readonly OfficeCommunicationsTestWebAppFactory _factory;
     private readonly HttpClient _client;
 
-    public CommunicationsEndpointsTests(OfficeCommunicationsTestWebAppFactory factory)
+    public CommunicationsEndpointsContractTests(OfficeCommunicationsTestWebAppFactory factory)
     {
         _factory = factory;
         _client = factory.CreateClient();
