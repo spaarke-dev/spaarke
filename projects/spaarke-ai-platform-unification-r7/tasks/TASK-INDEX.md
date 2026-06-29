@@ -28,7 +28,7 @@
 | Wave 8 | Playbook Builder UI updates (FR-21 to FR-27) | 🔄 in-progress (080 ✅ audit; 082 ✅ 33-executor categorized Node Types left panel FR-22; 083 ✅ typed config form renderer infrastructure; 084 ✅ 5 priority typed forms verified + 20 Jest tests (W3-032 already shipped rich BFF schemas; canvas-side test gate added); 085 ✅ remaining 18 placeholder executors enriched with typed fields FR-23 (2026-06-29); 086 ✅ Action tab promotion FR-24; 088 ✅ canvas state `sprk_nodetype`→`sprk_executortype` FR-26 (9 refs replaced, 3 `__actionType` removed, 4 legacy constructs deleted, grep zero verified, build clean); 089a ✅ Jest UI tests for ExecutorTypeSelector dropdown + tier grouping (14/14 pass, 2026-06-29); 089b ✅ +26 incremental jest tests for 5 priority typed forms covering field-count sentinels / default-value resolution / Boolean+Number widget commits / controlled-component re-render / per-executor isolation (FR-23; 46/46 pass combined with task 084); 089c ✅ ADR-021 dark-mode static jest scan (5 Wave 8 files, 1949 LOC, 0 hardcoded color findings; 13 tests pass incl. 6 scanner self-tests; 2026-06-29); 081, 087, 089, 089d pending) | 080-089d ✅ generated (14 files); 080, 082, 083, 084, 085, 086, 088, 089a, 089b, 089c ✅ executed |
 | Wave 9 | Consumer migration (FR-17, FR-18) | 🟢 COMPLETE (090 ✅ audit/design; 091 ✅ FR-17 SessionSummarizeOrchestrator migrated; 092 ✅ chat-summarize sprk_playbookconsumer row verified; 093 ✅; 094 ✅ /playbooks hard slash + Library modal browse-mode + PlaybookCardGrid consumer chips; 095 ✅ Library modal wired into Daily Briefing widget via DigestHeader overflow; 096 ✅ Library modal wired into LegalWorkspace Get Started 9th "Browse Playbooks" card — FR-18 ≥3 surfaces acceptance MET; see notes/handoffs/fr18-closure.md) | 090 ✅, 091 ✅, 092 ✅, 093 ✅, 094 ✅, 095 ✅, 096 ✅ |
 | Wave 10 | Wrap-up + R4 graduation gate close | 🔄 in-progress (100 ✅ end-to-end verification report 2026-06-29 marked 11/15 PASS at verification-report level, but Wave 10 task 101 UAT discovered orchestrator template-engine gap — Wave 11 added 2026-06-29 to close that gap; 101 + 090-wrap-up NOW BLOCK on Wave 11 task 119 GREEN) | 100 ✅, 101 ⏸️ (blocks on W11-117), 090-project-wrap-up ⏸️ (blocks on W11-119) |
-| Wave 11 | Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive | 🔄 in-progress (110 ✅ 2026-06-29 — audit + design doc landed at `notes/spikes/wave11-orchestrator-resolution-design.md`; key finding: NodeOutputs infra ALREADY exists in PlaybookRunContext, and ReturnResponseNodeExecutor.BuildTemplateContext already proves the pattern — T111 just extracts it as a shared helper) | 110-119 ✅ generated (10 files); 1/10 executed (110 ✅) |
+| Wave 11 | Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive | 🔄 in-progress (110 ✅ 2026-06-29 — audit + design doc at `notes/spikes/wave11-orchestrator-resolution-design.md`; **Option B finalized 2026-06-29** after deeper inspection of PromptSchemaRenderer revealed JPS schema has half-built `InputSection.Parameters` field never rendered; T111a added 2026-06-29 for binding doc requirement) | 110-119 + 111a ✅ generated (11 files); 1/11 executed (110 ✅) |
 
 **Total: 92 POML files generated across 11 waves. Wave 11 ready for execution starting at task 110.**
 
@@ -204,7 +204,8 @@
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
 | 110 | ✅ | Audit current orchestrator template resolution + design RunContext.NodeOutputs surface — design doc 2026-06-29 at `notes/spikes/wave11-orchestrator-resolution-design.md`; key finding: NodeOutputs infra ALREADY exists; T111 work narrower than initially scoped (extract `BuildTemplateContext` from ReturnResponseNodeExecutor as shared helper) | audit, bff-api, planning | yes | — |
-| 111 | 🔲 | Wire ITemplateEngine into PlaybookOrchestrationService.ApplyConfigJsonTemplates + carry RunContext.NodeOutputs to subsequent nodes | bff-api, code-impl, ai, refactoring | yes | 110 |
+| 111 | 🔲 | Wire ITemplateEngine into orchestrator (Layer 1) + extend PromptSchemaRenderer with structured `## Input` section (Layer 2) — **Option B finalized 2026-06-29** after deeper audit found JPS schema half-built `InputSection.Parameters` field never rendered | bff-api, code-impl, ai, refactoring | yes | 110 |
+| 111a | 🔲 | Document the Playbook-driven LLM Output pattern (architecture doc + maker guide + cross-links) — binding operator requirement 2026-06-29 for Insights Engine + other narrative consumers | documentation, architecture, ai | no (sequential after T111 ships) | 111 |
 | 112 | 🔲 | Register custom Handlebars helpers: json, map, flatten, distinct, concat, join | bff-api, code-impl, ai | yes (with 113, 114) | 111 |
 | 113 | 🔲 | Eliminate `{{lambda}}` from source by adding `{{flatMap}}` helper + rewriting allowList expression | bff-api, code-impl, ai, dataverse-data | yes (with 112, 114) | 111 |
 | 114 | 🔲 | Implement fan-out iteration semantics in PlaybookOrchestrationService | bff-api, code-impl, ai | yes (with 112, 113) | 111 |
@@ -242,8 +243,9 @@ Tasks within a group can run concurrently (separate `task-execute` invocations i
 | W9 | 090-096 | W2 024 ✅ | Sequential within (090 → 091 → 092; then 093-096 sequential) |
 | W10 | 100 ✅; 101 + wrap-up | W11 119 ✅ | Sequential — 101 + wrap-up block on Wave 11 close |
 | W11-A | 110 | W5 + W8 ✅ | yes — audit only |
-| W11-B | 111 | 110 ✅ | yes — orchestrator wiring |
-| W11-C | 112, 113, 114 | 111 ✅ | yes — 3 in parallel (different code surfaces) |
+| W11-B | 111 | 110 ✅ | yes — orchestrator wiring (Option B) |
+| W11-B' | 111a | 111 ✅ | no — sequential after T111 ships so docs reflect shipped code |
+| W11-C | 112, 113, 114 | 111a ✅ (binding doc dep) | yes — 3 in parallel (different code surfaces) |
 | W11-D | 115 | 112+113+114 ✅ | no — touches deployed Dataverse data (sequential) |
 | W11-E | 116 | 115 ✅ | no — deploys BFF + smoke (sequential) |
 | W11-F | 117 | 116 ✅ | no — operator UAT (sequential) |

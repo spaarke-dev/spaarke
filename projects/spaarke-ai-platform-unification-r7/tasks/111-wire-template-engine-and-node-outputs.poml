@@ -15,29 +15,30 @@
   </metadata>
 
   <prompt>
-    **REVISED 2026-06-29 — TWO-LAYER design (operator-approved after T110 deeper audit).**
+    **FINAL REVISION 2026-06-29 — Option B (operator-approved after deeper inspection of
+    PromptSchemaRenderer + JPS schema).**
 
-    T110 audit found NodeOutputs infrastructure ALREADY exists in PlaybookRunContext, but the
-    AI executors (AiCompletion + AiAnalysis) only read `templateParameters` from configJson —
-    they ignore `inputBinding.X` which is the playbook author convention. Two distinct concerns
-    need centralization:
-
-    LAYER 1 (universal): extract `PlaybookTemplateContextBuilder.Build(runContext)` and wire
-    orchestrator's `ApplyConfigJsonTemplates` to use `ITemplateEngine.Render` with it. Every
-    executor's configJson gets `{{X}}` substitution at the string level (NodeOutputs +
+    LAYER 1 (universal — every executor): extract `PlaybookTemplateContextBuilder.Build(runContext)`
+    and wire orchestrator's `ApplyConfigJsonTemplates` to use `ITemplateEngine.Render` with it.
+    Every executor's configJson gets `{{X}}` substitution at the string level (NodeOutputs +
     Parameters + run bag context). Existing `LoadKnowledgeNodeExecutor` + `ReturnResponseNodeExecutor`
-    BuildTemplateContext methods refactored to call the shared helper (eliminates duplication).
+    BuildTemplateContext methods refactored to call the shared helper.
 
-    LAYER 2 (AI-shared): NEW `AiPromptInputBindingResolver` helper used by AiCompletion +
-    AiAnalysis. Reads `configJson.inputBinding.<key>` (resolved values from Layer 1), looks up
-    `action.input[<key>].placeholder` for the LLM-prompt placeholder name, populates
-    `templateParameters` dict that PromptSchemaRenderer consumes. Centralizes AI-specific
-    mapping so future AI executors get it free with one helper invocation — NOT per-executor
-    template code.
+    LAYER 2 (AI-shared — structured Input section, NOT embedded placeholders): finalize the
+    half-built `InputSection.Parameters` field in PromptSchema. Extend `PromptSchemaRenderer.Render`
+    to accept `JsonElement? runtimeInput` parameter and render a new "## Input\n{json}" section
+    between Context and Document. AI executors (AiCompletion + AiAnalysis) extract resolved
+    `inputBinding` from configJson, package as JsonElement, pass to renderer as `runtimeInput`.
 
-    Rationale: addresses operator concern (2026-06-29) about needing to "code outputs for every
-    executor". Future narrative-output executors throughout Workspace UX get template resolution
-    for free via Layer 1, AI prompt-input mapping for free via Layer 2.
+    KEY DESIGN PROPERTY (operator-required): the Action JPS body (instruction.role/task/constraints/context)
+    stays PURE INSTRUCTIONS — no `{{X}}` substitution for data. Data lives in its own structured
+    "## Input" section the LLM clearly sees. This decouples prompt-instruction authoring from
+    data-shape authoring, enabling future narrative-output consumers (Insight Engine Matter
+    summaries, work assignment briefings, project status, document review, etc.) to be authored
+    as 1 Action JPS + 1 playbook + 1 destination-field — zero new C# per consumer.
+
+    Documentation deliverable spawns as T111a (architecture doc + maker guide) — operator
+    requirement for Insights Engine + many other areas.
   </prompt>
 
   <role>
@@ -128,19 +129,29 @@
     <step order="4" name="Layer 1: Refactor duplicate BuildTemplateContext methods">
       `LoadKnowledgeNodeExecutor.BuildTemplateContext` (line ~277) and `ReturnResponseNodeExecutor.BuildTemplateContext` (lines 312-339) are byte-for-byte duplicates. Replace BOTH with calls to `PlaybookTemplateContextBuilder.Build(...)`. NOTE: existing per-executor `_templateEngine.Render` calls become NO-OPs for templates already resolved by the orchestrator at Step 3 — but the executors keep their own logic for "build output FROM resolved values" (passthrough output, terminal response). This eliminates duplication without breaking existing tests.
     </step>
-    <step order="5" name="Layer 2: Create AiPromptInputBindingResolver helper">
-      NEW file `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiPromptInputBindingResolver.cs` (static class or free helper). Method `PopulateTemplateParameters(configJsonInputBinding, actionInputs, templateParameters)` reads `configJson.inputBinding.&lt;key&gt;` (already resolved values from Layer 1), looks up `action.input[&lt;key&gt;].placeholder` for the LLM-prompt placeholder name, populates the `templateParameters` dict. Defensive: missing inputBinding → no-op; missing action.input mapping → log warning, skip.
+    <step order="5" name="Layer 2: Extend PromptSchemaRenderer with ## Input section">
+      Add new optional parameter `JsonElement? runtimeInput = null` to `PromptSchemaRenderer.Render` (existing method at line 72) AND propagate to `RenderJps` (line 120). In `RenderJps`, between Context (line 205-209) and Document (line 211-218), add new section:
+      ```
+      if (runtimeInput is { ValueKind: not JsonValueKind.Null and not JsonValueKind.Undefined }) {
+          sb.AppendLine("## Input");
+          sb.AppendLine();
+          sb.AppendLine(JsonSerializer.Serialize(runtimeInput.Value, new JsonSerializerOptions { WriteIndented = true }));
+          sb.AppendLine();
+      }
+      ```
+      Renderer does NOT mutate JPS body. Input section is rendered between instructions and downstream sections so the LLM sees: instructions → data → document/skills/knowledge → examples → output schema.
     </step>
-    <step order="6" name="Layer 2: Wire AiCompletionNodeExecutor to invoke the AI helper">
-      In `AiCompletionNodeExecutor.ExecuteAsync` (around line 302 where `ExtractTemplateParameters` is called): AFTER extracting templateParameters from configJson, BEFORE calling PromptSchemaRenderer, invoke `AiPromptInputBindingResolver.PopulateTemplateParameters(configJson.inputBinding, context.Action.Inputs, templateParameters)` to merge inputBinding-derived values into templateParameters. The PromptSchemaRenderer then sees BOTH templateParameters values + inputBinding-derived values keyed by action input placeholder names.
+    <step order="6" name="Wire AiCompletionNodeExecutor to extract inputBinding + pass to renderer">
+      Add helper `ExtractInputBindingAsJsonElement(string? configJson) → JsonElement?` to `AiCompletionNodeExecutor` (private static, returns null if absent or malformed). In `ExecuteAsync` around line 302-316 where `_promptSchemaRenderer.Render(...)` is called, pass the new `runtimeInput` parameter: `runtimeInput: ExtractInputBindingAsJsonElement(context.Node.ConfigJson)`. Existing `templateParameters` continues to flow through for backward-compatibility with non-inputBinding playbook configs.
     </step>
-    <step order="7" name="Layer 2: Wire AiAnalysisNodeExecutor to invoke the AI helper">
-      Mirror Step 6 in `AiAnalysisNodeExecutor` — same insertion pattern (the executor mirrors AiCompletion per code-comments per task 001 audit). Confirm via grep that `ExtractTemplateParameters` pattern exists there too.
+    <step order="7" name="Wire AiAnalysisNodeExecutor same pattern">
+      Mirror Step 6 in `AiAnalysisNodeExecutor` (line 434 area): add `ExtractInputBindingAsJsonElement` helper + pass to `_promptSchemaRenderer.Render(... runtimeInput: ...)`. AiAnalysis mirrors AiCompletion per code-comments.
     </step>
     <step order="8" name="Write xUnit tests (Layer 1 + Layer 2)">
       NEW: `PlaybookTemplateContextBuilderTests.cs` (4-6 tests covering NodeOutputs traversal + Parameters merge + run-bag).
       NEW: `PlaybookOrchestrationService_TemplateResolutionTests.cs` (5 tests: (a) `{{paramName}}` regression, (b) `{{nodeA.field}}` resolves, (c) `{{nodeA.nested.deep}}` resolves, (d) `{{nonexistent}}` empty, (e) Parameters wins on collision).
-      NEW: `AiPromptInputBindingResolverTests.cs` (5 tests: (a) happy path inputBinding→placeholder, (b) missing inputBinding → no-op, (c) missing action.input mapping → warn+skip, (d) multiple inputs each correctly mapped, (e) inputBinding value already-resolved string passes through).
+      NEW: `PromptSchemaRenderer_InputSectionTests.cs` (5 tests: (a) `runtimeInput: null` renders no Input section (regression — no change vs today), (b) `runtimeInput: JsonElement of object` renders "## Input\\n{indented json}" between Context and Document, (c) `runtimeInput: JsonElement Null/Undefined` renders no section, (d) Input section appears in correct position (before Document, after Context), (e) JPS body NOT mutated by render).
+      NEW: `AiCompletionNodeExecutor_InputBindingTests.cs` (4 tests: (a) configJson with inputBinding → JsonElement extracted + passed to renderer, (b) configJson without inputBinding → renderer gets null, (c) malformed configJson → renderer gets null + no throw, (d) inputBinding with resolved-string values (from Layer 1) round-trips correctly).
       Refactor existing `ReturnResponseNodeExecutorTests` + `LoadKnowledgeNodeExecutorTests` if needed to confirm BuildTemplateContext extraction didn't regress behavior.
     </step>
     <step order="9" name="Run full BFF test suite + verify build">
@@ -170,14 +181,15 @@
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (edited — inject ITemplateEngine, rewrite ApplyConfigJsonTemplates)</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LoadKnowledgeNodeExecutor.cs (edited — replace BuildTemplateContext with helper call)</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ReturnResponseNodeExecutor.cs (edited — replace BuildTemplateContext with helper call)</output>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiPromptInputBindingResolver.cs (NEW — Layer 2 AI-shared helper)</output>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs (edited — wire AI helper)</output>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs (edited — wire AI helper)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs (edited — Layer 2: new runtimeInput parameter + "## Input" section render)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs (edited — extract inputBinding as JsonElement + pass to renderer)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs (edited — same pattern as AiCompletion)</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookTemplateContextBuilderTests.cs (NEW)</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookOrchestrationService_TemplateResolutionTests.cs (NEW)</output>
-    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiPromptInputBindingResolverTests.cs (NEW)</output>
-    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to 112)</output>
-    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 111 ✅)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaRenderer_InputSectionTests.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiCompletionNodeExecutor_InputBindingTests.cs (NEW)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to 111a)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 111 ✅, spawn 111a)</output>
   </outputs>
 
   <acceptance-criteria>

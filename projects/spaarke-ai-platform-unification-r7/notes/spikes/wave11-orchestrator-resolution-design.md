@@ -363,5 +363,137 @@ T111 size: medium (~1 day). Single PR / commit series.
 
 ### Confirmation
 
-Operator approved "two layer" 2026-06-29. T111 executes against this revised design. T112-T119 unchanged.
+Operator approved "two layer" 2026-06-29. **Superseded by Option B finalization below** (same operator session, deeper findings).
+
+---
+
+## FINAL DESIGN 2026-06-29 — Option B (structured Input section)
+
+> **Triggered by operator question**: "doesn't this mean that we are then making the UI output part of the prompt -- rather then an external function? again, that's fine if it simplifies and is the right technical approach -- but let's not do it just because [it's the simplest]"
+> **Operator approval 2026-06-29**: "proceed with Option B (ensure we have documentation of the architecture and component model because we will need it for Insights Engine (and many other areas))"
+
+### Finding 8 — JPS schema has half-built `input.parameters` field; PromptSchemaRenderer never renders it
+
+[`PromptSchema.cs:121`](../../../../src/server/api/Sprk.Bff.Api/Services/Ai/Models/PromptSchema.cs#L121) declares `InputSection.Parameters` as `JsonElement?`. PromptSchemaRenderer.RenderJps (lines 180-238) assembles 8 sections (Role, Task, Constraints, Context, Document, Skills, Knowledge, Examples) but does NOT render `input.parameters`. The field is orphan.
+
+### Finding 9 — R4 Action JPS authors invented `input.<X>.placeholder` outside the schema
+
+`brief-narrate-tldr.action.json` has `"input": { "payload": { "placeholder": "{{briefing.payload}}", ... } }` — this `input.payload` shape is NOT in the canonical JPS schema. PromptSchemaRenderer has no code path for it. The `{{briefing.payload}}` placeholder NEVER substitutes anywhere. Worse: the prompt body (`instruction.task/context/constraints`) doesn't reference the placeholder either.
+
+### Why this matters — operator scaling concern
+
+If we proceed with the "simpler" approach (embed `{{X}}` in `instruction.task`), the prompt body authoring couples data shape to instructions. Every new narrative-output consumer (Insight Engine matter summaries, work assignment briefings, project status updates, document review summaries, etc.) would need:
+- Prompt body editing when input shape changes
+- Coupling between maker who edits Action prompts and developer who composes playbook
+- Hard-to-test prompts (you can't unit-test a prompt that mixes data + instructions; you can unit-test instructions + structured data sections separately)
+
+### Option B — finalize the half-built `input.parameters` mechanism
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 1: Orchestrator-level template resolution (UNIVERSAL)      │
+│   PlaybookOrchestrationService.ApplyConfigJsonTemplates          │
+│   uses ITemplateEngine + shared PlaybookTemplateContextBuilder   │
+│   → configJson handed to executor has all {{X}} resolved         │
+│   → every current + future executor benefits                     │
+└──────────────────────────┬──────────────────────────────────────┘
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 2: PromptSchemaRenderer renders "## Input" section         │
+│   (the "external function" boundary operator asked about)        │
+│                                                                  │
+│   Render() gains one parameter: JsonElement? runtimeInput        │
+│   When non-null, renderer inserts "## Input\n{json}" section     │
+│   between Context and Document.                                  │
+│                                                                  │
+│   AI executors (AiCompletion + AiAnalysis):                      │
+│     - read configJson.inputBinding (resolved by Layer 1)         │
+│     - package as JsonElement                                     │
+│     - pass to PromptSchemaRenderer.Render(runtimeInput: ...)     │
+│                                                                  │
+│   Prompt body stays PURE INSTRUCTIONS — no {{X}} for data.       │
+│   Data lives in its own structured section the LLM clearly sees. │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Authoring convention (binding — to be documented in T111a)
+
+**Playbook author** writes node configJson:
+```json
+{
+  "actionCode": "BRIEF-NARRATE-TLDR",
+  "inputBinding": {
+    "briefing": "{{json start}}"
+  }
+}
+```
+
+**Action JPS author** writes pure instructions + declarative input metadata:
+```json
+{
+  "instruction": {
+    "role": "notification summarizer",
+    "task": "Read the structured input below and produce ...",
+    "constraints": [...]
+  },
+  "input": {
+    "parameters": {
+      "description": "What the data shape is (markdown documentation for the AI; does NOT inject data)"
+    }
+  },
+  "output": { "fields": [...] }
+}
+```
+
+**Output goes wherever downstream nodes send it** — ReturnResponse (HTTP), UpdateRecord (Dataverse field write), SendEmail, CreateNotification, etc. AI executor doesn't know or care about destination.
+
+### Generalization — Insight Engine "Performance Metrics → Matter Summary" example
+
+Same primitives, different composition:
+
+```
+Start (matterId, matterName) → QueryDataverse (fetch metrics)
+  → AiCompletion (action MATTER-METRICS-SUMMARIZE)
+  → UpdateRecord (write summaryText to sprk_matter.sprk_performancesummary)
+  → ReturnResponse
+```
+
+Zero new C# per consumer. New consumer = 1 Action JPS + 1 playbook + 1 form field. Reuses Layer 1 + Layer 2 universally.
+
+### Revised T111 sub-task list (Option B)
+
+| # | Sub-task | File |
+|---|---|---|
+| 1 | Extract `PlaybookTemplateContextBuilder.Build(runContext)` | NEW: `Services/Ai/PlaybookTemplateContextBuilder.cs` |
+| 2 | Wire orchestrator's `ApplyConfigJsonTemplates` to use ITemplateEngine + helper (Layer 1) | `Services/Ai/PlaybookOrchestrationService.cs` |
+| 3 | Refactor `LoadKnowledgeNodeExecutor.BuildTemplateContext` to call shared helper | `Services/Ai/Nodes/LoadKnowledgeNodeExecutor.cs` |
+| 4 | Refactor `ReturnResponseNodeExecutor.BuildTemplateContext` to call shared helper | `Services/Ai/Nodes/ReturnResponseNodeExecutor.cs` |
+| 5 | Extend `PromptSchemaRenderer.Render` to accept `JsonElement? runtimeInput` + render "## Input" section between Context and Document (Layer 2) | `Services/Ai/PromptSchemaRenderer.cs` |
+| 6 | Wire `AiCompletionNodeExecutor` to extract resolved `inputBinding` from configJson + pass to renderer as `runtimeInput` | `Services/Ai/Nodes/AiCompletionNodeExecutor.cs` |
+| 7 | Wire `AiAnalysisNodeExecutor` to do same | `Services/Ai/Nodes/AiAnalysisNodeExecutor.cs` |
+| 8 | Unit tests covering Layer 1 builder + orchestrator wiring + PromptSchemaRenderer "## Input" section + AI executor inputBinding extraction + integration | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` |
+
+T111 size: medium (1-1.5 days). PromptSchemaRenderer extension is +15-25 LOC plus 4-5 tests.
+
+### NEW Task T111a — Documentation (operator-required for Insights Engine + other areas)
+
+| Deliverable | Path | Purpose |
+|---|---|---|
+| Architecture doc | `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md` | Authoritative reference: two-layer architecture, runtime data flow, JPS authoring convention, component model. Cross-linked from AI-ARCHITECTURE.md + ai-architecture-actions-nodes-scopes.md. Cite ADR-013 + ADR-037. |
+| Maker guide | `docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md` | Step-by-step tutorial: author playbook + Action JPS + downstream-destination node for a new narrative output. Two worked examples (Daily Briefing + Insight Engine Matter Summary). |
+| Root CLAUDE.md pointer | `CLAUDE.md` §17 pointer table | New row pointing to architecture doc — load-bearing for future agents authoring narrative consumers. |
+
+T111a fires AFTER T111 implementation (docs reflect what shipped). Slots between T111 and T112.
+
+### T113 simplifies under Option B
+
+Previously T113 was going to require Action JPS body rewrites (to add `{{X}}` placeholders). Under Option B, Action JPS bodies stay as-is — no `{{X}}` substitution into prompt body needed. T113 scope reverts to original: flatMap helper + lambda rewrite + pipe-shorthand rewrite in `daily-briefing-narrate.json` only. **No Action source edits.**
+
+### What about T115 (ValidateEntityNames config restoration)?
+
+Unchanged. T115 PATCHes the deployed `sprk_playbooknode` row to restore source-correct templates. Under Option B, the source-correct templates resolve cleanly via Layer 1 (universal orchestrator resolution). ValidateEntityNames is NOT an AI executor — it doesn't use Layer 2 — it consumes resolved values directly from its configJson.
+
+### Confirmation
+
+Operator approved Option B 2026-06-29 with binding doc requirement. T111 executes against Option B design. T111a added for documentation. T112 / T114 / T115 / T116 / T117 / T118 / T119 unchanged. T113 simplifies (no Action JPS body rewrite).
 
