@@ -22,7 +22,7 @@
 | Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | 🟢 COMPLETE (10/10 tasks; publish-hygiene gate PASSED 2026-06-28: 46.71 MB compressed = FLAT vs Wave 1; +1.06 MB cumulative R7 = unchanged vs Wave 1 baseline; 0 new HIGH CVE; AiCompletion 20/20 + Orchestration 60/63 baseline preserved) | 020 ✅, 021 ✅, 022 ✅, 023 ✅, 024 ✅, 025 ✅, 026 ✅, 027 ✅, 028 ✅, 029 ✅ |
 | Wave 3 | Typed config schemas (FR-16) | 🔄 in-progress (030 ✅ design; 031 ✅ INodeExecutor seam + ExecutorConfigSchema DTO; 032 ✅ 25 executor overrides; 033 ✅ BFF endpoint shipped; 034-036 ready) | 030 ✅, 031 ✅, 032 ✅, 033 ✅; 034-036 generated |
 | Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | 🔄 in-progress (040 ✅ audit; 041 ✅ migration; 042 ✅ DELETION 524 LOC removed; 045 ✅; 043/044/046/047 remaining — schema drops next) | 040 ✅, 041 ✅, 042 ✅, 045 ✅; 043, 044, 046, 047 pending |
-| Wave 5 | Existing-playbook backfill (FR-19, FR-20) | ⏸️ blocked on Wave 2 | 050-056 ✅ generated (7 files) |
+| Wave 5 | Existing-playbook backfill (FR-19, FR-20) | 🔄 in-progress (050 ✅ Review-PlaybookNodes-Dispatch.ps1 authored + dry-run verified against spaarkedev1: 94 nodes / 41 HIGH / 14 MEDIUM / 23 LOW / 16 NONE; task 051 ready) | 050 ✅; 051-056 generated |
 | Wave 6 | Documentation deletion + updates (FR-28 to FR-31) | 🔄 in-progress (060 ✅ audit/disposition; 061 ✅ DELETE §5 from playbook-runtime.md; 067 ✅ CREATE ai-guide-consumer-wiring.md FR-31; 062-066/068-069 pending) | 060-069 ✅ generated (10 files); 060 ✅, 061 ✅, 067 ✅ executed |
 | Wave 7 | Skill rewrites (FR-32, FR-33) | ⏸️ blocked on Wave 2 | 070-075 ✅ generated (6 files) |
 | Wave 8 | Playbook Builder UI updates (FR-21 to FR-27) | ⏸️ blocked on Wave 2 + Wave 3 | 080-089d ✅ generated (14 files) |
@@ -109,7 +109,7 @@
 
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
-| 050 | ⏸️ | Author Review-PlaybookNodes-Dispatch.ps1 (FR-19) | script, dataverse | no (sequential) | 024 (W2 dispatch ready) |
+| 050 | ✅ | Author Review-PlaybookNodes-Dispatch.ps1 (FR-19) | script, dataverse | no (sequential) | 024 (W2 dispatch ready) |
 | 051 | ⏸️ | Run review tool; produce CSV for owner review | dataverse, audit | no | 050 |
 | 052 | ⏸️ | **OWNER CHECKPOINT** — owner reviews + sets each value (94 nodes) | manual, owner-gate | no | 051 |
 | 053 | ⏸️ | Author Migrate-PlaybookNodes-to-ExecutorType.ps1 (idempotent + dry-run) | script, dataverse | no | 052 |
@@ -129,7 +129,7 @@
 | 062 | ✅ | UPDATE ai-architecture-actions-nodes-scopes.md 4-Home decision tree | docs | yes | 024 |
 | 063 | ⏸️ | UPDATE ai-guide-playbook-deploy-recipe.md — remove Control-flow name-detection | docs | yes | 055 |
 | 064 | ⏸️ | UPDATE `.claude/constraints/bff-extensions.md` §G (FR-29) | docs, skill-directives | no (sequential per Sub-Agent Write Boundary) | 024 |
-| 065 | ⏸️ | MAJOR UPDATE JPS-AUTHORING-GUIDE.md (FR-30) | docs | yes | 024 |
+| 065 | ✅ | MAJOR UPDATE JPS-AUTHORING-GUIDE.md (FR-30) | docs | yes | 024 |
 | 066 | ⏸️ | MAJOR UPDATE PLAYBOOK-AUTHOR-GUIDE.md (FR-30) | docs | yes | 024 |
 | 067 | ✅ | CREATE ai-guide-consumer-wiring.md (FR-31) | docs | yes | 091 (W9 chat-summarize done) |
 | 068 | ⏸️ | UPDATE root CLAUDE.md if entry-points table affected | docs | no (sequential per Sub-Agent Write Boundary) | 067 |

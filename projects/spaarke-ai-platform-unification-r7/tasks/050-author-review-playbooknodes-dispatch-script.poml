@@ -2,7 +2,7 @@
 <task id="R7-050" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Author Review-PlaybookNodes-Dispatch.ps1 (FR-19) — owner manual-review tool</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>5</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>script, dataverse, wave-5</tags>

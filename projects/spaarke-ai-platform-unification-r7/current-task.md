@@ -11,9 +11,75 @@
 | Field | Value |
 |---|---|
 | **Task** | 094 — Wire Playbook Library modal into spaarke-ai chat surface (Wave 9, FR-18) |
-| **Step** | Step 0 — not started |
-| **Status** | not-started |
-| **Next Action** | Begin Step 1 of task 094 — wire the Playbook Library modal (audited by task 093) into the spaarke-ai chat surface per FR-18. Per user instructions: task 093 already complete; advance directly to 094. |
+| **Step** | Step 4-9 — implementing /playbooks hard slash + PlaybookCardGrid consumer mapping |
+| **Status** | in-progress |
+| **Next Action** | Implement hard-slash wiring + extend playbookService + PlaybookCardGrid, then build + quality gates + commit. |
+
+### Task 094 Files Modified This Session
+
+- `src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts` — add `/playbooks` to HardSlashCommand union + HARD_SLASHES array
+- `src/solutions/SpaarkeAi/src/components/conversation/CommandHelpPanel.tsx` — add `/playbooks` description
+- `src/solutions/SpaarkeAi/src/components/conversation/HardSlashExecutor.ts` — add `openLibraryModal` to ExecutorContext + execPlaybooks branch + assertHardSlash guard
+- `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` — wire `openLibraryModal: () => handleOpenLibraryModal([])` in hardSlashContext
+- `src/client/shared/Spaarke.UI.Components/src/components/Playbook/types.ts` — add optional `consumers` to IPlaybook
+- `src/client/shared/Spaarke.UI.Components/src/components/Playbook/playbookService.ts` — extend `loadPlaybooks` with OData `$expand` for `sprk_playbookconsumer`
+- `src/client/shared/Spaarke.UI.Components/src/components/Playbook/PlaybookCardGrid.tsx` — render consumer-mapping Tag chips
+- `src/solutions/SpaarkeAi/src/components/conversation/__tests__/PlaybookLibraryHardSlash.test.ts` — NEW component test
+
+### Task 094 Knowledge Loaded
+
+- Project CLAUDE.md (R7) ✓
+- Task 094 POML ✓
+- Task 093 audit doc at `notes/spikes/playbook-library-modal-audit.md` ✓
+- `CommandRouter.ts` / `CommandHelpPanel.tsx` / `HardSlashExecutor.ts` (R6 Pillar 8 foundation) ✓
+- `ConversationPane.tsx` lines 1340-1450 (hardSlashContext memo) + 1744-1802 (handleOpenLibraryModal) + 2380-2440 (mount points) ✓
+- `PlaybookLibraryShell.tsx` props contract (via task 093 audit Q2) ✓
+- `PlaybookCardGrid.tsx` + `playbookService.ts` + `types.ts` (Playbook shared lib) ✓
+- `sprk_playbookconsumer` schema (Dataverse MCP describe) — lookup column = `sprk_playbook` ✓
+- `ConsumerRoutingService.cs` (BFF Path A.5 — confirms `sprk_consumertype` + `sprk_consumercode` columns) ✓
+
+### Task 094 ADRs Applicable
+
+- ADR-013 (BFF AI architecture — Path A.5 routing preserved; modal launches existing infra, no new BFF surface)
+- ADR-021 (semantic Fluent UI tokens — Tag chips use `tokens.colorBrandBackground2` etc.)
+- ADR-029 (frontend-only; BFF publish-size delta = 0 MB)
+- ADR-038 (testing — single test for new affordance contract; mocks `executeHardSlash` boundary, doesn't re-test PlaybookLibraryShell internals)
+- Component Justification §11: REUSE — extending existing CommandRouter/Executor + shared PlaybookLibraryShell. No new surface.
+
+
+
+### Task 050 completion note (2026-06-28, Wave 5 START)
+
+✅ **Task 050 COMPLETE** — Wave 5 starts. New file `scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1` (512 lines) authored per FR-19 review-tool portion. Read-only tool: zero POST/PATCH/DELETE calls. Authenticates via `az account get-access-token` matching established R7 + R4-era pattern (`Add-EntityNameValidatorNodeTypeOption.ps1`, `Deploy-Playbook.ps1`). Queries `sprk_playbooknodes` with `$expand=sprk_actionid($select=sprk_name,sprk_executoractiontype),sprk_playbookid($select=sprk_name)` for full per-node context in one round-trip. Computes 13-column CSV per row at `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv` with: node_id, node_name, playbook_name, action_id, action_name, current_sprk_executortype, current_advisory_executoractiontype, suggested_executortype, suggested_executortype_label, confidence (HIGH/MEDIUM/LOW/NONE), suggestion_source (action-name / node-name / advisory-int / blank), owner_decision_executortype (BLANK), owner_notes (BLANK).
+
+**Inference engine** (refined during dev): pattern table applied (1) to Action name with full confidence, (2) to Node name with downgraded confidence (HIGH→MEDIUM, MEDIUM→LOW), (3) to advisory int field as LOW. The node-name fallback was added after the first dry-run showed 51/94 NONE; many R7 structural nodes have descriptive names ("Update Record", "Start", "AI Analysis", "Deliver Output") but no Action FK — node-name pattern recovered 35 of them. Iteration discipline caught the gap before owner review.
+
+**Dry-run test against spaarkedev1** (Step 6 — auth + query smoke): ✅ PASSED. Auth via `az account get-access-token --resource https://spaarkedev1.crm.dynamics.com` succeeded. Retrieved 94 node row(s) in <1 second. Summary: **94 total / 0 already backfilled / 41 HIGH / 14 MEDIUM / 23 LOW / 16 NONE — owner decision REQUIRED**. The 16 NONE rows are the residual ambiguous set the owner will authoritatively classify in task 052.
+
+**Idempotency** verified by inspection: zero Dataverse mutation calls. Re-running emits fresh CSV (overwrites if exists) with no Dataverse state change.
+
+**Switches**: `-Environment dev`, `-DataverseUrl` (defaults to $env:DATAVERSE_URL), `-DryRun` (console preview, no CSV), `-OutputPath` (custom output path).
+
+**Quality gates Step 9.5 (FULL rigor)**:
+- `/code-review` PASS: 0 critical, 0 warnings, 1 cosmetic suggestion (`[List[PSCustomObject]]` vs `$rows +=` — out of scope at 94-row corpus). AI smell score **0/5**. Quality direction = New file (no baseline).
+- `/adr-check` PASS: 12 ADRs compliant or N/A (ADR-001/002/006/007/008/009/010/013/021/028/029/038). §10 BFF Hygiene N/A (script not in BFF). §11 Component Justification compliant with concrete three-question triple from POML.
+
+**Per-task publish-size**: SKIPPED per POML (Wave 5 doesn't touch BFF; no shipped IL).
+**Per-task CVE scan**: N/A (no NuGet/npm package changes).
+
+**Acceptance criteria** (POML §acceptance-criteria, 10 items): all 10 satisfied.
+
+**Files committed**: 4 files
+- `scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1` — NEW (512 lines)
+- `projects/spaarke-ai-platform-unification-r7/tasks/050-author-review-playbooknodes-dispatch-script.poml` — status not-started → completed
+- `projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md` — Wave 5 row updated; task 050 ✅
+- `projects/spaarke-ai-platform-unification-r7/current-task.md` — this entry (parallel session owns Quick Recovery for in-progress task 094; this note adds to log only)
+
+**Unblocks**: Wave 5 task 051 (run the tool LIVE to produce the input CSV for owner review).
+
+**Coordination note**: Parallel session is executing task 094 (Wave 9, Playbook Library modal); their Quick Recovery section is preserved untouched. Task 050 and task 094 have zero file overlap (050 = `scripts/dataverse/` + project state; 094 = `src/solutions/SpaarkeAi/` + `src/client/shared/Spaarke.UI.Components/`).
+
+---
 
 ### Task 092 completion note (2026-06-28, Wave 9)
 
