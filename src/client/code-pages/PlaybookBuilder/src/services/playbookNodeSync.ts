@@ -375,6 +375,15 @@ export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): s
         includeSourceCitations: data.includeSourceCitations ?? false,
         maxLength: data.maxOutputLength ?? undefined,
       };
+      // R6 Pillar 5 / DEF-003 — NodeRoutingConfig fields persist into the same
+      // sprk_configjson blob alongside the DeliveryNodeConfig fields above. The
+      // server-side NodeRoutingConfig.Parse extracts only `destination` + `widgetType`;
+      // the DeliverOutputNodeExecutor extracts only `deliveryType` + `template` +
+      // `outputFormat` — they live in the same JSON object, separate consumer
+      // readers. Omitting the field when unset preserves backward compatibility
+      // (NodeRoutingConfig.Parse defaults to Destination = Chat).
+      if (data.destination) config.destination = data.destination;
+      if (data.widgetType) config.widgetType = data.widgetType;
       break;
 
     case 'deliverToIndex':
