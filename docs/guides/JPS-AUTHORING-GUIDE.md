@@ -15,6 +15,8 @@
 
 Prior to R7, dispatch — the decision of which executor runs a node — was split across three storage layers: a structural fallback ladder in `PlaybookOrchestrationService`, an `Action.sprk_actiontypeid` lookup chain, and per-node `configJson.__actionType` injection. Authors had to reason about all three layers simultaneously, and the v3 guide taught Action-type-first authoring as if Action drove dispatch. **R7 unified dispatch to a single column: `sprk_playbooknode.sprk_executortype`**. The runtime now reads one Choice value on the node row to decide which executor runs; the Action FK becomes the **prompt template carrier** for the prompt-driven executors only (AiAnalysis, AiCompletion, AiEmbedding) — not a dispatch source. This guide reflects the unified model. See spec FR-07 (single-hop dispatch), FR-12 (AiCompletion executor), FR-30 (this guide rewrite), and CLAUDE.md §10 (BFF Hygiene).
 
+> **Wave 11 addition (2026-06-29 — narrative-output authoring)**: when an Action produces structured output consumed downstream (Daily Briefing, Insight Engine matter summaries, etc.), write the Action JPS body as PURE INSTRUCTIONS — no `{{X}}` placeholders for runtime data in `instruction.task/context/constraints`. Data arrives via the playbook node's `configJson.inputBinding`, gets resolved by the orchestrator (Layer 1), and is rendered into a structured `## Input` section by `PromptSchemaRenderer` (Layer 2). See the canonical reference [`SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](../architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md) and the maker tutorial [`BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md`](BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md).
+
 ---
 
 ## Table of Contents

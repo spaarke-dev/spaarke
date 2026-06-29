@@ -122,6 +122,10 @@ Two handler interface hierarchies coexist: `IAnalysisToolHandler` for the tool h
 9. `AnalysisResultPersistence` writes working document periodically (every 500 chars) and finalizes to Dataverse
 10. RAG indexing job is enqueued via Service Bus for post-analysis indexing
 
+### Playbook-driven LLM Output Pattern (R7 Wave 11, narrative consumers)
+
+For LLM-produces-structured-output-from-runtime-data consumers (Daily Briefing, Insight Engine matter summaries, work assignment briefings, project status, document review, and any future Workspace UX narrative output), see the canonical reference [`SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md). It documents the two-layer architecture (Layer 1 orchestrator template resolution against NodeOutputs + Parameters + run metadata; Layer 2 PromptSchemaRenderer `## Input` section) that decouples prompt instructions from data shape. Maker tutorial at [`docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md`](../guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md).
+
 ### Playbook Node Execution (via AiAnalysisNodeExecutor)
 
 1. `PlaybookOrchestrationService` topologically sorts the node graph and executes nodes in parallel batches

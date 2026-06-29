@@ -10,13 +10,26 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 111a — Document the Playbook-driven LLM Output pattern (architecture doc + maker guide + cross-links) |
-| **Task File** | tasks/111a-document-playbook-llm-output-pattern.poml |
+| **Task** | 112 — Register custom Handlebars helpers (json, map, flatten, distinct, concat, join) |
+| **Task File** | tasks/112-register-custom-handlebars-helpers.poml |
 | **Phase / Wave** | Wave 11 — Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive |
 | **Step** | 0 (not-started) |
 | **Status** | not-started |
 | **Started** | — |
-| **Next Action** | Begin Step 1 of task 111a: read T111 shipped code (PlaybookTemplateContextBuilder + orchestrator + PromptSchemaRenderer + AiCompletion changes) + spike design doc + existing AI architecture docs. Then Step 2: author SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md. |
+| **Next Action** | Begin Step 1 of task 112: read existing TemplateEngine.cs to confirm defensive helper pattern (JoinIds at line 81 is canonical), then register the 6 helpers per POML Step 2-7. T112 + T113 + T114 are parallel-safe (different code surfaces). |
+
+### Task 111a — COMPLETE ✅ (2026-06-29)
+- **Rigor**: STANDARD (documentation task; no source code modification)
+- **Outputs shipped**:
+  - NEW: `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md` (385 lines, 12 sections)
+  - NEW: `docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md` (440 lines, decision tree + 6-step tutorial + 2 worked examples — Daily Briefing shipped reference + Insight Engine matter performance summary)
+  - EDITED: root `CLAUDE.md` §17 — added 2 pointer rows (architecture doc + maker guide)
+  - EDITED: `docs/architecture/AI-ARCHITECTURE.md` — cross-link in Data Flow section
+  - EDITED: `docs/architecture/ai-architecture-actions-nodes-scopes.md` — cross-link in §9 Relationship table
+  - EDITED: `docs/architecture/ai-architecture-playbook-runtime.md` — cross-link in §11 Relationship table
+  - EDITED: `docs/guides/JPS-AUTHORING-GUIDE.md` — cross-link in "Why this guide was rewritten" intro
+- **Verification**: all 4 cross-links resolve; 2 new files present; no SUPERSEDED markers; no broken refs
+- **Operator binding fulfilled**: "we will need it for Insights Engine (and many other areas)" — the architecture + maker guide ARE the canonical reference; future narrative-output features (Insight Engine matter summary, work assignment briefings, project status, document review summaries) can be authored without rediscovering the design.
 
 ### Task 111 — COMPLETE ✅ (2026-06-29)
 - **Rigor**: FULL (bff-api code-impl across 6 .cs files + 2 new test files)
