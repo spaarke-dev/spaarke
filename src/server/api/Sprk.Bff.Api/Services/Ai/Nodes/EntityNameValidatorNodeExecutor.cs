@@ -119,6 +119,34 @@ public sealed class EntityNameValidatorNodeExecutor : INodeExecutor
         ExecutorType.EntityNameValidator
     };
 
+    // R7 task 032 / FR-16 — typed config schema for Playbook Builder canvas (Wave 8 FR-23).
+    // Derived from this executor's ConfigJson consumption via EntityNameValidatorNodeConfig
+    // (camelCase via [JsonPropertyName]): CandidateText (required), AllowList (required; empty
+    // array means scrub all proper-noun-bearing sentences; null is a validation error).
+    // See projects/spaarke-ai-platform-unification-r7/notes/spikes/executor-config-fields-inventory.md §4.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.EntityNameValidator),
+        ExecutorTypeValue: (int)ExecutorType.EntityNameValidator,
+        Description: "Post-LLM defense-in-depth scrubber. Removes hallucinated entity names from LLM output by comparing against an explicit allow-list (R4 FR-3 / AC-3a).",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "candidateText",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Raw text emitted by the upstream LLM node that needs scrubbing. Typically a template like '{{summarize.output.narration}}'.",
+                Default: null),
+            new(
+                Name: "allowList",
+                Type: SchemaFieldType.Array,
+                Required: true,
+                Description: "Array of entity names known to be present in the input payload (matters, contacts, parties, etc.). Empty array opts into scrubbing every proper-noun-bearing sentence; null is invalid.",
+                Default: null)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

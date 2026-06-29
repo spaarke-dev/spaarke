@@ -95,6 +95,13 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
         ExecutorType.LookupUserMembership
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.LookupUserMembership,
+            "Resolves current user's record memberships for a given entity type via IMembershipResolverService (FR-1B.1).");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

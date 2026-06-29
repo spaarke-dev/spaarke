@@ -81,6 +81,13 @@ public sealed class SanitizerNodeExecutor : INodeExecutor
         ExecutorType.Sanitization
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.Sanitization,
+            "Sanitizes raw document text for downstream LLM consumption — strips control characters, retrieval blocks, noise (D-50 / D-A25 LAVERN sanitizer).");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

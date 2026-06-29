@@ -109,6 +109,35 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
         ExecutorType.AiCompletion
     };
 
+    // R7 task 032 / FR-16 — typed config schema for Playbook Builder canvas (Wave 8 FR-23).
+    // Derived from this executor's ConfigJson consumption: ApplyPromptSchemaOverride() reads
+    // `promptSchemaOverride`; ExtractTemplateParameters() reads `templateParameters`. Both are
+    // optional — AiCompletion is prompt-only per FR-13, so no L1/L2/L3 retrieval / $ref /
+    // $choices fields apply. See projects/spaarke-ai-platform-unification-r7/notes/spikes/
+    // executor-config-fields-inventory.md §2 + getconfigschema-design.md §8 worked example.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.AiCompletion),
+        ExecutorTypeValue: (int)ExecutorType.AiCompletion,
+        Description: "Prompt-only structured LLM completion (FR-12). Requires Action FK with SystemPrompt + OutputSchemaJson. Prohibits Tool + Document.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "templateParameters",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Key-to-value map substituted into {{var}} bindings in the JPS prompt instruction section.",
+                Default: null),
+            new(
+                Name: "promptSchemaOverride",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Per-node override merged into the Action's base JPS prompt schema (FR-25). Same shape as the Action's SystemPrompt JPS object.",
+                Default: null)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
+
     /// <summary>
     /// Validates the node's binding contract for AiCompletion (R7 FR-13).
     /// </summary>

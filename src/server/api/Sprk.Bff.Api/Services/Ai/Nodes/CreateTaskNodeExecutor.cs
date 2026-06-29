@@ -54,6 +54,13 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
         ExecutorType.CreateTask
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.CreateTask,
+            "Creates a Dataverse task record from playbook context.");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

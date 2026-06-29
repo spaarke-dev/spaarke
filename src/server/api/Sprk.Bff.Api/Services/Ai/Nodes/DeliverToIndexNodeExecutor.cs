@@ -56,6 +56,13 @@ public sealed class DeliverToIndexNodeExecutor : INodeExecutor
         ExecutorType.DeliverToIndex
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.DeliverToIndex,
+            "Queues the document for RAG semantic indexing.");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

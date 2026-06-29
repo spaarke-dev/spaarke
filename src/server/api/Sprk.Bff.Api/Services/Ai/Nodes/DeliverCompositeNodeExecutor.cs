@@ -72,6 +72,13 @@ public sealed class DeliverCompositeNodeExecutor : INodeExecutor
         ExecutorType.DeliverComposite
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.DeliverComposite,
+            "Multi-section composite delivery — assembles N upstream Action node outputs keyed by sectionName for consumer routing (FR-52).");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

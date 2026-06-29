@@ -73,6 +73,13 @@ public sealed class ReturnInsightArtifactNode : INodeExecutor
         ExecutorType.ReturnInsightArtifact
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.ReturnInsightArtifact,
+            "Final node of an Insights synthesis playbook — serializes upstream outputs into an InsightArtifact envelope (D-P12 / D-P1).");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

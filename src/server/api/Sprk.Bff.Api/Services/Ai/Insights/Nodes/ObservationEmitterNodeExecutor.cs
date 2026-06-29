@@ -94,6 +94,13 @@ public sealed class ObservationEmitterNodeExecutor : INodeExecutor
         ExecutorType.ObservationEmit
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.ObservationEmit,
+            "Emits N observations (one per surviving L2 candidate after grounding) + L1 classification — final node of universal-ingest@v1 JPS playbook.");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

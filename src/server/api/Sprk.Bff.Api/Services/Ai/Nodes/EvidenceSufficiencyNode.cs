@@ -75,6 +75,13 @@ public sealed class EvidenceSufficiencyNode : INodeExecutor
         ExecutorType.EvidenceSufficiency
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.EvidenceSufficiency,
+            "Reads prior node outputs and applies a configured evidence rule; emits sufficient/insufficient verdict (D-49 / LAVERN Pattern #7).");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

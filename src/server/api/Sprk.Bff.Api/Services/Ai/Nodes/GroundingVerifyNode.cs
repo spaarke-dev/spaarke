@@ -64,6 +64,13 @@ public sealed class GroundingVerifyNode : INodeExecutor
         ExecutorType.GroundingVerify
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.GroundingVerify,
+            "Zero-LLM citation verification — checks quoted evidence from prior AI nodes against source chunks (D-P9 / D-47 / LAVERN 10.6).");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

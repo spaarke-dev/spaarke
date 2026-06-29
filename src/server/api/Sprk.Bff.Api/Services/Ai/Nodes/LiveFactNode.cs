@@ -80,6 +80,13 @@ public sealed class LiveFactNode : INodeExecutor
         ExecutorType.LiveFact
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.LiveFact,
+            "Resolves a deterministic Live Fact about a Dataverse subject (e.g., matter:M-1234.totalSpend) per design.md §2.1 (confidence=1.0).");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

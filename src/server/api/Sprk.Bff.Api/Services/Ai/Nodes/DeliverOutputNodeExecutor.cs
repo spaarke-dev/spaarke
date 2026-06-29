@@ -48,6 +48,13 @@ public sealed class DeliverOutputNodeExecutor : INodeExecutor
         ExecutorType.DeliverOutput
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.DeliverOutput,
+            "Single-action delivery — renders and emits the final playbook output for the consumer.");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

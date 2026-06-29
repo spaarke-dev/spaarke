@@ -10,10 +10,33 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 041 — Migrate non-chat callers to PlaybookOrchestrationService.ExecuteAsync (FR-11) — parallel-with 029/031/090 |
-| **Step** | Step 8 — implementing migration |
-| **Status** | in-progress |
-| **Next Action** | Refactor AnalysisEndpoints.cs:261 ExecuteAnalysis to inject IPlaybookOrchestrationService + bridge PlaybookStreamEvent→AnalysisStreamChunk. Update MockAnalysisOrchestrationService mock in integration tests. Mark ExecuteAnalysisAsync method with TODO for task 042. Per audit (notes/spikes/executeanalysisasync-caller-audit.md): ONLY 1 production caller; Wave 9 NOT a prereq; SSE chunk-shape adapter required per R-040-1. Files for task 041: AnalysisEndpoints.cs + AnalysisOrchestrationService.cs (TODO) + AnalysisEndpointsIntegrationTests.cs (mock rewrite). Coordinated with 029/031/090 in parallel (different files). |
+| **Task** | 033 — BFF endpoint GET /api/ai/playbook-builder/executor-config-schemas (Wave 3, FR-16) |
+| **Step** | Step 0 — not started |
+| **Status** | not-started |
+| **Next Action** | Begin Step 1 of task 033 — implement GET endpoint that aggregates all 25 executor schemas (ordered by ExecutorTypeValue) via INodeExecutorRegistry.GetAllExecutors().Select(e => e.GetConfigSchema()). |
+
+### Task 032 completion note (2026-06-28, Wave 3)
+
+✅ **Task 032 COMPLETE**. 25 concrete executors received `GetConfigSchema()` overrides:
+
+- **5 rich schemas** (per FR-16 priority list):
+  - `AiAnalysisNodeExecutor` (6 fields: templateParameters, promptSchemaOverride, knowledgeRetrieval, includeDocumentContext, parentEntityType, parentEntityId)
+  - `AiCompletionNodeExecutor` (2 fields: templateParameters, promptSchemaOverride — prompt-only per FR-13)
+  - `ConditionNodeExecutor` (3 fields: condition required, trueBranch + falseBranch optional)
+  - `EntityNameValidatorNodeExecutor` (2 fields: candidateText + allowList — both required)
+  - `CreateNotificationNodeExecutor` (20 fields: title + body required; recipient/category/priority/toastType/actionUrl + R2.2 dueDate + 8 FR-6 enrichment fields)
+- **20 placeholder schemas** via `ExecutorConfigSchema.Empty(ExecutorType.X, "description")` — each with accurate description drawn from executor XML doc / enum doc.
+
+Inventory note at `notes/spikes/executor-config-fields-inventory.md` (per-executor field discovery; coordination notes for task 084 Wave 8 UI consumption).
+
+**Build**: clean (0 errors, 19 pre-existing warnings) — verified by stashing parallel task 091 uncommitted work which has its own unrelated `JsonElement.Deserialize` missing-using error.
+**Tests**: `dotnet test --filter "FullyQualifiedName~Nodes"` → **350 passed / 0 failed / 2 pre-existing skips**.
+**Per-task publish-size**: SKIPPED per POML (Wave 3 task 036 owns the gate).
+**Quality gates Step 9.5 (FULL rigor)**: code-review + adr-check on 3 sample files (AiCompletion, CreateNotification, Start) — both PASS with 0 critical / 0 warnings / 0 suggestions. ADR-010, ADR-013, ADR-029, ADR-038 all compliant; §10 BFF Hygiene 7/7 checklist items satisfied.
+**No DI changes**: zero `AnalysisServicesModule.cs` touches; method added to existing classes only.
+**Field naming**: schema field names match each executor's runtime ConfigJson consumption (verified via `JsonElement.TryGetProperty` lookups + `[JsonPropertyName]` attributes per design §11 schema↔config-record contract).
+
+Coordination with parallel tasks (per task POML): 042 (Wave 4, different files), 061 (Wave 6, docs only), 091 (Wave 9, different files) — zero file overlap. NOTE: task 091's uncommitted parallel work has a pre-existing build error in `SessionSummarizeOrchestrator.cs` (missing `using System.Text.Json` for `JsonElement.Deserialize`); not task 032's responsibility.
 
 **Concurrent Wave-2 closeout note (added by task 029, 2026-06-28)**: Wave 2 ✅ COMPLETE (10/10 tasks 020-029 closed). Publish 46.71 MB compressed = FLAT vs Wave 1 baseline (−181 bytes; IL-neutral); cumulative R7 delta +1.06 MB (NFR-01 ✅; 0.94 MB headroom for Waves 3-10). CVE: 1 HIGH (Kiota pre-existing); 0 new from Wave 2 (NFR-02 ✅). AiCompletion 20/20 preserved across rename + dispatch refactor; Orchestration 60/63 (3 pre-existing skips); full BFF 7503/7612 with 3 failures all pre-existing or parallel-test flake (R5SummarizeTelemetryTests passes 8/8 in isolation, `git diff master..HEAD` empty on file). Zero Wave 2 regressions. TASK-INDEX Wave 2 row → 🟢 COMPLETE. Sign-off docs: `notes/checkpoints/wave2-publish-size.md` + `notes/handoffs/wave2-signoff.md`. **Waves 3, 4, 5, 6, 7, 8, 9 all unblocked.** R4 graduation gate (FR-15) remains held until Wave 5 backfill.
 

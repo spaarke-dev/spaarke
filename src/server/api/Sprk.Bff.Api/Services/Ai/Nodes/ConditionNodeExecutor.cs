@@ -64,6 +64,39 @@ public sealed class ConditionNodeExecutor : INodeExecutor
         ExecutorType.Condition
     };
 
+    // R7 task 032 / FR-16 — typed config schema for Playbook Builder canvas (Wave 8 FR-23).
+    // Derived from this executor's ConfigJson consumption via ConditionNodeConfig record:
+    // Condition (required), TrueBranch + FalseBranch (one of which must be present per Validate).
+    // See projects/spaarke-ai-platform-unification-r7/notes/spikes/executor-config-fields-inventory.md §3.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.Condition),
+        ExecutorTypeValue: (int)ExecutorType.Condition,
+        Description: "Conditional branching based on expression evaluation. Routes execution to true or false branch based on operator + operands resolved against previous node outputs.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "condition",
+                Type: SchemaFieldType.Object,
+                Required: true,
+                Description: "Condition expression: { operator, left, right?, conditions?, condition? }. Operators: eq, ne, gt, lt, gte, lte, contains, startsWith, endsWith, exists, and, or, not. Use {{var.output.field}} template syntax in operands.",
+                Default: null),
+            new(
+                Name: "trueBranch",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Node OutputVariable name to select when condition evaluates to true. At least one of trueBranch or falseBranch must be specified.",
+                Default: null),
+            new(
+                Name: "falseBranch",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Node OutputVariable name to select when condition evaluates to false. At least one of trueBranch or falseBranch must be specified.",
+                Default: null)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

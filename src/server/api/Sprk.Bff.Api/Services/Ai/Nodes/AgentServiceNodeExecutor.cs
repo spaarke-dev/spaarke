@@ -59,6 +59,13 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
         ExecutorType.AgentService
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.AgentService,
+            "Routes the playbook node to Azure AI Foundry Agent Service (Phase 2).");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

@@ -20,8 +20,8 @@
 |---|---|---|---|
 | Wave 1 | AiCompletionNodeExecutor build (FR-12 to FR-15) | 🟢 COMPLETE | 001-010 ✅ all done; publish-hygiene gate PASSED 2026-06-28 (46.71 MB compressed; +1.06 MB vs 45.65 baseline; 0 new HIGH CVE; 20/20 AiCompletionNodeExecutor tests pass) |
 | Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | 🟢 COMPLETE (10/10 tasks; publish-hygiene gate PASSED 2026-06-28: 46.71 MB compressed = FLAT vs Wave 1; +1.06 MB cumulative R7 = unchanged vs Wave 1 baseline; 0 new HIGH CVE; AiCompletion 20/20 + Orchestration 60/63 baseline preserved) | 020 ✅, 021 ✅, 022 ✅, 023 ✅, 024 ✅, 025 ✅, 026 ✅, 027 ✅, 028 ✅, 029 ✅ |
-| Wave 3 | Typed config schemas (FR-16) | 🔄 in-progress (030 ✅ design; 031 ✅ INodeExecutor seam + ExecutorConfigSchema DTO; 032-036 ready) | 030 ✅, 031 ✅; 032-036 generated |
-| Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | 🔄 in-progress (040 ✅ audit; 041 ✅ FR-11 single non-chat caller migrated to IPlaybookOrchestrationService.ExecuteAsync; 042 ready to delete method body + interface row + tests) | 040 ✅, 041 ✅, 042-047 generated (6 remaining) |
+| Wave 3 | Typed config schemas (FR-16) | 🔄 in-progress (030 ✅ design; 031 ✅ INodeExecutor seam + ExecutorConfigSchema DTO; 032 ✅ 25 executor overrides; 033-036 ready) | 030 ✅, 031 ✅, 032 ✅; 033-036 generated |
+| Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | 🔄 in-progress (040 ✅ audit; 041 ✅ migration; 042 ✅ DELETION 524 LOC removed; 045 ✅; 043/044/046/047 remaining — schema drops next) | 040 ✅, 041 ✅, 042 ✅, 045 ✅; 043, 044, 046, 047 pending |
 | Wave 5 | Existing-playbook backfill (FR-19, FR-20) | ⏸️ blocked on Wave 2 | 050-056 ✅ generated (7 files) |
 | Wave 6 | Documentation deletion + updates (FR-28 to FR-31) | 🔄 in-progress (060 ✅ audit/disposition; 061 ✅ DELETE §5 from playbook-runtime.md; 062-068 pending) | 060-069 ✅ generated (10 files); 060 ✅, 061 ✅ executed |
 | Wave 7 | Skill rewrites (FR-32, FR-33) | ⏸️ blocked on Wave 2 | 070-075 ✅ generated (6 files) |
@@ -79,7 +79,7 @@
 |---|---|---|---|---|---|
 | 030 | ✅ | Design GetConfigSchema() signature + schema DTO shape | bff-api, planning | yes | W1 complete |
 | 031 | ✅ | Add GetConfigSchema() to INodeExecutor interface | bff-api, code-impl | yes | 030 |
-| 032 | ⏸️ | Implement GetConfigSchema() on all 33 executors | bff-api, code-impl | yes | 031 |
+| 032 | ✅ | Implement GetConfigSchema() on 25 concrete executors (5 rich + 20 placeholder) | bff-api, code-impl | yes | 031 |
 | 033 | ⏸️ | Implement BFF endpoint GET /api/ai/playbook-builder/executor-config-schemas | bff-api, code-impl | yes | 032 |
 | 034 | ⏸️ | xUnit tests for endpoint + schema serialization | bff-api, testing | yes | 033 |
 | 035 | ⏸️ | Document schema shape in `docs/architecture/AI-ARCHITECTURE.md` | docs | yes | 030 |
@@ -94,7 +94,7 @@
 |---|---|---|---|---|---|
 | 040 | ✅ | Audit all callers of AnalysisOrchestrationService.ExecuteAnalysisAsync | audit, bff-api | yes | — |
 | 041 | ✅ | Migrate non-chat callers to PlaybookOrchestrationService.ExecuteAsync (FR-11) — Wave 9 dep RESCINDED per task 040 audit | bff-api, code-impl | yes | 040 only (audit confirmed Wave 9 was false-premise dep) |
-| 042 | ⏸️ | DELETE ExecuteAnalysisAsync + cascading dead code (FR-11) | bff-api, code-impl, deletion | no | 041 |
+| 042 | ✅ | DELETE ExecuteAnalysisAsync + cascading dead code (FR-11) | bff-api, code-impl, deletion | no | 041 |
 | 043 | ⏸️ | Drop sprk_analysisaction.sprk_actiontypeid (lookup) via dataverse-create-schema (FR-03) | dataverse-schema, deletion | no | 042 |
 | 044 | ⏸️ | Drop sprk_analysisaction.sprk_executoractiontype (INT) (FR-04) | dataverse-schema, deletion | no (sequential with 043) | 043 |
 | 045 | ✅ | Document sprk_analysisactiontype as decorative (FR-05) | docs | yes | — |

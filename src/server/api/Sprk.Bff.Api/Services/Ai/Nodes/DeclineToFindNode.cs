@@ -63,6 +63,13 @@ public sealed class DeclineToFindNode : INodeExecutor
         ExecutorType.DeclineToFind
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.DeclineToFind,
+            "Deterministic exit emitting a structured DeclineResponse when EvidenceSufficiency returns insufficient (zero-LLM, D-49).");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

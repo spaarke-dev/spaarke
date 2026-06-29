@@ -112,6 +112,13 @@ public sealed class ReturnResponseNodeExecutor : INodeExecutor
         ExecutorType.ReturnResponse
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.ReturnResponse,
+            "Canvas-only Control node — terminal 'return response' projection. Reads configJson.responseBinding (R4 control-flow-executor).");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

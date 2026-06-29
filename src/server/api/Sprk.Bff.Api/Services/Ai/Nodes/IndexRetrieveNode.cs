@@ -96,6 +96,13 @@ public sealed class IndexRetrieveNode : INodeExecutor
         ExecutorType.IndexRetrieve
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.IndexRetrieve,
+            "Retrieves Observations and Precedents from spaarke-insights-index via filter + vector search (D-P12 / SPEC §3.4.3).");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

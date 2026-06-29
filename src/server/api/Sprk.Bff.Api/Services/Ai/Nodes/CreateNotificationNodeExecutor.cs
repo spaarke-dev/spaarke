@@ -81,6 +81,143 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
         ExecutorType.CreateNotification
     };
 
+    // R7 task 032 / FR-16 — typed config schema for Playbook Builder canvas (Wave 8 FR-23).
+    // Derived from this executor's ConfigJson consumption via NotificationNodeConfig record.
+    // Required (per Validate): title, body. Optional core: category, priority, toastType,
+    // actionUrl, regardingId, regardingType, recipientId, dueDate, iterateItems, itemNotification.
+    // Optional FR-6 enrichment (R4 task 020): regardingName, source*, viaMatter*.
+    // See projects/spaarke-ai-platform-unification-r7/notes/spikes/executor-config-fields-inventory.md §5.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.CreateNotification),
+        ExecutorTypeValue: (int)ExecutorType.CreateNotification,
+        Description: "Creates a Dataverse appnotification record for the recipient. Supports template substitution in all text fields, idempotency by (user + regarding + category), and per-item iteration over upstream query results.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "title",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Notification title. Supports {{templateVars}} resolved against previous node outputs.",
+                Default: null),
+            new(
+                Name: "body",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Notification body text. Supports {{templateVars}} resolved against previous node outputs.",
+                Default: null),
+            new(
+                Name: "recipientId",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Recipient systemuserid (GUID). Supports templates. Falls back to run-context userId when not specified.",
+                Default: null),
+            new(
+                Name: "category",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Category string for grouping and idempotency check (skip-if-unread-duplicate per user + regarding + category).",
+                Default: null),
+            new(
+                Name: "priority",
+                Type: SchemaFieldType.Number,
+                Required: false,
+                Description: "Priority: 100000000=Informational, 200000000=Important (default), 300000000=Urgent.",
+                Default: 200000000),
+            new(
+                Name: "toastType",
+                Type: SchemaFieldType.Number,
+                Required: false,
+                Description: "Toast visibility: 100000000=Hidden, 200000000=Timed (default), 300000000=Standard.",
+                Default: 200000000),
+            new(
+                Name: "actionUrl",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "URL to navigate when the notification is clicked. Supports {{templateVars}}.",
+                Default: null),
+            new(
+                Name: "regardingId",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Regarding record ID (GUID). Supports templates. Required for idempotency check.",
+                Default: null),
+            new(
+                Name: "regardingType",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Regarding entity logical name (e.g., 'sprk_document', 'sprk_matter').",
+                Default: null),
+            new(
+                Name: "dueDate",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional ISO-8601 due date written into customData.dueDate. Supports templates (e.g., '{{item.scheduledend}}').",
+                Default: null),
+            new(
+                Name: "iterateItems",
+                Type: SchemaFieldType.Boolean,
+                Required: false,
+                Description: "When true, iterate over items from upstream query output and create one notification per item using itemNotification template.",
+                Default: false),
+            new(
+                Name: "itemNotification",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Per-item notification template (same shape as the top-level config) used when iterateItems is true. Supports {{item.field}} variables.",
+                Default: null),
+            new(
+                Name: "regardingName",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "FR-6 enrichment: display name of the regarding entity. Written to customData.regardingName for widget grounding + FR-14 EntityNameValidator allow-list.",
+                Default: null),
+            new(
+                Name: "sourceEntityType",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "FR-6 enrichment: source record entity logical name (e.g., 'sprk_event'). Written to customData.source.entityType.",
+                Default: null),
+            new(
+                Name: "sourceId",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "FR-6 enrichment: source record GUID. Written to customData.source.id.",
+                Default: null),
+            new(
+                Name: "sourceModifiedOn",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "FR-6 enrichment: source record modifiedon timestamp (ISO-8601). Written to customData.source.modifiedOn.",
+                Default: null),
+            new(
+                Name: "sourceOwningUser",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "FR-6 enrichment: source record owning-user GUID. Written to customData.source.owningUser.",
+                Default: null),
+            new(
+                Name: "viaMatterId",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "FR-6 enrichment: matter ID linking the source record. Written to customData.viaMatter.id when matter linkage exists; entire viaMatter object omitted otherwise.",
+                Default: null),
+            new(
+                Name: "viaMatterName",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "FR-6 enrichment: display name of the matter. Written to customData.viaMatter.name when viaMatterId is present.",
+                Default: null),
+            new(
+                Name: "viaMatterMembershipsVariable",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "FR-6 enrichment: name of an upstream LookupUserMembership node's OutputVariable (default 'myMatters'). Used to project per-role memberships into customData.viaMatter.memberships[].",
+                Default: "myMatters")
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

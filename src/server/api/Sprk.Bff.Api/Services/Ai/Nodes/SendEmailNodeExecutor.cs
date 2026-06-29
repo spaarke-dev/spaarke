@@ -56,6 +56,13 @@ public sealed class SendEmailNodeExecutor : INodeExecutor
         ExecutorType.SendEmail
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.SendEmail,
+            "Sends email via Microsoft Graph.");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

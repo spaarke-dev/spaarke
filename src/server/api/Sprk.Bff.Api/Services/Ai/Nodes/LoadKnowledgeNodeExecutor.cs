@@ -107,6 +107,13 @@ public sealed class LoadKnowledgeNodeExecutor : INodeExecutor
         ExecutorType.LoadKnowledge
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.LoadKnowledge,
+            "Canvas-only Control node — pass-through knowledge binding (R4 control-flow-executor). Evaluates optional passthroughBinding templates against scope variables.");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

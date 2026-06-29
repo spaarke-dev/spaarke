@@ -122,6 +122,13 @@ public sealed class StartNodeExecutor : INodeExecutor
         ExecutorType.Start
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.Start,
+            "Canvas anchor — pass-through with no execution logic.");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

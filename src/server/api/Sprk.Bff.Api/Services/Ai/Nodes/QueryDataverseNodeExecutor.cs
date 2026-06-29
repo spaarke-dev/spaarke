@@ -47,6 +47,13 @@ public sealed class QueryDataverseNodeExecutor : INodeExecutor
         ExecutorType.QueryDataverse
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.QueryDataverse,
+            "Executes a FetchXML query against Dataverse and returns results.");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {

@@ -68,6 +68,13 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
         ExecutorType.UpdateRecord
     };
 
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.UpdateRecord,
+            "Updates a Dataverse entity record.");
+
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {
