@@ -1,10 +1,12 @@
 # Smart To Do — Decoupling from Events (R3)
 
+> **Portfolio**: [Project #440](https://github.com/spaarke-dev/spaarke/issues/440) · Parent Epic: [#423 SMART TO DO](https://github.com/spaarke-dev/spaarke/issues/423) · Board: [Spaarke Core](https://github.com/orgs/spaarke-dev/projects/2)
+>
 > **Last Updated**: 2026-06-10
 >
-> **Status**: ✅ Complete — PR #373 squash-merged to master `e328beaf` (2026-06-09); wrap-up PR (tasks 082, 083, 085, 090 + ✅ flips for 024, 072) follows
+> **Status**: ✅ Complete — PR #373 squash-merged to master `e328beaf` (2026-06-09); wrap-up PR #374 squash-merged `a2ac6a849` (2026-06-10).
 >
-> **Outcome**: 36/46 tasks closed. Remainder deferred (task 005 orphan-but-not-deleted) or blocked on external action (AAD scope for Phase 7 MS To Do sync). See [`lessons-learned.md`](./lessons-learned.md) and `tasks/TASK-INDEX.md`.
+> **Outcome**: 40/46 tasks closed. Remainder deferred (task 005 entity-delete orphan-but-not-deleted) or blocked on external action (AAD scope for Phase 7 MS To Do sync) — documented in [`lessons-learned.md`](./lessons-learned.md). See `tasks/TASK-INDEX.md`.
 
 ## Overview
 
