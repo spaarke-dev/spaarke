@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Frontend — Create `ComposeEditor.tsx` (TipTap editor shell + DOCX bridge from Spike #1)</title>
+    <phase>Phase 4: Frontend — SpaarkeAi Compose Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <tags>frontend, react, typescript, fluent-ui, tiptap</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'fluent-ui' (UI implementation per ADR-021)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Editor consumes section registry (040) and the locked Spike #1 DOCX-bridge artifact; serialized.</parallel-reason>
+    <dependencies>001,040</dependencies>
+    <blocks>042</blocks>
+  </metadata>
+
+  <prompt>
+    Create `ComposeEditor.tsx` — the TipTap editor shell that hosts the locked OOB-only StarterKit + extensions inventory (per Spike #1) and integrates the DOCX bridge (round-trip converter chosen in Spike #1). The editor exposes a controlled-document API to `ComposeWorkspace` (Task 042) and emits document-state events via PaneEventBus contracts from Task 041. No custom DOCX-feature integration outside TipTap OOB.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer fluent in TipTap (ProseMirror), DOCX-bridge converters (`prosemirror-docx` or equivalent), Fluent UI v9, and the SpaarkeAi PaneEventBus contract.
+  </role>
+
+  <goal>
+    `ComposeEditor.tsx` mounts the TipTap shell with the locked Spike #1 extension set, accepts a DOCX byte stream as input, renders editable content, emits change events via PaneEventBus, and exposes a `serialize() → DOCX` API for Save. Build green; ui-test green; dark mode renders.
+  </goal>
+
+  <context>
+    <background>
+      FR-02 + FR-03 lock the editor to TipTap OOB-only. Spike #1 (`notes/spikes/spike-tiptap-docx-roundtrip.md`) produces the validated extension inventory + the chosen DOCX-bridge package. This task IMPLEMENTS what Spike #1 locked. Advanced DOCX features (tracked changes, footnotes, equations, fields, SmartArt) are explicitly out of scope.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 dark mode via semantic tokens — the TipTap editor container MUST honor `colorNeutralBackground1` + `colorNeutralForeground1`.</constraint>
+    <constraint source="ADR-028">Auth via `@spaarke/auth` — editor does NOT call SPE directly; receives bytes from the workspace host.</constraint>
+    <constraint source="project">REUSE the TipTap StarterKit + the extensions locked by Spike #1; do NOT add extensions outside that inventory.</constraint>
+    <constraint source="project">No custom DOCX-feature integration outside TipTap OOB (tracked changes, footnotes, equations, fields, SmartArt are forbidden per spec.md MUST NOT).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>No existing TipTap editor component in the Spaarke client codebase (verified via grep `tiptap` in `src/`). SemanticSearch + ConversationPane use plain Fluent inputs, not a rich editor.</existing>
+    <extension>No — there is nothing to extend; this is the first TipTap host. Editing rich DOCX content cannot be retrofitted onto any existing component.</extension>
+    <cost-of-doing-nothing>FR-02 + FR-03 + FR-04 fail — Compose has no editor surface; DOCX files cannot be rendered or edited; the smoke test (Phase 6) cannot operate on any document content.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r1/notes/spikes/spike-tiptap-docx-roundtrip.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CalendarWorkspaceWidget</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load Spike #1 artifact">Verify context &lt; 70%. Load `notes/spikes/spike-tiptap-docx-roundtrip.md` for the locked extension inventory + DOCX-bridge choice.</step>
+    <step order="1" name="Install dependencies">Add `@tiptap/core`, `@tiptap/react`, `@tiptap/starter-kit`, and the Spike-#1-chosen DOCX-bridge package to the SpaarkeAi `package.json` (versions from Spike #1).</step>
+    <step order="2" name="Scaffold editor">Create `src/solutions/SpaarkeAi/src/components/compose/ComposeEditor.tsx`. Mount TipTap via `useEditor` with the locked extension set.</step>
+    <step order="3" name="Wire DOCX input">Accept a `docxBytes: ArrayBuffer | null` prop; on change, run the DOCX→ProseMirror conversion (Spike #1 path).</step>
+    <step order="4" name="Wire serialize API">Expose an imperative handle (`useImperativeHandle`) with `serialize() → Promise&lt;ArrayBuffer&gt;` that runs ProseMirror→DOCX.</step>
+    <step order="5" name="PaneEventBus events">Emit `compose:document-changed` (contract from Task 041) on debounced editor change.</step>
+    <step order="6" name="Style + dark mode">Style the editor container + ProseMirror content via Fluent v9 semantic tokens — no hex.</step>
+    <step order="7" name="Build + ui-tests">`npm run build`, then `pwsh ./scripts/Build-AllClientComponents.ps1`. Run ui-tests below.</step>
+    <step order="8" name="Update TASK-INDEX">TASK-INDEX.md: task 045 → ✅. Reset `current-task.md`.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Component Renders">Mount the editor with a small DOCX byte fixture; verify content renders; basic typing + heading + list + table interactions work; zero console errors.</test>
+    <test name="Dark Mode Compliance (ADR-021)">Editor container + ProseMirror content renders correctly in dark theme via Fluent v9 semantic tokens.</test>
+    <test name="DOCX Round-Trip">Load DOCX fixture → mutate → call `serialize()` → reload — content fidelity preserved per the Spike #1 inventory (StarterKit features only).</test>
+    <test name="PaneEventBus Document-Changed">Edit content — verify debounced `compose:document-changed` event fires with the correct contract shape.</test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Install TipTap packages; build TypeScript</tool>
+    <tool name="pwsh">Run Build-AllClientComponents.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/compose/ComposeEditor.tsx</output>
+    <output type="config">src/solutions/SpaarkeAi/package.json (TipTap + DOCX-bridge deps)</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Editor mounts with TipTap StarterKit + locked Spike #1 extensions.</criterion>
+    <criterion testable="true">DOCX byte input renders as editable content.</criterion>
+    <criterion testable="true">`serialize()` produces a valid DOCX byte stream.</criterion>
+    <criterion testable="true">PaneEventBus `compose:document-changed` event fires on edit.</criterion>
+    <criterion testable="true">`npm run build` + `Build-AllClientComponents.ps1` succeed.</criterion>
+    <criterion testable="true">ui-tests green: Component Renders, Dark Mode Compliance, DOCX Round-Trip, PaneEventBus Document-Changed.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 045 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>BFF — Add integration tests for 7 Compose endpoints</title>
+    <phase>Phase 2: BFF Endpoints + Services</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>bff-api, backend, testing, integration-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' + 'testing' / 'integration-test' (tests modify; TEST-MODIFYING override row per root CLAUDE.md §8 — adr-check + code-review mandatory)</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Add integration tests for the seven Compose endpoints in `tests/unit/Sprk.Bff.Api.Tests/Api/ComposeEndpointsTests.cs` exercising the full HTTP surface — auth gating (401 unauthenticated), happy-path (200/204 with valid bearer), and validation (400 on bad input). Tests follow ADR-038 and use the canonical `IntegrationTestFixture` pattern (per `docs/procedures/test-fixture-contracts.md`). Endpoints map unconditionally (task 024) and services register unconditionally (task 025) — tests assert both via behavioral checks, NOT via DI-registration assertions (banned by ADR-038).
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in xUnit + `WebApplicationFactory`-style integration testing, the Spaarke BFF `IntegrationTestFixture` pattern (RB-T028/T044 canonical config), and ADR-038 testing rules.
+  </role>
+
+  <goal>
+    `tests/unit/Sprk.Bff.Api.Tests/Api/ComposeEndpointsTests.cs` exists with one or more test classes covering all 7 endpoints. Tests pass; no banned patterns; fixture inherits canonical config keys.
+  </goal>
+
+  <context>
+    <background>
+      FR-21 acceptance is "each endpoint responds 200 on happy path; auth gates verified." FR-22 mandates tests exist. Per bff-extensions.md §F, endpoint-mapping tasks require corresponding `*EndpointsTests.cs` coverage. RB-T028-03/04/05/06 documents the asymmetric-registration regression — these tests must NOT introduce a similar pattern (no Skip'd tests waiting for fixture config; if fixture is wrong, fix the fixture per bff-extensions.md §F.2).
+    </background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/ComposeEndpointsTests.cs (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Endpoints under test use minimal-API conventions — tests exercise via HTTP, not via internal handler invocation.</constraint>
+    <constraint source="ADR-008">Tests verify `RequireAuthorization()` by hitting endpoints unauthenticated and asserting 401.</constraint>
+    <constraint source="ADR-028">Use the Spaarke Auth v2 test bearer/claims pattern matching existing endpoint tests in the same project.</constraint>
+    <constraint source="ADR-038">No banned patterns. Specifically NO DI-registration tests ("assert ComposeService is registered"); test behavior instead. NO `Mock&lt;HttpMessageHandler&gt;`. NO ctor null-check tests.</constraint>
+    <constraint source="project">Test fixture MUST inherit canonical config keys (`CosmosPersistence:Endpoint`, `SpeAdmin:KeyVaultUri`, `AgentService:*`) per bff-extensions.md §F + `docs/procedures/test-fixture-contracts.md`.</constraint>
+    <constraint source="project">If any test must Skip, FIRST inspect fixture config + claims + mocks per bff-extensions.md §F.2 Fixture-Config-FIRST protocol — don't blame DI without empirical reproduction (§F.3).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">Verify context &lt; 70%. Load ADR-038, bff-extensions.md §§F,F.1,F.2,F.3, an existing `*EndpointsTests.cs` for the BFF (e.g., FileAccessEndpoints tests) to match the fixture + bearer-claims pattern.</step>
+    <step order="1" name="Scaffold ComposeEndpointsTests.cs">Create the test class using the canonical `IntegrationTestFixture`. Verify required config keys are present in the fixture; if a key is missing, fix the fixture (do NOT Skip the test).</step>
+    <step order="2" name="Add auth-gate tests">For each of the 7 endpoints, add a test that calls without bearer and asserts 401.</step>
+    <step order="3" name="Add happy-path tests">For each endpoint, add a happy-path test with valid bearer + claims. For SPE-touching endpoints, mock the underlying `IComposeDocumentService` / `IComposeService` at the boundary (or use a test double registered via the fixture) to return canned data.</step>
+    <step order="4" name="Add validation test (400)">For at least the POST endpoints, add a test that sends a malformed body and asserts 400 with `Results.Problem`-shaped detail.</step>
+    <step order="5" name="Add dispatch-action test">For `POST /api/compose/action/compose-summarize`: assert the endpoint resolves through `IConsumerRoutingService` + `IInvokePlaybookAi` (via test doubles) — NOT through AI internals. This is the load-bearing ADR-013 verification.</step>
+    <step order="6" name="Run tests">`dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Api.ComposeEndpointsTests"` — must be green.</step>
+    <step order="7" name="ADR-038 conformance grep">Grep for banned patterns: `Mock&lt;HttpMessageHandler&gt;`, DI-registration assertions, ctor null-check tests, Skip without ledger entry. Must return zero hits.</step>
+    <step order="8" name="Measure publish-size (BFF unchanged) + update TASK-INDEX">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/`; report compressed delta vs ~45.65 MB baseline (expect 0 MB — tests don't affect BFF publish). Update `tasks/TASK-INDEX.md`: change task 027 status to ✅. Reset `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Test, build, publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/ComposeEndpointsTests.cs</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 endpoints have an auth-gate test that asserts 401 unauthenticated.</criterion>
+    <criterion testable="true">All 7 endpoints have a happy-path test that asserts 200/204 with valid bearer.</criterion>
+    <criterion testable="true">Dispatch-action test verifies the call resolves via `IConsumerRoutingService` + `IInvokePlaybookAi` (PublicContracts facade) — not via AI internals.</criterion>
+    <criterion testable="true">All tests pass on `dotnet test`; no Skip'd tests without a ledger entry.</criterion>
+    <criterion testable="true">Grep confirms no banned ADR-038 patterns.</criterion>
+    <criterion testable="true">BFF publish-size delta unchanged vs ~45.65 MB baseline.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 027 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

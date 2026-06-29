@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Acquire SPE check-out on Compose open via BFF endpoint</title>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>bff-api, backend, frontend, spe</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>003,024,042</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <fr-coverage>FR-15</fr-coverage>
+    <phase>5</phase>
+  </metadata>
+
+  <prompt>
+    Implement the SPE check-out acquisition flow that fires when Compose
+    opens a document. The BFF exposes a new POST endpoint under `/api/compose/`
+    that acquires the SPE check-out via Graph; ComposeWorkspace calls this
+    endpoint immediately after mount. Heartbeat + orphan-release are owned
+    by task 052; multi-tab conflict UX is owned by task 051. This task
+    delivers only the acquisition path.
+  </prompt>
+
+  <role>
+    Full-stack developer with expertise in Microsoft Graph SPE check-out
+    APIs, Spaarke BFF endpoint conventions (minimal API, RequireAuthorization,
+    PublicContracts facade), and the Compose three-pane wiring established
+    in Phase 4.
+  </role>
+
+  <goal>
+    A new minimal-API endpoint (e.g., `POST /api/compose/checkout/{driveItemId}`)
+    on the BFF acquires SPE check-out via Graph for the authenticated user;
+    ComposeWorkspace (from task 042) calls the endpoint on mount and surfaces
+    success/failure via Compose UI. Word for Web shows "Checked out to {user}"
+    when verified manually.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="closest-bff-pattern">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    <file purpose="spike-output">projects/spaarkeai-compose-r1/notes/spikes/spe-checkout-prototype.md (from Task 003 — Spike #3)</file>
+    <file purpose="compose-workspace">src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx (from Task 042)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-008">Every new BFF endpoint MUST RequireAuthorization()</constraint>
+    <constraint source="ADR-013">Compose CRUD code MUST inject only Services/Ai/PublicContracts facade types when calling AI; this task does NOT call AI but the rule still applies to imports</constraint>
+    <constraint source="ADR-019">Endpoint grouped under `/api/compose/` route prefix</constraint>
+    <constraint source="ADR-038">No banned test patterns (`Mock&lt;HttpMessageHandler&gt;`, DI-registration, ctor null-check)</constraint>
+    <constraint source="project">Heartbeat interval default 15 min per spec FR-17, refinable per Spike #3 (Task 003) findings — this task only acquires; heartbeat is task 052</constraint>
+    <constraint source="project">MUST measure publish-size impact (per root CLAUDE.md §10 #4)</constraint>
+    <constraint source="project">MUST add unit tests for the new service (per root CLAUDE.md §10 #6)</constraint>
+  </constraints>
+
+  <justification>
+    <existing>Closest pattern: `src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs` `GetOpenLinks` (per spec.md `Existing Patterns to Follow` table). It handles the Graph + Dataverse coordination for opening a Word document, exposes a minimal-API endpoint under a route group, and uses `RequireAuthorization`.</existing>
+    <extension>No — check-out is a Compose-session-lifecycle concern (acquired on open, released on close/idle/conflict), not a file-access concern (one-shot link generation). Adding check-out semantics to `FileAccessEndpoints` would conflate two domains and would force all `FileAccessEndpoints` consumers to reason about session lifecycle. Check-out belongs under `/api/compose/` and in `Services/Compose/` per spec.md §Affected Areas.</extension>
+    <cost-of-doing-nothing>FR-15 fails — Compose cannot acquire SPE check-out lock; the multi-tab conflict UX (task 051) cannot detect concurrent sessions because there is no lock to detect; FR-17 orphan-release (task 052) has nothing to release.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <topic>SPE check-out via Graph + BFF endpoint pattern</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file>projects/spaarkeai-compose-r1/notes/spikes/spe-checkout-prototype.md</file>
+    </files>
+    <patterns>
+      <pattern name="BFF minimal-API endpoint" location="src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs">
+        Route grouping, RequireAuthorization, parameter binding, Graph call shape.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Load Spike #3 output">
+      Read `projects/spaarkeai-compose-r1/notes/spikes/spe-checkout-prototype.md` (from Task 003) to anchor the validated check-out flow (Graph API call, error shapes, lock metadata storage tier — Redis vs Cosmos vs Dataverse — per Spike #3 decision).
+    </step>
+    <step order="2" name="Implement BFF endpoint + service">
+      Add `POST /api/compose/checkout/{driveItemId}` to `Api/ComposeEndpoints.cs` (or extend if already created in Phase 2). Implement the acquisition logic in `Services/Compose/ComposeSessionService.cs` (or new `ComposeCheckoutService.cs` if the session service is too crowded). Endpoint MUST `RequireAuthorization()`.
+    </step>
+    <step order="3" name="Persist lock metadata">
+      Per Spike #3 decision, persist lock metadata (user, drive-item id, tab id, acquired-at, last-heartbeat-at) in the tier validated by the spike. Default expectation: Redis hot-tier per NFR-12.
+    </step>
+    <step order="4" name="Wire ComposeWorkspace consumer">
+      Update `ComposeWorkspace.tsx` (from Task 042) to call the new endpoint on mount with the current drive-item id and a tab-scoped session id. Surface failure as a user-visible error state (no silent failure).
+    </step>
+    <step order="5" name="Add unit tests">
+      Add unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeCheckoutServiceTests.cs` (or extend existing session-service tests). Mock the Graph client + persistence at the boundary only (per ADR-038).
+    </step>
+    <step order="6" name="Measure publish-size delta">
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` and measure the compressed publish-size delta vs the prior baseline (~45.65 MB; ceiling ≤60 MB). Report absolute size + diff in task notes per root CLAUDE.md §10 #4.
+    </step>
+    <step order="7" name="Manual verification — Word for Web sees the lock">
+      Acquire a check-out via the new endpoint, then open the same drive-item in Word for Web; confirm it displays "Checked out to {user}". Capture screenshot in task notes.
+    </step>
+    <step order="8" name="Run code-review + adr-check (FULL rigor)">
+      Per root CLAUDE.md §8 (BFF task), FULL rigor. Invoke code-review and adr-check skills at Step 9.5.
+    </step>
+    <step order="9" name="Update TASK-INDEX">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md` status for task 050 to ✅.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish BFF</tool>
+    <tool name="npm">Build SpaarkeAi code-page consumer</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (checkout endpoint added)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeCheckoutService.cs (new — or extends ComposeSessionService.cs)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx (calls checkout on mount)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeCheckoutServiceTests.cs</output>
+    <output type="report">Publish-size report (compressed bytes + delta vs baseline) in task notes</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Opening a document in Compose acquires SPE check-out — verified via Graph API check + Word for Web ("Checked out to {user}")</criterion>
+    <criterion testable="true">BFF endpoint requires authentication (401 when unauthenticated)</criterion>
+    <criterion testable="true">Lock metadata persisted in the tier specified by Spike #3</criterion>
+    <criterion testable="true">Unit tests pass for `ComposeCheckoutService` (or equivalent)</criterion>
+    <criterion testable="true">BFF compressed publish-size delta ≤+2 MB (per NFR-06); absolute size ≤60 MB ceiling</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

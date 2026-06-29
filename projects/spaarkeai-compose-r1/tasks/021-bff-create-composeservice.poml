@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>BFF — Create ComposeService (upload, load, save, promote orchestration)</title>
+    <phase>Phase 2: BFF Endpoints + Services</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>bff-api, backend, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation)</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020</dependencies>
+    <blocks>024,025,026</blocks>
+  </metadata>
+
+  <prompt>
+    Create `Services/Compose/ComposeService.cs` — the orchestration service that coordinates upload-to-SPE, load-document, save-document, and first-Save Document promotion for the Compose workspace. ComposeService is the entry point Compose endpoints call; it delegates SPE plumbing to `ComposeDocumentService` and ChatSession binding to `ComposeSessionService`. Per refined ADR-013, this service MUST NOT inject AI internals — when the AI dispatch endpoint needs routing/invocation, it consumes `IConsumerRoutingService` + `IInvokePlaybookAi` from PublicContracts only.
+  </prompt>
+
+  <role>
+    Senior .NET developer experienced with ASP.NET Core service composition, SharePoint Embedded (Graph), Dataverse SDK, and the Spaarke BFF AI PublicContracts facade. Understands idempotent first-Save promotion semantics.
+  </role>
+
+  <goal>
+    `Services/Compose/ComposeService.cs` exists with public methods (and matching interface `IComposeService`) for upload/load/save/promote orchestration. Service compiles, has no AI-internal dependencies, and is ready for DI registration in task 025.
+  </goal>
+
+  <context>
+    <background>
+      FR-04, FR-05, FR-06 require: (a) load DOCX from SPE given a drive-item id (Path A from Document record); (b) load ephemeral DOCX (Path B from Assistant upload); (c) first-Save creates `sprk_document` record idempotently. ComposeService is the orchestration seam — it owns the FR-06 idempotency contract.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (NEW)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/IComposeService.cs (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">MUST NOT inject `IOpenAiClient`, `IPlaybookService`, or any AI-internal type. When AI is needed, consume `IConsumerRoutingService` + `IInvokePlaybookAi` from `Services/Ai/PublicContracts/` only (refined 2026-05-20).</constraint>
+    <constraint source="ADR-015">Multi-tenant isolation Tier 3 — all storage/lookup calls flow through services that already enforce tenant scoping (inherits via ChatSession).</constraint>
+    <constraint source="project">MUST reuse existing `ChatSession` model — NOT create a new session entity. Session binding is delegated to `ComposeSessionService` (task 023).</constraint>
+    <constraint source="project">SPE plumbing is delegated to `ComposeDocumentService` (task 022). `ComposeService` itself owns orchestration + first-Save promotion idempotency.</constraint>
+    <constraint source="project">First-Save promotion MUST be idempotent — multiple Save clicks before/after promotion MUST NOT create duplicate `sprk_document` rows.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs:42` (session-binding precedent) and `src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs:GetOpenLinks` (Document/SPE endpoint precedent). No existing service orchestrates upload+load+save+promote for a drafting workspace.</existing>
+    <extension>No — Compose introduces a discrete drafting-workspace surface; extending `ChatSessionManager` would conflate document-editing concerns with conversation memory, and extending `FileAccessEndpoints` would put orchestration logic in an endpoint module. Splitting orchestration (ComposeService) from SPE plumbing (ComposeDocumentService) and session binding (ComposeSessionService) maps cleanly to the three-axis problem (workflow / storage / session).</extension>
+    <cost-of-doing-nothing>FR-04, FR-05, FR-06 fail — no service owns the first-Save promotion idempotency contract, and the Compose endpoints (task 024) have no orchestration seam to call.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">Verify context &lt; 70%. Load spec.md (FR-04/05/06/22), bff-extensions.md §§A,E,F, plan.md Phase 2, and ChatSessionManager.cs/FileAccessEndpoints.cs for patterns.</step>
+    <step order="1" name="Define IComposeService interface">Create `IComposeService.cs` with methods: `UploadAsync`, `LoadAsync`, `SaveAsync`, `PromoteIfEphemeralAsync` (returns existing or new `sprk_documentid`). Methods take CancellationToken; use record DTOs from the Compose namespace.</step>
+    <step order="2" name="Implement ComposeService">Create `ComposeService.cs`. Constructor injects ONLY: `IComposeDocumentService`, `IComposeSessionService`, `ILogger&lt;ComposeService&gt;`, and (if needed for promotion) a Dataverse client abstraction already present in BFF. Explicitly do NOT inject `IOpenAiClient` / `IPlaybookService`.</step>
+    <step order="3" name="Implement first-Save promotion idempotency">In `PromoteIfEphemeralAsync`: check if `sprk_documentid` already exists for the SPE drive-item id (via session or Dataverse lookup); if yes, return existing id; if no, create `sprk_document` row and bind to session. Idempotent on concurrent Save clicks.</step>
+    <step order="4" name="Build BFF">`dotnet build src/server/api/Sprk.Bff.Api/` — must be clean.</step>
+    <step order="5" name="Measure publish-size impact">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed delta vs ~45.65 MB baseline (expect ≤+0.1 MB for service code).</step>
+    <step order="6" name="CVE check">`dotnet list package --vulnerable --include-transitive` — must show no new HIGH-severity CVE.</step>
+    <step order="7" name="Update TASK-INDEX">Update `tasks/TASK-INDEX.md`: change task 021 status to ✅. Reset `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, publish, CVE scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/IComposeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IComposeService` + `ComposeService` compile; service has no AI-internal dependencies (`IOpenAiClient`/`IPlaybookService` not in constructor).</criterion>
+    <criterion testable="true">`PromoteIfEphemeralAsync` is idempotent — second call with same drive-item id returns the same `sprk_documentid` without creating a duplicate row.</criterion>
+    <criterion testable="true">BFF builds clean; no new warnings.</criterion>
+    <criterion testable="true">Publish-size delta ≤+0.5 MB vs ~45.65 MB baseline.</criterion>
+    <criterion testable="true">No new HIGH-severity CVE.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 021 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

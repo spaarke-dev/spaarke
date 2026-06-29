@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Create sprk_playbookconsumer row: compose-summarize → Document Summary playbook</title>
+    <phase>Phase 1: Dataverse + JPS Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>dataverse, solution, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Creates new Dataverse data row that wires consumer routing; not a code-implementation task but ADR-010/013 constraints apply.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004</dependencies>
+    <blocks>060</blocks>
+  </metadata>
+
+  <prompt>
+    Create a new org-owned row in `sprk_playbookconsumer` linking consumer type `compose-summarize` to the existing Document Summary playbook (id `47686eb1-9916-f111-8343-7c1e520aa4df`). Per FR-10, this row makes `IConsumerRoutingService.ResolveAsync("compose-summarize", ...)` return the Document Summary playbook id, which is the routing wire that lets the Compose UI button trigger the existing playbook. Spike #4 has locked the endpoint shape and consumer-row contract; this task creates the actual row.
+  </prompt>
+
+  <role>
+    Dataverse maker with AI-routing context. Familiar with the Spaarke consumer-routing facade (`IConsumerRoutingService` + `IInvokePlaybookAi`) and the `sprk_playbookconsumer` table schema. Will follow the existing pattern documented in HOW-TO-ADD-A-CONSUMER-ROUTING-TYPE.md.
+  </role>
+
+  <goal>
+    A single new org-owned row in `sprk_playbookconsumer` with `consumertype = compose-summarize` and `playbookid = 47686eb1-9916-f111-8343-7c1e520aa4df`; row present in project solution; `IConsumerRoutingService.ResolveAsync("compose-summarize", ...)` returns the Document Summary playbook id end-to-end.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="design-working">projects/spaarkeai-compose-r1/design.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="spike-output">projects/spaarkeai-compose-r1/notes/spikes/</file>
+  </inputs>
+
+  <justification>
+    <existing>The `sprk_playbookconsumer` table exists with rows for the 7 current consumer types (per CLAUDE.md "Consumer-routing infrastructure operational — 7 active consumer types"). No row exists for `compose-summarize`.</existing>
+    <extension>No — `sprk_playbookconsumer` is keyed by consumer type and one row per consumer type is the contract. There is no existing row to extend; `compose-summarize` is the new R1 consumer type per FR-09.</extension>
+    <cost-of-doing-nothing>FR-10 + FR-11 fail: without this row, `IConsumerRoutingService.ResolveAsync("compose-summarize", ...)` returns null and the R1 smoke-test playbook dispatch (UI button → BFF → routing → Document Summary playbook → result) cannot complete. The single R1 end-to-end acceptance signal is gated on this row existing.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-010">New Dataverse row MUST be org-owned per Spaarke org-owned-by-default convention.</constraint>
+    <constraint source="ADR-013">This row is what makes the AI-PublicContracts facade work for Compose — Compose CRUD code injects `IConsumerRoutingService` (NOT `IPlaybookService` / `IOpenAiClient`); this row populates the data the facade resolves against.</constraint>
+    <constraint source="project">Consumer type string MUST be exactly `compose-summarize` (matches `ConsumerTypes.ComposeSummarize` constant per FR-09).</constraint>
+    <constraint source="project">Playbook id MUST be exactly `47686eb1-9916-f111-8343-7c1e520aa4df` (user-confirmed Document Summary playbook per spec.md).</constraint>
+    <constraint source="project">Row MUST be included in the project solution so it promotes deterministically.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse, sprk_playbookconsumer, ai-routing</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/design.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>docs/guides/HOW-TO-ADD-A-CONSUMER-ROUTING-TYPE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load spec.md FR-09 + FR-10, design.md, and Spike #4 outputs in `notes/spikes/` (locked endpoint shape + consumer-row contract). Confirm Document Summary playbook id `47686eb1-9916-f111-8343-7c1e520aa4df` is reachable in the target environment.</step>
+    <step order="2">Read `docs/guides/HOW-TO-ADD-A-CONSUMER-ROUTING-TYPE.md` and `ConsumerRoutingService.cs` to confirm the exact columns and value shapes expected by the consumer-routing facade.</step>
+    <step order="3">Verify via Dataverse MCP `describe` that `sprk_playbookconsumer` exists with the expected columns (consumer type string, playbook id GUID, owner type = org).</step>
+    <step order="4">Create the row via Dataverse MCP `create_record` (or PAC CLI / Web API) with `consumertype = compose-summarize`, `playbookid = 47686eb1-9916-f111-8343-7c1e520aa4df`, org-owned.</step>
+    <step order="5">Verify via a `read_query` that the row exists with the locked values; then exercise `IConsumerRoutingService.ResolveAsync("compose-summarize", ...)` via the BFF (smoke probe — e.g., curl an existing routing health check endpoint or a one-off test) and confirm the Document Summary playbook id is returned.</step>
+    <step order="6">Add the row to the project solution and export updated solution.</step>
+    <step order="7">Update TASK-INDEX.md status from 🔲 to ✅; reset current-task.md for next pending task.</step>
+  </steps>
+
+  <outputs>
+    <output type="data">New row in `sprk_playbookconsumer` (Dataverse)</output>
+    <output type="data">Project solution updated to include the new row</output>
+    <output type="docs">notes/spikes/ (referenced for locked consumer-row contract)</output>
+    <output type="notes">projects/spaarkeai-compose-r1/notes/ — any deviation notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IConsumerRoutingService.ResolveAsync("compose-summarize", ...)` returns the playbook id `47686eb1-9916-f111-8343-7c1e520aa4df` (per spec.md FR-10 Acceptance column).</criterion>
+    <criterion testable="true">Row is org-owned.</criterion>
+    <criterion testable="true">Row is present in the exported project solution ZIP.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This row only WIRES the existing playbook to the new consumer type — no new playbook authoring needed (spec.md "Owner Clarifications" row: First consumer type). If `ResolveAsync` returns null after row creation, check Redis-cache invalidation of the consumer-routing service (the service may need a cold restart or cache flush in the target environment).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist, then proceed through the &lt;steps&gt; sequence.
+    </protocol>
+  </execution>
+</task>

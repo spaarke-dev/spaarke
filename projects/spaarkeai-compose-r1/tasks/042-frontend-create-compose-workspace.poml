@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Frontend — Create `ComposeWorkspace.tsx` (TipTap host + toolbar wrapper)</title>
+    <phase>Phase 4: Frontend — SpaarkeAi Compose Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <tags>frontend, react, typescript, fluent-ui, widget, tiptap</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'fluent-ui' (UI implementation per ADR-021)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Composes shared lib (032), section registry (040), and editor (045); serialized.</parallel-reason>
+    <dependencies>032,040,045</dependencies>
+    <blocks>046</blocks>
+  </metadata>
+
+  <prompt>
+    Create `ComposeWorkspace.tsx` — the workspace-section host that wraps the TipTap editor (Task 045) and toolbar (Task 043), wires the three-pane data contracts (Task 041), and consumes `useDocumentActions` from the shared lib (Task 032). This is the Pattern D widget per Calendar precedent: shared-lib widget + thin LW shim. The component mounts inside the `compose-editor` section type registered in Task 040.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer fluent in the SpaarkeAi workspace widget pattern (Calendar Pattern D), TipTap host composition, Fluent UI v9, and PaneEventBus integration.
+  </role>
+
+  <goal>
+    `ComposeWorkspace.tsx` renders the editor + toolbar, wires `useDocumentActions`, hooks the six data contracts to PaneEventBus, handles the empty state via `ComposeEmptyState` (Task 044), and survives mount/unmount cleanly in both standalone and dashboard surfaces (per LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md).
+  </goal>
+
+  <context>
+    <background>
+      FR-02 + spec.md Affected Areas Frontend lock this as the workspace host. Calendar Pattern D is the canonical precedent — same lib, thin LW shim. Empty-state branch (FR-18) ships in Task 044; editor (FR-02) in Task 045; toolbar (FR-12) in Task 043; this task composes them.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 dark mode via semantic tokens — no hard-coded hex.</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 — consume client SSO via `@spaarke/auth` only; do NOT re-acquire tokens.</constraint>
+    <constraint source="project">REUSE existing modal pattern (ConversationPane reference); NO custom DOCX-feature integration outside TipTap OOB.</constraint>
+    <constraint source="project">MUST honor the 21 host MUSTs in LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md (theme ownership, sessionStorage sentinels, webApi shim, mount semantics, lifecycle hooks).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`CalendarWorkspaceWidget` at `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CalendarWorkspaceWidget` is the closest pattern (Pattern D dual-use).</existing>
+    <extension>No — Compose is a discrete artifact-editing surface (Calendar is read-only events; ConversationPane is chat). The TipTap host + DOCX bridge + check-out lifecycle do not overlap with any existing widget. A separate widget is required.</extension>
+    <cost-of-doing-nothing>FR-02 fails — the Compose layout has nothing to mount; Task 045 (editor) has no host; the modal launch (Task 046) has nothing to wrap. The smoke test (Phase 6) cannot fire from a UI that does not exist.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r1/design.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CalendarWorkspaceWidget</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">Verify context &lt; 70%. Load BUILD-A-NEW-WORKSPACE-WIDGET.md Pattern D worked example + CalendarWorkspaceWidget source.</step>
+    <step order="1" name="Scaffold component">Create `src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx`. Use Calendar Pattern D as the structural template.</step>
+    <step order="2" name="Wire shared-lib hook">Import `useDocumentActions` from `@spaarke/document-operations` (Task 032 output). Wire it to the toolbar slot.</step>
+    <step order="3" name="Compose subcomponents">Mount `ComposeToolbar` (Task 043), `ComposeEditor` (Task 045), and the `ComposeEmptyState` (Task 044) branch when no document context is present.</step>
+    <step order="4" name="PaneEventBus integration">Wire the six contracts from `compose-contracts.ts` (Task 041) to PaneEventBus emit/subscribe — receivers stay stubbed per FR-20.</step>
+    <step order="5" name="Lifecycle hooks">Implement mount/unmount: acquire SPE check-out on mount-with-document, release on unmount (Phase 5 fills detailed UX; this task hooks the lifecycle calls).</step>
+    <step order="6" name="Build + ui-tests">Run `npm run build`, then `pwsh ./scripts/Build-AllClientComponents.ps1`. Run ui-tests below.</step>
+    <step order="7" name="Update TASK-INDEX">TASK-INDEX.md: task 042 → ✅. Reset `current-task.md`.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Component Renders">Mount with document context — editor + toolbar visible; mount without document context — empty state visible; zero console errors.</test>
+    <test name="Dark Mode Compliance (ADR-021)">Both states render correctly in dark theme via Fluent v9 semantic tokens.</test>
+    <test name="PaneEventBus Wiring">Trigger one of the six contracts; assert PaneEventBus receives the event with correctly-shaped payload.</test>
+    <test name="Lifecycle Cleanup">Mount, unmount; verify SPE check-out release hook fires; no memory leaks (subscriptions cleaned).</test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build TypeScript</tool>
+    <tool name="pwsh">Run Build-AllClientComponents.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ComposeWorkspace` renders editor + toolbar when document context present.</criterion>
+    <criterion testable="true">`ComposeWorkspace` renders `ComposeEmptyState` when no document context.</criterion>
+    <criterion testable="true">PaneEventBus wiring covers all six contracts from Task 041.</criterion>
+    <criterion testable="true">`npm run build` + `Build-AllClientComponents.ps1` succeed.</criterion>
+    <criterion testable="true">ui-tests green: Component Renders, Dark Mode Compliance, PaneEventBus Wiring, Lifecycle Cleanup.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 042 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

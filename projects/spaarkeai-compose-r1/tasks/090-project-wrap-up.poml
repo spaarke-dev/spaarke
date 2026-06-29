@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Project wrap-up: code-review, adr-check, test-diet, repo-cleanup, archive</title>
+    <status>not-started</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>project-wrap-up, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>080,081</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <phase>wrap-up</phase>
+  </metadata>
+
+  <prompt>
+    Mandatory project wrap-up gate per `task-create` Step 3.7 +
+    CLAUDE.md §7. Runs the full close-out sequence: code-review on
+    all project code, adr-check on all project code, /test-diet to
+    reconcile MAINTAIN vs SCAFFOLDING tests, /repo-cleanup, then
+    update README/plan/TASK-INDEX/INDEX, write lessons-learned, and
+    finally invoke /devops-project-archive to close GitHub Issue #514
+    (preserves folder + worktree per CLAUDE.md §7 override).
+  </prompt>
+
+  <role>
+    Project-close release engineer applying every binding wrap-up
+    gate. Treats each step as non-skippable; surfaces any
+    Critical issue from code-review/adr-check rather than silencing.
+  </role>
+
+  <goal>
+    Project is fully archived: GitHub Issue #514 closed by
+    /devops-project-archive; README.md shows Status=Complete,
+    Progress=100%, all Graduation Criteria ✅; plan.md milestones
+    ✅; `notes/lessons-learned.md` written; `notes/test-diet-report.md`
+    cited in wrap-up PR; `projects/INDEX.md` updated; `.archived`
+    marker written; worktree retained.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-readme">projects/spaarkeai-compose-r1/README.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="code-review-skill">.claude/skills/code-review/SKILL.md</file>
+    <file purpose="adr-check-skill">.claude/skills/adr-check/SKILL.md</file>
+    <file purpose="test-diet-skill">.claude/skills/test-diet/SKILL.md</file>
+    <file purpose="repo-cleanup-skill">.claude/skills/repo-cleanup/SKILL.md</file>
+    <file purpose="archive-skill">.claude/skills/devops-project-archive/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">/test-diet gate is BINDING per CLAUDE.md §7 — wrap-up PR description MUST cite `notes/test-diet-report.md` or document skip rationale</constraint>
+    <constraint source="project">Worktree MUST be retained on archive per CLAUDE.md §7 override (folder + `.archived` marker only)</constraint>
+    <constraint source="project">All Critical issues from code-review/adr-check MUST be addressed before archive; defer non-Critical via `/defer` if scope is too large</constraint>
+    <constraint source="project">ADR violations require CLAUDE.md §6.5 protocol — Path A (exception with rationale) / Path B (amendment) / Path C (pivot to comply). Silent violation is forbidden.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>mandatory project wrap-up sequence</topic>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/devops-project-archive/SKILL.md</file>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/README.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Run /code-review on all project code">
+      Invoke the `code-review` skill across all files modified by
+      this project (`git diff master...HEAD --name-only`). Address
+      every Critical finding before proceeding. Non-Critical findings
+      may be filed via `/defer`.
+    </step>
+    <step order="2" name="Run /adr-check on all project code">
+      Invoke the `adr-check` skill across all files modified. For
+      every violation: apply CLAUDE.md §6.5 — Path A (exception +
+      rationale), Path B (ADR amendment), or Path C (pivot to comply).
+      Silent violation forbidden.
+    </step>
+    <step order="3" name="Run /test-diet (BINDING gate per CLAUDE.md §7)">
+      Invoke `test-diet` skill. It classifies project-added tests
+      against ADR-038 §7's 17-ban build-vs-maintain classifier.
+      Output: `notes/test-diet-report.md`. Skill emits `git rm` /
+      `git mv` commands — apply them as reviewer judgment dictates.
+    </step>
+    <step order="4" name="Run /repo-cleanup">
+      Invoke `repo-cleanup projects/spaarkeai-compose-r1`. Removes
+      ephemeral files from `notes/` per repo hygiene rules; validates
+      structure compliance.
+    </step>
+    <step order="5" name="Update README.md">
+      Update `projects/spaarkeai-compose-r1/README.md`:
+      Status=Complete, Phase=Complete, Progress=100%, Completed Date
+      set to today, every Graduation Criteria checkbox flipped to ✅,
+      Changelog entry added for the close-out.
+    </step>
+    <step order="6" name="Update plan.md">
+      Update `projects/spaarkeai-compose-r1/plan.md`: Status=Complete,
+      every milestone in §4 marked ✅.
+    </step>
+    <step order="7" name="Write lessons-learned">
+      Write `projects/spaarkeai-compose-r1/notes/lessons-learned.md`
+      capturing: what went well, what surprised, what we'd do
+      differently, candidates for future ADR/skill updates.
+    </step>
+    <step order="8" name="Update projects/INDEX.md">
+      Update `projects/INDEX.md`: move this project's row to the
+      archived section OR refresh last-touched per the file's
+      convention (it's the hot-path coordination registry per
+      CLAUDE.md §10 § G).
+    </step>
+    <step order="9" name="Run /devops-project-archive">
+      Invoke `devops-project-archive` skill. Sets GitHub Project
+      Issue #514 Status=Completed + Closed Date, writes `.archived`
+      marker into the project folder, retains the worktree per
+      CLAUDE.md §7 override.
+    </step>
+    <step order="10" name="Update TASK-INDEX">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md`
+      status for task 090 to ✅. Project is now complete.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Diff against master to enumerate project-modified files</tool>
+    <tool name="gh">Close GitHub Issue #514 via devops-project-archive skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-compose-r1/README.md (updated)</output>
+    <output type="docs">projects/spaarkeai-compose-r1/plan.md (updated)</output>
+    <output type="notes" ephemeral="false">projects/spaarkeai-compose-r1/notes/lessons-learned.md</output>
+    <output type="notes" ephemeral="false">projects/spaarkeai-compose-r1/notes/test-diet-report.md</output>
+    <output type="marker">projects/spaarkeai-compose-r1/.archived</output>
+    <output type="docs">projects/INDEX.md (updated)</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">/code-review run; all Critical findings addressed or filed via /defer</criterion>
+    <criterion testable="true">/adr-check run; every violation has a CLAUDE.md §6.5 resolution path</criterion>
+    <criterion testable="true">/test-diet run; `notes/test-diet-report.md` written and cited in wrap-up PR</criterion>
+    <criterion testable="true">/repo-cleanup run on projects/spaarkeai-compose-r1</criterion>
+    <criterion testable="true">README.md Status=Complete, Progress=100%, all Graduation Criteria ✅, Changelog entry added</criterion>
+    <criterion testable="true">plan.md Status=Complete, all milestones ✅</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` written</criterion>
+    <criterion testable="true">projects/INDEX.md updated</criterion>
+    <criterion testable="true">/devops-project-archive run; GitHub Issue #514 closed; `.archived` marker present; worktree retained</criterion>
+    <criterion testable="true">TASK-INDEX.md updated to ✅ for task 090</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

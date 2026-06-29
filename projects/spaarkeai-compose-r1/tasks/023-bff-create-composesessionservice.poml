@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>BFF — Create ComposeSessionService (ChatSession DocumentId binding)</title>
+    <phase>Phase 2: BFF Endpoints + Services</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>bff-api, backend, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation)</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020</dependencies>
+    <blocks>024,025,026</blocks>
+  </metadata>
+
+  <prompt>
+    Create `Services/Compose/ComposeSessionService.cs` — the thin binding layer that ties a Compose editor session to the existing `ChatSession` model via `DocumentId`. For ephemeral docs (Path B), `DocumentId` is the SPE drive-item id; after first-Save promotion (FR-06), `DocumentId` is updated to the `sprk_documentid`. This service consumes the existing `ChatSessionManager` + `SessionPersistenceService` infrastructure — it does NOT create a new session entity or duplicate the Redis/Cosmos/Dataverse three-tier pipeline.
+  </prompt>
+
+  <role>
+    Senior .NET developer who understands the Spaarke ChatSession three-tier persistence (Redis hot → Cosmos warm → Dataverse cold) and ADR-015 multi-tenant isolation. Comfortable building thin façades over existing infrastructure.
+  </role>
+
+  <goal>
+    `Services/Compose/ComposeSessionService.cs` + `IComposeSessionService` interface exist. The service binds a Compose editor session to an existing `ChatSession` via `DocumentId`, and exposes idempotent `RebindToDocumentIdAsync` to handle the ephemeral→promoted transition after first-Save (FR-07).
+  </goal>
+
+  <context>
+    <background>
+      FR-07 requires Compose to use the existing `ChatSession` model with `DocumentId` binding — NOT a new session entity. The session must persist across browser refresh via the existing three-tier infrastructure unchanged. This service is the thin seam that gives Compose a stable API while reusing all the heavy-lifting (compaction at 15 messages, archive at 50, multi-tenant Tier 3 isolation).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeSessionService.cs (NEW)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/IComposeSessionService.cs (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">No AI-internal types injected (`IOpenAiClient`, `IPlaybookService`). Consuming the existing `ChatSessionManager` is fine — it is not an AI client, it is the session-store facade.</constraint>
+    <constraint source="ADR-015">Multi-tenant isolation Tier 3 — inherited via the underlying `ChatSession` infrastructure. Do NOT bypass the existing tenant-scope filters.</constraint>
+    <constraint source="project">MUST reuse existing `ChatSession` model + `ChatSessionManager` + `SessionPersistenceService`. MUST NOT introduce a new session entity, new Redis key shape, or new Cosmos partition.</constraint>
+    <constraint source="project">`RebindToDocumentIdAsync` is idempotent — multiple calls with the same new `DocumentId` are a no-op after the first.</constraint>
+    <constraint source="project">MUST NOT extend `sprk_analysis.sprk_chathistory` (superseded; see CLAUDE.md Supersession Map).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs:42` (the canonical session-binding service; consumed via existing three-tier facade) and `Services/Ai/Sessions/SessionPersistenceService.cs` (the three-tier persistence layer).</existing>
+    <extension>No — extending `ChatSessionManager` directly would conflate conversation-memory concerns with editor-host session binding semantics (ephemeral→promoted DocumentId transition). A thin `ComposeSessionService` consumes ChatSessionManager without modifying its surface; this is exactly the seam the spec FR-07 calls for.</extension>
+    <cost-of-doing-nothing>FR-07 fails — Compose has no place to perform the ephemeral→promoted DocumentId rebind (FR-06 idempotency depends on this), and endpoints (task 024) have no session API to call.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">Verify context &lt; 70%. Load spec.md FR-07, plan.md Phase 2, bff-extensions.md §A, and ChatSessionManager.cs (+ SessionPersistenceService.cs) to confirm the binding surface.</step>
+    <step order="1" name="Define IComposeSessionService">Methods: `EnsureSessionForDocumentAsync(documentId, userId, ct)` (returns ChatSession), `RebindToDocumentIdAsync(currentDocumentId, newDocumentId, ct)` (idempotent), `GetSessionAsync(documentId, ct)`. All take CancellationToken.</step>
+    <step order="2" name="Implement ComposeSessionService">Constructor injects ONLY: `IChatSessionManager` (or equivalent existing session manager), `ILogger&lt;ComposeSessionService&gt;`. Do NOT inject any AI client. Implement methods by delegating to the existing ChatSession surface.</step>
+    <step order="3" name="Implement rebind idempotency">In `RebindToDocumentIdAsync`: if currentDocumentId == newDocumentId, return immediately. Otherwise update the session's DocumentId via the existing session-store API and persist via SessionPersistenceService (no new persistence path).</step>
+    <step order="4" name="Build BFF">`dotnet build src/server/api/Sprk.Bff.Api/` — must be clean.</step>
+    <step order="5" name="Measure publish-size impact">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/`; report compressed delta vs ~45.65 MB baseline (expect ≤+0.05 MB).</step>
+    <step order="6" name="CVE check">`dotnet list package --vulnerable --include-transitive` — must show no new HIGH-severity CVE.</step>
+    <step order="7" name="Update TASK-INDEX">Update `tasks/TASK-INDEX.md`: change task 023 status to ✅. Reset `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, publish, CVE scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/IComposeSessionService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeSessionService.cs</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IComposeSessionService` + `ComposeSessionService` compile; no AI client injected; no new session entity introduced.</criterion>
+    <criterion testable="true">`RebindToDocumentIdAsync` is idempotent — second call with the same new id is a no-op.</criterion>
+    <criterion testable="true">`EnsureSessionForDocumentAsync` returns a session bound via existing ChatSessionManager (no new Redis key shape or Cosmos partition).</criterion>
+    <criterion testable="true">BFF builds clean; publish-size delta ≤+0.5 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 023 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

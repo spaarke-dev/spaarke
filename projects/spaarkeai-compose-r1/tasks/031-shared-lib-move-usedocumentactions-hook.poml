@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Move useDocumentActions hook from SemanticSearch to @spaarke/document-operations</title>
+    <status>not-started</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>frontend, typescript, refactoring, shared-lib</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>030</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <fr-coverage>FR-13</fr-coverage>
+    <phase>3</phase>
+  </metadata>
+
+  <prompt>
+    Move the existing `useDocumentActions` hook from
+    `src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts`
+    into the new `@spaarke/document-operations` shared library (created by
+    task 030). This is a VERBATIM move — the hook implementation does not
+    change in this task; only its location and export path change. Task 032
+    then refactors SemanticSearch's consumer to import from the shared lib.
+  </prompt>
+
+  <role>
+    Frontend developer with expertise in TypeScript module refactoring,
+    preserving public API surface while changing physical location.
+  </role>
+
+  <goal>
+    `useDocumentActions` lives at
+    `src/client/shared/Spaarke.DocumentOperations/src/hooks/useDocumentActions.ts`,
+    is exported from the package barrel (`@spaarke/document-operations`),
+    builds clean standalone, and the original SemanticSearch file is removed
+    (or left as a thin re-export stub in this task, removed in task 032
+    after consumers refactor).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="source-hook">src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts</file>
+    <file purpose="consumer-reference">src/client/code-pages/SemanticSearch/src/components/SearchCommandBar.tsx</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="target-package">src/client/shared/Spaarke.DocumentOperations/ (from task 030)</file>
+    <file purpose="build-script">scripts/Build-AllClientComponents.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">MUST be a verbatim move — no behavioral changes to useDocumentActions in this task; behavior changes go through a separate PR</constraint>
+    <constraint source="project">MUST preserve the public API (signature, return shape, error semantics) so SemanticSearch refactor is a pure import-path change</constraint>
+    <constraint source="project">MUST NOT break SemanticSearch build during the transition — either keep a stub re-export or coordinate task 032 in the same PR</constraint>
+    <constraint source="project">MUST verify SemanticSearch existing tests still pass after move</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>verbatim module move</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/components/SearchCommandBar.tsx</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>scripts/Build-AllClientComponents.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read source hook">
+      Read `src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts` in full; capture every import, type, and side effect.
+    </step>
+    <step order="2" name="Copy hook into shared lib">
+      Create `src/client/shared/Spaarke.DocumentOperations/src/hooks/useDocumentActions.ts` as a verbatim copy. Update relative imports as needed (auth client, fetch helpers, types). If the hook depends on SemanticSearch-internal types, move those types to the shared lib too (only the strictly-required ones).
+    </step>
+    <step order="3" name="Export from barrel">
+      Update `src/client/shared/Spaarke.DocumentOperations/src/index.ts` to export `useDocumentActions` + any required types from the new location.
+    </step>
+    <step order="4" name="Stub or remove original">
+      Either (a) keep the original SemanticSearch file as a thin re-export stub (`export { useDocumentActions } from '@spaarke/document-operations';`) so SemanticSearch builds during the transition, or (b) delete it now if task 032 is in the same PR. Document the choice in the task notes.
+    </step>
+    <step order="5" name="Build shared lib + SemanticSearch">
+      Run `scripts/Build-AllClientComponents.ps1` and confirm both `@spaarke/document-operations` and SemanticSearch build clean. Use `npm install --legacy-peer-deps --no-audit --no-fund` per root CLAUDE.md §12.
+    </step>
+    <step order="6" name="Run existing SemanticSearch tests">
+      Run SemanticSearch's existing test suite and confirm no regressions. If a test imports the hook by deep path, note for task 033 fix-up.
+    </step>
+    <step order="7" name="Run code-review + adr-check (FULL rigor)">
+      Per root CLAUDE.md §8, FULL rigor for code-move tasks. Invoke code-review and adr-check skills at Step 9.5.
+    </step>
+    <step order="8" name="Update TASK-INDEX">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md` status for task 031 to ✅.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="powershell">Run scripts/Build-AllClientComponents.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.DocumentOperations/src/hooks/useDocumentActions.ts</output>
+    <output type="code">src/client/shared/Spaarke.DocumentOperations/src/index.ts (updated barrel)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts (removed or stubbed)</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`useDocumentActions` exported from `@spaarke/document-operations` and consumable via `import { useDocumentActions } from '@spaarke/document-operations';`</criterion>
+    <criterion testable="true">Both shared lib and SemanticSearch build clean via `scripts/Build-AllClientComponents.ps1`</criterion>
+    <criterion testable="true">SemanticSearch existing tests pass (no functional regression)</criterion>
+    <criterion testable="true">Hook behavior unchanged — verbatim move, public API preserved</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

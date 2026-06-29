@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Verify SemanticSearch existing tests pass after refactor; add consumer tests</title>
+    <status>not-started</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>testing, frontend, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <dependencies>032</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <fr-coverage>FR-14</fr-coverage>
+    <phase>3</phase>
+  </metadata>
+
+  <prompt>
+    Run the existing SemanticSearch test suite to verify the move + refactor
+    (tasks 031, 032) introduced no regression. Add light-weight consumer
+    tests proving `@spaarke/document-operations` is consumed correctly by
+    SemanticSearch (smoke level — hook is callable, returns expected shape,
+    no broken imports). This task is the test-side closure of FR-14.
+  </prompt>
+
+  <role>
+    Test engineer familiar with the SemanticSearch vitest setup, the
+    `@spaarke/*` shared-lib conventions, and ADR-038 testing strategy
+    (integration-heavy pyramid, mock at boundaries only, banned patterns).
+  </role>
+
+  <goal>
+    All existing SemanticSearch tests pass against the refactored code.
+    Additionally, a small set of consumer tests under SemanticSearch
+    verifies the shared-lib import path resolves and the hook's return
+    shape matches what `SearchCommandBar` expects. No `Mock&lt;HttpMessageHandler&gt;`,
+    no DI-registration tests, no ctor null-check tests (ADR-038 bans).
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="refactored-consumer">src/client/code-pages/SemanticSearch/src/components/SearchCommandBar.tsx</file>
+    <file purpose="moved-hook">src/client/shared/Spaarke.DocumentOperations/src/hooks/useDocumentActions.ts</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="build-script">scripts/Build-AllClientComponents.ps1</file>
+    <file purpose="testing-adr">docs/adr/ADR-038-testing-strategy.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-038">No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests, no ctor null-check tests</constraint>
+    <constraint source="project">MUST NOT introduce new SCAFFOLDING-class tests (project-close /test-diet gate will delete them)</constraint>
+    <constraint source="project">MUST keep test scope minimal — smoke-level only; full coverage of useDocumentActions is owned by the shared lib, not SemanticSearch</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>test verification after refactor</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/components/SearchCommandBar.tsx</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>scripts/Build-AllClientComponents.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Run SemanticSearch test suite">
+      Run `npm test` (or the SemanticSearch equivalent) and confirm all existing tests pass against the refactored code. If failures occur, root-cause and fix in coordination with tasks 031/032 — do NOT bypass.
+    </step>
+    <step order="2" name="Add minimal consumer smoke test">
+      Add a small vitest file under SemanticSearch (e.g., `tests/SearchCommandBar.consumer.spec.tsx`) that imports `useDocumentActions` via `@spaarke/document-operations` and asserts the hook is callable with a smoke fixture (no real network — mock at the auth/fetch boundary only).
+    </step>
+    <step order="3" name="Verify build + tests green">
+      Run `scripts/Build-AllClientComponents.ps1` followed by `npm test` in SemanticSearch; confirm all green. Use `npm install --legacy-peer-deps --no-audit --no-fund` per root CLAUDE.md §12.
+    </step>
+    <step order="4" name="ADR-038 conformance check">
+      Confirm no banned test patterns (`Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, ctor null-check tests) in the new consumer test. Document in task notes.
+    </step>
+    <step order="5" name="Update TASK-INDEX">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md` status for task 033 to ✅. Phase 3 closes when this task passes.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Run SemanticSearch test suite</tool>
+    <tool name="powershell">Run scripts/Build-AllClientComponents.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/client/code-pages/SemanticSearch/tests/SearchCommandBar.consumer.spec.tsx (or equivalent path)</output>
+    <output type="report">SemanticSearch test-run summary (in task notes)</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All existing SemanticSearch tests pass against the refactored code</criterion>
+    <criterion testable="true">At least one consumer smoke test verifies `useDocumentActions` is imported via `@spaarke/document-operations` and behaves as expected</criterion>
+    <criterion testable="true">No banned test patterns introduced (ADR-038)</criterion>
+    <criterion testable="true">"Open in Word for Web" + "Open in Word Desktop" still work in SemanticSearch (per FR-14 acceptance)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

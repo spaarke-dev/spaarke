@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Create sprk_workspacelayout Compose system row</title>
+    <phase>Phase 1: Dataverse + JPS Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <tags>dataverse, solution, data</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Creates new Dataverse data row (new artifact, ADR constraints apply); not a code-implementation task.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001,002,003,004</dependencies>
+    <blocks>060</blocks>
+  </metadata>
+
+  <prompt>
+    Create a new org-owned record in `sprk_workspacelayout` registering the "Compose" system layout. Use a hard-coded GUID (the layout is a single system row keyed by that GUID), template = `single-column`, sections = `["compose-editor"]`, user-facing label = "Compose". Per FR-01, the row makes the Compose entry appear in the SpaarkeAi workspace picker. Per CLAUDE.md §11, the hard-coded GUID is intentional — this is a single system row that is NOT extensible by users, so a stable opaque ID is correct (no alternate-key flexibility needed).
+  </prompt>
+
+  <role>
+    Dataverse maker with Web API + solution experience. Comfortable creating org-owned system rows via the Dataverse Web API or PAC CLI, and exporting the row to the project solution for environment promotion.
+  </role>
+
+  <goal>
+    A single new org-owned row in `sprk_workspacelayout` with the locked GUID, template, sections list, and label specified; the row appears in the SpaarkeAi workspace picker; row is included in the project solution export.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="design-working">projects/spaarkeai-compose-r1/design.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="spike-output">projects/spaarkeai-compose-r1/notes/spikes/</file>
+  </inputs>
+
+  <justification>
+    <existing>No existing `sprk_workspacelayout` row for Compose (verified by inspecting current rows — only existing layouts are pre-Compose workspaces such as Matter, Calendar, etc.). The table itself exists; only this row is new.</existing>
+    <extension>No — `sprk_workspacelayout` is keyed by layout ID and one row represents one workspace surface. There is no existing layout to extend; Compose is a new workspace surface per FR-01.</extension>
+    <cost-of-doing-nothing>FR-01 fails: no "Compose" entry appears in the SpaarkeAi workspace picker, which means there is no way for a user to open Compose. The entire R1 surface area is gated on this row existing.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-010">New Dataverse row MUST be org-owned (not user-owned) per Spaarke org-owned-by-default convention. Reference `.claude/adr/ADR-010-di-minimalism.md` together with project CLAUDE.md MUST rule "MUST make new Dataverse rows org-owned" sourced from the org-owned ADR family.</constraint>
+    <constraint source="project">GUID MUST be hard-coded — this is a single system row (not extensible by users), so a stable opaque ID is correct per CLAUDE.md §11 (Component Justification — answers documented in `&lt;justification&gt;` above).</constraint>
+    <constraint source="project">Row MUST be included in the project solution so it promotes to other environments deterministically.</constraint>
+    <constraint source="project">Label MUST be exactly "Compose" (user-facing) per spec.md §FR-01 acceptance.</constraint>
+    <constraint source="project">Template MUST be `single-column`; sections MUST be `["compose-editor"]` per spec.md §Scope #1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse, sprk_workspacelayout, solution</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/design.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load spec.md FR-01, design.md §14, and the Spike #2 notes (locked three-pane data contracts) from `notes/spikes/`. Verify the locked Compose layout GUID is published in spike output; if not, ask the spike owner.</step>
+    <step order="2">Verify via Dataverse MCP `describe` that `sprk_workspacelayout` table exists with the expected columns (layout id, template, sections, label, owner type = org).</step>
+    <step order="3">Create the row via Dataverse MCP `create_record` (or PAC CLI / Web API) using the locked GUID, `sprk_layouttemplateid = single-column`, sections JSON `["compose-editor"]`, label "Compose", org-owned.</step>
+    <step order="4">Verify the row appears by issuing a `read_query` against `sprk_workspacelayout` filtered to the GUID; confirm all four locked values match.</step>
+    <step order="5">Add the row to the project solution (so it deploys downstream) and export the updated solution into the project deployment artifacts.</step>
+    <step order="6">Open the SpaarkeAi workspace picker in the target environment and verify "Compose" appears as an option (per FR-01 acceptance). Selecting it should attempt to mount Compose (mount may fail in Phase 1 — that is expected; only picker visibility is gated here).</step>
+    <step order="7">Update TASK-INDEX.md status from 🔲 to ✅; reset current-task.md for the next pending task.</step>
+  </steps>
+
+  <outputs>
+    <output type="data">New row in `sprk_workspacelayout` (Dataverse)</output>
+    <output type="data">Project solution updated to include the new row</output>
+    <output type="docs">notes/spikes/ (referenced for locked GUID)</output>
+    <output type="notes">projects/spaarkeai-compose-r1/notes/ — any deviation notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Layout appears in workspace picker; selecting it opens Compose (per spec.md FR-01 Acceptance column).</criterion>
+    <criterion testable="true">Row is org-owned (verified via Web API `ownerid` and `ownertype` fields).</criterion>
+    <criterion testable="true">Row is present in the exported project solution ZIP.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Per CLAUDE.md §6.5: if ADR-010 (or org-owned-by-default family) conflicts emerge during this task (e.g., the table is user-owned by default), surface via the three-path resolution protocol — do not silently violate. Locked GUID is intentional (CLAUDE.md §11 justification documented above) and is NOT a tech-debt item to revisit.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist, then proceed through the &lt;steps&gt; sequence.
+    </protocol>
+  </execution>
+</task>

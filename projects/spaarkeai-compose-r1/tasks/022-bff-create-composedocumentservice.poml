@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>BFF — Create ComposeDocumentService (SPE plumbing via Graph)</title>
+    <phase>Phase 2: BFF Endpoints + Services</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>bff-api, backend, services</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation)</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020</dependencies>
+    <blocks>024,025,026</blocks>
+  </metadata>
+
+  <prompt>
+    Create `Services/Compose/ComposeDocumentService.cs` — the SPE plumbing layer for Compose. This service owns the Graph API interactions for loading DOCX bytes from a SPE drive-item, saving new versions back to SPE, and (in Phase 5) acquiring/releasing SPE check-out locks. It exposes a clean async surface to `ComposeService` (task 021) while keeping all Graph-specific concerns isolated for testability.
+  </prompt>
+
+  <role>
+    Senior .NET developer experienced with Microsoft Graph SDK, SharePoint Embedded drive-items + versions, and BFF OBO/app-only auth via `GraphClientFactory`. Comfortable structuring services for mock-at-boundary testing per ADR-038.
+  </role>
+
+  <goal>
+    `Services/Compose/ComposeDocumentService.cs` + `IComposeDocumentService` interface exist with SPE read/write/version methods. Service compiles, isolates Graph dependency at the boundary, and is ready for DI registration in task 025.
+  </goal>
+
+  <context>
+    <background>
+      FR-04 and FR-05 require loading DOCX bytes from a SPE drive-item id (both Path A: from `sprk_document` record, and Path B: ephemeral from Assistant upload). The save path (FR-06) commits a new SPE version. Keeping Graph in its own service (not inline in ComposeService) preserves mock-at-boundary testability per ADR-038 and matches the BFF's existing pattern (`FileAccessEndpoints` delegates to file-store services).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentService.cs (NEW)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/IComposeDocumentService.cs (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">No AI-internal dependencies — SPE plumbing only. Graph is allowed; `IOpenAiClient` / `IPlaybookService` are NOT.</constraint>
+    <constraint source="ADR-038">Service MUST be testable with Graph mocked at the boundary; do NOT introduce `Mock&lt;HttpMessageHandler&gt;` patterns in this service or its tests.</constraint>
+    <constraint source="project">Use existing BFF `GraphClientFactory` (OBO + app-only paths); do NOT instantiate a `GraphServiceClient` ad-hoc.</constraint>
+    <constraint source="project">All public methods take `CancellationToken`. All errors propagate as typed exceptions or `Result&lt;T&gt;`-style returns (match existing BFF conventions).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs:GetOpenLinks` and the file-store services it consumes (BFF `Services/Files/*`) are the closest SPE-touching surface. No existing service exposes the load+save+version triad as a single async surface for an editor host.</existing>
+    <extension>No — the existing file-store services are oriented around upload/download endpoints, not editor-host load/save/version semantics. Bolting editor semantics onto them would conflate two consumer shapes. A dedicated `ComposeDocumentService` keeps the Compose editor's needs explicit and the existing file-store surface unchanged.</extension>
+    <cost-of-doing-nothing>FR-04, FR-05 fail — Compose cannot load DOCX bytes from a SPE drive-item id, and the editor has no save target.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">Verify context &lt; 70%. Load spec.md FR-04/05, bff-extensions.md §§A,D,F, plan.md Phase 2, and existing BFF file-store / GraphClientFactory patterns.</step>
+    <step order="1" name="Define IComposeDocumentService">Create `IComposeDocumentService.cs` with methods: `LoadDocxAsync(driveItemId, ct)`, `SaveDocxAsync(driveItemId, bytes, ct)` (returns new version id), and check-out/check-in stubs (`AcquireCheckOutAsync`, `ReleaseCheckOutAsync`) for Phase 5 to fill in. Use record DTOs.</step>
+    <step order="2" name="Implement ComposeDocumentService">Create `ComposeDocumentService.cs`. Constructor injects ONLY: `IGraphClientFactory` (existing BFF abstraction), `ILogger&lt;ComposeDocumentService&gt;`. Implement load + save against Graph drive-item APIs. For R1, check-out methods can throw `NotImplementedException` with a TODO referencing Phase 5.</step>
+    <step order="3" name="Wire writer-identity rule (advisory)">Per bff-extensions.md §D, document in XML comments which write paths run under OBO (user-initiated Save) vs MI (any background re-index). Save path in R1 is always user-initiated → OBO.</step>
+    <step order="4" name="Build BFF">`dotnet build src/server/api/Sprk.Bff.Api/` — must be clean.</step>
+    <step order="5" name="Measure publish-size impact">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/`; report compressed delta vs ~45.65 MB baseline (expect ≤+0.1 MB).</step>
+    <step order="6" name="CVE check">`dotnet list package --vulnerable --include-transitive` — must show no new HIGH-severity CVE.</step>
+    <step order="7" name="Update TASK-INDEX">Update `tasks/TASK-INDEX.md`: change task 022 status to ✅. Reset `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, publish, CVE scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/IComposeDocumentService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentService.cs</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`IComposeDocumentService` + `ComposeDocumentService` compile; constructor injects only `IGraphClientFactory` + `ILogger`.</criterion>
+    <criterion testable="true">`LoadDocxAsync` returns the DOCX byte stream from a SPE drive-item id; `SaveDocxAsync` commits a new version and returns the version id.</criterion>
+    <criterion testable="true">No AI-internal types referenced; no `Mock&lt;HttpMessageHandler&gt;` introduced in this codepath.</criterion>
+    <criterion testable="true">BFF builds clean; publish-size delta ≤+0.5 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 022 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

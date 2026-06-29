@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Capture automated integration test for compose-summarize roundtrip</title>
+    <phase>Phase 6: E2E Smoke Test</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>testing, integration-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Adds automated regression test for existing surface; ADR-038 testing rules apply (no banned patterns); test-modifying tag triggers code-review + adr-check at Step 9.5 per CLAUDE.md §8.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential after task 060 — captures the same round-trip as a code-level regression test; depends on smoke-test confirmation that the wiring works.</parallel-reason>
+    <dependencies>060</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Capture an automated integration test for the `compose-summarize` round-trip verified manually in task 060. Place the test in the appropriate KEEP path per ADR-038 (likely `tests/unit/Sprk.Bff.Api.Tests/Api/ComposeEndpointsTests.cs` for the endpoint-level test, plus an integration test in `tests/integration/Spe.Integration.Tests/` if one is warranted). The test MUST follow ADR-038 mock-boundary rules — mock at `IInvokePlaybookAi` and `IConsumerRoutingService` boundaries OR at HTTP / Dataverse boundaries (NOT both at once, and NEVER `Mock&lt;HttpMessageHandler&gt;`). The test verifies that a POST to `/api/compose/action/compose-summarize` with a valid JPS scope payload resolves to playbook id `47686eb1-9916-f111-8343-7c1e520aa4df` and returns a summary result.
+  </prompt>
+
+  <role>
+    .NET test author with ADR-038 fluency. Comfortable with WebApplicationFactory-style integration tests, fake/stub authoring at the right boundary, and xUnit `Theory`/`Fact` patterns. Familiar with Sprk.Bff.Api test fixture conventions (per `docs/procedures/test-fixture-contracts.md` if applicable).
+  </role>
+
+  <goal>
+    A green automated integration test that exercises the `compose-summarize` round-trip end-to-end at the BFF endpoint level: POST `/api/compose/action/compose-summarize` → `IConsumerRoutingService` resolves Document Summary playbook id → `IInvokePlaybookAi` invoked → response shape verified. Test lives at an ADR-038 KEEP path, follows mock-boundary rules, and contains zero banned patterns.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="design-working">projects/spaarkeai-compose-r1/design.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="smoke-test-output">projects/spaarkeai-compose-r1/notes/smoke-tests/compose-summarize-roundtrip.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">Test code MUST exercise the AI PublicContracts facade only (`IConsumerRoutingService` + `IInvokePlaybookAi`). MUST NOT inject or mock `IOpenAiClient` / `IPlaybookService` / other AI internals from the test surface — that would violate the facade boundary and create false-positive coverage.</constraint>
+    <constraint source="ADR-038">Test MUST live at an ADR-038 KEEP path (per `docs/adr/ADR-038-testing-strategy.md` §6 KEEP categories). NO banned patterns: NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor null-check tests. Use `TimeProvider` if any time logic is exercised (not `Stopwatch`).</constraint>
+    <constraint source="ADR-038">Mock at boundaries only — `IConsumerRoutingService`, `IInvokePlaybookAi`, Dataverse, or Graph — NOT internal collaborators.</constraint>
+    <constraint source="project">Test MUST be deterministic — no flaky external dependencies. If the test exercises the real playbook (rare), mark it `[Trait("Category", "Integration")]` and gate via test runner category if needed.</constraint>
+    <constraint source="project">All `dotnet test` runs MUST remain green after this test is added; this task does NOT introduce any new failing tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>integration-test, bff-api-testing, adr-038</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/design.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvokePlaybookAi.cs</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load the smoke-test write-up from task 060 (`notes/smoke-tests/compose-summarize-roundtrip.md`). Use it as the spec for what behavior the integration test must reproduce.</step>
+    <step order="2">Read `docs/adr/ADR-038-testing-strategy.md` §6 (KEEP categories) and `docs/standards/TEST-ARCHITECTURE.md` to confirm the correct KEEP path and the mock-boundary rules. Decide: endpoint-level integration test in `tests/unit/Sprk.Bff.Api.Tests/Api/ComposeEndpointsTests.cs` (most likely) vs full-stack integration test in `tests/integration/Spe.Integration.Tests/` (only if SPE round-trip is part of scope — for this task it is NOT).</step>
+    <step order="3">Author the test method: arrange `WebApplicationFactory&lt;Program&gt;` with `IConsumerRoutingService` + `IInvokePlaybookAi` mocked at the facade boundary (returning Document Summary playbook id + a canned summary result). Act: POST `/api/compose/action/compose-summarize` with a valid `compose-document` JPS scope payload. Assert: HTTP 200, response body contains the canned summary, `IConsumerRoutingService.ResolveAsync` was called with `"compose-summarize"`, `IInvokePlaybookAi.InvokeAsync` was called with playbook id `47686eb1-9916-f111-8343-7c1e520aa4df`.</step>
+    <step order="4">Run `dotnet test` against the test project; verify the new test is green and no existing tests regress.</step>
+    <step order="5">Run a static check that NO banned patterns exist in the new test code: grep for `Mock&lt;HttpMessageHandler&gt;`, look for DI-registration-only tests, look for ctor-null-check-only tests. If any found, refactor.</step>
+    <step order="6">Run `code-review` + `adr-check` at Step 9.5 (test-modifying tag triggers this unconditionally per CLAUDE.md §8 override row). Address findings.</step>
+    <step order="7">Update TASK-INDEX.md status from 🔲 to ✅; reset current-task.md to next pending task (or "none" if Phase 6 complete).</step>
+  </steps>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/ComposeEndpointsTests.cs (or equivalent KEEP path)</output>
+    <output type="notes">projects/spaarkeai-compose-r1/notes/ — any deviation notes from the chosen KEEP path</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`dotnet test tests/unit/Sprk.Bff.Api.Tests/` passes including the new test (per spec.md FR-11 Acceptance, with the FR-22 unit-test obligation enforced).</criterion>
+    <criterion testable="true">New test lives at an ADR-038 KEEP path; no banned patterns present (grep-verified).</criterion>
+    <criterion testable="true">Test exercises only the AI PublicContracts facade (no `IOpenAiClient` / `IPlaybookService` references in the test code).</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check return clean (or all findings addressed).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Per CLAUDE.md §8 TEST-MODIFYING override row: this task triggers code-review + adr-check at Step 9.5 UNCONDITIONALLY because tags include `testing` + `integration-test`. The override exists precisely so that test additions don't sneak banned ADR-038 patterns past the quality gates. If `compose-summarize` does NOT yet have a stable response shape at execution time, write the test against the locked response contract from Spike #4 and add a TODO comment referencing the spike output.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist, then proceed through the &lt;steps&gt; sequence.
+    </protocol>
+  </execution>
+</task>

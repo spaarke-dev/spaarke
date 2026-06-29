@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Frontend — Create `ComposeToolbar.tsx` (Open-in-Word buttons via shared lib + dispatch-action)</title>
+    <phase>Phase 4: Frontend — SpaarkeAi Compose Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>frontend, react, typescript, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'fluent-ui' (UI implementation per ADR-021)</rigor-reason>
+    <parallel-group>F2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Separate file from `ComposeEmptyState.tsx` (Task 044) — both can run in parallel group F2 after 032.</parallel-reason>
+    <dependencies>032</dependencies>
+    <blocks>042</blocks>
+  </metadata>
+
+  <prompt>
+    Create `ComposeToolbar.tsx` — the toolbar component that renders "Open in Word for Web" + "Open in Word Desktop" buttons (consuming `useDocumentActions` from the new `@spaarke/document-operations` shared lib, Task 032) plus a dispatch-action surface for the `compose-summarize` AI action. The toolbar wraps reusable Fluent v9 toolbar primitives; it does NOT own any DOCX state.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer fluent in Fluent UI v9 toolbar patterns, the SpaarkeAi shared-lib hook conventions, and the existing `GET /api/documents/{id}/open-links` endpoint shape.
+  </role>
+
+  <goal>
+    `ComposeToolbar.tsx` renders Open-in-Word-Web + Open-in-Word-Desktop buttons (both invoke shared-lib hook → `/api/documents/{id}/open-links`) and a `compose-summarize` dispatch button. Build green; ui-test green; dark mode renders.
+  </goal>
+
+  <context>
+    <background>
+      FR-12 mandates both Open-in-Word buttons reuse `GET /api/documents/{id}/open-links` via the shared-lib `useDocumentActions` hook (extracted in Task 032). FR-19 + the broader Compose flow position the toolbar as the entry point for the `compose-summarize` dispatch (wired in Phase 6 smoke test). The toolbar does NOT own DOCX state; it is presentational + action-dispatch only.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 dark mode via semantic tokens — no hard-coded hex.</constraint>
+    <constraint source="ADR-028">Auth scope acquired through `@spaarke/auth` only; no manual token handling.</constraint>
+    <constraint source="project">REUSE `useDocumentActions` from `@spaarke/document-operations` (Task 032); do NOT call `/api/documents/.../open-links` directly.</constraint>
+    <constraint source="project">No custom DOCX-feature integration outside TipTap OOB — toolbar buttons map only to OOB-supported actions.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>SemanticSearch's existing toolbar (with the SAME Open-in-Word buttons) is the reference UX. Task 032 extracts the underlying hook to the shared lib.</existing>
+    <extension>No — Compose has a distinct toolbar (different action set: compose-summarize dispatch surface; different layout vs SemanticSearch grid). A separate component is needed; the shared lib provides the reusable hook.</extension>
+    <cost-of-doing-nothing>FR-12 fails — Compose has no Open-in-Word entry points; users cannot escape to Word for advanced editing; Phase 6 smoke test cannot fire `compose-summarize` from the UI.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CalendarWorkspaceWidget</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">Verify context &lt; 70%. Load FR-12, SemanticSearch's current toolbar for reference UX.</step>
+    <step order="1" name="Scaffold toolbar">Create `src/solutions/SpaarkeAi/src/components/compose/ComposeToolbar.tsx`. Use Fluent v9 `Toolbar` primitive.</step>
+    <step order="2" name="Wire shared-lib hook">Import + call `useDocumentActions` from `@spaarke/document-operations`. Render Open-in-Word-Web + Open-in-Word-Desktop buttons bound to the hook's action handlers.</step>
+    <step order="3" name="Dispatch-action surface">Add a `compose-summarize` button stub that fires a PaneEventBus event (receiver = Assistant pane stub in R1 per FR-20). Phase 6 wires the actual BFF call.</step>
+    <step order="4" name="Accessibility + tooltips">Add Fluent v9 `Tooltip` + ARIA labels for each button.</step>
+    <step order="5" name="Build + ui-tests">`npm run build`, then `pwsh ./scripts/Build-AllClientComponents.ps1`. Run ui-tests below.</step>
+    <step order="6" name="Update TASK-INDEX">TASK-INDEX.md: task 043 → ✅. Reset `current-task.md`.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Component Renders">Toolbar renders three buttons; zero console errors; ARIA labels present.</test>
+    <test name="Dark Mode Compliance (ADR-021)">Toolbar renders correctly in dark theme via Fluent v9 semantic tokens.</test>
+    <test name="Open-in-Word-Web Click">Click Open-in-Word-Web — verify `useDocumentActions` hook is called with expected document id; mock the hook and assert the call.</test>
+    <test name="Compose-Summarize Dispatch">Click compose-summarize — verify PaneEventBus emits the dispatch event with the correct contract shape from Task 041.</test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build TypeScript</tool>
+    <tool name="pwsh">Run Build-AllClientComponents.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/compose/ComposeToolbar.tsx</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Toolbar renders Open-in-Word-Web + Open-in-Word-Desktop + compose-summarize buttons.</criterion>
+    <criterion testable="true">Open-in-Word buttons invoke `useDocumentActions` from `@spaarke/document-operations`.</criterion>
+    <criterion testable="true">Compose-summarize button emits PaneEventBus event with correct contract shape.</criterion>
+    <criterion testable="true">`npm run build` + `Build-AllClientComponents.ps1` succeed.</criterion>
+    <criterion testable="true">ui-tests green: Component Renders, Dark Mode Compliance, Open-in-Word-Web Click, Compose-Summarize Dispatch.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 043 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Session heartbeat + 15 min idle orphan-lock release</title>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>bff-api, backend, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>050</dependencies>
+    <parallel-group>G</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-coverage>FR-17</fr-coverage>
+    <phase>5</phase>
+  </metadata>
+
+  <prompt>
+    Implement the heartbeat + orphan-release mechanism. The Compose client
+    sends a heartbeat to a new BFF endpoint at a configurable interval
+    (default 15 min idle threshold per spec FR-17, refinable per Spike #3).
+    A background sweeper (or just-in-time check on next acquisition) releases
+    locks whose last-heartbeat-at is older than the idle threshold. Closes
+    Phase 5 alongside tasks 050 (acquisition) and 051 (conflict UX).
+  </prompt>
+
+  <role>
+    Full-stack developer with expertise in BFF background-work patterns
+    (per CLAUDE.md §13 — `ServiceBusJobProcessor` and similar), client-side
+    timer + visibility-API patterns, and Spike #3's persistence-tier
+    decision for lock metadata.
+  </role>
+
+  <goal>
+    Locks auto-release after 15 min of client-side idle (no heartbeat
+    received). Verified by integration test (or manual test with clock):
+    open document → close tab without explicit close → wait 15 min → confirm
+    check-out is released via Graph API check.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="closest-bff-pattern">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    <file purpose="checkout-endpoint">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (from task 050)</file>
+    <file purpose="spike-output">projects/spaarkeai-compose-r1/notes/spikes/spe-checkout-prototype.md (Task 003)</file>
+    <file purpose="compose-workspace">src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-008">Heartbeat endpoint MUST RequireAuthorization()</constraint>
+    <constraint source="ADR-013">No direct injection of AI internals (IOpenAiClient, IPlaybookService) — not relevant here but rule still binding</constraint>
+    <constraint source="ADR-019">Heartbeat endpoint grouped under `/api/compose/` route prefix</constraint>
+    <constraint source="ADR-038">No banned test patterns (`Mock&lt;HttpMessageHandler&gt;`, DI-registration, ctor null-check). Use TimeProvider over Stopwatch per ADR-038 + TEST-ARCHITECTURE.md.</constraint>
+    <constraint source="project">Heartbeat interval default 15 min per spec FR-17; refinable per Spike #3 output — configurable via app settings, not hard-coded</constraint>
+    <constraint source="project">MUST measure publish-size impact (per root CLAUDE.md §10 #4)</constraint>
+    <constraint source="project">MUST add unit tests for the new service (per root CLAUDE.md §10 #6)</constraint>
+  </constraints>
+
+  <justification>
+    <existing>Closest patterns: (a) BFF endpoint convention — `src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs`; (b) background work pattern — `src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` (per CLAUDE.md §13). For a 15-min cadence, just-in-time release on next acquisition (or a lightweight hosted-service sweeper) is typical; Spike #3 picks one.</existing>
+    <extension>No — the heartbeat endpoint is Compose-session-lifecycle-specific (acquired-at, last-heartbeat-at semantics tied to the checkout record from task 050). It does not belong in any existing endpoint group, and the orphan-release sweep is purely Compose-internal lock hygiene.</extension>
+    <cost-of-doing-nothing>FR-17 fails — orphan locks accumulate. A user who closes their browser tab without an explicit close would hold the SPE check-out indefinitely, blocking themselves (and per FR-16, triggering conflict UX) on every subsequent attempt. Locks would have to be manually cleared. The single-session lock model becomes worse than no lock.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <topic>heartbeat + idle expiry pattern</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file>projects/spaarkeai-compose-r1/notes/spikes/spe-checkout-prototype.md</file>
+    </files>
+    <patterns>
+      <pattern name="background sweeper" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">
+        Pattern for periodic background work in the BFF. Use only if Spike #3 mandates a sweeper vs just-in-time release.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Confirm Spike #3 decision">
+      Read `notes/spikes/spe-checkout-prototype.md` for the final decision: just-in-time release on next acquisition vs background sweeper. Adopt the spike's choice; do not re-litigate.
+    </step>
+    <step order="2" name="Implement BFF heartbeat endpoint">
+      Add `POST /api/compose/checkout/{driveItemId}/heartbeat` to `Api/ComposeEndpoints.cs`. Endpoint MUST `RequireAuthorization()`. Updates `last-heartbeat-at` on the lock metadata persisted in task 050. Reject heartbeats from a different tab id than the one holding the lock.
+    </step>
+    <step order="3" name="Implement orphan-release logic">
+      In `Services/Compose/ComposeCheckoutService.cs` (or equivalent from task 050), add an "is-expired" check on every acquisition attempt that compares now() - last-heartbeat-at to the configured idle threshold. If expired, release the prior lock via Graph and grant the new one. Threshold read from configuration with default 15 min. Use `TimeProvider` for testability (ADR-038).
+    </step>
+    <step order="4" name="If sweeper chosen — implement hosted service">
+      Only if Spike #3 mandated a background sweeper: add a hosted service that periodically scans lock metadata for expired entries and releases them via Graph. Otherwise, skip this step.
+    </step>
+    <step order="5" name="Wire client-side heartbeat">
+      In `ComposeWorkspace.tsx`, set up a setInterval that POSTs the heartbeat endpoint every N minutes (N &lt; threshold; e.g., 5 min for a 15-min threshold). Pause on document.visibilityState === "hidden" so a backgrounded tab counts as idle. Stop on unmount.
+    </step>
+    <step order="6" name="Add unit tests with TimeProvider">
+      Add tests for orphan-release logic using `TimeProvider` to advance time (ADR-038). Mock Graph + persistence at the boundary only. No banned test patterns.
+    </step>
+    <step order="7" name="Measure publish-size delta">
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` and report compressed size + delta vs baseline per root CLAUDE.md §10 #4.
+    </step>
+    <step order="8" name="Manual verification with clock or short-config">
+      Set the idle threshold to a small value (e.g., 30s) in a test-mode config, open a document, close the tab without explicit close, wait the threshold + a margin, confirm via Graph that the check-out has been released. Restore the default threshold afterward. Capture evidence in task notes.
+    </step>
+    <step order="9" name="Run code-review + adr-check (FULL rigor)">
+      Per root CLAUDE.md §8 (BFF task), FULL rigor. Invoke code-review and adr-check skills at Step 9.5.
+    </step>
+    <step order="10" name="Update TASK-INDEX">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md` status for task 052 to ✅. Phase 5 closes when 050 + 051 + 052 are all ✅.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish BFF</tool>
+    <tool name="npm">Build SpaarkeAi code-page heartbeat consumer</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (heartbeat endpoint added)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeCheckoutService.cs (orphan-release logic)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx (client-side heartbeat timer)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeCheckoutServiceTests.cs (orphan-release tests with TimeProvider)</output>
+    <output type="report">Publish-size report (compressed bytes + delta vs baseline) in task notes</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Open document → close tab without explicit close → wait idle threshold → check-out released (verified via Graph)</criterion>
+    <criterion testable="true">Heartbeat endpoint requires authentication (401 unauthenticated)</criterion>
+    <criterion testable="true">Idle threshold is configurable (default 15 min); not hard-coded</criterion>
+    <criterion testable="true">Tests use TimeProvider (not Stopwatch); no banned patterns (ADR-038)</criterion>
+    <criterion testable="true">BFF compressed publish-size delta within NFR-06 envelope; absolute size ≤60 MB ceiling</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

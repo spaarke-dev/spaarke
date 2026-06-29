@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Multi-tab conflict UX: Go to that session / Force-close other session</title>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>frontend, typescript, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>050</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <fr-coverage>FR-16</fr-coverage>
+    <phase>5</phase>
+  </metadata>
+
+  <prompt>
+    Build the multi-tab conflict UX that fires when the same user tries to
+    open the same document in Compose in a second tab/session. The UI shows
+    two options: "[Go to that session]" (navigates focus to the existing tab
+    via BroadcastChannel or window.opener if available) and "[Force-close
+    other session and open here]" (calls a BFF release endpoint that
+    invalidates the prior lock and grants the current tab a fresh
+    check-out). Per FR-16 verbatim.
+  </prompt>
+
+  <role>
+    Frontend developer with expertise in Fluent UI v9 (Dialog / MessageBar /
+    Buttons), BroadcastChannel API for cross-tab signaling, and the Compose
+    workspace shell established in Phase 4.
+  </role>
+
+  <goal>
+    When a second Compose tab attempts to open a document already locked by
+    the same user in another tab, the second tab renders a Fluent v9 conflict
+    dialog with the two buttons specified in FR-16. Each button is wired to
+    the correct behavior (navigate or force-close). Verified by manual test:
+    open one tab → open second tab on same doc → conflict UX appears.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="checkout-endpoint">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (from task 050)</file>
+    <file purpose="spike-output">projects/spaarkeai-compose-r1/notes/spikes/spe-checkout-prototype.md (Task 003)</file>
+    <file purpose="compose-workspace">src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-008">Any new BFF endpoint added (e.g., force-release) MUST RequireAuthorization()</constraint>
+    <constraint source="project">UX strings MUST match FR-16 verbatim: "[Go to that session]" and "[Force-close other session and open here]"</constraint>
+    <constraint source="project">MUST use Fluent v9 Dialog primitives (consistent with SpaarkeAi visual language)</constraint>
+    <constraint source="project">MUST scope conflict detection per-user — cross-user conflicts are NOT in R1 (R1 is per-user single-session lock per design.md §14)</constraint>
+    <constraint source="ADR-038">No banned test patterns in any new tests</constraint>
+  </constraints>
+
+  <justification>
+    <existing>Closest pattern: any Fluent v9 Dialog usage in `src/solutions/SpaarkeAi/src/components/` (e.g., existing modal-launch patterns referenced in spec.md `Modal launch (Path A)` row). The conflict UX is a thin Dialog with two action buttons.</existing>
+    <extension>No — multi-tab conflict UX is a discrete UI concern triggered only by Compose lock conflicts; it does NOT belong inside a general-purpose modal/dialog component, and its trigger condition (lock-already-held-by-same-user response from the checkout endpoint) is Compose-specific.</extension>
+    <cost-of-doing-nothing>FR-16 fails — same user opening the same document in two tabs would either silently steal the lock (data loss risk) or silently fail to mount (confusing UX). Without the conflict UX the per-user single-session lock has no escape hatch.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <topic>multi-tab conflict UX + BroadcastChannel signaling</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file>projects/spaarkeai-compose-r1/notes/spikes/spe-checkout-prototype.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Read Spike #3 conflict-detection mechanism">
+      Read `notes/spikes/spe-checkout-prototype.md` to anchor how the checkout endpoint signals "already locked by you in tab X" (response code, payload shape).
+    </step>
+    <step order="2" name="Build ComposeConflictDialog Fluent v9 component">
+      Create `src/solutions/SpaarkeAi/src/components/compose/ComposeConflictDialog.tsx` using Fluent v9 Dialog primitives. Two buttons with FR-16 verbatim labels. Receives props: `otherTabId`, `onGoToOtherSession`, `onForceClose`.
+    </step>
+    <step order="3" name="Wire ComposeWorkspace to render dialog on conflict">
+      When the checkout endpoint (from task 050) returns a "already locked" response, ComposeWorkspace renders ComposeConflictDialog instead of mounting the editor.
+    </step>
+    <step order="4" name="Implement Go-to-other-session via BroadcastChannel">
+      Each Compose tab registers a BroadcastChannel listener (channel name scoped per drive-item id). "Go to that session" posts a "focus-me" message; the original tab calls `window.focus()` on receipt.
+    </step>
+    <step order="5" name="Implement Force-close via BFF release endpoint">
+      Add `POST /api/compose/checkout/{driveItemId}/force-release` to ComposeEndpoints (RequireAuthorization, same-user check via auth principal). The original tab listens on its BroadcastChannel for "force-closed" and unmounts the editor + shows a "Session ended in another tab" notice.
+    </step>
+    <step order="6" name="Add tests">
+      Add tests (vitest) for ComposeConflictDialog rendering + button click handlers. Add BFF unit test for the force-release endpoint (auth boundary + same-user check). No banned test patterns (ADR-038).
+    </step>
+    <step order="7" name="Manual two-tab verification">
+      Open one Compose tab on a document → open second tab on the same document → confirm conflict dialog appears with both buttons; click each and verify behavior. Capture screenshots in task notes.
+    </step>
+    <step order="8" name="Run code-review + adr-check (FULL rigor)">
+      Per root CLAUDE.md §8, FULL rigor. Invoke code-review and adr-check skills at Step 9.5.
+    </step>
+    <step order="9" name="Update TASK-INDEX">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md` status for task 051 to ✅.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test SpaarkeAi</tool>
+    <tool name="dotnet">Build + test BFF endpoint</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/compose/ComposeConflictDialog.tsx</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx (conflict-dialog rendering + BroadcastChannel)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (force-release endpoint)</output>
+    <output type="test">src/solutions/SpaarkeAi/tests/ComposeConflictDialog.spec.tsx</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/ComposeForceReleaseTests.cs</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Same user opening same document in second tab sees conflict dialog with FR-16 verbatim button labels</criterion>
+    <criterion testable="true">"Go to that session" focuses the original tab (BroadcastChannel verified)</criterion>
+    <criterion testable="true">"Force-close other session and open here" releases prior lock + grants new check-out to current tab</criterion>
+    <criterion testable="true">Original tab receives force-close notification + unmounts editor</criterion>
+    <criterion testable="true">No banned test patterns introduced (ADR-038)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
