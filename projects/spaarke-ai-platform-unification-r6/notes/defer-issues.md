@@ -328,10 +328,9 @@ Per task 092: open maker portal, verify presence of both fields. If `sprk_capabi
 
 > Pulled back into R6 scope 2026-06-28 — user confirmed "expected to be done". Status mirrored on GitHub issues via `wip` label.
 
-- **DEF-001** (#471) — BFF `context_event` SSE emission. Detailed entry above. ~2h.
-- **DEF-002** (#473) — Builder UI persona dropdown. Detailed entry above. ~1 day.
-- **DEF-003** (#474) — Builder UI destination + widgetType. Detailed entry above. ~1 day. Pre-step: verify successor WP3 FR-23 doesn't obviate.
-- **DEF-004** (#476) — Vestigial `sprk_capabilities` cleanup. **Verification done 2026-06-28**; awaiting user confirmation for schema-delete step + sister project (`spaarke-daily-update-service`) to fix `daily-briefing-narrate.json` (filed as ISS-003).
+- **DEF-001** (#471) — BFF `context_event` SSE emission. Code complete (`229f30ef9`, pushed); awaiting Azure BFF redeploy + UAT.
+- **DEF-002** (#473) — Persona resolution. **2026-06-29 update**: user added `sprk_playbookpersona` lookup column to `sprk_analysisplaybook` + added to main form. BFF wiring code complete (commit pending): `AnalysisPersonaService.GetEffectivePersonaAsync` now fetches the playbook's `_sprk_playbookpersona_value` and resolves the persona by PK (the prior code stubbed this layer — it filtered only on `scopetype=PlaybookAttached`, returning the FIRST such row regardless of which playbook was bound). PlaybookBuilder dropdown UI skipped — main form already exposes the field; an in-Builder dropdown can ship as a future enhancement.
+- **DEF-003** (#474) — Builder UI destination + widgetType. Code complete (`c98fe7f85`, pushed); awaiting maker portal upload + UAT.
 
 ---
 
@@ -339,7 +338,16 @@ Per task 092: open maker portal, verify presence of both fields. If `sprk_capabi
 
 ## Done
 
-*None.*
+### DEF-004 — Vestigial `sprk_capabilities` field removed from `sprk_analysisplaybook` (closed 2026-06-29)
+
+| Field | Value |
+|---|---|
+| **Closed** | 2026-06-29 |
+| **GitHub Issue** | [#476](https://github.com/spaarke-dev/spaarke/issues/476) (closed) |
+
+User removed the column via maker portal after R6 closeout verification confirmed: (a) zero production-code references to `sprk_analysisplaybook.sprk_capabilities`; (b) production code reads `sprk_playbookcapabilities` exclusively for chat-capability surface; (c) the 3 affected playbook rows are either dual-populated (live field is the source of truth) or were already silently broken (Daily Briefing Narrate's "Summarize" capability was invisible to the LLM regardless). Sister project bug ([ISS-003 / #510](https://github.com/spaarke-dev/spaarke/issues/510)) urgency bumped to `now` — their next `Deploy-Playbook.ps1` will fail until `daily-briefing-narrate.json` is updated.
+
+---
 
 ---
 
