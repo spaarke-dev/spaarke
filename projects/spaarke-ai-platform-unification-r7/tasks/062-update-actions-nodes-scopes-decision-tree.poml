@@ -2,7 +2,7 @@
 <task id="R7-062" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>UPDATE ai-architecture-actions-nodes-scopes.md 4-Home decision tree for new node-dispatch model</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>6</wave>
     <estimated-effort>1-2 hours</estimated-effort>
     <tags>docs, wave-6</tags>

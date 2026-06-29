@@ -126,7 +126,7 @@
 |---|---|---|---|---|---|
 | 060 | ✅ | Audit ai-architecture-playbook-runtime.md for outdated sections | docs, audit | yes | 024 |
 | 061 | ✅ | DELETE §5 action-lookup precedence ladder + structural-fallback section | docs, deletion | yes (with 062-066) | 060 |
-| 062 | ⏸️ | UPDATE ai-architecture-actions-nodes-scopes.md 4-Home decision tree | docs | yes | 024 |
+| 062 | ✅ | UPDATE ai-architecture-actions-nodes-scopes.md 4-Home decision tree | docs | yes | 024 |
 | 063 | ⏸️ | UPDATE ai-guide-playbook-deploy-recipe.md — remove Control-flow name-detection | docs | yes | 055 |
 | 064 | ⏸️ | UPDATE `.claude/constraints/bff-extensions.md` §G (FR-29) | docs, skill-directives | no (sequential per Sub-Agent Write Boundary) | 024 |
 | 065 | ⏸️ | MAJOR UPDATE JPS-AUTHORING-GUIDE.md (FR-30) | docs | yes | 024 |

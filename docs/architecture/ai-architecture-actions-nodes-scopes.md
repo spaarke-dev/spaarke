@@ -57,34 +57,65 @@ The node configjson is **the right place** for executor-specific runtime fields 
 
 ---
 
-## 4. The decision tree
+## 4. Where dispatch, prompt, and categorization live (single-hop model)
 
-When you have a new piece of config, walk this tree:
+Pre-R7, this section walked makers through a multi-rung lookup ladder ("which of four homes carries the executor selector?"). R7 collapses the question. **Dispatch reads `node.sprk_executortype` directly — a single hop, no fallback chain.** Action FK is optional and carries the prompt template only when an executor is prompt-driven. The lookup table (`sprk_analysisactiontype`) is decorative for maker browsing (see §8a for the binding disposition).
+
+The decision is no longer "which home wins?" but "what are you trying to express?"
+
+### What lives where
+
+| What you need to express | Where it lives | Required? |
+|---|---|---|
+| Which executor handles this node (dispatch identity) | `sprk_playbooknode.sprk_executortype` (Choice column on the node row) | **Required** on every node (FR-07; FR-19 backfill) |
+| Prompt template for prompt-driven executors (SystemPrompt, OutputSchemaJson, Temperature) | Action row (`sprk_analysisaction`) via `sprk_playbooknode.sprk_actionid` FK | Required only for prompt-driven executors (AiAnalysis, AiCompletion, AiEmbedding); enforced at executor `Validate()` (FR-06) |
+| Per-node runtime config (input bindings, output variable, conditional guard, model deployment override, scope arrays) | `sprk_playbooknode.sprk_configjson` + first-class node columns where they exist (see §3 for canonical contents) | Per-node, per-executor |
+| Playbook-header metadata (name, type, capabilities, scheduling, canvas layout) | `sprk_analysisplaybook` row columns (Home B in §2) | Per playbook |
+| Declarative resource scope (which Actions / Skills / Knowledge / Tools this playbook depends on) | N:N relationships (Home D in §2) | Per playbook |
+| Maker categorization / browsing of "what kinds of actions exist" | `sprk_analysisactiontype` lookup table | **Advisory only — runtime ignores it** (see §8a) |
+
+### Two worked examples
+
+**Example 1 — Prompt-driven node (`AiCompletion`)**: a node in `DAILY-BRIEFING-NARRATE` runs the `BRIEF-NARRATE-TLDR` prompt.
 
 ```
-Is the config a property of the Action's intrinsic behaviour
-(prompt, temperature, output shape, executor-internal param)?
-├─ YES → Home A: sprk_analysisaction column
-│        (do NOT put it on the node — it would couple the action to one use)
-└─ NO → Is it identity/scheduling/capability metadata of the playbook
-         as a whole (name, type, scope of capability, builder-UI state)?
-        ├─ YES → Home B: sprk_analysisplaybook column
-        │        (do NOT put it in canvas json — runtime won't read it)
-        └─ NO → Is it per-node runtime config (which action FK, input bindings,
-                 dependencies, output variable, position, executor-specific
-                 input shape)?
-                ├─ YES → Home C: sprk_playbooknode row
-                │        — first-class columns where they exist
-                │        — sprk_configjson for executor-specific extras
-                └─ NO → Is it a declaration of "what this playbook
-                         is allowed/expected to use" (action list, skill list,
-                         knowledge list, tool list)?
-                        ├─ YES → Home D: N:N relationships
-                        │        (do NOT put it inline as JSON — it bypasses
-                        │        the audit, refresh, and reuse tooling)
-                        └─ NO → STOP. You probably haven't separated concerns;
-                                 re-examine the requirement.
+sprk_playbooknode row
+├─ sprk_executortype = 1 (AiCompletion)             ← single-hop dispatch identity
+├─ sprk_actionid = {BRIEF-NARRATE-TLDR Action row}  ← Action FK supplies prompt template
+└─ sprk_configjson = { /* template parameters, etc. */ }
+
+sprk_analysisaction row (BRIEF-NARRATE-TLDR)
+├─ sprk_systemprompt = "..."                        ← prompt-driven payload only
+├─ sprk_outputschemajson = "..."                    ← structured output shape
+└─ sprk_temperature = 0
 ```
+
+Runtime: orchestrator reads `node.sprk_executortype = 1` → routes to `AiCompletionNodeExecutor` (one hop). Executor's `Validate()` then asserts Action FK is present and reads SystemPrompt + OutputSchemaJson from the Action row.
+
+**Example 2 — Pure executor node (`Condition`)**: a node that evaluates a branching condition. No prompt; no Action FK needed.
+
+```
+sprk_playbooknode row
+├─ sprk_executortype = 30 (Condition)               ← single-hop dispatch identity
+├─ sprk_actionid = null                             ← no Action FK (Validate() prohibits it)
+└─ sprk_configjson = { "condition": "...", "trueBranch": "...", "falseBranch": "..." }
+```
+
+Runtime: orchestrator reads `node.sprk_executortype = 30` → routes to `ConditionNodeExecutor` (one hop). Executor's `Validate()` prohibits Action FK presence and reads the branching expression from `sprk_configjson`.
+
+### What was removed
+
+Three pre-R7 dispatch artifacts no longer exist at runtime:
+- The structural-fallback ladder (`IsDeployedStartNode`, `IsDeployedLoadKnowledgeNode`, `IsDeployedReturnResponseNode`) — deleted per FR-08.
+- The 3-rung lookup chain (`node.actionid → Action.actiontypeid → lookup_row.executoractiontype`) — replaced by the single `node.sprk_executortype` read per FR-07.
+- The `__actionType` discriminator in `sprk_playbooknode.sprk_configjson` — no longer read at runtime per FR-08 (see §3).
+
+### Cross-references
+
+- Runtime mechanics (single-hop dispatch contract, executor registry, validation order): `ai-architecture-playbook-runtime.md`.
+- Spec authority: FR-07 (single-hop dispatch), FR-12 / FR-13 (AiCompletion executor + Validate contract), FR-19 (`sprk_executortype` backfill on existing 94 nodes).
+- BFF placement decision criteria (config boundary): root `CLAUDE.md` §10 BFF Hygiene + `.claude/constraints/bff-extensions.md` §G.
+- Lookup-table disposition (advisory only): §8a below.
 
 ---
 
