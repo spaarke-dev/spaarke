@@ -253,14 +253,81 @@ function Associate-NtoN {
 }
 
 # ---------------------------------------------------------------------------
-# Node type mapping
+# Executor-type allow-list (R7 FR-20 — single-hop dispatch)
 # ---------------------------------------------------------------------------
-$NodeTypeMap = @{
-    'AIAnalysis'        = 100000000
-    'Output'            = 100000001
-    'Control'           = 100000002
-    'Workflow'          = 100000003
-    'DeliverComposite'  = 100000004  # chat-routing-redesign-r1 FR-52 — multi-section composite output (ADR-037)
+# Source of truth: src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs
+# `public enum ExecutorType` (post-Wave 2 task 022 rename from `ActionType`).
+# Each playbook node deploy writes the integer value below into
+# sprk_playbooknode.sprk_executortype (a Dataverse global Choice). Reject deploy
+# if a node's executorType is not in this list.
+#
+# When the C# enum grows past 33 values, update this hashtable in lockstep.
+# Tracked for codegen replacement as DEF-NNN (file via /devops-idea-create if
+# manual sync becomes a pain point). Per R7 task 055 POML default — inline
+# constant array is the chosen mechanism over fragile regex parsing of the
+# C# enum file.
+$KnownExecutorTypes = @{
+    0   = 'AiAnalysis'
+    1   = 'AiCompletion'
+    2   = 'AiEmbedding'
+    10  = 'RuleEngine'
+    11  = 'Calculation'
+    12  = 'DataTransform'
+    20  = 'CreateTask'
+    21  = 'SendEmail'
+    22  = 'UpdateRecord'
+    23  = 'CallWebhook'
+    24  = 'SendTeamsMessage'
+    30  = 'Condition'
+    31  = 'Parallel'
+    32  = 'Wait'
+    33  = 'Start'
+    40  = 'DeliverOutput'
+    41  = 'DeliverToIndex'
+    42  = 'DeliverComposite'   # ADR-037 multi-section delivery (chat-routing-redesign-r1 FR-52)
+    50  = 'CreateNotification'
+    51  = 'QueryDataverse'
+    52  = 'LookupUserMembership'
+    60  = 'AgentService'
+    70  = 'GroundingVerify'
+    80  = 'LiveFact'
+    90  = 'IndexRetrieve'
+    100 = 'EvidenceSufficiency'
+    110 = 'DeclineToFind'
+    120 = 'ReturnInsightArtifact'
+    130 = 'Sanitization'
+    140 = 'ObservationEmit'
+    141 = 'EntityNameValidator'
+    142 = 'LoadKnowledge'
+    143 = 'ReturnResponse'
+}
+
+# ---------------------------------------------------------------------------
+# Backward-compat: legacy `nodeType` (string friendly label) -> ExecutorType (int)
+# ---------------------------------------------------------------------------
+# Existing playbook JSON files (R3/R4-era) use friendly `nodeType` strings.
+# This map lets them deploy without modification while new playbook JSONs
+# SHOULD set `executorType: <int>` directly. The map is INPUT CONVENIENCE
+# ONLY; the column being written is sprk_executortype, not nodeType.
+$LegacyNodeTypeToExecutorType = @{
+    'AIAnalysis'           = 0   # AiAnalysis
+    'AiCompletion'         = 1
+    'AiEmbedding'          = 2
+    'Output'               = 40  # DeliverOutput (legacy single-section)
+    'DeliverOutput'        = 40
+    'DeliverComposite'     = 42
+    'DeliverToIndex'       = 41
+    'Control'              = 30  # Condition (conservative default; explicit executorType wins when present)
+    'Condition'            = 30
+    'Start'                = 33
+    'LoadKnowledge'        = 142
+    'ReturnResponse'       = 143
+    'Workflow'             = 20  # CreateTask (conservative default for legacy "Workflow" label)
+    'CreateTask'           = 20
+    'CreateNotification'   = 50
+    'EntityNameValidator'  = 141
+    'Sanitization'         = 130
+    'ObservationEmit'      = 140
 }
 
 # ===========================================================================
@@ -312,25 +379,82 @@ if (-not $definition.nodes -or $definition.nodes.Count -eq 0) {
 }
 
 # ===========================================================================
-# Lint: action-code wiring per node (Wave B B3 per Insights Engine r2 D-01)
+# Lint A: executor-type validation per node (R7 task 055 FR-20)
 # ===========================================================================
-# Every node must carry an `actionCode` so this script can resolve it to a
-# sprk_analysisaction row at line 701-704 and set sprk_playbooknode.sprk_actionid.
-# Without sprk_actionid, the orchestrator at PlaybookOrchestrationService.cs:920
-# falls into the "structural node" path and dispatches based on
-# __actionType in sprk_configjson — which is overwritten by the Make Designer
-# UI on save (D-01 §2.4). The actionCode binding is the load-bearing dispatch
-# mechanism for Insights playbooks per D-01 + owner direction 2026-06-02.
+# Every node MUST resolve to one of the 33 known sprk_playbookexecutortype
+# Choice values BEFORE any Dataverse write. This catches author errors at
+# deploy time instead of at orchestrator dispatch time (where an unknown
+# value would silently no-op against the executor registry).
+#
+# Resolution order per node (matches what Step 8 will write):
+#   1. node.executorType (preferred; int)
+#   2. legacy mapping: node.nodeType (string) -> $LegacyNodeTypeToExecutorType
+#   3. otherwise -> lint FAIL with named offending node
+#
+# Lint runs BEFORE the deploy loop. If any node fails, exit 1 — no partial
+# deploy (which could leave some nodes new-shape + some old-shape).
+$nodesFailingExecutorTypeLint = @()
+foreach ($lintNode in $definition.nodes) {
+    $resolvedExecutorType = $null
+    $resolutionSource     = $null
 
-# DeliverComposite nodes (NodeType 100000004 / ActionType 42, ADR-037) are
-# code-registered executors — they dispatch via ActionType lookup in
-# AnalysisServicesModule.cs, NOT via actionCode → sprk_actionid lookup. The
-# Designer-clobbering risk that the linter guards against does not apply
-# because the configjson "sections" array has no Designer UI to be edited.
-# Skip DeliverComposite nodes from the actionCode requirement.
+    if ($null -ne $lintNode.executorType) {
+        # Explicit field on the node — R7 preferred convention.
+        $resolvedExecutorType = [int]$lintNode.executorType
+        $resolutionSource     = 'executorType field'
+    } elseif ($lintNode.nodeType -and $LegacyNodeTypeToExecutorType.ContainsKey($lintNode.nodeType)) {
+        # Legacy R3/R4 friendly-label fallback (input convenience only).
+        $resolvedExecutorType = $LegacyNodeTypeToExecutorType[$lintNode.nodeType]
+        $resolutionSource     = "legacy nodeType '$($lintNode.nodeType)' -> $resolvedExecutorType"
+    }
+
+    if ($null -eq $resolvedExecutorType -or -not $KnownExecutorTypes.ContainsKey($resolvedExecutorType)) {
+        $nodesFailingExecutorTypeLint += [pscustomobject]@{
+            Name            = $lintNode.name
+            ExecutorType    = $lintNode.executorType
+            NodeType        = $lintNode.nodeType
+            Resolution      = $resolutionSource
+            ResolvedValue   = $resolvedExecutorType
+        }
+    }
+}
+if ($nodesFailingExecutorTypeLint.Count -gt 0) {
+    Write-Host ''
+    Write-Host '❌ LINT FAILED — executor-type validation (R7 FR-20)' -ForegroundColor Red
+    Write-Host ('The following nodes do not resolve to a known sprk_playbookexecutortype Choice value:') -ForegroundColor Red
+    foreach ($n in $nodesFailingExecutorTypeLint) {
+        $detail = "  - $($n.Name): executorType=$($n.ExecutorType), nodeType=$($n.NodeType), resolved=$($n.ResolvedValue)"
+        Write-Host $detail -ForegroundColor Red
+    }
+    Write-Host ''
+    Write-Host 'Fix:' -ForegroundColor Yellow
+    Write-Host '  Set the node `executorType` field to one of the 33 known integer values:' -ForegroundColor Yellow
+    foreach ($k in ($KnownExecutorTypes.Keys | Sort-Object)) {
+        Write-Host "    $k => $($KnownExecutorTypes[$k])" -ForegroundColor Gray
+    }
+    Write-Host ''
+    Write-Host '  OR set the node `nodeType` field to a legacy friendly label that maps to one of the above.' -ForegroundColor Yellow
+    Write-Host '  Source of truth: src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs (enum ExecutorType).' -ForegroundColor Gray
+    throw "Playbook lint failed: $($nodesFailingExecutorTypeLint.Count) of $($definition.nodes.Count) nodes have unknown/missing executorType."
+}
+Write-Host "  Lint A  : ✅ all $($definition.nodes.Count) nodes resolve to a known sprk_playbookexecutortype Choice value (R7 FR-20)" -ForegroundColor Green
+
+# ===========================================================================
+# Lint B: action-code wiring per node (Wave B B3 per Insights Engine r2 D-01)
+# ===========================================================================
+# Every dispatchable node must carry an `actionCode` so this script can
+# resolve it to a sprk_analysisaction row and set
+# sprk_playbooknode.sprk_actionid. Without sprk_actionid, the R7 orchestrator
+# (PlaybookOrchestrationService.ExecuteNodeAsync after Wave 2 single-hop
+# refactor) cannot resolve action-bound config for the executor.
+#
+# Exemption: DeliverComposite nodes (ExecutorType 42, ADR-037) are
+# code-registered structural executors — they read sections + destination
+# from configjson, not from an Action FK. Skip them from the actionCode
+# requirement.
 $nodesMissingActionCode = @()
 foreach ($lintNode in $definition.nodes) {
-    if ($lintNode.nodeType -eq 'DeliverComposite') { continue }
+    if ($lintNode.nodeType -eq 'DeliverComposite' -or [int]($lintNode.executorType) -eq 42) { continue }
     if (-not $lintNode.actionCode) {
         $nodesMissingActionCode += $lintNode.name
     }
@@ -354,7 +478,7 @@ if ($nodesMissingActionCode.Count -gt 0) {
     Write-Host 'Reference: projects/ai-spaarke-insights-engine-r2/decisions/D-01-wave-b-root-cause-corrected.md' -ForegroundColor Gray
     throw "Playbook lint failed: $($nodesMissingActionCode.Count) of $($definition.nodes.Count) nodes missing actionCode."
 }
-Write-Host "  Lint    : ✅ all dispatchable nodes have actionCode wiring (DeliverComposite nodes exempt)" -ForegroundColor Green
+Write-Host "  Lint B  : ✅ all dispatchable nodes have actionCode wiring (DeliverComposite nodes exempt)" -ForegroundColor Green
 
 $playbookName = $definition.playbook.name
 $playbookDescription = if ($definition.playbook.description) { $definition.playbook.description } else { '' }
@@ -765,8 +889,21 @@ $nodeIndex = 0
 foreach ($node in $definition.nodes) {
     $nodeIndex++
     $nodeName       = $node.name
-    $nodeType       = if ($node.nodeType) { $node.nodeType } else { 'AIAnalysis' }
-    $nodeTypeValue  = $NodeTypeMap[$nodeType]
+
+    # R7 FR-20 (task 055): resolve sprk_executortype explicitly. Lint A
+    # above has already validated that every node resolves successfully —
+    # this block mirrors that resolution to produce the integer to write.
+    if ($null -ne $node.executorType) {
+        $executorTypeValue = [int]$node.executorType
+    } elseif ($node.nodeType -and $LegacyNodeTypeToExecutorType.ContainsKey($node.nodeType)) {
+        $executorTypeValue = $LegacyNodeTypeToExecutorType[$node.nodeType]
+    } else {
+        # Defensive: Lint A should have caught this. Hard-fail rather than
+        # silently writing a wrong value or letting a $null into the POST.
+        throw "INTERNAL: node '$nodeName' has no executorType + no legacy nodeType mapping (should have been caught by Lint A)."
+    }
+    $executorTypeName = $KnownExecutorTypes[$executorTypeValue]
+
     $actionCode     = $node.actionCode
     $modelName      = $node.model
     $outputVariable = if ($node.outputVariable) { $node.outputVariable } else { '' }
@@ -813,12 +950,12 @@ foreach ($node in $definition.nodes) {
     }
 
     if ($DryRun) {
-        Write-Host "  Node $nodeIndex`: $nodeName ($actionDisplay, $modelDisplay)" -ForegroundColor Gray
+        Write-Host "  Node $nodeIndex`: $nodeName ($actionDisplay, $modelDisplay) -> sprk_executortype = $executorTypeValue ($executorTypeName)" -ForegroundColor Gray
         $nodeIdMap[$nodeName] = [guid]::NewGuid()
     } else {
         $nodeBody = @{
             sprk_name           = $nodeName
-            sprk_nodetype       = $nodeTypeValue
+            sprk_executortype   = $executorTypeValue   # R7 FR-20 (task 055): single-hop dispatch column. Source: $node.executorType (preferred) or $LegacyNodeTypeToExecutorType[$node.nodeType]. Legacy sprk_nodetype column was dropped pre-R7; do NOT write it.
             sprk_executionorder = $nodeIndex
             sprk_isactive       = $true   # MUST set explicitly — Dataverse column default is false, so omitting this causes PlaybookOrchestrationService.ExecutionGraph to filter out the node ("0 active nodes"). Surfaced during 2026-05-30 live smoke of predict-matter-cost@v1.
             'sprk_playbookid@odata.bind' = "sprk_analysisplaybooks($playbookId)"
@@ -845,7 +982,7 @@ foreach ($node in $definition.nodes) {
                 throw "POST succeeded but could not extract node record ID."
             }
             $nodeIdMap[$nodeName] = [guid]$nodeId
-            Write-Host "  Node $nodeIndex`: $nodeName ($actionDisplay, $modelDisplay) -> $nodeId" -ForegroundColor Green
+            Write-Host "  Node $nodeIndex`: $nodeName [$executorTypeName] ($actionDisplay, $modelDisplay) -> $nodeId" -ForegroundColor Green
         } catch {
             throw "Failed to create node '$nodeName': $($_.Exception.Message)"
         }
@@ -982,10 +1119,18 @@ $canvasEdges = @()
 foreach ($node in $definition.nodes) {
     $nodeName = $node.name
     $nodeId   = $nodeIdMap[$nodeName]
-    $nodeType = if ($node.nodeType) { $node.nodeType } else { 'AIAnalysis' }
+
+    # R7 NOTE (task 055): the `nodeType` string read here drives the canvas
+    # layout JSON shape ONLY (canvasType: 'aiAnalysis' | 'output' | 'control').
+    # It does NOT drive dispatch — dispatch is via sprk_executortype written
+    # above. The friendly-label switch is the correct level of granularity
+    # for the canvas builder (which renders by category, not by specific
+    # executor). Wave 8 task 088 owns the full Builder migration to
+    # sprk_executortype-driven canvas rendering.
+    $canvasNodeTypeLabel = if ($node.nodeType) { $node.nodeType } else { 'AIAnalysis' }
 
     # Map node type to canvas type string
-    $canvasType = switch ($nodeType) {
+    $canvasType = switch ($canvasNodeTypeLabel) {
         'AIAnalysis' { 'aiAnalysis' }
         'Output'     { 'output' }
         'Control'    { 'control' }

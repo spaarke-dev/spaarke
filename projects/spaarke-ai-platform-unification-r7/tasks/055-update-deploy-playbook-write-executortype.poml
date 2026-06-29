@@ -2,7 +2,7 @@
 <task id="R7-055" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Update Deploy-Playbook.ps1 to write sprk_executortype explicitly + lint reject unknown values (FR-20)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>5</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>script, wave-5</tags>
