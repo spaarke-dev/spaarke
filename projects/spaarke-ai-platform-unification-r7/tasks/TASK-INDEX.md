@@ -46,7 +46,7 @@
 | 004 | ✅ | Implement IOpenAiClient.GetStructuredCompletionRawAsync call + JsonElement binding | bff-api, code-impl | yes (with 003) | 003 |
 | 005 | ✅ | Implement Validate() — Action FK required; Tool/Document NOT required | bff-api, code-impl | yes (with 003) | 002 |
 | 006 | ✅ | Register AiCompletionNodeExecutor as Singleton in AnalysisServicesModule | bff-api, di | yes | 003-005 |
-| 007 | (to be generated) | xUnit tests — payload binding + schema rendering + template substitution | bff-api, testing | yes | 003 |
+| 007 | ✅ | xUnit tests — payload binding + schema rendering + template substitution | bff-api, testing | yes | 003 |
 | 008 | (to be generated) | xUnit tests — temperature override + per-node prompt override | bff-api, testing | yes (with 007) | 007 |
 | 009 | (to be generated) | xUnit tests — error paths (missing prompt, malformed JSON, LLM error) | bff-api, testing | yes (with 007) | 007 |
 | 010 | (to be generated) | Wave 1 BFF publish + size check (NFR-01) + CVE scan (NFR-02) | bff-api, deploy | yes | 006, 009 |
