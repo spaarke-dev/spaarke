@@ -103,46 +103,91 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
         ActionType.AiCompletion
     };
 
+    /// <summary>
+    /// Validates the node's binding contract for AiCompletion (R7 FR-13).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// AiCompletion is a <b>prompt-only</b> structured-LLM call. This Validate() enforces
+    /// the FR-13 invariants so the orchestrator can fast-fail before any LLM cost is
+    /// incurred. Error messages are surfaced verbatim by the Playbook Builder UI (Wave 8) —
+    /// the wording is part of the contract.
+    /// </para>
+    /// <para>
+    /// REQUIRED: <c>context.Action</c> (FK) + <c>context.Action.SystemPrompt</c> +
+    /// <c>context.Action.OutputSchemaJson</c> + <c>context.Node.OutputVariable</c>.
+    /// PROHIBITED: <c>context.Tool</c> (Tools belong to AiAnalysis) and
+    /// <c>context.Document</c> (Documents are AiAnalysis grounding input). AiCompletion has
+    /// neither — the prompt + payload is self-contained.
+    /// </para>
+    /// <para>
+    /// All failure conditions are aggregated into a single
+    /// <see cref="NodeValidationResult.Failure(string[])"/> result — the orchestrator
+    /// returns the full diagnostic set to the caller so the UI can show every error in one
+    /// pass. The SystemPrompt + OutputSchemaJson + ActionId references are guarded behind
+    /// the Action-presence check to avoid NullReferenceException on the per-Action checks.
+    /// </para>
+    /// <para>
+    /// Per ADR-038: validation is deterministic + side-effect-free. No logging here — the
+    /// caller (orchestrator) logs the failure with full diagnostic context.
+    /// </para>
+    /// </remarks>
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
     {
-        // SCAFFOLD: full error catalog (per-field messages, prompt-format guidance) lands
-        // in task 005. This block establishes the FR-13 require/prohibit invariants so the
-        // dispatch path can be wired in task 006 against a Validate() that already enforces
-        // the canonical shape. TODO(task 005): expand to the full diagnostic message set per
-        // spec FR-13 acceptance criteria.
-
         var errors = new List<string>();
+
+        // FR-06: prompt-driven executors REQUIRE Action FK. context.Action is declared
+        // required on NodeExecutionContext but defensive null-check + ActionId empty-check
+        // catches orchestrator misconfiguration and test scaffolding alike.
+        var actionMissing = context.Action is null || context.Node.ActionId == Guid.Empty;
+        if (actionMissing)
+        {
+            errors.Add(
+                "AiCompletion node requires an Action FK (prompt source). Set sprk_actionid on the node.");
+        }
+
+        // FR-13 inversion vs AiAnalysis: AiCompletion PROHIBITS Tool presence. A Tool means
+        // the playbook author chose the wrong ActionType — should be AiAnalysis.
+        if (context.Tool is not null)
+        {
+            errors.Add(
+                "AiCompletion node MUST NOT have a Tool. Tools are used by AiAnalysis nodes; AiCompletion is prompt-only.");
+        }
+
+        // FR-13 inversion vs AiAnalysis: AiCompletion PROHIBITS Document presence. Documents
+        // are AiAnalysis grounding input; AiCompletion is payload-driven (R4 /narrate, etc.).
+        if (context.Document is not null)
+        {
+            errors.Add(
+                "AiCompletion node MUST NOT have a Document. Documents are used by AiAnalysis nodes for grounding; AiCompletion is prompt-only.");
+        }
 
         if (string.IsNullOrWhiteSpace(context.Node.OutputVariable))
         {
-            errors.Add("AiCompletion node requires OutputVariable to be set on the node");
+            errors.Add(
+                "AiCompletion node requires OutputVariable to be set on the node.");
         }
 
-        // FR-06: prompt-driven executors REQUIRE Action FK (Action carries SystemPrompt,
-        // OutputSchema, and Temperature for the LLM call).
-        if (context.Action is null)
+        // Per-Action checks — guarded so we don't NRE when Action is null. The Action-missing
+        // error above already surfaces the root cause; these add granular detail when Action
+        // is present but its required fields are blank.
+        if (!actionMissing)
         {
-            errors.Add("AiCompletion node requires an Action (FK on node) — Action carries SystemPrompt, OutputSchema, and Temperature");
-            return NodeValidationResult.Failure(errors.ToArray());
-        }
+            if (string.IsNullOrWhiteSpace(context.Action!.SystemPrompt))
+            {
+                errors.Add(
+                    $"AiCompletion node's Action {context.Action.Id} has no SystemPrompt. Set sprk_systemprompt on the Action.");
+            }
 
-        if (string.IsNullOrWhiteSpace(context.Action.SystemPrompt))
-        {
-            errors.Add("AiCompletion node Action has empty SystemPrompt — required for LLM call");
-        }
-
-        if (string.IsNullOrWhiteSpace(context.Action.OutputSchemaJson))
-        {
-            errors.Add("AiCompletion node Action has empty OutputSchemaJson — required for IOpenAiClient.GetStructuredCompletionRawAsync constrained-decoding schema arg");
-        }
-
-        // FR-13 inversion vs AiAnalysis: AiCompletion does NOT require Tool/Document and
-        // EXPLICITLY rejects Tool presence (a Tool means the playbook author chose the
-        // wrong ActionType — should be AiAnalysis).
-        if (context.Tool is not null)
-        {
-            errors.Add($"AiCompletion node MUST NOT have a Tool configured (found Tool '{context.Tool.Name}'); use ActionType.AiAnalysis for tool-driven nodes");
+            // OutputSchemaJson is required by IOpenAiClient.GetStructuredCompletionRawAsync
+            // (constrained-decoding schema arg per Q4 of the pattern-decision doc). Not in
+            // the FR-13 goal-bullet enumeration but required for a successful LLM call.
+            if (string.IsNullOrWhiteSpace(context.Action.OutputSchemaJson))
+            {
+                errors.Add(
+                    $"AiCompletion node's Action {context.Action.Id} has no OutputSchemaJson. Set sprk_outputschemajson on the Action (constrained-decoding schema for structured output).");
+            }
         }
 
         return errors.Count > 0
