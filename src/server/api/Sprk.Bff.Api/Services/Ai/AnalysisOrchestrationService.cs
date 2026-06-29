@@ -79,6 +79,16 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _logger = logger;
     }
 
+    // TODO(R7 Wave 4 task 042 — FR-11): DELETE this method.
+    // Per task 040 audit (notes/spikes/executeanalysisasync-caller-audit.md) this method has
+    // ZERO production callers post-task-041: AnalysisEndpoints.ExecuteAnalysis was migrated to
+    // IPlaybookOrchestrationService.ExecuteAsync (the canonical IInvokePlaybookAi facade per
+    // ADR-013 Invariant 1). Method body + the corresponding declaration on
+    // IAnalysisOrchestrationService (interface line 33) + the matching unit-test region in
+    // AnalysisOrchestrationServiceTests.cs (#region "ExecuteAnalysisAsync Tests", ~196 LOC) +
+    // the XML-doc cref in IStreamingAnalysisToolHandler.cs:11 are all task 042 deletion scope.
+    // Retained here only to keep the Wave 4 task ordering (041 migrates callers → 042 deletes
+    // declaration) parallel-safe — no behavior change vs pre-041 state.
     /// <inheritdoc />
     public async IAsyncEnumerable<AnalysisStreamChunk> ExecuteAnalysisAsync(
         AnalysisExecuteRequest request,
