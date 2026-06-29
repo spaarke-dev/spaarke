@@ -2,7 +2,7 @@
 <task id="R7-090" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Audit SessionSummarizeOrchestrator caller graph; design Path A.5 migration</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>9</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>audit, bff-api, wave-9</tags>
