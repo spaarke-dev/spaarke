@@ -1,5 +1,7 @@
 # Spaarke AI Search Azure Setup (Dev Restoration + Canonicalization)
 
+> **Portfolio**: [Issue #519](https://github.com/spaarke-dev/spaarke/issues/519) (Type=Project; Parent Epic #421 SPAARKE AI; Project Board #2 Spaarke Core)
+>
 > **Last Updated**: 2026-06-26
 >
 > **Status**: ✅ **COMPLETE**
