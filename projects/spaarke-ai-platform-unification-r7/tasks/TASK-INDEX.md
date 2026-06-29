@@ -127,8 +127,8 @@
 | 060 | ✅ | Audit ai-architecture-playbook-runtime.md for outdated sections | docs, audit | yes | 024 |
 | 061 | ✅ | DELETE §5 action-lookup precedence ladder + structural-fallback section | docs, deletion | yes (with 062-066) | 060 |
 | 062 | ✅ | UPDATE ai-architecture-actions-nodes-scopes.md 4-Home decision tree | docs | yes | 024 |
-| 063 | ⏸️ | UPDATE ai-guide-playbook-deploy-recipe.md — remove Control-flow name-detection | docs | yes | 055 |
-| 064 | ⏸️ | UPDATE `.claude/constraints/bff-extensions.md` §G (FR-29) | docs, skill-directives | no (sequential per Sub-Agent Write Boundary) | 024 |
+| 063 | ✅ | UPDATE ai-guide-playbook-deploy-recipe.md — header bump + JSON example (explicit `executorType` + backward-compat `nodeType`) + R7 §3 step-1 Lint A narrative + §9 lint-failure troubleshooting subsection (FR-28 + FR-20 doc impact). Main session per Sub-Agent Write Boundary. 2026-06-29. Commit `2e96c0f70`. | docs | yes | 055 |
+| 064 | ✅ | UPDATE `.claude/constraints/bff-extensions.md` §G (FR-29) — rewritten for R7 single-hop dispatch contract; Hot-Path Declaration renumbered §G → §H to fix duplicate-§G ambiguity. 2026-06-29. Commit `5a915292c`. | docs, skill-directives | no (sequential per Sub-Agent Write Boundary) | 024 |
 | 065 | ✅ | MAJOR UPDATE JPS-AUTHORING-GUIDE.md (FR-30) | docs | yes | 024 |
 | 066 | ✅ | MAJOR UPDATE PLAYBOOK-AUTHOR-GUIDE.md (FR-30) | docs | yes | 024 |
 | 067 | ✅ | CREATE ai-guide-consumer-wiring.md (FR-31) | docs | yes | 091 (W9 chat-summarize done) |
