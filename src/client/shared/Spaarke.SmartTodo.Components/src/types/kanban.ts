@@ -79,7 +79,7 @@ export interface IKanbanCardTodo extends IKanbanTodoLike {
  * import the UI primitive library directly. Source-path import keeps the
  * dependency narrow (same pattern as `PaneHeader` in `SmartTodoWidget.tsx`).
  */
-export type { IKanbanColumn, KanbanOrientation } from '../../../Spaarke.UI.Components/src/components/Kanban/types';
+export type { IKanbanColumn, KanbanOrientation } from '@spaarke/ui-components/components/Kanban/types';
 
 /**
  * Minimal Dataverse service surface the hoisted hook requires to persist
