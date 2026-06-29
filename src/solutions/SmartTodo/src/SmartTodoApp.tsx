@@ -445,6 +445,10 @@ function SmartTodoLayout(): React.ReactElement {
         <SmartToDo
           webApi={getWebApi()}
           userId={getUserId()}
+          // Code-review hotfix 2026-06-27 — wire Header SearchBox to filter.
+          // SmartTodoApp owns the searchQuery state (line ~160) but until now
+          // never forwarded it to <SmartToDo>, so the filter input was a no-op.
+          searchQuery={searchQuery}
           // R4 task 060 — Card affordances plumbing (FR-25/26/27)
           selectedIds={selectedIds}
           onToggleSelect={handleToggleSelect}
