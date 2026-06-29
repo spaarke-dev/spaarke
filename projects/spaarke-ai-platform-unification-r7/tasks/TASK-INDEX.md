@@ -25,7 +25,7 @@
 | Wave 5 | Existing-playbook backfill (FR-19, FR-20) | 🔄 in-progress (050 ✅ Review-PlaybookNodes-Dispatch.ps1 authored + dry-run verified against spaarkedev1: 94 nodes / 41 HIGH / 14 MEDIUM / 23 LOW / 16 NONE; task 051 ready) | 050 ✅; 051-056 generated |
 | Wave 6 | Documentation deletion + updates (FR-28 to FR-31) | 🔄 in-progress (060 ✅ audit/disposition; 061 ✅ DELETE §5 from playbook-runtime.md; 062 ✅ UPDATE actions-nodes-scopes decision tree; 066 ✅ MAJOR UPDATE PLAYBOOK-AUTHOR-GUIDE node-first dispatch; 067 ✅ CREATE ai-guide-consumer-wiring.md FR-31; 063-065/068-069 pending) | 060-069 ✅ generated (10 files); 060 ✅, 061 ✅, 062 ✅, 066 ✅, 067 ✅ executed |
 | Wave 7 | Skill rewrites (FR-32, FR-33) | ⏸️ blocked on Wave 2 | 070-075 ✅ generated (6 files) |
-| Wave 8 | Playbook Builder UI updates (FR-21 to FR-27) | 🔄 in-progress (080 ✅ audit; 082 ✅ 33-executor categorized Node Types left panel FR-22; 083 ✅ typed config form renderer infrastructure; 081, 084-089d pending) | 080-089d ✅ generated (14 files) |
+| Wave 8 | Playbook Builder UI updates (FR-21 to FR-27) | 🔄 in-progress (080 ✅ audit; 082 ✅ 33-executor categorized Node Types left panel FR-22; 083 ✅ typed config form renderer infrastructure; 086 ✅ Action tab promotion FR-24; 081, 084, 085, 087-089d pending) | 080-089d ✅ generated (14 files) |
 | Wave 9 | Consumer migration (FR-17, FR-18) | 🔄 in-progress (090 ✅ audit/design; 091 ✅ FR-17 SessionSummarizeOrchestrator migrated; 092 ✅ chat-summarize sprk_playbookconsumer row verified; 093 ✅; 094 ✅ /playbooks hard slash + Library modal browse-mode + PlaybookCardGrid consumer chips; 095 ✅ Library modal wired into Daily Briefing widget via DigestHeader overflow; 096 pending) | 090 ✅, 091 ✅, 092 ✅, 093 ✅, 094 ✅, 095 ✅, 096 generated |
 | Wave 10 | Wrap-up + R4 graduation gate close | ⏸️ blocked on all waves | 100, 101, 090-project-wrap-up ✅ generated (3 files) |
 
@@ -163,7 +163,7 @@
 | 083 | ✅ | Wire typed config form renderer driven by schema endpoint (FR-23) | code-page, ui | yes | 033 (W3 endpoint) |
 | 084 | ⏸️ | Implement typed config forms for 5 priority executors (FR-23) | code-page, ui | yes | 083 |
 | 085 | ⏸️ | Implement remaining 28 executor schemas (placeholders OK) | code-page, ui | yes | 084 |
-| 086 | ⏸️ | Promote Action selection to new Action tab (FR-24) | code-page, ui | yes | 082 |
+| 086 | ✅ | Promote Action selection to new Action tab (FR-24) | code-page, ui | yes | 082 |
 | 087 | ⏸️ | KEEP Prompt tab + per-node override wiring (FR-25) — UAT | code-page, ui, testing | yes | 086 |
 | 088 | ⏸️ | Replace `sprk_nodetype` references in canvas state (FR-26) | code-page, code-impl | yes | 080 |
 | 089 | ⏸️ | Handle unknown-executor-type warning state (FR-27) | code-page, ui | yes | 085 |

@@ -3,7 +3,8 @@
  *
  * Opens automatically when a node is selected on the canvas.
  * Fixed dialog shell (860×560) with horizontal tabs at top:
- *   - Overview: Name, Output Variable, Action selector, AI Model selector
+ *   - Overview: Name, Output Variable, AI Model selector
+ *   - Action: Action lookup + Executor Type selector (side-by-side) — R7 FR-24
  *   - Prompt: Prompt Configuration (AI nodes only)
  *   - Skills: Skill scope selector
  *   - Knowledge: Knowledge scope selector
@@ -40,6 +41,7 @@ import { useCanvasStore } from '../../stores/canvasStore';
 
 // Sub-components
 import { ActionSelector } from './ActionSelector';
+import { ExecutorTypeSelector } from './ExecutorTypeSelector';
 import { ModelSelector } from './ModelSelector';
 import { ScopeSelector } from './ScopeSelector';
 import { ConditionEditor } from './ConditionEditor';
@@ -172,7 +174,7 @@ const useStyles = makeStyles({
 // Tab IDs
 // ---------------------------------------------------------------------------
 
-type TabId = 'overview' | 'prompt' | 'skills' | 'knowledge' | 'tools' | 'configuration';
+type TabId = 'overview' | 'action' | 'prompt' | 'skills' | 'knowledge' | 'tools' | 'configuration';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -366,9 +368,15 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
     [renameGuard, selectedNode, committedOutputVar, outputVarDraft, updateNodeData, renameOutputVariableReferences]
   );
 
-  // Which tabs to show — dynamic based on node type
+  // Which tabs to show — dynamic based on node type.
+  // R7 Wave 8 task 086 (FR-24): tab order is Overview, Action, Prompt, Skills,
+  // Knowledge, Tools, Configuration. Action tab is hidden on Start nodes
+  // (Start is a canvas anchor with no Action / ExecutorType to choose).
   const visibleTabs = useMemo(() => {
     const tabs: { id: TabId; label: string }[] = [{ id: 'overview', label: 'Overview' }];
+    if (!isStartNode) {
+      tabs.push({ id: 'action', label: 'Action' });
+    }
     if (isAiNode) {
       tabs.push({ id: 'prompt', label: 'Prompt' });
     }
@@ -455,20 +463,11 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
                       )}
                     </div>
 
-                    {isAiNode && (
-                      <>
-                        <Divider className={styles.sectionTitle} />
-                        <Text weight="semibold" size={300} className={styles.sectionTitle}>
-                          Action
-                        </Text>
-                        <div className={styles.fieldGroup}>
-                          <ActionSelector
-                            selectedActionId={selectedNode.data.actionId}
-                            onActionChange={id => handleUpdate('actionId', id)}
-                          />
-                        </div>
-                      </>
-                    )}
+                    {/*
+                      R7 Wave 8 task 086 (FR-24): ActionSelector has been promoted
+                      out of Overview tab into the new dedicated Action tab below.
+                      Overview tab now shows only: Name, Output Variable, AI Model.
+                    */}
 
                     {isAiNode && (
                       <>
@@ -485,6 +484,28 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
                       </>
                     )}
                   </>
+                )}
+
+                {/* === ACTION (R7 FR-24 — Action + Executor Type side-by-side) === */}
+                {activeTab === 'action' && !isStartNode && (
+                  <div className={styles.fieldRow}>
+                    <div className={styles.fieldCol}>
+                      <ActionSelector
+                        selectedActionId={selectedNode.data.actionId}
+                        onActionChange={id => handleUpdate('actionId', id)}
+                      />
+                    </div>
+                    <div className={styles.fieldCol}>
+                      <ExecutorTypeSelector
+                        value={
+                          typeof selectedNode.data.executorType === 'number'
+                            ? selectedNode.data.executorType
+                            : undefined
+                        }
+                        onChange={value => handleUpdate('executorType', value)}
+                      />
+                    </div>
+                  </div>
                 )}
 
                 {/* === PROMPT (AI nodes only) === */}
