@@ -7,13 +7,12 @@
 
 ## Project Status
 
-- **Phase**: Closeout — Surface Completion (post-UAT 2026-06-25)
-- **Last Updated**: 2026-06-25
-- **Backend status**: 100% complete; deployed to master 2026-06-24 (PR #401 / commit `8579d6536`)
-- **UAT result**: Tier G ✅; Tier F partial; Tiers A/B deferred (focused project); Tiers C/D/E blocked on surface wiring gaps
-- **Current pending work**: TIER-C diagnostic + tasks 095, 097b, 098 (surface completion); 091, 093 (Builder UI — may defer to R7); 089/090 (closeout — after UAT pass)
-- **Next Action**: TIER-C diagnostic (1-2 hours, no code) → surface completion sprint (~20h) → re-UAT → 089/090 close R6
-- **Audit reference**: [r6-deliverables-audit.md](r6-deliverables-audit.md) is the source of truth for "shipped vs surfaced vs working" per pillar
+- **Phase**: ✅ **COMPLETE** (closed 2026-06-29)
+- **Last Updated**: 2026-06-29
+- **Backend + surface**: 100% complete; backend on master via PR #401 (2026-06-24, commit `8579d6536`); closeout follow-on (DEF-001/002/003/004) on master via fast-forward `ecb650e44` 2026-06-29
+- **UAT outcome**: surface gaps closed via DEF closeout commits; deploy + final UAT pending (user lifted hold at closeout, scheduled separately)
+- **Closeout artifacts**: [notes/phase-d-exit-checklist.md](notes/phase-d-exit-checklist.md), [notes/lessons-learned.md](notes/lessons-learned.md), [notes/r7-backlog.md](notes/r7-backlog.md)
+- **Next Action (post-R6)**: deploy DEF-001/002 (BFF), upload DEF-003 (PlaybookBuilder), run final UAT pass; then R7+ feature work uses [notes/lessons-learned.md](notes/lessons-learned.md) as carry-forward
 
 ---
 

@@ -2,7 +2,9 @@
   <metadata>
     <title>Builder UI — Persona Dropdown on Playbook Properties Form (Pillar 1 closeout)</title>
     <phase>Closeout — Surface Completion (post-audit)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-29</completed>
+    <completion-notes>Descoped to BFF wiring fix (DEF-002 commit e16677beb on master). User added `sprk_playbookpersona` lookup column to `sprk_analysisplaybook` + main form 2026-06-29. AnalysisPersonaService.GetEffectivePersonaAsync now reads the FK and resolves the persona by PK (the prior code stubbed this layer — filtered only by `scopetype`, returning the FIRST PlaybookAttached row regardless of which playbook was bound). PlaybookBuilder dedicated dropdown UI deferred — main form provides authoring surface today; tracked in r7-backlog.md if Q3 scope admin UI project picks it up. GitHub: #473.</completion-notes>
     <estimated-effort>1 day</estimated-effort>
     <dependencies>001, 002, 003, 004, 005 (Pillar 1 backend already shipped)</dependencies>
     <blocks>none (R6 may close without this; deferrable to R7)</blocks>

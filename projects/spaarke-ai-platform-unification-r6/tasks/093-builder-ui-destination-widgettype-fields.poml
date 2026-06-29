@@ -2,7 +2,9 @@
   <metadata>
     <title>Builder UI — `destination` + `widgetType` Fields on Node Properties Form (Pillar 5 closeout)</title>
     <phase>Closeout — Surface Completion (post-audit)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-29</completed>
+    <completion-notes>DEF-003 (#474) shipped 2026-06-29 (commit c98fe7f85 on master). Added `destination?: 'chat'|'workspace'|'both'|'form-prefill'|'side-effect'` + `widgetType?: string` to PlaybookNodeData. DeliverOutputForm.tsx extended with Routing Destination dropdown (5 wire values matching NodeDestinationJsonConverter) + conditional widgetType input (shown for workspace + both; required when visible). buildConfigJson 'deliverOutput' case persists both into existing sprk_configjson (no schema change — NodeRoutingConfig.Parse + DeliveryNodeConfig parse are separate readers on the same blob). Successor FR-23 does NOT obviate (FR-23 is tool-filtering backend, unrelated to per-node routing config). Build verified: webpack production bundle 2.91 MiB unchanged from baseline; deployable HTML sprk_playbookbuilder.html at 2,977 KB contains all expected strings. Awaiting maker portal upload to activate in spaarke-dev.</completion-notes>
     <estimated-effort>1 day</estimated-effort>
     <dependencies>030, 031 (Pillar 5 backend already shipped)</dependencies>
     <blocks>none (R6 may close without this; deferrable to R7)</blocks>
