@@ -24,6 +24,8 @@ The hybrid modal pattern is the architectural keystone: it standardizes record n
 | [Tasks](./tasks/TASK-INDEX.md) | Task registry, dependencies, parallel groups |
 | [Project CLAUDE.md](./CLAUDE.md) | AI context file for this project |
 
+> **Portfolio**: [Project Issue #441](https://github.com/spaarke-dev/spaarke/issues/441) · [Project #2 board](https://github.com/users/spaarke-dev/projects/2) · Parent Epic [#423](https://github.com/spaarke-dev/spaarke/issues/423)
+
 ## Current Status
 
 | Metric | Value |
