@@ -2,7 +2,7 @@
 <task id="R7-060" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Audit ai-architecture-playbook-runtime.md for outdated sections</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>6</wave>
     <estimated-effort>1-2 hours</estimated-effort>
     <tags>docs, audit, wave-6</tags>
