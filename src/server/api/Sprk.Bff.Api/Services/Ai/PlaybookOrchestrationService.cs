@@ -1198,6 +1198,44 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // "matter:{{matterId}}" and failed at LiveFactResolver. Centralizing the fix here
             // applies it to every node executor uniformly (LiveFact / IndexRetrieve /
             // ReturnInsightArtifact all use {{matterId}} in synthesis playbooks).
+
+            // R7 Wave 11 task 114: fan-out iteration detection BEFORE Layer 1 template
+            // resolution. If the node's RAW configJson declares iteration.iterateOver +
+            // iteration.itemAlias, run the executor N times (one per element of iterateOver)
+            // with a per-iteration overlay context. Outputs collected into an ordered
+            // array; aggregated into a single composite NodeOutput. Per ADR-037 +
+            // SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md. Sequential v1 (parallelism deferred).
+            // Detection-on-RAW-configJson is intentional: the iteration metadata is itself
+            // templated (`iterateOver: "{{channelRegistry.channels}}"`), so we must read it
+            // before Layer 1 rewrites it into a resolved string.
+            if (TryExtractIterationConfig(node.ConfigJson, out var iterateOverExpr, out var itemAlias))
+            {
+                var compositeOutput = await ExecuteFanOutIterationAsync(
+                    runContext, node, action, scopes, actionType, executor, downstreamNodes,
+                    iterateOverExpr!, itemAlias!, writer, cancellationToken).ConfigureAwait(false);
+
+                runContext.StoreNodeOutput(compositeOutput);
+
+                if (compositeOutput.Success)
+                {
+                    _logger.LogInformation(
+                        "Fan-out node {NodeName} completed: {Iterations} iterations, total duration: {Duration}ms",
+                        node.Name, compositeOutput.ToolResults.Count, compositeOutput.Metrics.DurationMs);
+                    await writer.WriteAsync(PlaybookStreamEvent.NodeCompleted(
+                        runContext.RunId, runContext.PlaybookId, node.Id, node.Name, compositeOutput), cancellationToken);
+                }
+                else
+                {
+                    await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                        runContext.RunId, runContext.PlaybookId, node.Id, node.Name,
+                        compositeOutput.ErrorMessage ?? "Iteration failed"), cancellationToken);
+                }
+
+                EmitNodeCompleted(compositeOutput.Success ? "completed" : "failed");
+                await ScanForUnrenderedTemplatesAsync(runContext, node, compositeOutput, writer, cancellationToken).ConfigureAwait(false);
+                return compositeOutput;
+            }
+
             var substitutedNode = ApplyConfigJsonTemplates(node, runContext);
 
             // Create node execution context with streaming callback for per-token SSE events
@@ -1905,6 +1943,274 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         value = null;
         return false;
     }
+
+    /// <summary>
+    /// R7 Wave 11 task 114: detects fan-out iteration metadata in a node's RAW configJson
+    /// (BEFORE Layer 1 template resolution rewrites it). Returns true + outputs the
+    /// iterateOver template expression + itemAlias when the node has
+    /// <c>iteration.iterateOver</c> + <c>iteration.itemAlias</c> declared.
+    /// </summary>
+    /// <remarks>
+    /// Detection-on-RAW is intentional: the iteration metadata is itself templated
+    /// (<c>iterateOver: "{{channelRegistry.channels}}"</c>), so we must read it BEFORE
+    /// Layer 1 rewrites it into a resolved string. Defensive: missing iteration block,
+    /// missing keys, or malformed JSON → returns false (single-call path).
+    /// </remarks>
+    private static bool TryExtractIterationConfig(
+        string? configJson,
+        out string? iterateOverExpr,
+        out string? itemAlias)
+    {
+        iterateOverExpr = null;
+        itemAlias = null;
+
+        if (string.IsNullOrWhiteSpace(configJson) || !configJson.Contains("iteration", StringComparison.Ordinal))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(configJson);
+            if (!doc.RootElement.TryGetProperty("iteration", out var iteration)
+                || iteration.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (!iteration.TryGetProperty("iterateOver", out var iterOver) || iterOver.ValueKind != JsonValueKind.String)
+                return false;
+
+            if (!iteration.TryGetProperty("itemAlias", out var alias) || alias.ValueKind != JsonValueKind.String)
+                return false;
+
+            iterateOverExpr = iterOver.GetString();
+            itemAlias = alias.GetString();
+            return !string.IsNullOrWhiteSpace(iterateOverExpr) && !string.IsNullOrWhiteSpace(itemAlias);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// R7 Wave 11 task 114 (ADR-037 fan-out semantic): runs the node's executor N times,
+    /// one per element of the resolved iterateOver collection. Per iteration the configJson
+    /// is rendered against a context overlay where <paramref name="itemAlias"/> binds the
+    /// current iteration's item. Per-iteration NodeOutputs are aggregated into a single
+    /// composite NodeOutput whose StructuredData is a JsonElement-array — downstream nodes
+    /// reference the aggregate via <c>{{node.OutputVariable}}</c> as if it were a single
+    /// node's output containing an array. Sequential execution v1 (parallelism deferred).
+    /// </summary>
+    private async Task<NodeOutput> ExecuteFanOutIterationAsync(
+        PlaybookRunContext runContext,
+        PlaybookNodeDto node,
+        AnalysisAction action,
+        ResolvedScopes scopes,
+        ExecutorType actionType,
+        INodeExecutor executor,
+        IReadOnlyList<DownstreamNodeInfo>? downstreamNodes,
+        string iterateOverExpr,
+        string itemAlias,
+        ChannelWriter<PlaybookStreamEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+
+        // 1. Resolve the iterateOver expression alone (wrap in {{ }} if missing).
+        var wrappedExpr = iterateOverExpr.Contains("{{", StringComparison.Ordinal)
+            ? iterateOverExpr
+            : "{{" + iterateOverExpr + "}}";
+        var baseContext = PlaybookTemplateContextBuilder.Build(runContext);
+        string resolvedIterateOver;
+        try
+        {
+            resolvedIterateOver = _templateEngine.Render(wrappedExpr, baseContext);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Fan-out node {NodeName}: failed to render iterateOver expression '{Expr}'; treating as empty iteration",
+                node.Name, iterateOverExpr);
+            return NodeOutput.Ok(
+                node.Id,
+                node.OutputVariable,
+                data: Array.Empty<object>(),
+                metrics: NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+        }
+
+        // 2. Parse the rendered iterateOver as JSON to recover the array.
+        var iterationItems = TryParseIterationItems(resolvedIterateOver, node.Name);
+
+        // 3. Strip the iteration block from configJson so the executor doesn't see it.
+        var configWithoutIteration = StripIterationBlock(node.ConfigJson);
+
+        // 4. Per-iteration execution.
+        var perIterationOutputs = new List<JsonElement?>();
+        var failedIterations = new List<string>();
+        var iterIndex = 0;
+        foreach (var item in iterationItems)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Build overlay context: base + { [itemAlias]: currentItem }
+            var overlay = new Dictionary<string, object?>(baseContext, StringComparer.Ordinal)
+            {
+                [itemAlias] = item
+            };
+
+            string renderedConfigJson;
+            try
+            {
+                renderedConfigJson = _templateEngine.Render(configWithoutIteration ?? string.Empty, overlay);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Fan-out node {NodeName}: failed to render configJson for iteration {Index}; skipping",
+                    node.Name, iterIndex);
+                failedIterations.Add($"iteration[{iterIndex}]: render failed");
+                iterIndex++;
+                continue;
+            }
+
+            var iterationNode = node with { ConfigJson = renderedConfigJson };
+            var iterationNodeContext = runContext.CreateNodeContext(iterationNode, action, scopes, actionType) with
+            {
+                DownstreamNodes = downstreamNodes
+            };
+
+            var validation = executor.Validate(iterationNodeContext);
+            if (!validation.IsValid)
+            {
+                failedIterations.Add($"iteration[{iterIndex}]: validation failed: {string.Join("; ", validation.Errors)}");
+                iterIndex++;
+                continue;
+            }
+
+            NodeOutput iterationOutput;
+            try
+            {
+                iterationOutput = await executor.ExecuteAsync(iterationNodeContext, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Fan-out node {NodeName} iteration {Index} threw; recording failure",
+                    node.Name, iterIndex);
+                failedIterations.Add($"iteration[{iterIndex}]: {ex.GetType().Name}: {ex.Message}");
+                iterIndex++;
+                continue;
+            }
+
+            perIterationOutputs.Add(iterationOutput.StructuredData);
+            if (!iterationOutput.Success)
+            {
+                failedIterations.Add($"iteration[{iterIndex}]: {iterationOutput.ErrorMessage}");
+            }
+            iterIndex++;
+        }
+
+        // 5. Aggregate per-iteration outputs into a single composite NodeOutput.
+        var arrayData = perIterationOutputs
+            .Select(je => je is JsonElement v && v.ValueKind != JsonValueKind.Null && v.ValueKind != JsonValueKind.Undefined
+                ? TemplateEngine.ConvertJsonElement(v)
+                : null)
+            .ToArray();
+
+        var allSucceeded = failedIterations.Count == 0;
+        var metrics = NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow);
+
+        if (allSucceeded)
+        {
+            return NodeOutput.Ok(
+                nodeId: node.Id,
+                outputVariable: node.OutputVariable,
+                data: arrayData,
+                metrics: metrics,
+                toolResults: PadToolResults(perIterationOutputs.Count));
+        }
+        else
+        {
+            var errMsg = $"Fan-out completed with {failedIterations.Count}/{iterIndex} failed iteration(s): " +
+                         string.Join(" | ", failedIterations.Take(3));
+            return NodeOutput.Error(node.Id, node.OutputVariable, errMsg, NodeErrorCodes.InternalError, metrics);
+        }
+    }
+
+    /// <summary>
+    /// Parses the rendered iterateOver value into an enumeration of items.
+    /// Accepts JSON-array text (from <c>{{json X}}</c> or raw collection rendering).
+    /// Defensive: malformed / non-array / null → empty enumeration.
+    /// </summary>
+    private IEnumerable<object?> TryParseIterationItems(string? renderedValue, string nodeName)
+    {
+        if (string.IsNullOrWhiteSpace(renderedValue))
+            return Array.Empty<object?>();
+
+        try
+        {
+            using var doc = JsonDocument.Parse(renderedValue);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                return doc.RootElement.EnumerateArray()
+                    .Select(e => TemplateEngine.ConvertJsonElement(e))
+                    .ToList();
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogDebug(ex,
+                "Fan-out node {NodeName}: iterateOver rendered to non-JSON string; treating as empty iteration",
+                nodeName);
+        }
+        return Array.Empty<object?>();
+    }
+
+    /// <summary>
+    /// Returns a copy of the configJson with the <c>iteration</c> top-level property removed,
+    /// so executors don't receive iteration metadata in their configJson.
+    /// </summary>
+    private static string? StripIterationBlock(string? configJson)
+    {
+        if (string.IsNullOrWhiteSpace(configJson))
+            return configJson;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(configJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return configJson;
+
+            using var stream = new System.IO.MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    if (string.Equals(prop.Name, "iteration", StringComparison.Ordinal))
+                        continue;
+                    prop.WriteTo(writer);
+                }
+                writer.WriteEndObject();
+            }
+            return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+        }
+        catch (JsonException)
+        {
+            return configJson; // defensive: malformed → pass through unchanged
+        }
+    }
+
+    /// <summary>
+    /// Placeholder ToolResults list sized to per-iteration count (used to signal iteration
+    /// count to log lines that read ToolResults.Count without semantic meaning).
+    /// </summary>
+    private static IReadOnlyList<ToolResult> PadToolResults(int count)
+        => count <= 0 ? Array.Empty<ToolResult>() : new ToolResult[count];
 
     /// <summary>
     /// Resolve Handlebars-style placeholders (<c>{{X}}</c>, <c>{{X.Y.Z}}</c>, custom helpers)

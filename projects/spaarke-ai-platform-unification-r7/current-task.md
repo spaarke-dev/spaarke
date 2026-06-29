@@ -10,13 +10,21 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 112 — Register custom Handlebars helpers (json, map, flatten, distinct, concat, join) |
-| **Task File** | tasks/112-register-custom-handlebars-helpers.poml |
+| **Task** | 115 — Restore source-correct ValidateEntityNames node configJson + author Sync-DailyBriefingNarratePlaybookNodes.ps1 |
+| **Task File** | tasks/115-restore-validate-entity-names-config.poml |
 | **Phase / Wave** | Wave 11 — Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive |
 | **Step** | 0 (not-started) |
 | **Status** | not-started |
 | **Started** | — |
-| **Next Action** | Begin Step 1 of task 112: read existing TemplateEngine.cs to confirm defensive helper pattern (JoinIds at line 81 is canonical), then register the 6 helpers per POML Step 2-7. T112 + T113 + T114 are parallel-safe (different code surfaces). |
+| **Next Action** | Begin Step 1 of task 115: read existing Sync-BriefNarrateOutputSchemas.ps1 (canonical pattern). Then Step 2: author Sync-DailyBriefingNarratePlaybookNodes.ps1 mirroring that structure to PATCH `sprk_playbooknode.sprk_configjson` for the 6 nodes of DAILY-BRIEFING-NARRATE from source. Live PATCH replaces the 2026-06-29 smoke-test value on ValidateEntityNames. |
+
+### T112 + T113 + T114 — COMPLETE ✅ (2026-06-29)
+- **Outputs shipped**:
+  - T112: 6 helpers registered on TemplateEngine.cs (json, map, flatten, distinct, concat, join); 12 new tests
+  - T113: flatMap helper added (eliminates need for inline lambda); 3 new tests; source playbook rewrite — both `lambda` AND pipe shorthand `(... | flatten)` removed from runtime expressions in daily-briefing-narrate.json
+  - T114: TryExtractIterationConfig + ExecuteFanOutIterationAsync + StripIterationBlock + TryParseIterationItems in PlaybookOrchestrationService; 5 detection-helper unit tests; per-iteration overlay context binding via itemAlias; aggregate composite NodeOutput
+- **Test results**: 131/131 Wave 11 + regression tests pass; 0 new regressions across 7,532 BFF tests (6 pre-existing failures unchanged: KnowledgeDeploymentConfig, SummarizeSession contract, SessionFilesCleanup, ExecutorConfigSchemas)
+- **Build**: 0 errors
 
 ### Task 111a — COMPLETE ✅ (2026-06-29)
 - **Rigor**: STANDARD (documentation task; no source code modification)

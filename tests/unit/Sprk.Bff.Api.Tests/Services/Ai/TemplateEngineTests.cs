@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -726,6 +727,235 @@ Regards,
 
         // Assert
         result.Should().Be("Review document: Contract_2024.pdf - 5-year service agreement");
+    }
+
+    #endregion
+
+    #region R7 Wave 11 Task 112 — Custom Handlebars helpers (Option B Layer 1)
+
+    // {{json X}}
+
+    [Fact]
+    public void JsonHelper_WithObject_SerializesToJson()
+    {
+        var ctx = new Dictionary<string, object?>
+        {
+            ["data"] = new { name = "Alice", age = 30 }
+        };
+        var result = _engine.Render("{{json data}}", ctx);
+        result.Should().Contain("\"name\":\"Alice\"").And.Contain("\"age\":30");
+    }
+
+    [Fact]
+    public void JsonHelper_WithNull_ReturnsLiteralNull()
+    {
+        var ctx = new Dictionary<string, object?> { ["x"] = null };
+        var result = _engine.Render("{{json x}}", ctx);
+        result.Should().Be("null");
+    }
+
+    [Fact]
+    public void JsonHelper_WithMissingBinding_ReturnsLiteralNull()
+    {
+        var result = _engine.Render("{{json nonexistent}}", new Dictionary<string, object?>());
+        result.Should().Be("null");
+    }
+
+    // {{map COLL 'field'}}
+
+    [Fact]
+    public void MapHelper_WithDictionaryItems_ExtractsField()
+    {
+        var ctx = new Dictionary<string, object?>
+        {
+            ["items"] = new List<object?>
+            {
+                new Dictionary<string, object?> { ["name"] = "Alice" },
+                new Dictionary<string, object?> { ["name"] = "Bob" }
+            }
+        };
+        var result = _engine.Render("{{json (map items 'name')}}", ctx);
+        result.Should().Contain("\"Alice\"").And.Contain("\"Bob\"");
+    }
+
+    [Fact]
+    public void MapHelper_WithDottedPath_TraversesNestedField()
+    {
+        var ctx = new Dictionary<string, object?>
+        {
+            ["items"] = new List<object?>
+            {
+                new Dictionary<string, object?> { ["matter"] = new Dictionary<string, object?> { ["name"] = "Acme" } },
+                new Dictionary<string, object?> { ["matter"] = new Dictionary<string, object?> { ["name"] = "Beta" } }
+            }
+        };
+        var result = _engine.Render("{{json (map items 'matter.name')}}", ctx);
+        result.Should().Contain("\"Acme\"").And.Contain("\"Beta\"");
+    }
+
+    [Fact]
+    public void MapHelper_WithEmptyCollection_ReturnsEmptyArray()
+    {
+        var ctx = new Dictionary<string, object?> { ["items"] = new List<object?>() };
+        var result = _engine.Render("{{json (map items 'name')}}", ctx);
+        result.Should().Be("[]");
+    }
+
+    // {{flatten COLL}}
+
+    [Fact]
+    public void FlattenHelper_FlattensArrayOfArrays()
+    {
+        var ctx = new Dictionary<string, object?>
+        {
+            ["nested"] = new List<object?>
+            {
+                new List<object?> { "a", "b" },
+                new List<object?> { "c" }
+            }
+        };
+        var result = _engine.Render("{{json (flatten nested)}}", ctx);
+        result.Should().Contain("\"a\"").And.Contain("\"b\"").And.Contain("\"c\"");
+    }
+
+    // {{distinct COLL}}
+
+    [Fact]
+    public void DistinctHelper_PreservesFirstOccurrenceOrder_CaseInsensitive()
+    {
+        var ctx = new Dictionary<string, object?>
+        {
+            ["names"] = new List<object?> { "Alice", "Bob", "alice", "Charlie", "BOB" }
+        };
+        var result = _engine.Render("{{json (distinct names)}}", ctx);
+        result.Should().Contain("\"Alice\"").And.Contain("\"Bob\"").And.Contain("\"Charlie\"");
+        // "alice" + "BOB" deduplicated case-insensitively (preserves first occurrence)
+        result.Should().NotContain("\"alice\"").And.NotContain("\"BOB\"");
+    }
+
+    // {{concat A B C}}
+
+    [Fact]
+    public void ConcatHelper_ConcatenatesMultipleEnumerables()
+    {
+        var ctx = new Dictionary<string, object?>
+        {
+            ["a"] = new List<object?> { "x", "y" },
+            ["b"] = new List<object?> { "z" }
+        };
+        var result = _engine.Render("{{json (concat a b)}}", ctx);
+        result.Should().Contain("\"x\"").And.Contain("\"y\"").And.Contain("\"z\"");
+    }
+
+    // {{join SEP A B}}
+
+    [Fact]
+    public void JoinHelper_JoinsWithSeparator()
+    {
+        var ctx = new Dictionary<string, object?>
+        {
+            ["parts"] = new List<object?> { "a", "b", "c" }
+        };
+        var result = _engine.Render("{{join ', ' parts}}", ctx);
+        result.Should().Be("a, b, c");
+    }
+
+    [Fact]
+    public void JoinHelper_WithMultipleEnumerableArgs_ConcatenatesThenJoins()
+    {
+        var ctx = new Dictionary<string, object?>
+        {
+            ["a"] = new List<object?> { "1", "2" },
+            ["b"] = new List<object?> { "3" }
+        };
+        var result = _engine.Render("{{join '|' a b}}", ctx);
+        result.Should().Be("1|2|3");
+    }
+
+    // Subexpression composition — the load-bearing case
+
+    // {{flatMap COLL 'nested.path'}} — R7 Wave 11 T113
+
+    [Fact]
+    public void FlatMapHelper_ExpandsArrayOfArrayObjects()
+    {
+        // Mirrors the DAILY-BRIEFING-NARRATE allowList pattern that previously required
+        // inline lambda syntax: `(lambda c (map c.items 'regardingName'))`.
+        var ctx = new Dictionary<string, object?>
+        {
+            ["categories"] = new List<object?>
+            {
+                new Dictionary<string, object?>
+                {
+                    ["items"] = new List<object?>
+                    {
+                        new Dictionary<string, object?> { ["regardingName"] = "Acme" },
+                        new Dictionary<string, object?> { ["regardingName"] = "Beta" }
+                    }
+                },
+                new Dictionary<string, object?>
+                {
+                    ["items"] = new List<object?>
+                    {
+                        new Dictionary<string, object?> { ["regardingName"] = "Gamma" }
+                    }
+                }
+            }
+        };
+        var result = _engine.Render("{{json (flatMap categories 'items.regardingName')}}", ctx);
+        result.Should().Contain("\"Acme\"").And.Contain("\"Beta\"").And.Contain("\"Gamma\"");
+    }
+
+    [Fact]
+    public void FlatMapHelper_WithEmptyCollection_ReturnsEmptyArray()
+    {
+        var ctx = new Dictionary<string, object?> { ["categories"] = new List<object?>() };
+        var result = _engine.Render("{{json (flatMap categories 'items.x')}}", ctx);
+        result.Should().Be("[]");
+    }
+
+    [Fact]
+    public void FlatMapHelper_WithMissingPath_SkipsNullEntries()
+    {
+        var ctx = new Dictionary<string, object?>
+        {
+            ["categories"] = new List<object?>
+            {
+                new Dictionary<string, object?> { ["items"] = null },
+                new Dictionary<string, object?> { ["items"] = new List<object?> { "a" } }
+            }
+        };
+        var result = _engine.Render("{{json (flatMap categories 'items')}}", ctx);
+        // Null path skipped, "a" makes it through
+        result.Should().Contain("\"a\"");
+    }
+
+    [Fact]
+    public void SubexpressionComposition_DistinctConcatMapAcrossTwoCollections_Works()
+    {
+        // Mirrors the DAILY-BRIEFING-NARRATE ValidateEntityNames allowList pattern (simplified).
+        var ctx = new Dictionary<string, object?>
+        {
+            ["priorityItems"] = new List<object?>
+            {
+                new Dictionary<string, object?> { ["regardingName"] = "Acme Litigation" },
+                new Dictionary<string, object?> { ["regardingName"] = "Beta Matter" }
+            },
+            ["recentItems"] = new List<object?>
+            {
+                new Dictionary<string, object?> { ["regardingName"] = "Acme Litigation" },
+                new Dictionary<string, object?> { ["regardingName"] = "Gamma Project" }
+            }
+        };
+        var result = _engine.Render(
+            "{{json (distinct (concat (map priorityItems 'regardingName') (map recentItems 'regardingName')))}}",
+            ctx);
+        result.Should().Contain("Acme Litigation");
+        result.Should().Contain("Beta Matter");
+        result.Should().Contain("Gamma Project");
+        // Deduplicated — "Acme Litigation" appears only once
+        var acmeCount = result.Split("Acme Litigation").Length - 1;
+        acmeCount.Should().Be(1);
     }
 
     #endregion
