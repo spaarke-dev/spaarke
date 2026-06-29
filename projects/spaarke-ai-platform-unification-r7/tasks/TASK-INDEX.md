@@ -21,7 +21,7 @@
 | Wave 1 | AiCompletionNodeExecutor build (FR-12 to FR-15) | 🔄 in-progress | 001-010 ✅ generated (10 files) |
 | Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | ⏸️ blocked on Wave 1 | 020-029 ✅ generated (10 files) |
 | Wave 3 | Typed config schemas (FR-16) | ⏸️ blocked on Wave 1 | 030-036 ✅ generated (7 files) |
-| Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | ⏸️ blocked on Wave 9 + Wave 2 | 040-047 ✅ generated (8 files) |
+| Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | ⏸️ blocked on Wave 2 ONLY (task 040 audit confirmed Wave 9 NOT a prerequisite — SessionSummarizeOrchestrator does NOT call ExecuteAnalysisAsync; only 1 production caller at AnalysisEndpoints.cs:261) | 040 ✅, 041-047 generated (8 files) |
 | Wave 5 | Existing-playbook backfill (FR-19, FR-20) | ⏸️ blocked on Wave 2 | 050-056 ✅ generated (7 files) |
 | Wave 6 | Documentation deletion + updates (FR-28 to FR-31) | ⏸️ blocked on Wave 2 (partial) | 060-069 ✅ generated (10 files) |
 | Wave 7 | Skill rewrites (FR-32, FR-33) | ⏸️ blocked on Wave 2 | 070-075 ✅ generated (6 files) |
@@ -183,7 +183,7 @@
 | 090 | ⏸️ | Audit SessionSummarizeOrchestrator caller graph; design Path A.5 migration | audit, bff-api | yes | 024 |
 | 091 | ⏸️ | Migrate SessionSummarizeOrchestrator to IConsumerRoutingService + IInvokePlaybookAi (FR-17) | bff-api, code-impl | yes | 090 |
 | 092 | ⏸️ | Add chat-summarize row to sprk_playbookconsumer table | dataverse | yes | 091 |
-| 093 | ⏸️ | Audit Playbook Library Code Page modal current routing | audit, code-page | yes | — |
+| 093 | ✅ | Audit Playbook Library Code Page modal current routing | audit, code-page | yes | — |
 | 094 | ⏸️ | Wire Library modal into spaarke-ai chat surface (FR-18) | code-page, ui | yes | 093 |
 | 095 | ⏸️ | Wire Library modal into briefing widget (FR-18) | code-page, ui | yes | 094 |
 | 096 | ⏸️ | Wire Library modal into ad-hoc launcher (FR-18) | code-page, ui | yes | 095 |
