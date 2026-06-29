@@ -1,0 +1,23 @@
+Archived: 2026-06-29
+Final status: Completed
+Closing PRs: #375 #395 #401 #488 (plus 2026-06-29 closeout fast-forward — DEF-001 229f30ef9, DEF-003 c98fe7f85, DEF-002+DEF-004 e16677beb, task 089 8ea5c006e, task 090 501cebbb2)
+Worktree: c:/code_files/spaarke-wt-spaarke-ai-platform-unification-r6 (PRESERVED — not removed by this skill; clean up separately if desired)
+Remote branch: work/spaarke-ai-platform-unification-r6 (still on origin)
+Issue: #443 (closed)
+
+Task Count: 92
+Tasks Completed: 91
+Tasks Withdrawn: 1 (094 — found already wired during audit)
+
+Closeout artifacts:
+- notes/lessons-learned.md — R5-style carry-forward for R7+ projects
+- notes/r7-backlog.md — deferred-work list with GitHub Issue pointers
+- notes/phase-d-exit-checklist.md — Phase D exit-gate sign-off evidence
+- notes/defer-issues.md — 8 defer/issue entries paired with GitHub Issues
+- notes/r6-deliverables-audit.md — pillar-by-pillar shipped/surfaced/working audit
+
+Post-R6 ops (pending — not part of R6 scope, tracked on GitHub):
+- DEF-001 (#471) BFF Azure redeploy + UAT
+- DEF-002 (#473) BFF Azure redeploy + UAT (same deploy as DEF-001)
+- DEF-003 (#474) PlaybookBuilder maker-portal upload (sprk_playbookbuilder.html at 2,977 KB)
+- ISS-003 (#510) sister project daily-update-service JSON field-rename — URGENT, their deploy will fail
