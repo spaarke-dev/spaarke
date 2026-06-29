@@ -21,7 +21,7 @@
 | Wave 1 | AiCompletionNodeExecutor build (FR-12 to FR-15) | 🟢 COMPLETE | 001-010 ✅ all done; publish-hygiene gate PASSED 2026-06-28 (46.71 MB compressed; +1.06 MB vs 45.65 baseline; 0 new HIGH CVE; 20/20 AiCompletionNodeExecutor tests pass) |
 | Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | 🟢 COMPLETE (10/10 tasks; publish-hygiene gate PASSED 2026-06-28: 46.71 MB compressed = FLAT vs Wave 1; +1.06 MB cumulative R7 = unchanged vs Wave 1 baseline; 0 new HIGH CVE; AiCompletion 20/20 + Orchestration 60/63 baseline preserved) | 020 ✅, 021 ✅, 022 ✅, 023 ✅, 024 ✅, 025 ✅, 026 ✅, 027 ✅, 028 ✅, 029 ✅ |
 | Wave 3 | Typed config schemas (FR-16) | ✅ COMPLETE (7/7 tasks; 46.71 MB FLAT vs Wave 2; 0 new HIGH CVE; 34/34 Wave 3-targeted tests pass) | 030 ✅, 031 ✅, 032 ✅, 033 ✅, 034 ✅, 035 ✅, 036 ✅ |
-| Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | 🔄 in-progress (040 ✅ audit; 041 ✅ migration; 042 ✅ DELETION 524 LOC removed; 045 ✅; 043/044/046/047 remaining — schema drops next) | 040 ✅, 041 ✅, 042 ✅, 045 ✅; 043, 044, 046, 047 pending |
+| Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | 🔄 in-progress (040 ✅; 041 ✅; 042 ✅ DELETION 524 LOC; 045 ✅; 043 ✅ sprk_actiontypeid dropped 2026-06-29 via MCP (view+form pre-clean); 044 ✅ sprk_executoractiontype dropped 2026-06-29 via MCP; 046, 047 remaining) | 040 ✅, 041 ✅, 042 ✅, 043 ✅, 044 ✅, 045 ✅; 046, 047 pending |
 | Wave 5 | Existing-playbook backfill (FR-19, FR-20) | 🔄 in-progress (050 ✅ Review-PlaybookNodes-Dispatch.ps1 authored + dry-run verified against spaarkedev1: 94 nodes / 41 HIGH / 14 MEDIUM / 23 LOW / 16 NONE; task 051 ready) | 050 ✅; 051-056 generated |
 | Wave 6 | Documentation deletion + updates (FR-28 to FR-31) | 🔄 in-progress (060 ✅ audit/disposition; 061 ✅ DELETE §5 from playbook-runtime.md; 062 ✅ UPDATE actions-nodes-scopes decision tree; 066 ✅ MAJOR UPDATE PLAYBOOK-AUTHOR-GUIDE node-first dispatch; 067 ✅ CREATE ai-guide-consumer-wiring.md FR-31; 063-065/068-069 pending) | 060-069 ✅ generated (10 files); 060 ✅, 061 ✅, 062 ✅, 066 ✅, 067 ✅ executed |
 | Wave 7 | Skill rewrites (FR-32, FR-33) | ⏸️ blocked on Wave 2 | 070-075 ✅ generated (6 files) |
@@ -95,8 +95,8 @@
 | 040 | ✅ | Audit all callers of AnalysisOrchestrationService.ExecuteAnalysisAsync | audit, bff-api | yes | — |
 | 041 | ✅ | Migrate non-chat callers to PlaybookOrchestrationService.ExecuteAsync (FR-11) — Wave 9 dep RESCINDED per task 040 audit | bff-api, code-impl | yes | 040 only (audit confirmed Wave 9 was false-premise dep) |
 | 042 | ✅ | DELETE ExecuteAnalysisAsync + cascading dead code (FR-11) | bff-api, code-impl, deletion | no | 041 |
-| 043 | ⏸️ | Drop sprk_analysisaction.sprk_actiontypeid (lookup) via dataverse-create-schema (FR-03) | dataverse-schema, deletion | no | 042 |
-| 044 | ⏸️ | Drop sprk_analysisaction.sprk_executoractiontype (INT) (FR-04) | dataverse-schema, deletion | no (sequential with 043) | 043 |
+| 043 | ✅ | Drop sprk_analysisaction.sprk_actiontypeid (lookup) — Web API DELETE on ManyToOneRelationship (Lookups don't accept DELETE on /Attributes; cascade-via-relationship is the supported form); pre-cleared deps from "Active Analysis Actions" savedquery + "Analysis Action main form" SystemForm; 2026-06-29 | dataverse-schema, deletion | no | 042 |
+| 044 | ✅ | Drop sprk_analysisaction.sprk_executoractiontype (INT) — straight Web API DELETE on /Attributes (no relationship cascade needed for primitives); same form pre-clean as 043; 2026-06-29 | dataverse-schema, deletion | no (sequential with 043) | 043 |
 | 045 | ✅ | Document sprk_analysisactiontype as decorative (FR-05) | docs | yes | — |
 | 046 | ⏸️ | Update AnalysisActionService to remove references to dropped fields | bff-api, code-impl | yes (after 044) | 044 |
 | 047 | ⏸️ | Wave 4 BFF publish + size check (expect SHRINK) | bff-api, deploy | yes | 042-046 |
