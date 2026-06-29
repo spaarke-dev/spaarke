@@ -20,7 +20,7 @@
 |---|---|---|---|
 | Wave 1 | AiCompletionNodeExecutor build (FR-12 to FR-15) | 🟢 COMPLETE | 001-010 ✅ all done; publish-hygiene gate PASSED 2026-06-28 (46.71 MB compressed; +1.06 MB vs 45.65 baseline; 0 new HIGH CVE; 20/20 AiCompletionNodeExecutor tests pass) |
 | Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | 🟢 COMPLETE (10/10 tasks; publish-hygiene gate PASSED 2026-06-28: 46.71 MB compressed = FLAT vs Wave 1; +1.06 MB cumulative R7 = unchanged vs Wave 1 baseline; 0 new HIGH CVE; AiCompletion 20/20 + Orchestration 60/63 baseline preserved) | 020 ✅, 021 ✅, 022 ✅, 023 ✅, 024 ✅, 025 ✅, 026 ✅, 027 ✅, 028 ✅, 029 ✅ |
-| Wave 3 | Typed config schemas (FR-16) | 🔄 in-progress (030 ✅ design; 031 ✅ INodeExecutor seam + ExecutorConfigSchema DTO; 032 ✅ 25 executor overrides; 033 ✅ BFF endpoint shipped; 034 ✅ 14 endpoint tests; 035 ✅ AI-ARCHITECTURE.md FR-16 section; 036 ready) | 030 ✅, 031 ✅, 032 ✅, 033 ✅, 034 ✅, 035 ✅; 036 generated |
+| Wave 3 | Typed config schemas (FR-16) | ✅ COMPLETE (7/7 tasks; 46.71 MB FLAT vs Wave 2; 0 new HIGH CVE; 34/34 Wave 3-targeted tests pass) | 030 ✅, 031 ✅, 032 ✅, 033 ✅, 034 ✅, 035 ✅, 036 ✅ |
 | Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | 🔄 in-progress (040 ✅ audit; 041 ✅ migration; 042 ✅ DELETION 524 LOC removed; 045 ✅; 043/044/046/047 remaining — schema drops next) | 040 ✅, 041 ✅, 042 ✅, 045 ✅; 043, 044, 046, 047 pending |
 | Wave 5 | Existing-playbook backfill (FR-19, FR-20) | 🔄 in-progress (050 ✅ Review-PlaybookNodes-Dispatch.ps1 authored + dry-run verified against spaarkedev1: 94 nodes / 41 HIGH / 14 MEDIUM / 23 LOW / 16 NONE; task 051 ready) | 050 ✅; 051-056 generated |
 | Wave 6 | Documentation deletion + updates (FR-28 to FR-31) | 🔄 in-progress (060 ✅ audit/disposition; 061 ✅ DELETE §5 from playbook-runtime.md; 062 ✅ UPDATE actions-nodes-scopes decision tree; 066 ✅ MAJOR UPDATE PLAYBOOK-AUTHOR-GUIDE node-first dispatch; 067 ✅ CREATE ai-guide-consumer-wiring.md FR-31; 063-065/068-069 pending) | 060-069 ✅ generated (10 files); 060 ✅, 061 ✅, 062 ✅, 066 ✅, 067 ✅ executed |
@@ -83,7 +83,7 @@
 | 033 | ✅ | Implement BFF endpoint GET /api/ai/playbook-builder/executor-config-schemas | bff-api, code-impl | yes | 032 |
 | 034 | ✅ | xUnit tests for endpoint + schema serialization | bff-api, testing | yes | 033 |
 | 035 | ✅ | Document schema shape in `docs/architecture/AI-ARCHITECTURE.md` | docs | yes | 030 |
-| 036 | ⏸️ | Wave 3 BFF publish + size check (NFR-01) | bff-api, deploy | yes | 033, 034 |
+| 036 | ✅ | Wave 3 BFF publish + size check (NFR-01) | bff-api, deploy | yes | 033, 034 |
 
 ## Wave 4 — Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11)
 

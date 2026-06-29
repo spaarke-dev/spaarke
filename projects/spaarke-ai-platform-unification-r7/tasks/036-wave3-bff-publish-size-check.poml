@@ -2,7 +2,7 @@
 <task id="R7-036" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Wave 3 BFF publish + size check (NFR-01)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>3</wave>
     <estimated-effort>1 hour</estimated-effort>
     <tags>bff-api, deploy, wave-3</tags>

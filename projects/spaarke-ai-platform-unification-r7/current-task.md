@@ -10,10 +10,33 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 084 — Implement typed config forms for 5 priority executors (Wave 8, FR-23) |
-| **Step** | Step 0 — not started |
-| **Status** | not-started |
-| **Next Action** | Build on the TypedConfigForm renderer wired by task 083 — verify schemas for 5 priority executors (AiCompletion, AiAnalysis, AiEmbedding, EntityNameValidator, DeliverComposite) shipped by W3 task 032 render correctly, and add hardening (validation polish, defaults, descriptions) as needed. |
+| **Task** | 096 — Wire Library modal into ad-hoc launcher (Wave 9, FR-18 — closes ≥3 surfaces) |
+| **Step** | Step 5 — Wire affordance (9th Get Started card per task 093 audit recommendation) |
+| **Status** | in-progress |
+| **Next Action** | Add 9th "Browse Playbooks" card to LegalWorkspace Get Started grid. Modify getStartedConfig.ts (+1 card), getStarted.registration.ts (+1 onCardClick entry calling ctx.onOpenWizard("sprk_playbooklibrary") browse mode), WorkspaceGrid.tsx cardClickHandlers (+1 entry for fallback path). Add documentation-style test file in __tests__. Build + quality gates. |
+
+### Task 096 Rigor Declaration
+
+**Rigor Level:** FULL
+**Reason:** Code-page implementation (.ts/.tsx), tags include code-page+ui, ADR-013+021 applicable, FR-18 acceptance closing task
+**Files**: getStartedConfig.ts (+1 card), getStarted.registration.ts (+1 handler), WorkspaceGrid.tsx (+1 fallback handler), __tests__/BrowsePlaybooksCard.test.tsx (NEW doc-style test), notes/handoffs/fr18-closure.md (NEW)
+
+### Task 036 completion note (2026-06-28, Wave 3 closeout)
+
+✅ **Task 036 COMPLETE. Wave 3 ✅ CLOSED (7/7 tasks).** Wave 3 publish-hygiene gate passed per NFR-01 + NFR-02 + ADR-029.
+
+**Measurements**:
+- Build: 0 errors, 19 pre-existing warnings, 0 new warnings.
+- Publish: 46.71 MB compressed (48,983,530 bytes). Single-wave delta vs Wave 2 = **+6,760 bytes / +0.006 MB (FLAT)**. Cumulative R7 delta vs pre-R7 baseline = **+1.06 MB** (unchanged from Wave 2). NFR-01 ✅ PASS (0.94 MB headroom remaining of +2 MB project budget).
+- CVE: 1 HIGH = `Microsoft.Kiota.Abstractions 1.21.2` (pre-existing transitive; accepted-risk per ADR-029 §4). **0 new HIGH introduced by Wave 3.** NFR-02 ✅ PASS.
+- Wave 3 targeted tests: 34/34 PASS (14 endpoint + 20 AiCompletionNodeExecutor preserved across Wave 2 + Wave 3 changes).
+- Broader BFF suite: 7515/7625 pass; 5 failures all NOT Wave 3 regressions (2 pre-existing per Wave 1/2 sign-offs, 3 attributable to Wave 9 task 091 parallel-session work — owned by Wave 9 wrap-up gate).
+
+**Files produced**: `projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave3-signoff.md`.
+**Files updated**: `tasks/TASK-INDEX.md` (036 ✅, Wave 3 ✅), task POML status.
+**Cleanup**: `deploy/api-publish-wave3/` deleted post-measurement.
+
+**Quick Recovery field NOT updated** because a parallel session (task 096) is currently in-progress in this worktree per the Quick Recovery field above — that session owns the active state. Task 036 was independent (BFF deploy verification, no source touch) and is now closed.
 
 ### Task 083 completion note (2026-06-29, Wave 8)
 
