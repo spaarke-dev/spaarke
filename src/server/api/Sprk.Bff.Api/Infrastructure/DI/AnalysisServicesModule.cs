@@ -879,6 +879,15 @@ public static class AnalysisServicesModule
         // IMembershipResolverService per execution. In-process call (NOT HTTP round-trip).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.LookupUserMembershipNodeExecutor>();
 
+        // AiCompletionNodeExecutor — ActionType.AiCompletion = 1
+        // (R7 spaarke-ai-platform-unification-r7 / FR-12, task 002).
+        // Closes R4 /narrate graduation gate. Singleton: ILogger + IOpenAiClient
+        // (both Singleton-safe); no Scoped deps, no IServiceScopeFactory indirection.
+        // Prompt-only structured LLM call (no Tool, no Document required) — distinguishes
+        // from AiAnalysisNodeExecutor's Tool+Document contract per FR-13. UNCONDITIONAL
+        // registration per CLAUDE.md §F.1 asymmetric-registration governance.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AiCompletionNodeExecutor>();
+
         // EntityNameValidatorNodeExecutor — ActionType.EntityNameValidator = 141
         // (R4 spaarke-daily-update-service-r4 / FR-3, task 003).
         // Singleton: pure string analysis, no external deps beyond ILogger; matches the

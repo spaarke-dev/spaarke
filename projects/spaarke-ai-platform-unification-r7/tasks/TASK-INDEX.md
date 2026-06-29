@@ -41,7 +41,7 @@
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
 | 001 | ✅ | Audit existing AiAnalysisNodeExecutor + EntityNameValidatorNodeExecutor for AiCompletion patterns | audit, bff-api | yes | — |
-| 002 | 🔲 | Scaffold AiCompletionNodeExecutor.cs (interface impl, ctor, Validate skeleton) | bff-api, code-impl | yes | 001 |
+| 002 | ✅ | Scaffold AiCompletionNodeExecutor.cs (interface impl, ctor, Validate skeleton) | bff-api, code-impl | yes | 001 |
 | 003 | (to be generated) | Implement payload binding + PromptSchemaOverrideMerger integration | bff-api, code-impl | yes | 002 |
 | 004 | (to be generated) | Implement IOpenAiClient.GetStructuredCompletionRawAsync call + JsonElement binding | bff-api, code-impl | yes (with 003) | 003 |
 | 005 | (to be generated) | Implement Validate() — Action FK required; Tool/Document NOT required | bff-api, code-impl | yes (with 003) | 002 |
