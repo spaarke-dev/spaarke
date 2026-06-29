@@ -10,10 +10,16 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 085 — ✅ COMPLETE 2026-06-29. 18 placeholder executor schemas enriched with typed fields. |
+| **Task** | 089c — ✅ COMPLETE 2026-06-29. ADR-021 dark-mode static jest scan landed; 13/13 tests pass; 0 hardcoded color findings across 5 Wave 8 files. |
 | **Step** | DONE (Steps 0-11 complete) |
 | **Status** | completed |
-| **Next Action** | Next Wave 8 task: 081 (BFF + maker docs ExecutorType auto-generation) or 087/089 per TASK-INDEX |
+| **Next Action** | Next Wave 8 task: 081, 087, 089, or 089d per TASK-INDEX. |
+
+### Task 089c — Rigor Level
+- **Rigor**: FULL (testing tag + creates test under `src/__tests__/`; ADR-038 TEST-MODIFYING override)
+- **Approach divergence from POML**: launch prompt redirects from browser-based UI test (8 screenshots) to a static/grep-based jest scan of Wave 8 component files for hardcoded color patterns. This is a stronger gate (every commit, not one-time visual check) and is mock-free per ADR-038 KEEP path.
+- **Wave 8 files scanned** (5): `NodePalette.tsx`, `nodes/UnknownNode.tsx`, `properties/ExecutorTypeSelector.tsx`, `properties/NodePropertiesDialog.tsx`, `properties/TypedConfigForm.tsx` (1949 LOC total).
+- **Pre-scan findings**: zero hex/rgb/rgba in any of the 5 files (verified via grep). Test expected to pass with zero violations.
 
 ### Task 085 completion note (2026-06-29, Wave 8)
 
