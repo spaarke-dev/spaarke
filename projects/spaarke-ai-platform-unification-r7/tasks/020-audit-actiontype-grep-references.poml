@@ -2,7 +2,9 @@
 <task id="R7-020" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Audit all ActionType references via grep (~1000+) across BFF</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-on>2026-06-28</completed-on>
+    <completion-note>464 ActionType refs identified across 82 files (224 BFF + 240 tests; src/server/shared/ clean). Spec FR-10 estimate of ~1000 corrected. Largest cluster: PlaybookOrchestrationService.cs (25 hits — much will disappear in task 024 dispatch deletion). 1 unrelated-symbol gotcha flagged: InlineActionInfo.ActionType string discriminator in AnalysisChatContextResponse.cs MUST be excluded from regex. 32 lowercase "actionType" JSON property hits + SSE wire field deferred to Wave 6 (FR-21 Dataverse schema rename). SupportedActionTypes (97 refs) deferred to task 023. Audit doc at notes/spikes/actiontype-audit.md drives task 021 strategy.</completion-note>
     <wave>2</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>audit, bff-api, wave-2</tags>
