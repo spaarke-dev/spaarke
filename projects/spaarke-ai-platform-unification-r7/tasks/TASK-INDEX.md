@@ -158,7 +158,7 @@
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
 | 080 | ✅ | Audit PlaybookBuilder canvas state for `sprk_nodetype` references | audit, code-page | yes | — |
-| 081 | ⏸️ | Replace Node Type field with Executor Type Choice on Power Apps form (FR-21) | dataverse, form-update | yes | 024 |
+| 081 | ✅ | Replace Node Type field with Executor Type Choice on Power Apps form (FR-21) — empirical pre-state: form was already wired (sprk_executortype control present, sprk_nodetype absent); only DefaultFormValue (-1 → 1 AiCompletion) needed updating. PUT on PicklistAttributeMetadata typed-cast + PublishXml; 2026-06-29. UAT spot-check ⏸️ operator-only. See [`notes/spikes/081-form-update-actuals.md`](../notes/spikes/081-form-update-actuals.md) | dataverse, form-update | yes | 024 |
 | 082 | ✅ | Update canvas Node Types left panel — 33 categorized entries (FR-22) | code-page, ui | yes | 024 |
 | 083 | ✅ | Wire typed config form renderer driven by schema endpoint (FR-23) | code-page, ui | yes | 033 (W3 endpoint) |
 | 084 | ✅ | Implement typed config forms for 5 priority executors (FR-23) | code-page, ui | yes | 083 |
