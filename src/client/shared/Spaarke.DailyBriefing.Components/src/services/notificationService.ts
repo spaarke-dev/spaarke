@@ -63,15 +63,6 @@ const NOTIFICATION_SELECT = [
   'toasttype',
   'createdon',
   'sprk_briefingstate',
-  // R7 hotfix 2026-06-29: surface sprk_category (Dataverse column dual-write)
-  // so toNotificationItem can fall back to it when data.customData.category
-  // is missing. Observed producer drift in spaarkedev1: "Due soon:"
-  // notifications populated sprk_category='tasks-due' but emitted no JSON-side
-  // category, so the widget bucketed every one as 'system' (not in
-  // CHANNEL_REGISTRY) and the user saw "you're all caught up" despite real
-  // notifications existing. normalizeCategory() further maps the variant
-  // 'tasks-due' -> 'tasks-due-soon' canonical.
-  'sprk_category',
   // R3 FR-6 follow-up: surface ttlinseconds so the "Keep 7 more days" action
   // can write `current + 604800` additively. NotificationService writes 604800
   // explicitly post-task-010; pre-rollout rows may be undefined (fall back to
@@ -241,34 +232,6 @@ function parseNotificationData(raw: unknown): {
  * Convert a raw appnotification WebApi entity to a typed NotificationItem.
  * Returns null if the record cannot be parsed.
  */
-/**
- * R7 hotfix 2026-06-29 — normalize a raw category string (from either
- * data.customData.category or the sprk_category Dataverse column) to a
- * canonical NotificationCategory. Handles producer naming variants observed in
- * spaarkedev1:
- *   - 'tasks-due' -> 'tasks-due-soon' (some plugins emit the shorter form)
- * Unknown strings fall through to 'system' so the widget still buckets them
- * (rather than filtering them out entirely).
- */
-function normalizeCategory(raw: string | null | undefined): NotificationCategory {
-  if (!raw) return 'system';
-  switch (raw) {
-    case 'tasks-due':
-      return 'tasks-due-soon';
-    case 'tasks-overdue':
-    case 'tasks-due-soon':
-    case 'new-documents':
-    case 'new-emails':
-    case 'new-events':
-    case 'matter-activity':
-    case 'work-assignments':
-    case 'system':
-      return raw;
-    default:
-      return 'system';
-  }
-}
-
 function toNotificationItem(entity: WebApiEntity): NotificationItem | null {
   const id = entity['appnotificationid'] as string | undefined;
   const title = entity['title'] as string | undefined;
@@ -276,21 +239,11 @@ function toNotificationItem(entity: WebApiEntity): NotificationItem | null {
 
   const customData = parseNotificationData(entity['data']);
 
-  // R7 hotfix 2026-06-29: fall back to sprk_category Dataverse column when
-  // data.customData.category is missing. Observed: "Due soon:" notifications
-  // populated sprk_category='tasks-due' but emitted no JSON-side category, so
-  // the widget bucketed them all as 'system' and the user saw an empty Daily
-  // Briefing despite having real notifications. normalizeCategory maps the
-  // 'tasks-due' variant -> 'tasks-due-soon' canonical.
-  const rawCategoryFromJson = customData?.category as string | undefined;
-  const rawCategoryFromColumn = entity['sprk_category'] as string | undefined;
-  const rawCategory = rawCategoryFromJson ?? rawCategoryFromColumn;
-
   return {
     id,
     title,
     body: (entity['body'] as string) ?? '',
-    category: normalizeCategory(rawCategory),
+    category: customData?.category ?? 'system',
     priority: customData?.priority ?? 'normal',
     actionUrl: customData?.actionUrl ?? '',
     regardingName: customData?.regardingName ?? '',
