@@ -252,8 +252,116 @@ private PlaybookNodeDto ApplyConfigJsonTemplates(
 
 ---
 
-## Conclusion
+## Conclusion (initial)
 
 Work scope confirmed narrower than initial estimate. T111 reduces from "build NodeOutputs infrastructure" to "wire ITemplateEngine + extract BuildTemplateContext helper". T113 scope expands slightly to cover pipe-shorthand elimination in addition to lambda elimination. Other tasks unchanged.
 
 **T111 starts with**: extract `PlaybookTemplateContextBuilder` as new static helper (alongside `TemplateEngine.cs`), refactor `ReturnResponseNodeExecutor.BuildTemplateContext` to call it, inject `ITemplateEngine` into `PlaybookOrchestrationService` constructor, rewrite `ApplyConfigJsonTemplates` to use it, add 5 unit tests.
+
+---
+
+## REVISION 2026-06-29 — Two-Layer Architecture (operator-approved)
+
+> **Triggered by operator question 2026-06-29**: "in previous Daily Briefing projects the TL:DR and Activities were being shown including in narrative form. If there was not previously a template resolution how were those being constructed? my concern is that the wiring is already available and somehow we're missing it"
+
+### Finding 6 — historical answer: R1/R2/R3 bypassed the playbook engine
+
+Git history confirms `HandleNarrate` was originally pure-C# composition (commit `836da2394`):
+
+```csharp
+private static async Task<TldrResult> GetTldrAsync(...) {
+    var prompt = BuildNarrateTldrPrompt(request);              // C# composes prompt
+    var briefingText = await openAiClient.GetCompletionAsync(prompt, ...);   // direct LLM call
+}
+```
+
+Commit `88dd66a1c` (R4 task 031) migrated HandleNarrate to playbook dispatch via `IConsumerRoutingService` → `IInvokePlaybookAi`. The migration was **never tested end-to-end**. R7 inherits the incomplete migration. **The "missing wiring" the operator suspected is real — but not because something was bypassed; because the R4 migration was incomplete.**
+
+### Finding 7 — partial wiring + naming mismatch in AI executors
+
+| Executor | Reads | Uses `_templateEngine.Render`? |
+|---|---|---|
+| `LoadKnowledgeNodeExecutor` | `configJson.passthroughBinding` | ✅ YES (line 230) |
+| `ReturnResponseNodeExecutor` | `configJson.responseBinding` | ✅ YES (line 263) |
+| `AiCompletionNodeExecutor` | `configJson.templateParameters` (flat dict) | ❌ NO — only string substitution into JPS prompt body via PromptSchemaRenderer |
+| `AiAnalysisNodeExecutor` | `configJson.templateParameters` (per code-comment mirror) | ❌ NO |
+
+The deployed playbook author wrote `inputBinding.payload = "{{json start}}"`. `AiCompletionNodeExecutor.ExtractTemplateParameters` (line 543) ONLY reads `configJson.templateParameters` — the `inputBinding` key is silently ignored. Even with orchestrator-level template resolution, the AI executor still wouldn't connect `inputBinding.payload` to the Action prompt's `{{briefing.payload}}` placeholder.
+
+### Revised T111 design — TWO LAYERS, both centralized
+
+```
+Layer 1: ORCHESTRATOR-LEVEL TEMPLATE RESOLUTION (universal)
+  ─────────────────────────────────────────────────────────
+  Every executor (current + future) benefits without per-executor template code.
+  - Extract `PlaybookTemplateContextBuilder.Build(runContext)` — one source of truth
+  - Orchestrator's `ApplyConfigJsonTemplates` calls `ITemplateEngine.Render` with this context
+  - configJson handed to executor has all `{{X}}` resolved at string level
+  - Existing `LoadKnowledgeNodeExecutor` + `ReturnResponseNodeExecutor` per-executor resolvers
+    become no-ops (Render of resolved string is identity); they keep their "build output from
+    resolved values" logic but call the shared `PlaybookTemplateContextBuilder.Build()`
+    eliminating today's BuildTemplateContext duplication
+
+Layer 2: AI-SHARED PROMPT INPUT BINDING (AI executors only)
+  ─────────────────────────────────────────────────────────
+  Centralized to AI executors — AiCompletion + AiAnalysis + any future AI executor.
+  - New helper `AiPromptInputBindingResolver` (free function or static class)
+  - Reads `configJson.inputBinding.<key>` (RESOLVED values from Layer 1)
+  - Looks up `action.input[<key>].placeholder` to map to LLM-prompt-placeholder name
+  - Populates the `templateParameters` dict that `PromptSchemaRenderer` consumes
+  - AI executors invoke this helper once before PromptSchemaRenderer
+  - Future AI executors get this for free — one line addition, NOT per-executor template code
+```
+
+**Why this addresses operator concern**: future "narrative output" executors throughout the Workspace UX (R8, R9, …) do NOT need per-executor template-resolution code. Non-AI executors get Layer 1 for free. New AI executors get Layer 1 + Layer 2 by invoking the shared resolver. No duplication.
+
+### Architecture diagram
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Orchestrator                                                 │
+│  └─ ApplyConfigJsonTemplates(node, runContext)               │
+│        ├─ uses PlaybookTemplateContextBuilder.Build()        │ ← Layer 1 (universal)
+│        └─ uses ITemplateEngine.Render(configJson, context)   │
+│  After: configJson has all {{X}} resolved at string level    │
+└──────────────────────────┬───────────────────────────────────┘
+                           ▼
+              ┌───────────────────────────────┐
+              │ Executor receives RESOLVED    │
+              │ configJson (no templates left)│
+              └────────────┬──────────────────┘
+       ┌───────────────────┼───────────────────────┐
+       ▼                   ▼                       ▼
+  AI executors        Load/Return            Other executors
+  invoke              (read resolved         (read resolved
+  AiPromptInput-      bindings, build        fields, no
+  BindingResolver     output / response)     template code)
+  (Layer 2 shared)         │                       │
+       │                   │                       │
+       ▼                   ▼                       ▼
+  inputBinding.X     existing logic         existing logic
+  → action.input
+    [X].placeholder
+  → templateParameters
+  → PromptSchemaRenderer
+```
+
+### Revised T111 sub-task list
+
+| # | Sub-task | File |
+|---|---|---|
+| 1 | Extract `PlaybookTemplateContextBuilder.Build(runContext)` static helper | NEW: `Services/Ai/PlaybookTemplateContextBuilder.cs` |
+| 2 | Wire orchestrator to use ITemplateEngine + helper (Layer 1) | `Services/Ai/PlaybookOrchestrationService.cs` |
+| 3 | Refactor `LoadKnowledgeNodeExecutor.BuildTemplateContext` to call shared helper | `Services/Ai/Nodes/LoadKnowledgeNodeExecutor.cs` |
+| 4 | Refactor `ReturnResponseNodeExecutor.BuildTemplateContext` to call shared helper | `Services/Ai/Nodes/ReturnResponseNodeExecutor.cs` |
+| 5 | Add `AiPromptInputBindingResolver` shared helper (Layer 2) | NEW: `Services/Ai/Nodes/AiPromptInputBindingResolver.cs` |
+| 6 | Wire `AiCompletionNodeExecutor` to invoke the AI helper | `Services/Ai/Nodes/AiCompletionNodeExecutor.cs` |
+| 7 | Wire `AiAnalysisNodeExecutor` to invoke the AI helper | `Services/Ai/Nodes/AiAnalysisNodeExecutor.cs` |
+| 8 | Unit tests covering both layers | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/` (new test files) |
+
+T111 size: medium (~1 day). Single PR / commit series.
+
+### Confirmation
+
+Operator approved "two layer" 2026-06-29. T111 executes against this revised design. T112-T119 unchanged.
+

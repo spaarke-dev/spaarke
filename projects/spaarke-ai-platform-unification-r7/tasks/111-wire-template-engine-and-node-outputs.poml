@@ -15,15 +15,29 @@
   </metadata>
 
   <prompt>
-    Replace `PlaybookOrchestrationService.ApplyConfigJsonTemplates` literal `Replace` loop with
-    `ITemplateEngine.Render`. Add `IDictionary&lt;string, object?&gt; NodeOutputs` to `RunContext`.
-    After each node executes, register its OutputVariable → output value (use
-    `TemplateEngine.ConvertJsonElement` for JsonElement results). Build the template context for
-    each subsequent node from `RunContext.Parameters` + `RunContext.NodeOutputs` (merged dict).
-    Preserve current `{{paramName}}` literal-substitution behavior — Handlebars handles those
-    natively. Add unit tests proving (a) `{{paramName}}` still works, (b) `{{nodeName.field}}`
-    now resolves, (c) missing/null references render as empty string (graceful per Handlebars
-    config).
+    **REVISED 2026-06-29 — TWO-LAYER design (operator-approved after T110 deeper audit).**
+
+    T110 audit found NodeOutputs infrastructure ALREADY exists in PlaybookRunContext, but the
+    AI executors (AiCompletion + AiAnalysis) only read `templateParameters` from configJson —
+    they ignore `inputBinding.X` which is the playbook author convention. Two distinct concerns
+    need centralization:
+
+    LAYER 1 (universal): extract `PlaybookTemplateContextBuilder.Build(runContext)` and wire
+    orchestrator's `ApplyConfigJsonTemplates` to use `ITemplateEngine.Render` with it. Every
+    executor's configJson gets `{{X}}` substitution at the string level (NodeOutputs +
+    Parameters + run bag context). Existing `LoadKnowledgeNodeExecutor` + `ReturnResponseNodeExecutor`
+    BuildTemplateContext methods refactored to call the shared helper (eliminates duplication).
+
+    LAYER 2 (AI-shared): NEW `AiPromptInputBindingResolver` helper used by AiCompletion +
+    AiAnalysis. Reads `configJson.inputBinding.<key>` (resolved values from Layer 1), looks up
+    `action.input[<key>].placeholder` for the LLM-prompt placeholder name, populates
+    `templateParameters` dict that PromptSchemaRenderer consumes. Centralizes AI-specific
+    mapping so future AI executors get it free with one helper invocation — NOT per-executor
+    template code.
+
+    Rationale: addresses operator concern (2026-06-29) about needing to "code outputs for every
+    executor". Future narrative-output executors throughout Workspace UX get template resolution
+    for free via Layer 1, AI prompt-input mapping for free via Layer 2.
   </prompt>
 
   <role>
@@ -100,43 +114,46 @@
 
   <steps>
     <step order="0" name="Rigor Declaration">
-      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: bff-api code-impl, modifies .cs, downstream deps · Proceeding with Step 0...
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: bff-api code-impl, modifies multiple .cs, downstream deps · Proceeding with Step 0...
     </step>
     <step order="1" name="Load context + design doc from 110">
-      Read project CLAUDE.md + design doc from task 110 + bff-extensions.md + ADR-010 + ADR-013.
+      Read project CLAUDE.md + design doc from task 110 (especially REVISION 2026-06-29 — Two-Layer Architecture section) + bff-extensions.md + ADR-010 + ADR-013.
     </step>
-    <step order="2" name="Add NodeOutputs to RunContext">
-      Extend `PlaybookRunContext.cs` with `IDictionary&lt;string, object?&gt; NodeOutputs { get; }` initialized to empty Dictionary&lt;string, object?&gt;(StringComparer.Ordinal). Confirm constructor + property semantics match existing immutable-vs-mutable style of the class.
+    <step order="2" name="Layer 1: Create PlaybookTemplateContextBuilder helper">
+      NEW file `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookTemplateContextBuilder.cs` with static `Build(runContext)` returning `Dictionary&lt;string, object?&gt;`. Mirrors the pattern from `ReturnResponseNodeExecutor.BuildTemplateContext` lines 312-339: walks `runContext.NodeOutputs` calling `TemplateEngine.ConvertJsonElement` on StructuredData (or TextContent fallback), adds `runContext.Parameters` (Parameters win on collision), adds `run` metadata bag {id, playbookId, tenantId, completedAtUtc, startedAt}.
     </step>
-    <step order="3" name="Inject ITemplateEngine into PlaybookOrchestrationService">
-      Add `ITemplateEngine` as a constructor parameter; assign to readonly field. Verify DI: `ITemplateEngine` is already registered in `AnalysisServicesModule` (or wherever — check first). If not registered for orchestrator's lifetime scope, register appropriately.
+    <step order="3" name="Layer 1: Inject ITemplateEngine + rewrite ApplyConfigJsonTemplates">
+      Inject `ITemplateEngine` into `PlaybookOrchestrationService` constructor (already DI-registered at AnalysisServicesModule.cs:860). Rewrite `ApplyConfigJsonTemplates` (line ~1921) to (a) take `runContext` instead of just `parameters`, (b) build merged context via `PlaybookTemplateContextBuilder.Build(runContext)`, (c) call `_templateEngine.Render(node.ConfigJson, context)`. Preserve early-exit for `!ConfigJson.Contains("{{")`. Update call site at line 1198 to pass runContext.
     </step>
-    <step order="4" name="Rewrite ApplyConfigJsonTemplates">
-      Replace literal `Replace` loop at line ~1921 with `ITemplateEngine.Render(node.ConfigJson, mergedContext)`. `mergedContext` = Parameters dict + NodeOutputs dict (Parameters wins on key collision per existing semantics). Preserve early-exit for `!ConfigJson.Contains("{{")`. Update node clone to use rendered configJson.
+    <step order="4" name="Layer 1: Refactor duplicate BuildTemplateContext methods">
+      `LoadKnowledgeNodeExecutor.BuildTemplateContext` (line ~277) and `ReturnResponseNodeExecutor.BuildTemplateContext` (lines 312-339) are byte-for-byte duplicates. Replace BOTH with calls to `PlaybookTemplateContextBuilder.Build(...)`. NOTE: existing per-executor `_templateEngine.Render` calls become NO-OPs for templates already resolved by the orchestrator at Step 3 — but the executors keep their own logic for "build output FROM resolved values" (passthrough output, terminal response). This eliminates duplication without breaking existing tests.
     </step>
-    <step order="5" name="Register node output in ExecuteNodeAsync loop">
-      After each node executor returns NodeOutput, if `node.OutputVariable` is non-empty: call `TemplateEngine.ConvertJsonElement(output.StructuredData)` if StructuredData is set, else use `output.TextContent`, else skip; store in `runContext.NodeOutputs[node.OutputVariable]`. Concurrency note: write site is single-threaded per playbook run.
+    <step order="5" name="Layer 2: Create AiPromptInputBindingResolver helper">
+      NEW file `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiPromptInputBindingResolver.cs` (static class or free helper). Method `PopulateTemplateParameters(configJsonInputBinding, actionInputs, templateParameters)` reads `configJson.inputBinding.&lt;key&gt;` (already resolved values from Layer 1), looks up `action.input[&lt;key&gt;].placeholder` for the LLM-prompt placeholder name, populates the `templateParameters` dict. Defensive: missing inputBinding → no-op; missing action.input mapping → log warning, skip.
     </step>
-    <step order="6" name="Write xUnit tests">
-      Add `PlaybookOrchestrationService_TemplateResolutionTests.cs`. Test cases:
-      (a) `{{paramName}}` substitution still works (regression);
-      (b) `{{nodeA.field}}` resolves to nodeA's prior output;
-      (c) `{{nodeA.nested.deep}}` resolves through dotted path;
-      (d) `{{nonexistent}}` renders as empty (graceful, no throw);
-      (e) Parameter wins on collision when both Parameters and NodeOutputs contain the same key.
-      Use real ITemplateEngine; mock executor returns canned NodeOutput.
+    <step order="6" name="Layer 2: Wire AiCompletionNodeExecutor to invoke the AI helper">
+      In `AiCompletionNodeExecutor.ExecuteAsync` (around line 302 where `ExtractTemplateParameters` is called): AFTER extracting templateParameters from configJson, BEFORE calling PromptSchemaRenderer, invoke `AiPromptInputBindingResolver.PopulateTemplateParameters(configJson.inputBinding, context.Action.Inputs, templateParameters)` to merge inputBinding-derived values into templateParameters. The PromptSchemaRenderer then sees BOTH templateParameters values + inputBinding-derived values keyed by action input placeholder names.
     </step>
-    <step order="7" name="Run full BFF test suite + verify build">
-      `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — confirm new tests pass + zero regressions.
+    <step order="7" name="Layer 2: Wire AiAnalysisNodeExecutor to invoke the AI helper">
+      Mirror Step 6 in `AiAnalysisNodeExecutor` — same insertion pattern (the executor mirrors AiCompletion per code-comments per task 001 audit). Confirm via grep that `ExtractTemplateParameters` pattern exists there too.
     </step>
-    <step order="8" name="Step 9.5 — Quality gates">
-      Invoke `/code-review` on the changed files (PlaybookOrchestrationService.cs, PlaybookRunContext.cs, new test file). Invoke `/adr-check`. Address any HIGH/CRITICAL findings before commit.
+    <step order="8" name="Write xUnit tests (Layer 1 + Layer 2)">
+      NEW: `PlaybookTemplateContextBuilderTests.cs` (4-6 tests covering NodeOutputs traversal + Parameters merge + run-bag).
+      NEW: `PlaybookOrchestrationService_TemplateResolutionTests.cs` (5 tests: (a) `{{paramName}}` regression, (b) `{{nodeA.field}}` resolves, (c) `{{nodeA.nested.deep}}` resolves, (d) `{{nonexistent}}` empty, (e) Parameters wins on collision).
+      NEW: `AiPromptInputBindingResolverTests.cs` (5 tests: (a) happy path inputBinding→placeholder, (b) missing inputBinding → no-op, (c) missing action.input mapping → warn+skip, (d) multiple inputs each correctly mapped, (e) inputBinding value already-resolved string passes through).
+      Refactor existing `ReturnResponseNodeExecutorTests` + `LoadKnowledgeNodeExecutorTests` if needed to confirm BuildTemplateContext extraction didn't regress behavior.
     </step>
-    <step order="9" name="Update TASK-INDEX + current-task.md">
+    <step order="9" name="Run full BFF test suite + verify build">
+      `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — confirm new tests pass + zero regressions across orchestrator + LoadKnowledge + ReturnResponse + AiCompletion + AiAnalysis tests.
+    </step>
+    <step order="10" name="Step 9.5 — Quality gates">
+      Invoke `/code-review` on changed/new files. Invoke `/adr-check`. Address any HIGH/CRITICAL before commit.
+    </step>
+    <step order="11" name="Update TASK-INDEX + current-task.md">
       Mark 111 ✅; advance current-task.md to next pending task (112).
     </step>
-    <step order="10" name="Commit">
-      Conventional commit. State BFF placement decision in body (per CLAUDE.md §10). Do NOT push — Wave 11 batch-pushes after task 119.
+    <step order="12" name="Commit">
+      Conventional commit. Body documents: two-layer architecture, files added (PlaybookTemplateContextBuilder + AiPromptInputBindingResolver), refactored duplicates (Load/Return), executor edits (AiCompletion + AiAnalysis), test coverage. State BFF placement decision per CLAUDE.md §10. Do NOT push — Wave 11 batch-pushes after T119.
     </step>
   </steps>
 
@@ -149,9 +166,16 @@
   </tools>
 
   <outputs>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (edited)</output>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRunContext.cs (NodeOutputs added)</output>
-    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookOrchestrationService_TemplateResolutionTests.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookTemplateContextBuilder.cs (NEW — Layer 1 shared helper)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (edited — inject ITemplateEngine, rewrite ApplyConfigJsonTemplates)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LoadKnowledgeNodeExecutor.cs (edited — replace BuildTemplateContext with helper call)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ReturnResponseNodeExecutor.cs (edited — replace BuildTemplateContext with helper call)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiPromptInputBindingResolver.cs (NEW — Layer 2 AI-shared helper)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs (edited — wire AI helper)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs (edited — wire AI helper)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookTemplateContextBuilderTests.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookOrchestrationService_TemplateResolutionTests.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiPromptInputBindingResolverTests.cs (NEW)</output>
     <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to 112)</output>
     <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 111 ✅)</output>
   </outputs>
