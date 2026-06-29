@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-28
+> **Last Updated**: 2026-06-29
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,32 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 089c — ✅ COMPLETE 2026-06-29. ADR-021 dark-mode static jest scan landed; 13/13 tests pass; 0 hardcoded color findings across 5 Wave 8 files. |
-| **Step** | DONE (Steps 0-11 complete) |
-| **Status** | completed |
-| **Next Action** | Next Wave 8 task: 081, 087, 089, or 089d per TASK-INDEX. |
+| **Task** | 111 — Wire ITemplateEngine + carry RunContext.NodeOutputs to subsequent nodes |
+| **Task File** | tasks/111-wire-template-engine-and-node-outputs.poml |
+| **Phase / Wave** | Wave 11 — Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive |
+| **Step** | 0 (not-started) |
+| **Status** | not-started |
+| **Started** | — |
+| **Next Action** | Begin Step 1 of task 111: extract PlaybookTemplateContextBuilder helper per T110 design doc; refactor ReturnResponseNodeExecutor.BuildTemplateContext to call it; inject ITemplateEngine into PlaybookOrchestrationService constructor; rewrite ApplyConfigJsonTemplates. |
+
+### Task 110 — COMPLETE ✅ (2026-06-29)
+- **Rigor**: STANDARD (audit + design, no source modification)
+- **Output**: [`notes/spikes/wave11-orchestrator-resolution-design.md`](notes/spikes/wave11-orchestrator-resolution-design.md) — ~280 lines covering 5 audit findings + 7 goal-question answers + 2 proposed-code blocks for T111 + 4 open questions flagged for downstream tasks.
+- **Key audit findings**:
+  1. **NodeOutputs infrastructure ALREADY EXISTS** in PlaybookRunContext (ConcurrentDictionary line 30 + StoreNodeOutput method line 225 + passed to executors via NodeExecutionContext.PreviousOutputs line 315). No schema change needed.
+  2. **ReturnResponseNodeExecutor.BuildTemplateContext (lines 312-339) already proves the pattern** — walks PreviousOutputs, ConvertJsonElement per output, exposes `run` metadata bag. T111 extracts this into a shared helper and applies it uniformly.
+  3. **15 distinct expression shapes inventoried** in daily-briefing-narrate.json — covered by T112 (6 standard helpers) + T113 (flatMap helper + pipe-shorthand source rewrite).
+  4. **T113 scope expanded**: must rewrite BOTH lambda AND pipe shorthand `(… | flatten | join '\n')` (which is NOT valid Handlebars).
+  5. **Two distinct template layers** (orchestrator-resolution vs Action JPS LLM-prompt placeholders) — Wave 11 only touches the orchestrator layer.
+- **ITemplateEngine already DI-registered as Singleton** at AnalysisServicesModule.cs:860 — no DI work needed in T111.
+- **Quality Gates**: SKIPPED per STANDARD rigor + no .cs/.ts modification (design doc only).
+- **Files reviewed**: PlaybookRunContext.cs (332 lines), NodeOutput.cs (300 lines), ApplyConfigJsonTemplates region (line 1880-1945), ITemplateEngine.cs + TemplateEngine.cs (full), ReturnResponseNodeExecutor.cs lines 230-339, AnalysisServicesModule.cs line 860, daily-briefing-narrate.json (full source).
+
+### Wave 11 context (binding scope decision 2026-06-29)
+Wave 10 task 100 marked 15 success criteria GREEN at report-level but Wave 10 task 101 UAT discovered orchestrator template-engine gap blocks /narrate end-to-end. Operator binding: "r7 was designed to deliver a fully working daily briefing so whatever is required is in scope for r7. Otherwise what is the value of r7 as incomplete?" → Wave 11 added 2026-06-29 (10 tasks, 110-119, commit e68325a89) to close orchestrator gap + restore source-correct config + UAT. R7 close (Wave 10 wrap-up) blocks on Wave 11 T119.
+
+### Previous task — 089c (completed 2026-06-29)
+✅ ADR-021 dark-mode static jest scan landed; 13/13 tests pass; 0 hardcoded color findings across 5 Wave 8 files. (Detail history archived below.)
 
 ### Task 089c — Rigor Level
 - **Rigor**: FULL (testing tag + creates test under `src/__tests__/`; ADR-038 TEST-MODIFYING override)

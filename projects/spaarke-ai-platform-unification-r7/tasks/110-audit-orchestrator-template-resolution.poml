@@ -2,7 +2,9 @@
 <task id="R7-110" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Audit current orchestrator template resolution + design RunContext.NodeOutputs surface</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-on>2026-06-29</completed-on>
+    <completion-notes>Design doc at `notes/spikes/wave11-orchestrator-resolution-design.md`. Key audit finding: NodeOutputs infra ALREADY exists in PlaybookRunContext (ConcurrentDictionary at line 30, StoreNodeOutput at line 225, passed to executors via NodeExecutionContext.PreviousOutputs at line 315). ReturnResponseNodeExecutor.BuildTemplateContext (lines 312-339) already proves the exact pattern needed — T111 just extracts it as a shared helper. T113 scope expanded to cover pipe-shorthand elimination in addition to lambda. ITemplateEngine already DI-registered at AnalysisServicesModule.cs:860 — no DI work needed in T111.</completion-notes>
     <wave>11</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>audit, bff-api, planning, wave-11</tags>
