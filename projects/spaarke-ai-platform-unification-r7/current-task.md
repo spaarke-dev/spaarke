@@ -10,10 +10,40 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 083 — Wire typed config form renderer driven by schema endpoint (Wave 8, FR-23) |
-| **Step** | Step 3 — write executorSchemaService.ts |
-| **Status** | in-progress |
-| **Next Action** | Create services/executorSchemaService.ts (fetch + sessionStorage cache), then properties/TypedConfigForm.tsx (Fluent v9 inputs by SchemaFieldType), then wire into NodePropertiesDialog Configuration tab. |
+| **Task** | 084 — Implement typed config forms for 5 priority executors (Wave 8, FR-23) |
+| **Step** | Step 0 — not started |
+| **Status** | not-started |
+| **Next Action** | Build on the TypedConfigForm renderer wired by task 083 — verify schemas for 5 priority executors (AiCompletion, AiAnalysis, AiEmbedding, EntityNameValidator, DeliverComposite) shipped by W3 task 032 render correctly, and add hardening (validation polish, defaults, descriptions) as needed. |
+
+### Task 083 completion note (2026-06-29, Wave 8)
+
+✅ **Task 083 COMPLETE**. Wired typed config form renderer in PlaybookBuilder canvas per FR-23. Reads schemas from `GET /api/ai/playbook-builder/executor-config-schemas` (Wave 3 task 033 endpoint); maps `SchemaFieldType` → Fluent v9 inputs (String→Input, Number→SpinButton, Boolean→Switch, Enum→Dropdown, Object/Array→Textarea JSON sub-editor); form-state syncs to legacy `sprk_configjson` per FR-23 backward-compat; per-field validation (required/number/enum/JSON). Empty-schema placeholder paves task 089 FR-27 warning UX.
+
+**Files changed**:
+- `src/client/code-pages/PlaybookBuilder/src/services/executorSchemaService.ts` (NEW, 245 lines) — fetch with in-memory + sessionStorage 5-min TTL cache, race-safe inflight promise, `fetchExecutorSchemas` / `getSchemaForExecutorType` (value) / `getSchemaForExecutorTypeName` (name fallback for pre-W8-081/088 canvas) / `clearSchemaCache` / `isSchemaCacheReady`.
+- `src/client/code-pages/PlaybookBuilder/src/components/properties/TypedConfigForm.tsx` (NEW, 472 lines) — schema-driven renderer with `validateField` helper; empty-schema placeholder + Empty()-schema placeholder branches; forward-compat unknown-field-type fallback. Zero hardcoded colors; all semantic tokens.
+- `src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesDialog.tsx` (modified, +118 lines) — added camelCase→PascalCase nodeType → ExecutorType name map (paves W8 081/088 transition to numeric `sprk_executortype`); lazy schema fetch on dialog open; rendered TypedConfigForm in Configuration tab below existing hand-crafted forms (per POML step 6 — hand-crafted forms untouched, replaced incrementally in tasks 084-085).
+
+**Build verification**: `npm run build` (webpack production mode) — 5 pre-existing errors (shared lib peer-dep gaps: Kanban→`@hello-pangea/dnd`, SprkChat→`pdfjs-dist`/`mammoth`, AppInsightsService→`@microsoft/applicationinsights-web`, EntityCreationService→`@spaarke/sdap-client`). VERIFIED IDENTICAL count on pre-change baseline (`git stash` test). Zero new errors from my changes. Type-check (`tsc --noEmit`) shows 3 pre-existing TS errors at `nodeType` → `ScopeSelector` props mismatch, also confirmed pre-existing on baseline. Note: PlaybookBuilder package.json has no `build:prod` script — `npm run build` invokes webpack defaulting to production mode.
+
+**Quality gates Step 9.5 (FULL rigor)**:
+- `/code-review` PASS: 0 critical, 0 warnings, 1 minor suggestion (inline `fieldKindFromType` helper). AI smell score **0/5** across 3 files. Quality direction = **Improved** (NodePropertiesDialog +118 LOC but paves replacement of 12 hand-crafted forms).
+- `/adr-check` PASS: 6 ADRs Compliant — ADR-006 (zero v8 imports, only `@fluentui/react-components` v9), ADR-021 (zero hardcoded colors, all `tokens.*` semantic tokens), ADR-010 (no single-impl interfaces; exported types are wire DTOs), ADR-028 (uses `authenticatedFetch` from `@spaarke/auth`; no raw fetch with Bearer headers, no tokenBridge), ADR-013 (frontend consumer of existing BFF facade endpoint), ADR-029 (N/A — zero BFF/.csproj changes). 0 violations, 0 warnings.
+
+**Per-task publish-size**: SKIPPED per task POML (frontend-only; ADR-029 §10 trigger condition not met — zero BFF files modified).
+**Per-task CVE scan**: N/A (no NuGet/npm package additions).
+
+**Acceptance criteria** (POML §acceptance-criteria, 9 items): ALL PASS — executorSchemaService.ts fetches with sessionStorage cache ✅, TypedConfigForm.tsx renders Fluent v9 by field type ✅, form-state syncs to `sprk_configjson` ✅, per-field validation ✅, unknown-schema placeholder ✅, semantic tokens only ✅, `npm run build` passes no new errors ✅, code-review + adr-check pass ✅, TASK-INDEX 083 ✅.
+
+**Unblocks**: Wave 8 tasks 084 (5 priority forms ON TOP of this renderer), 085 (remaining 28 placeholders), 089 (FR-27 unknown-executor-type warning — coordinates with this renderer's "no schema available" path).
+
+**Notes for tasks 084 + 085**:
+- The TypedConfigForm renderer is generic and READY — tasks 084/085 only need to ensure the BFF executor schemas (already shipped by W3 task 032) are rich enough; this task's frontend automatically picks them up via `fetchExecutorSchemas`.
+- The camelCase→PascalCase name map in NodePropertiesDialog (`CANVAS_NODE_TYPE_TO_EXECUTOR_NAME`) is a forward-compat bridge — once W8 tasks 081 + 088 add the numeric `sprk_executortype` column to the canvas node data, switch to `getSchemaForExecutorType(value: number)` for stability.
+
+**Coordination note**: Worktree had untracked + modified files from parallel sibling sessions (082 left-panel: NodePalette.tsx + executorMetadata.ts; 095 daily-briefing: BuilderLayout.tsx + DailyBriefingApp.tsx + DigestHeader.tsx + main.tsx + dailyBriefing.registration.ts; plus unrelated PlaybookCanvas.tsx + canvasStore.ts change). Task 083 commit scope is STRICTLY limited to: executorSchemaService.ts + TypedConfigForm.tsx + NodePropertiesDialog.tsx + TASK-INDEX.md + current-task.md. Other parallel-session files left untouched and unstaged.
+
+---
 
 > **Parallel-session note (2026-06-28)**: This worktree is running multiple tasks across parallel sessions. Task 051 (Wave 5) just completed in a separate session. Task 052 is now an **OWNER CHECKPOINT** — owner must review `notes/drafts/playbook-node-review-input.csv` (94 rows) and produce `playbook-node-review-output.csv` before task 053 can begin. See "Task 051 completion note" below.
 

@@ -55,8 +55,48 @@ import { EntityNameValidatorForm } from './EntityNameValidatorForm';
 import { PromptSchemaForm } from './PromptSchemaForm';
 import { PromptSchemaEditor } from './PromptSchemaEditor';
 import { RenameGuardDialog, type RenameGuardAction } from './RenameGuardDialog';
+import { TypedConfigForm } from './TypedConfigForm';
 import { findOutputVariableReferences, type OutputVariableReference } from '../../services/canvasValidation';
+import {
+  fetchExecutorSchemas,
+  getSchemaForExecutorTypeName,
+  type ExecutorConfigSchema,
+} from '../../services/executorSchemaService';
+import { useTemplateStore } from '../../stores/templateStore';
 import type { PromptSchema } from '../../types/promptSchema';
+
+// R7 Wave 8 task 083 (FR-23) — map camelCase canvas node types to PascalCase ExecutorType
+// enum member names served by the BFF schema endpoint. Once Wave 8 tasks 081 + 088 add
+// the numeric `sprk_executortype` to the canvas node data, prefer `getSchemaForExecutorType`
+// over this name-based lookup. Names omitted from the map (e.g., 'start') fall through to
+// the schema service's "no schema available" placeholder branch.
+const CANVAS_NODE_TYPE_TO_EXECUTOR_NAME: Record<string, string> = {
+  start: 'Start',
+  aiAnalysis: 'AiAnalysis',
+  aiCompletion: 'AiCompletion',
+  condition: 'Condition',
+  deliverOutput: 'DeliverOutput',
+  deliverToIndex: 'DeliverToIndex',
+  updateRecord: 'UpdateRecord',
+  createTask: 'CreateTask',
+  sendEmail: 'SendEmail',
+  createNotification: 'CreateNotification',
+  lookupUserMembership: 'LookupUserMembership',
+  entityNameValidator: 'EntityNameValidator',
+  wait: 'Wait',
+};
+
+function parseConfigBag(configJson: string | undefined): Record<string, unknown> {
+  if (!configJson) return {};
+  try {
+    const parsed = JSON.parse(configJson);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -207,6 +247,63 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
       selectNode(null);
     }
   }, [selectedNode, removeNode, selectNode]);
+
+  // R7 Wave 8 task 083 (FR-23) — typed config schema renderer wiring.
+  //
+  // Lazy-fetch the executor config schemas on first dialog open. Cached across opens
+  // via in-memory + sessionStorage by `executorSchemaService`. Re-renders this dialog
+  // when the cache flips from "loading" → "ready" via the local `executorSchema` state.
+  //
+  // The hand-crafted forms above (AiCompletionForm, CreateTaskForm, etc.) remain in
+  // place at this task — tasks 084 + 085 replace them incrementally on top of the
+  // TypedConfigForm renderer rendered below them.
+  const apiBaseUrl = useTemplateStore(s => s.apiBaseUrl);
+  const [executorSchema, setExecutorSchema] = useState<ExecutorConfigSchema | undefined>(undefined);
+  const [schemasReady, setSchemasReady] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!isOpen || !apiBaseUrl) return;
+    let cancelled = false;
+    fetchExecutorSchemas(apiBaseUrl)
+      .then(() => {
+        if (!cancelled) setSchemasReady(true);
+      })
+      .catch(err => {
+        // Non-fatal: typed form will render the "no schema available" placeholder
+        // and existing hand-crafted forms continue to work unchanged.
+        console.warn('[NodePropertiesDialog] failed to load executor config schemas', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, apiBaseUrl]);
+
+  useEffect(() => {
+    if (!schemasReady || !nodeType) {
+      setExecutorSchema(undefined);
+      return;
+    }
+    const executorName = CANVAS_NODE_TYPE_TO_EXECUTOR_NAME[nodeType];
+    setExecutorSchema(executorName ? getSchemaForExecutorTypeName(executorName) : undefined);
+  }, [schemasReady, nodeType]);
+
+  const typedConfigValue = useMemo(
+    () => parseConfigBag(selectedNode?.data.configJson),
+    [selectedNode?.data.configJson]
+  );
+
+  const handleTypedConfigChange = useCallback(
+    (next: Record<string, unknown>) => {
+      if (!selectedNode) return;
+      try {
+        const json = JSON.stringify(next);
+        updateNodeData(selectedNode.id, { configJson: json });
+      } catch (err) {
+        console.warn('[NodePropertiesDialog] failed to serialize typed config', err);
+      }
+    },
+    [selectedNode, updateNodeData]
+  );
 
   // -----------------------------------------------------------------------
   // R3 P9 H2 (task 091) — OutputVariable rename guard (FR-3H2.1 / AC-H2.1).
@@ -533,9 +630,28 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
                       </div>
                     )}
 
-                    {!isStartNode && (
+                    {!isStartNode && schemasReady && (
                       <>
                         {(hasTypeForm || isConditionNode) && <Divider style={{ marginBottom: '16px' }} />}
+                        <Text weight="semibold" size={300} className={styles.sectionTitle}>
+                          Typed Configuration (R7 FR-23)
+                        </Text>
+                        <div className={styles.fieldGroup}>
+                          <TypedConfigForm
+                            nodeId={selectedNode.id}
+                            schema={executorSchema}
+                            value={typedConfigValue}
+                            onChange={handleTypedConfigChange}
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {!isStartNode && (
+                      <>
+                        {(hasTypeForm || isConditionNode || schemasReady) && (
+                          <Divider style={{ marginBottom: '16px' }} />
+                        )}
                         <Text weight="semibold" size={300} className={styles.sectionTitle}>
                           Runtime Settings
                         </Text>
