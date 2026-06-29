@@ -105,10 +105,7 @@ import {
   type InputOnChangeData,
 } from '@fluentui/react-components';
 import { ArrowClockwiseRegular, Add20Regular, Open20Regular, Search20Regular } from '@fluentui/react-icons';
-import {
-  OrientationToggle,
-  type Orientation,
-} from '@spaarke/ui-components/components/OrientationToggle';
+import { OrientationToggle, type Orientation } from '@spaarke/ui-components/components/OrientationToggle';
 import { MicrosoftToDoIcon } from '@spaarke/ui-components/icons/MicrosoftToDoIcon';
 
 import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
