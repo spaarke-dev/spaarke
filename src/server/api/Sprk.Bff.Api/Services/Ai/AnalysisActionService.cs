@@ -33,13 +33,9 @@ public class AnalysisActionService : DataverseHttpServiceBase
         // R7 task 028 / FR-07: read path simplified. After single-hop dispatch (task 024),
         // the orchestrator reads ExecutorType from node.sprk_executortype DIRECTLY — Action is
         // no longer the dispatch axis. Action is now strictly a prompt-template carrier
-        // {SystemPrompt + OutputSchema + Temperature}. Removed the $expand=sprk_ActionTypeId
-        // lookup chain (was: sprk_actiontypeid → sprk_analysisactiontype.sprk_executoractiontype)
-        // because nothing in the dispatch path consumes it anymore.
-        // TODO(R7 Wave 4 task 046): the AnalysisAction.ExecutorType DTO property + ActionEntity
-        // .ActionTypeValue / .ActionTypeId fields are now dead read-path projections; full
-        // deletion follows after Wave 4 tasks 043/044 drop the Dataverse columns + retire the
-        // remaining CRUD writers (ScopeManagementService, BuilderScopeImporter, Create/Update DTOs).
+        // {SystemPrompt + OutputSchema + Temperature}. The pre-R7 dispatch-identity columns
+        // on the Action row were dropped in Wave 4 tasks 043 + 044 (2026-06-29); the
+        // corresponding DTO projections + cascading dead helpers were removed by task 046.
         // R7 task 002 / FR-12: sprk_outputschemajson is retained on the projection so the
         // AnalysisAction record carries the canonical {SystemPrompt + OutputSchema + Temperature}
         // triple — consumed unconditionally by AiCompletionNodeExecutor; ignored by executors
@@ -68,16 +64,15 @@ public class AnalysisActionService : DataverseHttpServiceBase
             Name = entity.Name ?? "Unnamed Action",
             Description = entity.Description,
             SystemPrompt = entity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
-            // TODO(R7 Wave 4 task 046): SortOrder previously derived from ActionTypeId.Name
-            // (e.g., "10 - AiAnalysis"). After the lookup expand removal, the only source is
-            // an Action-row column (none today). Defaulting to 0 is safe because the only live
-            // consumer is display sorting in maker surfaces and tests; full SortOrder reform
-            // is out of scope for R7 — Wave 4 task 046 owns the column decision.
+            // SortOrder previously derived from ActionTypeId.Name (e.g., "10 - AiAnalysis").
+            // After the Wave 4 lookup-column drop (task 043) there is no source column on the
+            // Action row. Defaulting to 0 is safe — the only live consumer is display sorting
+            // in maker surfaces and tests, and full SortOrder reform is out of scope for R7.
             SortOrder = 0,
-            // TODO(R7 Wave 4 task 046): ExecutorType is set to the default value because the
-            // orchestrator no longer reads Action.ExecutorType for dispatch (task 024 single-hop).
-            // The DTO property is retained until Wave 4 tasks 043/044 drop the Dataverse columns
-            // and task 046 retires the remaining CRUD writers + DTO property.
+            // ExecutorType is set to the default value because the orchestrator no longer reads
+            // Action.ExecutorType for dispatch (task 024 single-hop reads node.sprk_executortype
+            // directly). The DTO property is retained on AnalysisAction for compatibility with
+            // CRUD callers (Create/Update DTOs); future cleanup of those writers may retire it.
             ExecutorType = Nodes.ExecutorType.AiAnalysis,
             OwnerType = ScopeOwnerType.System,
             IsImmutable = false,
@@ -147,7 +142,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
             Name = entity.Name ?? "Unnamed Action",
             Description = entity.Description,
             SystemPrompt = entity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
-            // TODO(R7 Wave 4 task 046): SortOrder default — see GetActionAsync TODO.
+            // SortOrder defaults to 0 — see GetActionAsync rationale.
             SortOrder = 0,
             OwnerType = ScopeOwnerType.System,
             IsImmutable = false,
@@ -211,8 +206,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
 
         // R7 task 028 / FR-07: ActionTypeId lookup-derived sortOrder removed. Honor the
         // CreateActionRequest.SortOrder verbatim (server-side default is 100 per the DTO).
-        // TODO(R7 Wave 4 task 046): ExecutorType is still surfaced from the request DTO until
-        // Wave 4 retires the CRUD writers + DTO property entirely.
+        // ExecutorType is still surfaced from the request DTO for CRUD-caller compatibility.
         var action = new AnalysisAction
         {
             Id = entity.Id,
@@ -384,30 +378,6 @@ public class AnalysisActionService : DataverseHttpServiceBase
         return child with { ParentScopeId = parentId };
     }
 
-    #region Private Helpers
-
-    // TODO(R7 Wave 4 task 046): ExtractSortOrderFromTypeName is dead code after R7 task 028
-    // (FR-07) removed the sprk_ActionTypeId expand from the read path. The only consumers
-    // (GetActionAsync, ListActionsAsync, CreateActionAsync) no longer call it. Retained
-    // here as internal-static (and exposed for any external test that still references it
-    // via InternalsVisibleTo) until Wave 4 task 046 deletes both this helper and the
-    // sprk_actiontypeid column itself.
-    internal static int ExtractSortOrderFromTypeName(string? typeName)
-    {
-        if (string.IsNullOrEmpty(typeName))
-            return 0;
-
-        var match = System.Text.RegularExpressions.Regex.Match(typeName, @"^(\d+)\s*-");
-        if (match.Success && int.TryParse(match.Groups[1].Value, out var sortOrder))
-        {
-            return sortOrder;
-        }
-
-        return 0;
-    }
-
-    #endregion
-
     #region Private DTOs
 
     internal class ActionEntity
@@ -423,18 +393,6 @@ public class AnalysisActionService : DataverseHttpServiceBase
 
         [JsonPropertyName("sprk_systemprompt")]
         public string? SystemPrompt { get; set; }
-
-        // TODO(R7 Wave 4 task 046): ActionTypeValue + ActionTypeId are no longer projected
-        // by GetActionAsync / ListActionsAsync after R7 task 028 (FR-07) removed the
-        // $expand=sprk_ActionTypeId clause. Retained on the entity DTO until Wave 4 tasks
-        // 043/044 drop the underlying Dataverse columns (sprk_actiontype int +
-        // sprk_actiontypeid lookup), at which point task 046 will delete these properties
-        // and the ActionTypeReference nested class.
-        [JsonPropertyName("sprk_actiontype")]
-        public int? ActionTypeValue { get; set; }
-
-        [JsonPropertyName("sprk_ActionTypeId")]
-        public ActionTypeReference? ActionTypeId { get; set; }
 
         /// <summary>
         /// Per-action temperature override (sprk_temperature, Decimal 0.0–2.0).
@@ -452,24 +410,6 @@ public class AnalysisActionService : DataverseHttpServiceBase
         /// </summary>
         [JsonPropertyName("sprk_outputschemajson")]
         public string? OutputSchemaJson { get; set; }
-    }
-
-    // TODO(R7 Wave 4 task 046): ActionTypeReference is dead after R7 task 028 removed the
-    // $expand=sprk_ActionTypeId clause from the read path. Retained until Wave 4 schema drops
-    // and task 046 deletes the type along with its containing ActionTypeId property above.
-    internal class ActionTypeReference
-    {
-        [JsonPropertyName("sprk_name")]
-        public string? Name { get; set; }
-
-        /// <summary>
-        /// Dispatch ExecutorType integer. Pre-R7 single source of truth for which INodeExecutor
-        /// handles actions of this type. SUPERSEDED by R7 task 024 single-hop dispatch — orchestrator
-        /// now reads node.sprk_executortype directly. This field is no longer consulted on the
-        /// hot path; Wave 4 task 044 drops the Dataverse column and task 046 deletes this property.
-        /// </summary>
-        [JsonPropertyName("sprk_executoractiontype")]
-        public int? ExecutorActionType { get; set; }
     }
 
     #endregion
