@@ -2,7 +2,7 @@
 <task id="R7-095" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Wire Library modal into briefing widget (FR-18)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>9</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>code-page, ui, wave-9</tags>

@@ -85,6 +85,20 @@ const useStyles = makeStyles({
 
 export interface DailyBriefingAppProps {
   params: Record<string, string>;
+  /**
+   * R7 task 095 / FR-18 — host-supplied callback for the "Browse Playbooks"
+   * overflow menu item on the DigestHeader. The standalone DailyBriefing
+   * Code Page and the SpaarkeAi briefing widget each wire this to their own
+   * `Xrm.Navigation.navigateTo({pageType:'webresource',
+   * webresourceName:'sprk_playbooklibrary', data:''}, {target:2, ...})`
+   * thunk (shared lib stays Xrm-free per ADR-012). The launch reaches the
+   * existing Library Code Page wrapper which preserves Path A.5 routing
+   * (`IConsumerRoutingService → IInvokePlaybookAi`) per ADR-013.
+   *
+   * Optional — when omitted, the overflow menu is not rendered (back-compat
+   * for non-Dataverse hosts).
+   */
+  onBrowsePlaybooks?: () => void;
 }
 
 /**
@@ -93,7 +107,7 @@ export interface DailyBriefingAppProps {
  * Integrates notification data, AI narration, inline to-do creation,
  * and preferences via a narrative digest layout.
  */
-export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _params }) => {
+export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _params, onBrowsePlaybooks }) => {
   const styles = useStyles();
 
   // Resolve Xrm via frame-walking with polling for welcome screen timing.
@@ -593,6 +607,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           totalUnreadCount={totalUnreadCount}
           onRefresh={refresh}
           preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
+          onBrowsePlaybooks={onBrowsePlaybooks}
         />
         <div className={styles.scrollContent}>
           <EmptyState />
@@ -609,6 +624,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         totalUnreadCount={totalUnreadCount}
         onRefresh={refresh}
         preferencesSlot={<PreferencesDropdown preferences={preferences} onUpdatePreferences={updatePreferences} />}
+        onBrowsePlaybooks={onBrowsePlaybooks}
       />
       <div className={styles.scrollContent}>
         <TldrSection
