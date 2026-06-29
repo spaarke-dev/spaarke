@@ -2,7 +2,7 @@
 <task id="R7-089a" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>UI test — Executor Type dropdown + tier grouping render</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>8</wave>
     <estimated-effort>2 hours</estimated-effort>
     <tags>code-page, testing, ui-test, wave-8</tags>
