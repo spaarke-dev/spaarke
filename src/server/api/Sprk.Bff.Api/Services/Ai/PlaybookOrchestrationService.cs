@@ -861,208 +861,17 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
-    /// Detects whether a Control node is a deployed-Start node — the canvas
-    /// entry-point anchor that the dispatching wrapper binds the payload into.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// R4 (2026-06-25, daily-update-service-r4): Deploy-Playbook.ps1 writes the Start
-    /// row's <c>sprk_configjson</c> as the playbook JSON's <c>nodes[].configJson</c>
-    /// object verbatim — it does NOT inject <c>__actionType=33</c> the way the
-    /// canvas-sync path (<c>NodeService.BuildConfigJson</c>) does. Without an explicit
-    /// <c>__actionType</c>, the orchestrator's structural fallback used to default
-    /// <c>NodeType.Control</c> to <c>ExecutorType.Condition</c>, which then failed
-    /// <c>ConditionNodeExecutor</c> validation ("Condition expression is required").
-    /// </para>
-    /// <para>
-    /// Detection signals (any one is sufficient — kept lenient because the deploy
-    /// shape varies across the 5 R4 playbooks):
-    /// </para>
-    /// <list type="number">
-    /// <item><description>Empty / null ConfigJson — auto-placed anchor.</description></item>
-    /// <item><description>Node name equals "Start" (case-insensitive).</description></item>
-    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
-    ///   property with value "start".</description></item>
-    /// <item><description>ConfigJson contains an <c>inputContract</c> object (entry-point
-    ///   marker per the R4 playbook authoring convention).</description></item>
-    /// </list>
-    /// </remarks>
-    // TODO(R7 task 025): DELETE — structural fallback ladder is dead code after FR-07
-    // single-hop dispatch (task 024). Last caller in ExecuteNodeAsync was removed
-    // 2026-06-28; the only remaining callers are within the now-dead fallback chain.
-    private static bool IsDeployedStartNode(PlaybookNodeDto node)
-    {
-        if (node.NodeType != NodeType.Control)
-            return false;
-
-        if (string.IsNullOrWhiteSpace(node.ConfigJson))
-            return true;
-
-        if (string.Equals(node.Name, "Start", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
-            var root = doc.RootElement;
-            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
-                return false;
-
-            if (root.TryGetProperty("canvasType", out var canvas)
-                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(canvas.GetString(), "start", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (root.TryGetProperty("__canvasType", out var underscored)
-                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(underscored.GetString(), "start", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (root.TryGetProperty("inputContract", out _))
-                return true;
-        }
-        catch
-        {
-            // Malformed JSON — not Start; the executor lookup will surface the error.
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Detects whether a Control node is a deployed-LoadKnowledge node — the canvas-only
-    /// pass-through placeholder for the R5 AI Search knowledge-source binding.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// R4 (2026-06-26, daily-update-service-r4 follow-on after StartNodeExecutor):
-    /// same failure class as Start — Deploy-Playbook.ps1 does NOT inject
-    /// <c>__actionType=142</c> for the LoadKnowledge row, so without this detection
-    /// the structural fallback would route Control → ExecutorType.Condition →
-    /// ConditionNodeExecutor → "Condition expression is required" validation failure.
-    /// </para>
-    /// <para>
-    /// Detection signals (any one is sufficient):
-    /// </para>
-    /// <list type="number">
-    /// <item><description>Node name equals "LoadKnowledge" (case-insensitive).</description></item>
-    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
-    ///   property with value "loadKnowledge".</description></item>
-    /// <item><description>ConfigJson contains a <c>passthroughBinding</c> object
-    ///   (R4 placeholder marker) OR an <c>r5BindingPlan</c> object (forward-compat
-    ///   marker).</description></item>
-    /// </list>
-    /// </remarks>
-    // TODO(R7 task 025): DELETE — structural fallback ladder is dead code after FR-07
-    // single-hop dispatch (task 024).
-    private static bool IsDeployedLoadKnowledgeNode(PlaybookNodeDto node)
-    {
-        if (node.NodeType != NodeType.Control)
-            return false;
-
-        if (string.Equals(node.Name, "LoadKnowledge", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (string.IsNullOrWhiteSpace(node.ConfigJson))
-            return false;
-
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
-            var root = doc.RootElement;
-            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
-                return false;
-
-            if (root.TryGetProperty("canvasType", out var canvas)
-                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(canvas.GetString(), "loadKnowledge", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (root.TryGetProperty("__canvasType", out var underscored)
-                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(underscored.GetString(), "loadKnowledge", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (root.TryGetProperty("passthroughBinding", out _))
-                return true;
-
-            if (root.TryGetProperty("r5BindingPlan", out _))
-                return true;
-        }
-        catch
-        {
-            // Malformed JSON — not LoadKnowledge; executor lookup will surface the error.
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Detects whether a Control node is a deployed-ReturnResponse node — the canvas-only
-    /// terminal node that binds upstream node outputs into the playbook run's return value.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// R4 (2026-06-26, daily-update-service-r4 follow-on after StartNodeExecutor):
-    /// same failure class as Start + LoadKnowledge — Deploy-Playbook.ps1 does NOT inject
-    /// <c>__actionType=143</c> for the ReturnResponse row.
-    /// </para>
-    /// <para>
-    /// Detection signals (any one is sufficient):
-    /// </para>
-    /// <list type="number">
-    /// <item><description>Node name equals "ReturnResponse" (case-insensitive).</description></item>
-    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
-    ///   property with value "returnResponse".</description></item>
-    /// <item><description>ConfigJson contains a <c>responseBinding</c> object
-    ///   (terminal-node marker per the R4 playbook authoring convention).</description></item>
-    /// </list>
-    /// </remarks>
-    // TODO(R7 task 025): DELETE — structural fallback ladder is dead code after FR-07
-    // single-hop dispatch (task 024).
-    private static bool IsDeployedReturnResponseNode(PlaybookNodeDto node)
-    {
-        if (node.NodeType != NodeType.Control)
-            return false;
-
-        if (string.Equals(node.Name, "ReturnResponse", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (string.IsNullOrWhiteSpace(node.ConfigJson))
-            return false;
-
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
-            var root = doc.RootElement;
-            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
-                return false;
-
-            if (root.TryGetProperty("canvasType", out var canvas)
-                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(canvas.GetString(), "returnResponse", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (root.TryGetProperty("__canvasType", out var underscored)
-                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(underscored.GetString(), "returnResponse", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (root.TryGetProperty("responseBinding", out _))
-                return true;
-        }
-        catch
-        {
-            // Malformed JSON — not ReturnResponse; executor lookup will surface the error.
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// Extracts the __actionType value from a node's ConfigJson.
     /// Returns null if ConfigJson is missing or doesn't contain the field.
     /// </summary>
+    /// <remarks>
+    /// R7 task 025 (2026-06-28, FR-08): PRESERVED — sole remaining caller is
+    /// <see cref="CollectDownstreamNodeInfo"/> for <c>$choices</c> option-set
+    /// resolution on downstream UpdateRecord nodes. This is NOT structural
+    /// dispatch fallback (which was deleted) — it's payload introspection
+    /// for cross-node option-set hydration. Spec FR-08 scope is the dispatch
+    /// ladder; this helper survives that scope per task 024 caller audit.
+    /// </remarks>
     private static ExecutorType? ExtractActionTypeFromConfig(string? configJson)
     {
         if (string.IsNullOrEmpty(configJson))
@@ -1223,7 +1032,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // R7 Wave 2 task 024 (FR-07) — SINGLE-HOP DISPATCH.
             // Dispatch reads `node.SprkExecutortype` (sprk_executortype Choice column) DIRECTLY.
             // The legacy 3-layer chain (`node.actionid` → `Action.actiontypeid` → `lookup_row.executoractiontype`)
-            // and structural fallback ladder are no longer in the hot path. Per FR-19, all
+            // and structural fallback ladder have been removed. Per FR-19, all
             // production nodes are backfilled (Wave 5 task 054); a null sprk_executortype
             // indicates an unmigrated row and MUST throw rather than silently fall back —
             // silent fallback would defeat the refactor.
@@ -1232,10 +1041,17 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // AiEmbedding) via per-executor `Validate()`; it carries the SystemPrompt + OutputSchema.
             // The orchestrator resolves it as payload, not as dispatch source.
             //
-            // The pre-R7 fallback code (structural-detect helpers IsDeployedStartNode /
-            // IsDeployedLoadKnowledgeNode / IsDeployedReturnResponseNode / ExtractActionTypeFromConfig
-            // + the Action.ExecutorType override branch) is now DEAD CODE on this hot path —
-            // deletion is owned by tasks 025 (fallback ladder) + 026 (Action override branch).
+            // R7 task 025 (FR-08, 2026-06-28): structural fallback ladder helpers
+            // (IsDeployedStartNode / IsDeployedLoadKnowledgeNode / IsDeployedReturnResponseNode)
+            // DELETED. ExtractActionTypeFromConfig PRESERVED — sole remaining caller is
+            // CollectDownstreamNodeInfo for $choices option-set hydration (payload introspection,
+            // not dispatch).
+            //
+            // R7 task 026 (FR-09, 2026-06-28): Action.ExecutorType override branch
+            // ("Action ActionType is canonical regardless of NodeType" — Insights Engine
+            // r2 Wave B legacy) was inline-deleted by task 024 when ExecuteNodeAsync moved
+            // to single-hop dispatch. No standalone code block remains to delete; closure
+            // confirmed.
 
             ExecutorType actionType;
             if (node.SprkExecutortype.HasValue)
