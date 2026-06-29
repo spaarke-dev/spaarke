@@ -2,7 +2,7 @@
 <task id="R7-026" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Delete "Action ActionType is canonical regardless of NodeType" override branch (lines 1241-1278, FR-09)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>2</wave>
     <estimated-effort>1-2 hours</estimated-effort>
     <tags>bff-api, code-impl, deletion, wave-2</tags>
