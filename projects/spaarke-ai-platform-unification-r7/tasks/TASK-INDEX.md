@@ -66,7 +66,7 @@
 | 024 | ✅ | Update `PlaybookOrchestrationService.ExecuteNodeAsync` to read single-hop (FR-07) | bff-api, code-impl | yes | 022 |
 | 025 | ⏸️ | Delete structural fallback ladder (FR-08, ~150 LOC) | bff-api, code-impl | yes | 024 |
 | 026 | ⏸️ | Delete Action ActionType override branch lines 1241-1278 (FR-09) | bff-api, code-impl | yes (with 025) | 024 |
-| 027 | ⏸️ | Update `NodeExecutorRegistry` dispatch to use `ExecutorType` | bff-api, code-impl | yes (with 025-026) | 023 |
+| 027 | ✅ | Update `NodeExecutorRegistry` dispatch to use `ExecutorType` | bff-api, code-impl | yes (with 025-026) | 023 |
 | 028 | ⏸️ | Update `AnalysisActionService` Action read path | bff-api, code-impl | yes (with 025-027) | 024 |
 | 029 | ⏸️ | Wave 2 BFF publish + size check (NFR-01) + CVE scan | bff-api, deploy | yes | 022-028 |
 
