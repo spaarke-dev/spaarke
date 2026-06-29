@@ -190,6 +190,24 @@ The policy is not yet binding — capture in this doc so it's not lost between R
 
 ---
 
+## 8a. `sprk_analysisactiontype` lookup table — R7 disposition (FR-05)
+
+> **Added by**: spaarke-ai-platform-unification-r7 Wave 4 task 045 (FR-05)
+> **Status**: PRESERVED, repurposed as decorative. Wave 6 task 062 may rewrite the surrounding §8 "ActionType allocation policy" treatment to fully reflect the new model; this section is the binding interim disposition note.
+
+The `sprk_analysisactiontype` Dataverse lookup table is KEPT in R7 (not dropped) but its role changes fundamentally:
+
+- **Decorative / maker categorization only**: the table exists so makers can browse "what kinds of actions exist" in the maker portal. It is convenience metadata for human navigation.
+- **Runtime ignores it**: `PlaybookOrchestrationService.ExecuteNodeAsync` does NOT read the lookup table or any FK to it for dispatch decisions. Per FR-07, dispatch identity lives ONLY on `sprk_playbooknode.sprk_executortype` (a Choice column directly on the node row) — a single-hop read.
+- **The `sprk_executoractiontype` field on lookup-table ROWS remains, but is advisory only**: the column persists on the lookup table for maker readability (so a maker viewing a lookup row can see "this category corresponds to executor type X"), but it is NOT load-bearing. The runtime never reads it. Treat it as informational documentation about the row's intent.
+- **The Action row's prior `sprk_actiontypeid` FK is dropped** (FR-03 + FR-04, executed in tasks 042-044). The Action row no longer carries an ActionType pointer at all. Per FR-05, this is the binding state: dispatch is on `node.sprk_executortype`; Actions are prompt templates (Home A — prompt, temperature, output schema), not dispatch markers.
+
+**Traceability**: this disposition implements spec **FR-03** (drop FK on Action), **FR-04** (drop INT field on Action), **FR-05** (KEEP lookup table; field on rows is advisory), and **FR-07** (single-hop dispatch on `node.sprk_executortype`).
+
+**Practical consequence for the §2 four-home model**: the row in §2's Home A table listing `sprk_ActionTypeId FK (executor selector)` reflects the PRE-R7 state. As of R7, that FK is gone; Actions in Home A carry only Action-intrinsic LLM behaviour (prompt, temperature, output schema). The "executor selector" responsibility moves to Home C — the node row's `sprk_executortype` Choice column. Wave 6 task 062 will refresh §2 + §8 to align fully.
+
+---
+
 ## 9. Relationship to other canonical docs
 
 | Question | Read |

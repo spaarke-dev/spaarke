@@ -2,7 +2,7 @@
 <task id="R7-045" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Document sprk_analysisactiontype as decorative (FR-05)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>4</wave>
     <estimated-effort>1-2 hours</estimated-effort>
     <tags>docs, wave-4</tags>

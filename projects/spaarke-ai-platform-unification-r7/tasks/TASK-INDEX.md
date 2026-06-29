@@ -97,7 +97,7 @@
 | 042 | ⏸️ | DELETE ExecuteAnalysisAsync + cascading dead code (FR-11) | bff-api, code-impl, deletion | no | 041 |
 | 043 | ⏸️ | Drop sprk_analysisaction.sprk_actiontypeid (lookup) via dataverse-create-schema (FR-03) | dataverse-schema, deletion | no | 042 |
 | 044 | ⏸️ | Drop sprk_analysisaction.sprk_executoractiontype (INT) (FR-04) | dataverse-schema, deletion | no (sequential with 043) | 043 |
-| 045 | ⏸️ | Document sprk_analysisactiontype as decorative (FR-05) | docs | yes | — |
+| 045 | ✅ | Document sprk_analysisactiontype as decorative (FR-05) | docs | yes | — |
 | 046 | ⏸️ | Update AnalysisActionService to remove references to dropped fields | bff-api, code-impl | yes (after 044) | 044 |
 | 047 | ⏸️ | Wave 4 BFF publish + size check (expect SHRINK) | bff-api, deploy | yes | 042-046 |
 
