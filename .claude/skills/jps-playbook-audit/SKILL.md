@@ -5,15 +5,13 @@ techStack: [azure-openai, dataverse, powershell]
 appliesTo: ["audit playbooks", "review playbooks", "check playbook compliance", "update playbooks"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-16
+last-reviewed: 2026-06-29
 ---
 
 # jps-playbook-audit
 
-> **Last Reviewed**: 2026-05-16
-> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
-> **Exemplar rationale**: Audit runs against live Dataverse data and an evolving scope catalog. A frozen exemplar output would not be valuable.
-> **Usage note**: This skill has only 3 inbound references and no see_also from other skills (audit observation, 2026-05-15). If no developer has invoked it in 6+ months, consider archival under NF-1. Reviewer (2026-05-16) opted to keep refined in case future use.
+> **Last Reviewed**: 2026-06-29
+> **Reviewed By**: spaarke-ai-platform-unification-r7 task 072 (FR-32 — node-first audit). New Check 3.6 enumerates 7 R7 dispatch-drift patterns (A-G) mapped to the same shape produced by Wave 5 task 050's `Review-PlaybookNodes-Dispatch.ps1` (94-node CSV). Step 2 deployed-node query updated: `sprk_nodetype` (legacy, column removed pre-R7) → `sprk_executortype` (Choice, single source of dispatch identity). Check 3.5 dispatch-axis citation refreshed (FK is NO LONGER the canonical dispatch axis post-R7 single-hop refactor; `node.sprk_executortype` is). Prior review: ai-procedure-quality-r1 (Phase 2b Wave 2b-A).
 
 ## Purpose
 
@@ -67,10 +65,16 @@ QUERY playbooks:
 FOR EACH playbook:
   QUERY nodes:
     GET /api/data/v9.2/sprk_playbooknodes
-      ?$select=sprk_name,sprk_nodetype,sprk_outputvariable,sprk_dependsonjson,sprk_configjson
+      ?$select=sprk_name,sprk_executortype,sprk_outputvariable,sprk_dependsonjson,sprk_configjson,sprk_isactive
       &$filter=_sprk_playbookid_value eq '{playbookId}'
       &$expand=sprk_ActionId($select=sprk_actioncode,sprk_name),
                sprk_ModelDeploymentId($select=sprk_name)
+
+    NOTE (R7, 2026-06-29): the legacy `sprk_nodetype` column was REMOVED from
+    `sprk_playbooknode` pre-R7. Selecting it will 400. `sprk_executortype`
+    (Choice, 33 values) is the sole node-level dispatch signal. If an audited
+    playbook was deployed BEFORE the schema migration, the row will still
+    exist but `sprk_executortype` may be NULL — Check 3.6 below flags that.
 
   QUERY node scope associations:
     GET sprk_playbooknodes({nodeId})/sprk_playbooknode_skill
@@ -117,13 +121,37 @@ FOR EACH playbook:
          FLAG 🔴 if mismatch (deploy gap — runtime will hit Legacy mode if count is 0)
       b. For each repo node: COMPARE repo.actionCode vs deployed _sprk_actionid_value
          RESOLVE deployed FK via sprk_analysisaction lookup → sprk_actioncode
-         FLAG 🔴 if actionCode mismatch (FK is canonical dispatch axis per ai-architecture-playbook-runtime.md §5)
+         FLAG 🔴 if actionCode mismatch (Action FK carries SystemPrompt + OutputSchema + Temperature for prompt-driven executors; mismatch means the node runs the wrong prompt template. Action FK is NO LONGER the dispatch axis post-R7 — `node.sprk_executortype` Choice owns dispatch identity per design.md §2 Invariant 2; the previously-referenced `ai-architecture-playbook-runtime.md` §5 lookup-precedence section was DELETED in Wave 6 task 061)
       c. For each deployed node: VERIFY sprk_isactive=true
          FLAG 🔴 if false (load-bearing per Deploy-Playbook.ps1:823 comment;
          the column's default is false → row exists but runtime filter excludes it → Legacy mode)
     - Check for ORPHANED nodes (sprk_playbooknode rows where playbook was deleted but nodes remain)
       QUERY: sprk_playbooknodes where _sprk_playbookid_value not in (active playbook IDs)
       FLAG 🔴 if any found — these consume storage + may surface in stale queries
+
+  CHECK 3.6 — R7 Dispatch-Drift (BINDING per spec FR-32, added 2026-06-29 by task 072)
+    Mirrors the shape produced by Wave 5 task 050's `Review-PlaybookNodes-Dispatch.ps1`. Surface every node carrying drift from the single-hop dispatch model. Seven drift patterns:
+
+    A. `sprk_executortype` is NULL or absent on the node row
+       → 🔴 ERROR — runtime cannot dispatch; `PlaybookOrchestrationService.ExecuteNodeAsync` will throw "executor unknown". Recommended action: use Wave 5 owner-review CSV workflow to backfill.
+
+    B. Any code/script still references `sprk_playbooknode.sprk_nodetype` for read or write
+       → 🔴 ERROR — column was REMOVED from schema pre-R7. Will produce 400 at runtime. Recommended: replace with `sprk_executortype`.
+
+    C. Any code/script still reads `sprk_analysisaction.sprk_actiontypeid` lookup as a DISPATCH signal
+       → 🔴 ERROR — column was DROPPED in Wave 4 task 043 (2026-06-29). The lookup table (`sprk_analysisactiontype`) remains per FR-05 as decorative maker categorization, but no runtime code reads it for dispatch. Browse-only / display-name uses are fine if the column still existed; it doesn't.
+
+    D. Any code/script reads `sprk_analysisaction.sprk_executoractiontype` INT column
+       → 🔴 ERROR — column was DROPPED in Wave 4 task 044 (2026-06-29). Any read returns 400.
+
+    E. Prompt-driven node (executor type ∈ {AiAnalysis=0, AiCompletion=1, AiEmbedding=2}) has NULL Action FK
+       → 🔴 ERROR — executor's `Validate()` will fail at runtime ("Action FK required for prompt-driven executor"). Recommended: pick or author an Action row via `jps-action-create`.
+
+    F. Pure executor (Condition, Start, ReturnResponse, EntityNameValidator, UpdateRecord, SendEmail, CreateTask, CallWebhook, SendTeamsMessage, etc. — anything NOT in the prompt-driven trio) has NON-NULL Action FK
+       → 🟡 WARNING — Action FK is unused at runtime for pure executors. Not load-bearing but suggests author confusion about the R7 model. Recommended: NULL out the FK.
+
+    G. Compose strategy + scope hints on multi-output playbooks
+       → ✅ unchanged by R7 — verify ADR-037 compose strategy untouched.
 
   CHECK 4 — Standards Compliance:
     - Does the playbook have a description?
@@ -249,6 +277,46 @@ COMMIT audit report if saved to file:
 | **Scope Impact** | `/jps-playbook-audit --scope SKL-009` | Playbooks affected by a specific scope | Shows which playbooks should get the new scope |
 | **Model Optimization** | `/jps-playbook-audit --models` | All playbooks | Focus only on model assignments and cost savings |
 | **Dry Run** | `/jps-playbook-audit --dry-run` | All playbooks | Report only, no changes offered |
+
+---
+
+## The R7 dispatch model — what this audit checks (and why)
+
+> **Read this once.** It anchors Check 3.6 above.
+
+**Before R7**, dispatch was resolved via a 3-layer ladder: `node.sprk_nodetype` → `Action.sprk_executoractiontype` INT → `Action.sprk_actiontypeid` lookup. None of the layers was enforced to agree, so they drifted across releases and every release shipped a different version of the same "wrong executor ran" bug (design.md §3.1 WHY history).
+
+**After R7** (Invariants 1-3):
+- Every node has `sprk_executortype` (Choice) set explicitly.
+- `PlaybookOrchestrationService.ExecuteNodeAsync` reads it once. Single hop.
+- Action is a reusable prompt template — `SystemPrompt + OutputSchema + Temperature` for prompt-driven executors only — and carries NO dispatch identity.
+
+**This audit's load-bearing job** is to surface playbooks (and call sites) still carrying the legacy drift:
+- 94 nodes existed in spaarkedev1 pre-R7. Wave 5 task 050 reviewed them via `Review-PlaybookNodes-Dispatch.ps1` (CSV output: 41 HIGH-confidence + 14 MEDIUM + 23 LOW + 16 NONE) and Wave 5 task 053 produced the backfill migration script. Any node still showing NULL `sprk_executortype` after Wave 5 = bug.
+- The two Action-side columns (`sprk_actiontypeid` + `sprk_executoractiontype`) were dropped in Wave 4. Any code reading them = 400 at runtime.
+
+**Audit report shape** (mirrors Wave 5 CSV):
+
+| Column | Source | Notes |
+|---|---|---|
+| node-guid | `sprk_playbooknode.sprk_playbooknodeid` | Stable identifier |
+| playbook-name | parent `sprk_analysisplaybook.sprk_name` | For grouping |
+| node-name | `sprk_playbooknode.sprk_name` | Reviewer context |
+| current sprk_executortype | `sprk_playbooknode.sprk_executortype` | NULL = pattern A (🔴) |
+| sprk_nodetype (legacy) | — | column removed; SHOULD return empty/error |
+| Action FK | `_sprk_actionid_value` | NULL for pure; non-NULL for prompt-driven |
+| Action ActionType lookup (decorative) | — | column dropped (Wave 4 task 043); SHOULD return error |
+| Drift flags | A-G from Check 3.6 | Multi-flag possible |
+| Recommended action | per-flag | Backfill / cleanup / NULL out / no-op |
+
+**Cross-references**:
+- design.md §2 (Invariants 1-3) — binding rules
+- design.md §3.1 (R3.1 WHY history) — failure modes that motivated the rewrite
+- spec.md FR-03 / FR-04 / FR-05 — schema cleanup + decorative-table preservation
+- spec.md FR-07 / FR-08 / FR-09 — single-hop refactor
+- spec.md FR-19 — 94-node backfill via `Review-PlaybookNodes-Dispatch.ps1` + `Migrate-PlaybookNodes-to-ExecutorType.ps1`
+- spec.md FR-32 — this skill's rewrite
+- `PlaybookOrchestrationService.ExecuteNodeAsync` — runtime source of truth (Wave 2 task 024)
 
 ---
 
