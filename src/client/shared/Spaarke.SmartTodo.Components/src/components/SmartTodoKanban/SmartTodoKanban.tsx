@@ -52,7 +52,7 @@
 import * as React from 'react';
 import type { DropResult } from '@hello-pangea/dnd';
 
-import { KanbanBoard } from '../../../../Spaarke.UI.Components/src/components/Kanban/KanbanBoard';
+import { KanbanBoard } from '@spaarke/ui-components/components/Kanban/KanbanBoard';
 import { useKanbanColumns } from '../../hooks/useKanbanColumns';
 import { KanbanCard } from '../KanbanCard';
 import { DEFAULT_TODAY_THRESHOLD, DEFAULT_TOMORROW_THRESHOLD } from '../../hooks/useKanbanColumns';

@@ -14,7 +14,14 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["node"]
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@spaarke/ui-components": ["../Spaarke.UI.Components/dist/index.d.ts"],
+      "@spaarke/ui-components/*": ["../Spaarke.UI.Components/dist/*"],
+      "@fluentui/react-icons": ["./node_modules/@fluentui/react-icons"],
+      "@fluentui/react-icons/*": ["./node_modules/@fluentui/react-icons/*"]
+    }
   },
   "include": ["src"]
 }

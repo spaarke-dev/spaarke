@@ -124,8 +124,8 @@ import { addMonths, startOfMonth } from '../../utils/dateMath';
 // (UniversalDatasetGrid, useDatasetMode, SprkChat, etc.) into events-components's
 // tsc check — events-components has no ComponentFramework types installed.
 // See task 033b deviations doc for rationale.
-import { DataGrid, type HostFilterCondition } from '../../../../Spaarke.UI.Components/src/components/DataGrid';
-import { XrmDataverseClient } from '../../../../Spaarke.UI.Components/src/services/XrmDataverseClient';
+import { DataGrid, type HostFilterCondition } from '@spaarke/ui-components/components/DataGrid';
+import { XrmDataverseClient } from '@spaarke/ui-components/services/XrmDataverseClient';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration — the sprk_gridconfiguration record id that drives the grid.
