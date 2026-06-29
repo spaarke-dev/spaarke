@@ -559,6 +559,19 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // Full card click handler map: Create Matter (wizard) + 6 Analysis Builder
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // browse-playbooks card handler (R7 Wave 9 task 096 / FR-18 surface 3 of 3)
+  //
+  // Browse mode = NO intent param. Reuses handleOpenWizardGeneric, which
+  // appends bffBaseUrl automatically. Mirrors the registration-factory wiring
+  // in getStarted.registration.ts so both layout-driven and fallback paths
+  // (incl. GetStartedExpandDialog) get the same affordance.
+  // -------------------------------------------------------------------------
+
+  const handleOpenPlaybookLibraryBrowse = React.useCallback(() => {
+    void handleOpenWizardGeneric("sprk_playbooklibrary");
+  }, [handleOpenWizardGeneric]);
+
   const cardClickHandlers = React.useMemo(
     () => ({
       ...playbookHandlers,
@@ -568,8 +581,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       "summarize-new-files": handleOpenSummarize,
       "find-similar": handleOpenFindSimilar,
       "assign-to-counsel": handleOpenWorkAssignmentWizard,
+      "browse-playbooks": handleOpenPlaybookLibraryBrowse,
     }),
-    [playbookHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize, handleOpenFindSimilar, handleOpenWorkAssignmentWizard]
+    [playbookHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize, handleOpenFindSimilar, handleOpenWorkAssignmentWizard, handleOpenPlaybookLibraryBrowse]
   );
 
   // -------------------------------------------------------------------------
@@ -925,7 +939,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       {/* ----- Loaded: normal workspace rendering ----- */}
       {layoutStatus === "loaded" && <WorkspaceShell config={workspaceConfig} />}
 
-      {/* GetStarted expand dialog — shows all 7 action cards in a grid */}
+      {/* GetStarted expand dialog — shows all 9 action cards in a grid */}
       {isExpandOpen && (
         <React.Suspense fallback={<DialogLoadingFallback />}>
           <LazyGetStartedExpandDialog

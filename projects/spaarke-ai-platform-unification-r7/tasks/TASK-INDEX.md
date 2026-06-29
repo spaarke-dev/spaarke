@@ -26,7 +26,7 @@
 | Wave 6 | Documentation deletion + updates (FR-28 to FR-31) | 🔄 in-progress (060 ✅ audit/disposition; 061 ✅ DELETE §5 from playbook-runtime.md; 062 ✅ UPDATE actions-nodes-scopes decision tree; 066 ✅ MAJOR UPDATE PLAYBOOK-AUTHOR-GUIDE node-first dispatch; 067 ✅ CREATE ai-guide-consumer-wiring.md FR-31; 063-065/068-069 pending) | 060-069 ✅ generated (10 files); 060 ✅, 061 ✅, 062 ✅, 066 ✅, 067 ✅ executed |
 | Wave 7 | Skill rewrites (FR-32, FR-33) | ⏸️ blocked on Wave 2 | 070-075 ✅ generated (6 files) |
 | Wave 8 | Playbook Builder UI updates (FR-21 to FR-27) | 🔄 in-progress (080 ✅ audit; 082 ✅ 33-executor categorized Node Types left panel FR-22; 083 ✅ typed config form renderer infrastructure; 084 ✅ 5 priority typed forms verified + 20 Jest tests (W3-032 already shipped rich BFF schemas; canvas-side test gate added); 086 ✅ Action tab promotion FR-24; 088 ✅ canvas state `sprk_nodetype`→`sprk_executortype` FR-26 (9 refs replaced, 3 `__actionType` removed, 4 legacy constructs deleted, grep zero verified, build clean); 081, 085, 087, 089-089d pending) | 080-089d ✅ generated (14 files) |
-| Wave 9 | Consumer migration (FR-17, FR-18) | 🔄 in-progress (090 ✅ audit/design; 091 ✅ FR-17 SessionSummarizeOrchestrator migrated; 092 ✅ chat-summarize sprk_playbookconsumer row verified; 093 ✅; 094 ✅ /playbooks hard slash + Library modal browse-mode + PlaybookCardGrid consumer chips; 095 ✅ Library modal wired into Daily Briefing widget via DigestHeader overflow; 096 pending) | 090 ✅, 091 ✅, 092 ✅, 093 ✅, 094 ✅, 095 ✅, 096 generated |
+| Wave 9 | Consumer migration (FR-17, FR-18) | 🟢 COMPLETE (090 ✅ audit/design; 091 ✅ FR-17 SessionSummarizeOrchestrator migrated; 092 ✅ chat-summarize sprk_playbookconsumer row verified; 093 ✅; 094 ✅ /playbooks hard slash + Library modal browse-mode + PlaybookCardGrid consumer chips; 095 ✅ Library modal wired into Daily Briefing widget via DigestHeader overflow; 096 ✅ Library modal wired into LegalWorkspace Get Started 9th "Browse Playbooks" card — FR-18 ≥3 surfaces acceptance MET; see notes/handoffs/fr18-closure.md) | 090 ✅, 091 ✅, 092 ✅, 093 ✅, 094 ✅, 095 ✅, 096 ✅ |
 | Wave 10 | Wrap-up + R4 graduation gate close | ⏸️ blocked on all waves | 100, 101, 090-project-wrap-up ✅ generated (3 files) |
 
 **Total: 82 POML files generated. Ready for Wave 1 execution.**
@@ -186,7 +186,7 @@
 | 093 | ✅ | Audit Playbook Library Code Page modal current routing | audit, code-page | yes | — |
 | 094 | ✅ | Wire Library modal into spaarke-ai chat surface (FR-18) | code-page, ui | yes | 093 |
 | 095 | ✅ | Wire Library modal into briefing widget (FR-18) | code-page, ui | yes | 094 |
-| 096 | ⏸️ | Wire Library modal into ad-hoc launcher (FR-18) | code-page, ui | yes | 095 |
+| 096 | ✅ | Wire Library modal into ad-hoc launcher (FR-18) — LegalWorkspace 9th Get Started card | code-page, ui | yes | 095 |
 
 ## Wave 10 — Wrap-up
 

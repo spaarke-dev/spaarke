@@ -41,11 +41,13 @@ const useStyles = makeStyles({
 });
 
 /**
- * GetStartedExpandDialog -- displays all 7 action cards in a wrapping
+ * GetStartedExpandDialog -- displays all 9 action cards in a wrapping
  * flex grid inside a Fluent v9 Dialog.
  *
  * Opened when the user clicks the "more" expand icon in GetStartedRow
  * (when maxVisible limits the visible card count).
+ *
+ * 9th card "Browse Playbooks" added in R7 Wave 9 task 096 / FR-18.
  */
 export const GetStartedExpandDialog: React.FC<IGetStartedExpandDialogProps> = ({
   open,
