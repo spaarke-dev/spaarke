@@ -601,10 +601,27 @@ CRITICAL ADRs to always check:
   - ADR-028: Spaarke Auth v2 contract — client: useAuth() + authenticatedFetch (no raw fetch with Authorization headers, no accessToken: string props, no tokenBridge/__SPAARKE_BFF_TOKEN__, no PublicClientApplication outside @spaarke/auth); server: DefaultAzureCredential (MI) for Graph/Dataverse when MI enabled; HMAC webhook signing; tenant-specific MSAL authority (INV-3/INV-6)
 
 IF violations found:
-  LINK to full adr-check skill for details
-  FLAG: Critical
+  // Per CLAUDE.md §6.5 ADR Conflict Resolution Protocol:
+  // A violation is NOT automatically Critical. Check whether the PR description
+  // or design.md/spec.md "ADR Tensions" section already documents the deviation
+  // as a Path A (project-scoped exception) or Path B (ADR amendment in flight).
+
+  IF the deviation is documented in PR/design.md "ADR Tensions" as Path A:
+    → Verify the rationale is concrete (not boilerplate); cite the documented exception
+    → FLAG as Warning (reviewer judgment — confirm exception scope is bounded)
+    → DO NOT block on this alone
+  ELSE IF Path B (ADR amendment) is referenced + linked PR exists:
+    → FLAG as Warning; verify amendment lands before/with this PR
+  ELSE:
+    → FLAG as Critical (violation without documented exception)
+    → LINK to full adr-check skill for details
+    → REQUEST the implementer choose Path A / B / C per CLAUDE.md §6.5
+
+  Silent violations (no documented exception, no amendment) are ALWAYS Critical.
+  Reasoned exceptions documented at the point of decision are acceptable.
 
 See: .claude/skills/adr-check/ for detailed ADR validation rules
+See: CLAUDE.md §6.5 for the ADR Conflict Resolution Protocol
 ```
 
 ### Step 6.5: BFF Hygiene Check (Conditional — CLAUDE.md §10)

@@ -108,11 +108,73 @@ All work state must be recoverable from files alone: `projects/{name}/current-ta
 **MUST request human input for**:
 - Ambiguous or conflicting requirements
 - Security-sensitive code (auth, secrets, encryption)
-- ADR conflicts or violations
+- ADR conflicts or violations (see §6.5 for the resolution protocol)
 - Breaking changes (API contracts, DB schema)
 - Scope expansion beyond task boundaries
 
 Format: 🔔 **Human Input Required** with situation, options, recommendation.
+
+---
+
+## 6.5. ADR Conflict Resolution Protocol (BINDING — added 2026-06-29 by `spaarkeai-compose-r1`)
+
+**Principle**: ADRs are codified prior decisions, not immutable laws. They exist as guardrails to keep us out of known failure modes — not to force sub-optimal solutions when a legitimate technical need conflicts with them. When such a conflict surfaces, agents and humans MUST explicitly surface it and resolve it through one of three paths. Silent compliance with an ADR rule that produces a sub-optimal outcome is itself a failure mode.
+
+### The three resolution paths
+
+When code, design, or implementation legitimately conflicts with an ADR rule:
+
+| Path | When to choose | Owner action |
+|---|---|---|
+| **(A) Project-scoped exception** | The ADR remains correct in general; this project has a narrow, documented reason to deviate | Document the deviation + rationale in the project's `design.md` and/or `spec.md` ADR Tensions section; cite in PR description; code-review approves explicitly |
+| **(B) ADR amendment** | Context has changed; the ADR's prior decision is no longer correct as written | Propose an ADR amendment (concise + full versions); link from the proposing project; merge ADR change before or alongside the dependent code |
+| **(C) Pivot to comply** | On further inspection, an ADR-compliant approach meets the requirement equally well or better | Document the pivot reasoning; proceed under existing ADR |
+
+**No fourth path.** Silent violation, "we'll fix it later" tech debt, or hand-waving past an ADR rule without surfacing the conflict are all forbidden.
+
+### When this protocol fires
+
+Trigger conditions:
+- An agent (you) recognizes that strict compliance with an ADR will produce a worse technical outcome than a documented exception or amendment would
+- `adr-check` or `code-review` flags a violation that the implementer believes is justified
+- During spec authoring, the design surfaces a requirement that conflicts with an existing ADR's MUST/MUST NOT rule
+- During task execution, an ADR constraint blocks a legitimate implementation need
+
+### Required output format when invoking this protocol
+
+🔔 **ADR Conflict — Resolution Required**
+
+- **ADR in question**: ADR-XXX [title]
+- **Specific rule**: [quote the MUST / MUST NOT being challenged]
+- **Conflict**: [explain the technical need and why the rule produces a sub-optimal outcome]
+- **Proposed path**: A (exception) / B (amendment) / C (pivot to comply)
+- **Rationale**: [why this path is correct]
+- **Impact if path A or B is accepted**: [scope of the deviation/amendment]
+- **Alternative considered (and rejected)**: [show that the other paths were genuinely considered]
+
+The human reviewer chooses or refines the path. Do NOT proceed silently if escalation is warranted.
+
+### Where this protocol is enforced
+
+- **At design time** — `design-to-spec` and `project-pipeline` surface anticipated ADR tensions in a dedicated **ADR Tensions** section of `spec.md`
+- **At code-review time** — `code-review` Step 6 (ADR Compliance Check) accepts a reasoned exception (path A) cited in the PR description; otherwise flags as Critical
+- **At task-execute Step 9.5** — `adr-check` violations either are fixed (path C), formalized as exceptions (path A), or trigger amendment workflow (path B); silent retry-until-clean is not the loop
+- **At ADR-check** — the skill output includes a "Challenge Path" section alongside violations, prompting the human to choose a resolution rather than just accepting the violation list as final
+
+### What this protocol is NOT
+
+- Not a license to ignore ADRs casually — the bar for path A/B is "documented + rationale + reviewer approval"
+- Not an excuse to bypass auth, security, or compliance ADRs without explicit human sign-off
+- Not retroactive — code that violated an ADR silently before this protocol existed is still in violation; this protocol applies to new decisions going forward
+
+### Anti-patterns this catches
+
+- ❌ "ADR says no, so I'll write worse code to comply" — surface as path B candidate
+- ❌ "I violated the ADR but it's fine, the reviewer won't notice" — silent violation, forbidden
+- ❌ "The ADR is wrong but I don't want to amend it" — surface as path B; the cost of amendment is part of the work
+- ❌ "I'll comply now and document the exception later" — exception MUST be documented at the point of decision, not deferred
+
+**Binding for ≥6 months from 2026-06-29.** Reviewed by next major procedure-quality audit.
 
 ---
 

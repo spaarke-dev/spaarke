@@ -435,6 +435,25 @@ FOLLOW template structure:
 - See `src/server/api/.../ExampleEndpoints.cs` for endpoint pattern
 - See `.claude/patterns/api/` for detailed patterns
 
+## ADR Tensions (per CLAUDE.md §6.5)
+
+{This section is MANDATORY. Surface any anticipated conflicts between this
+project's design and existing ADR rules. The bar is "MUST/MUST NOT rule the
+design seems to push against" — not minor stylistic deviations.}
+
+{For each tension, declare a resolution path:}
+
+| ADR | Rule challenged | Conflict | Path | Rationale |
+|---|---|---|---|---|
+| ADR-XXX | "MUST/MUST NOT ..." | [why strict compliance is sub-optimal here] | A / B / C | [why this path] |
+
+{If no tensions are anticipated, state explicitly:}
+> No ADR tensions surfaced at design time. All listed ADRs (above) apply
+> without exception. This section may be updated if tensions emerge during
+> implementation.
+
+{See CLAUDE.md §6.5 for the three resolution paths (A exception / B amendment / C comply).}
+
 ## Success Criteria
 
 {Numbered list with verification method}
@@ -607,6 +626,17 @@ The generated spec.md follows this structure (no template file ΓÇö generate i
 
 ### Existing Patterns
 - See `{path}` for {pattern}
+
+## ADR Tensions (per CLAUDE.md §6.5 — MANDATORY)
+
+*Anticipated conflicts between this project's design and existing ADR rules. Surface at design time so they can be resolved as A (exception) / B (amendment) / C (comply) rather than discovered as silent violations at code-review.*
+
+| ADR | Rule challenged | Conflict | Path | Rationale |
+|---|---|---|---|---|
+| ADR-XXX | "MUST/MUST NOT ..." | {why strict compliance is sub-optimal here} | A / B / C | {why this path} |
+
+*If no tensions exist:*
+> No ADR tensions surfaced at design time. All listed ADRs apply without exception.
 
 ## Success Criteria
 1. [ ] {Criterion} - Verify: {method}

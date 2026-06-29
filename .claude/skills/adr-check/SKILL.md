@@ -102,6 +102,35 @@ For each violation:
 2. Provide concrete fix with code example
 3. Reference the ADR document for full context
 
+### Step 5.5: Surface Challenge Paths (per CLAUDE.md §6.5)
+
+For each Violation reported, ALSO surface the three resolution paths from the ADR Conflict Resolution Protocol so the reviewer can choose intentionally rather than defaulting to silent compliance:
+
+```
+FOR EACH violation:
+  EMIT a "Resolution Paths" block alongside the fix:
+
+  Path A — Project-scoped exception
+    Applies when: the ADR remains correct generally but this project has a
+    narrow, documented reason to deviate.
+    Action: document in design.md/spec.md "ADR Tensions" section + cite in PR.
+
+  Path B — ADR amendment
+    Applies when: context has changed; the ADR's prior decision is no longer
+    correct as written.
+    Action: propose ADR amendment (concise + full versions) + link from this
+    project; merge ADR change before or alongside the code.
+
+  Path C — Pivot to comply (default suggestion)
+    Applies when: an ADR-compliant approach meets the requirement equally
+    well or better.
+    Action: use the fix suggested in Step 5.
+
+  REVIEWER CHOOSES which path applies. Do not assume Path C.
+```
+
+**Why this matters**: A violation list that only shows fixes implicitly says "comply or fail." That's wrong when path A or B is the better outcome. Surfacing all three paths forces the human to choose intentionally instead of defaulting to whichever is mechanically easiest.
+
 ---
 
 ## Conventions
@@ -142,12 +171,16 @@ For each violation:
   - `src/server/Services/IFooService.cs` → `FooService.cs`
   - **Recommendation:** Consider registering `FooService` directly unless testing seam needed
 
-### ❌ Violations (Must Fix)
+### ❌ Violations (Resolution Required — see Challenge Paths)
 
 - **ADR-007:** Graph types found outside Infrastructure layer
   - **File:** `src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs:42`
   - **Code:** `Microsoft.Graph.DriveItem item = ...`
-  - **Fix:** Replace with `FileHandleDto` and route through `SpeFileStore`
+  - **Path A (Exception)**: justify in PR description + ADR Tensions section if there's a project-scoped reason this Graph type can't route through `SpeFileStore`
+  - **Path B (Amendment)**: propose ADR-007 amendment if the Infrastructure-only rule is no longer correct in general
+  - **Path C (Comply — default)**: Replace with `FileHandleDto` and route through `SpeFileStore`
+
+  Per CLAUDE.md §6.5, the reviewer chooses path A / B / C — do not default to silent C if the implementation legitimately needs A or B.
 
 ### Summary
 

@@ -23,6 +23,16 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Added (2026-06-29 spaarkeai-compose-r1 — ADR Conflict Resolution Protocol governance)
+- `CLAUDE.md` — new §6.5 "ADR Conflict Resolution Protocol (BINDING)". Introduces the three resolution paths for ADR conflicts: (A) project-scoped exception with documented rationale, (B) ADR amendment when context has changed, (C) pivot to comply when an ADR-compliant alternative exists. Establishes "silent compliance with a sub-optimal ADR is itself a failure mode" as the principle. Binding for ≥6 months from 2026-06-29.
+- `.claude/skills/adr-check/SKILL.md` — new Step 5.5 "Surface Challenge Paths" + updated Output Format Violations block to display the three resolution paths alongside each violation. Reviewer now chooses intentionally instead of defaulting to silent compliance.
+- `.claude/skills/code-review/SKILL.md` — Step 6 ADR Compliance Check rewritten to accept reasoned exceptions documented in PR description / `spec.md` "ADR Tensions" section. Silent violations still Critical; documented Path A exceptions = Warning with reviewer judgment. Cross-links CLAUDE.md §6.5.
+- `.claude/skills/task-execute/SKILL.md` — Step 9.5 quality gates updated: ADR violations no longer default to "STOP, must fix" silent-comply loop. Agent applies CLAUDE.md §6.5 protocol (path A/B/C choice with user escalation for A and B).
+- `.claude/skills/design-to-spec/SKILL.md` — both spec.md templates (inline Step 4 + standalone bottom template) extended with mandatory "ADR Tensions" section (table format: ADR / rule / conflict / path / rationale). Default content if no tensions: explicit "No ADR tensions surfaced" statement.
+- `.claude/skills/project-pipeline/SKILL.md` — Step 1 spec validation now requires "ADR Tensions" section; new Step 1.7 processes declared tensions before Step 2 resource discovery (validates rationale concreteness, flags Path B amendment prerequisite, summarizes path counts).
+- **Driver**: design conversation during `spaarkeai-compose-r1` surfaced governance gap — agents and humans default to silent ADR compliance even when path A (exception) or path B (amendment) would produce a better technical outcome. User explicit ask: "if we have surfaced a legitimate exception or required modification to an ADR then we MUST surface this conflict and resolve it. We cannot have our ADRs drive us to sub-optimal solutions." This protocol formalizes the resolution.
+- Reinforcement points: design-time (`design-to-spec` + `project-pipeline`), code-review-time (`code-review`), task-execute-time (`task-execute` Step 9.5), and ad-hoc (`adr-check`). Five enforcement layers ensure the principle isn't a doc-only addition.
+
 ### Added (2026-06-25 smart-todo-r4 R4-112 — PCF `noAposStringType` XSD failure mode)
 - `.claude/skills/pcf-deploy/SKILL.md` — new row in Failure Modes & Recovery table for `noAposStringType` XSD validation failure (Dataverse PCF import rejects apostrophes in `description-key` attribute values). Discovered during RegardingResolver v1.2.0 deploy (commit 5b7a62812) — `entity's` and `'sprk_todo'` in description-key blocked the import. Comments are fine (XSD skips them); only attribute values matter. Burned ~10 min on first import attempt; this entry saves the next operator.
 

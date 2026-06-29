@@ -218,12 +218,55 @@ VALIDATE:
   - Scope definition
   - Technical approach
   - Success criteria
+  - **ADR Tensions** (per CLAUDE.md §6.5 — MUST exist, even if "no tensions surfaced")
 ✓ Minimum 500 words (meaningful content)
 
 IF validation fails:
   → STOP - List missing elements
   → Offer to help complete spec.md
 ```
+
+### Step 1.7: Process ADR Tensions (per CLAUDE.md §6.5)
+
+**Purpose**: Surface anticipated ADR conflicts to the user BEFORE Step 2 resource discovery, so resolution paths are chosen intentionally rather than emerging as silent violations during code-review later.
+
+**Action:**
+```
+READ the "ADR Tensions" section of spec.md.
+
+IF section says "No ADR tensions surfaced":
+  → Log silently: ✅ ADR tensions: none declared
+  → Continue to Step 2
+
+IF section contains tensions:
+  → FOR EACH tension row in the table:
+      DISPLAY to user:
+        - ADR + rule challenged
+        - Conflict description
+        - Declared path (A exception / B amendment / C comply)
+        - Rationale
+
+      VALIDATE the declared path is concrete:
+        - Path A: rationale cites specific project constraint (not boilerplate)
+        - Path B: amendment scope identified (which ADR sections change)
+        - Path C: implementation alternative is specific
+
+      IF rationale is hollow/boilerplate:
+        → FLAG: "Tension declared but rationale is generic. Per CLAUDE.md §6.5,
+                 path choice MUST cite concrete reasoning. Strengthen rationale
+                 or downgrade to Path C (comply)."
+
+      IF Path B (ADR amendment) declared:
+        → REMIND user: "Path B requires the ADR amendment to merge before or
+                        alongside this project's dependent code. Plan accordingly."
+
+  → SUMMARIZE: "N ADR tensions declared (X path A, Y path B, Z path C).
+                Proceed to Step 2 with these resolutions on the record."
+
+  → CONTINUE to Step 2 (do NOT block — declarations are authoritative once accepted)
+```
+
+**Why this step exists**: The ADR Conflict Resolution Protocol (CLAUDE.md §6.5) is only as strong as the points where it's enforced. design-to-spec writes the tensions; project-pipeline validates them at handoff to implementation; code-review enforces them at PR time. This is the design-time gate.
 
 **Output to User:**
 ```

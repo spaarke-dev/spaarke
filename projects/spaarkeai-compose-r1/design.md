@@ -42,8 +42,8 @@ This is a **handoff model**, not competition: the file lives in SPE; Compose is 
 | 6 | **Document record creation on Save** | For ephemeral (unbound) docs, the **first Save** creates a `sprk_document` record; indexing then follows the normal Document pipeline |
 | 7 | **Chat session reuse** | Compose uses the existing `ChatSession` + Redis/Cosmos/Dataverse three-tier persistence (see §6) — wired with `DocumentId` binding |
 | 8 | **Two new JPS scopes** | `compose-selection`, `compose-document` — defined and registered via `jps-scope-refresh`. No new actions in R1. |
-| 9 | **Compose consumer-routing foundation** | Define at least one Compose consumer type in [`ConsumerTypes.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs), seed Dataverse row, prove end-to-end dispatch as smoke test |
-| 10 | **Compose → Word handoff** | "Open in Word for Web" (new tab) + "Open in Word Desktop" (via `ms-word:ofe\|u\|` protocol) — both via SPE-provided URLs |
+| 9 | **Compose consumer-routing foundation** | Define `ConsumerTypes.ComposeSummarize = "compose-summarize"`; seed `sprk_playbookconsumer` row linking to existing **Document Summary** playbook (id `47686eb1-9916-f111-8343-7c1e520aa4df`); prove end-to-end dispatch as smoke test |
+| 10 | **Compose → Word handoff + shared-lib extraction** | Reuse existing `GET /api/documents/{id}/open-links` endpoint + [`DesktopUrlBuilder`](../../src/server/shared/Spaarke.Core/Utilities/DesktopUrlBuilder.cs) (already in `Spaarke.Core`). **Extract** the client hook `useDocumentActions` from [`SemanticSearch/src/hooks/useDocumentActions.ts`](../../src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts) into a new shared library (`@spaarke/document-operations`); refactor SemanticSearch to consume from shared; Compose consumes from shared. No new BFF endpoints for this deliverable. |
 
 ### Out of scope for R1 (deferred)
 
@@ -293,6 +293,32 @@ R1 gets (1)–(3) for free. (4) and (5) = R2.
 
 ---
 
+## 10.5. Placement Justification (per CLAUDE.md §10 BFF Hygiene)
+
+This section is mandatory per CLAUDE.md §10: every project that adds code to the BFF must explicitly justify placement.
+
+**Decision**: All R1 Compose endpoints (§12) belong in `Sprk.Bff.Api`. No new microservice; no Dataverse plugin handlers.
+
+**Justification**:
+
+1. **All R1 endpoints touch SPE (Graph API) and/or Dataverse.** Both require BFF-resident infrastructure: OBO/app-only auth flows, Graph client factory (`GraphClientFactory`), Dataverse SDK access, and `IGraphClient` injection. No alternative location offers these dependencies.
+
+2. **Plugins lack Graph access.** Compose's upload, load, save, check-out, check-in operations all hit SPE via Graph — outside plugin sandbox capabilities.
+
+3. **A separate microservice would duplicate auth + deployment without functional benefit.** All Compose endpoints fit the same auth surface (`RequireAuthorization()`) that the existing BFF endpoints use. Splitting forces cross-service auth + adds an operational unit for no functional gain.
+
+4. **AI dispatch uses the AI PublicContracts facade per refined ADR-013 (2026-05-20).** The Compose-action endpoint injects `IConsumerRoutingService` + `IInvokePlaybookAi` (the facade), NOT direct AI internals (`IOpenAiClient`, `IPlaybookService`). Compose CRUD code stays decoupled from AI internals.
+
+5. **Publish-size impact is minimal.** TipTap and the DOCX bridge are client-side dependencies (no BFF cost). New BFF code is endpoint + service classes only. Estimated delta: +1–2 MB compressed. Current baseline ~45.65 MB; ≤60 MB ceiling. Will be measured per CLAUDE.md NFR-01 per-task rule.
+
+6. **No new HIGH-severity CVE expected.** No new server-side NuGet dependencies beyond what existing services already pull in. Verify via `dotnet list package --vulnerable --include-transitive` at task close.
+
+7. **Test obligation** per CLAUDE.md §10 #6: every new service in `src/server/api/Sprk.Bff.Api/Services/` requires unit tests in `tests/unit/Sprk.Bff.Api.Tests/`. R1 tasks deliver corresponding test files.
+
+**Hot-Path Declaration**: BFF=Y · SpaarkeAi=Y · ci-workflows=N · skill-directives=N · root-CLAUDE.md=N.
+
+---
+
 ## 11. Component Reuse Map
 
 Per CLAUDE.md §11 (Component Justification):
@@ -306,6 +332,8 @@ Per CLAUDE.md §11 (Component Justification):
 | Auth | `@spaarke/auth` (Spaarke Auth v2 — ADR-028) | — |
 | BFF | `Sprk.Bff.Api` | New endpoints (§12) — placement justification per CLAUDE.md §10 + [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) |
 | SPE access | Existing Graph client + SPE patterns | SPE check-out/check-in wrapper; upload-to-SPE for ephemeral path |
+| Open-in-Word backend | `GET /api/documents/{id}/open-links` ([`FileAccessEndpoints.cs`](../../src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs)) + [`DesktopUrlBuilder`](../../src/server/shared/Spaarke.Core/Utilities/DesktopUrlBuilder.cs) | — (reuse) |
+| Open-in-Word client hook | `useDocumentActions` (currently in SemanticSearch — extract to new `@spaarke/document-operations` shared lib) | NEW shared lib; refactor SemanticSearch to consume; Compose consumes |
 | Playbook execution | Existing JPS infrastructure | New JPS scopes (`compose-selection`, `compose-document`) |
 | Playbook dispatch | `IConsumerRoutingService` + `IInvokePlaybookAi` ([§7](#7-playbook-integration--consumer-routing-dispatch)) | New `ConsumerTypes` constants; seeded Dataverse row(s) |
 | Session persistence | `ChatSession` + Redis/Cosmos/Dataverse three-tier ([§6](#6-session-persistence--reuse-the-existing-three-tier-pattern)) | DocumentId binding; possibly `ComposeContext` extension on `HostContext` |
@@ -329,7 +357,7 @@ R1 endpoints (each must satisfy §10 placement justification per CLAUDE.md):
 | `POST /api/compose/document/{spe-id}/checkin` | SPE check-in (unlock + save) | NEW (thin SPE wrapper) |
 | `POST /api/compose/action/{consumerType}` | Invoke playbook via consumer routing — wraps `IConsumerRoutingService` + `IInvokePlaybookAi` | NEW (one consumer wired E2E in R1; thin dispatch wrapper) |
 | **Chat session** | All chat persistence/load/save reuses existing endpoints | **REUSE** — no new chat endpoints |
-| **Word handoff URLs** | Compose UI consumes SPE-provided WOPI launcher + `ms-word:` protocol URLs | REUSE (no BFF work) |
+| **Open-in-Word** | Compose calls existing `GET /api/documents/{id}/open-links` — no new BFF endpoint | REUSE |
 
 **Hot-path declaration (per CLAUDE.md §10)**: BFF=Y, SpaarkeAi=Y, ci-workflows=N, skill-directives=N, root-CLAUDE.md=N.
 
