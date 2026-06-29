@@ -2,7 +2,7 @@
 <task id="R7-051" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Run Review-PlaybookNodes-Dispatch.ps1 against spaarkedev1 — produce CSV for owner review</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>5</wave>
     <estimated-effort>30-60 minutes</estimated-effort>
     <tags>dataverse, audit, wave-5</tags>
@@ -140,4 +140,26 @@
     <criterion>current-task.md advances to task 052 with prominent OWNER CHECKPOINT notice</criterion>
     <criterion>User notified explicitly that task 052 blocks on human action</criterion>
   </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-28.
+
+    Real run against spaarkedev1: 94 rows / 41 HIGH / 14 MEDIUM / 23 LOW / 16 NONE confidence (identical
+    to task 050 dry-run as expected — script is deterministic + read-only). CSV written to
+    `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv`.
+
+    Verification:
+    - 94 rows (✅ exact match to task 050 baseline)
+    - 13 columns (node_id, node_name, playbook_name, action_id, action_name, current_sprk_executortype,
+      current_advisory_executoractiontype, suggested_executortype, suggested_executortype_label,
+      confidence, suggestion_source, owner_decision_executortype, owner_notes)
+    - All 94 `owner_decision_executortype` cells blank ✅
+    - All 94 `owner_notes` cells blank ✅
+    - All 94 `current_sprk_executortype` cells blank ✅ (confirms FR-19 backfill obligation: zero rows
+      already backfilled)
+
+    NEXT: Task 052 is OWNER CHECKPOINT. Owner reviews CSV + fills
+    `owner_decision_executortype` per row + saves as `playbook-node-review-output.csv`.
+    Task 053 (migration script) consumes the owner-output.
+  </notes>
 </task>

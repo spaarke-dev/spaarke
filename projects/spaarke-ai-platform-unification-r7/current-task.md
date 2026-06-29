@@ -10,10 +10,50 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 095 — Wire Playbook Library modal into Daily Briefing widget (Wave 9, FR-18) |
-| **Step** | Step 0 — not started |
-| **Status** | not-started |
-| **Next Action** | Begin task 095 — wire Library modal into Daily Briefing widget per FR-18 (consumer surface 2 of 3). Per task 093 audit Q6, the primary mount point is DigestHeader overflow item with `onBrowsePlaybooks` prop plumbed to host. |
+| **Task** | 083 — Wire typed config form renderer driven by schema endpoint (Wave 8, FR-23) |
+| **Step** | Step 3 — write executorSchemaService.ts |
+| **Status** | in-progress |
+| **Next Action** | Create services/executorSchemaService.ts (fetch + sessionStorage cache), then properties/TypedConfigForm.tsx (Fluent v9 inputs by SchemaFieldType), then wire into NodePropertiesDialog Configuration tab. |
+
+> **Parallel-session note (2026-06-28)**: This worktree is running multiple tasks across parallel sessions. Task 051 (Wave 5) just completed in a separate session. Task 052 is now an **OWNER CHECKPOINT** — owner must review `notes/drafts/playbook-node-review-input.csv` (94 rows) and produce `playbook-node-review-output.csv` before task 053 can begin. See "Task 051 completion note" below.
+
+### Task 051 completion note (2026-06-28, Wave 5 — parallel session)
+
+✅ **Task 051 COMPLETE**. Ran `scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1` in REAL mode against spaarkedev1. CSV produced at `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv`.
+
+**Run summary** (identical to task 050 dry-run baseline — confirms deterministic READ-only behavior):
+- 94 node rows retrieved from `sprk_playbooknode`
+- 41 HIGH-confidence suggestions (action-name match)
+- 14 MEDIUM-confidence (node-name fallback)
+- 23 LOW-confidence (advisory-int fallback)
+- 16 NONE — owner decision REQUIRED (zero name signal)
+- 0 already backfilled (confirms FR-19 backfill obligation: all 94 rows need owner review)
+
+**CSV structure verified**:
+- 13 columns: node_id, node_name, playbook_name, action_id, action_name, current_sprk_executortype, current_advisory_executoractiontype, suggested_executortype, suggested_executortype_label, confidence, suggestion_source, owner_decision_executortype, owner_notes
+- All 94 `owner_decision_executortype` cells blank ✅
+- All 94 `owner_notes` cells blank ✅
+- All 94 `current_sprk_executortype` cells blank ✅
+- UTF-8 encoded
+
+**Sample row 0** (sanity check): node `queryMatterContext` (playbook `matter-health-single`) → action `Insights — Live Fact Resolver` → suggested `80 LiveFact` (HIGH, action-name match) — looks reasonable.
+
+**TASK 052 STATUS**: 🔄 IN-PROGRESS BLOCKED ON OWNER. The owner must:
+1. Open `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv` (94 rows)
+2. Fill in the `owner_decision_executortype` column per row (+ optional `owner_notes`)
+3. Save as `playbook-node-review-output.csv` in the same `notes/drafts/` folder
+
+Task 053 (`Migrate-PlaybookNodes-to-ExecutorType.ps1` authoring) cannot begin until owner-output exists.
+
+---
+
+
+### Task 083 Rigor + Knowledge
+
+- **Rigor**: FULL (code-page UI infra, FR-23 critical, ADR-006 + ADR-021 applicable)
+- **Constraints loaded**: ADR-006 (Fluent v9 only), ADR-021 (dark mode semantic tokens)
+- **Reference files read**: AiCompletionForm.tsx (form pattern); NodePropertiesDialog.tsx (host); ExecutorConfigSchema.cs (BFF DTO contract); AiPlaybookBuilderEndpoints.cs (endpoint shape); templateStore.ts (authenticatedFetch pattern)
+- **Coordination**: Task 082 runs in parallel — different component (left panel), no overlap with properties/* or services/executorSchemaService.ts.
 
 ### Task 094 completion note (2026-06-28, Wave 9)
 
