@@ -18,8 +18,8 @@
 
 | Wave | Goal | Status | Tasks |
 |---|---|---|---|
-| Wave 1 | AiCompletionNodeExecutor build (FR-12 to FR-15) | 🔄 in-progress | 001-010 ✅ generated (10 files) |
-| Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | ⏸️ blocked on Wave 1 | 020-029 ✅ generated (10 files) |
+| Wave 1 | AiCompletionNodeExecutor build (FR-12 to FR-15) | 🟢 COMPLETE | 001-010 ✅ all done; publish-hygiene gate PASSED 2026-06-28 (46.71 MB compressed; +1.06 MB vs 45.65 baseline; 0 new HIGH CVE; 20/20 AiCompletionNodeExecutor tests pass) |
+| Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | 🔲 ready (Wave 1 complete) | 020-029 ✅ generated (10 files) |
 | Wave 3 | Typed config schemas (FR-16) | ⏸️ blocked on Wave 1 | 030-036 ✅ generated (7 files) |
 | Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | ⏸️ blocked on Wave 2 ONLY (task 040 audit confirmed Wave 9 NOT a prerequisite — SessionSummarizeOrchestrator does NOT call ExecuteAnalysisAsync; only 1 production caller at AnalysisEndpoints.cs:261) | 040 ✅, 041-047 generated (8 files) |
 | Wave 5 | Existing-playbook backfill (FR-19, FR-20) | ⏸️ blocked on Wave 2 | 050-056 ✅ generated (7 files) |
@@ -49,7 +49,7 @@
 | 007 | ✅ | xUnit tests — payload binding + schema rendering + template substitution | bff-api, testing | yes | 003 |
 | 008 | ✅ | xUnit tests — temperature override + per-node prompt override | bff-api, testing | yes (with 007) | 007 |
 | 009 | ✅ | xUnit tests — error paths (missing prompt, malformed JSON, LLM error) | bff-api, testing | yes (with 007) | 007 |
-| 010 | (to be generated) | Wave 1 BFF publish + size check (NFR-01) + CVE scan (NFR-02) | bff-api, deploy | yes | 006, 009 |
+| 010 | ✅ | Wave 1 BFF publish + size check (NFR-01) + CVE scan (NFR-02) | bff-api, deploy | yes | 006, 009 |
 
 ## Wave 2 — Dispatch refactor + enum rename (FR-07 to FR-10)
 
