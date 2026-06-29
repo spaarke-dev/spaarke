@@ -1,7 +1,7 @@
 # R4 Task Index
 
 > **Project**: smart-todo-r4
-> **Last Updated**: 2026-06-24 (R4-110 ✅ merged via PR #419; closeout wave re-scoped per user decisions 2026-06-24)
+> **Last Updated**: 2026-06-29 (R4 closeout-wave complete; R4-092 flipped to ✅ by R4-116; only R4-117 wrap-up remains)
 > **Branch**: `work/smart-todo-r4-closeout` → master @ `cc1391c9a`
 > **Total Tasks**: 47 (was 46; +118 ribbon-deploy; R4-111 closed-no-action)
 > **Status**: 🔲 6 not-started (112, 113, 114, 115, 118 + 116/117 wrap-up) · ✅ R4-110 complete · 🚫 R4-111 closed-no-action · ❌ 0 blocked
@@ -18,7 +18,7 @@
 | R4-114 | 🔲 | Wire vitest for SmartTodo Code Page | 22 spec files exist with no runner |
 | R4-115 | 🔲 | SpeDocumentViewer stale bundle cleanup | — |
 | **R4-118** (NEW) | 🔲 | Deploy `sprk_wizard_commands.js` + audit other parent form ribbons | spaarkedev1 returns 404 on `/webresources/sprk_wizard_commands.js` — Matter "Create To Do" button defined but JS not deployed. Deploy script at `scripts/Deploy-WizardCommandsJs.ps1`. Audit which other parent entities (Project, Event, Invoice, WorkAssignment, Communication) need similar ribbon buttons added. |
-| R4-116 | 🔲 | R4-092 final deploy notes + flip to ✅ | Serial after 112-115, 118 |
+| R4-116 | ✅ | R4-092 final deploy notes + flip to ✅ | Closed 2026-06-29. R4-092 status flipped + 130-line closeout deploy block appended to 092 POML capturing all R4-110→118 outcomes + post-deploy search-filter hotfix. |
 | R4-117 | 🔲 | R4-098 wrap-up + lessons-learned | Serial after 116 |
 
 ---
@@ -162,7 +162,7 @@
 
 | Status | ID | Title | Tags | Parallel-Safe | Depends on | Blocks |
 |:---:|:---|---|---|:---:|---|---|
-| 🔄 | [092](092-deploy-all-affected-solutions.poml) | Deploy all affected solutions to spaarkedev1 — **IN PROGRESS** (2026-06-16: SmartTodo + SpaarkeAi + RegardingResolver v1.1.0 + dirty-check JS deployed; golden-path smoke test pending) | deploy, smoke-test | ❌ | all 020-084 | 093, 094 |
+| ✅ | [092](092-deploy-all-affected-solutions.poml) | Deploy all affected solutions to spaarkedev1 — **COMPLETE** (closed by R4-116 on 2026-06-29 at master `9d0ed559a`. Final wave: R4-110 height-chain + R4-112 RegardingResolver v1.2.0 Bug-1 fix + R4-113 dirty-check orphan delete + R4-118 sprk_wizard_commands.js + 2 icons + post-deploy search-filter hotfix. Full closeout block in POML.) | deploy, smoke-test | ❌ | all 020-084 | 093, 094 |
 | 🔲 | [093](093-ui-test-suite-nfr-validation.poml) | UI test suite for NFR-05 / NFR-07 / NFR-08 | ui-test, a11y, performance | ❌ | 092 | 098 |
 | ✅ | [094](094-grep-sweep-sprk-todoflag.poml) | Final grep sweep: 0 functional `sprk_todoflag` hits (2026-06-12; 45 comment/guard lines classified; stale SpeDocumentViewer bundle.js flagged → follow-up #6) | regression, grep | ❌ | ~~092~~ (re-sequenced first per user decision) | 098 |
 
