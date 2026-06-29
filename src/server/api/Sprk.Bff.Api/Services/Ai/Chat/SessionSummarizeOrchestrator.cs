@@ -1,4 +1,6 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
@@ -13,45 +15,49 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// (<c>POST /api/ai/chat/sessions/{sessionId}/summarize</c>) AND the
 /// natural-language agent-tool dispatch — by ensuring BOTH paths delegate to a SINGLE
 /// convergence method (<see cref="SummarizeSessionFilesAsync"/>) on this class, which now
-/// forwards to <see cref="IPlaybookExecutionEngine.ExecuteChatSummarizeAsync"/>.
+/// dispatches through the canonical playbook-orchestration triangle per ADR-013 (R7 task 091).
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>R6 Pillar 4 (D-A-17) refactor</b>: prior to R6 task 025, this orchestrator owned the
-/// full chat-Summarize streaming pipeline (RAG retrieval + Structured Outputs +
-/// <see cref="Streaming.IncrementalJsonParser"/> + telemetry) AND loaded the action seed
-/// via the <c>sprk_actioncode = "SUM-CHAT@v1"</c> alternate-key bypass because the playbook
-/// → node → action FK chain was broken. R6 task 024 (D-A-16) fixed the FK chain in
-/// Dataverse; R6 task 025 (this file) moves the streaming pipeline INTO
-/// <see cref="PlaybookExecutionEngine"/> and refactors this orchestrator to a thin
-/// pass-through that forwards to <see cref="IPlaybookExecutionEngine.ExecuteChatSummarizeAsync"/>.
+/// <b>R7 task 091 (FR-17) refactor</b>: removed the chat-streaming-specific
+/// <see cref="IPlaybookExecutionEngine.ExecuteChatSummarizeAsync"/> dispatch in favor of
+/// the canonical <see cref="IPlaybookOrchestrationService.ExecuteAsync"/> per ADR-013.
+/// Per task 090 design (notes/spikes/chat-summarize-migration-design.md) Option 1: the
+/// orchestrator injects <see cref="IPlaybookOrchestrationService"/> directly (in-zone
+/// per ADR-013 — <c>Services/Ai/Chat/</c> is AI-internal territory; the
+/// <see cref="IInvokePlaybookAi"/> facade aggregates internally and would have eliminated
+/// the per-token <see cref="FieldDelta"/> progressive UX). An inline SSE adapter
+/// translates <see cref="PlaybookStreamEvent"/> → <see cref="AnalysisChunk"/> sequence,
+/// preserving byte-equivalent on-the-wire shape for the chat client.
 /// </para>
 /// <para>
-/// <b>What stayed here</b> (orchestrator boundary responsibilities):
+/// <b>What stayed here</b> (orchestrator boundary responsibilities, unchanged from R5/R6):
 /// <list type="bullet">
 ///   <item>Public <see cref="SummarizeSessionFilesAsync"/> signature — UNCHANGED for downstream
-///         consumers (<c>SummarizeSessionEndpoint</c> + <c>InvokeSummarizePlaybookTool</c>).</item>
+///         consumers (<c>SummarizeSessionEndpoint</c> + future agent-tool dispatch).</item>
 ///   <item>Session lookup via <see cref="ChatSessionManager.GetSessionAsync"/> — orchestrator
-///         remains the chat-session boundary; the engine receives the resolved files manifest.</item>
+///         remains the chat-session boundary.</item>
 ///   <item>Argument validation at the chat-orchestration boundary (tenant + session non-empty;
-///         null request; null/empty file list semantics).</item>
+///         null request; ≤20-file cap per NFR-02).</item>
+///   <item>FR-1R-05 routing-table → typed-options fallback resolution chain (verbatim from
+///         chat-routing-redesign-r1 task 028d).</item>
 ///   <item>Null-Object kill-switch subclass (<see cref="NullSessionSummarizeOrchestrator"/>) —
 ///         construction via the protected ctor still works; override behavior unchanged.</item>
 /// </list>
 /// </para>
 /// <para>
-/// <b>What moved to <see cref="PlaybookExecutionEngine"/></b> (D-A-17):
+/// <b>What changed (R7 task 091)</b>:
 /// <list type="bullet">
-///   <item>Action config resolution — now FK-chain via
-///         <see cref="INodeService.GetNodesAsync"/> + <see cref="Spaarke.Dataverse.IGenericEntityService.RetrieveAsync"/>
-///         on the FK-resolved action ID; NO alternate-key lookup, NO
-///         <c>SummarizeActionCode</c> / <c>ActionEntityLogicalName</c> constants.</item>
-///   <item>RAG retrieval (with session-files filter preserved via
-///         <see cref="RagSearchOptions.SessionId"/>).</item>
-///   <item>Structured Outputs streaming + <see cref="Streaming.IncrementalJsonParser"/>
-///         field-delta emission (byte-equivalent <see cref="AnalysisChunk"/> shape preserved).</item>
-///   <item>FR-04 multi-file combined-summary interjection.</item>
-///   <item>R5 Summarize telemetry recording.</item>
+///   <item>Constructor swaps <see cref="IPlaybookExecutionEngine"/> for
+///         <see cref="IPlaybookOrchestrationService"/> +
+///         <see cref="IHttpContextAccessor"/>.</item>
+///   <item>FR-04 multi-file combined-summary interjection moved to this orchestrator — emitted
+///         BEFORE the playbook orchestration stream (it was previously inside the engine).</item>
+///   <item>Inline SSE adapter projects <see cref="PlaybookStreamEvent"/> events into
+///         <see cref="AnalysisChunk"/> shape: <c>NodeProgress</c> → <c>FromContent</c>,
+///         terminal <c>NodeCompleted</c> with structured output → <c>Completed</c>,
+///         <c>RunFailed/RunCancelled/NodeFailed</c> → <c>FromError</c>. Section + node-level
+///         events that don't map cleanly to the AnalysisChunk envelope are filtered out.</item>
 /// </list>
 /// </para>
 /// <para>
@@ -61,25 +67,13 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <c>RetrieveByAlternateKeyAsync</c> reference in this orchestrator.
 /// </para>
 /// <para>
-/// <b>FR-05 stable-ID resolution</b> (chat-routing-redesign-r1 task 015): the prior
-/// hardcoded <c>44285d15-1360-f111-ab0b-70a8a59455f4</c> GUID constant has been removed.
-/// The playbook is now resolved at runtime by looking up
-/// <see cref="WorkspaceOptions.ChatSummarizePlaybookId"/> (typed-options per ADR-018)
-/// through <see cref="IPlaybookLookupService.GetByIdAsync"/>, which queries the
-/// <c>sprk_playbookid</c> alternate key on <c>sprk_analysisplaybook</c> (Q&amp;A 2026-06-22 Q1)
-/// with 1-hour caching (ADR-014). This is the FIRST stable-ID consumer migration (spec
-/// FR-05) — no config override existed previously. Fail-fast on missing config — no
-/// hardcoded fallback at this convergence point per FR-26.
-/// </para>
-/// <para>
-/// <b>FR-1R-05 routing-table migration</b> (chat-routing-redesign-r1 task 028d): the
-/// resolution path now prefers <see cref="IConsumerRoutingService.ResolveAsync"/> with
+/// <b>FR-05 stable-ID resolution</b> (chat-routing-redesign-r1 task 015) + <b>FR-1R-05
+/// routing-table migration</b> (chat-routing-redesign-r1 task 028d): playbook ID resolved
+/// at runtime by preferring <see cref="IConsumerRoutingService.ResolveAsync"/> with
 /// <see cref="ConsumerTypes.ChatSummarize"/>, falling back to
 /// <see cref="WorkspaceOptions.ChatSummarizePlaybookId"/> when the routing table returns
-/// null (graceful-degrade for the FR-1R-06 deprecation window). FR-26 / FR-30 convergence
-/// invariants preserved — both slash <c>/summarize</c> and NL agent-tool dispatch end up
-/// here with the same resolved Guid; the typed-options fallback preserves the pre-028d
-/// behavior verbatim when no routing-table row matches.
+/// null (graceful-degrade for the FR-1R-06 deprecation window). 5-min TTL routing-cache
+/// (ADR-014) preserved; spec NFR-04 — no new invalidation logic introduced.
 /// </para>
 /// <para>
 /// <b>ADR-010</b>: concrete class with NO orchestrator-authored interface (unit tests target the
@@ -88,11 +82,27 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// (ADR-030 P3 Fail-Fast, registered in
 /// <c>AnalysisServicesModule.AddNullObjectsForCompoundOff</c>).
 /// </para>
+/// <para>
+/// <b>ADR-013 placement</b>: orchestrator lives in <c>Services/Ai/Chat/</c> (in-zone AI
+/// territory). Per refined ADR-013 (2026-05-20), in-zone code MAY inject AI-internal types
+/// (<see cref="IPlaybookOrchestrationService"/>) when the consumer use case demands it.
+/// Per-token <see cref="FieldDelta"/> streaming UX is the use case here — the
+/// <see cref="IInvokePlaybookAi"/> facade aggregates internally to a single
+/// <c>PlaybookInvocationResult</c> and is unsuitable for progressive SSE rendering.
+/// External CRUD code is still forbidden from injecting orchestration internals; the
+/// facade rule applies to the CRUD boundary, not in-zone consumers.
+/// </para>
 /// </remarks>
 public class SessionSummarizeOrchestrator
 {
+    /// <summary>FR-04 — multi-file combined-summary interjection emitted as the first
+    /// <see cref="AnalysisChunk.FromContent"/> chunk when the resolved file set is ≥2.</summary>
+    private const string CombinedSummaryInterjection =
+        "Multiple files selected — generating a combined summary across all of them.";
+
     private readonly ChatSessionManager _sessionManager;
-    private readonly IPlaybookExecutionEngine _executionEngine;
+    private readonly IPlaybookOrchestrationService _orchestrationService;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IPlaybookLookupService _playbookLookup;
     private readonly IConsumerRoutingService _consumerRouting;
     private readonly IOptions<WorkspaceOptions> _workspaceOptions;
@@ -100,14 +110,16 @@ public class SessionSummarizeOrchestrator
 
     public SessionSummarizeOrchestrator(
         ChatSessionManager sessionManager,
-        IPlaybookExecutionEngine executionEngine,
+        IPlaybookOrchestrationService orchestrationService,
+        IHttpContextAccessor httpContextAccessor,
         IPlaybookLookupService playbookLookup,
         IConsumerRoutingService consumerRouting,
         IOptions<WorkspaceOptions> workspaceOptions,
         ILogger<SessionSummarizeOrchestrator> logger)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
-        _executionEngine = executionEngine ?? throw new ArgumentNullException(nameof(executionEngine));
+        _orchestrationService = orchestrationService ?? throw new ArgumentNullException(nameof(orchestrationService));
+        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
         _workspaceOptions = workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions));
@@ -117,7 +129,7 @@ public class SessionSummarizeOrchestrator
     /// <summary>
     /// Protected ctor used only by <see cref="NullSessionSummarizeOrchestrator"/> so the
     /// kill-switch subclass can be constructed when the compound AI gate is OFF and
-    /// AI dependencies (<see cref="IPlaybookExecutionEngine"/>) are absent or not yet
+    /// AI dependencies (<see cref="IPlaybookOrchestrationService"/>) are absent or not yet
     /// resolvable. The Null override never reads the nulled fields — it throws
     /// <see cref="Configuration.FeatureDisabledException"/> before they are dereferenced.
     /// Matches the canonical pattern in <see cref="SprkChatAgentFactory"/> /
@@ -126,7 +138,8 @@ public class SessionSummarizeOrchestrator
     protected SessionSummarizeOrchestrator(ILogger<SessionSummarizeOrchestrator> logger)
     {
         _sessionManager = null!;
-        _executionEngine = null!;
+        _orchestrationService = null!;
+        _httpContextAccessor = null!;
         _playbookLookup = null!;
         _consumerRouting = null!;
         _workspaceOptions = null!;
@@ -141,11 +154,12 @@ public class SessionSummarizeOrchestrator
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// SSE-shaped chunks (FR-04 interjection for multi-file requests → zero or more
-    /// <see cref="AnalysisChunk.FromDelta"/> events → terminal
+    /// per-token / per-field events → terminal
     /// <see cref="AnalysisChunk.Completed(DocumentAnalysisResult)"/> or
-    /// <see cref="AnalysisChunk.FromError"/>). The exact chunk shapes and ordering are
-    /// produced by <see cref="IPlaybookExecutionEngine.ExecuteChatSummarizeAsync"/> — this
-    /// orchestrator forwards them unchanged.
+    /// <see cref="AnalysisChunk.FromError"/>). The exact chunk shapes are produced by an
+    /// inline adapter that projects <see cref="PlaybookStreamEvent"/> stream from
+    /// <see cref="IPlaybookOrchestrationService.ExecuteAsync"/> into the
+    /// <see cref="AnalysisChunk"/> envelope.
     /// </returns>
     public virtual async IAsyncEnumerable<AnalysisChunk> SummarizeSessionFilesAsync(
         SummarizeSessionFilesRequest request,
@@ -155,9 +169,9 @@ public class SessionSummarizeOrchestrator
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId, $"{nameof(request)}.{nameof(request.TenantId)}");
         ArgumentException.ThrowIfNullOrWhiteSpace(request.SessionId, $"{nameof(request)}.{nameof(request.SessionId)}");
 
-        // NFR-02 — early hard cap (defense-in-depth at the orchestrator boundary; the engine
-        // re-checks symmetrically). Surfaces ArgumentException to the endpoint mapping layer
-        // for 400 ProblemDetails — same shape callers expected pre-R6 task 025.
+        // NFR-02 — early hard cap (defense-in-depth at the orchestrator boundary). Surfaces
+        // ArgumentException to the endpoint mapping layer for 400 ProblemDetails — same shape
+        // callers expected pre-R7.
         if (request.FileIds is { Count: > ChatSession.MaxUploadedFiles })
         {
             throw new ArgumentException(
@@ -166,31 +180,28 @@ public class SessionSummarizeOrchestrator
                 nameof(request));
         }
 
-        // Load the chat session at the orchestrator boundary. The engine accepts a resolved
-        // files manifest; resolving here keeps the engine session-store-agnostic and matches
-        // the pre-R6 behavior (session-not-found surfaces as InvalidOperationException →
-        // endpoint maps to 404).
+        // Load the chat session at the orchestrator boundary. Session-not-found surfaces as
+        // InvalidOperationException → endpoint maps to 404 (pre-R7 behavior preserved).
         ChatSession? session = await _sessionManager
             .GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
             .ConfigureAwait(false);
         if (session is null)
         {
-            // Preserved pre-R6 behavior — endpoint catches InvalidOperationException and maps
-            // to 404 ProblemDetails. Do NOT silently turn into an SSE error chunk.
             throw new InvalidOperationException(
                 $"Chat session '{request.SessionId}' not found for tenant '{request.TenantId}'.");
         }
 
         var uploadedFiles = session.UploadedFiles ?? Array.Empty<ChatSessionFile>();
+        var resolvedFileIds = ResolveEffectiveFileIds(request.FileIds, uploadedFiles);
 
-        // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028d):
-        // Prefer IConsumerRoutingService.ResolveAsync(ConsumerTypes.ChatSummarize) which
-        // reads the owner-managed sprk_playbookconsumer Dataverse table (5-min TTL cache
-        // per ADR-014). When the routing table returns null (no matching row), fall back
-        // to the FR-05 stable-ID resolution path (WorkspaceOptions.ChatSummarizePlaybookId
-        // via IPlaybookLookupService.GetByIdAsync) for the FR-1R-06 deprecation window.
-        // When BOTH are unavailable, fail fast — this is the chat /summarize convergence
-        // point per R6 FR-26 / FR-30 and must not silently downgrade.
+        // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028d): prefer
+        // IConsumerRoutingService.ResolveAsync(ConsumerTypes.ChatSummarize) which reads the
+        // owner-managed sprk_playbookconsumer Dataverse table (5-min TTL cache per ADR-014).
+        // When the routing table returns null (no matching row), fall back to the FR-05
+        // stable-ID resolution path (WorkspaceOptions.ChatSummarizePlaybookId via
+        // IPlaybookLookupService.GetByIdAsync) for the FR-1R-06 deprecation window. When BOTH
+        // are unavailable, fail fast — this is the chat /summarize convergence point per
+        // R6 FR-26 / FR-30 and must not silently downgrade.
         //
         // Hardening (code-review S-5): pass ConsumerTypes.ChatSummarize, NEVER the literal
         // string "chat-summarize" — compile-time typo defense.
@@ -236,36 +247,228 @@ public class SessionSummarizeOrchestrator
                 resolvedPlaybookId);
         }
 
-        var engineRequest = new ChatSummarizeRequest(
-            TenantId: request.TenantId,
-            SessionId: request.SessionId,
-            FileIds: request.FileIds,
-            StyleHint: request.StyleHint,
-            UploadedFiles: uploadedFiles,
-            Path: request.Path,
-            CorrelationId: request.CorrelationId);
+        // FR-04 — multi-file combined-summary interjection emitted BEFORE the playbook stream.
+        // Moved into the orchestrator at R7 task 091 (previously inside PlaybookExecutionEngine
+        // when the orchestrator forwarded to ExecuteChatSummarizeAsync). The interjection is a
+        // user-facing UX signal; the playbook stream that follows is the actual structured
+        // summarization output.
+        if (resolvedFileIds.Count >= 2)
+        {
+            yield return AnalysisChunk.FromContent(CombinedSummaryInterjection);
+        }
+
+        // Build the PlaybookRunRequest. Parameters carry the session-files manifest +
+        // discriminators per task 090 design §3.4 — deterministic identifiers only (ADR-015).
+        var playbookRequest = new PlaybookRunRequest
+        {
+            PlaybookId = resolvedPlaybookId,
+            // Session-files filter passes through parameters (the chat-summarize playbook's
+            // RAG node reads sessionFilesManifest + sessionId); DocumentIds remains empty.
+            DocumentIds = Array.Empty<Guid>(),
+            Parameters = BuildParameters(request, session, uploadedFiles, resolvedFileIds)
+        };
+
+        // Resolve HttpContext for OBO auth in downstream node executors (ADR-013 — HttpContext
+        // is an ASP.NET primitive, not an AI-internal type per ADR-013 §). Per task 090 design
+        // §3.3 Option A: inject IHttpContextAccessor (preserves the orchestrator's public
+        // surface — caller doesn't need to change to pass HttpContext explicitly).
+        var httpContext = _httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException(
+                "SessionSummarizeOrchestrator requires an active HttpContext for OBO authentication " +
+                "in downstream playbook node executors. HttpContextAccessor.HttpContext was null " +
+                "— is the orchestrator being invoked outside of an HTTP request scope?");
 
         _logger.LogDebug(
-            "R6 SessionSummarizeOrchestrator forwarding to PlaybookExecutionEngine.ExecuteChatSummarizeAsync " +
-            "(playbookId={PlaybookId} tenant={TenantId} session={SessionId} path={Path})",
-            resolvedPlaybookId, request.TenantId, request.SessionId, request.Path.ToTelemetryValue());
+            "R7 SessionSummarizeOrchestrator dispatching to IPlaybookOrchestrationService.ExecuteAsync " +
+            "(playbookId={PlaybookId} tenant={TenantId} session={SessionId} fileCount={FileCount} path={Path})",
+            resolvedPlaybookId, request.TenantId, request.SessionId, resolvedFileIds.Count,
+            request.Path.ToTelemetryValue());
 
-        // Forward the engine stream unchanged. The engine owns chunk-shape contract, telemetry,
-        // and all preserved behaviors (FR-04 interjection, ADR-014 session filter, Structured
-        // Outputs schema, field-delta streaming, mid-stream error → FromError, terminal Completed).
-        await foreach (var chunk in _executionEngine
-            .ExecuteChatSummarizeAsync(resolvedPlaybookId, engineRequest, cancellationToken)
+        // Stream events from the orchestration service and project each into the AnalysisChunk
+        // envelope via the inline SSE adapter (TranslateEventToChunk). Events that don't map
+        // cleanly (e.g., NodeStarted, RunStarted) are filtered out — only events with a
+        // user-visible payload reach the chat client. Per-token FieldDelta UX is preserved
+        // because we yield as events arrive (no aggregation).
+        await foreach (var ev in _orchestrationService
+            .ExecuteAsync(playbookRequest, httpContext, cancellationToken)
             .ConfigureAwait(false))
         {
-            yield return chunk;
+            var chunk = TranslateEventToChunk(ev);
+            if (chunk is not null)
+            {
+                yield return chunk;
+            }
         }
+    }
+
+    /// <summary>
+    /// SSE adapter — projects a <see cref="PlaybookStreamEvent"/> into the
+    /// <see cref="AnalysisChunk"/> envelope shape that <see cref="SummarizeSessionEndpoint"/>
+    /// already writes to the wire. Returns <c>null</c> for events that have no chat-client-visible
+    /// payload (lifecycle events like RunStarted / NodeStarted), so the caller can filter them
+    /// without inflating the SSE stream.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Mapping table</b> (R7 task 091):
+    /// </para>
+    /// <list type="table">
+    ///   <listheader><term>PlaybookStreamEvent.Type</term><description>AnalysisChunk projection</description></listheader>
+    ///   <item><term><see cref="PlaybookEventType.NodeProgress"/></term>
+    ///     <description><see cref="AnalysisChunk.FromContent"/> with the event's Content payload —
+    ///     this is the per-token streaming surface the chat UX relies on for progressive rendering.</description></item>
+    ///   <item><term><see cref="PlaybookEventType.NodeCompleted"/> + DeliverOutput + StructuredData</term>
+    ///     <description><see cref="AnalysisChunk.Completed(DocumentAnalysisResult)"/> when the terminal
+    ///     node's structured output deserializes to <see cref="DocumentAnalysisResult"/>; else
+    ///     <see cref="AnalysisChunk.Completed(string)"/> with TextContent. Mid-run NodeCompleted
+    ///     events are filtered (returns null) — only the terminal DeliverOutput surfaces a
+    ///     "complete" event.</description></item>
+    ///   <item><term><see cref="PlaybookEventType.RunFailed"/> / <see cref="PlaybookEventType.NodeFailed"/></term>
+    ///     <description><see cref="AnalysisChunk.FromError"/> with the orchestration-layer error
+    ///     message.</description></item>
+    ///   <item><term><see cref="PlaybookEventType.RunCancelled"/></term>
+    ///     <description><see cref="AnalysisChunk.FromError"/> ("Summarization was cancelled.").</description></item>
+    ///   <item><term>All other event types</term>
+    ///     <description><c>null</c> (filtered out — RunStarted/RunCompleted/NodeStarted/NodeSkipped/
+    ///     SectionStarted/SectionData/SectionCompleted/UnrenderedTemplateDetected have no
+    ///     AnalysisChunk equivalent in the chat-summarize wire contract).</description></item>
+    /// </list>
+    /// <para>
+    /// <b>Per-token UX preservation</b>: the chat-summarize playbook's AI node emits
+    /// <see cref="PlaybookEventType.NodeProgress"/> events per LLM-streamed token (the
+    /// existing node-executor contract). Each maps to one <see cref="AnalysisChunk.FromContent"/>
+    /// emission, preserving the byte-equivalent on-the-wire cadence the chat client UX depends on.
+    /// </para>
+    /// </remarks>
+    private static AnalysisChunk? TranslateEventToChunk(PlaybookStreamEvent ev)
+    {
+        switch (ev.Type)
+        {
+            case PlaybookEventType.NodeProgress:
+                // Per-token streaming surface. NodeProgress events without content
+                // are filtered (defensive — should not happen in practice).
+                return string.IsNullOrEmpty(ev.Content)
+                    ? null
+                    : AnalysisChunk.FromContent(ev.Content);
+
+            case PlaybookEventType.NodeCompleted when ev.NodeOutput is { Success: true, IsDeliverOutput: true } output:
+                // Terminal DeliverOutput → "complete" chunk. Prefer the structured payload
+                // (binds to DocumentAnalysisResult); fall back to text-only when StructuredData
+                // doesn't deserialize (model drift) or is absent.
+                if (output.StructuredData.HasValue)
+                {
+                    try
+                    {
+                        var result = output.StructuredData.Value.Deserialize<DocumentAnalysisResult>();
+                        if (result is not null)
+                        {
+                            return AnalysisChunk.Completed(result);
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        // Graceful degrade — fall through to text-only completion.
+                    }
+                }
+
+                return !string.IsNullOrEmpty(output.TextContent)
+                    ? AnalysisChunk.Completed(output.TextContent)
+                    : null;
+
+            case PlaybookEventType.RunFailed:
+                return AnalysisChunk.FromError(ev.Error ?? "Summarization failed.");
+
+            case PlaybookEventType.NodeFailed:
+                // Per-node failure surfaces as a stream-level error so the chat client renders
+                // the failure rather than silently terminating mid-stream.
+                return AnalysisChunk.FromError(ev.Error ?? "A summarization step failed.");
+
+            case PlaybookEventType.RunCancelled:
+                return AnalysisChunk.FromError("Summarization was cancelled.");
+
+            default:
+                // Filtered: RunStarted, NodeStarted, NodeSkipped, NodeCompleted (non-terminal),
+                // SectionStarted, SectionData, SectionCompleted, RunCompleted (no chat payload —
+                // the terminal NodeCompleted+DeliverOutput already emitted the Completed chunk),
+                // UnrenderedTemplateDetected (server-side observability only).
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the effective file-id list for the request: prefers explicit
+    /// <see cref="SummarizeSessionFilesRequest.FileIds"/>, falls back to the session's full
+    /// uploaded-files manifest (FR-08). Returns an empty list when neither carries any IDs.
+    /// </summary>
+    private static IReadOnlyList<string> ResolveEffectiveFileIds(
+        IReadOnlyList<string>? explicitFileIds,
+        IReadOnlyList<ChatSessionFile> uploadedFiles)
+    {
+        if (explicitFileIds is { Count: > 0 })
+        {
+            return explicitFileIds;
+        }
+
+        if (uploadedFiles.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        return uploadedFiles.Select(f => f.FileId).ToList();
+    }
+
+    /// <summary>
+    /// Builds the parameter dictionary forwarded to <see cref="IPlaybookOrchestrationService"/>
+    /// per task 090 design §3.4. All keys + values are deterministic identifiers or enumerable
+    /// shapes per ADR-015 — NEVER user message content.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> BuildParameters(
+        SummarizeSessionFilesRequest request,
+        ChatSession session,
+        IReadOnlyList<ChatSessionFile> uploadedFiles,
+        IReadOnlyList<string> resolvedFileIds)
+    {
+        var manifest = uploadedFiles
+            .Where(f => resolvedFileIds.Contains(f.FileId, StringComparer.Ordinal))
+            .Select(f => new
+            {
+                f.FileId,
+                f.FileName,
+                f.ContentType,
+                f.SizeBytes,
+                f.SearchDocumentIdsCsv,
+                UploadedAt = f.UploadedAt.ToString("O")
+            })
+            .ToList();
+
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            // Identity (ADR-014 tenant/session isolation)
+            ["tenantId"] = request.TenantId,
+            ["sessionId"] = request.SessionId,
+
+            // Optional style hint (per FR-08)
+            ["styleHint"] = request.StyleHint ?? string.Empty,
+
+            // File manifest — JSON-serialized so the playbook's RAG node can filter on the
+            // explicit session+file scope.
+            ["sessionFilesManifest"] = JsonSerializer.Serialize(manifest),
+
+            // Convenience scalars for {{template}} conditionals.
+            ["fileCount"] = resolvedFileIds.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["isMultiFile"] = (resolvedFileIds.Count >= 2).ToString().ToLowerInvariant(),
+
+            // Path discriminator preserved for telemetry consistency
+            ["invocationPath"] = request.Path.ToTelemetryValue(),
+
+            // Correlation propagation (NFR-17)
+            ["correlationId"] = request.CorrelationId ?? string.Empty
+        };
     }
 }
 
 /// <summary>
 /// Request shape consumed by <see cref="SessionSummarizeOrchestrator.SummarizeSessionFilesAsync"/>.
-/// The orchestrator forwards this (plus the resolved session-files manifest) to
-/// <see cref="IPlaybookExecutionEngine.ExecuteChatSummarizeAsync"/>.
 /// </summary>
 /// <param name="TenantId">Tenant ID (ADR-014). Required.</param>
 /// <param name="SessionId">Chat session ID (ADR-014; task 004 manifest key). Required.</param>
@@ -304,7 +507,7 @@ public enum SummarizeInvocationPath
     /// <summary>Direct endpoint dispatch (<c>POST /api/ai/chat/sessions/{id}/summarize</c>).</summary>
     DirectEndpoint = 0,
 
-    /// <summary>Agent-tool dispatch (<c>InvokeSummarizePlaybookTool</c>).</summary>
+    /// <summary>Agent-tool dispatch (historical; reserved for future re-introduction).</summary>
     AgentTool = 1,
 }
 

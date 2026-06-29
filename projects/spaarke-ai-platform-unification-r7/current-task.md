@@ -15,6 +15,32 @@
 | **Status** | not-started |
 | **Next Action** | Begin Step 1 of task 033 — implement GET endpoint that aggregates all 25 executor schemas (ordered by ExecutorTypeValue) via INodeExecutorRegistry.GetAllExecutors().Select(e => e.GetConfigSchema()). |
 
+### Task 091 completion note (2026-06-28, Wave 9)
+
+✅ **Task 091 COMPLETE** (concurrent with task 032 Wave 3 + task 042 Wave 4 in parallel worktrees per coordination matrix — no file overlap). **`SessionSummarizeOrchestrator` migrated from `IPlaybookExecutionEngine.ExecuteChatSummarizeAsync` to `IPlaybookOrchestrationService.ExecuteAsync` canonical triangle per ADR-013 + FR-17.** Per task 090 design Option 1 (in-zone direct injection preserves per-token FieldDelta UX; `IInvokePlaybookAi` facade would have aggregated and broken progressive SSE rendering).
+
+**Files changed**: 3 files (1 source + 2 tests).
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs` — 327 → 529 lines (+202; refactor + extensive XML doc on migration + SSE adapter contract). Ctor signature swap: `IPlaybookExecutionEngine` → `IPlaybookOrchestrationService` + `IHttpContextAccessor` added (7 ctor params — at ADR-010 documented threshold; each justified). FR-04 multi-file interjection MOVED into orchestrator (was inside engine). Inline `TranslateEventToChunk` SSE adapter projects `PlaybookStreamEvent` → `AnalysisChunk` envelope: `NodeProgress` → `FromContent` (per-token), terminal `NodeCompleted`+`IsDeliverOutput`+`StructuredData` → `Completed(DocumentAnalysisResult)`, `RunFailed`/`NodeFailed` → `FromError`, `RunCancelled` → `FromError("Summarization was cancelled.")`, lifecycle events (RunStarted/NodeStarted/RunCompleted/NodeSkipped/section_*) filtered (return null). `BuildParameters` builds the parameter dictionary per task 090 §3.4: deterministic IDs + sessionFilesManifest JSON + style hint + counts + path discriminator + correlation ID (ADR-015 binding).
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestratorTests.cs` — restructured for new ctor (19 [Fact]s; was 17). Added 6 SSE-adapter tests + 2 dispatch-via-orchestration tests; removed 2 engine-only tests (FK-chain regression + byte-equivalent pass-through replaced by SSE adapter contract tests). All FR-1R-05 routing-table + fallback + fail-fast tests PRESERVED verbatim.
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestrator.PathA5.IntegrationTest.cs` — NEW (350 lines). Per user task 091 instructions, covers 3 of 7 scenarios from task 090 design §5.2: (1) routing-table HIT → IPlaybookOrchestrationService dispatch with per-token SSE preservation + terminal Completed chunk via Structured Outputs deserialization, (4) NullSessionSummarizeOrchestrator kill-switch (ADR-030 P3) throws FeatureDisabledException on first MoveNextAsync without dereferencing new fields, (7) mid-stream RunFailed → terminal AnalysisChunk.FromError (preserves chat-client failure-state contract).
+
+**Build**: `dotnet build src/server/api/Sprk.Bff.Api/` clean (0 errors / 19 pre-existing warnings / 0 new). `dotnet build tests/unit/Sprk.Bff.Api.Tests/` clean (0 errors / 20 pre-existing warnings / 0 new).
+
+**Test verification**: `dotnet test --filter FullyQualifiedName~SessionSummarizeOrchestrator` → **22/22 PASS in 1.36 sec** (19 unit + 3 PathA5 integration). Broader regression sweep `--filter FullyQualifiedName~Chat` → **1217/1229 PASS** (12 pre-existing skips, 0 failures, 0 regressions).
+
+**Grep verification**: zero `ExecuteAnalysisAsync` calls remain in `Services/Ai/Chat/` (was already zero per task 040 audit — confirms task 091 doesn't reintroduce the legacy direct path).
+
+**Quality gates** (FULL rigor Step 9.5): 
+- `/code-review` PASS: 0 critical, 0 warnings, 1 cosmetic suggestion (file length 529 LOC above 500 threshold — XML doc commentary on R7 migration is load-bearing; left inline for R7 cycle); AI smell score **0/5**; quality direction = **Architecturally Improved** (closes chat-summarize outlier per ADR-013).
+- `/adr-check` PASS: 12 ADRs Compliant (ADR-001 / 007 / 008 / 009 / 010 / 013 refined / 014 / 015 / 028 / 030 / 032 / 038); BFF Hygiene §10 9/9 sub-rules compliant (Placement Justification stated in class XML, in-zone ADR-013 exception correctly applied + documented, asymmetric-registration audit clean). 0 warnings, 0 violations.
+
+**Per-task publish-size**: SKIPPED per POML (Wave 4 task 047 owns cumulative; no NuGet packages added; small refactor + ~200 lines comments).
+**Per-task CVE scan**: N/A (no new packages added; pre-existing Kiota 1.21.x CVEs unchanged per Wave 1 task 010 evidence).
+
+**Unblocks**: Wave 4 task 042 (✅ already complete via parallel worktree per coordination matrix). FR-17 (chat-summarize via consumer routing + IPlaybookOrchestrationService canonical triangle) acceptance criteria satisfied; pending only task 092 (sprk_playbookconsumer row creation) for end-to-end environment validation.
+
+**Note on parallel-session conflict**: Task 042 noted my `PathA5.IntegrationTest.cs` was "untracked, task 091 territory" causing their `dotnet test` full-run to be blocked. That file is now committed by this task; subsequent BFF test runs will succeed.
+
 ### Task 042 completion note (2026-06-28, Wave 4)
 
 ✅ **Task 042 COMPLETE** (concurrent with task 032 Wave 3 + task 091 Wave 9 in parallel worktrees per coordination matrix — no file overlap). DELETED `AnalysisOrchestrationService.ExecuteAnalysisAsync` (~190 LOC method body, the FR-11 deletion target) + interface declaration on `IAnalysisOrchestrationService` (single row, 6 surviving methods preserved for live consumers ContinueAnalysis/SaveWorkingDoc/Export/Get/Resume/ExecutePlaybook) + entire `#region ExecuteAnalysisAsync Tests` block in unit test fixture (6 deleted test methods, ~196 LOC, per ADR-038 §7 build-vs-maintain criteria — production under test was deleted, replacement contract coverage at integration layer) + `ExecuteAnalysisAsync` method on `MockAnalysisOrchestrationService` in integration test (mock class itself preserved because interface still consumed by ResumeAnalysis/ExecutePlaybook endpoints + AnalysisQueryHandler + WorkingDocumentHandler) + XML doc cref in `IStreamingAnalysisToolHandler.cs` rewritten to point at `IPlaybookOrchestrationService.ExecuteAsync` (canonical per ADR-013) + transitional state comments in `AnalysisEndpoints.cs` (4 lines) updated to reflect post-deletion reality.

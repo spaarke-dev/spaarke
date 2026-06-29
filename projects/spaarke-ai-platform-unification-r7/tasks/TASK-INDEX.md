@@ -26,7 +26,7 @@
 | Wave 6 | Documentation deletion + updates (FR-28 to FR-31) | 🔄 in-progress (060 ✅ audit/disposition; 061 ✅ DELETE §5 from playbook-runtime.md; 062-068 pending) | 060-069 ✅ generated (10 files); 060 ✅, 061 ✅ executed |
 | Wave 7 | Skill rewrites (FR-32, FR-33) | ⏸️ blocked on Wave 2 | 070-075 ✅ generated (6 files) |
 | Wave 8 | Playbook Builder UI updates (FR-21 to FR-27) | ⏸️ blocked on Wave 2 + Wave 3 | 080-089d ✅ generated (14 files) |
-| Wave 9 | Consumer migration (FR-17, FR-18) | 🔄 in-progress (090 ✅ audit/design complete 2026-06-28; 091-096 pending) | 090 ✅, 091-096 generated (7 files) |
+| Wave 9 | Consumer migration (FR-17, FR-18) | 🔄 in-progress (090 ✅ audit/design; 091 ✅ FR-17 SessionSummarizeOrchestrator migrated to IPlaybookOrchestrationService canonical triangle; 092-096 pending) | 090 ✅, 091 ✅, 092-096 generated (7 files) |
 | Wave 10 | Wrap-up + R4 graduation gate close | ⏸️ blocked on all waves | 100, 101, 090-project-wrap-up ✅ generated (3 files) |
 
 **Total: 82 POML files generated. Ready for Wave 1 execution.**
@@ -181,7 +181,7 @@
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
 | 090 | ✅ | Audit SessionSummarizeOrchestrator caller graph; design Path A.5 migration | audit, bff-api | yes | 024 |
-| 091 | ⏸️ | Migrate SessionSummarizeOrchestrator to IConsumerRoutingService + IInvokePlaybookAi (FR-17) | bff-api, code-impl | yes | 090 |
+| 091 | ✅ | Migrate SessionSummarizeOrchestrator to IConsumerRoutingService + IInvokePlaybookAi (FR-17) | bff-api, code-impl | yes | 090 |
 | 092 | ⏸️ | Add chat-summarize row to sprk_playbookconsumer table | dataverse | yes | 091 |
 | 093 | ✅ | Audit Playbook Library Code Page modal current routing | audit, code-page | yes | — |
 | 094 | ⏸️ | Wire Library modal into spaarke-ai chat surface (FR-18) | code-page, ui | yes | 093 |
