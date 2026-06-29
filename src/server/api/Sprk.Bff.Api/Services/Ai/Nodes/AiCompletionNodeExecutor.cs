@@ -16,15 +16,18 @@
 //   NodeOutput.Ok / .Error). The one addition vs EntityNameValidator: inject IOpenAiClient
 //   (Singleton-safe). No IServiceScopeFactory — no Scoped deps required.
 //
-// SCAFFOLD STATUS (task 002):
-//   - Class compiles and registers in DI.
+// IMPLEMENTATION STATUS (Wave 1 tasks 002 → 005 complete):
+//   - Class compiles and registers in DI as Singleton (UNCONDITIONAL per CLAUDE.md §F.1).
 //   - Validate() enforces FR-13 require/prohibit invariants (Action FK + SystemPrompt +
-//     OutputSchema + OutputVariable required; Tool prohibited).
-//   - ExecuteAsync() is a deliberate skeleton — returns InternalError pointing to the
-//     implementing tasks. Tasks 003 + 004 add the PromptSchemaOverrideMerger plug-in,
-//     IOpenAiClient.GetStructuredCompletionRawAsync call, and NodeOutput.StructuredData
-//     binding. Task 005 fills in the full Validate() error catalog. Task 006 wires the
-//     PlaybookOrchestrationService dispatch path (Wave 2 enum rename / dispatch refactor).
+//     OutputSchema + OutputVariable required; Tool + Document prohibited). Error messages
+//     match the POML literal contract (Playbook Builder Wave 8 UI surface). [task 005]
+//   - ExecuteAsync() end-to-end: PromptSchemaOverrideMerger plug-in [task 003] +
+//     PromptSchemaRenderer render [task 003] +
+//     IOpenAiClient.GetStructuredCompletionRawAsync call [task 004] +
+//     JsonDocument.Parse + RootElement.Clone → NodeOutput.StructuredData binding [task 004].
+//   - Privacy-safe telemetry per ADR-015 (lengths + IDs only; never prompt/response content).
+//   - Task 006 wires the PlaybookOrchestrationService dispatch path (Wave 2 enum rename /
+//     dispatch refactor); tasks 007-009 add unit tests for happy-path + error mapping.
 //
 // Reference: projects/spaarke-ai-platform-unification-r7/spec.md FR-12, FR-13;
 //            projects/spaarke-ai-platform-unification-r7/notes/spikes/aicompletion-pattern-decision.md
@@ -64,11 +67,14 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 ///   R4 <c>/narrate</c> have no document context.</description></item>
 /// </list>
 /// <para>
-/// SCAFFOLD STATUS: task 002 delivers the class shape, ctor, Validate() enforcement of the
-/// FR-13 require/prohibit invariants, and an ExecuteAsync() skeleton. Full
-/// <c>IOpenAiClient.GetStructuredCompletionRawAsync</c> call + <c>PromptSchemaOverrideMerger</c>
-/// plug-in + <see cref="NodeOutput.StructuredData"/> binding land in tasks 003 + 004. Task 005
-/// expands the Validate() error catalog. Unit tests follow in tasks 007–009.
+/// IMPLEMENTATION (Wave 1 task 004 complete): ExecuteAsync calls
+/// <see cref="IOpenAiClient.GetStructuredCompletionRawAsync"/> with the
+/// (rendered prompt, OutputSchemaJson, Temperature, schemaName) tuple produced by the
+/// PromptSchemaOverrideMerger + PromptSchemaRenderer pipeline, parses the raw JSON response,
+/// and binds the cloned <see cref="JsonElement"/> to <see cref="NodeOutput.StructuredData"/>
+/// alongside the raw JSON text on <see cref="NodeOutput.TextContent"/>. Telemetry is
+/// privacy-safe per ADR-015 (lengths + IDs only; never prompt/response content). Unit tests
+/// follow in Wave 1 tasks 007–009.
 /// </para>
 /// </remarks>
 public sealed class AiCompletionNodeExecutor : INodeExecutor
@@ -196,7 +202,7 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public Task<NodeOutput> ExecuteAsync(
+    public async Task<NodeOutput> ExecuteAsync(
         NodeExecutionContext context,
         CancellationToken cancellationToken)
     {
@@ -218,12 +224,12 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
             if (!validation.IsValid)
             {
                 activity?.SetTag("node.outcome", "validation_failed");
-                return Task.FromResult(NodeOutput.Error(
+                return NodeOutput.Error(
                     context.Node.Id,
                     context.Node.OutputVariable,
                     string.Join("; ", validation.Errors),
                     NodeErrorCodes.ValidationFailed,
-                    NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow)));
+                    NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
             }
 
             // ─────────────────────────────────────────────────────────────────────────
@@ -314,78 +320,120 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
             activity?.SetTag("output_schema.length", outputSchemaJson.Length);
 
             // ─────────────────────────────────────────────────────────────────────────
-            // Task 004 binding contract — LLM call + NodeOutput.StructuredData binding.
+            // Task 004 (R7 spaarke-ai-platform-unification-r7 / FR-12):
+            //   IOpenAiClient.GetStructuredCompletionRawAsync invocation + JsonElement binding.
             //
-            // The locals below are FULLY STAGED for the task-004 call. Task 004 should:
-            //   a) replace this block with the await call
-            //   b) parse the returned raw JSON once + clone the root JsonElement
-            //   c) return NodeOutput.Ok with structured data + textContent = rawJson
+            // Per ADR-013 the executor is INSIDE the AI internals boundary, so a direct
+            // IOpenAiClient dependency is appropriate — no facade. The call uses constrained
+            // decoding (response_format: json_schema) so the returned string is guaranteed valid
+            // JSON conforming to outputSchemaJson. JsonDocument.Parse should only fail in
+            // pathological cases (Azure OpenAI returns malformed JSON despite strict mode); we
+            // still defensively catch JsonException to surface a clean error.
             //
-            // The exact call site:
-            //
-            //   var rawJson = await _openAiClient.GetStructuredCompletionRawAsync(
-            //       prompt:          rendered.PromptText,
-            //       jsonSchema:      BinaryData.FromString(outputSchemaJson),
-            //       schemaName:      schemaName,
-            //       model:           context.ModelDeploymentId?.ToString(),
-            //       maxOutputTokens: context.MaxTokens,
-            //       temperature:     effectiveTemperature,
-            //       cancellationToken: cancellationToken);
-            //
-            //   using var doc      = JsonDocument.Parse(rawJson);
-            //   var structuredData = doc.RootElement.Clone();
-            //
-            //   return NodeOutput.Ok(
-            //       nodeId:         context.Node.Id,
-            //       outputVariable: context.Node.OutputVariable,
-            //       data:           structuredData,
-            //       textContent:    rawJson,
-            //       metrics:        NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+            // CancellationToken is forwarded into the SDK call so caller-driven cancellation
+            // propagates (per task 004 acceptance criterion).
             // ─────────────────────────────────────────────────────────────────────────
+            var rawJson = await _openAiClient.GetStructuredCompletionRawAsync(
+                prompt:            rendered.PromptText,
+                jsonSchema:        BinaryData.FromString(outputSchemaJson),
+                schemaName:        schemaName,
+                model:             context.ModelDeploymentId?.ToString(),
+                maxOutputTokens:   context.MaxTokens,
+                temperature:       effectiveTemperature,
+                cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
 
-            // Suppress unused-warning on rendered/schemaName/effectiveTemperature locals while
-            // task 004 is pending. Discarding here makes the staging contract explicit + readable.
-            _ = rendered;
-            _ = schemaName;
-            _ = effectiveTemperature;
-            _ = outputSchemaJson;
+            // Parse the response once + clone the root element. Cloning detaches the JsonElement
+            // from the disposed JsonDocument so it remains usable downstream in NodeOutput.
+            JsonElement structuredData;
+            try
+            {
+                using var doc = JsonDocument.Parse(rawJson);
+                structuredData = doc.RootElement.Clone();
+            }
+            catch (JsonException jsonEx)
+            {
+                // Privacy-safe: log only metadata (length + exception type), never the response body.
+                _logger.LogError(jsonEx,
+                    "AiCompletion node {NodeId} (Action {ActionId}) received malformed JSON from LLM: " +
+                    "RawJsonLength={RawJsonLength}, ExceptionType={ExceptionType}",
+                    context.Node.Id,
+                    context.Action.Id,
+                    rawJson.Length,
+                    jsonEx.GetType().Name);
 
-            activity?.SetTag("node.outcome", "not_implemented");
-            return Task.FromResult(NodeOutput.Error(
+                activity?.SetTag("node.outcome", "malformed_json");
+                activity?.SetStatus(ActivityStatusCode.Error, "AI completion returned malformed JSON");
+                return NodeOutput.Error(
+                    context.Node.Id,
+                    context.Node.OutputVariable,
+                    "AI completion returned malformed JSON",
+                    NodeErrorCodes.InternalError,
+                    NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+            }
+
+            // Privacy-safe success telemetry per ADR-015: lengths + IDs only, never content.
+            _logger.LogInformation(
+                "AiCompletion node {NodeId} (Action {ActionId}) completed: " +
+                "RawJsonLength={RawJsonLength}, DurationMs={DurationMs}",
                 context.Node.Id,
-                context.Node.OutputVariable,
-                "AiCompletionNodeExecutor.ExecuteAsync staged through task 003 (payload binding + PromptSchemaOverrideMerger merge + render); LLM call wires in R7 task 004. See notes/spikes/aicompletion-pattern-decision.md §Q4.",
-                NodeErrorCodes.InternalError,
-                NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow)));
+                context.Action.Id,
+                rawJson.Length,
+                (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds);
+
+            activity?.SetTag("node.outcome", "success");
+            activity?.SetTag("response.raw_json_length", rawJson.Length);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+
+            // Bind to NodeOutput. We construct directly (instead of NodeOutput.Ok(...)) to avoid
+            // re-serializing the already-parsed JsonElement through SerializeToElement.
+            return new NodeOutput
+            {
+                NodeId = context.Node.Id,
+                OutputVariable = context.Node.OutputVariable,
+                Success = true,
+                TextContent = rawJson,
+                StructuredData = structuredData,
+                Metrics = NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow)
+            };
         }
         catch (OperationCanceledException)
         {
+            // Includes both caller-cancellation and SDK-internal cancellation propagation. We do
+            // not distinguish — the orchestrator treats Cancelled identically in both cases.
             _logger.LogWarning(
                 "AiCompletion node {NodeId} was cancelled",
                 context.Node.Id);
 
             activity?.SetTag("node.outcome", "cancelled");
-            return Task.FromResult(NodeOutput.Error(
+            return NodeOutput.Error(
                 context.Node.Id,
                 context.Node.OutputVariable,
                 "Node execution was cancelled",
                 NodeErrorCodes.Cancelled,
-                NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow)));
+                NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
         }
         catch (Exception ex)
         {
+            // Covers LLM HTTP failures, circuit-breaker open (OpenAiCircuitBrokenException),
+            // and any other unexpected exception. Privacy-safe: log exception type + message
+            // but NEVER the prompt or response content (ADR-015).
             _logger.LogError(ex,
-                "AiCompletion node {NodeId} failed: {ErrorMessage}",
-                context.Node.Id, ex.Message);
+                "AiCompletion node {NodeId} (Action {ActionId}) failed: ExceptionType={ExceptionType}, " +
+                "ErrorMessage={ErrorMessage}",
+                context.Node.Id,
+                context.Action?.Id,
+                ex.GetType().Name,
+                ex.Message);
 
             activity?.SetTag("node.outcome", "error");
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            return Task.FromResult(NodeOutput.Error(
+            return NodeOutput.Error(
                 context.Node.Id,
                 context.Node.OutputVariable,
                 $"AiCompletion execution failed: {ex.Message}",
                 NodeErrorCodes.InternalError,
-                NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow)));
+                NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
         }
     }
 

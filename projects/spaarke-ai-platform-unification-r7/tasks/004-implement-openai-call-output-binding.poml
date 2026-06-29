@@ -2,7 +2,7 @@
 <task id="R7-004" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Implement IOpenAiClient.GetStructuredCompletionRawAsync call + JsonElement binding</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>1</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>bff-api, code-impl, wave-1</tags>
