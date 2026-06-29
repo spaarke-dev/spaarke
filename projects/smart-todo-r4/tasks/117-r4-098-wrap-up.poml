@@ -3,7 +3,10 @@
     <title>R4-098 — Project wrap-up: lessons-learned + README + repo-cleanup</title>
     <phase>Closeout (UAT round 14 — final task)</phase>
     <workstream>project-tracking</workstream>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-2026-06-29>
+      lessons-learned.md written at projects/smart-todo-r4/lessons-learned.md (~120 lines, 5 sections: What went right · What was harder than expected · Process notes · Carry-forward items · Decisions worth re-using). Covers UAT rounds 4-13 + closeout wave findings: 5-round entity-name bug (sprk_contact vs contact), 7-round widget height-chain debug arc, form-script registration miss, PascalCase bind-key issue, no-shims cleanups, PCF noAposStringType XSD novel failure, worktree-staleness risk, search-filter wiring bug shipped through 13 UAT rounds. README.md updated with final state + closeout commit chain + R5 successor pointer. TASK-INDEX header + status line + R4-117 row all flipped ✅. notes/debug + notes/drafts retained (intentional .gitkeep placeholders per project convention).
+    </completion-2026-06-29>
     <estimated-effort>2-3 hrs</estimated-effort>
     <tags>wrap-up, lessons-learned, docs, repo-cleanup</tags>
     <parallel-safe>false</parallel-safe>

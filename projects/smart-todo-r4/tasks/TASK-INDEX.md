@@ -1,10 +1,10 @@
 # R4 Task Index
 
 > **Project**: smart-todo-r4
-> **Last Updated**: 2026-06-29 (R4 closeout-wave complete; R4-092 flipped to ✅ by R4-116; only R4-117 wrap-up remains)
+> **Last Updated**: 2026-06-29 (R4 ✅ COMPLETE — all closeout-wave tasks done. R4-117 wrap-up shipped; lessons-learned.md written; R5 backlog handoff ready.)
 > **Branch**: `work/smart-todo-r4-closeout` → master @ `cc1391c9a`
 > **Total Tasks**: 47 (was 46; +118 ribbon-deploy; R4-111 closed-no-action)
-> **Status**: 🔲 6 not-started (112, 113, 114, 115, 118 + 116/117 wrap-up) · ✅ R4-110 complete · 🚫 R4-111 closed-no-action · ❌ 0 blocked
+> **Status**: ✅ R4 complete (R4-110/112/113/114/116/117 done · R4-111 closed-no-action · R4-115 deferred to pcf-orphan-cleanup-r1 · R4-118 partial-done with R-9 deferred to R5) · ❌ 0 blocked
 > **Active wave**: **Closeout Wave 14** (re-scoped 2026-06-24)
 
 ## Closeout Wave (110-118) — Execution Order
@@ -13,13 +13,13 @@
 |---|---|---|---|
 | R4-110 | ✅ | Structural height-chain audit + fix | PR #419 merged at `b26ac56b7` |
 | R4-111 | 🚫 closed | Remove widget "Expand to Code Page modal" path | User decision 2026-06-24: leave widget Expand path; F-7/F-8 deferred to R5 |
-| R4-112 | 🔲 | PCF RegardingResolver — CREATE-mode bridge + bug fixes (EXPANDED) | (a) Bug 1: catalog nav-prop vs m:1 rel-name error on lookup; (b) CREATE-mode `window.__sprk_regarding_pending__` bridge; (c) form-binding cleanup note (Event NOT a host entity) |
-| R4-113 | 🔲 | Form-script audit — **DELETE** `sprk_todo_dirty_check.js` per user decision 2026-06-24 | "no shims" rule; parent-side `Xrm.Page.ui.close` patch keeps save/close working |
-| R4-114 | 🔲 | Wire vitest for SmartTodo Code Page | 22 spec files exist with no runner |
-| R4-115 | 🔲 | SpeDocumentViewer stale bundle cleanup | — |
-| **R4-118** (NEW) | 🔲 | Deploy `sprk_wizard_commands.js` + audit other parent form ribbons | spaarkedev1 returns 404 on `/webresources/sprk_wizard_commands.js` — Matter "Create To Do" button defined but JS not deployed. Deploy script at `scripts/Deploy-WizardCommandsJs.ps1`. Audit which other parent entities (Project, Event, Invoice, WorkAssignment, Communication) need similar ribbon buttons added. |
+| R4-112 | ✅ | PCF RegardingResolver v1.1.0 → v1.2.0 deployed (Bug-1 fix shipped) | onRecordTypeChanged now passes `sprk_recordtype_ref` id/entityType (was passing parent's matter id/entityType causing "Unable to find many-to-one relationship" console error). Solution scaffold built (`Solution/{solution.xml,customizations.xml,pack.ps1,[Content_Types].xml,Controls/...}`). Manifest XSD apostrophe-fix. HOST-only docs added. Deployed via `pac solution import` of `RegardingResolverSolution_v1.2.0.zip`. |
+| R4-113 | ✅ | Form-script audit — **DELETED** `sprk_todo_dirty_check.js` (source + Dataverse webresource `4c6e8319-c069-f111-ab0d-7ced8ddc4cc6` removed via MCP 2026-06-25) | "no shims" closure. Parent-side `Xrm.Page.ui.close` patch in SmartTodoModal.tsx retains save/close. |
+| R4-114 | ✅ | Jest wired for SmartTodo (`jest@30` + `ts-jest@29` + `jest-environment-jsdom@30` + `@testing-library/jest-dom@6` + `@types/jest@30` + `identity-obj-proxy@3`) | 4 test suites pass, **77 tests passing**, 1 documented `.skip` (handleEmail mailto — jsdom v22+ `window.location` non-configurable; deferred to R5 R-10). `jest.config.cjs` + `jest.setup.cjs` mirror shared-lib pattern. |
+| R4-115 | ⏸️ deferred | SpeDocumentViewer stale bundle cleanup | Source ALREADY REMOVED by sibling `pcf-orphan-cleanup-r1` project; 3 orphan PCF child webresources (`cc_Spaarke.SpeDocumentViewer/{bundle.js,css,resx}`) remain on Dataverse. Proper PCF removal needs solution-uninstall, not individual webresource deletes — owned by that sibling project. |
+| **R4-118** (NEW) | 🟡 partial | Deploy `sprk_wizard_commands.js` + audit other parent form ribbons | **JS + 2 icons deployed 2026-06-25** (sprk_wizard_commands.js updated webresourceid `e03039e0-d523-f111-88b5-7c1e520aa4df`; sprk_ToDoCheckmark16/32.svg created `be028483-9370-f111-ab0e-7ced8ddc4a05` / `e5de459a-9370-f111-ab0e-7ced8ddc4cc6`). **Ribbon expansion to 5 other entities deferred to R5 R-9** (see `projects/smart-todo-r5/design.md`). Matter button now functional with current OOB icon. |
 | R4-116 | ✅ | R4-092 final deploy notes + flip to ✅ | Closed 2026-06-29. R4-092 status flipped + 130-line closeout deploy block appended to 092 POML capturing all R4-110→118 outcomes + post-deploy search-filter hotfix. |
-| R4-117 | 🔲 | R4-098 wrap-up + lessons-learned | Serial after 116 |
+| R4-117 | ✅ | R4-098 wrap-up + lessons-learned + repo-cleanup | Closed 2026-06-29. lessons-learned.md written (5 sections covering UAT rounds 4-13 + closeout); README updated with final state + closeout commit chain; R5 handoff via design.md. |
 
 ---
 

@@ -1,8 +1,12 @@
 # Smart To Do — UX Enhancement (R4)
 
-> **Last Updated**: 2026-06-10
+> **Last Updated**: 2026-06-29
 >
-> **Status**: In Progress
+> **Status**: ✅ COMPLETE (PR #406 squash-merged at `80f70a1d4`; closeout-wave R4-110→R4-118 + post-deploy search-filter hotfix on master at `9d0ed559a`)
+>
+> **Lessons Learned**: [`lessons-learned.md`](./lessons-learned.md)
+>
+> **Next cycle**: R5 backlog at [`../smart-todo-r5/design.md`](../smart-todo-r5/design.md) (10 entries: F-1..F-8 visual/filter UX + FU-2/FU-5 + PROC-1 + R-9 ribbon expansion + R-10 test-honesty refactor)
 
 ## Overview
 
@@ -24,13 +28,15 @@ The hybrid modal pattern is the architectural keystone: it standardizes record n
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Initialization → Foundation |
-| **Progress** | 0% (0 of ~36 tasks complete) |
-| **Target Date** | TBD |
-| **Completed Date** | — |
+| **Phase** | ✅ COMPLETE |
+| **Progress** | 100% (38 R4 tasks + 7 closeout-wave tasks; 1 deferred to sibling project, 2 sub-items deferred to R5 with concrete plans) |
+| **Completed Date** | 2026-06-29 |
 | **Owner** | spaarke-dev |
-| **Branch** | `work/smart-todo-r4` (worktree) |
+| **Branch** | `work/smart-todo-r4-closeout` (merged to master at `9d0ed559a`) |
+| **Main PR** | PR #406 squash-merged at `80f70a1d4` (R4 main scope) |
+| **Closeout commits on master** | `027db5d12` (R4-113) → `21274208c` → `1c51fd8e2` (R4-112 Bug-1) → `96c391900` → `a8c1e58e3` (R4-114) → `5b7a62812` (R4-112 scaffold) → `9069ee50f` → `817685608` (R4-118) → `eda9a00b2` (search-filter hotfix) → `d8c3a468f` (R4-116 R4-092 flip) |
 | **Predecessor** | smart-todo-decoupling-r3 (PR #373 merged `e328beaf`; wrap-up PR #374 merged `a2ac6a849`) |
+| **Successor** | smart-todo-r5 (design.md backlog ready, no project worktree yet) |
 
 ## Problem Statement
 
