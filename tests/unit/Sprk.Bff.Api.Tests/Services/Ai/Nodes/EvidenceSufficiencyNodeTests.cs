@@ -19,7 +19,7 @@ public sealed class EvidenceSufficiencyNodeTests
     [Fact]
     public void SupportedActionTypes_ContainsEvidenceSufficiency()
     {
-        CreateNode().SupportedActionTypes.Should()
+        CreateNode().SupportedExecutorTypes.Should()
             .ContainSingle().Which.Should().Be(ExecutorType.EvidenceSufficiency);
     }
 

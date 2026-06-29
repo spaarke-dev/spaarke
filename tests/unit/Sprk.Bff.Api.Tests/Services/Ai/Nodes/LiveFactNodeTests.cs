@@ -71,7 +71,7 @@ public sealed class LiveFactNodeTests
     public void SupportedActionTypes_ContainsLiveFact()
     {
         var node = BuildNode();
-        node.SupportedActionTypes.Should().ContainSingle().Which.Should().Be(ExecutorType.LiveFact);
+        node.SupportedExecutorTypes.Should().ContainSingle().Which.Should().Be(ExecutorType.LiveFact);
     }
 
     [Fact]

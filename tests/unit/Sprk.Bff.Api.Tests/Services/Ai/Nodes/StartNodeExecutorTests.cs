@@ -33,13 +33,13 @@ public class StartNodeExecutorTests
         _executor = new StartNodeExecutor(_loggerMock.Object);
     }
 
-    #region SupportedActionTypes
+    #region SupportedExecutorTypes
 
     [Fact]
     public void SupportedActionTypes_ContainsStart()
     {
-        _executor.SupportedActionTypes.Should().Contain(ExecutorType.Start);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.Start);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion

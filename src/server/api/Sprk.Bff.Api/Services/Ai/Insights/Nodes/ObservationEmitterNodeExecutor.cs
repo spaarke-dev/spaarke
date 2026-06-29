@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 /// <remarks>
 /// <para>
 /// <b>Zone A</b> per SPEC §3.5 — discovered automatically by <see cref="NodeExecutorRegistry"/>
-/// via <see cref="SupportedActionTypes"/>; registered in
+/// via <see cref="SupportedExecutorTypes"/>; registered in
 /// <see cref="Sprk.Bff.Api.Infrastructure.DI.InsightsIngestModule"/>.
 /// </para>
 /// <para>
@@ -89,7 +89,7 @@ public sealed class ObservationEmitterNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
         ExecutorType.ObservationEmit
     };

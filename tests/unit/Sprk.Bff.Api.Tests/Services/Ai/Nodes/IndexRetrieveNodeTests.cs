@@ -32,7 +32,7 @@ public sealed class IndexRetrieveNodeTests
     [Fact]
     public void SupportedActionTypes_ContainsIndexRetrieve()
     {
-        CreateNode().SupportedActionTypes.Should()
+        CreateNode().SupportedExecutorTypes.Should()
             .ContainSingle().Which.Should().Be(ExecutorType.IndexRetrieve);
     }
 

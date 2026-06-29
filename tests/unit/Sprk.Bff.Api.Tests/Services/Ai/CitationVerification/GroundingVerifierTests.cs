@@ -282,8 +282,8 @@ public sealed class GroundingVerifyNodeTests
     public void SupportedActionTypes_ContainsGroundingVerify()
     {
         var node = CreateNode();
-        node.SupportedActionTypes.Should().Contain(ExecutorType.GroundingVerify);
-        node.SupportedActionTypes.Should().HaveCount(1);
+        node.SupportedExecutorTypes.Should().Contain(ExecutorType.GroundingVerify);
+        node.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     [Fact]

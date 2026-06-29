@@ -56,14 +56,14 @@ public class LookupUserMembershipNodeExecutorTests
             _loggerMock.Object);
     }
 
-    #region SupportedActionTypes
+    #region SupportedExecutorTypes
 
     [Fact]
     public void SupportedActionTypes_ContainsLookupUserMembership()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ExecutorType.LookupUserMembership);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.LookupUserMembership);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion

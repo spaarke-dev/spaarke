@@ -90,7 +90,7 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
         ExecutorType.LookupUserMembership
     };

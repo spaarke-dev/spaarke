@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 /// <para>
 /// <b>Zone A</b> per SPEC §3.5 — lives under <c>Services/Ai/Insights/Nodes/</c> and freely
 /// imports <see cref="IInsightsContentSanitizer"/> (Zone A). Discovered automatically by
-/// <see cref="NodeExecutorRegistry"/> via <see cref="SupportedActionTypes"/>; the registration
+/// <see cref="NodeExecutorRegistry"/> via <see cref="SupportedExecutorTypes"/>; the registration
 /// is added in <see cref="Sprk.Bff.Api.Infrastructure.DI.InsightsIngestModule"/> alongside the
 /// other ingest pipeline services.
 /// </para>
@@ -76,7 +76,7 @@ public sealed class SanitizerNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
         ExecutorType.Sanitization
     };

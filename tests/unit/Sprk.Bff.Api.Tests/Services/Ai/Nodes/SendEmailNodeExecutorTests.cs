@@ -36,14 +36,14 @@ public class SendEmailNodeExecutorTests
             _loggerMock.Object);
     }
 
-    #region SupportedActionTypes Tests
+    #region SupportedExecutorTypes Tests
 
     [Fact]
     public void SupportedActionTypes_ContainsSendEmail()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ExecutorType.SendEmail);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.SendEmail);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion

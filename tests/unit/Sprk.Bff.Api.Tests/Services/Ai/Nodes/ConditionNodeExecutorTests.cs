@@ -27,14 +27,14 @@ public class ConditionNodeExecutorTests
             _loggerMock.Object);
     }
 
-    #region SupportedActionTypes Tests
+    #region SupportedExecutorTypes Tests
 
     [Fact]
     public void SupportedActionTypes_ContainsCondition()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ExecutorType.Condition);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.Condition);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion

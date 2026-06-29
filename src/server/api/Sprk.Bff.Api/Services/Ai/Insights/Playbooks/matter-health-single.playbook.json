@@ -49,7 +49,7 @@
       "knowledge": [],
       "tools": []
     },
-    "$comment-scopes": "Insights-mode playbooks bypass the legacy skill/action/knowledge/tool resolution — the node executors are auto-discovered by NodeExecutorRegistry via SupportedActionTypes. Scopes left empty intentionally; the seed script tolerates empty arrays per resolution-loop guards."
+    "$comment-scopes": "Insights-mode playbooks bypass the legacy skill/action/knowledge/tool resolution — the node executors are auto-discovered by NodeExecutorRegistry via SupportedExecutorTypes. Scopes left empty intentionally; the seed script tolerates empty arrays per resolution-loop guards."
   },
 
   "nodes": [

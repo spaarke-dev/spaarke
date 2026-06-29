@@ -21,7 +21,7 @@ public sealed class ReturnInsightArtifactNodeTests
     [Fact]
     public void SupportedActionTypes_ContainsReturnInsightArtifact()
     {
-        CreateNode().SupportedActionTypes.Should()
+        CreateNode().SupportedExecutorTypes.Should()
             .ContainSingle().Which.Should().Be(ExecutorType.ReturnInsightArtifact);
     }
 

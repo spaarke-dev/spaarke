@@ -162,7 +162,7 @@ public class PlaybookExecutionTests
         var registry = new NodeExecutorRegistry(executors, Mock.Of<ILogger<NodeExecutorRegistry>>());
 
         // Act
-        var supportedTypes = registry.GetSupportedActionTypes();
+        var supportedTypes = registry.GetSupportedExecutorTypes();
 
         // Assert
         supportedTypes.Should().Contain(ExecutorType.AiAnalysis);

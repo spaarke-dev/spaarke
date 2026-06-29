@@ -68,7 +68,7 @@ public sealed class ReturnInsightArtifactNode : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
         ExecutorType.ReturnInsightArtifact
     };

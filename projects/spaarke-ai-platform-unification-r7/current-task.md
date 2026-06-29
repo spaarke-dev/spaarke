@@ -10,10 +10,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 023 — Rename `INodeExecutor.SupportedActionTypes` → `SupportedExecutorTypes` |
+| **Task** | 027 — Update NodeExecutorRegistry dispatch to use ExecutorType (next after 023+024) |
 | **Step** | 0 of N: not-started |
 | **Status** | not-started |
-| **Next Action** | Run `task-execute` for task 023. Wave 2 022 ✅ COMPLETE (460 refs renamed across 77 files; build clean 0/19 warnings; AiCompletion + Nodes + orchestration tests green; 3 broader-run failures are pre-existing unrelated flakes confirmed by isolation re-run). 023 + 024 are parallel-safe per WBS group W2-C. Task 023 rename is 36 `SupportedActionTypes` declarations + ~75 test assertions; mechanical replace_all by file. |
+| **Next Action** | Run `task-execute` for task 027 (or 024 if 024 still pending after parallel run). Wave 2 023 ✅ COMPLETE (95 `SupportedActionTypes`/`GetSupportedActionTypes` refs renamed to `SupportedExecutorTypes`/`GetSupportedExecutorTypes` across 59 files: 28 BFF source + 19 tests + 3 JSON playbook comment-strings + 9 bin/ build artifacts as side-effect; build clean 0/18 warnings; 481/481 Node tests pass + 2 pre-existing skips). |
 
 ### Files Modified This Session (task 022)
 

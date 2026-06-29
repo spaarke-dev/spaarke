@@ -23,7 +23,7 @@ public interface INodeExecutor
     /// Gets the ExecutorTypes this executor can handle.
     /// Most executors handle a single type; some may handle multiple.
     /// </summary>
-    IReadOnlyList<ExecutorType> SupportedActionTypes { get; }
+    IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; }
 
     /// <summary>
     /// Executes the node and produces output.

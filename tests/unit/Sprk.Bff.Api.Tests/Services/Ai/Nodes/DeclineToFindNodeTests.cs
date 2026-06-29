@@ -20,7 +20,7 @@ public sealed class DeclineToFindNodeTests
     [Fact]
     public void SupportedActionTypes_ContainsDeclineToFind()
     {
-        CreateNode().SupportedActionTypes.Should()
+        CreateNode().SupportedExecutorTypes.Should()
             .ContainSingle().Which.Should().Be(ExecutorType.DeclineToFind);
     }
 

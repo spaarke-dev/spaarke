@@ -52,14 +52,14 @@ public class AiAnalysisNodeExecutorTests
             _loggerMock.Object);
     }
 
-    #region SupportedActionTypes Tests
+    #region SupportedExecutorTypes Tests
 
     [Fact]
     public void SupportedActionTypes_ContainsAiAnalysis()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ExecutorType.AiAnalysis);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.AiAnalysis);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion
@@ -531,7 +531,7 @@ public class NodeExecutorRegistryTests
         var registry = new NodeExecutorRegistry(new[] { executor1, executor2 }, _loggerMock.Object);
 
         // Act
-        var result = registry.GetSupportedActionTypes();
+        var result = registry.GetSupportedExecutorTypes();
 
         // Assert
         result.Should().HaveCount(2);
@@ -580,7 +580,7 @@ public class NodeExecutorRegistryTests
     private static INodeExecutor CreateMockExecutor(ExecutorType[] actionTypes, string? name = null)
     {
         var mock = new Mock<INodeExecutor>();
-        mock.Setup(e => e.SupportedActionTypes).Returns(actionTypes);
+        mock.Setup(e => e.SupportedExecutorTypes).Returns(actionTypes);
         return mock.Object;
     }
 }

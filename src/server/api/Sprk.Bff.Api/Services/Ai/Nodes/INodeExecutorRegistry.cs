@@ -42,7 +42,7 @@ public interface INodeExecutorRegistry
     /// Gets all ExecutorTypes that have registered executors.
     /// </summary>
     /// <returns>Collection of supported executor types.</returns>
-    IReadOnlyList<ExecutorType> GetSupportedActionTypes();
+    IReadOnlyList<ExecutorType> GetSupportedExecutorTypes();
 
     /// <summary>
     /// Gets the count of registered executors.

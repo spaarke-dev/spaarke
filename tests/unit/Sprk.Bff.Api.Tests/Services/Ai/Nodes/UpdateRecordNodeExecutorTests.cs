@@ -31,14 +31,14 @@ public class UpdateRecordNodeExecutorTests
             _loggerMock.Object);
     }
 
-    #region SupportedActionTypes Tests
+    #region SupportedExecutorTypes Tests
 
     [Fact]
     public void SupportedActionTypes_ContainsUpdateRecord()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ExecutorType.UpdateRecord);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.UpdateRecord);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion

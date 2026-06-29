@@ -267,7 +267,7 @@ public class PhaseAVerticalSliceTests : IClassFixture<WorkspaceTestFixture>
 
         // Act
         var executors = registry.GetAllExecutors();
-        var supportedActionTypes = registry.GetSupportedActionTypes();
+        var supportedActionTypes = registry.GetSupportedExecutorTypes();
 
         // Assert — at least 11 production node executors (NFR-08 binding).
         // The spec binds the production set to the canonical 11 (AiAnalysis, AiCompletion,

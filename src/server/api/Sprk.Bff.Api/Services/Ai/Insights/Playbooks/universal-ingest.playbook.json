@@ -88,7 +88,7 @@
       "knowledge": [],
       "tools": []
     },
-    "$comment-scopes": "Ingest playbook node executors are auto-discovered by NodeExecutorRegistry via SupportedActionTypes. Scopes left empty intentionally; the seed script tolerates empty arrays per resolution-loop guards."
+    "$comment-scopes": "Ingest playbook node executors are auto-discovered by NodeExecutorRegistry via SupportedExecutorTypes. Scopes left empty intentionally; the seed script tolerates empty arrays per resolution-loop guards."
   },
 
   "nodes": [

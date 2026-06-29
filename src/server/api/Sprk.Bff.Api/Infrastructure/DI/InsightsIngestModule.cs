@@ -93,7 +93,7 @@ public static class InsightsIngestModule
         // ====================================================================
         // Two new INodeExecutor registrations for the universal-ingest@v1 playbook (D-P15-02
         // ONE canonical playbook, parameterized — replaces code-defined IngestOrchestrator.cs
-        // on Wave C3). Auto-discovered by NodeExecutorRegistry via SupportedActionTypes:
+        // on Wave C3). Auto-discovered by NodeExecutorRegistry via SupportedExecutorTypes:
         //   - SanitizerNodeExecutor → ExecutorType.Sanitization (130) — wraps IInsightsContentSanitizer
         //   - ObservationEmitterNodeExecutor → ExecutorType.ObservationEmit (140) — wraps
         //     IObservationEmitter + IObservationIndexUpserter + IObservationMirror

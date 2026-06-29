@@ -13,7 +13,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// <list type="number">
 /// <item>At startup, all INodeExecutor implementations are registered in DI</item>
 /// <item>Registry receives executors via constructor injection (IEnumerable)</item>
-/// <item>Executors are indexed by SupportedActionTypes for fast lookup</item>
+/// <item>Executors are indexed by SupportedExecutorTypes for fast lookup</item>
 /// </list>
 /// <para>
 /// Follows ADR-010 DI minimalism by using constructor injection for executors.
@@ -54,7 +54,7 @@ public sealed class NodeExecutorRegistry : INodeExecutorRegistry
         _executorsByType.ContainsKey(actionType);
 
     /// <inheritdoc />
-    public IReadOnlyList<ExecutorType> GetSupportedActionTypes() =>
+    public IReadOnlyList<ExecutorType> GetSupportedExecutorTypes() =>
         _executorsByType.Keys.ToList();
 
     /// <inheritdoc />
@@ -72,7 +72,7 @@ public sealed class NodeExecutorRegistry : INodeExecutorRegistry
         foreach (var executor in executorList)
         {
             var typeName = executor.GetType().Name;
-            var supportedTypes = executor.SupportedActionTypes;
+            var supportedTypes = executor.SupportedExecutorTypes;
 
             if (supportedTypes.Count == 0)
             {

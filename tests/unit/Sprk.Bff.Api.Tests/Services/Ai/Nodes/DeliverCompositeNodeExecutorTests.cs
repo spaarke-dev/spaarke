@@ -34,13 +34,13 @@ public class DeliverCompositeNodeExecutorTests
         _executor = new DeliverCompositeNodeExecutor(_loggerMock.Object);
     }
 
-    #region SupportedActionTypes
+    #region SupportedExecutorTypes
 
     [Fact]
     public void SupportedActionTypes_ContainsOnlyDeliverComposite()
     {
-        _executor.SupportedActionTypes.Should().ContainSingle();
-        _executor.SupportedActionTypes.Should().Contain(ExecutorType.DeliverComposite);
+        _executor.SupportedExecutorTypes.Should().ContainSingle();
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.DeliverComposite);
     }
 
     /// <summary>
@@ -53,7 +53,7 @@ public class DeliverCompositeNodeExecutorTests
     [Fact]
     public void ExistingSingleActionOutputNode_BackwardCompat_DeliverCompositeExecutorDoesNotHandleDeliverOutput()
     {
-        _executor.SupportedActionTypes.Should().NotContain(ExecutorType.DeliverOutput,
+        _executor.SupportedExecutorTypes.Should().NotContain(ExecutorType.DeliverOutput,
             "FR-52 backward-compat invariant — legacy single-action Output Node dispatch is " +
             "owned by DeliverOutputNodeExecutor; composite executor MUST NOT collide");
     }

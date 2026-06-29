@@ -70,7 +70,7 @@ public sealed class EvidenceSufficiencyNode : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ExecutorType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
         ExecutorType.EvidenceSufficiency
     };

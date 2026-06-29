@@ -66,9 +66,9 @@ public class AiCompletionNodeExecutorTests
     [Fact]
     public void SupportedActionTypes_ContainsAiCompletion()
     {
-        // Assert — declared SupportedActionTypes binds NodeExecutorRegistry dispatch.
-        _sut.SupportedActionTypes.Should().Contain(ExecutorType.AiCompletion);
-        _sut.SupportedActionTypes.Should().HaveCount(1);
+        // Assert — declared SupportedExecutorTypes binds NodeExecutorRegistry dispatch.
+        _sut.SupportedExecutorTypes.Should().Contain(ExecutorType.AiCompletion);
+        _sut.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     [Fact]
