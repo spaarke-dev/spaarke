@@ -136,6 +136,120 @@ Two handler interface hierarchies coexist: `IAnalysisToolHandler` for the tool h
 
 ---
 
+## Typed Executor Config Schemas (FR-16)
+
+> **Added 2026-06-28 by `spaarke-ai-platform-unification-r7` Wave 3** — Invariant 5 / FR-16. Every `INodeExecutor` implementation declares a typed schema describing the maker-editable fields it reads from `sprk_playbooknode.sprk_configjson`. The Playbook Builder canvas (Wave 8 FR-23) consumes these schemas via a single endpoint and renders typed forms instead of free-text JSON editors. Reference design: [`projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md`](../../projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md).
+
+### What
+
+`INodeExecutor` exposes `ExecutorConfigSchema GetConfigSchema()` — a pure, deterministic, sync method returning a singleton-cached schema descriptor. The schema is the **maker contract** (what fields the canvas presents); `ConfigJson` is the **runtime contract** (what the executor deserializes). They MUST stay aligned — schema field names match the executor's private config record `[JsonPropertyName]` attributes.
+
+C# DTO shape (in `Sprk.Bff.Api/Services/Ai/Nodes/ExecutorConfigSchema.cs`):
+
+```csharp
+public sealed record ExecutorConfigSchema(
+    string ExecutorTypeName,        // "AiCompletion"
+    int ExecutorTypeValue,          // 1
+    string Description,             // "Prompt-only structured LLM completion"
+    IReadOnlyList<ConfigSchemaField> Fields)
+{
+    public static ExecutorConfigSchema Empty(ExecutorType type, string description) => ...;
+}
+
+public sealed record ConfigSchemaField(
+    string Name,
+    SchemaFieldType Type,           // String | Number | Boolean | Object | Array | Enum
+    bool Required,
+    string Description,
+    object? Default = null,
+    IReadOnlyList<string>? EnumValues = null);
+```
+
+### Endpoint
+
+```
+GET /api/ai/playbook-builder/executor-config-schemas   →   200 OK
+```
+
+Authorized by the standard `RequireAuthorization()` on the PlaybookBuilder group. Response envelope (one entry per executor, ordered ascending by `ExecutorTypeValue` for deterministic diffs):
+
+```json
+{
+  "schemas": [
+    {
+      "executorTypeName": "AiCompletion",
+      "executorTypeValue": 1,
+      "description": "Prompt-only structured LLM completion (FR-12).",
+      "fields": [
+        {
+          "name": "templateParameters",
+          "type": "Object",
+          "required": false,
+          "description": "Key→value map substituted into {{var}} bindings in the JPS instruction.",
+          "default": null
+        },
+        {
+          "name": "promptSchemaOverride",
+          "type": "Object",
+          "required": false,
+          "description": "Per-node override merged into the Action's base JPS prompt schema (FR-25).",
+          "default": null
+        }
+      ]
+    },
+    {
+      "executorTypeName": "Start",
+      "executorTypeValue": 33,
+      "description": "Canvas anchor; pass-through with no execution logic.",
+      "fields": []
+    }
+  ]
+}
+```
+
+### Rich vs placeholder schemas
+
+| Pattern | Count (Wave 3) | When |
+|---|---|---|
+| **Rich** (≥1 field) | 5 — `AiCompletion`, `AiAnalysis`, `AiEmbedding`, `EntityNameValidator`, `DeliverComposite` | Executor has maker-editable config (e.g., `templateParameters`, override JSON, deliver targets) |
+| **Placeholder** (empty `fields: []`) | 20 — `Start`, `ReturnResponse`, `Condition`, `Parallel`, `Wait`, etc. | Executor takes no maker config; canvas renders a collapsed "no configuration required" hint |
+
+The empty array IS the contract — it distinguishes "intentionally no config" from "we forgot to define it." Placeholder pattern:
+
+```csharp
+private static readonly ExecutorConfigSchema CachedSchema =
+    ExecutorConfigSchema.Empty(ExecutorType.Start, "Canvas anchor; pass-through with no execution logic.");
+
+public ExecutorConfigSchema GetConfigSchema() => CachedSchema;
+```
+
+### Author guidance — declaring a schema for a new executor
+
+When adding a new `INodeExecutor`:
+
+1. **Declare a `private static readonly ExecutorConfigSchema CachedSchema`** built once at class load (no DI, no I/O).
+2. **Return it directly from `GetConfigSchema()`** — same reference every call.
+3. **Pick `SchemaFieldType`** from `{ String, Number, Boolean, Object, Array, Enum }`. Nested arbitrarily-shaped JSON → `Object` (canvas renders a Monaco-style sub-editor). Typed enum → `Enum` + populate `EnumValues`.
+4. **Use `Required = true` only** for fields the executor's `Validate()` actually requires. Don't pad required-ness to "guide" the maker — `Description` is the right place for guidance.
+5. **Use `Default`** to communicate the executor's default behavior to the canvas (canvas pre-fills the form).
+6. **Keep schema field names in lockstep** with the runtime config record's `[JsonPropertyName]` attributes. See [`.claude/patterns/ai/node-executor-authoring.md`](../../.claude/patterns/ai/node-executor-authoring.md) for the full executor pattern.
+
+### Forward-compat — what the canvas does with unknown values
+
+- **New `SchemaFieldType` enum value** (e.g., future `Date`, `Duration`): append to the C# enum tail — never insert mid-list (numeric values are wire contract). Older canvas builds that don't know the new string fall through to the same warning state used for unknown executor types per spec FR-27 (read-only JSON view + "unsupported field type — update Playbook Builder Code Page" hint).
+- **New optional `ConfigSchemaField` property** (e.g., future `validationRegex`, `minLength`): add as `init` accessor with `[JsonIgnore(Condition = WhenWritingNull)]`. Older canvas builds ignore unknown JSON properties — additive, non-breaking.
+- **Removing a field property or renaming `ExecutorTypeName`** is BREAKING — coordinate server + canvas in the same deploy or deprecate by marking `Required = false` first.
+
+### Cross-references
+
+- **Requirement**: spec.md FR-16 (typed schemas) + Invariant 5 (executor-as-schema-authority)
+- **ADRs**: [ADR-010 DI Minimalism](../adr/ADR-010-di-minimalism.md) (singleton schemas, zero DI deps), [ADR-013 BFF AI Architecture](../adr/ADR-013-bff-ai-architecture.md) (endpoint placement on BFF, not a separate AI microservice)
+- **Pattern**: [`.claude/patterns/ai/node-executor-authoring.md`](../../.claude/patterns/ai/node-executor-authoring.md) — full executor authoring pointer
+- **Consumer (Wave 8 task 083)**: `src/client/code-pages/PlaybookBuilder/src/**` — canvas loads schemas at mount, caches in-memory for the session, renders typed forms per node configuration
+- **Design history**: [`projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md`](../../projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md)
+
+---
+
 ## Tool Handler Framework (Tier 3 Detail)
 
 > **Moved**: Tool Handler Framework, handler registration, resolution chain, and `IAnalysisToolHandler` contract have been consolidated into the runtime canonical doc. See [`ai-architecture-playbook-runtime.md`](ai-architecture-playbook-runtime.md) §1 (Component model — Layer E) and §5 (Action lookup precedence) for canonical content. See `.claude/patterns/ai/` for code-pointer files.
@@ -424,6 +538,7 @@ All queries are tenant-scoped (partition key = `/tenantId`). Aggregation queries
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-06-28 | 5.1 | R7 Wave 3 (FR-16): added "Typed Executor Config Schemas" section documenting `INodeExecutor.GetConfigSchema()`, `ExecutorConfigSchema`/`ConfigSchemaField` DTOs, `GET /api/ai/playbook-builder/executor-config-schemas` endpoint, rich vs placeholder pattern (5 priority + 20 placeholder), author guidance, forward-compat (FR-27 pattern reuse), Wave 8 task 083 canvas consumer. |
 | 2026-05-17 | 5.0 | R2 additions: Capability Router (3-tier), Safety Pipeline (PromptShield, Groundedness, Citations, privilege filter), Cosmos DB persistence (5 containers, write-through), Feedback Collection. Updated Tier 4, integration points, design decisions. |
 | 2026-04-05 | 4.0 | Restored depth: tool handler framework internals, handler registration, streaming paths, scope resolution, knowledge retrieval, integration points, known pitfalls. Restructured to mandatory architecture doc format. |
 | 2026-03-13 | 3.4 | Added DeliverToIndex node (ActionType 41). |

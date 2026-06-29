@@ -2,7 +2,7 @@
 <task id="R7-035" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Document schema shape in docs/architecture/AI-ARCHITECTURE.md</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>3</wave>
     <estimated-effort>1-2 hours</estimated-effort>
     <tags>docs, wave-3</tags>
