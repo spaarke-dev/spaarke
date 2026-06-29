@@ -19,7 +19,7 @@
 | Wave | Goal | Status | Tasks |
 |---|---|---|---|
 | Wave 1 | AiCompletionNodeExecutor build (FR-12 to FR-15) | 🟢 COMPLETE | 001-010 ✅ all done; publish-hygiene gate PASSED 2026-06-28 (46.71 MB compressed; +1.06 MB vs 45.65 baseline; 0 new HIGH CVE; 20/20 AiCompletionNodeExecutor tests pass) |
-| Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | 🔄 in-progress (020-025 ✅; 025 deleted 3 dead structural fallback helpers, ~190 LOC) | 020 ✅, 021 ✅, 022 ✅, 023 ✅, 024 ✅, 025 ✅, 026-029 pending |
+| Wave 2 | Dispatch refactor + enum rename (FR-07 to FR-10) | 🔄 in-progress (020-028 ✅; 026 closed Action override-branch reference — task 024 inline-deleted; 025 deleted 3 dead structural fallback helpers, ~190 LOC; 028 simplified Action read path per FR-07) | 020 ✅, 021 ✅, 022 ✅, 023 ✅, 024 ✅, 025 ✅, 026 ✅, 027 ✅, 028 ✅, 029 pending |
 | Wave 3 | Typed config schemas (FR-16) | 🔄 in-progress (030 ✅ design doc complete; 031 blocked on Wave 2 task 023 interface rename) | 030 ✅; 031-036 generated, blocked on Wave 2 |
 | Wave 4 | Schema cleanup + remove legacy direct-path (FR-03, FR-04, FR-11) | ⏸️ blocked on Wave 2 ONLY (task 040 audit confirmed Wave 9 NOT a prerequisite — SessionSummarizeOrchestrator does NOT call ExecuteAnalysisAsync; only 1 production caller at AnalysisEndpoints.cs:261) | 040 ✅, 041-047 generated (8 files) |
 | Wave 5 | Existing-playbook backfill (FR-19, FR-20) | ⏸️ blocked on Wave 2 | 050-056 ✅ generated (7 files) |
@@ -65,9 +65,9 @@
 | 023 | ✅ | Rename `INodeExecutor.SupportedActionTypes` → `SupportedExecutorTypes` | bff-api, code-impl | yes | 022 |
 | 024 | ✅ | Update `PlaybookOrchestrationService.ExecuteNodeAsync` to read single-hop (FR-07) | bff-api, code-impl | yes | 022 |
 | 025 | ✅ | Delete structural fallback ladder (FR-08, ~150 LOC) | bff-api, code-impl | yes | 024 |
-| 026 | ⏸️ | Delete Action ActionType override branch lines 1241-1278 (FR-09) | bff-api, code-impl | yes (with 025) | 024 |
+| 026 | ✅ | Delete Action ActionType override branch lines 1241-1278 (FR-09) | bff-api, code-impl | yes (with 025) | 024 |
 | 027 | ✅ | Update `NodeExecutorRegistry` dispatch to use `ExecutorType` | bff-api, code-impl | yes (with 025-026) | 023 |
-| 028 | ⏸️ | Update `AnalysisActionService` Action read path | bff-api, code-impl | yes (with 025-027) | 024 |
+| 028 | ✅ | Update `AnalysisActionService` Action read path | bff-api, code-impl | yes (with 025-027) | 024 |
 | 029 | ⏸️ | Wave 2 BFF publish + size check (NFR-01) + CVE scan | bff-api, deploy | yes | 022-028 |
 
 ## Wave 3 — Typed config schemas (FR-16)

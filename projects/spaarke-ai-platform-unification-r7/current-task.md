@@ -10,10 +10,10 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 027 — Update NodeExecutorRegistry dispatch to use ExecutorType (Wave 2 W2-D continuation) |
-| **Step** | 0 of N: not-started |
-| **Status** | not-started |
-| **Next Action** | Run `task-execute` for task 027 (or 026 if not yet landed). Wave 2 task 025 ✅ COMPLETE — deleted 3 dead structural fallback helpers (IsDeployedStartNode + IsDeployedLoadKnowledgeNode + IsDeployedReturnResponseNode) from `PlaybookOrchestrationService.cs` per FR-08. Net diff: 1 file, +14/−204 lines, −190 LOC; file 2129 → 1939 lines. Critical preservation decision: `ExtractActionTypeFromConfig` PRESERVED (NOT deleted) — sole remaining caller at `CollectDownstreamNodeInfo:1339` for `$choices` option-set hydration on downstream UpdateRecord nodes (payload introspection, not dispatch fallback). Per task 024 caller audit + spec FR-08 scope (structural ladder only). Updated dispatch comment block at lines 1224-1247 to reflect deletion completion + preservation rationale. Build clean (0 errors, 18 warnings = baseline). Tests: Orchestration filter 60/63 pass (3 pre-existing skips, 0 new failures). Quality gates Step 9.5 PASS: code-review 0/0/1 (pre-existing file length owned by ongoing refactor); adr-check 4/0/0 (ADR-010, ADR-013, ADR-029, ADR-038). |
+| **Task** | 028 — Update AnalysisActionService Action read path (FR-07) ✅ COMPLETE |
+| **Step** | 11 of 11: committed |
+| **Status** | completed |
+| **Next Action** | Wave 2 task 029 (BFF publish + size + CVE close) is the remaining Wave 2 task once 026 + 027 land. Tasks 025, 026, 027, 028 marked ✅ in TASK-INDEX (W2-D parallel group). Task 028: AnalysisActionService GetActionAsync + ListActionsAsync no longer $expand=sprk_ActionTypeId; dispatch-derived ExecutorType projection removed (replaced with deterministic AiAnalysis default + TODO citing Wave 4 task 046); SortOrder lookup-derivation removed (defaults to 0 in read paths, honors request.SortOrder in CreateActionAsync); ExtractSortOrderFromTypeName helper + ActionEntity.ActionTypeValue + ActionTypeId + ActionTypeReference all marked dead-code via TODO citing Wave 4 task 046 (deferred deletion per POML "leave field drop to Wave 4"). Tests: targeted Orchestration 60/63 pass (3 pre-existing skips); broader ScopeManagement/AnalysisAction/PlaybookExecution/Builder filter 346/346 pass. Build clean: 0 errors, 19 pre-existing warnings (= baseline). Diff: 1 file, +64/−50, net +14 LOC (TODO comment blocks). Quality gates Step 9.5 PASS: code-review (Quality Improved — 3-branch dispatch ladder removed, complexity −3), 0 critical, 0 warnings, 0 AI smells; adr-check 4/0/0 (ADR-010, ADR-013, ADR-029, ADR-038). Per POML — per-task publish-size SKIPPED (Wave 2 task 029 owns). |
 
 ### Files Modified This Session (task 022)
 
@@ -33,12 +33,12 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 
 | Field | Value |
 |---|---|
-| **Task ID** | 027 (next pending — 025 ✅ complete; 026 may be in parallel or pending) |
-| **Task File** | `tasks/027-update-nodeexecutor-registry-dispatch.poml` |
-| **Title** | Update NodeExecutorRegistry dispatch to use ExecutorType |
+| **Task ID** | 028 |
+| **Task File** | `tasks/028-update-analysisactionservice-readpath.poml` |
+| **Title** | Update AnalysisActionService Action read path (FR-07) |
 | **Phase / Wave** | Wave 2 — Dispatch refactor + enum rename (FR-07 to FR-10) |
-| **Status** | not-started |
-| **Started** | — |
+| **Status** | completed |
+| **Started** | 2026-06-28 |
 
 ---
 

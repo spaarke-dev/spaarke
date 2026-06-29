@@ -30,15 +30,21 @@ public class AnalysisActionService : DataverseHttpServiceBase
 
         await EnsureAuthenticatedAsync(cancellationToken);
 
-        // Bug fix 2026-06-23: removed sprk_actiontype from $select — that field does not exist on
-        // sprk_analysisaction (the comment below documents the Q1 2026-06-02 empirical confirmation
-        // but the SELECT clause was never updated). Including it causes ALL GetActionAsync calls to
-        // return 400 Bad Request, silently breaking every node that depends on Action lookup.
-        // R7 task 002 / FR-12: sprk_outputschemajson added to projection so the
+        // R7 task 028 / FR-07: read path simplified. After single-hop dispatch (task 024),
+        // the orchestrator reads ExecutorType from node.sprk_executortype DIRECTLY — Action is
+        // no longer the dispatch axis. Action is now strictly a prompt-template carrier
+        // {SystemPrompt + OutputSchema + Temperature}. Removed the $expand=sprk_ActionTypeId
+        // lookup chain (was: sprk_actiontypeid → sprk_analysisactiontype.sprk_executoractiontype)
+        // because nothing in the dispatch path consumes it anymore.
+        // TODO(R7 Wave 4 task 046): the AnalysisAction.ExecutorType DTO property + ActionEntity
+        // .ActionTypeValue / .ActionTypeId fields are now dead read-path projections; full
+        // deletion follows after Wave 4 tasks 043/044 drop the Dataverse columns + retire the
+        // remaining CRUD writers (ScopeManagementService, BuilderScopeImporter, Create/Update DTOs).
+        // R7 task 002 / FR-12: sprk_outputschemajson is retained on the projection so the
         // AnalysisAction record carries the canonical {SystemPrompt + OutputSchema + Temperature}
         // triple — consumed unconditionally by AiCompletionNodeExecutor; ignored by executors
         // that do not need a structured-output schema.
-        var url = $"sprk_analysisactions({actionId})?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_outputschemajson&$expand=sprk_ActionTypeId($select=sprk_name,sprk_executoractiontype)";
+        var url = $"sprk_analysisactions({actionId})?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_outputschemajson";
         var response = await Http.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -56,28 +62,23 @@ public class AnalysisActionService : DataverseHttpServiceBase
             return null;
         }
 
-        var sortOrder = ExtractSortOrderFromTypeName(entity.ActionTypeId?.Name);
-
-        // ExecutorType dispatch — single source of truth is the lookup target (sprk_analysisactiontype)
-        // via the sprk_executoractiontype field. See Insights Engine r2 decisions/D-01 +
-        // notes/handoffs/wave-b1-investigation-notes.md for the empirical reasoning. The
-        // legacy sprk_actiontype int field on sprk_analysisaction is absent on the entity
-        // (Q1 empirically confirmed 2026-06-02) — ActionTypeValue is kept as a safety
-        // fallback but is expected to always be null in practice.
-        var actionType = entity.ActionTypeId?.ExecutorActionType.HasValue == true
-            ? (Nodes.ExecutorType)entity.ActionTypeId.ExecutorActionType.Value
-            : entity.ActionTypeValue.HasValue
-                ? (Nodes.ExecutorType)entity.ActionTypeValue.Value
-                : Nodes.ExecutorType.AiAnalysis;
-
         var action = new AnalysisAction
         {
             Id = entity.Id,
             Name = entity.Name ?? "Unnamed Action",
             Description = entity.Description,
             SystemPrompt = entity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
-            SortOrder = sortOrder,
-            ExecutorType = actionType,
+            // TODO(R7 Wave 4 task 046): SortOrder previously derived from ActionTypeId.Name
+            // (e.g., "10 - AiAnalysis"). After the lookup expand removal, the only source is
+            // an Action-row column (none today). Defaulting to 0 is safe because the only live
+            // consumer is display sorting in maker surfaces and tests; full SortOrder reform
+            // is out of scope for R7 — Wave 4 task 046 owns the column decision.
+            SortOrder = 0,
+            // TODO(R7 Wave 4 task 046): ExecutorType is set to the default value because the
+            // orchestrator no longer reads Action.ExecutorType for dispatch (task 024 single-hop).
+            // The DTO property is retained until Wave 4 tasks 043/044 drop the Dataverse columns
+            // and task 046 retires the remaining CRUD writers + DTO property.
+            ExecutorType = Nodes.ExecutorType.AiAnalysis,
             OwnerType = ScopeOwnerType.System,
             IsImmutable = false,
             // Wave B-G9c1 (B6): per-action temperature override. Null = deterministic 0.0
@@ -110,10 +111,13 @@ public class AnalysisActionService : DataverseHttpServiceBase
             ["sortorder"] = "sprk_name"
         };
 
+        // R7 task 028 / FR-07: read path simplified. ActionTypeId expand removed — Action is
+        // no longer the dispatch axis (orchestrator reads node.sprk_executortype directly).
+        // See GetActionAsync above for the full rationale and Wave 4 task 046 follow-up.
         var query = BuildODataQuery(
             options,
             selectFields: "sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_outputschemajson",
-            expandClause: "sprk_ActionTypeId($select=sprk_name,sprk_executoractiontype)",
+            expandClause: null,
             nameFieldPath: "sprk_name",
             categoryFieldPath: null,
             sortFieldMappings: sortMappings);
@@ -137,23 +141,20 @@ public class AnalysisActionService : DataverseHttpServiceBase
             };
         }
 
-        var actions = result.Value.Select(entity =>
+        var actions = result.Value.Select(entity => new AnalysisAction
         {
-            var sortOrder = ExtractSortOrderFromTypeName(entity.ActionTypeId?.Name);
-            return new AnalysisAction
-            {
-                Id = entity.Id,
-                Name = entity.Name ?? "Unnamed Action",
-                Description = entity.Description,
-                SystemPrompt = entity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
-                SortOrder = sortOrder,
-                OwnerType = ScopeOwnerType.System,
-                IsImmutable = false,
-                // Wave B-G9c1 (B6): per-action temperature override.
-                Temperature = entity.Temperature,
-                // R7 task 002 / FR-12: structured-outputs JSON schema for prompt-driven executors.
-                OutputSchemaJson = entity.OutputSchemaJson
-            };
+            Id = entity.Id,
+            Name = entity.Name ?? "Unnamed Action",
+            Description = entity.Description,
+            SystemPrompt = entity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
+            // TODO(R7 Wave 4 task 046): SortOrder default — see GetActionAsync TODO.
+            SortOrder = 0,
+            OwnerType = ScopeOwnerType.System,
+            IsImmutable = false,
+            // Wave B-G9c1 (B6): per-action temperature override.
+            Temperature = entity.Temperature,
+            // R7 task 002 / FR-12: structured-outputs JSON schema for prompt-driven executors.
+            OutputSchemaJson = entity.OutputSchemaJson
         }).ToArray();
 
         Logger.LogInformation("[LIST ACTIONS] Retrieved {Count} actions from Dataverse (Total: {TotalCount})",
@@ -208,17 +209,17 @@ public class AnalysisActionService : DataverseHttpServiceBase
             throw new InvalidOperationException("Failed to deserialize created action from Dataverse response");
         }
 
-        var sortOrder = entity.ActionTypeId?.Name != null
-            ? ExtractSortOrderFromTypeName(entity.ActionTypeId?.Name)
-            : request.SortOrder;
-
+        // R7 task 028 / FR-07: ActionTypeId lookup-derived sortOrder removed. Honor the
+        // CreateActionRequest.SortOrder verbatim (server-side default is 100 per the DTO).
+        // TODO(R7 Wave 4 task 046): ExecutorType is still surfaced from the request DTO until
+        // Wave 4 retires the CRUD writers + DTO property entirely.
         var action = new AnalysisAction
         {
             Id = entity.Id,
             Name = entity.Name ?? name,
             Description = entity.Description ?? request.Description,
             SystemPrompt = entity.SystemPrompt ?? request.SystemPrompt,
-            SortOrder = sortOrder,
+            SortOrder = request.SortOrder,
             ExecutorType = request.ExecutorType,
             OwnerType = ScopeOwnerType.Customer,
             IsImmutable = false,
@@ -385,6 +386,12 @@ public class AnalysisActionService : DataverseHttpServiceBase
 
     #region Private Helpers
 
+    // TODO(R7 Wave 4 task 046): ExtractSortOrderFromTypeName is dead code after R7 task 028
+    // (FR-07) removed the sprk_ActionTypeId expand from the read path. The only consumers
+    // (GetActionAsync, ListActionsAsync, CreateActionAsync) no longer call it. Retained
+    // here as internal-static (and exposed for any external test that still references it
+    // via InternalsVisibleTo) until Wave 4 task 046 deletes both this helper and the
+    // sprk_actiontypeid column itself.
     internal static int ExtractSortOrderFromTypeName(string? typeName)
     {
         if (string.IsNullOrEmpty(typeName))
@@ -417,6 +424,12 @@ public class AnalysisActionService : DataverseHttpServiceBase
         [JsonPropertyName("sprk_systemprompt")]
         public string? SystemPrompt { get; set; }
 
+        // TODO(R7 Wave 4 task 046): ActionTypeValue + ActionTypeId are no longer projected
+        // by GetActionAsync / ListActionsAsync after R7 task 028 (FR-07) removed the
+        // $expand=sprk_ActionTypeId clause. Retained on the entity DTO until Wave 4 tasks
+        // 043/044 drop the underlying Dataverse columns (sprk_actiontype int +
+        // sprk_actiontypeid lookup), at which point task 046 will delete these properties
+        // and the ActionTypeReference nested class.
         [JsonPropertyName("sprk_actiontype")]
         public int? ActionTypeValue { get; set; }
 
@@ -441,18 +454,19 @@ public class AnalysisActionService : DataverseHttpServiceBase
         public string? OutputSchemaJson { get; set; }
     }
 
+    // TODO(R7 Wave 4 task 046): ActionTypeReference is dead after R7 task 028 removed the
+    // $expand=sprk_ActionTypeId clause from the read path. Retained until Wave 4 schema drops
+    // and task 046 deletes the type along with its containing ActionTypeId property above.
     internal class ActionTypeReference
     {
         [JsonPropertyName("sprk_name")]
         public string? Name { get; set; }
 
         /// <summary>
-        /// Dispatch ExecutorType integer. Single source of truth for which INodeExecutor handles
-        /// actions of this type. Per Insights Engine r2 D-01 + owner direction 2026-06-02:
-        /// lookup target is canonical (not a duplicated int field on sprk_analysisaction).
-        /// Backfilled = 0 (AiAnalysis) for existing 11 lookup rows; set to 70/80/90/100/110/120
-        /// for the 6 Insights ExecutorType lookup rows. Field is being made required (NOT NULL)
-        /// post-backfill.
+        /// Dispatch ExecutorType integer. Pre-R7 single source of truth for which INodeExecutor
+        /// handles actions of this type. SUPERSEDED by R7 task 024 single-hop dispatch — orchestrator
+        /// now reads node.sprk_executortype directly. This field is no longer consulted on the
+        /// hot path; Wave 4 task 044 drops the Dataverse column and task 046 deletes this property.
         /// </summary>
         [JsonPropertyName("sprk_executoractiontype")]
         public int? ExecutorActionType { get; set; }
