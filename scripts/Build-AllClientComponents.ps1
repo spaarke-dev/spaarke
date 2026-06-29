@@ -4,9 +4,7 @@
 
 .DESCRIPTION
     Orchestrates the build of all Spaarke client components in the required order:
-    1. Shared libraries (8 packages in src/client/shared/ — Auth, SdapClient, AI.Context, AI.Outputs, Events.Components, SmartTodo.Components, UI.Components, AI.Widgets)
-       NOTE: Spaarke.DailyBriefing.Components is intentionally excluded — it's a source-only lib
-       (tsc --noEmit) with @spaarke peerDependencies; type-check happens via the consumer's tsc pass.
+    1. Shared libraries (9 packages in src/client/shared/ — Auth, SdapClient, AI.Context, AI.Outputs, Events.Components, SmartTodo.Components, UI.Components, AI.Widgets, DailyBriefing.Components)
     2. Vite solutions (19 projects in src/solutions/)
     3. Webpack code pages (4 projects in src/client/code-pages/)
     4. PCF controls (src/client/pcf/)
@@ -61,21 +59,16 @@ if ($Component) {
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 
 # Shared libraries (build order matters — downstream deps must come after their dependencies)
-#
-# Spaarke.DailyBriefing.Components is intentionally EXCLUDED from this list. Its build script is
-# `tsc --noEmit` and its `@spaarke/*` deps are listed as peerDependencies (not regular deps),
-# so it cannot type-check standalone — the type-check is performed by each consumer's tsc pass
-# (SpaarkeAi, DailyBriefing). Tried adding it 2026-06-28 → orchestrator failed on TS2307
-# "Cannot find module '@spaarke/ui-components'" etc. Excluded by design.
 $SharedLibs = @(
-    @{ Name = "Spaarke.Auth";                 Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
-    @{ Name = "Spaarke.SdapClient";           Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }
-    @{ Name = "Spaarke.AI.Context";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Context" }           # depends on Auth
-    @{ Name = "Spaarke.AI.Outputs";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Outputs" }
-    @{ Name = "Spaarke.Events.Components";    Path = "$RepoRoot\src\client\shared\Spaarke.Events.Components" }
-    @{ Name = "Spaarke.SmartTodo.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.SmartTodo.Components" }
-    @{ Name = "Spaarke.UI.Components";        Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }        # depends on Auth, SdapClient
-    @{ Name = "Spaarke.AI.Widgets";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Widgets" }           # depends on UI.Components, AI.Outputs
+    @{ Name = "Spaarke.Auth";                    Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
+    @{ Name = "Spaarke.SdapClient";              Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }
+    @{ Name = "Spaarke.AI.Context";              Path = "$RepoRoot\src\client\shared\Spaarke.AI.Context" }              # depends on Auth
+    @{ Name = "Spaarke.AI.Outputs";              Path = "$RepoRoot\src\client\shared\Spaarke.AI.Outputs" }
+    @{ Name = "Spaarke.Events.Components";       Path = "$RepoRoot\src\client\shared\Spaarke.Events.Components" }
+    @{ Name = "Spaarke.SmartTodo.Components";    Path = "$RepoRoot\src\client\shared\Spaarke.SmartTodo.Components" }
+    @{ Name = "Spaarke.UI.Components";           Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }           # depends on Auth, SdapClient
+    @{ Name = "Spaarke.AI.Widgets";              Path = "$RepoRoot\src\client\shared\Spaarke.AI.Widgets" }              # depends on UI.Components, AI.Outputs
+    @{ Name = "Spaarke.DailyBriefing.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.DailyBriefing.Components" } # depends on Auth, UI.Components
 )
 
 # Expand the "SharedLibs" special shortcut into the actual lib names so the filter at line ~113 matches.
