@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Tests.Integration.Workspace;
 ///   GET    /api/workspace/templates        — Static layout templates
 /// </summary>
 [Trait("status", "repaired")]
-public class WorkspaceLayoutEndpointTests : IClassFixture<WorkspaceLayoutTestFixture>
+public class WorkspaceLayoutEndpointContractTests : IClassFixture<WorkspaceLayoutTestFixture>
 {
     private readonly WorkspaceLayoutTestFixture _fixture;
 
@@ -42,7 +42,7 @@ public class WorkspaceLayoutEndpointTests : IClassFixture<WorkspaceLayoutTestFix
         PropertyNameCaseInsensitive = true
     };
 
-    public WorkspaceLayoutEndpointTests(WorkspaceLayoutTestFixture fixture)
+    public WorkspaceLayoutEndpointContractTests(WorkspaceLayoutTestFixture fixture)
     {
         _fixture = fixture;
     }

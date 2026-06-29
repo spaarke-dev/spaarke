@@ -27,7 +27,7 @@ namespace Sprk.Bff.Api.Tests.Integration.Workspace;
 ///   POST /api/workspace/matters/pre-fill   — Matter AI pre-fill (WorkspaceMatterEndpoints)
 /// </summary>
 [Trait("status", "repaired")]
-public class WorkspaceEndpointsTests : IClassFixture<WorkspaceTestFixture>
+public class WorkspaceEndpointsContractTests : IClassFixture<WorkspaceTestFixture>
 {
     private readonly WorkspaceTestFixture _fixture;
 
@@ -37,7 +37,7 @@ public class WorkspaceEndpointsTests : IClassFixture<WorkspaceTestFixture>
         PropertyNameCaseInsensitive = true
     };
 
-    public WorkspaceEndpointsTests(WorkspaceTestFixture fixture)
+    public WorkspaceEndpointsContractTests(WorkspaceTestFixture fixture)
     {
         _fixture = fixture;
     }

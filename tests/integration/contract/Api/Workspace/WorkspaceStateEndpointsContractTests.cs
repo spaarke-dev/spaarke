@@ -64,12 +64,12 @@ namespace Sprk.Bff.Api.Tests.Api.Workspace;
 /// <c>InsightEndpoints.Ask</c> precedent. Documented in code + evidence note.
 /// </para>
 /// </remarks>
-public class WorkspaceStateEndpointsTests : IClassFixture<WorkspaceStateEndpointsTestFixture>
+public class WorkspaceStateEndpointsContractTests : IClassFixture<WorkspaceStateEndpointsTestFixture>
 {
     private readonly WorkspaceStateEndpointsTestFixture _fixture;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
 
-    public WorkspaceStateEndpointsTests(WorkspaceStateEndpointsTestFixture fixture)
+    public WorkspaceStateEndpointsContractTests(WorkspaceStateEndpointsTestFixture fixture)
     {
         _fixture = fixture;
     }
@@ -321,7 +321,7 @@ public class WorkspaceStateEndpointsTests : IClassFixture<WorkspaceStateEndpoint
 // =============================================================================
 
 /// <summary>
-/// In-process WebApplicationFactory fixture for <see cref="WorkspaceStateEndpointsTests"/>.
+/// In-process WebApplicationFactory fixture for <see cref="WorkspaceStateEndpointsContractTests"/>.
 /// Replaces <see cref="IWorkspaceStateService"/> with a mock, registers a fake auth
 /// handler that emits <c>oid</c> (+ optional <c>tid</c>) so the tid-extraction code
 /// path can be exercised.
