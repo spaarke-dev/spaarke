@@ -292,6 +292,292 @@ public class AiCompletionNodeExecutorTests
 
     #endregion
 
+    #region Task 008 — Temperature override + per-node prompt override (FR-14, FR-25 Q2 KEEP)
+
+    // Region 008 scope (per task 008 POML):
+    //   - Temperature override semantics: Action.Temperature → effectiveTemperature mapping
+    //     to IOpenAiClient.GetStructuredCompletionRawAsync. Three null/zero/non-zero variants.
+    //   - Per-node prompt overrides via PromptSchemaOverrideMerger (FR-25 Q2 KEEP):
+    //     Role replacement + Constraints concatenation. Plus graceful no-op paths when
+    //     ConfigJson missing or Action.SystemPrompt is flat text (no $schema).
+    //
+    // Boundary discipline (per task 008 POML §step 3): merger-internal logic is NOT re-tested
+    // here — PromptSchemaOverrideMergerTests already covers that. These tests assert the
+    // executor's INVOCATION + RESULT-FLOW: that ConfigJson is parsed, ApplyPromptSchemaOverride
+    // is called, and the merged values reach the IOpenAiClient call via PromptSchemaRenderer.
+    //
+    // Mock surface reuse: shares _sut + _openAiClientMock + SetupOpenAiClient + CreateValidContext
+    // with the task 007 ctor fixture (defined in Shared Helpers region below).
+
+    /// <summary>
+    /// Builds a minimal JPS prompt that satisfies <c>IsJpsFormat</c> (starts with '{'
+    /// and contains <c>"$schema"</c>) — required to activate the
+    /// <see cref="PromptSchemaOverrideMerger"/> merge path inside the executor's
+    /// <c>ApplyPromptSchemaOverride</c> helper. Optional <paramref name="role"/> and
+    /// <paramref name="constraints"/> let tests assert role-replacement + constraint-concat
+    /// semantics flow end-to-end through the rendered prompt.
+    /// </summary>
+    private static string BuildJpsPrompt008(
+        string? role = "Base role",
+        string task = "Base task",
+        string[]? constraints = null)
+    {
+        var roleJson      = role is null ? "null" : JsonSerializer.Serialize(role);
+        var taskJson      = JsonSerializer.Serialize(task);
+        var constraintsJs = constraints is null
+            ? "null"
+            : JsonSerializer.Serialize(constraints);
+
+        return $$"""
+        {
+          "$schema": "https://spaarke.com/schemas/prompt/v1",
+          "$version": 1,
+          "instruction": {
+            "role":        {{roleJson}},
+            "task":        {{taskJson}},
+            "constraints": {{constraintsJs}}
+          }
+        }
+        """;
+    }
+
+    /// <summary>
+    /// Builds a node ConfigJson string carrying a <c>promptSchemaOverride</c> section.
+    /// Mirrors the Playbook Builder UI emission shape for FR-25 KEEP per-node
+    /// personalization (R7 spec §FR-25). Override fields are emitted only when supplied
+    /// — absent fields fall through to base-schema values per merger contract.
+    /// </summary>
+    private static string BuildConfigWithOverride008(
+        string? overrideRole = null,
+        string[]? overrideConstraints = null)
+    {
+        var instruction = new Dictionary<string, object?>();
+        if (overrideRole is not null)
+            instruction["role"] = overrideRole;
+        if (overrideConstraints is not null)
+            instruction["constraints"] = overrideConstraints;
+
+        // The merger's NormalizeOverrideJson path requires an "instruction" object even
+        // when callers only override scalars — we always emit it for shape correctness.
+        var payload = new
+        {
+            promptSchemaOverride = new { instruction }
+        };
+        return JsonSerializer.Serialize(payload);
+    }
+
+    // ─── Temperature override tests (FR-14 + Wave B-G9c1 B6 contract) ────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_PassesExplicitZeroTemperature_WhenActionTemperatureIsZero()
+    {
+        // Arrange — Action.Temperature = 0.0 (explicit zero, fully deterministic).
+        // Per the executor's effectiveTemperature mapping
+        // (AiCompletionNodeExecutor.cs:292-294: HasValue → (float)Value, otherwise null),
+        // an explicit zero from Action.Temperature flows through as 0.0f — NOT null.
+        // This distinction matters because the LLM client applies its own default of 0.0f
+        // when null, and we MUST be able to distinguish "Action explicitly chose 0.0" from
+        // "Action did not specify" for telemetry + future Action-version diffing.
+        float? capturedTemperature = null;
+        _openAiClientMock
+            .Setup(c => c.GetStructuredCompletionRawAsync(
+                It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, BinaryData, string, string?, int?, float?, CancellationToken>(
+                (_, _, _, _, _, t, _) => capturedTemperature = t)
+            .ReturnsAsync("""{"summary":"ok"}""");
+
+        var ctx = CreateValidContext(temperature: 0.0m);
+
+        // Act
+        var result = await _sut.ExecuteAsync(ctx, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedTemperature.Should().NotBeNull(
+            "Action.Temperature=0.0 MUST map to effectiveTemperature=0.0f (explicit zero != null)");
+        capturedTemperature.Should().Be(0.0f);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PassesNullTemperature_WhenActionTemperatureIsNull()
+    {
+        // Arrange — Action.Temperature = null. Per AnalysisAction.Temperature XML doc
+        // "Null semantics: when null, downstream handlers MUST use a deterministic
+        // default of 0.0." The executor preserves the null and the IOpenAiClient
+        // applies the default (see IOpenAiClient.GetStructuredCompletionRawAsync's
+        // temperature parameter doc: "When null, defaults to 0.0f for deterministic
+        // structured output"). The executor's job is to PRESERVE the null, not to
+        // pre-apply a default itself.
+        float? capturedTemperature = 999f;  // sentinel to detect "never called"
+        _openAiClientMock
+            .Setup(c => c.GetStructuredCompletionRawAsync(
+                It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, BinaryData, string, string?, int?, float?, CancellationToken>(
+                (_, _, _, _, _, t, _) => capturedTemperature = t)
+            .ReturnsAsync("""{"summary":"ok"}""");
+
+        var ctx = CreateValidContext(temperature: null);
+
+        // Act
+        var result = await _sut.ExecuteAsync(ctx, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedTemperature.Should().BeNull(
+            "Action.Temperature=null MUST map to effectiveTemperature=null — LLM client applies default");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PassesNonZeroTemperature_WhenActionTemperatureIsSet()
+    {
+        // Arrange — Action.Temperature = 0.7m (decimal). The executor casts decimal → float
+        // (AiCompletionNodeExecutor.cs:293). Rare for structured output but supported per
+        // AnalysisAction.Temperature XML doc range 0.0–2.0.
+        float? capturedTemperature = null;
+        _openAiClientMock
+            .Setup(c => c.GetStructuredCompletionRawAsync(
+                It.IsAny<string>(), It.IsAny<BinaryData>(), It.IsAny<string>(),
+                It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<float?>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, BinaryData, string, string?, int?, float?, CancellationToken>(
+                (_, _, _, _, _, t, _) => capturedTemperature = t)
+            .ReturnsAsync("""{"summary":"ok"}""");
+
+        var ctx = CreateValidContext(temperature: 0.7m);
+
+        // Act
+        var result = await _sut.ExecuteAsync(ctx, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedTemperature.Should().NotBeNull();
+        // Small epsilon comparison guards against decimal→float rounding noise.
+        Math.Abs(capturedTemperature!.Value - 0.7f).Should().BeLessThan(0.0001f,
+            "Action.Temperature=0.7m (decimal) MUST map to ~0.7f via decimal→float cast");
+    }
+
+    // ─── Per-node prompt override tests (FR-25 KEEP) ─────────────────────────────────
+
+    [Fact]
+    public async Task ExecuteAsync_MergesNodeRoleOverride_OverActionRole()
+    {
+        // Arrange — base JPS prompt has role="Base role"; ConfigJson promptSchemaOverride
+        // supplies role="Override role". Per PromptSchemaOverrideMerger.MergeInstruction
+        // (scalar fields: replace when override provides a value), the rendered prompt
+        // sent to the LLM must contain "Override role" — NOT "Base role". This is the
+        // Q2 KEEP contract: per-node personalization without forcing makers to create
+        // a new Action for every minor variant.
+        string? capturedPrompt = null;
+        SetupOpenAiClient(rawJson: """{"summary":"ok"}""", capturePrompt: p => capturedPrompt = p);
+
+        var basePrompt = BuildJpsPrompt008(role: "Base role", task: "Analyze");
+        var configJson = BuildConfigWithOverride008(overrideRole: "Override role");
+        var ctx = CreateValidContext(systemPrompt: basePrompt, configJson: configJson);
+
+        // Act
+        var result = await _sut.ExecuteAsync(ctx, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedPrompt.Should().NotBeNull();
+        capturedPrompt!.Should().Contain("Override role",
+            "FR-25 KEEP: node ConfigJson role override MUST replace Action.SystemPrompt role in the rendered prompt");
+        capturedPrompt.Should().NotContain("Base role",
+            "merger scalar-replacement semantics: override role replaces base role (not appended)");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_MergesNodeConstraintsOverride_OverActionConstraints()
+    {
+        // Arrange — base JPS has 1 constraint "Be precise"; ConfigJson override adds
+        // "Focus on financial clauses". Per PromptSchemaOverrideMerger.MergeConstraints
+        // default semantics (no __replace marker), arrays concatenate — rendered prompt
+        // contains BOTH constraints. This proves the FR-25 KEEP "constraint augmentation"
+        // path (most common authoring scenario per Playbook Builder UX research).
+        string? capturedPrompt = null;
+        SetupOpenAiClient(rawJson: """{"summary":"ok"}""", capturePrompt: p => capturedPrompt = p);
+
+        var basePrompt = BuildJpsPrompt008(
+            role: "Analyst",
+            task: "Analyze",
+            constraints: new[] { "Be precise" });
+        var configJson = BuildConfigWithOverride008(
+            overrideConstraints: new[] { "Focus on financial clauses" });
+        var ctx = CreateValidContext(systemPrompt: basePrompt, configJson: configJson);
+
+        // Act
+        var result = await _sut.ExecuteAsync(ctx, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedPrompt.Should().NotBeNull();
+        capturedPrompt!.Should().Contain("Be precise",
+            "merger default concatenation: base constraints are preserved when override does not use __replace");
+        capturedPrompt.Should().Contain("Focus on financial clauses",
+            "FR-25 KEEP: node-level constraint override is appended to the rendered prompt");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DoesNotMergeOverride_WhenConfigJsonMissing()
+    {
+        // Arrange — JPS base prompt with role="Base role"; no ConfigJson. Per
+        // ApplyPromptSchemaOverride contract (AiCompletionNodeExecutor.cs:464-467):
+        // when ConfigJson is null/empty, return basePrompt unchanged — the rendered
+        // prompt contains only "Base role" and no merging occurs. This is the graceful
+        // no-op path covering the majority of existing playbook nodes that have not
+        // opted into per-node overrides (FR-19 / FR-20: 94 existing playbook nodes
+        // backfilled without ConfigJson in Wave 5).
+        string? capturedPrompt = null;
+        SetupOpenAiClient(rawJson: """{"summary":"ok"}""", capturePrompt: p => capturedPrompt = p);
+
+        var basePrompt = BuildJpsPrompt008(role: "Base role", task: "Analyze");
+        var ctx = CreateValidContext(systemPrompt: basePrompt, configJson: null);
+
+        // Act
+        var result = await _sut.ExecuteAsync(ctx, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedPrompt.Should().NotBeNull();
+        capturedPrompt!.Should().Contain("Base role",
+            "FR-25 graceful no-op: missing ConfigJson MUST NOT alter the base prompt — rendered prompt contains base role");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DoesNotMergeOverride_WhenSystemPromptIsFlatText()
+    {
+        // Arrange — flat-text base prompt (no '{' or no "$schema" → IsJpsFormat returns false);
+        // ConfigJson DOES have an override. Per ApplyPromptSchemaOverride contract
+        // (AiCompletionNodeExecutor.cs:469-471): merging is skipped for non-JPS prompts
+        // because the override JSON shape only makes sense layered on a structured
+        // PromptSchema. The rendered prompt is the flat text unchanged; the override
+        // role string MUST NOT appear. This is the graceful no-op path covering legacy
+        // flat-text Action.SystemPrompt rows that have not been migrated to JPS.
+        const string flatPrompt = "You are a helpful assistant. Analyze the input.";
+        string? capturedPrompt = null;
+        SetupOpenAiClient(rawJson: """{"summary":"ok"}""", capturePrompt: p => capturedPrompt = p);
+
+        var configJson = BuildConfigWithOverride008(overrideRole: "Ignored override role");
+        var ctx = CreateValidContext(systemPrompt: flatPrompt, configJson: configJson);
+
+        // Act
+        var result = await _sut.ExecuteAsync(ctx, CancellationToken.None);
+
+        // Assert
+        result.Success.Should().BeTrue();
+        capturedPrompt.Should().NotBeNull();
+        capturedPrompt.Should().Be(flatPrompt,
+            "flat-text Action.SystemPrompt is passed through verbatim by the renderer");
+        capturedPrompt.Should().NotContain("Ignored override role",
+            "FR-25 graceful no-op: promptSchemaOverride MUST be ignored when SystemPrompt is flat text (no $schema)");
+    }
+
+    #endregion
+
     #region Shared Helpers (created by task 007; shared with tasks 008 + 009)
 
     /// <summary>

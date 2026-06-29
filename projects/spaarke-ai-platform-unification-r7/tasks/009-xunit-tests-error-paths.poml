@@ -2,7 +2,7 @@
 <task id="R7-009" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>xUnit tests — error paths (missing prompt, malformed JSON, LLM error) (FR-14)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>1</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>bff-api, testing, wave-1</tags>
