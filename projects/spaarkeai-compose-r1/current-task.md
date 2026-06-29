@@ -13,10 +13,45 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — 37 tasks generated; Wave 0 (Spikes) ready to start |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Say `"work on task 001"` to start Phase 0 spike, OR `"execute wave 0"` to dispatch all 4 spikes in parallel via `task-execute`. See [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md) for wave plan. |
+| **Active Wave** | none — 37 tasks generated; **Wave 0 (Phase 0 Spikes) ready to dispatch** |
+| **Mode** | **Autonomous parallel** (per project [`CLAUDE.md` §Autonomous Parallel Execution Mode](./CLAUDE.md)) |
+| **Status** | not-started |
+| **Next Action** | Say `"go"` / `"start"` / `"execute wave 0"` to dispatch Wave 0 (4 parallel `task-execute` agents for Spikes #1–#4). After Wave 0 completes: **pause for operator review of locked artifacts in `notes/spikes/`** before Wave 1 dispatches. |
+
+---
+
+## Parallel Wave Tracker
+
+Tracks in-flight wave dispatches. Updated by **main session only** at wave-start and wave-end (per-task agents do NOT write here). See [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md) for the full 12-wave plan.
+
+### Current wave: none (Wave 0 pending)
+
+| Wave | Tasks | Status | Start | End | Build After | Notes |
+|---|---|---|---|---|---|---|
+| W0 | 001, 002, 003, 004 | 🔲 not-dispatched | — | — | none (spikes → `notes/spikes/`) | **Operator review gate after completion** |
+| W1a | 010, 011, 012 | 🔲 | — | — | none | — |
+| W1b | 020, 030, 040, 041 | 🔲 | — | — | `dotnet build` + `npm run build` | — |
+| W2 | 021, 022, 023, 031 | 🔲 | — | — | `dotnet build` + `npm run build` | — |
+| W3 | 024, 032 | 🔲 | — | — | `dotnet build` + `npm run build` | — |
+| W4 | 025, 033, 043, 044, 045 | 🔲 | — | — | `dotnet build` + `npm run build` | — |
+| W5 | 026, 027, 042 | 🔲 | — | — | `dotnet build` + `npm run build` | — |
+| W6 | 046, 050 | 🔲 | — | — | build per language touched | — |
+| W7 | 051, 052 | 🔲 | — | — | `dotnet build` + `npm run build` | — |
+| W8 | 060, 061 | 🔲 | — | — | `dotnet test` | — |
+| W9 | 070, 071, 072 | 🔲 | — | — | none (read-only checks) | — |
+| W10 | 080, 081 | 🔲 | — | — | smoke-test endpoints post-deploy | **Operator review gate before deploy** |
+| W11 | 090 | 🔲 | — | — | all build + tests + test-diet | **Operator review gate before wrap-up** |
+
+### Wave status legend
+- 🔲 not-dispatched · 🔄 in-flight · ✅ all tasks complete · ⚠️ partial (some 🔄 retries) · ❌ aborted
+
+### In-flight agent log (current wave only)
+
+*No agents dispatched yet.*
+
+When Wave N is in flight, this section lists each parallel agent with: task ID, dispatch time, status (running / done / failed). Cleared at next wave-start.
+
+---
 
 ### Files Modified This Session
 

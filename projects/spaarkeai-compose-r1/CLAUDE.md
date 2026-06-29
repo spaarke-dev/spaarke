@@ -107,6 +107,60 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 
 ---
 
+## 🤖 Autonomous Parallel Execution Mode (this project)
+
+This project runs in **autonomous wave-based parallel execution mode**. Claude Code should move the project forward at pace via TASK-INDEX.md "Wave Plan" without prompting at every wave boundary — but with explicit human-review gates where operator judgment is load-bearing.
+
+### Loop
+
+1. **Dispatch by wave** per [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) — ONE message with multiple `task-execute` Skill invocations (one per task in the wave). **Max 6 agents per wave** (hard concurrency limit).
+2. **Wait for all agents** in the wave to complete; collect outcomes.
+3. **Build-verify** if any `.cs` touched (`dotnet build src/server/api/Sprk.Bff.Api/`) and/or any `.ts`/`.tsx` touched (`npm run build` or `scripts/Build-AllClientComponents.ps1`).
+4. **Update TASK-INDEX.md** statuses (🔲 → ✅ or 🔄 for failed retries).
+5. **Update `current-task.md` Wave Tracker** with completion summary.
+6. **Continue to next wave** if all conditions in *Continue* below are met. Otherwise STOP per *Stop* below.
+
+### Continue between waves WITHOUT prompting when ALL of:
+
+- Every task in the prior wave completed ✅ (no 🔄 / ❌)
+- Build verification passed (0 errors; pre-existing warnings tolerated)
+- No Critical issues from `code-review` or `adr-check` (Step 9.5 quality gates)
+- Context usage < 70%
+- No human-review gate is active (see *Mandatory operator-review gates* below)
+
+### STOP and escalate when ANY of:
+
+- A task fails AND a second attempt fails — escalate with the failure mode for human triage
+- Build breaks after wave dispatch — do NOT dispatch next wave; identify breaking change
+- `code-review` or `adr-check` finds a Critical issue not resolvable by Path C (comply) per CLAUDE.md §6.5
+- An ADR Tension surfaces requiring Path A (project-scoped exception) or Path B (ADR amendment) — escalate per §6.5 required output format
+- Context > 70% — run `/checkpoint`, request `/compact`, do NOT dispatch next wave
+- All tasks complete — emit final pipeline-complete report
+
+### Mandatory operator-review gates (autonomous mode defers here)
+
+These are the points where "autonomous" defers to "human checkpoint" because operator judgment is load-bearing. Pause and escalate before dispatching the next wave:
+
+1. **After Wave 0 (Spikes) completes** — pause for operator to review the locked artifacts in `notes/spikes/`: DOCX subset spec + bridge library choice (Spike #1), three-pane TypeScript data contracts (Spike #2), SPE check-out mechanism + heartbeat interval (Spike #3), JPS scope schemas + endpoint shape (Spike #4). These outputs are *consumed by* Phases 1–4 — auto-continuing past spikes would commit to choices the spikes are supposed to inform.
+2. **Before Phase 8 (deploy)** — pause for operator to review the publish-size delta report (Task 080) and CVE scan (Task 072) before pushing artifacts to dev/test environments.
+3. **Before Wrap-up (Task 090)** — pause for operator to review `/test-diet` report classifications (MAINTAIN vs SCAFFOLDING) before deletions land.
+
+### Failure isolation per wave
+
+One agent failing does NOT abort the wave. Collect all agent outcomes (success / failure / timeout); report at wave end. Mark failed tasks 🔄 (needs retry) not ❌ (abandoned). Main session decides whether to retry sequentially or escalate.
+
+### Hot-path coordination
+
+Tasks modifying `Program.cs`, `SECTION_REGISTRY`, or `Services/Ai/PublicContracts/ConsumerTypes.cs` (shared with active projects per `projects/INDEX.md`): proceed but flag the touch in the PR description. Reviewer manually sequences against in-flight peer PRs — do NOT auto-resolve.
+
+### File-write coordination
+
+- Per-task agents (dispatched via `task-execute` in a wave) write to their own task POML's `<relevant-files>` and append to TASK-INDEX status only.
+- **Main session** is the single writer of `current-task.md` "Wave Tracker" (updates at wave-start + wave-end).
+- All `.claude/`-path writes are main-session-only (sub-agent write boundary per root CLAUDE.md §3). Per TASK-INDEX.md, no tasks in this project touch `.claude/` — so this never fires here.
+
+---
+
 ## Key Technical Constraints
 
 Extracted from `spec.md` + applicable ADRs + CLAUDE.md §10/§11:
