@@ -11,7 +11,7 @@
 
 | Field | Value |
 |---|---|
-| **Phase** | ✅ **SHIPPED** (PR #489 merged to master 2026-06-27, commit `8180f8d44`) |
+| **Phase** | ✅ **GRADUATED** — PR #489 merged + live deploy + KQL acceptance verified |
 | **Owner** | spaarke-dev |
 | **Estimated effort** | 3-5 days (one combined PR per spec NFR-01) — actual: 1 day local + 1 day PR review |
 | **Spec lock date** | 2026-06-26 |
@@ -19,7 +19,7 @@
 | **PR merged** | 2026-06-27 ([PR #489](https://github.com/spaarke-dev/spaarke/pull/489)) |
 | **Issues closed** | [#462](https://github.com/spaarke-dev/spaarke/issues/462) (DEF-001) · [#483](https://github.com/spaarke-dev/spaarke/issues/483) (DEF-007) · [#484](https://github.com/spaarke-dev/spaarke/issues/484) (DEF-008) · [#485](https://github.com/spaarke-dev/spaarke/issues/485) (DEF-009) — manually closed 2026-06-29 (PR description omitted "Closes #X" keywords) |
 
-All 17 tasks shipped. Operator-driven Phase 4 live deploy + KQL verification still pending per [`notes/post-deploy-verification.md`](notes/post-deploy-verification.md) — code is in master, alerts.bicep + BFF redeploy + KQL acceptance happen against the deployed code. Lessons learned captured in [`notes/lessons-learned.md`](notes/lessons-learned.md).
+**All 17 tasks ✅ GRADUATED 2026-06-29.** PR #489 in master + live dev deploy + KQL acceptance verified (FR-01 cache.failures = 29 rows in 2h; FR-03 cache.hits.by_resource = 3 bounded resources). Full evidence in [`notes/post-deploy-verification.md`](notes/post-deploy-verification.md). Lessons learned captured in [`notes/lessons-learned.md`](notes/lessons-learned.md). Ready for `/devops-project-archive`.
 
 ## Summary
 
