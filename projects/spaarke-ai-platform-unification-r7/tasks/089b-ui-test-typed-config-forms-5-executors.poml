@@ -2,7 +2,7 @@
 <task id="R7-089b" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>UI test — typed config forms for 5 priority executors</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>8</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>code-page, testing, ui-test, wave-8</tags>
