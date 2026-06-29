@@ -440,21 +440,37 @@ if ($nodesFailingExecutorTypeLint.Count -gt 0) {
 Write-Host "  Lint A  : ✅ all $($definition.nodes.Count) nodes resolve to a known sprk_playbookexecutortype Choice value (R7 FR-20)" -ForegroundColor Green
 
 # ===========================================================================
-# Lint B: action-code wiring per node (Wave B B3 per Insights Engine r2 D-01)
+# Lint B: action-code wiring per node (Wave B B3 per Insights Engine r2 D-01;
+# R7 2026-06-29 refined to be prompt-driven-only)
 # ===========================================================================
-# Every dispatchable node must carry an `actionCode` so this script can
-# resolve it to a sprk_analysisaction row and set
-# sprk_playbooknode.sprk_actionid. Without sprk_actionid, the R7 orchestrator
-# (PlaybookOrchestrationService.ExecuteNodeAsync after Wave 2 single-hop
-# refactor) cannot resolve action-bound config for the executor.
+# Prompt-driven nodes (AiAnalysis=0, AiCompletion=1, AiEmbedding=2) MUST carry
+# an `actionCode` so this script can resolve it to a sprk_analysisaction row
+# and set sprk_playbooknode.sprk_actionid (the prompt template's home).
 #
-# Exemption: DeliverComposite nodes (ExecutorType 42, ADR-037) are
-# code-registered structural executors — they read sections + destination
-# from configjson, not from an Action FK. Skip them from the actionCode
-# requirement.
+# Pure executors (Condition=30, Start=33, CreateNotification=50,
+# LookupUserMembership=52, QueryDataverse=51, etc.) do NOT use Actions — their
+# config lives entirely in sprk_configjson on the node. Requiring actionCode
+# for these would block legitimate notification/control-flow playbooks
+# (observed 2026-06-29 when re-deploying notification-tasks-due-soon.json).
+#
+# Exemptions:
+#   - DeliverComposite (ExecutorType 42, ADR-037) — code-registered structural
+#     executor (reads sections + destination from configjson, not Action FK).
+#   - All non-prompt-driven executors per R7 single-hop dispatch model.
+$promptDrivenExecutorTypes = @(0, 1, 2)  # AiAnalysis, AiCompletion, AiEmbedding
 $nodesMissingActionCode = @()
 foreach ($lintNode in $definition.nodes) {
-    if ($lintNode.nodeType -eq 'DeliverComposite' -or [int]($lintNode.executorType) -eq 42) { continue }
+    # Resolve effective executorType (same logic as Lint A)
+    $effectiveType = $null
+    if ($null -ne $lintNode.executorType) {
+        $effectiveType = [int]$lintNode.executorType
+    } elseif ($lintNode.nodeType -and $LegacyNodeTypeToExecutorType.ContainsKey([string]$lintNode.nodeType)) {
+        $effectiveType = [int]$LegacyNodeTypeToExecutorType[[string]$lintNode.nodeType]
+    }
+    # Exempt non-prompt-driven executors + DeliverComposite (covered by inclusion check below)
+    if ($null -eq $effectiveType -or -not ($promptDrivenExecutorTypes -contains $effectiveType)) {
+        continue
+    }
     if (-not $lintNode.actionCode) {
         $nodesMissingActionCode += $lintNode.name
     }

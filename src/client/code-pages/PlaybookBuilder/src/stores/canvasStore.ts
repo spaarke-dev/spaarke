@@ -57,8 +57,26 @@ export function coerceUnknownNodeTypes(nodes: PlaybookNode[]): PlaybookNode[] {
     if (node.data.type === 'start') return node;
 
     const executorType = node.data.executorType;
-    const knownExecutor =
-      typeof executorType === 'number' ? getExecutorByValue(executorType) : undefined;
+
+    // R7 hotfix 2026-06-29: do NOT coerce when executorType is absent. Pre-R7
+    // canvasLayoutJson uses legacy `data.type` discriminators ('control',
+    // 'aiAnalysis', 'output', 'workflow', 'deliverComposite') WITHOUT an
+    // executorType integer. The original logic coerced those to 'unknown',
+    // which permanently corrupted the JSON (next save persisted 'unknown' to
+    // Dataverse — observed on "Tasks Due Soon" 2026-06-29). Only coerce when
+    // executorType IS a number BUT not in the catalog — that's the actual
+    // "unknown executor" case FR-27 was designed for.
+    //
+    // The companion canvas-JSON migration
+    // (scripts/dataverse/Migrate-PlaybookCanvasJson-To-ExecutorType.ps1)
+    // backfills `data.executorType` from sprk_playbooknode rows for legacy
+    // playbooks. After it runs, all nodes have executorType set and this
+    // function only coerces genuinely unknown values.
+    if (typeof executorType !== 'number') {
+      return node;
+    }
+
+    const knownExecutor = getExecutorByValue(executorType);
 
     // Known + present in catalog → leave untouched.
     if (knownExecutor) return node;
