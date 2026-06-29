@@ -2,7 +2,9 @@
   <metadata>
     <title>Phase D Exit-Gate Validation — 5 Exit Criteria from spec §Phase D</title>
     <phase>Phase D — Command Router + Integration + Closeout</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-29</completed>
+    <completion-notes>5 Phase D exit criteria signed off; checklist at `notes/phase-d-exit-checklist.md`; `plan.md` Phase D marked ✅; tasks 080–088 verified ✅ in TASK-INDEX.md; BFF publish-size delta = 0 MB (docs-only task). Acceptance criteria all met.</completion-notes>
     <estimated-effort>2 hours</estimated-effort>
     <dependencies>088</dependencies>
     <blocks>090</blocks>

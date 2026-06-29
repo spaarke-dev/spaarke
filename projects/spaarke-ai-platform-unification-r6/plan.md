@@ -316,7 +316,9 @@ Parallel handler workstream (spans Phase A–C)
 **Outputs**: ~30 task files (050–079 range)
 **Dependencies**: Pillar 6a is the gate for 6b/6c/7/9 (state model interfaces are consumed by all four)
 
-### Phase D: Command Router + Integration + Closeout (Week 6–7)
+### Phase D: Command Router + Integration + Closeout (Week 6–7) ✅ SIGNED OFF 2026-06-29
+
+> **Phase D exit gate signed off** 2026-06-29 by task 089. Evidence: [`notes/phase-d-exit-checklist.md`](notes/phase-d-exit-checklist.md). All 5 exit criteria green; tasks 080–088 ✅.
 
 **Objectives**:
 1. Pillar 8: Slash/hash/at command vocabulary + parser + execution
@@ -446,12 +448,12 @@ Parallel handler workstream (spans Phase A–C)
 - [ ] Pinned facts persist as user preferences across sessions
 - [ ] **Q7**: Pinned Memory CRUD UI in Context pane functional
 
-### Phase D Exit Criteria
-- [ ] `/help` works and discoverable
-- [ ] Hard slashes bypass LLM (<100ms latency; no Azure OpenAI request)
-- [ ] Soft slashes route via agent with prioritized intent
-- [ ] References resolve at parse time
-- [ ] All R6 changes have integration test coverage (vertical-slice validation per §6)
+### Phase D Exit Criteria — ✅ SIGNED OFF 2026-06-29 ([`notes/phase-d-exit-checklist.md`](notes/phase-d-exit-checklist.md))
+- [x] `/help` works and discoverable — tasks 081 + 085
+- [x] Hard slashes bypass LLM (<100ms latency; no Azure OpenAI request) — task 081 (43 tests + 087 vertical-slice)
+- [x] Soft slashes route via agent with prioritized intent — task 082 (38 tests + 18 BFF tests); successor PR #509 preserves invariant via FR-23 replacement
+- [x] References resolve at parse time — tasks 083 + 084 (composition tests)
+- [x] All R6 changes have integration test coverage (vertical-slice validation per §6) — tasks 086/087/088
 
 ### Cross-cutting
 - [ ] BFF publish size ≤+5 MB total across R6 (NFR-02)
