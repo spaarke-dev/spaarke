@@ -2,7 +2,7 @@
 <task id="R7-066" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>MAJOR UPDATE PLAYBOOK-AUTHOR-GUIDE.md for node-first dispatch model</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>6</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>docs, wave-6</tags>
