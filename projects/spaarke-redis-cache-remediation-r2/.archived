@@ -1,0 +1,10 @@
+Archived: 2026-06-29
+Final status: Completed
+Closing PR: #489 (https://github.com/spaarke-dev/spaarke/pull/489) — primary; merged 2026-06-27
+Hotfix PR: #512 (https://github.com/spaarke-dev/spaarke/pull/512) — autoMitigate fix + graduation docs
+Worktree: c:/code_files/spaarke-wt-spaarke-redis-cache-remediation-r2 (PRESERVED — not removed by this skill; clean up separately if desired)
+Remote branch: work/spaarke-redis-cache-remediation-r2 (still on origin)
+Issue: #481 (closed)
+Closed issues by R2: #462 (DEF-001), #483 (DEF-007), #484 (DEF-008), #485 (DEF-009)
+Spec FR/NFR verified: 14 of 14 FRs + 8 of 8 NFRs (full table in notes/post-deploy-verification.md §6)
+Live deploy date: 2026-06-29 (dev — KQL acceptance MET with organic traffic)
