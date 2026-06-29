@@ -208,6 +208,11 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
   const isAiNode = nodeType === 'aiAnalysis' || nodeType === 'aiCompletion';
   const isConditionNode = nodeType === 'condition';
   const isStartNode = nodeType === 'start';
+  // R7 Wave 8 task 089 (FR-27): when the node has been coerced to 'unknown'
+  // by canvasStore.coerceUnknownNodeTypes (executorType not in catalog),
+  // restrict the dialog to the Action tab only so the maker is funneled toward
+  // picking a known Executor Type via the ExecutorTypeSelector.
+  const isUnknownNode = nodeType === 'unknown';
   const hasTypeForm = [
     'deliverOutput',
     'deliverToIndex',
@@ -372,7 +377,15 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
   // R7 Wave 8 task 086 (FR-24): tab order is Overview, Action, Prompt, Skills,
   // Knowledge, Tools, Configuration. Action tab is hidden on Start nodes
   // (Start is a canvas anchor with no Action / ExecutorType to choose).
+  // R7 Wave 8 task 089 (FR-27): when nodeType === 'unknown', show ONLY the
+  // Action tab. The maker must pick a known Executor Type via the
+  // ExecutorTypeSelector before any other tab is meaningful (Prompt depends on
+  // executor being prompt-driven; Configuration depends on the executor's
+  // typed config schema; Skills/Knowledge/Tools depend on executor capability).
   const visibleTabs = useMemo(() => {
+    if (isUnknownNode) {
+      return [{ id: 'action' as TabId, label: 'Action' }];
+    }
     const tabs: { id: TabId; label: string }[] = [{ id: 'overview', label: 'Overview' }];
     if (!isStartNode) {
       tabs.push({ id: 'action', label: 'Action' });
@@ -389,7 +402,18 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
       tabs.push({ id: 'configuration', label: 'Configuration' });
     }
     return tabs;
-  }, [isAiNode, isStartNode, hasConfigTab]);
+  }, [isAiNode, isStartNode, hasConfigTab, isUnknownNode]);
+
+  // R7 Wave 8 task 089 (FR-27): when the selected node is unknown, force
+  // activeTab to 'action' so the dialog opens directly on the
+  // ExecutorTypeSelector. Without this, the previously-selected tab (e.g.
+  // 'overview') would persist across selection changes and the maker would
+  // see an empty pane.
+  useEffect(() => {
+    if (isUnknownNode && activeTab !== 'action') {
+      setActiveTab('action');
+    }
+  }, [isUnknownNode, activeTab]);
 
   return (
     <Dialog

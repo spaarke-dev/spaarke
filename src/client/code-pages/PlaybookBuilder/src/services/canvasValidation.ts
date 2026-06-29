@@ -18,6 +18,7 @@
 import type { Node, Edge } from '@xyflow/react';
 import type { PlaybookNodeData } from '../types/canvas';
 import type { PromptSchema, OutputFieldDefinition } from '../types/promptSchema';
+import { getExecutorByValue } from '../config/executorMetadata';
 
 // ---------------------------------------------------------------------------
 // Public Types
@@ -62,7 +63,14 @@ export interface PromptSchemaValidation {
     // whose target config does NOT reference the source's outputVariable via
     // {{<source.outputVariable>.output.*}}. Severity 'warning' ONLY — does NOT
     // block save (FR-3H2.3 binding constraint; enforced by hasValidationErrors).
-    | 'edge-no-data-dependency';
+    | 'edge-no-data-dependency'
+    // R7 Wave 8 task 089 (FR-27): node's data.executorType is not in the
+    // 33-entry EXECUTOR_METADATA catalog OR is NULL/undefined. The canvas
+    // renders the node via UnknownNode (warning-state shell); this validation
+    // entry surfaces the same condition in the validation results panel.
+    // Severity 'warning' (advisory, non-blocking save) — execution will fail
+    // at runtime until the maker picks a known executor type in the Action tab.
+    | 'r7-fr27-unknown-executor-type';
   /** Human-readable validation message. */
   message: string;
 }
@@ -217,6 +225,32 @@ export function validatePromptSchemaNodes(nodes: Node<PlaybookNodeData>[], edges
   // NodePropertiesForm/Dialog, but a user can still hand-edit a second node
   // to collide. Runs over the full nodes array (cross-node rule), not per-type.
   results.push(...validateOutputVariableCollisions(nodes));
+
+  // R7 Wave 8 task 089 (FR-27): unknown executor type advisory.
+  // Flags any node whose data.executorType is not present in EXECUTOR_METADATA.
+  // The renderer (UnknownNode.tsx, coerced via canvasStore.coerceUnknownNodeTypes)
+  // already shows a warning-state shell, but a validation entry makes the
+  // condition discoverable from the validation results panel + blocks downstream
+  // confusion. Severity = 'warning' (advisory, non-blocking) per existing
+  // pattern; the maker can still save the playbook but execution will fail
+  // until they pick a known executor type.
+  for (const node of nodes) {
+    // Start nodes never carry executorType — never flag them.
+    if (node.data.type === 'start') continue;
+    const executorType = node.data.executorType;
+    const known = typeof executorType === 'number' ? getExecutorByValue(executorType) : undefined;
+    if (!known) {
+      results.push({
+        nodeId: node.id,
+        severity: 'warning',
+        rule: 'r7-fr27-unknown-executor-type',
+        message:
+          executorType === undefined || executorType === null
+            ? 'Executor Type not set — pick an Executor Type in the Action tab to enable execution.'
+            : `Unknown Executor Type ${executorType}. Pick a known type from the Action tab to enable execution.`,
+      });
+    }
+  }
 
   // Per-edge advisory rules (task 093) — sibling to the per-NODE-type loop above.
   // Iterates edges (not nodes) to flag edges that lack a data dependency between
