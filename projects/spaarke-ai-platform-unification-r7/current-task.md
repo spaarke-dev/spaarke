@@ -10,20 +10,17 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 003 — Implement payload binding + PromptSchemaOverrideMerger integration |
+| **Task** | 005 — Implement Validate() — Action FK required; Tool/Document NOT required |
 | **Step** | 0 of N: not yet started |
 | **Status** | not-started |
-| **Next Action** | User says "execute task 003" / "continue" → invokes `task-execute` skill with `tasks/003-*.poml` (parallel-safe with task 005) |
+| **Next Action** | User says "execute task 005" / "continue" → invokes `task-execute` skill with `tasks/005-*.poml` (parallel-safe with task 004; both depend on 003 ✅) |
 
-### Files Modified This Session
+### Files Modified This Session (task 003)
 
-- `projects/spaarke-ai-platform-unification-r7/current-task.md` — Modified — advance to task 003
-- `projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md` — Modified — mark 002 ✅
-- `projects/spaarke-ai-platform-unification-r7/tasks/002-scaffold-aicompletion-node-executor.poml` — Modified — status completed
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs` — Created — scaffold (Validate enforces FR-13 invariants; ExecuteAsync skeleton with TODOs for tasks 003/004)
-- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs` — Modified — Singleton DI registration for AiCompletionNodeExecutor (UNCONDITIONAL per CLAUDE.md §F.1)
-- `src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs` — Modified — extended `AnalysisAction` record with `OutputSchemaJson` property (Home A — Action row, per spec FR-12)
-- `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs` — Modified — added `sprk_outputschemajson` to Get/List projections + `ActionEntity.OutputSchemaJson` + populate `AnalysisAction.OutputSchemaJson`
+- `projects/spaarke-ai-platform-unification-r7/current-task.md` — Modified — advance to task 005 (after 003 ✅)
+- `projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md` — Modified — mark 003 ✅
+- `projects/spaarke-ai-platform-unification-r7/tasks/003-implement-payload-binding-prompt-merger.poml` — Modified — status completed
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs` — Modified — added PromptSchemaRenderer DI dep + ApplyPromptSchemaOverride/ExtractTemplateParameters/DeriveSchemaName private helpers + ExecuteAsync payload binding through render (staged for task 004 LLM call)
 
 ### Critical Context
 
@@ -35,9 +32,9 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 
 | Field | Value |
 |---|---|
-| **Task ID** | 003 |
-| **Task File** | `tasks/003-*.poml` |
-| **Title** | Implement payload binding + PromptSchemaOverrideMerger integration |
+| **Task ID** | 005 |
+| **Task File** | `tasks/005-*.poml` |
+| **Title** | Implement Validate() — Action FK required; Tool/Document NOT required |
 | **Phase / Wave** | Wave 1 — AiCompletionNodeExecutor build (FR-12 to FR-15) |
 | **Status** | not-started |
 | **Started** | — |
@@ -52,12 +49,13 @@ R7 is the foundational dispatch-model reform. Critical-path: Wave 1 (AiCompletio
 - ✅ **Task 080** (2026-06-28, Wave 8 parallel-safe pre-flight) — PlaybookBuilder `sprk_nodetype` + `__actionType` audit complete. Inventory at `notes/spikes/playbookbuilder-sprk-nodetype-audit.md`. Findings: 9 `sprk_nodetype` refs in 3 files (`types/canvas.ts`, `types/playbook.ts`, `services/playbookNodeSync.ts`); 3 `__actionType` refs in same 3 files; zero refs in `src/client/shared/`. Replacement strategy categorized (direct rename for query/payload, delete for `DataverseNodeType`/`NodeTypeToDataverse`/`NodeTypeToActionType` constructs, rewrite for JSDoc). Task 088 has a 5-step plan + cross-task coordination matrix (depends on task 022 enum rename + task 024 dispatch refactor + task 081 form update).
 - ✅ **Task 040** (2026-06-28, Wave 4 parallel-safe pre-flight) — `ExecuteAnalysisAsync` caller audit complete. Inventory at `notes/spikes/executeanalysisasync-caller-audit.md`. Key findings: only **1 production caller** (`AnalysisEndpoints.cs:261` `POST /api/ai/analysis/execute`); **SessionSummarizeOrchestrator does NOT call it** (contradicts POML expected-callers assumption — Wave 9 task 091 still required for FR-17 but independent of Wave 4); 13 unit-test references + 1 integration-test mock; replacement = degenerate 3-node playbook via `PlaybookOrchestrationService.ExecuteAsync` (Option A — recommended). **Plan implication**: Wave 4 dependency "blocked on Wave 9 + Wave 2" can be downgraded to "blocked on Wave 2 only" at task 041 kickoff. Risk register includes SSE chunk-shape mapping (`AnalysisStreamChunk` → `PlaybookStreamEvent`).
 - ✅ **Task 002** (2026-06-28, Wave 1) — `AiCompletionNodeExecutor` scaffold complete. New file at `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs` (mirrors EntityNameValidatorNodeExecutor: `sealed class`, `JsonOptions` static field, `IOpenAiClient + ILogger` ctor, `using var activity = AiTelemetry.ActivitySource.StartActivity("ai.completion.node_execute", ...)`, terminal try/catch with Cancelled/InternalError propagation). `Validate()` enforces FR-13 invariants: REQUIRES `Node.OutputVariable` + `Action` FK + `Action.SystemPrompt` + `Action.OutputSchemaJson`; PROHIBITS `Tool`. `ExecuteAsync()` is a deliberate scaffold — body returns `InternalError` with a TODO pointing to tasks 003/004. DI registration as Singleton in `AnalysisServicesModule.AddNodeExecutors` (UNCONDITIONAL per CLAUDE.md §F.1). Extended `AnalysisAction` record with `OutputSchemaJson` property (resolves task 001 open question — Option A per orchestrator decision; populated from `sprk_outputschemajson` Dataverse field via `AnalysisActionService`). Build clean (0 errors, 18 pre-existing warnings, 0 new). Publish size: 46.71 MB compressed (baseline 45.65 MB; delta +1.06 MB — below +5 MB single-task escalation threshold; well under 60 MB NFR-01 hard ceiling).
+- ✅ **Task 003** (2026-06-28, Wave 1) — Payload binding + PromptSchemaOverrideMerger integration complete. Modified `AiCompletionNodeExecutor.cs` (251 → 512 lines): (a) added `PromptSchemaRenderer` constructor dependency (existing Singleton, no new abstraction); (b) implemented `ExecuteAsync` payload binding pipeline — read `Action.SystemPrompt` → `ApplyPromptSchemaOverride(basePrompt, ConfigJson)` (FR-25 KEEP, mirrors AiAnalysisNodeExecutor sibling) → `ExtractTemplateParameters(ConfigJson)` (mirrors sibling) → `PromptSchemaRenderer.Render(...)` with null skillContext/knowledgeContext/documentText (AiCompletion is prompt-only per FR-13) → stage locals for task 004 (rendered.PromptText, outputSchemaJson, schemaName via new `DeriveSchemaName` helper, effectiveTemperature with Wave B-G9c1 B6 null-safe semantics); (c) added structured logging emitting only metadata (NodeId, ActionId, length counts, format enum, ParamCount, Temperature) — NO prompt content per ADR-015; (d) added activity tags `rendered.format`, `rendered.prompt_length`, `output_schema.length`; (e) explicit "Task 004 binding contract" comment block stages the await `_openAiClient.GetStructuredCompletionRawAsync(...)` call. `Validate()` left untouched per orchestrator instruction (task 005 owns it). Build clean (0 errors, 18 pre-existing warnings, 0 new). Targeted tests pass (76 PromptSchemaRenderer/Merger/AiAnalysis tests, 0 regression). Publish size: **46.71 MB compressed (0.00 MB delta vs task 002)** — well under 60 MB NFR-01 ceiling. `/code-review` + `/adr-check` both passed: 0 critical, 0 warnings, 3 deferred suggestions (file length 512 vs 500 threshold, ExecuteAsync body length, Validate null-check style — all task 004/005 scope).
 
 ### Current Step
 
 **Step 0**: not yet started
 
-Run `task-execute` for task 003 when ready. Tasks 003 + 005 are parallel-safe per Wave 1 dependency graph.
+Run `task-execute` for task 005 (Validate refinement) when ready. Tasks 005 + 004 are parallel-safe per Wave 1 dependency graph (both depend on 003 ✅).
 
 ---
 
