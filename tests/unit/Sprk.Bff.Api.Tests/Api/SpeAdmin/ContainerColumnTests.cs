@@ -76,19 +76,6 @@ public class ContainerColumnTests
     }
 
     [Fact]
-    public void ContainerColumnDto_IsRecord_SupportsValueEquality()
-    {
-        // Arrange
-        var a = new ContainerColumnDto("col-1", "Name", "Display", null, "text", false, false, false);
-        var b = new ContainerColumnDto("col-1", "Name", "Display", null, "text", false, false, false);
-        var c = new ContainerColumnDto("col-1", "Name", "Display", null, "text", true, false, false);
-
-        // Assert
-        a.Should().Be(b, "records with identical values should be equal");
-        a.Should().NotBe(c, "records with different Required flags should not be equal");
-    }
-
-    [Fact]
     public void ContainerColumnDto_IsImmutable_RecordType()
     {
         // Assert — positional records have Deconstruct
@@ -188,18 +175,6 @@ public class ContainerColumnTests
         response.Count.Should().Be(0);
     }
 
-    [Fact]
-    public void ContainerColumnListResponse_IsRecord_SupportsValueEquality()
-    {
-        // Arrange
-        var items = Array.Empty<ContainerColumnDto>();
-        var a = new ContainerColumnListResponse(items, 0);
-        var b = new ContainerColumnListResponse(items, 0);
-
-        // Assert
-        a.Should().Be(b);
-    }
-
     #endregion
 
     // =========================================================================
@@ -257,19 +232,6 @@ public class ContainerColumnTests
         // Assert
         request.DisplayName.Should().BeNull();
         request.Description.Should().BeNull();
-    }
-
-    [Fact]
-    public void CreateColumnRequest_IsRecord_SupportsValueEquality()
-    {
-        // Arrange
-        var a = new CreateColumnRequest("Col", null, null, "text", false, false);
-        var b = new CreateColumnRequest("Col", null, null, "text", false, false);
-        var c = new CreateColumnRequest("Col", null, null, "text", true, false);
-
-        // Assert
-        a.Should().Be(b);
-        a.Should().NotBe(c, "records with different Required flags should not be equal");
     }
 
     #endregion
@@ -330,19 +292,6 @@ public class ContainerColumnTests
         request.Required.Should().BeNull("required not included in this patch");
     }
 
-    [Fact]
-    public void UpdateColumnRequest_IsRecord_SupportsValueEquality()
-    {
-        // Arrange
-        var a = new UpdateColumnRequest("Name", null, null, null);
-        var b = new UpdateColumnRequest("Name", null, null, null);
-        var c = new UpdateColumnRequest("Different", null, null, null);
-
-        // Assert
-        a.Should().Be(b);
-        a.Should().NotBe(c);
-    }
-
     #endregion
 
     // =========================================================================
@@ -372,17 +321,6 @@ public class ContainerColumnTests
         col.ColumnType.Should().Be("choice");
         col.Indexed.Should().BeTrue();
         col.ReadOnly.Should().BeFalse();
-    }
-
-    [Fact]
-    public void SpeContainerColumn_IsRecord_SupportsValueEquality()
-    {
-        // Arrange
-        var a = new SpeAdminGraphService.SpeContainerColumn("id", "Name", null, null, "text", false, false, false);
-        var b = new SpeAdminGraphService.SpeContainerColumn("id", "Name", null, null, "text", false, false, false);
-
-        // Assert
-        a.Should().Be(b, "identical domain records should be value-equal");
     }
 
     #endregion

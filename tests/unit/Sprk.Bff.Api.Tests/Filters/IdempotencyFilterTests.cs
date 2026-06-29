@@ -614,13 +614,6 @@ public class IdempotencyFilterTests
 
     #region Extension Method Tests
 
-    [Fact]
-    public void AddIdempotencyFilter_ReturnsRouteHandlerBuilder()
-    {
-        // This is a compile-time test - if it compiles, the extension method signature is correct
-        // Runtime testing requires a full WebApplication setup which is done in integration tests
-    }
-
     #endregion
 
     #region Helper Methods
