@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>Deploy alerts.bicep to dev + KQL verification (NFR-07) + BFF publish-size delta (NFR-04)</title>
+    <phase>4: Deploy + verify + close-out</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001,002,003,004,005,006,010,011,012,013,014,020,021,022</dependencies>
+    <blocks>031</blocks>
+    <tags>deploy, azure, observability, kql, publish-size</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Irreversible Azure operations; NFR-04 + NFR-07 enforcement gates project graduation.</rigor-reason>
+    <parallel-group>Phase 4 serial</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>All-prior dependencies; deploy is the integration point.</parallel-reason>
+  </metadata>
+  <prompt>(1) Deploy `infrastructure/bicep/alerts.bicep` to dev RG via `scripts/Deploy-RedisCache.ps1 -DeployAlerts -Environment dev`. Verify 4 alerts (3 cache + 1 missed-rotation) exist via `az monitor metrics alert list -g rg-spaarke-dev` + `az monitor scheduled-query list -g rg-spaarke-dev`. (2) Deploy BFF to dev via `scripts/Deploy-BffApi.ps1`. Measure publish-size delta vs R1 baseline (46.67 MB from R1 close-out): MUST be ≤+0.5 MB (NFR-04). (3) Verify Theme A KQL queries return rows within 10 min of post-deploy traffic (NFR-07): `customMetrics | where name == 'cache.failures'` AND `customMetrics | where name == 'cache.hits.by_resource'`. Capture all outputs to `notes/post-deploy-verification.md`.</prompt>
+  <role>Spaarke deploy operator with Az CLI + App Insights KQL + Bicep familiarity. Apply `azure-deploy` + `bff-deploy` skills.</role>
+  <goal>4 alerts deployed + visible; BFF publish-size delta ≤+0.5 MB; cache.failures + cache.hits.by_resource KQL queries return rows within 10 min of post-deploy traffic. All evidence captured in notes/.</goal>
+  <context>
+    <background>This is the integration gate for the whole project. Spec NFR-04, NFR-07, FR-01 G-02, FR-03 G-03 all verified here. Optionally trigger `az redis force-reboot spaarke-bff-redis-dev` to provoke a `cache.failures` event (sanity check).</background>
+    <relevant-files>
+      <file>infrastructure/bicep/alerts.bicep (from tasks 004 + 014)</file>
+      <file>scripts/Deploy-RedisCache.ps1 (from task 004 extension)</file>
+      <file>scripts/Deploy-BffApi.ps1 (existing)</file>
+      <file>tests/manual/RedisValidationTests.ps1 (post-deploy verification)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">NFR-04 — publish-size delta ≤+0.5 MB compressed.</constraint>
+    <constraint source="spec">NFR-07 — KQL cache.failures + cache.hits.by_resource non-empty within 10 min of post-deploy traffic.</constraint>
+    <constraint source="azure-deployment.md">Idempotent deploy; clear evidence captured.</constraint>
+    <constraint source="bff-extensions.md">§G Hot-Path Declaration — already in design.md; reference in deploy notes.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>infrastructure/bicep/alerts.bicep</file>
+      <file>scripts/Deploy-RedisCache.ps1</file>
+      <file>scripts/Deploy-BffApi.ps1</file>
+      <file>tests/manual/RedisValidationTests.ps1</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Confirm prerequisites: tasks 001-022 ✅; build clean; tests at baseline.</step>
+    <step order="2">Deploy alerts: `pwsh ./scripts/Deploy-RedisCache.ps1 -DeployAlerts -Environment dev`.</step>
+    <step order="3">Verify alerts: `az monitor metrics alert list -g rg-spaarke-dev` shows 3; `az monitor scheduled-query list -g rg-spaarke-dev` shows missed-rotation alert.</step>
+    <step order="4">Measure BFF publish size: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure compressed output size. Compare to R1 close-out baseline of 46.67 MB.</step>
+    <step order="5">Deploy BFF: `pwsh ./scripts/Deploy-BffApi.ps1 -Environment dev` (or equivalent — operator confirms exact invocation).</step>
+    <step order="6">Verify `/healthz` 200 post-deploy.</step>
+    <step order="7">Optional: `az redis force-reboot spaarke-bff-redis-dev` to provoke a cache.failures event.</step>
+    <step order="8">Wait 10 min for App Insights propagation.</step>
+    <step order="9">Run KQL queries via Az Portal or `az monitor app-insights query`: `customMetrics | where name == 'cache.failures' | summarize sum(value) by tostring(customDimensions.outcome)` AND `customMetrics | where name == 'cache.hits.by_resource' | summarize sum(value) by tostring(customDimensions.resource)`. Both must return ≥1 row.</step>
+    <step order="10">Capture all outputs (alert list, publish-size delta, KQL output) to `notes/post-deploy-verification.md`.</step>
+    <step order="11">Update TASK-INDEX 🔲 → ✅.</step>
+    <step order="12">Step 9.5 quality gates: code-review (full PR diff) + adr-check.</step>
+  </steps>
+  <tools>
+    <tool name="Bash">Deploy scripts + Az CLI queries</tool>
+    <tool name="Write">notes/post-deploy-verification.md</tool>
+  </tools>
+  <outputs>
+    <output type="deployment">Dev env alerts deployed + BFF deployed (NEW BUILD)</output>
+    <output type="notes">projects/spaarke-redis-cache-remediation-r2/notes/post-deploy-verification.md (publish-size + alerts + KQL evidence)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`az monitor metrics alert list -g rg-spaarke-dev` shows 3 cache alerts.</criterion>
+    <criterion testable="true">`az monitor scheduled-query list -g rg-spaarke-dev` shows missed-rotation alert.</criterion>
+    <criterion testable="true">BFF publish-size delta vs R1 baseline ≤+0.5 MB compressed.</criterion>
+    <criterion testable="true">KQL cache.failures returns ≥1 row within 10 min of post-deploy traffic.</criterion>
+    <criterion testable="true">KQL cache.hits.by_resource returns rows with bounded resource values.</criterion>
+    <criterion testable="true">BFF /healthz returns 200 post-deploy.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor.</protocol>
+  </execution>
+</task>

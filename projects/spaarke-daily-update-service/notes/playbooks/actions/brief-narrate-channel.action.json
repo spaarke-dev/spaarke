@@ -74,10 +74,7 @@
       "input": "{ \"channel\": \"<channel-name>\", \"items\": [{ \"regardingName\": \"<matter-name-1>\", \"source\": { \"owningUser\": \"<person-A>\" } }, { \"regardingName\": \"<matter-name-1>\" }, { \"regardingName\": \"<matter-name-2>\" }] }",
       "output": {
         "channel": "<channel-name>",
-        "narrative": [
-          "2 updates on <matter-name-1> from <person-A>.",
-          "1 update on <matter-name-2>."
-        ],
+        "narrative": ["2 updates on <matter-name-1> from <person-A>.", "1 update on <matter-name-2>."],
         "itemCount": 3,
         "bulletCount": 2
       }

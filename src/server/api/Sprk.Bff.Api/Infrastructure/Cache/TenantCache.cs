@@ -1,7 +1,6 @@
-using System.Diagnostics;
-using System.Diagnostics.Metrics;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.Cache;
 
@@ -15,21 +14,18 @@ namespace Sprk.Bff.Api.Infrastructure.Cache;
 /// <c>InstanceName</c> (currently <c>spaarke:</c>) is prepended by
 /// <c>StackExchangeRedisCache</c>, not by this wrapper.
 /// </remarks>
+/// <remarks>
+/// Cache metrics (cache.hits / cache.misses / cache.failures / cache.redis_call_duration_ms)
+/// are owned by <see cref="Sprk.Bff.Api.Telemetry.CacheMetrics"/> and emitted by
+/// <see cref="MetricsDistributedCache"/> at the <see cref="IDistributedCache"/> decorator
+/// layer (FR-02 of <c>spaarke-redis-cache-remediation-r2</c>). This wrapper deliberately
+/// owns no Meter or instruments.
+/// </remarks>
 internal sealed class TenantCache : ITenantCache
 {
     private const string DefaultCacheInstance = "default";
 
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
-
-    // FR-16: Custom cache metrics. Hit-rate is computed downstream from hits/(hits+misses).
-    // Meter name follows the BFF's "Sprk.Bff.Api.*" convention (matches the existing
-    // `metrics.AddMeter("Sprk.Bff.Api.Cache")` registration in `TelemetryModule.cs` so
-    // metrics flow to App Insights via OpenTelemetry without additional registration).
-    internal static readonly Meter Meter = new("Sprk.Bff.Api.Cache", "1.0.0");
-    internal static readonly Counter<long> HitsCounter = Meter.CreateCounter<long>("cache.hits");
-    internal static readonly Counter<long> MissesCounter = Meter.CreateCounter<long>("cache.misses");
-    internal static readonly Histogram<double> CallDurationHistogram =
-        Meter.CreateHistogram<double>("cache.redis_call_duration_ms");
 
     private readonly IDistributedCache _cache;
     private readonly ILogger<TenantCache> _logger;
@@ -58,8 +54,17 @@ internal sealed class TenantCache : ITenantCache
 
         if (bytes is null || bytes.Length == 0)
         {
+            // FR-03 (task 003): secondary by_resource metric — wrapper layer only, primary
+            // cache.misses at decorator layer is unchanged. Resource cardinality bounded (~10-20).
+            CacheMetrics.MissesByResourceCounter.Add(
+                1,
+                new KeyValuePair<string, object?>("resource", resource));
             return default;
         }
+
+        CacheMetrics.HitsByResourceCounter.Add(
+            1,
+            new KeyValuePair<string, object?>("resource", resource));
 
         try
         {
@@ -158,8 +163,24 @@ internal sealed class TenantCache : ITenantCache
         ValidateArguments(tenantId, resource, id, cacheInstance);
 
         var key = BuildKey(tenantId, resource, id, version);
-        // Metrics emitted at IDistributedCache decorator layer (see GetAsync comment).
-        return await _cache.GetStringAsync(key, ct).ConfigureAwait(false);
+        // Primary cache.hits / cache.misses emitted at IDistributedCache decorator layer.
+        // FR-03 (task 003) secondary by_resource metric below.
+        var value = await _cache.GetStringAsync(key, ct).ConfigureAwait(false);
+
+        if (string.IsNullOrEmpty(value))
+        {
+            CacheMetrics.MissesByResourceCounter.Add(
+                1,
+                new KeyValuePair<string, object?>("resource", resource));
+        }
+        else
+        {
+            CacheMetrics.HitsByResourceCounter.Add(
+                1,
+                new KeyValuePair<string, object?>("resource", resource));
+        }
+
+        return value;
     }
 
     public async Task SetStringAsync(

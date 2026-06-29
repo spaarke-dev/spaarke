@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "customerId": {
+      "value": "replaceme"
+    },
+    "environmentName": {
+      "value": "prod"
+    },
+    "location": {
+      "value": "westus2"
+    },
+    "platformKeyVaultName": {
+      "value": "sprk-platform-prod-kv"
+    },
+    "storageSku": {
+      "value": "Standard_LRS"
+    },
+    "serviceBusSku": {
+      "value": "Standard"
+    },
+    "tags": {
+      "value": {
+        "customer": "replaceme",
+        "environment": "prod",
+        "application": "spaarke",
+        "managedBy": "bicep"
+      }
+    }
+  }
+}

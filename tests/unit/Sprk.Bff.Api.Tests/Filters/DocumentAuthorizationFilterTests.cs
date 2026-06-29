@@ -75,17 +75,6 @@ public class DocumentAuthorizationFilterTests
             .WithParameterName("authorizationService");
     }
 
-    [Fact]
-    public void Constructor_NullOperation_ThrowsArgumentNullException()
-    {
-        // Arrange - need a mock since we can't pass null
-        // But this test verifies the argument null check on operation
-        // We can only test this if we have a way to construct the filter
-
-        // Since AuthorizationService requires DI, we skip this test
-        // The constructor validation is tested via integration tests
-    }
-
     #endregion
 
     #region Route Extraction Tests

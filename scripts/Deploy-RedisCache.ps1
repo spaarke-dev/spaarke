@@ -52,9 +52,33 @@
     Required to target `prod` or `demo` environments per NFR-05. Without `-Force`,
     the script exits with code 2 and a NFR-05 message.
 
+.PARAMETER DeployAlerts
+    Deploy the 3 Bicep-defined cache observability alerts (hit-rate <80% / 15min,
+    P95 latency >100ms / 5min, memory >80% of SKU / 15min) from
+    `infrastructure/bicep/alerts.bicep` to the target env's resource group.
+    Requires `-AppInsightsName` and `-ActionGroupResourceId`. Mutually compatible
+    with `-WhatIf` (uses `az deployment group what-if`) and with the standard
+    Redis-deploy path (alert deploy runs after Redis idempotency check).
+
+    Project: spaarke-redis-cache-remediation-r2 FR-04.
+
+.PARAMETER AppInsightsName
+    Application Insights component name used as the alert scope for the hit-rate
+    + P95 KQL alerts (alert 3, memory, scopes the Redis cache directly).
+    Defaults by environment:
+      dev     -> spe-insights-dev-67e2xz
+      staging -> spe-insights-staging
+      prod    -> spe-insights-prod
+
+.PARAMETER ActionGroupResourceId
+    Full Azure resource ID of the on-call action group that receives the alert
+    notifications (email). Required when `-DeployAlerts` is set. Format:
+    `/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/actionGroups/{name}`.
+
 .PARAMETER WhatIf
     Native PowerShell `-WhatIf` via `SupportsShouldProcess`. Shows planned actions
-    only — no Azure resources are created or modified.
+    only — no Azure resources are created or modified. Combines with `-DeployAlerts`
+    to surface an `az deployment group what-if` plan for the alerts.
 
 .EXAMPLE
     pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev -WhatIf
@@ -96,7 +120,13 @@ param(
 
     [switch]$CutoverBffSettings,
 
-    [switch]$Force
+    [switch]$Force,
+
+    [switch]$DeployAlerts,
+
+    [string]$AppInsightsName,
+
+    [string]$ActionGroupResourceId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -127,10 +157,21 @@ if (-not $ResourceGroup) {
 # ---------------------------------------------------------------------------
 $bicepModule      = Join-Path $repoRoot "infrastructure/bicep/modules/redis.bicep"
 $bicepParam       = Join-Path $repoRoot "infrastructure/bicep/parameters/redis-$Environment.bicepparam"
+$alertsBicep      = Join-Path $repoRoot "infrastructure/bicep/alerts.bicep"
 $validationScript = Join-Path $repoRoot "tests/manual/RedisValidationTests.ps1"
 $bffAppName       = "spaarke-bff-$Environment"
 $kvSecretName     = 'Redis-ConnectionString'
 $redisName        = "spaarke-bff-redis-$Environment"
+
+# DeployAlerts: resolve App Insights default by env (FR-04 of R2)
+if ($DeployAlerts -and -not $AppInsightsName) {
+    $AppInsightsName = switch ($Environment) {
+        'dev'     { 'spe-insights-dev-67e2xz' }
+        'staging' { 'spe-insights-staging' }
+        'prod'    { 'spe-insights-prod' }
+        'demo'    { 'spe-insights-demo' }
+    }
+}
 
 if (-not (Test-Path $bicepParam)) {
     Write-Error "Bicep param file not found: $bicepParam"
@@ -246,6 +287,57 @@ if ($CutoverBffSettings) {
             exit $LASTEXITCODE
         }
         Write-Host "  Cut over '$bffAppName' App Settings to KV reference."
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Deploy alerts (FR-04 of spaarke-redis-cache-remediation-r2)
+# ---------------------------------------------------------------------------
+if ($DeployAlerts) {
+    if (-not $ActionGroupResourceId) {
+        Write-Error "-DeployAlerts requires -ActionGroupResourceId (full Azure resource ID of the on-call action group)."
+        exit 6
+    }
+    if (-not (Test-Path $alertsBicep)) {
+        Write-Error "Alerts Bicep template not found: $alertsBicep"
+        exit 7
+    }
+
+    Write-Host ""
+    Write-Host "Deploying Redis cache alerts (FR-04 — alerts.bicep)..."
+    Write-Host "  Template       : $alertsBicep"
+    Write-Host "  App Insights   : $AppInsightsName"
+    Write-Host "  ActionGroup ID : $ActionGroupResourceId"
+
+    $alertParams = @(
+        "redisCacheName=$redisName",
+        "appInsightsName=$AppInsightsName",
+        "actionGroupResourceId=$ActionGroupResourceId",
+        "environment=$Environment"
+    )
+
+    if ($WhatIfPreference) {
+        Write-Host "  Mode           : what-if (no resources will be created)"
+        az deployment group what-if `
+            --resource-group $ResourceGroup `
+            --template-file $alertsBicep `
+            --parameters $alertParams `
+            --no-pretty-print
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Alert deploy what-if failed (exit $LASTEXITCODE)"
+            exit $LASTEXITCODE
+        }
+    } elseif ($PSCmdlet.ShouldProcess("alerts in $ResourceGroup targeting $redisName + $AppInsightsName", "Deploy 3 Redis cache alerts via alerts.bicep")) {
+        az deployment group create `
+            --resource-group $ResourceGroup `
+            --template-file $alertsBicep `
+            --parameters $alertParams `
+            --query "properties.provisioningState" -o tsv
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Alert deploy failed (exit $LASTEXITCODE)"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Alerts deployed. Verify with: az monitor metrics alert list -g $ResourceGroup"
     }
 }
 

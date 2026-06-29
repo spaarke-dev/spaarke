@@ -2,7 +2,6 @@ using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services;
-using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -13,9 +12,10 @@ public static class DocumentsModule
         // ============================================================================
         // Phase 4: Token Caching (ADR-009: Redis-First Caching)
         // ============================================================================
-        // Register CacheMetrics as Singleton (stateless, tracks metrics across all requests)
-        // Provides OpenTelemetry-compatible metrics for cache hits, misses, and latency
-        services.AddSingleton<CacheMetrics>();
+        // CacheMetrics is a static class (FR-02 of spaarke-redis-cache-remediation-r2):
+        // single canonical Meter("Sprk.Bff.Api.Cache") owner. No DI registration required —
+        // consumers call CacheMetrics.RecordHit(...) / RecordMiss(...) directly. Per ADR-010
+        // (DI minimalism), this eliminates an unnecessary instance class.
 
         // Register GraphTokenCache as Singleton (stateless, uses IDistributedCache which is also Singleton)
         // Reduces OBO token exchange latency by 97% (~200ms → ~5ms on cache hit)

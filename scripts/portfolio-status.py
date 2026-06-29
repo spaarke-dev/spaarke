@@ -20,11 +20,37 @@ from collections import defaultdict
 PROJECT_ID = "PVT_kwHODW0Pv84BEgWu"
 
 
+def get_merge_state_for_branches(branches):
+    """For each branch, return (latest_merged_pr_num, merge_date) or None.
+
+    Single batched gh pr list call — efficient.
+    """
+    out = subprocess.run(
+        ['gh', 'pr', 'list', '--state', 'all', '--limit', '300',
+         '--json', 'number,title,state,headRefName,mergedAt,url'],
+        capture_output=True, check=True
+    ).stdout.decode('utf-8')
+    all_prs = json.loads(out)
+    branch_to_merged = {}
+    branch_to_open = {}
+    for pr in all_prs:
+        b = pr['headRefName']
+        if pr['state'] == 'MERGED':
+            existing = branch_to_merged.get(b)
+            if not existing or pr['mergedAt'] > existing['mergedAt']:
+                branch_to_merged[b] = pr
+        elif pr['state'] == 'OPEN':
+            branch_to_open[b] = pr
+    return branch_to_merged, branch_to_open
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--epic', type=int, help='Show one Epic only')
-    ap.add_argument('--status', help='Filter Projects by Project Status field value')
+    ap.add_argument('--status', help='Filter Projects by Status field value')
     ap.add_argument('--verbose', action='store_true', help='Show field values per Project')
+    ap.add_argument('--show-merges', action='store_true',
+                    help='Show latest merged PR + merge date + archive-candidate flag per Project')
     args = ap.parse_args()
 
     print('Loading portfolio from Project #2...', file=sys.stderr)
@@ -64,8 +90,8 @@ def main():
       }
     }
     '''
-    result = subprocess.run(['gh', 'api', 'graphql', '-f', f'query={query}'], capture_output=True, text=True, check=True)
-    nodes = json.loads(result.stdout)['data']['node']['items']['nodes']
+    result = subprocess.run(['gh', 'api', 'graphql', '-f', f'query={query}'], capture_output=True, check=True)
+    nodes = json.loads(result.stdout.decode('utf-8'))['data']['node']['items']['nodes']
 
     # Parse items
     epics = {}
@@ -95,7 +121,7 @@ def main():
                 'number': num,
                 'title':  title.replace('[Project]:', '').strip(),
                 'type':   fv.get('Type', '-'),
-                'status': fv.get('Project Status', '-'),
+                'status': fv.get('Status', '-'),
                 'ptype':  fv.get('Project Type', '-'),
                 'worktree': fv.get('Worktree Path', ''),
                 'folder':   fv.get('Project Folder', ''),
@@ -110,19 +136,59 @@ def main():
         try:
             subs = json.loads(subprocess.run(
                 ['gh', 'api', f'repos/spaarke-dev/spaarke/issues/{epic_num}/sub_issues'],
-                capture_output=True, text=True, check=True
-            ).stdout)
+                capture_output=True, check=True
+            ).stdout.decode('utf-8'))
             for sub in subs:
                 if sub['title'].startswith('[Project]:'):
                     epic_to_projects[epic_num].append(sub['number'])
                     project_to_epic[sub['number']] = epic_num
-        except Exception:
-            pass
+        except Exception as e:
+            # Surface errors so silent failures don't masquerade as "no children"
+            sys.stderr.write(f'  warn: Epic #{epic_num} sub-issues query failed: {e}\n')
 
     # Filter
     if args.status:
         projects = [p for p in projects if p['status'].lower() == args.status.lower()]
     project_nums = {p['number']: p for p in projects}
+
+    # --show-merges: for each project, look up merge state by reading its worktree's current branch
+    branch_to_merged_pr = {}
+    branch_to_open_pr = {}
+    if args.show_merges:
+        # Resolve each project's branch from worktree path
+        for p in projects:
+            wt_path = p.get('worktree', '')
+            if wt_path:
+                try:
+                    branch = subprocess.run(['git', '-C', wt_path, 'branch', '--show-current'],
+                                            capture_output=True, check=True
+                                            ).stdout.decode('utf-8').strip()
+                    p['branch'] = branch
+                except Exception:
+                    p['branch'] = None
+            else:
+                p['branch'] = None
+        # Batch query for all PRs (single API call, more efficient than per-branch)
+        branch_to_merged_pr, branch_to_open_pr = get_merge_state_for_branches([])
+        # Attach merge info to each project
+        for p in projects:
+            b = p.get('branch')
+            if b and b in branch_to_merged_pr:
+                pr = branch_to_merged_pr[b]
+                p['merged_pr'] = pr['number']
+                p['merged_date'] = pr['mergedAt'][:10]
+            else:
+                p['merged_pr'] = None
+                p['merged_date'] = None
+            if b and b in branch_to_open_pr:
+                p['open_pr'] = branch_to_open_pr[b]['number']
+            else:
+                p['open_pr'] = None
+            # Archive candidate: merged + not yet archived (Status != Completed/Cancelled)
+            p['archive_candidate'] = (
+                p['merged_pr'] is not None
+                and p['status'] not in ('Completed', 'Cancelled')
+            )
 
     epic_nums_to_show = [args.epic] if args.epic else sorted(epics.keys())
 
@@ -154,7 +220,17 @@ def main():
             if c['task_count'] is not None:
                 done = c['tasks_completed'] or 0
                 tasks_str = f"  ({done}/{int(c['task_count'])} tasks)"
-            print(f"       - #{c['number']}  {c['title'][:55]:<55}  [{c['status']}] ({c['ptype']}){tasks_str}")
+            merge_str = ''
+            if args.show_merges:
+                if c.get('archive_candidate'):
+                    merge_str = f"  [ARCHIVE CANDIDATE — merged #{c['merged_pr']} on {c['merged_date']}]"
+                elif c.get('merged_pr'):
+                    merge_str = f"  [merged #{c['merged_pr']} on {c['merged_date']}]"
+                elif c.get('open_pr'):
+                    merge_str = f"  [open PR #{c['open_pr']}]"
+                else:
+                    merge_str = f"  [no PR]"
+            print(f"       - #{c['number']}  {c['title'][:55]:<55}  [{c['status']}] ({c['ptype']}){tasks_str}{merge_str}")
             if args.verbose:
                 if c['worktree']:
                     print(f"             worktree: {c['worktree']}")

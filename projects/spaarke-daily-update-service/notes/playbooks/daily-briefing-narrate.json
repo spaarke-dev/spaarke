@@ -231,7 +231,18 @@
     "authorLevel": 0,
     "createdAt": "2026-06-25T00:00:00Z",
     "description": "DAILY-BRIEFING-NARRATE playbook — grounded LLM narration of a structured notification briefing payload, with post-LLM EntityNameValidator scrub. Authors the canonical repo source-of-truth JSON; task 011 deploys via dataverse-deploy. Dispatched by /narrate via IConsumerRoutingService (Path A.5 — see notes/decisions/030-dispatch-path.md). Companion design notes at projects/spaarke-daily-update-service-r4/notes/design/010-daily-briefing-narrate-node-graph.md.",
-    "tags": ["daily-briefing", "narrate", "ai-analysis", "grounded", "playbook", "r4", "fr-4", "fr-12", "fr-13", "fr-14"],
+    "tags": [
+      "daily-briefing",
+      "narrate",
+      "ai-analysis",
+      "grounded",
+      "playbook",
+      "r4",
+      "fr-4",
+      "fr-12",
+      "fr-13",
+      "fr-14"
+    ],
     "specReferences": {
       "FR-4": "Author + deploy DAILY-BRIEFING-NARRATE playbook (lines 123-125)",
       "FR-12": "/narrate dispatches to this playbook (lines 159-164)",

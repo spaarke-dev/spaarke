@@ -558,8 +558,8 @@ Archive candidate detected: projects/{name}/
 Archive this project? [y/N]
 ```
 
-On explicit `y` (default N — destructive): invoke `/devops-project-archive --status Completed --pr-number #M`. This removes the worktree per D-18, retains `projects/{name}/` folder + `.archived` marker.
+On explicit `y` (default N): invoke `/devops-project-archive --status Completed --pr-number #M`. This sets Status=Completed + Closed Date, closes the Issue, writes a `.archived` marker file. **Worktree is preserved** (spec override 2026-06-25: D-18/NFR-09 worktree-deletion behavior removed per operator workflow — worktree cleanup is a separate manual step).
 
-Confirmation prompt is MANDATORY per safety contract — do NOT auto-archive.
+Operator confirmation still required — never auto-archive (F3 explicit gate).
 
 See: [`.claude/skills/devops-project-archive/SKILL.md`](../devops-project-archive/SKILL.md).

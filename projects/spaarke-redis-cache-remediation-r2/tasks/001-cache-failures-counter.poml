@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>cache.failures Counter + try/finally + ClassifyException helper in MetricsDistributedCache</title>
+    <phase>1: Theme A — Cache observability hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>030</blocks>
+    <tags>bff-api, telemetry, otel, observability</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag + .cs modification — code-review + adr-check at Step 9.5</rigor-reason>
+    <parallel-group>0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Foundational; later waves may parallelize. No write conflict with tasks 002/004/006 (distinct files).</parallel-reason>
+  </metadata>
+  <prompt>Extend `src/server/api/Sprk.Bff.Api/Infrastructure/Cache/MetricsDistributedCache.cs` (the R1 R7-S7 decorator) so every cache op method (`GetAsync`, `SetAsync`, `RemoveAsync`, `RefreshAsync`) is wrapped in `try/finally`. On exception, classify via a new private `ClassifyException(Exception ex)` helper that maps to `outcome` ∈ {`timeout`, `canceled`, `connection`, `serialization`, `other`}, record a NEW `cache.failures` Counter with `outcome` + `op` dimensions, then rethrow. Counter MUST be emitted via the canonical `Sprk.Bff.Api.Telemetry.CacheMetrics` static class (post task 002) — task 001 may register on the existing instance if 002 hasn't landed yet, but MUST NOT create a second Meter instance. Pre-task-002 fallback: emit via the existing CacheMetrics instance Counter API. If task 002 has already landed, emit via the static class.</prompt>
+  <role>Senior .NET developer with OpenTelemetry Metrics + .NET 8 cache decorator experience. Apply `task-execute` skill at FULL rigor.</role>
+  <goal>`MetricsDistributedCache.cs` extended: try/finally on every public cache method; `ClassifyException` private helper; new `cache.failures` Counter emitted with `outcome` + `op` dimensions before rethrow. Build clean (0 errors). No existing test regressions. KQL acceptance verified at task 030 post-deploy.</goal>
+  <context>
+    <background>R1 R7-S7 (PR #460) wired the OTel Azure Monitor exporter and added `MetricsDistributedCache` with `cache.hits` / `cache.misses` / `cache.redis_call_duration_ms`. Senior review (DEF-007) noted there is no failure counter; Redis outages are invisible.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/MetricsDistributedCache.cs (MODIFY)</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/CacheMetrics.cs (REFERENCE — Meter + Counter source)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/CacheModule.cs (REFERENCE — DecorateDistributedCacheWithMetrics wiring; do NOT modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-01 — every op method wraps inner call in try/finally; ClassifyException maps to outcome dimension; records cache.failures Counter before rethrow.</constraint>
+    <constraint source="ADR-009">No silent in-memory fallback in deployed envs; failures must surface.</constraint>
+    <constraint source="ADR-029">Publish-size delta ≤+0.5 MB per NFR-04. Measure at task 030.</constraint>
+    <constraint source="ADR-032">Preserve symmetric IConnectionMultiplexer DI — do not change DI registrations.</constraint>
+    <constraint source="bff-extensions.md">§F.1/F.2/F.3 sub-mechanisms; §G hot-path declaration already in design.md.</constraint>
+    <constraint source="project">No new BFF endpoints, services, DI registrations, or packages.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/design.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/MetricsDistributedCache.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/CacheMetrics.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/CacheModule.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read `MetricsDistributedCache.cs` end-to-end. Identify all public methods (GetAsync, SetAsync, RemoveAsync, RefreshAsync — confirm in source).</step>
+    <step order="2">Read `Telemetry/CacheMetrics.cs` to confirm Counter API surface (whether `RecordFailure(outcome, op)` exists or needs to be added). If task 002 hasn't landed, may need to add a temporary Counter on the instance; if 002 has landed, emit via canonical static class.</step>
+    <step order="3">Design `ClassifyException(Exception ex)` helper: `OperationCanceledException` → "canceled", `TimeoutException`/`RedisTimeoutException` → "timeout", `RedisConnectionException`/`RedisServerException`/`SocketException` → "connection", `JsonException`/`InvalidOperationException` (serialization context) → "serialization", default → "other".</step>
+    <step order="4">Wrap each public method body in `try/finally`. Capture failure outcome via local var; in catch, classify + record + rethrow.</step>
+    <step order="5">Verify the Counter emission point uses the SAME Meter as `cache.hits` / `cache.misses` — do NOT create a second Meter instance (anti-pattern that task 002 explicitly fixes).</step>
+    <step order="6">Build: `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors, ≤2 new warnings.</step>
+    <step order="7">Run existing unit tests covering MetricsDistributedCache (if any) to confirm no regression. Skip integration if dev Redis is required.</step>
+    <step order="8">Update TASK-INDEX status 🔲 → ✅. Update current-task.md with file modified.</step>
+    <step order="9">Step 9.5 quality gates: `code-review` + `adr-check`.</step>
+  </steps>
+  <tools>
+    <tool name="Read">Source files</tool>
+    <tool name="Edit">MetricsDistributedCache.cs</tool>
+    <tool name="Bash">dotnet build + targeted tests</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Cache/MetricsDistributedCache.cs (MODIFIED)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Every public method in MetricsDistributedCache uses try/finally; failure path classifies + records + rethrows.</criterion>
+    <criterion testable="true">ClassifyException helper exists and covers 5 outcome values per spec.</criterion>
+    <criterion testable="true">No new Meter instances created (only one `Meter("Sprk.Bff.Api.Cache")` at runtime — verified by task 005).</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` returns 0 errors.</criterion>
+    <criterion testable="true">No regression in existing tests touching MetricsDistributedCache.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor.</protocol>
+  </execution>
+</task>

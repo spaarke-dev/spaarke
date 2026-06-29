@@ -20,12 +20,6 @@
     "serviceBusSku": {
       "value": "Standard"
     },
-    "redisSku": {
-      "value": "Basic"
-    },
-    "redisCapacity": {
-      "value": 0
-    },
     "tags": {
       "value": {
         "customer": "demo",

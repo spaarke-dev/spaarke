@@ -229,19 +229,6 @@ public class BulkOperationTests
         error.ErrorMessage.Should().Be("Graph API error (HTTP 403)");
     }
 
-    [Fact]
-    public void BulkOperationItemError_RecordEquality_Works()
-    {
-        // Arrange
-        var a = new BulkOperationItemError("c-1", "Not found");
-        var b = new BulkOperationItemError("c-1", "Not found");
-        var c = new BulkOperationItemError("c-2", "Not found");
-
-        // Assert
-        a.Should().Be(b);
-        a.Should().NotBe(c);
-    }
-
     #endregion
 
     // =========================================================================

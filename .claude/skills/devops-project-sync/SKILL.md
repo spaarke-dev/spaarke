@@ -39,8 +39,8 @@ This is the workhorse — most automation hooks call this skill at end-of-host-s
 - `tasks/*.poml` count → Task Count
 - `tasks/TASK-INDEX.md` rows with `✅` → Tasks Completed
 - `current-task.md` "Task" field → for in-progress detection
-- Worktree existence + last commit date → Project Status heuristic
-- Open PR for branch → also influences Project Status
+- Worktree existence + last commit date → Status heuristic
+- Open PR for branch → also influences Status
 
 ### Step 2: Query current Issue field values
 

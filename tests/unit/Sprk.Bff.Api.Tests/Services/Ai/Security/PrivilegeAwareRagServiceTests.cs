@@ -290,42 +290,4 @@ public class PrivilegeAwareRagServiceTests
         _capturedSearchOptions.Filter.Should().Contain(" and ");
     }
 
-    // -------------------------------------------------------------------------
-    // Integration test checklist (manual verification required)
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// MANUAL TEST CHECKLIST: Privilege-Aware Retrieval Integration Verification
-    ///
-    /// Pre-requisite: Two test users in the same Entra ID tenant.
-    ///   - User A: member of Azure AD group G1 (e.g., "Matter-123-Team")
-    ///   - User B: NOT a member of group G1
-    ///
-    /// Test documents indexed in spaarke-knowledge-index-v2:
-    ///   - Doc1: privilege_group_ids = ["<G1 object ID>"]   (restricted to G1)
-    ///   - Doc2: privilege_group_ids = []                   (public)
-    ///
-    /// Steps:
-    ///   1. POST /api/ai/chat/sessions as User A → send a query that matches Doc1 content
-    ///      Expected: Doc1 appears in tool call results (User A is in G1)
-    ///
-    ///   2. POST /api/ai/chat/sessions as User B → send identical query
-    ///      Expected: Doc1 does NOT appear (User B not in G1); Doc2 may appear (public)
-    ///
-    ///   3. POST /api/ai/rag/search as User B → direct RAG search endpoint
-    ///      Expected: zero results for Doc1, Doc2 visible if query matches
-    ///
-    ///   4. Verify OTEL counter ai_retrieval_privilege_filter_applied_total increments for
-    ///      each search request in Application Insights / Prometheus scrape.
-    ///
-    ///   5. Remove User A from G1 in Entra ID → wait 5 minutes (cache TTL) → repeat Step 1
-    ///      Expected: Doc1 no longer appears for User A after cache expires.
-    ///
-    /// This test method is intentionally a placeholder to document manual verification requirements.
-    /// </summary>
-    [Fact(Skip = "Manual integration test — see XML doc for procedure")]
-    public void PrivilegeAwareRetrieval_ManualIntegrationTestChecklist()
-    {
-        // Intentionally empty — see XML documentation above for the manual test procedure.
-    }
 }

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>Meter consolidation — single canonical CacheMetrics static class</title>
+    <phase>1: Theme A — Cache observability hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>003,005</blocks>
+    <tags>bff-api, telemetry, otel, di-cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api tag + .cs modification + DI surface change (interface removal). Asymmetric-registration risk requires §F.1 static-scan; §F.2 Fixture-Config-FIRST applies if WAF fixtures regress.</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches CacheMetrics.cs + TenantCache.cs static fields + consumer files. Distinct from tasks 004 (alerts.bicep) and 006 (Program.cs).</parallel-reason>
+  </metadata>
+  <prompt>Collapse the TWO `Meter("Sprk.Bff.Api.Cache")` instances (today at `TenantCache.cs:28-32` static fields + `Telemetry/CacheMetrics.cs:25-40`) into a SINGLE canonical `Sprk.Bff.Api.Telemetry.CacheMetrics` STATIC class owning the Meter + all instruments. Remove the `CacheMetrics?` constructor injection from every consumer (`EmbeddingCache`, `GraphTokenCache`, plus 1-3 others via grep). Static class means: no DI registration; consumers call `CacheMetrics.RecordHit(...)` etc directly. Apply §F.1 static-scan to ensure no asymmetric registration regression. Apply §F.2 Fixture-Config-FIRST if WAF-based test fixtures regress.</prompt>
+  <role>Senior .NET developer with OpenTelemetry Metrics + DI minimalism (ADR-010) experience. Apply `task-execute` skill at FULL rigor. Apply `bff-extensions.md` §F.1 + §F.2.</role>
+  <goal>Exactly ONE Meter instance `Sprk.Bff.Api.Cache` at runtime (verified by task 005). `Sprk.Bff.Api.Telemetry.CacheMetrics` is a `static class` owning the Meter + instruments. Zero references to `CacheMetrics` as an INSTANCE type (no `ICacheMetrics`, no `CacheMetrics?` ctor injection). All consumers call static methods. Build clean; tests at baseline.</goal>
+  <context>
+    <background>Spec FR-02: today two Meters are created independently (TenantCache static fields + CacheMetrics instance class), claiming the same name. OTel will emit metrics from BOTH, doubling counts or causing unstable behavior. Cause: R1 created CacheMetrics in task 041 (instance class for DI) AND R1 task 006 added static Meter fields directly on TenantCache. R2 unifies.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/CacheMetrics.cs (PROMOTE TO STATIC)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs (REMOVE static Meter+Counter fields lines ~28-32)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs (REMOVE CacheMetrics? injection)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/GraphTokenCache.cs (REMOVE CacheMetrics? injection)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/CacheModule.cs (REMOVE CacheMetrics DI registration if present)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/MetricsDistributedCache.cs (MAY need to switch from injected CacheMetrics to static)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-02 — exactly one Meter("Sprk.Bff.Api.Cache") instance at runtime.</constraint>
+    <constraint source="ADR-010">DI minimalism: concretes over interfaces. Static class is preferred when state is purely diagnostic.</constraint>
+    <constraint source="ADR-029">Publish-size ≤+0.5 MB (NFR-04); fewer types = smaller assembly.</constraint>
+    <constraint source="ADR-032">Symmetric IConnectionMultiplexer DI must be preserved.</constraint>
+    <constraint source="bff-extensions.md">§F.1 — run static-scan after DI registration changes; §F.2 — Fixture-Config-FIRST if test fixtures break.</constraint>
+    <constraint source="project">No new BFF endpoints, services, DI registrations, or packages.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Telemetry/CacheMetrics.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/GraphTokenCache.cs</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Grep audit — find ALL CacheMetrics consumers + ALL Meter("Sprk.Bff.Api.Cache") creators. Commands: `grep -rn "CacheMetrics" src/server/api/` + `grep -rn 'Meter("Sprk.Bff.Api.Cache")' src/`.</step>
+    <step order="2">Read CacheMetrics.cs current implementation. Note constructor + instance fields. Plan promotion: instance fields → static readonly; constructor → static initializer; instance methods → static methods.</step>
+    <step order="3">Promote `CacheMetrics` to `public static class CacheMetrics`. Static Meter + static Counters + static Histograms. Static methods `RecordHit`, `RecordMiss`, `RecordDuration`, `RecordFailure` (Failure added in task 001 if not landed yet — coordinate).</step>
+    <step order="4">Remove static Meter + Counter fields from TenantCache.cs lines ~28-32. Replace any `s_hits.Add(...)` calls with `CacheMetrics.RecordHit(...)`.</step>
+    <step order="5">Remove `CacheMetrics?` constructor parameter from EmbeddingCache, GraphTokenCache, plus any others found in step 1. Convert `_metrics?.Record(...)` → `CacheMetrics.Record(...)`.</step>
+    <step order="6">Remove CacheMetrics DI registration from CacheModule.cs (or wherever registered). Verify no `AddSingleton&lt;CacheMetrics&gt;` remains.</step>
+    <step order="7">§F.1 static-scan: confirm no asymmetric registration. Static class has no DI registration — no symmetry concern (which is the point of static).</step>
+    <step order="8">Build: `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors.</step>
+    <step order="9">Run BFF unit tests `dotnet test --filter "FullyQualifiedName~Sprk.Bff.Api"`. §F.2: if WAF fixtures break, inspect fixture config FIRST (DI minimalism + static class may surface latent fixture issues).</step>
+    <step order="10">Update TASK-INDEX status 🔲 → ✅. Note in current-task.md the consumer count found + files modified.</step>
+    <step order="11">Step 9.5 quality gates: `code-review` + `adr-check` (focus on ADR-010 alignment).</step>
+  </steps>
+  <tools>
+    <tool name="Grep">Audit CacheMetrics usage + Meter creation</tool>
+    <tool name="Edit">CacheMetrics.cs + TenantCache.cs + consumers + CacheModule.cs</tool>
+    <tool name="Bash">dotnet build + dotnet test</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Telemetry/CacheMetrics.cs (promoted to static)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs (static fields removed)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/EmbeddingCache.cs (DI cleanup)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/GraphTokenCache.cs (DI cleanup)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Cache/CacheModule.cs (DI registration removed)</output>
+    <output type="code">Other CacheMetrics consumers from grep audit (DI cleanup)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`grep -rn 'Meter("Sprk.Bff.Api.Cache")' src/` returns exactly ONE match (in static CacheMetrics class).</criterion>
+    <criterion testable="true">`grep -rn "CacheMetrics " src/server/api/Sprk.Bff.Api/` shows no instance-class declaration; only `static class CacheMetrics`.</criterion>
+    <criterion testable="true">`grep -rn "AddSingleton&lt;CacheMetrics&gt;" src/server/api/` returns 0 matches.</criterion>
+    <criterion testable="true">`dotnet build` returns 0 errors.</criterion>
+    <criterion testable="true">BFF unit tests baseline maintained (≥7885 pass / 2 pre-existing fail / 135 skip per NFR-02).</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor.</protocol>
+  </execution>
+</task>

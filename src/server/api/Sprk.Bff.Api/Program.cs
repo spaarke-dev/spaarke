@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Api.Membership;                 // R3 task 035 — AddMembers
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Dataverse;                  // Dataverse passthrough endpoints (Phase B)
 using Sprk.Bff.Api.Infrastructure.DI;
+using Sprk.Bff.Api.Infrastructure.Startup;         // R2 FR-06: AzureMonitorGuard
 using Sprk.Bff.Api.Services.Dataverse.Extensions;  // Dataverse DI extension methods (Phase B)
 using Sprk.Bff.Api.Workers.Office;
 
@@ -20,12 +21,15 @@ builder.Services.AddConfigurationModule(builder.Configuration);
 // reached App Insights. UseAzureMonitor() wires both pipelines to the same
 // App Insights resource pointed at by APPLICATIONINSIGHTS_CONNECTION_STRING.
 //
-// Guard: UseAzureMonitor() throws at host start if no connection string is
-// present (unlike the classic SDK, which silently no-op'd). Skip in test /
-// local-dev hosts where the connection string is not configured.
+// Guard (R2 FR-06 — spaarke-redis-cache-remediation-r2 task 006):
+// Non-Development env + missing APPLICATIONINSIGHTS_CONNECTION_STRING → throw at
+// startup via AzureMonitorGuard (mirrors CacheModule 4-branch fail-fast pattern,
+// R1 FR-03). Development env preserves dev-convenience pass-through. Without this
+// guard, missing conn string in Production silently skipped UseAzureMonitor() and
+// no telemetry reached App Insights — invisible failure.
 var aiConnString = builder.Configuration["APPLICATIONINSIGHTS_CONNECTION_STRING"]
     ?? Environment.GetEnvironmentVariable("APPLICATIONINSIGHTS_CONNECTION_STRING");
-if (!string.IsNullOrWhiteSpace(aiConnString))
+if (AzureMonitorGuard.ShouldWireExporter(builder.Environment.EnvironmentName, aiConnString))
 {
     builder.Services.AddOpenTelemetry().UseAzureMonitor();
 }

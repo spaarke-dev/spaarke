@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>NEW infrastructure/bicep/alerts.bicep — 3 cache metric alerts</title>
+    <phase>1: Theme A — Cache observability hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>014,030</blocks>
+    <tags>bicep, azure, infrastructure, alerts, observability</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New Bicep file; no .cs change; not test-modifying.</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct file from tasks 001/002/003/005/006.</parallel-reason>
+  </metadata>
+  <prompt>Create NEW `infrastructure/bicep/alerts.bicep` with 3 Azure Monitor metric alerts on the cache: hit-rate &lt; 80% / 15min, P95 latency &gt; 100ms / 5min, memory &gt; 80% of SKU / 15min. Each routes to an `email` action group (on-call). Use module shape consistent with existing `infrastructure/bicep/redis.bicep`. Extend `scripts/Deploy-RedisCache.ps1` to accept `-DeployAlerts` flag that invokes this Bicep against the target env's RG.</prompt>
+  <role>Spaarke infrastructure developer with Bicep + Az Monitor familiarity. Apply `script-aware` skill (read `scripts/README.md` for conventions).</role>
+  <goal>`infrastructure/bicep/alerts.bicep` exists with 3 metricAlert resources targeting the Redis cache resource. `Deploy-RedisCache.ps1 -DeployAlerts -Environment dev -WhatIf` produces a sensible plan. `az bicep build` succeeds.</goal>
+  <context>
+    <background>Spec FR-04: today the 3 alerts are documented in `docs/guides/redis-cache-azure-setup.md` §8 as markdown skeletons (R1 task 043 deliverable). R2 replaces markdown with Bicep so they are deployable + queryable via `az monitor metrics alert list`.</background>
+    <relevant-files>
+      <file>infrastructure/bicep/alerts.bicep (NEW)</file>
+      <file>infrastructure/bicep/redis.bicep (REFERENCE — module shape)</file>
+      <file>infrastructure/bicep/redis-dev.bicepparam (REFERENCE — naming)</file>
+      <file>scripts/Deploy-RedisCache.ps1 (EXTEND with -DeployAlerts flag)</file>
+      <file>docs/guides/redis-cache-azure-setup.md (REFERENCE — current alert documentation §8)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-04 — exactly 3 alerts: hit-rate &lt;80%/15min, P95 &gt;100ms/5min, memory &gt;80%/15min. Bicep-deployed, not markdown.</constraint>
+    <constraint source="azure-deployment.md">Idempotent deploy; reuse existing action group; emit clear error messages.</constraint>
+    <constraint source="spec">Acceptance: `az monitor metrics alert list -g rg-spaarke-dev` shows the 3 alerts after deploy.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>infrastructure/bicep/redis.bicep</file>
+      <file>infrastructure/bicep/redis-dev.bicepparam</file>
+      <file>scripts/Deploy-RedisCache.ps1</file>
+      <file>scripts/README.md</file>
+      <file>docs/guides/redis-cache-azure-setup.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read `redis.bicep` to mirror module shape (params, vars, resources, outputs).</step>
+    <step order="2">Read current `docs/guides/redis-cache-azure-setup.md` §8 markdown skeletons for thresholds.</step>
+    <step order="3">Author `alerts.bicep`: 3 `Microsoft.Insights/metricAlerts` resources targeting `Microsoft.Cache/Redis/{cacheName}`. Each references an existing action group (param) for email notification.</step>
+    <step order="4">Add params: `redisCacheName`, `actionGroupResourceId`, `location` (default RG location).</step>
+    <step order="5">Run `az bicep build infrastructure/bicep/alerts.bicep` to validate.</step>
+    <step order="6">Extend `Deploy-RedisCache.ps1`: add `-DeployAlerts` switch; when set, invoke `az deployment group create` with `alerts.bicep` against the target env's RG.</step>
+    <step order="7">Verify `-DeployAlerts -WhatIf -Environment dev` plan output shows 3 alert creations.</step>
+    <step order="8">Update TASK-INDEX 🔲 → ✅.</step>
+  </steps>
+  <tools>
+    <tool name="Read">redis.bicep + Deploy-RedisCache.ps1</tool>
+    <tool name="Write">alerts.bicep</tool>
+    <tool name="Edit">Deploy-RedisCache.ps1</tool>
+    <tool name="Bash">az bicep build + az deployment what-if (no actual deploy yet — that's task 030)</tool>
+  </tools>
+  <outputs>
+    <output type="infrastructure">infrastructure/bicep/alerts.bicep (NEW)</output>
+    <output type="code">scripts/Deploy-RedisCache.ps1 (EXTENDED with -DeployAlerts flag)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">alerts.bicep compiles via `az bicep build`.</criterion>
+    <criterion testable="true">3 metricAlert resources present targeting Redis cache.</criterion>
+    <criterion testable="true">Deploy-RedisCache.ps1 -DeployAlerts -WhatIf -Environment dev produces a clear plan.</criterion>
+    <criterion testable="true">Acceptance via `az monitor metrics alert list -g rg-spaarke-dev` deferred to task 030.</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>

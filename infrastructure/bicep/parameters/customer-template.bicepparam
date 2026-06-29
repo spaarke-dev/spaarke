@@ -74,16 +74,6 @@ param storageSku = 'Standard_LRS'
 param serviceBusSku = 'Standard'
 
 // ============================================================================
-// REDIS
-// ============================================================================
-
-// Basic tier (C0) for cost-optimized customers; Standard for HA;
-// Premium required for VNet injection + RDB persistence.
-// See infrastructure/bicep/modules/redis.bicep for capabilities per SKU.
-param redisSku = 'Basic'
-param redisCapacity = 0
-
-// ============================================================================
 // TAGS (customize as needed)
 // ============================================================================
 

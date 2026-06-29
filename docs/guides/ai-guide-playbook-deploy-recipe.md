@@ -4,7 +4,7 @@
 > **Authored by**: canonical-truth loop step 3 (spaarke-daily-update-service-r4)
 > **Status**: Canonical operator runbook for `Deploy-Playbook.ps1`. Consolidates fragments from `JPS-AUTHORING-GUIDE.md` §10, `.claude/skills/jps-playbook-design/SKILL.md` Steps 9-10, and `.claude/skills/dataverse-deploy/SKILL.md`. Cited from R4 W0.
 > **Scope**: Input file format, 12-step deploy sequence, skip-vs-Force behaviour, the load-bearing `sprk_isactive` rule, the actionCode lint, failure recovery, verification queries, and the "Playbook has no nodes — using Legacy mode" diagnostic.
-> **NOT in scope**: JPS schema (see `ai-guide-jps-authoring.md`); maker recipes (see `PLAYBOOK-AUTHOR-GUIDE.md`); runtime semantics (see `ai-architecture-playbook-runtime.md`); consumer routing (see `ai-architecture-consumer-routing.md`).
+> **NOT in scope**: JPS schema (see `ai-guide-jps-authoring.md`); maker recipes (see `PLAYBOOK-AUTHOR-GUIDE.md`); runtime semantics (see `ai-architecture-playbook-runtime.md`); consumer routing (see `ai-architecture-playbook-consumer-routing.md`).
 
 ---
 
@@ -226,7 +226,7 @@ For internal teams: the canonical input files live at `projects/spaarke-daily-up
 |---|---|
 | Runtime mode detection + log site catalog | `ai-architecture-playbook-runtime.md` §3 |
 | Why a config field goes on Action vs Node vs Playbook | `ai-architecture-actions-nodes-scopes.md` |
-| How a consumer surface looks up + dispatches the playbook after deploy | `ai-architecture-consumer-routing.md` |
+| How a consumer surface looks up + dispatches the playbook after deploy | `ai-architecture-playbook-consumer-routing.md` |
 | JPS schema for `sprk_systemprompt`, structured output, `$choices` | `ai-guide-jps-authoring.md` |
 | Maker UI procedure (build a playbook in the visual canvas instead) | `PLAYBOOK-AUTHOR-GUIDE.md` |
 | Action row deploy (`Seed-JpsActions.ps1`) | `.claude/skills/jps-action-create/SKILL.md` |

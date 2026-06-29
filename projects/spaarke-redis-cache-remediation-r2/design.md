@@ -6,6 +6,15 @@
 > **Predecessor**: [`spaarke-redis-cache-remediation-r1`](../spaarke-redis-cache-remediation-r1/) (R7-S7 closure shipped; 6 items filed as GitHub Issues #462–#467; #466 DEF-005 Managed Redis closed Won't Fix per [`notes/managed-redis-decision.md`](notes/managed-redis-decision.md))
 > **Background research** (informational): [`notes/managed-redis-ai-research.md`](notes/managed-redis-ai-research.md)
 
+<hot-path-declaration>
+  <!-- Required per root CLAUDE.md §10 (binding 2026-06-26 per ci-cd-unit-test-remediation-r1 FR-C04). -->
+  <bff>Y</bff>                <!-- Theme A modifies src/server/api/Sprk.Bff.Api/Infrastructure/Cache/* + Telemetry/CacheMetrics.cs + Program.cs -->
+  <spaarke-ai>N</spaarke-ai>  <!-- No src/solutions/SpaarkeAi/** changes -->
+  <ci-workflows>Y</ci-workflows>  <!-- Theme B adds .github/workflows/redis-key-rotation.yml -->
+  <skill-directives>N</skill-directives>  <!-- No .claude/skills/** or .claude/constraints/** changes -->
+  <root-claudemd>N</root-claudemd>  <!-- No root CLAUDE.md changes -->
+</hot-path-declaration>
+
 ## Decisions locked (2026-06-26)
 
 | # | Decision | Source |

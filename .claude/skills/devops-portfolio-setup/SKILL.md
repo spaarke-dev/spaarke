@@ -27,7 +27,7 @@ last-reviewed: 2026-06-23
 One-shot, idempotent bootstrap of the GitHub Project #2 portfolio schema so any clean repo + Project can be brought to a known-good state in seconds. Encodes everything Phase 1 (tasks 001–005) did manually:
 
 1. Extend `Type` field with `Project` option (preserve existing 6)
-2. Add 6 custom fields (`Project Type`, `Worktree Path`, `Project Folder`, `Task Count`, `Tasks Completed`, `Project Status`) with exact FR-02 schemas
+2. Add 6 custom fields (`Project Type`, `Worktree Path`, `Project Folder`, `Task Count`, `Tasks Completed`, `Status`) with exact FR-02 schemas
 3. Create 7 repository labels (`epic`, `project`, `backlog`, `worktree:active`, `worktree:archived`, `on-hold`, `cancelled`)
 4. Land 3 issue templates (`epic.yml`, `project.yml`, `idea.yml`) at `.github/ISSUE_TEMPLATE/`
 
@@ -132,7 +132,7 @@ For each missing field, execute `createProjectV2Field` mutation per the schemas 
 - `Project Folder` — TEXT
 - `Task Count` — NUMBER
 - `Tasks Completed` — NUMBER
-- `Project Status` — SINGLE_SELECT with 5 options (`Planned, In Progress, On Hold, Completed, Cancelled`)
+- `Status` — SINGLE_SELECT with 5 options (`Planned, In Progress, On Hold, Completed, Cancelled`)
 
 Field creation is purely additive — no reconciliation needed because new fields have no existing item references.
 

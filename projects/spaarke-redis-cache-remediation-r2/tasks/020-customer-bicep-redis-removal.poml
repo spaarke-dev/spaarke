@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-redis-cache-remediation-r2">
+  <metadata>
+    <title>Remove Redis from customer.bicep (module call + params + var + outputs); what-if verify</title>
+    <phase>3: Theme C — R1 implementation gap closure</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>021,030</blocks>
+    <tags>bicep, azure, infrastructure, cleanup, iac-gap</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Bicep delete + what-if gate (irreversible IaC change).</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct file domain from Phase 1 + Phase 2.</parallel-reason>
+  </metadata>
+  <prompt>Remove per-customer Redis from `infrastructure/bicep/customer.bicep`: delete the `module redis 'modules/redis.bicep'` call (lines ~181-195), the `redisSku` / `redisCapacity` parameters (lines ~62-67), the `redisName` variable (line ~99), and any `output redis*` lines. R1 already removed Redis from `Provision-Customer.ps1` runtime path; this closes the IaC template gap. BEFORE the delete commit, MUST run `az deployment group what-if` on the new customer.bicep for a fresh customer ID — output must show NO Redis resource in the plan. If a live customer is detected, ESCALATE before deleting (spec §Dependencies bullet 3).</prompt>
+  <role>Spaarke infrastructure developer with Bicep + what-if verification experience. Apply `task-execute` skill at STANDARD rigor.</role>
+  <goal>customer.bicep cleaned (no Redis references); `az deployment group what-if` for a fresh customer shows no Redis resource; existing customer envs unaffected (Bicep templates govern future deployments only).</goal>
+  <context>
+    <background>Spec FR-12. R1 deprecated per-customer Redis in `Provision-Customer.ps1` runtime path but left the Bicep template unchanged — a documented gap. R2 closes it. The R1 deployment guide §4.6 has a strikethrough row + footnote acknowledging this gap (cleaned up in task 022).</background>
+    <relevant-files>
+      <file>infrastructure/bicep/customer.bicep (MODIFY — delete Redis references)</file>
+      <file>scripts/Provision-Customer.ps1 (REFERENCE — already does NOT call Redis module path post-R1)</file>
+      <file>docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md (REFERENCE — §4.6 strikethrough referencing customer.bicep:181)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="spec">FR-12 — delete Redis module call + params + var + outputs. what-if for fresh customer shows NO Redis resource.</constraint>
+    <constraint source="spec">§Dependencies — NO live customers may be relying on customer.bicep's Redis module call. Escalate if `what-if` against a live customer shows Redis in delete plan.</constraint>
+    <constraint source="azure-deployment.md">Idempotent; what-if before destructive change.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-redis-cache-remediation-r2/spec.md</file>
+      <file>projects/spaarke-redis-cache-remediation-r2/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>infrastructure/bicep/customer.bicep</file>
+      <file>scripts/Provision-Customer.ps1</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step order="1">Read customer.bicep to confirm exact line numbers for Redis references (params ~62-67, var ~99, module call ~181-195, outputs).</step>
+    <step order="2">PRE-DELETE GATE: run `az deployment group what-if --resource-group {fresh-customer-rg} --template-file customer.bicep --parameters customer-template.bicepparam` for a NEW customer ID. Verify NO Redis resource in plan. Capture output to `notes/customer-bicep-what-if.md`.</step>
+    <step order="3">If a live customer exists: run what-if against that customer; if Redis is in "delete" or "modify" set, ESCALATE before proceeding (do NOT delete).</step>
+    <step order="4">Delete Redis params, var, module call, outputs from customer.bicep.</step>
+    <step order="5">Run `az bicep build infrastructure/bicep/customer.bicep` to validate.</step>
+    <step order="6">Re-run what-if for fresh customer post-delete: verify still NO Redis in plan.</step>
+    <step order="7">Capture before/after diff in notes/.</step>
+    <step order="8">Update TASK-INDEX 🔲 → ✅.</step>
+  </steps>
+  <tools>
+    <tool name="Read">customer.bicep + Provision-Customer.ps1 + SPAARKE-DEPLOYMENT-GUIDE.md</tool>
+    <tool name="Edit">customer.bicep</tool>
+    <tool name="Bash">az deployment group what-if + az bicep build</tool>
+  </tools>
+  <outputs>
+    <output type="infrastructure">infrastructure/bicep/customer.bicep (CLEANED of Redis references)</output>
+    <output type="notes" ephemeral="true">projects/spaarke-redis-cache-remediation-r2/notes/customer-bicep-what-if.md (what-if outputs before + after)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">customer.bicep contains zero references to Redis (module call, params, var, outputs all removed).</criterion>
+    <criterion testable="true">`az bicep build customer.bicep` succeeds.</criterion>
+    <criterion testable="true">`az deployment group what-if` for fresh customer shows NO Redis resource.</criterion>
+    <criterion testable="true">No live customer requires the deleted Redis module path (escalation gate cleared).</criterion>
+  </acceptance-criteria>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>STANDARD rigor.</protocol>
+  </execution>
+</task>
