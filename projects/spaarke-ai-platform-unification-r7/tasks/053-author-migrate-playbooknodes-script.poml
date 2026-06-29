@@ -2,7 +2,7 @@
 <task id="R7-053" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Author Migrate-PlaybookNodes-to-ExecutorType.ps1 (idempotent + dry-run)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>5</wave>
     <estimated-effort>2-3 hours</estimated-effort>
     <tags>script, dataverse, wave-5</tags>
