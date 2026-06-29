@@ -1,7 +1,7 @@
 # Current Task State — spaarke-redis-cache-remediation-r2
 
-> **Last Updated**: 2026-06-26
-> **Status**: ✅ PROJECT COMPLETE (LOCAL) — PR pending operator-driven Phase 4 task 030 live deploy + KQL verification
+> **Last Updated**: 2026-06-29
+> **Status**: ✅ **PROJECT SHIPPED** — PR #489 merged 2026-06-27 (commit `8180f8d44`)
 
 ---
 
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Project** | spaarke-redis-cache-remediation-r2 |
-| **Active task** | — (none; 16 of 17 ✅ ; task 030 🟡 PARTIAL ⏸ OPERATOR) |
-| **Status** | All local work complete + committed + pushed to `origin/work/spaarke-redis-cache-remediation-r2` |
-| **Next action** | PR open + merge per NFR-01 atomic strategy |
+| **Active task** | — (none; project closed) |
+| **Status** | PR #489 merged to master. 4 linked Issues closed (#462, #483, #484, #485) on 2026-06-29 (manual close — PR omitted "Closes #X"). Worktree synced to current master (`ecb650e44`). |
+| **Next action** | Operator: Phase 4 task 030 live deploy + KQL verification per `notes/post-deploy-verification.md`. Then: `/devops-project-archive` to retire this project. |
 
 ---
 

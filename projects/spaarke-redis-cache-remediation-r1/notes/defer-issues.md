@@ -14,13 +14,13 @@
 
 | Field | Value |
 |---|---|
-| **Status** | Closed (Done by R2 PR pending — work shipped to `origin/work/spaarke-redis-cache-remediation-r2`) — 2026-06-26 |
+| **Status** | ✅ Closed (Done by R2 PR #489, merged 2026-06-27, commit `8180f8d44`) — 2026-06-29 |
 | **Urgency** | (closed) |
 | **Filed** | 2026-06-25 (migrated 2026-06-26) |
 | **Source** | spec.md FR-22 — explicitly deferred from R1; user-confirmed during Phase 3 cutover |
-| **GitHub Issue** | [#462](https://github.com/spaarke-dev/spaarke/issues/462) — closes automatically on R2 PR merge (PR description: `Closes #462`) |
+| **GitHub Issue** | [#462](https://github.com/spaarke-dev/spaarke/issues/462) — closed manually 2026-06-29 with PR #489 reference (auto-close didn't fire; PR description omitted "Closes #462" keyword). |
 | **Supersession rationale** | Project owner decision (2026-06-26): not worth +$485/mo for ACR Premium SKU to eliminate key rotation alone, AND Managed Redis (which has all-tier Entra ID) is also rejected (see DEF-005). Instead, R2 Theme B builds automation for the rotation procedure — same operational outcome (rotation happens reliably) without infra cost. |
-| **R2 deliverables (Theme B)** | `scripts/Rotate-RedisKey.ps1` (safe-window rotation: Secondary → KV → restart → `/healthz` → Primary) + `.github/workflows/redis-key-rotation.yml` (quarterly staggered cron, OIDC per-env SP) + `docs/guides/redis-cache-azure-setup.md` §6 update + missed-rotation alert (FR-11). Branch: `work/spaarke-redis-cache-remediation-r2` (PR pending). |
+| **R2 deliverables (Theme B)** | `scripts/Rotate-RedisKey.ps1` (safe-window rotation: Secondary → KV → restart → `/healthz` → Primary) + `.github/workflows/redis-key-rotation.yml` (quarterly staggered cron, OIDC per-env SP) + `docs/guides/redis-cache-azure-setup.md` §6 update + missed-rotation alert (FR-11). Shipped via PR #489 merge to master. |
 
 **Description**
 
