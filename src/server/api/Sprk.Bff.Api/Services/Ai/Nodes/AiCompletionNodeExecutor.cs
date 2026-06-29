@@ -301,9 +301,21 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
             //    templateParameters property (PromptSchemaRenderer handles null gracefully).
             var templateParameters = ExtractTemplateParameters(context.Node.ConfigJson);
 
+            // 3.5. R7 Wave 11 task 111 (Option B): extract the resolved `inputBinding` from
+            //      configJson (already template-resolved by the orchestrator's Layer 1
+            //      ApplyConfigJsonTemplates) and package as a JsonElement to pass to the
+            //      renderer as runtimeInput. The renderer assembles a "## Input" section
+            //      with the indented JSON, between Context and Document. This is the
+            //      canonical way to pass payload data into an AI prompt WITHOUT coupling
+            //      it to the prompt-body text. See:
+            //        docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md (T111a)
+            //      Defensive: missing inputBinding → null → renderer skips the Input section.
+            var runtimeInput = ExtractInputBindingAsJsonElement(context.Node.ConfigJson);
+
             // 4. Render the (possibly merged) JPS prompt to the final string the LLM receives.
             //    For AiCompletion, all the structural sections (skillContext, knowledgeContext,
             //    documentText) are null — the prompt is self-contained per FR-13.
+            //    runtimeInput emits the structured "## Input" section (Wave 11 / Option B).
             var rendered = _promptSchemaRenderer.Render(
                 rawPrompt: mergedPrompt,
                 skillContext: null,
@@ -313,7 +325,8 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
                 downstreamNodes: null,
                 additionalKnowledge: null,
                 additionalSkills: null,
-                preResolvedLookupChoices: null);
+                preResolvedLookupChoices: null,
+                runtimeInput: runtimeInput);
 
             // 5. Compute effective temperature. Wave B-G9c1 B6 rule: per-Action override wins;
             //    null → 0.0 (deterministic) per IOpenAiClient.GetStructuredCompletionRawAsync's
@@ -580,6 +593,52 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
             _logger.LogWarning(
                 ex,
                 "AiCompletion node failed to parse templateParameters from ConfigJson; using null fallback");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// R7 Wave 11 task 111 (Option B Layer 2): extracts the <c>inputBinding</c> object from the
+    /// node's ConfigJson as a <see cref="JsonElement"/>, suitable for passing to
+    /// <see cref="PromptSchemaRenderer.Render"/> as the <c>runtimeInput</c> parameter. By the
+    /// time the executor receives ConfigJson, the orchestrator's Layer 1 has already resolved
+    /// all <c>{{X}}</c> Handlebars templates inside it — so the inputBinding values are
+    /// concrete strings/objects, not unresolved templates.
+    /// </summary>
+    /// <remarks>
+    /// Defensive: returns null when ConfigJson is missing, malformed, or has no inputBinding
+    /// property (PromptSchemaRenderer skips the "## Input" section on null/Null/Undefined input).
+    /// Returns the inputBinding object's JsonElement clone (detached from the parsing JsonDocument
+    /// so it remains usable downstream).
+    /// </remarks>
+    /// <param name="configJson">The node's ConfigJson string (may be null or empty).</param>
+    /// <returns>JsonElement clone of the inputBinding object, or null if absent/malformed.</returns>
+    private JsonElement? ExtractInputBindingAsJsonElement(string? configJson)
+    {
+        if (string.IsNullOrWhiteSpace(configJson))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(configJson);
+            if (!doc.RootElement.TryGetProperty("inputBinding", out var bindingElement))
+                return null;
+
+            if (bindingElement.ValueKind != JsonValueKind.Object)
+            {
+                _logger.LogWarning(
+                    "AiCompletion node ConfigJson inputBinding is not an object (found {ValueKind}); ignoring",
+                    bindingElement.ValueKind);
+                return null;
+            }
+
+            return bindingElement.Clone();
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "AiCompletion node failed to parse inputBinding from ConfigJson; using null fallback");
             return null;
         }
     }

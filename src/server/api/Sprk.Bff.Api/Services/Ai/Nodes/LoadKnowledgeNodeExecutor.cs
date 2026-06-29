@@ -280,28 +280,11 @@ public sealed class LoadKnowledgeNodeExecutor : INodeExecutor
     /// </remarks>
     private static Dictionary<string, object?> BuildTemplateContext(NodeExecutionContext context)
     {
-        var templateContext = new Dictionary<string, object?>();
-
-        foreach (var (varName, output) in context.PreviousOutputs)
-        {
-            if (output.StructuredData.HasValue)
-            {
-                templateContext[varName] = TemplateEngine.ConvertJsonElement(output.StructuredData.Value);
-            }
-            else
-            {
-                templateContext[varName] = null;
-            }
-        }
-
-        templateContext["run"] = new
-        {
-            id = context.RunId.ToString(),
-            playbookId = context.PlaybookId.ToString(),
-            tenantId = context.TenantId
-        };
-
-        return templateContext;
+        // R7 Wave 11 task 111 (Option B): delegates to shared PlaybookTemplateContextBuilder
+        // helper. Prior to Wave 11 this method was byte-for-byte duplicated across
+        // LoadKnowledgeNodeExecutor + ReturnResponseNodeExecutor. The shared helper is the
+        // single source of truth for "what context can templates see".
+        return PlaybookTemplateContextBuilder.Build(context);
     }
 
     /// <summary>

@@ -144,8 +144,8 @@
     <step order="6" name="Wire AiCompletionNodeExecutor to extract inputBinding + pass to renderer">
       Add helper `ExtractInputBindingAsJsonElement(string? configJson) → JsonElement?` to `AiCompletionNodeExecutor` (private static, returns null if absent or malformed). In `ExecuteAsync` around line 302-316 where `_promptSchemaRenderer.Render(...)` is called, pass the new `runtimeInput` parameter: `runtimeInput: ExtractInputBindingAsJsonElement(context.Node.ConfigJson)`. Existing `templateParameters` continues to flow through for backward-compatibility with non-inputBinding playbook configs.
     </step>
-    <step order="7" name="Wire AiAnalysisNodeExecutor same pattern">
-      Mirror Step 6 in `AiAnalysisNodeExecutor` (line 434 area): add `ExtractInputBindingAsJsonElement` helper + pass to `_promptSchemaRenderer.Render(... runtimeInput: ...)`. AiAnalysis mirrors AiCompletion per code-comments.
+    <step order="7" name="AiAnalysisNodeExecutor wiring DEFERRED to DEF-001">
+      **DEFERRED 2026-06-29**: AiAnalysisNodeExecutor does NOT call `_promptSchemaRenderer.Render` directly — it builds a `ToolExecutionContext` passed through 4 tool handlers (GenericAnalysisHandler, SummaryHandler, DocumentClassifierHandler, SemanticSearchToolHandler) that each call Render. Wiring inputBinding through that chain touches ~6 files (vs 1 for AiCompletion). The deployed DAILY-BRIEFING-NARRATE playbook uses only AiCompletion — no AiAnalysis. To keep T111 focused + reviewable, AiAnalysis wiring is deferred via DEF-001 (`notes/defer-issues.md`). When ANY AiAnalysis-based playbook consumer needs structured input, lift DEF-001 — implementation is mechanical (~1-2 hours including tests).
     </step>
     <step order="8" name="Write xUnit tests (Layer 1 + Layer 2)">
       NEW: `PlaybookTemplateContextBuilderTests.cs` (4-6 tests covering NodeOutputs traversal + Parameters merge + run-bag).
@@ -183,7 +183,7 @@
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ReturnResponseNodeExecutor.cs (edited — replace BuildTemplateContext with helper call)</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs (edited — Layer 2: new runtimeInput parameter + "## Input" section render)</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs (edited — extract inputBinding as JsonElement + pass to renderer)</output>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs (edited — same pattern as AiCompletion)</output>
+    <output type="defer">projects/spaarke-ai-platform-unification-r7/notes/defer-issues.md (DEF-001 — AiAnalysis wiring deferred; mechanical follow-up, ~1-2 hours)</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookTemplateContextBuilderTests.cs (NEW)</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookOrchestrationService_TemplateResolutionTests.cs (NEW)</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaRenderer_InputSectionTests.cs (NEW)</output>

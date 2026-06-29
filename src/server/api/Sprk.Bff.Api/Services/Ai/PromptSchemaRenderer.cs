@@ -68,6 +68,17 @@ public sealed class PromptSchemaRenderer
     /// The caller resolves <c>$ref</c> values by querying Dataverse <c>sprk_analysisskill</c>;
     /// the renderer only merges them into the assembled prompt. Pass null when no named references exist.
     /// </param>
+    /// <param name="runtimeInput">
+    /// R7 Wave 11 task 111 (Option B): structured runtime data rendered as a "## Input" section
+    /// between Context and Document. When non-null + non-Null/Undefined, serialized with
+    /// indentation and emitted as <c>"## Input\n\n{indented json}\n"</c>. This is the canonical
+    /// way to pass payload data into an AI prompt WITHOUT coupling it to the prompt-body text —
+    /// the Action JPS author keeps <c>instruction.role/task/constraints/context</c> as pure
+    /// instructions; the playbook author provides the data via <c>inputBinding</c> in the node
+    /// configJson; the AI executor packages the resolved values and passes them here. See
+    /// <c>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</c> (T111a) for the full
+    /// authoring contract.
+    /// </param>
     /// <returns>A <see cref="RenderedPrompt"/> with the assembled text and format metadata.</returns>
     public RenderedPrompt Render(
         string? rawPrompt,
@@ -78,7 +89,8 @@ public sealed class PromptSchemaRenderer
         IReadOnlyList<DownstreamNodeInfo>? downstreamNodes,
         IReadOnlyList<ResolvedKnowledgeRef>? additionalKnowledge = null,
         IReadOnlyList<ResolvedSkillRef>? additionalSkills = null,
-        IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices = null)
+        IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices = null,
+        JsonElement? runtimeInput = null)
     {
         // Step 1: Format detection
         if (string.IsNullOrWhiteSpace(rawPrompt))
@@ -92,7 +104,7 @@ public sealed class PromptSchemaRenderer
 
         if (IsJpsFormat(rawPrompt))
         {
-            return RenderJps(rawPrompt, skillContext, knowledgeContext, documentText, templateParameters, downstreamNodes, additionalKnowledge, additionalSkills, preResolvedLookupChoices);
+            return RenderJps(rawPrompt, skillContext, knowledgeContext, documentText, templateParameters, downstreamNodes, additionalKnowledge, additionalSkills, preResolvedLookupChoices, runtimeInput);
         }
 
         // Flat text legacy path — return rawPrompt as-is.
@@ -126,7 +138,8 @@ public sealed class PromptSchemaRenderer
         IReadOnlyList<DownstreamNodeInfo>? downstreamNodes,
         IReadOnlyList<ResolvedKnowledgeRef>? additionalKnowledge,
         IReadOnlyList<ResolvedSkillRef>? additionalSkills,
-        IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices = null)
+        IReadOnlyDictionary<string, string[]>? preResolvedLookupChoices = null,
+        JsonElement? runtimeInput = null)
     {
         PromptSchema schema;
 
@@ -205,6 +218,23 @@ public sealed class PromptSchemaRenderer
         if (!string.IsNullOrWhiteSpace(schema.Instruction.Context))
         {
             sb.AppendLine(schema.Instruction.Context);
+            sb.AppendLine();
+        }
+
+        // 4.5. Runtime Input (R7 Wave 11 task 111 / Option B): structured data passed in from
+        //      the playbook node's `inputBinding` (resolved by Layer 1). Rendered as a "## Input"
+        //      section so the Action JPS prompt body stays pure instructions and the data lives
+        //      in its own structurally-distinct section the LLM clearly sees. See
+        //      docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md for the authoring contract.
+        if (runtimeInput.HasValue
+            && runtimeInput.Value.ValueKind != JsonValueKind.Null
+            && runtimeInput.Value.ValueKind != JsonValueKind.Undefined)
+        {
+            sb.AppendLine("## Input");
+            sb.AppendLine();
+            sb.AppendLine(JsonSerializer.Serialize(
+                runtimeInput.Value,
+                new JsonSerializerOptions { WriteIndented = true }));
             sb.AppendLine();
         }
 

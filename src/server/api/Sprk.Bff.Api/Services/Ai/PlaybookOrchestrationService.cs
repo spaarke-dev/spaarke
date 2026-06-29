@@ -46,6 +46,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     private readonly IScopeResolverService _scopeResolver;
     private readonly IAnalysisOrchestrationService _legacyOrchestrator;
     private readonly IInsightsActionRouter _insightsRouter;
+    private readonly ITemplateEngine _templateEngine;
     private readonly ILogger<PlaybookOrchestrationService> _logger;
 
     /// <summary>
@@ -65,6 +66,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         IScopeResolverService scopeResolver,
         IAnalysisOrchestrationService legacyOrchestrator,
         IInsightsActionRouter insightsRouter,
+        ITemplateEngine templateEngine,
         ILogger<PlaybookOrchestrationService> logger,
         Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? contextEventEmitter = null)
     {
@@ -73,6 +75,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         _scopeResolver = scopeResolver;
         _legacyOrchestrator = legacyOrchestrator;
         _insightsRouter = insightsRouter ?? throw new ArgumentNullException(nameof(insightsRouter));
+        _templateEngine = templateEngine ?? throw new ArgumentNullException(nameof(templateEngine));
         _logger = logger;
         _contextEventEmitter = contextEventEmitter;
     }
@@ -1195,7 +1198,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // "matter:{{matterId}}" and failed at LiveFactResolver. Centralizing the fix here
             // applies it to every node executor uniformly (LiveFact / IndexRetrieve /
             // ReturnInsightArtifact all use {{matterId}} in synthesis playbooks).
-            var substitutedNode = ApplyConfigJsonTemplates(node, runContext.Parameters);
+            var substitutedNode = ApplyConfigJsonTemplates(node, runContext);
 
             // Create node execution context with streaming callback for per-token SSE events
             var nodeContext = runContext.CreateNodeContext(substitutedNode, action, scopes, actionType) with
@@ -1904,39 +1907,42 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
-    /// Substitute <c>{{paramName}}</c> placeholders in the node's ConfigJson with values
-    /// from the run parameters. Returns a NEW PlaybookNodeDto record with the substituted
-    /// ConfigJson; never mutates the input. Idempotent — placeholders without matching
-    /// parameters are left intact (the executor surfaces the original string for clear
-    /// authoring feedback).
+    /// Resolve Handlebars-style placeholders (<c>{{X}}</c>, <c>{{X.Y.Z}}</c>, custom helpers)
+    /// in the node's ConfigJson against the merged playbook run context (Parameters +
+    /// NodeOutputs + run metadata). Returns a NEW <see cref="PlaybookNodeDto"/> record with the
+    /// rendered ConfigJson; never mutates the input. Missing references render as empty string
+    /// (graceful per Handlebars configuration).
     /// </summary>
     /// <remarks>
-    /// Per Insights Engine r2 Wave B (2026-06-02): adds centralized template substitution
-    /// previously missing from the orchestration pipeline. Without it, playbook nodes like
-    /// <c>resolveLiveFacts</c> received literal <c>"matter:{{matterId}}"</c> from ConfigJson
-    /// and failed at <c>LiveFactResolver.ParseMatterSubject</c> with
-    /// <c>LiveFactNotSupportedException</c>, returning a scaffold "no-artifact-produced"
-    /// decline to the caller. Centralized fix applies uniformly to all executor types.
+    /// <para>
+    /// R7 Wave 11 (FR-15 / task 111 / Option B, 2026-06-29): Layer 1 of the two-layer architecture.
+    /// Replaces the prior literal <c>Replace</c> loop with <see cref="ITemplateEngine.Render"/>
+    /// against a merged context built by <see cref="PlaybookTemplateContextBuilder"/>. Every
+    /// executor's configJson now benefits uniformly — no per-executor template-resolution code.
+    /// </para>
+    /// <para>
+    /// Pre-Wave-11 behavior preserved: <c>{{paramName}}</c> against Parameters still substitutes
+    /// (Handlebars handles flat <c>{{key}}</c> natively against the merged context dict).
+    /// </para>
+    /// <para>
+    /// Per Insights Engine r2 Wave B (2026-06-02): the original centralized substitution prevented
+    /// playbook nodes like <c>resolveLiveFacts</c> from receiving literal
+    /// <c>"matter:{{matterId}}"</c> and failing at <c>LiveFactResolver.ParseMatterSubject</c>.
+    /// Option B (R7 task 111) extends that fix to support <c>{{nodeName.field.subfield}}</c>
+    /// references against prior node outputs, enabling the DAILY-BRIEFING-NARRATE playbook's
+    /// rich template expressions to resolve end-to-end. Bug being closed: <c>/narrate</c> HTTP 200
+    /// with empty content (LLM nodes saw literal <c>{{json start}}</c> as their input).
+    /// </para>
     /// </remarks>
-    private static PlaybookNodeDto ApplyConfigJsonTemplates(
+    private PlaybookNodeDto ApplyConfigJsonTemplates(
         PlaybookNodeDto node,
-        IReadOnlyDictionary<string, string>? parameters)
+        PlaybookRunContext runContext)
     {
-        if (parameters is null || parameters.Count == 0)
-            return node;
         if (string.IsNullOrEmpty(node.ConfigJson) || !node.ConfigJson.Contains("{{", StringComparison.Ordinal))
             return node;
 
-        var rendered = node.ConfigJson;
-        foreach (var kvp in parameters)
-        {
-            if (string.IsNullOrEmpty(kvp.Key)) continue;
-            var placeholder = "{{" + kvp.Key + "}}";
-            if (rendered.Contains(placeholder, StringComparison.Ordinal))
-            {
-                rendered = rendered.Replace(placeholder, kvp.Value ?? string.Empty, StringComparison.Ordinal);
-            }
-        }
+        var context = PlaybookTemplateContextBuilder.Build(runContext);
+        var rendered = _templateEngine.Render(node.ConfigJson, context);
 
         return node with { ConfigJson = rendered };
     }

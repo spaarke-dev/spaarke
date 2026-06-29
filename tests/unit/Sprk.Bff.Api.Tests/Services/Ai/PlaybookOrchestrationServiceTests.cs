@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
@@ -52,6 +53,10 @@ public class PlaybookOrchestrationServiceTests
             _scopeResolverMock.Object,
             _legacyOrchestratorMock.Object,
             _insightsRouterMock.Object,
+            // R7 Wave 11 task 111: ITemplateEngine injected for orchestrator-level
+            // {{X}} resolution via PlaybookTemplateContextBuilder. Use real Handlebars-backed
+            // engine — its behavior is well-tested by TemplateEngineTests.
+            new TemplateEngine(NullLogger<TemplateEngine>.Instance),
             _loggerMock.Object);
     }
 

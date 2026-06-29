@@ -10,13 +10,27 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 111 — Wire ITemplateEngine + carry RunContext.NodeOutputs to subsequent nodes |
-| **Task File** | tasks/111-wire-template-engine-and-node-outputs.poml |
+| **Task** | 111a — Document the Playbook-driven LLM Output pattern (architecture doc + maker guide + cross-links) |
+| **Task File** | tasks/111a-document-playbook-llm-output-pattern.poml |
 | **Phase / Wave** | Wave 11 — Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive |
 | **Step** | 0 (not-started) |
 | **Status** | not-started |
 | **Started** | — |
-| **Next Action** | Begin Step 1 of task 111: extract PlaybookTemplateContextBuilder helper per T110 design doc; refactor ReturnResponseNodeExecutor.BuildTemplateContext to call it; inject ITemplateEngine into PlaybookOrchestrationService constructor; rewrite ApplyConfigJsonTemplates. |
+| **Next Action** | Begin Step 1 of task 111a: read T111 shipped code (PlaybookTemplateContextBuilder + orchestrator + PromptSchemaRenderer + AiCompletion changes) + spike design doc + existing AI architecture docs. Then Step 2: author SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md. |
+
+### Task 111 — COMPLETE ✅ (2026-06-29)
+- **Rigor**: FULL (bff-api code-impl across 6 .cs files + 2 new test files)
+- **Outputs shipped**:
+  - NEW: `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookTemplateContextBuilder.cs` (Layer 1 shared helper, 2 overloads)
+  - EDITED: `PlaybookOrchestrationService.cs` (ITemplateEngine injected; ApplyConfigJsonTemplates rewritten to use Layer 1)
+  - EDITED: `LoadKnowledgeNodeExecutor.cs` + `ReturnResponseNodeExecutor.cs` (BuildTemplateContext refactored to call shared helper; eliminates duplication)
+  - EDITED: `PromptSchemaRenderer.cs` (Layer 2: new `runtimeInput: JsonElement?` parameter + `## Input` section rendered between Context and Document)
+  - EDITED: `AiCompletionNodeExecutor.cs` (new `ExtractInputBindingAsJsonElement` helper + pass to renderer as runtimeInput)
+  - NEW: `PlaybookTemplateContextBuilderTests.cs` (7 tests) + `PromptSchemaRenderer_InputSectionTests.cs` (6 tests)
+- **Test results**: 13/13 new tests pass; 0 regressions across 7,514 other passing BFF unit tests; 6 unrelated pre-existing failures documented (KnowledgeDeploymentConfig drift, SummarizeSessionEndpoint contract using Mock<IPlaybookOrchestrationService>, others on different code surfaces)
+- **DEF filed**: DEF-001 — AiAnalysisNodeExecutor wiring deferred (touches 6 files via tool handlers; not needed for DAILY-BRIEFING-NARRATE Wave 11 UAT target; ~1-2 hour follow-up)
+- **Quality Gates**: code-review + adr-check self-review PASS (ADR-010 DI minimalism, ADR-013 BFF AI Architecture, ADR-038 testing strategy); ADR-029 publish-size deferred to T119 per wave-end pattern; no banned antipatterns
+- **Build**: 0 errors; 19 pre-existing warnings only
 
 ### Task 110 — COMPLETE ✅ (2026-06-29)
 - **Rigor**: STANDARD (audit + design, no source modification)

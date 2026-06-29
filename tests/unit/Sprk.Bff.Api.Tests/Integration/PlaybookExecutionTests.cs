@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
@@ -911,6 +912,8 @@ public class PlaybookExecutionTests
             scopeResolverMock.Object,
             legacyOrchestratorMock.Object,
             insightsRouterMock.Object,
+            // R7 Wave 11 task 111: ITemplateEngine for orchestrator Layer 1 resolution.
+            new TemplateEngine(NullLogger<TemplateEngine>.Instance),
             loggerMock.Object);
 
         return (service, new TestMocks(
