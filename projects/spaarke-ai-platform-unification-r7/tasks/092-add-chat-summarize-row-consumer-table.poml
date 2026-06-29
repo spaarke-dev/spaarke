@@ -2,7 +2,7 @@
 <task id="R7-092" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Add chat-summarize row to sprk_playbookconsumer table</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>9</wave>
     <estimated-effort>1-2 hours</estimated-effort>
     <tags>dataverse, wave-9</tags>

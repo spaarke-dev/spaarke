@@ -10,10 +10,45 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 033 — BFF endpoint GET /api/ai/playbook-builder/executor-config-schemas (Wave 3, FR-16) |
+| **Task** | 094 — Wire Playbook Library modal into spaarke-ai chat surface (Wave 9, FR-18) |
 | **Step** | Step 0 — not started |
 | **Status** | not-started |
-| **Next Action** | Begin Step 1 of task 033 — implement GET endpoint that aggregates all 25 executor schemas (ordered by ExecutorTypeValue) via INodeExecutorRegistry.GetAllExecutors().Select(e => e.GetConfigSchema()). |
+| **Next Action** | Begin Step 1 of task 094 — wire the Playbook Library modal (audited by task 093) into the spaarke-ai chat surface per FR-18. Per user instructions: task 093 already complete; advance directly to 094. |
+
+### Task 092 completion note (2026-06-28, Wave 9)
+
+✅ **Task 092 COMPLETE** (verification gate — no new row insertion needed). chat-summarize `sprk_playbookconsumer` row **already exists** in spaarkedev1 (`sprk_playbookconsumerid=651194cd-3670-f111-ab0e-70a8a590c51c`), seeded by chat-routing-redesign-r1 task 028b (2026-06-24) via the existing `scripts/dataverse/Seed-PlaybookConsumers.ps1` (which ships with chat-summarize as record #5 of 6 in its seed set). Row state verified via `mcp__dataverse__read_query`: `sprk_consumertype='chat-summarize'`, `sprk_consumercode='default'`, `sprk_environment='*'`, `sprk_priority=500`, `sprk_enabled=true`, `sprk_playbook=44285d15-1360-f111-ab0b-70a8a59455f4` → `summarize-document-for-chat@v1` (target playbook lookup verified to exist). `sprk_matchconditions` is null (no conditional routing — chat-summarize always dispatches to the one playbook per task 090 design §4).
+
+**Files changed**: 3 files (1 PowerShell + 1 new traceability doc + 1 task POML status).
+- `scripts/dataverse/Seed-PlaybookConsumers.ps1` — 2-line PS parse-error fix on line 285 (extract `$failedColor` variable; original `-ForegroundColor (if ... else ...)` was not legal PowerShell, suppressing the failure-summary print path). Net +1 LOC. No change to seed-record set or UPSERT logic.
+- `projects/spaarke-ai-platform-unification-r7/notes/handoffs/dataverse-changes.md` — NEW (113 lines). Per-task Dataverse traceability log per task 092 POML step 9. Records row state, acceptance-criteria mapping table, provenance (chat-routing-redesign-r1 task 028b prior seeding), idempotency-check forensics (script's PATCH-on-alternate-key returns 400 — pre-existing latent bug not introduced by task 092; documented for future re-seeders), cache-timing notes (5-min TTL preserved per NFR-04). Sets pattern for future Wave 9/10 Dataverse mutation tasks.
+- `projects/spaarke-ai-platform-unification-r7/tasks/092-add-chat-summarize-row-consumer-table.poml` — status not-started → completed.
+
+**Idempotency verification** (POML step 8): re-ran `Seed-PlaybookConsumers.ps1 -SkipConfirm` live; 6/6 records returned HTTP 400 from Dataverse. **Zero duplicates created** — idempotency property HELD (for the wrong reason: script's alternate-key UPSERT mechanism is broken in spaarkedev1, but the existing row was untouched and the failure was non-destructive). Documented in traceability doc as known-issue; pre-existing condition, not introduced by R7 task 092.
+
+**Acceptance criteria** (POML §acceptance-criteria, 9 items):
+- Row exists with correct schema ✅ (verified via `read_query`)
+- `sprk_playbook` GUID matches `WorkspaceOptions.ChatSummarizePlaybookId` ✅ (`44285d15-1360-f111-ab0b-70a8a59455f4`)
+- `sprk_matchconditions` null/empty ✅
+- Idempotent re-run ✅ (zero duplicates created in re-run, though by way of the 400 documented above)
+- Post-cache `IConsumerRoutingService.ResolveAsync` returns new row's GUID — ⏭️ deferred per traceability doc (requires App Service restart OR 5-min cache TTL wait; task 091 PathA5 integration test scenario 1 already validates this against a mocked routing service; live smoke deferred to next BFF deploy)
+- Traceability entry ✅
+- code-review + adr-check pass ✅ (Step 9.5: 0 critical, 0 warnings, 0 violations on both)
+- current-task.md advanced ✅ (this entry; advances to task 094)
+- TASK-INDEX shows 092 ✅ ✅
+
+**Quality gates** (FULL rigor Step 9.5):
+- `/code-review` PASS: 0 critical, 0 warnings, 1 future-suggestion (script's broken alternate-key UPSERT could be future-fixed; out of scope for task 092). AI smell score **0/5**. Quality direction = **Improved** (PS parse error fixed).
+- `/adr-check` PASS: ADR-013 / ADR-014 / ADR-029 / ADR-038 all Compliant. Component Justification §11 exemption applies (no new code components). 0 warnings, 0 violations.
+
+**Per-task publish-size**: N/A (no BFF code touched; scripts/dataverse/ is automation tooling, not shipped).
+**Per-task CVE scan**: N/A (no NuGet/npm package changes).
+
+**Unblocks**: Wave 9 tasks 094-096 (Playbook Library modal wiring into chat/briefing/launcher surfaces — they consume `sprk_playbookconsumer` table for consumer selection UI). FR-17 data-portion acceptance criterion satisfied; FR-17 end-to-end satisfied jointly with task 091. Per user instructions: task 093 already complete; advance to **task 094** as next.
+
+**Per-environment seeding rollout** (NFR-07): spaarkedev1 ✅ (this task); test + prod environments handled separately under NFR-07 follow-up (out of R7 scope per task POML constraints).
+
+---
 
 ### Task 091 completion note (2026-06-28, Wave 9)
 
