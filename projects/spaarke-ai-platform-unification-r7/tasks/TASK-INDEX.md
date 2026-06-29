@@ -111,9 +111,9 @@
 |---|---|---|---|---|---|
 | 050 | ✅ | Author Review-PlaybookNodes-Dispatch.ps1 (FR-19) | script, dataverse | no (sequential) | 024 (W2 dispatch ready) |
 | 051 | ✅ | Run review tool; produce CSV for owner review | dataverse, audit | no | 050 |
-| 052 | 🔄 | **OWNER CHECKPOINT** — owner reviews + sets each value (94 nodes) | manual, owner-gate | no | 051 |
+| 052 | ✅ | Owner review of 94-node review CSV — assisted via Prefill-PlaybookNodeReview.ps1 (78 AUTO-COPY + 16 AUTO-GUESS pre-fills, owner approved "looks generally ok" path); CSV committed at `ce0e9bfce`. 2026-06-29. | manual, owner-gate | no | 051 |
 | 053 | ✅ | Author Migrate-PlaybookNodes-to-ExecutorType.ps1 (idempotent + dry-run) — 428 LOC, auto-detect decision column (5 candidates), range-checked against KnownExecutorTypeValues, defensive 404 handling, pre-scan validates BEFORE auth, self-test "no decisions to apply" graceful exit 0; live-run gated on 052 owner CSV; 2026-06-29 | script, dataverse | no | 052 |
-| 054 | ⏸️ | Run migration (dry-run → real run); audit post-migration null check | dataverse, deploy | no | 053 |
+| 054 | ✅ | Migration LIVE-RUN against spaarkedev1 — 94/94 PATCHed (38.8s), 0 errors, 0 404s. Idempotency confirmed (2nd dry-run: 94 already-correct, 0 WOULD PATCH). MCP spot-check of DAILY-BRIEFING-NARRATE (7b5a6ed3-0271-f111-ab0e-000d3a13a4cd) verified all 6 nodes: Start→33, LoadKnowledge→142, GenerateTldr→1, GenerateChannelNarratives→1, ValidateEntityNames→141, ReturnResponse→143. R4 graduation gate target playbook ready for /narrate UAT (task 101). 2026-06-29. | dataverse, deploy | no | 053 |
 | 055 | ✅ | Update Deploy-Playbook.ps1 to write executor type explicitly (FR-20) — `$NodeTypeMap` + `sprk_nodetype` write removed, Lint A added (33-value allow-list), backward-compat input map for 17 legacy `nodeType` friendly labels, dry-run output shows `sprk_executortype = N (Name)` per node, happy-path (4 nodes incl. legacy `nodeType: AIAnalysis` + explicit `executorType: 33/1/42`) + lint-failure (executorType=9999 + unknown legacy label) both verified via pwsh dry-run 2026-06-29; live sanity redeploy is task 056 | script | no | 054 (live), but script itself ready now |
 | 056 | ⏸️ | Sanity — redeploy 3 representative playbooks (Daily Briefing, Insights, chat) | dataverse, deploy | no | 055 |
 
