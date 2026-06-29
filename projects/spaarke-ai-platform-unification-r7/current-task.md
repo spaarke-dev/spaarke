@@ -10,13 +10,21 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 115 — Restore source-correct ValidateEntityNames node configJson + author Sync-DailyBriefingNarratePlaybookNodes.ps1 |
-| **Task File** | tasks/115-restore-validate-entity-names-config.poml |
+| **Task** | 116 — Build BFF + deploy via bff-deploy; smoke /narrate via direct curl |
+| **Task File** | tasks/116-deploy-and-smoke-narrate.poml |
 | **Phase / Wave** | Wave 11 — Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive |
 | **Step** | 0 (not-started) |
 | **Status** | not-started |
 | **Started** | — |
-| **Next Action** | Begin Step 1 of task 115: read existing Sync-BriefNarrateOutputSchemas.ps1 (canonical pattern). Then Step 2: author Sync-DailyBriefingNarratePlaybookNodes.ps1 mirroring that structure to PATCH `sprk_playbooknode.sprk_configjson` for the 6 nodes of DAILY-BRIEFING-NARRATE from source. Live PATCH replaces the 2026-06-29 smoke-test value on ValidateEntityNames. |
+| **Next Action** | Begin Step 1 of task 116: build BFF locally + run tests; then invoke bff-deploy skill to push to spaarkedev1; then compose realistic curl payload with non-empty categories/priorityItems/channels and POST to /api/ai/daily-briefing/narrate. Expect non-empty `summary` + `keyTakeaways[]` + `channelNarratives[]`. |
+
+### T115 — COMPLETE ✅ (2026-06-29)
+- **Rigor**: FULL (data-modifying on spaarkedev1 + new script)
+- **Outputs shipped**:
+  - NEW: `scripts/dataverse/Sync-DailyBriefingNarratePlaybookNodes.ps1` (idempotent, dry-run-first; reads source playbook JSON, PATCHes 6 sprk_playbooknode rows by GUID)
+  - LIVE PATCH: 6/6 nodes successfully updated on spaarkedev1 (Start, LoadKnowledge, GenerateTldr, GenerateChannelNarratives, ValidateEntityNames, ReturnResponse)
+- **Verification**: MCP read_query on ValidateEntityNames confirms sprk_configjson now contains the source-correct `inputBinding.candidateText` (nested-subexpr) + `inputBinding.allowList` (flatMap-based) templates. Smoke-test value `"smoke test text"` GONE.
+- **Significance**: The full Layer 1 → Layer 2 → executor → LLM pathway can now resolve end-to-end against real DAILY-BRIEFING-NARRATE configJson. T116 deploy + smoke verifies behavior with actual LLM call against spaarkedev1.
 
 ### T112 + T113 + T114 — COMPLETE ✅ (2026-06-29)
 - **Outputs shipped**:
