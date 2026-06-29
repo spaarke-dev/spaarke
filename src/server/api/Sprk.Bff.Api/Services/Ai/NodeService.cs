@@ -549,7 +549,13 @@ public class NodeService : INodeService
     private static string GetSelectFields()
     {
         // R7 Wave 2 task 024 (FR-07): sprk_executortype is the canonical single-hop dispatch source.
-        return "sprk_playbooknodeid,sprk_name,sprk_nodetype,sprk_executortype,_sprk_playbookid_value,_sprk_actionid_value," +
+        // R7 hotfix 2026-06-29: removed `sprk_nodetype` from the SELECT — that column was DROPPED
+        // from sprk_playbooknode pre-R7 as part of FR-02 schema cleanup. Leaving it in the
+        // $select caused every Dataverse query to return 400 Bad Request, which surfaced as the
+        // /narrate 503 "AI Service Unavailable" pinned to NodeService.GetNodesAsync line 89 in
+        // App Service logs. R7 dispatch worked end-to-end (routing + playbook execution); only
+        // the very first GetNodesAsync load step failed because of this stale column ref.
+        return "sprk_playbooknodeid,sprk_name,sprk_executortype,_sprk_playbookid_value,_sprk_actionid_value," +
                "_sprk_modeldeploymentid_value,sprk_executionorder,sprk_dependsonjson,sprk_outputvariable," +
                "sprk_conditionjson,sprk_configjson,sprk_timeoutseconds,sprk_retrycount," +
                "sprk_position_x,sprk_position_y,sprk_isactive,createdon,modifiedon";
@@ -872,7 +878,12 @@ public class NodeService : INodeService
         var payload = new Dictionary<string, object?>
         {
             ["sprk_name"] = name,
-            ["sprk_nodetype"] = (int)nodeType,
+            // R7 hotfix 2026-06-29: write sprk_executortype (Choice) — the canonical
+            // single-hop dispatch field per FR-07/FR-26. Was previously writing to
+            // sprk_nodetype which was DROPPED from the schema pre-R7; that write
+            // would 400 on every node create. actionType (the int from
+            // MapCanvasTypeToActionType) IS the executor type value.
+            ["sprk_executortype"] = (int)actionType,
             ["sprk_playbookid@odata.bind"] = $"/sprk_analysisplaybooks({playbookId})",
             ["sprk_executionorder"] = executionOrder,
             ["sprk_outputvariable"] = outputVariable,
@@ -926,7 +937,9 @@ public class NodeService : INodeService
 
         var payload = new Dictionary<string, object?>
         {
-            ["sprk_nodetype"] = (int)nodeType,
+            // R7 hotfix 2026-06-29: write sprk_executortype (Choice) — same fix as
+            // CreateNodeAsync above. sprk_nodetype was dropped from the schema pre-R7.
+            ["sprk_executortype"] = (int)actionType,
             ["sprk_executionorder"] = executionOrder,
             ["sprk_configjson"] = configJson,
             ["sprk_position_x"] = (int)canvasNode.X,
