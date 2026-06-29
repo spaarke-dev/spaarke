@@ -1,0 +1,16 @@
+Archived: 2026-06-10
+Final status: Completed
+Closing PRs:
+  - #373 (https://github.com/spaarke-dev/spaarke/pull/373) — main scope, squash e328beafb (2026-06-09)
+  - #374 (https://github.com/spaarke-dev/spaarke/pull/374) — wrap-up tasks 082/083/085/090 + Outlook fixes + R4 design scaffolding, squash a2ac6a849 (2026-06-10)
+  - #495 (https://github.com/spaarke-dev/spaarke/pull/495) — wrap-up R4 design v2/v3 docs + portfolio pointer (2026-06-10)
+Worktree removed: c:/code_files/spaarke-wt-smart-todo-decoupling-r3
+Remote branches preserved: work/smart-todo-decoupling-r3, work/smart-todo-r3-wrap-up (still on origin)
+Issue: #440 (closed)
+Final task count: 46
+Tasks completed: 40
+Carry-forward (documented in lessons-learned.md):
+  - Task 005 — sprk_eventtodo entity orphan-but-not-deleted (26 appmodulecomponent refs)
+  - Task 015 + Phase 7 (016, 061–066) — blocked on tenant admin adding AAD Tasks.ReadWrite scope
+  - SPE container-type registration for BFF MI — Microsoft platform regression
+  - 10 deferred parent-form ribbons — XMLs drafted, deploy deferred to R4 OD-6
