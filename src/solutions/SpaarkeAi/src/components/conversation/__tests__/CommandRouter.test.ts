@@ -30,8 +30,8 @@ import {
 // ---------------------------------------------------------------------------
 
 describe('CommandRouter vocabulary (Q6 closed)', () => {
-  test('exposes exactly 6 hard slashes', () => {
-    expect(HardSlashes).toHaveLength(6);
+  test('exposes exactly 7 hard slashes (Q6 + R7 task 094 /playbooks)', () => {
+    expect(HardSlashes).toHaveLength(7);
     expect([...HardSlashes].sort()).toEqual(
       [
         '/clear',
@@ -39,6 +39,7 @@ describe('CommandRouter vocabulary (Q6 closed)', () => {
         '/help',
         '/new-session',
         '/pin',
+        '/playbooks',
         '/save-to-matter',
       ].sort()
     );
@@ -64,6 +65,8 @@ describe('parse — hard slashes (FR-49)', () => {
     { command: '/export', input: '/export' },
     { command: '/save-to-matter', input: '/save-to-matter ABC-123' },
     { command: '/pin', input: '/pin' },
+    // R7 task 094 / FR-18 — `/playbooks` opens the Playbook Library modal (browse mode).
+    { command: '/playbooks', input: '/playbooks' },
   ];
 
   test.each(hardCases)('classifies "$input" as hard slash $command', ({ command, input }) => {

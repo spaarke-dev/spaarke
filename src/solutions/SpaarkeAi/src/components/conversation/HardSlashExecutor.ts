@@ -177,6 +177,24 @@ export type GetFocusedTabIdFn = () => string | null;
 export type DownloadBlobFn = (blob: Blob, filename: string) => void;
 
 /**
+ * Function the caller provides for `/playbooks` (R7 task 094, FR-18) to open
+ * the Playbook Library modal in browse mode. The host wires this to its
+ * existing `handleOpenLibraryModal` plumbing — typically a thunk that calls
+ * `Xrm.Navigation.navigateTo({pageType:'webresource', webresourceName:
+ * 'sprk_playbooklibrary'}, {target:2, ...})`.
+ *
+ * Reuses the existing modal infrastructure; no new BFF surface (publish-size
+ * delta = 0 MB per ADR-029). Launch flow continues to route through the
+ * `sprk_playbooklibrary` Code Page, which preserves Path A.5 routing
+ * (`IConsumerRoutingService` → `IInvokePlaybookAi`) per ADR-013.
+ *
+ * Per task 093 audit Q6 (PRIMARY recommendation for chat surface): the
+ * `/playbooks` hard slash reuses the closed-vocabulary Pillar 8 infrastructure
+ * with zero new UI surface and automatic `/help` discoverability.
+ */
+export type OpenLibraryModalFn = () => void;
+
+/**
  * Context bag the executor needs. All side-effect surfaces are injected so
  * the module stays trivially unit-testable. The ConversationPane assembles
  * this object once per render via `React.useMemo`.
@@ -209,6 +227,13 @@ export interface ExecutorContext {
   activeMatterId: string | null;
   /** Trigger a browser-side blob download (consumed by /export). */
   downloadBlob: DownloadBlobFn;
+  /**
+   * Open the Playbook Library modal in browse mode (consumed by /playbooks).
+   * R7 task 094 / FR-18 — host wires to its existing `handleOpenLibraryModal`
+   * thunk (Xrm.Navigation → `sprk_playbooklibrary` Code Page). Pure UI; no
+   * BFF call.
+   */
+  openLibraryModal: OpenLibraryModalFn;
   /** Telemetry sink (production: errorTelemetry; tests: mock). */
   telemetry: TelemetrySink;
 }
@@ -592,6 +617,34 @@ async function execPin(ctx: ExecutorContext): Promise<ExecutorResult> {
   };
 }
 
+/**
+ * `/playbooks` — open the Playbook Library modal in browse mode (R7 task 094,
+ * FR-18 — consumer surface 1 of 3: chat).
+ *
+ * Pure-frontend, host-driven. Invokes the host-provided
+ * `ctx.openLibraryModal` callback, which is wired to the existing
+ * `ConversationPane.handleOpenLibraryModal([])` thunk (Xrm.Navigation →
+ * `sprk_playbooklibrary` Code Page with `target:2`). The empty
+ * `sessionAttachmentIds` array opens the Library in browse mode (no
+ * pre-filter) per the audit recommendation.
+ *
+ * Latency: <1ms (synchronous callback invocation; the modal's own load is
+ * downstream of this executor). NO BFF call. NO Path A.5 bypass — the Library
+ * modal preserves the existing `IConsumerRoutingService` → `IInvokePlaybookAi`
+ * launch path per ADR-013.
+ *
+ * Failure mode: if the host is running outside Dataverse (no Xrm.Navigation),
+ * the thunk logs a warn and returns silently. The executor still reports
+ * `executed` because the affordance fired; surface-level fallback (e.g., toast
+ * "Library only available in Dataverse host") is the host's concern, not the
+ * executor's. This preserves the executor's single-responsibility shape.
+ */
+async function execPlaybooks(ctx: ExecutorContext): Promise<ExecutorResult> {
+  ctx.openLibraryModal();
+  emitInvoked(ctx.telemetry, '/playbooks', 'executed');
+  return { outcome: 'executed', message: null };
+}
+
 // ---------------------------------------------------------------------------
 // Public dispatcher
 // ---------------------------------------------------------------------------
@@ -629,6 +682,8 @@ export async function executeHardSlash(
         return await execSaveToMatter(intent, ctx);
       case '/pin':
         return await execPin(ctx);
+      case '/playbooks':
+        return await execPlaybooks(ctx);
       default:
         // Defensive: assertHardSlash already rejected this case. Belt-and-
         // braces for runtime safety.

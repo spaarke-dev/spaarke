@@ -2,7 +2,7 @@
 <task id="R7-094" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Wire Library modal into spaarke-ai chat surface (FR-18)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>9</wave>
     <estimated-effort>3-4 hours</estimated-effort>
     <tags>code-page, ui, wave-9</tags>

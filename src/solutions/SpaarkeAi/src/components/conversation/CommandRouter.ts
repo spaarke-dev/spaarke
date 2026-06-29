@@ -51,7 +51,8 @@ export type HardSlashCommand =
   | '/help'
   | '/export'
   | '/save-to-matter'
-  | '/pin';
+  | '/pin'
+  | '/playbooks';
 
 /**
  * Soft slash commands — intent shortcuts; routed through the agent.
@@ -136,6 +137,7 @@ const HARD_SLASHES: readonly HardSlashCommand[] = [
   '/export',
   '/save-to-matter',
   '/pin',
+  '/playbooks',
 ] as const;
 
 const SOFT_SLASHES: readonly SoftSlashCommand[] = [

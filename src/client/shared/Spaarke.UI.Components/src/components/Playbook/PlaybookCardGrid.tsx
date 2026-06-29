@@ -151,6 +151,46 @@ const useStyles = makeStyles({
     textOverflow: 'ellipsis',
   },
 
+  // R7 task 094 / FR-18 — consumer-mapping chip row. Renders one Tag chip
+  // per consumer mapping below the description. ADR-021 dark-mode parity via
+  // semantic tokens only — chips use brand background tokens that adapt to
+  // theme. The row wraps to a second line if many chips are present.
+  consumerChipsRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: tokens.spacingHorizontalXS,
+    marginTop: tokens.spacingVerticalXS,
+  },
+  consumerChip: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorBrandForeground1,
+    backgroundColor: tokens.colorBrandBackground2,
+    borderRadius: tokens.borderRadiusSmall,
+    paddingLeft: tokens.spacingHorizontalXS,
+    paddingRight: tokens.spacingHorizontalXS,
+    paddingTop: '1px',
+    paddingBottom: '1px',
+    lineHeight: tokens.lineHeightBase100,
+    whiteSpace: 'nowrap',
+  },
+  // Sentinel chip rendered when consumers === [] (expand requested but no
+  // mappings found). Uses a muted subtle token to differentiate from real
+  // consumer chips per ADR-021 (semantic tokens only, no hardcoded colors).
+  consumerEmptyChip: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderRadius: tokens.borderRadiusSmall,
+    paddingLeft: tokens.spacingHorizontalXS,
+    paddingRight: tokens.spacingHorizontalXS,
+    paddingTop: '1px',
+    paddingBottom: '1px',
+    lineHeight: tokens.lineHeightBase100,
+    whiteSpace: 'nowrap',
+    fontStyle: 'italic',
+  },
+
   // Info button (top-right corner of card)
   infoButtonWrapper: {
     position: 'absolute',
@@ -324,6 +364,33 @@ const PlaybookCard: React.FC<PlaybookCardProps> = ({ playbook, isSelected, onSel
             </div>
             <Text className={mergeClasses(styles.name, compact && styles.nameCompact)}>{playbook.name}</Text>
             {!compact && playbook.description && <Text className={styles.description}>{playbook.description}</Text>}
+            {/*
+              R7 task 094 / FR-18 — consumer-mapping chip row. Only rendered
+              in non-compact mode when consumers === [] OR consumers.length > 0
+              (i.e., the caller opted into the consumer-mapping join via
+              loadPlaybooks({includeConsumers:true})). `consumers === undefined`
+              → not joined, render nothing (back-compat for callers that don't
+              opt in). `consumers === []` → joined but no mappings, render a
+              muted "no consumers" sentinel chip so the maker can see this is a
+              dead-code playbook (design.md §3 consumer-driven model).
+            */}
+            {!compact && playbook.consumers !== undefined && (
+              <div className={styles.consumerChipsRow} aria-label="Consumer mappings">
+                {playbook.consumers.length === 0 ? (
+                  <span className={styles.consumerEmptyChip}>no consumers</span>
+                ) : (
+                  playbook.consumers.map((c, idx) => (
+                    <span
+                      key={`${c.consumerType}-${c.consumerCode ?? 'default'}-${idx}`}
+                      className={styles.consumerChip}
+                      title={`Consumer: ${c.consumerType}${c.consumerCode ? ` (${c.consumerCode})` : ''}${c.environment && c.environment !== '*' ? ` env=${c.environment}` : ''}`}
+                    >
+                      {c.consumerType}
+                    </span>
+                  ))
+                )}
+              </div>
+            )}
           </div>
         }
       />

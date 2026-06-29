@@ -62,7 +62,7 @@ describe('CommandHelpPanel', () => {
     expect(screen.queryByText(/chat commands/i)).not.toBeInTheDocument();
   });
 
-  it('lists all 6 hard-slash commands', () => {
+  it('lists all hard-slash commands (7 post-R7 task 094)', () => {
     renderPanel(true, jest.fn());
     for (const cmd of HardSlashes) {
       expect(screen.getByText(cmd)).toBeInTheDocument();

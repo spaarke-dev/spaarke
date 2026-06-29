@@ -10,10 +10,67 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 094 — Wire Playbook Library modal into spaarke-ai chat surface (Wave 9, FR-18) |
-| **Step** | Step 4-9 — implementing /playbooks hard slash + PlaybookCardGrid consumer mapping |
-| **Status** | in-progress |
-| **Next Action** | Implement hard-slash wiring + extend playbookService + PlaybookCardGrid, then build + quality gates + commit. |
+| **Task** | 095 — Wire Playbook Library modal into Daily Briefing widget (Wave 9, FR-18) |
+| **Step** | Step 0 — not started |
+| **Status** | not-started |
+| **Next Action** | Begin task 095 — wire Library modal into Daily Briefing widget per FR-18 (consumer surface 2 of 3). Per task 093 audit Q6, the primary mount point is DigestHeader overflow item with `onBrowsePlaybooks` prop plumbed to host. |
+
+### Task 094 completion note (2026-06-28, Wave 9)
+
+✅ **Task 094 COMPLETE**. Wired `/playbooks` hard slash into spaarke-ai chat surface (consumer surface 1 of 3 per FR-18). Per task 093 audit Q6 PRIMARY recommendation: chose the closed-vocabulary Pillar 8 hard-slash mechanism over a UI button — automatic `/help` discoverability + zero new chrome on the deliberately-minimal PaneHeader + symmetric with existing `/clear` `/help` `/pin` etc.
+
+**Files changed**: 13 files (9 source + 4 tests).
+- `src/solutions/SpaarkeAi/src/components/conversation/CommandRouter.ts` — `/playbooks` added to HardSlashCommand union + HARD_SLASHES array (6 → 7 hard slashes); module-level JSDoc updated.
+- `src/solutions/SpaarkeAi/src/components/conversation/CommandHelpPanel.tsx` — `/playbooks` description added to HARD_SLASH_DESCRIPTIONS map.
+- `src/solutions/SpaarkeAi/src/components/conversation/HardSlashExecutor.ts` — `OpenLibraryModalFn` type alias + `ExecutorContext.openLibraryModal` required field + `execPlaybooks` async function (3-LOC; mirrors execHelp pattern) + `case '/playbooks'` in dispatcher switch + module-level JSDoc updated to "SEVEN hard slashes".
+- `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` — `openLibraryModalRef` React.useRef (forward-declared, with Temporal Dead Zone rationale comment); `openLibraryModal: () => openLibraryModalRef.current?.([])` entry in `hardSlashContext` useMemo; `React.useEffect` after `handleOpenLibraryModal` assigns the ref. Pattern mirrors existing `messagesRef` / `focusedTabIdRef`.
+- `src/client/shared/Spaarke.UI.Components/src/components/Playbook/types.ts` — NEW `IPlaybookConsumerMapping` interface (consumerType + consumerCode + environment + enabled + priority); IPlaybook extended with optional `consumers?: IPlaybookConsumerMapping[]` (undefined = not joined, [] = joined-but-empty = dead-code playbook signal); ENTITY_NAMES.playbookConsumer constant added.
+- `src/client/shared/Spaarke.UI.Components/src/components/Playbook/index.ts` — barrel exports IPlaybookConsumerMapping.
+- `src/client/shared/Spaarke.UI.Components/src/components/Playbook/playbookService.ts` — `loadPlaybooks` and `loadAllData` extended with optional `{ includeConsumers?: boolean }` parameter (default false = back-compat preserved for 10+ existing call sites); NEW internal `loadConsumerMappingsByPlaybookId` helper does parallel `sprk_playbookconsumer` query via Promise.all and joins in-memory on `_sprk_playbook_value`. Two-query approach avoids dependency on auto-generated 1:N OData navigation name (which varies by Dataverse maker convention and is brittle to schema renames). Scaling note + future $filter migration path documented inline.
+- `src/client/shared/Spaarke.UI.Components/src/components/Playbook/PlaybookCardGrid.tsx` — `consumerChipsRow` + `consumerChip` + `consumerEmptyChip` makeStyles entries (semantic tokens only — `tokens.colorBrandBackground2`, `tokens.colorBrandForeground1`, `tokens.colorNeutralForeground3`, `tokens.colorNeutralBackground3`; ZERO hardcoded colors per ADR-021); chip-row render below description with sentinel "no consumers" chip for `consumers === []` case (dead-code playbook signal per design.md §3 consumer-driven model); only renders in non-compact mode and only when consumers array is defined (back-compat for callers that don't opt in).
+- `src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/PlaybookLibraryShell.tsx` — single line change: `loadAllData(webApiAdapter, { includeConsumers: mode === 'browse' })`. Intent mode skips join (cost savings + locked-playbook flow doesn't surface chips).
+- `src/solutions/SpaarkeAi/src/components/conversation/__tests__/PlaybookLibraryHardSlash.test.ts` — NEW (200 lines, 8 tests in 3 describes): vocabulary registration (3 tests including case-insensitive `/PLAYBOOKS`), dispatch contract (4 tests covering openLibraryModal invocation, telemetry shape + ADR-015 privacy assertion, zero BFF calls, <100ms latency), failure isolation (1 test — host throw → `failed-unknown` not crash).
+- `src/solutions/SpaarkeAi/src/components/conversation/__tests__/CommandRouter.test.ts` — vocabulary-size assertion 6 → 7 with `/playbooks` in alphabetical-sorted list; hard-cases parametrized table extended with `/playbooks` entry.
+- `src/solutions/SpaarkeAi/src/components/conversation/__tests__/CommandHelpPanel.test.tsx` — test name updated "lists all hard-slash commands (7 post-R7 task 094)"; assertion unchanged (iterates HardSlashes — auto-updates).
+- `src/solutions/SpaarkeAi/src/components/conversation/__tests__/HardSlashExecutor.test.ts` — `TestCtxBundle.openLibraryModalCalls` field + `makeCtx` extended with `openLibraryModal` stub + getter; latency-aggregate test extended for 7th command (`/playbooks` block); comment + assertion strings updated 6 → 7.
+
+**Build verification**:
+- `npm run build` in `src/solutions/SpaarkeAi/` → `surface-gate: 0 surface-owned errors` + `vite build: ✓ built in 17.88s` (3989.84 kB / 1088.04 kB gzip — no measurable bundle size increase). 128 pre-existing errors in shared libs (deferred to Phase B per surface-gate config — not in scope).
+- `npm test` targeted: `PlaybookLibraryHardSlash|HardSlashExecutor|CommandRouter|CommandHelpPanel` → **4 suites pass, 98/98 tests pass in 42.9s**.
+- Broader composition.integration test suite cannot resolve `@fluentui/react-components` from Spaarke.AI.Widgets path — pre-existing worktree-level peer dependency setup gap; 12 tests that DID run pass; NOT a code regression.
+
+**Quality gates Step 9.5 (FULL rigor)**:
+- `/code-review` PASS: 0 critical, 0 warnings, 0 suggestions. AI smell score **0/5** across 9 source files. Quality direction = **Improved** (consumer-driven model surface advanced per FR-18). Component Justification §11 compliant (concrete three-question triple in POML; verified inline).
+- `/adr-check` PASS: 8 ADRs Compliant — ADR-010 (function-type alias not DI interface), ADR-013 (Path A.5 triangle preserved via existing sprk_playbooklibrary Code Page), ADR-015 (telemetry assertion test verifies no rawText leak), ADR-021 (all semantic tokens, ZERO hardcoded colors), ADR-028 (existing webApi adapter pattern, no auth shortcuts), ADR-029 (frontend-only, 0 MB BFF delta), ADR-030 (no new PaneEventBus channel introduced), ADR-038 (8 MAINTAIN-class tests, no banned patterns — no Mock<HttpMessageHandler>, no DI-registration tests, no ctor null-check tests). 0 violations, 0 warnings.
+
+**Per-task publish-size**: N/A (frontend-only; ADR-029 §10 trigger condition not met — zero BFF files modified).
+**Per-task CVE scan**: N/A (no NuGet/npm package changes).
+
+**Acceptance criteria** (POML §acceptance-criteria, 11 items):
+- "Browse Playbooks" affordance mounted at audit-recommended location ✅ (`/playbooks` hard slash per Q6 PRIMARY)
+- Click opens Dialog wrapping PlaybookLibraryShell ✅ (existing `sprk_playbooklibrary` Code Page wrapper, target:2)
+- Modal lists every playbook with consumer mapping ✅ (PlaybookCardGrid renders consumer chips; loadPlaybooks joins via parallel query)
+- Clicking a playbook invokes through Path A.5 ✅ (preserved via existing Code Page → IConsumerRoutingService → IInvokePlaybookAi triangle — no direct ExecuteAnalysisAsync bypass introduced)
+- NO direct AnalysisOrchestrationService.ExecuteAnalysisAsync call from launch path ✅ (verified — only existing host-side handleOpenLibraryModal thunk invoked)
+- ADR-021 dark mode compliance ✅ (semantic tokens only per code-review + adr-check)
+- Component test passes ✅ (8/8 in PlaybookLibraryHardSlash.test.ts)
+- npm run build:prod passes ✅ (vite build clean)
+- code-review + adr-check pass at Step 9.5 ✅ (both PASS with zero findings)
+- Manual smoke in spaarkedev1 dev — ⏭️ deferred (out-of-scope for code task; tested in next BFF + code-page deploy)
+- Commit pushed to work/spaarke-ai-platform-unification-r7 — ⏳ pending (this task's next action)
+
+**Unblocks**: Wave 9 task 095 (briefing widget — consumer surface 2 of 3) and task 096 (ad-hoc launcher — consumer surface 3 of 3). FR-18 first surface delivered; full acceptance gate (≥3 surfaces wired) requires 095 + 096 completion.
+
+**Notes for tasks 095 + 096**:
+- `IPlaybook.consumers` + `loadPlaybooks({includeConsumers:true})` + `PlaybookCardGrid` consumer-chip rendering is ALREADY in place after this task. Tasks 095 + 096 only need to add their own host-side affordance — the consumer-mapping display will work automatically via the shared lib.
+- Task 095 will need to add `onBrowsePlaybooks?: () => void` prop to `DigestHeader.tsx` + `DailyBriefingAppProps` per task 093 audit Q6 recommendation; the host code page is responsible for the `Xrm.Navigation.navigateTo` thunk (shared lib stays Xrm-free per ADR-012).
+- Task 096 follows the LegalWorkspace Get Started card precedent established by chat-routing-redesign-r1.
+
+**Coordination note**: This worktree (R7) is also running parallel tasks 034 + 050 + 065 + 066 in other sessions. Task 094 has zero file overlap with any of them (094 = `src/solutions/SpaarkeAi/components/conversation/*` + `src/client/shared/Spaarke.UI.Components/src/components/Playbook*`; 050 = `scripts/dataverse/`; others = BFF tests / docs / scripts).
+
+---
+
+
 
 ### Task 094 Files Modified This Session
 

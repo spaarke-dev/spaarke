@@ -260,7 +260,13 @@ export const PlaybookLibraryShell: React.FC<IPlaybookLibraryShellProps> = ({
     let cancelled = false;
     (async () => {
       try {
-        const data: IPlaybookData = await loadAllData(webApiAdapter);
+        // R7 task 094 / FR-18 — in browse mode, request consumer-mapping
+        // join so PlaybookCardGrid can render "which consumer surface invokes
+        // this playbook" chips per row. Intent mode skips the join (cost
+        // savings + the locked-playbook flow doesn't surface the chip).
+        const data: IPlaybookData = await loadAllData(webApiAdapter, {
+          includeConsumers: mode === 'browse',
+        });
         if (cancelled) return;
 
         // Apply allowlist filter if provided
