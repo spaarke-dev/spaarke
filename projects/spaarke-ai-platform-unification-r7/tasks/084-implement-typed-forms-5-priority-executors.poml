@@ -2,7 +2,7 @@
 <task id="R7-084" project="spaarke-ai-platform-unification-r7">
   <metadata>
     <title>Implement typed config forms for 5 priority executors (FR-23)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <wave>8</wave>
     <estimated-effort>4-5 hours</estimated-effort>
     <tags>code-page, ui, wave-8</tags>
