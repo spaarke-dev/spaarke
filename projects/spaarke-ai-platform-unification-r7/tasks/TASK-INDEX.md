@@ -1,10 +1,10 @@
 # Task Index — Spaarke AI Platform Unification R7
 
-> **Last Updated**: 2026-06-28
+> **Last Updated**: 2026-06-29 (Wave 11 added — Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive)
 > **Source plan**: [`../plan.md`](../plan.md)
 > **Source spec**: [`../spec.md`](../spec.md)
-> **Total tasks generated**: **82 POML files across 10 waves** (all waves seeded)
-> **Generation method**: 10 parallel subagents (one per wave) dispatched by `/project-pipeline` Step 3
+> **Total tasks generated**: **92 POML files across 11 waves** (Wave 11 added 2026-06-29 in response to Wave 10 task 101 UAT discovery: orchestrator template-engine gap blocks /narrate end-to-end)
+> **Generation method**: 10 parallel subagents per wave 1-10 (dispatched by `/project-pipeline` Step 3); Wave 11 generated sequentially 2026-06-29 via `/task-create --wave 11`
 
 ## Status Legend
 
@@ -27,9 +27,10 @@
 | Wave 7 | Skill rewrites (FR-32, FR-33) | ⏸️ blocked on Wave 2 | 070-075 ✅ generated (6 files) |
 | Wave 8 | Playbook Builder UI updates (FR-21 to FR-27) | 🔄 in-progress (080 ✅ audit; 082 ✅ 33-executor categorized Node Types left panel FR-22; 083 ✅ typed config form renderer infrastructure; 084 ✅ 5 priority typed forms verified + 20 Jest tests (W3-032 already shipped rich BFF schemas; canvas-side test gate added); 085 ✅ remaining 18 placeholder executors enriched with typed fields FR-23 (2026-06-29); 086 ✅ Action tab promotion FR-24; 088 ✅ canvas state `sprk_nodetype`→`sprk_executortype` FR-26 (9 refs replaced, 3 `__actionType` removed, 4 legacy constructs deleted, grep zero verified, build clean); 089a ✅ Jest UI tests for ExecutorTypeSelector dropdown + tier grouping (14/14 pass, 2026-06-29); 089b ✅ +26 incremental jest tests for 5 priority typed forms covering field-count sentinels / default-value resolution / Boolean+Number widget commits / controlled-component re-render / per-executor isolation (FR-23; 46/46 pass combined with task 084); 089c ✅ ADR-021 dark-mode static jest scan (5 Wave 8 files, 1949 LOC, 0 hardcoded color findings; 13 tests pass incl. 6 scanner self-tests; 2026-06-29); 081, 087, 089, 089d pending) | 080-089d ✅ generated (14 files); 080, 082, 083, 084, 085, 086, 088, 089a, 089b, 089c ✅ executed |
 | Wave 9 | Consumer migration (FR-17, FR-18) | 🟢 COMPLETE (090 ✅ audit/design; 091 ✅ FR-17 SessionSummarizeOrchestrator migrated; 092 ✅ chat-summarize sprk_playbookconsumer row verified; 093 ✅; 094 ✅ /playbooks hard slash + Library modal browse-mode + PlaybookCardGrid consumer chips; 095 ✅ Library modal wired into Daily Briefing widget via DigestHeader overflow; 096 ✅ Library modal wired into LegalWorkspace Get Started 9th "Browse Playbooks" card — FR-18 ≥3 surfaces acceptance MET; see notes/handoffs/fr18-closure.md) | 090 ✅, 091 ✅, 092 ✅, 093 ✅, 094 ✅, 095 ✅, 096 ✅ |
-| Wave 10 | Wrap-up + R4 graduation gate close | 🔄 in-progress (100 ✅ end-to-end verification report — 11/15 PASS, 1 PARTIAL (Wave 5 backfill owner-checkpoint), 3 BLOCKED-OPERATOR (089d deploy + 101 UAT + 090-wrap-up); signal GREEN for ship-readiness — see `notes/handoffs/wave10-success-criteria-verification.md`) | 100 ✅, 101 ⏸️, 090-project-wrap-up ⏸️ generated (3 files) |
+| Wave 10 | Wrap-up + R4 graduation gate close | 🔄 in-progress (100 ✅ end-to-end verification report 2026-06-29 marked 11/15 PASS at verification-report level, but Wave 10 task 101 UAT discovered orchestrator template-engine gap — Wave 11 added 2026-06-29 to close that gap; 101 + 090-wrap-up NOW BLOCK on Wave 11 task 119 GREEN) | 100 ✅, 101 ⏸️ (blocks on W11-117), 090-project-wrap-up ⏸️ (blocks on W11-119) |
+| Wave 11 | Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive | 🔲 not-started (added 2026-06-29 post-Wave-10 task 100 UAT discovery; closes the actual root cause of empty /narrate responses) | 110-119 ✅ generated (10 files); 0/10 executed |
 
-**Total: 82 POML files generated. Ready for Wave 1 execution.**
+**Total: 92 POML files generated across 11 waves. Wave 11 ready for execution starting at task 110.**
 
 ---
 
@@ -192,9 +193,26 @@
 
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
-| 100 | ✅ | End-to-end verification of 15 success criteria — 11/15 PASS, 1 PARTIAL (W5 backfill), 3 BLOCKED-OPERATOR (089d/101/090-wrap); GREEN ship-readiness; see `notes/handoffs/wave10-success-criteria-verification.md` | testing, audit | no | All waves done |
-| 101 | ⏸️ | UAT — /narrate via Daily Briefing widget (R4 graduation gate, FR-15) | uat, testing | no | 100 |
-| 090-project-wrap-up | ⏸️ | Wrap-up — README → Complete, lessons-learned.md, archive | wrapup | no | 101 |
+| 100 | ✅ | End-to-end verification of 15 success criteria — 11/15 PASS at verification-report level, but Wave 11 added 2026-06-29 to close UAT-discovered orchestrator gap | testing, audit | no | All waves done |
+| 101 | ⏸️ | UAT — /narrate via Daily Briefing widget (R4 graduation gate, FR-15) — BLOCKED on W11-117 | uat, testing | no | 100, **W11-117** |
+| 090-project-wrap-up | ⏸️ | Wrap-up — README → Complete, lessons-learned.md, archive — BLOCKED on W11-119 | wrapup | no | 101, **W11-119** |
+
+## Wave 11 — Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive
+
+> Added 2026-06-29 after Wave 10 task 100 marked the verification report GREEN but Wave 10 task 101 (UAT) discovered the actual root cause of empty `/narrate` end-to-end: `PlaybookOrchestrationService` only does literal `{{paramName}}` substitution; the deployed DAILY-BRIEFING-NARRATE playbook uses richer expressions (`{{json start}}`, `{{nodeName.field}}`, `{{map}}`, `{{flatten}}`, `{{distinct}}`, `{{concat}}`, `{{join}}`, `{{flatMap}}`, fan-out iteration). Wave 11 closes that gap by wiring the existing `ITemplateEngine` (Handlebars.NET) into the orchestrator + carrying node outputs forward as context + registering 7 helpers + implementing fan-out iteration semantics + restoring source-correct ValidateEntityNames config + UAT.
+
+| ID | Status | Title | Tags | Parallel-safe | Dependencies |
+|---|---|---|---|---|---|
+| 110 | 🔲 | Audit current orchestrator template resolution + design RunContext.NodeOutputs surface | audit, bff-api, planning | yes | — |
+| 111 | 🔲 | Wire ITemplateEngine into PlaybookOrchestrationService.ApplyConfigJsonTemplates + carry RunContext.NodeOutputs to subsequent nodes | bff-api, code-impl, ai, refactoring | yes | 110 |
+| 112 | 🔲 | Register custom Handlebars helpers: json, map, flatten, distinct, concat, join | bff-api, code-impl, ai | yes (with 113, 114) | 111 |
+| 113 | 🔲 | Eliminate `{{lambda}}` from source by adding `{{flatMap}}` helper + rewriting allowList expression | bff-api, code-impl, ai, dataverse-data | yes (with 112, 114) | 111 |
+| 114 | 🔲 | Implement fan-out iteration semantics in PlaybookOrchestrationService | bff-api, code-impl, ai | yes (with 112, 113) | 111 |
+| 115 | 🔲 | Restore source-correct ValidateEntityNames node configJson + author Sync-DailyBriefingNarratePlaybookNodes.ps1 | dataverse, deploy, script | no (touches deployed data) | 112, 113, 114 |
+| 116 | 🔲 | Build BFF + deploy via bff-deploy; smoke /narrate via curl with realistic payload | deploy, smoke, bff-api | no (deploys + smokes) | 115 |
+| 117 | 🔲 | UAT — Daily Briefing widget renders TL;DR + per-channel narratives with real data (R4 graduation) | uat, gate, operator | no (operator UAT) | 116 |
+| 118 | 🔲 | Address operator-flagged UAT issues (events, links/tools, two unidentified items) | investigation, uat | no (operator-context-dependent) | 117 |
+| 119 | 🔲 | Wave 11 BFF publish + size check (NFR-01) + CVE scan (NFR-02) | bff-api, deploy | yes | 118 |
 
 ---
 
@@ -222,18 +240,27 @@ Tasks within a group can run concurrently (separate `task-execute` invocations i
 | W7 | 070-075 | W2 024 ✅ | **SEQUENTIAL ONLY** per Sub-Agent Write Boundary |
 | W8 | 080-089d | W2 + W3 033 ✅ | Parallel: UI subtasks |
 | W9 | 090-096 | W2 024 ✅ | Sequential within (090 → 091 → 092; then 093-096 sequential) |
-| W10 | 100, 101, wrap-up | All waves ✅ | Sequential |
+| W10 | 100 ✅; 101 + wrap-up | W11 119 ✅ | Sequential — 101 + wrap-up block on Wave 11 close |
+| W11-A | 110 | W5 + W8 ✅ | yes — audit only |
+| W11-B | 111 | 110 ✅ | yes — orchestrator wiring |
+| W11-C | 112, 113, 114 | 111 ✅ | yes — 3 in parallel (different code surfaces) |
+| W11-D | 115 | 112+113+114 ✅ | no — touches deployed Dataverse data (sequential) |
+| W11-E | 116 | 115 ✅ | no — deploys BFF + smoke (sequential) |
+| W11-F | 117 | 116 ✅ | no — operator UAT (sequential) |
+| W11-G | 118 | 117 ✅ | no — operator-context-dependent (may spawn sub-tasks 118a/b/c) |
+| W11-H | 119 | 118 ✅ | yes — hygiene gate |
 
 ### Parallel-safety summary
 
 - **Sub-Agent Write Boundary tasks** (must run sequentially, main session only): 022, 042, 043, 044, 064, 068, 070, 071, 072, 073, 074, 075, 100, 101, 090-project-wrap-up
+- **Wave 11 sequentiality** (operator + data + UAT gates, not Sub-Agent Boundary): 115, 116, 117, 118
 - **All other tasks**: parallel-safe within their group
 
 ---
 
 ## Critical Path
 
-The longest dependency chain through the WBS (estimated 12-15 days):
+The longest dependency chain through the WBS (estimated 15-19 days; +3-4 days for Wave 11 added 2026-06-29):
 
 ```
 001 → 002 → 003 → 006 → 010 (Wave 1 complete)
@@ -241,10 +268,14 @@ The longest dependency chain through the WBS (estimated 12-15 days):
   → 024 (dispatch refactor)
   → 050 → 051 → 052 (owner review) → 053 → 054 → 055 → 056 (backfill complete)
   → 089d (PlaybookBuilder UI deployed) — depends on W8 critical path 080 → 082 → 089a-c
-  → 100 → 101 → 090-project-wrap-up
+  → 100 (verification report)
+  → 110 → 111 → {112, 113, 114 in parallel} → 115 → 116 → 117 (R4 graduation UAT) → 118 → 119 (Wave 11)
+  → 101 → 090-project-wrap-up
 ```
 
 Other waves run in parallel where dependencies allow.
+
+**Why Wave 11 was inserted between Wave 10 task 100 and 101**: task 100's verification report was at the "criteria-as-described-in-spec" level (15/15 GREEN). Task 101 (UAT) attempted to exercise /narrate end-to-end and discovered the orchestrator template-engine gap that prevents the actual user experience from working. Wave 11 closes that gap. Without Wave 11, R7 cannot ship — UAT cannot pass. With Wave 11, R7 can close.
 
 ---
 

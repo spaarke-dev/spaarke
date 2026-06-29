@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-116" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Build BFF + deploy via bff-deploy; smoke /narrate via direct curl</title>
+    <status>not-started</status>
+    <wave>11</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>deploy, smoke, bff-api, wave-11</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <rigor-reason>Deploys BFF + runs smoke test against spaarkedev1; no code modification in this task; deployment + verification only. STANDARD per task-execute Step 0.5.</rigor-reason>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys to shared spaarkedev1 environment; sequential after 115 confirms data restored.</parallel-reason>
+    <dependencies>115</dependencies>
+    <blocks>117</blocks>
+    <fr-coverage>FR-15 (validates Wave 11 end-to-end before widget UAT)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Build BFF locally. Deploy via the `bff-deploy` skill to spaarkedev1 App Service. Smoke
+    `/narrate` via direct curl POST with a realistic payload (real categories + priorityItems +
+    channels — not empty). Verify HTTP 200 with NON-EMPTY `summary`, NON-EMPTY `keyTakeaways[]`,
+    NON-EMPTY `channelNarratives[]`, AND the `_validationMetadata.scrubbedText` sidecar present
+    (proves ValidateEntityNames executed against the source-correct candidateText). If empty
+    content persists despite all upstream tasks complete, STOP and re-open T110 audit — do NOT
+    advance to widget UAT (T117) with empty smoke.
+  </prompt>
+
+  <role>
+    SPAARKE platform DevOps / smoke-test engineer. Familiar with bff-deploy skill + curl-based
+    API smoke. Goal: catch any Wave-11 end-to-end gap BEFORE the operator UAT step.
+  </role>
+
+  <goal>
+    BFF deployed to spaarkedev1 with all Wave 11 work merged. A curl POST to `/api/ai/daily-briefing/narrate`
+    with a realistic payload returns HTTP 200 + non-empty content fields. Smoke evidence captured
+    at `projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-narrate-smoke.md`
+    (request body + response body + HTTP status + observed latency).
+  </goal>
+
+  <inputs>
+    <file purpose="bff-deploy-skill">.claude/skills/bff-deploy/SKILL.md</file>
+    <file purpose="narrate-endpoint">src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+    <file purpose="bff-publish-recipe">.claude/constraints/azure-deployment.md</file>
+    <file purpose="prior-wave-publish-baseline">projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave-4-publish-report.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-029">BFF Publish Hygiene — verify publish-size delta IN THIS TASK (it's the deploy task); full per-task delta accounting at T119. Expected: small delta from T111+T112+T113+T114 (helper code + iteration logic + tests).</constraint>
+    <constraint source="bff-extensions.md §A">Per-deploy: confirm 0 new HIGH CVE via `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="CLAUDE.md §10">Capture BFF placement decision per design — no new endpoints in Wave 11; only existing /narrate is exercised.</constraint>
+    <constraint source="smoke-payload-fidelity">Use a NON-empty payload with ≥2 categories, ≥3 priorityItems, ≥2 channels — confirms iteration + template engine + flatMap all exercised in one request.</constraint>
+    <constraint source="abort-on-empty">If response body has empty `summary` OR empty `keyTakeaways[]` despite non-empty input, STOP. Do NOT proceed to T117. Re-open T110 audit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/deploy-and-smoke</topic>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="bff-deploy recipe" location=".claude/skills/bff-deploy/SKILL.md">
+        Standard `dotnet publish -c Release` + `Compress-Archive` + Azure deploy + smoke. Captures publish-size + CVE evidence. Wave 11 task 119 does the formal gate; this task captures the data point.
+      </pattern>
+      <pattern name="Direct /narrate curl" location="projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave10-success-criteria-verification.md">
+        Reference for prior /narrate curl + auth bearer-token shape against spaarkedev1 (az account get-access-token --resource &lt;bff client id&gt;).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 11 tasks 111-115 built the orchestrator runtime variable resolution + restored source-correct ValidateEntityNames config. This task is the first end-to-end exercise: build + deploy + curl. Catches integration bugs before the operator's eyes are on the widget at T117.
+    </background>
+    <dependencies>
+      <dependency task="115" status="must-complete-first">ValidateEntityNames config restored — smoke test exercises the full anti-hallucination path.</dependency>
+    </dependencies>
+    <related-work>
+      <item>T117 is the operator UAT via the widget (real spaarkedev1 notifications).</item>
+      <item>T119 is the formal publish-size + CVE gate for Wave 11.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: deploy + smoke task, no code modification · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Build BFF locally + run unit tests">
+      `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/`. Verify zero errors + all tests pass before deploying.
+    </step>
+    <step order="2" name="Invoke bff-deploy skill">
+      Use the `bff-deploy` skill (NOT custom commands). Capture publish-size + CVE evidence emitted by the skill.
+    </step>
+    <step order="3" name="Compose realistic curl payload">
+      Build a `DailyBriefingNarrateRequest` payload with ≥2 categories, ≥3 priorityItems, ≥2 channels. Use real (or realistic-shape) entity names — e.g., from existing spaarkedev1 sprk_event / appnotification data. Save payload to `notes/handoffs/wave11-narrate-smoke-payload.json`.
+    </step>
+    <step order="4" name="POST /narrate + capture response">
+      `az account get-access-token --resource &lt;BFF-CLIENT-ID&gt; --query accessToken -o tsv` to get bearer; `curl -X POST https://&lt;spaarkedev1-bff&gt;/api/ai/daily-briefing/narrate -H "Authorization: Bearer …" -H "Content-Type: application/json" -d @notes/handoffs/wave11-narrate-smoke-payload.json` → capture full response body + HTTP status code.
+    </step>
+    <step order="5" name="Verify response shape + content">
+      Assert: HTTP 200, response.tldr.summary is non-empty string, response.tldr.keyTakeaways is non-empty array, response.channelNarratives length matches input channel count, each channel.narrative is non-empty array. Spot-check: at least one entity name in response is from input payload (grounding evidence).
+    </step>
+    <step order="6" name="If empty — STOP and re-open T110">
+      If any required field is empty: write a defect note in `notes/spikes/wave11-smoke-defect-{timestamp}.md`; re-mark TASK-INDEX 110 status to 🔄 in-progress; DO NOT advance to T117.
+    </step>
+    <step order="7" name="Write smoke evidence handoff">
+      Create `notes/handoffs/wave11-narrate-smoke.md` with: deploy commit SHA, publish-size + CVE evidence, request payload (sanitized), response body (sanitized), HTTP status, observed latency, conclusion.
+    </step>
+    <step order="8" name="Update TASK-INDEX + current-task.md">
+      Mark 116 ✅; advance to 117.
+    </step>
+    <step order="9" name="Commit">
+      Commit handoff doc + smoke payload + (no code changes). Conventional message.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Bash (dotnet build + test + az + curl + git)</tool>
+    <tool>Skill (bff-deploy)</tool>
+    <tool>Write (smoke payload + handoff doc)</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">spaarkedev1 BFF App Service deploy</output>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-narrate-smoke.md</output>
+    <output type="data">projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-narrate-smoke-payload.json</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF deployed to spaarkedev1 (deploy commit SHA captured)</criterion>
+    <criterion testable="true">curl POST /narrate returns HTTP 200</criterion>
+    <criterion testable="true">response.tldr.summary is non-empty string</criterion>
+    <criterion testable="true">response.tldr.keyTakeaways has ≥2 items (matches Action prompt's 2-4 bullet contract)</criterion>
+    <criterion testable="true">response.channelNarratives count matches input channel count</criterion>
+    <criterion testable="true">Each channelNarratives[i].bullets is non-empty</criterion>
+    <criterion testable="true">At least one entity name in response is verifiably from input payload (grounding evidence)</criterion>
+    <criterion testable="true">notes/handoffs/wave11-narrate-smoke.md captured with publish-size + CVE evidence</criterion>
+  </acceptance-criteria>
+</task>

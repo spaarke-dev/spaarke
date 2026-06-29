@@ -103,13 +103,13 @@ Out: Action Engine R1 territory (Spaarke Claw, Tool Registry classification, gat
 
 ## Implementation Approach
 
-### Wave structure (10 waves, ~80-110 tasks)
+### Wave structure (11 waves, ~90-120 tasks)
 
-The work decomposes into 10 waves. Waves 1, 2, 4, 5, 10 are on the critical path. Waves 3, 6, 7, 8, 9 can partially parallelize.
+The work decomposes into 11 waves. Waves 1, 2, 4, 5, 11, 10 are on the critical path. Waves 3, 6, 7, 8, 9 can partially parallelize.
 
 ```
 Wave 1 (AiCompletion) ─┐
-                       ├──► Wave 2 (dispatch + rename) ──► Wave 4 (cleanup) ──► Wave 5 (backfill) ──► Wave 10 (wrap-up)
+                       ├──► Wave 2 (dispatch + rename) ──► Wave 4 (cleanup) ──► Wave 5 (backfill) ──► Wave 11 (orch runtime resolution + UAT drive) ──► Wave 10 (wrap-up)
 Wave 3 (typed schemas)─┘                                          │
                                                                   ├──► Wave 8 (Playbook Builder UI)
 Wave 6 (docs cleanup) ─────────────────────────────────┐          │
@@ -121,7 +121,9 @@ Wave 9 (consumer migration) ─────────────────�
 
 ### Critical path
 
-Wave 1 → Wave 2 → Wave 5 → Wave 8 (UI completeness) → Wave 10. Estimated 12-15 working days. Other waves run in parallel where dependencies allow.
+Wave 1 → Wave 2 → Wave 5 → Wave 8 (UI completeness) → **Wave 11 (UAT drive)** → Wave 10. Estimated 15-19 working days (Wave 11 adds 3-4 days). Other waves run in parallel where dependencies allow.
+
+> **Wave 11 added 2026-06-29 (post-Wave-10-task-100 UAT discovery).** Wave 10 task 100 marked 15 success criteria GREEN at the verification report level, but Wave 10 task 101 (`/narrate` UAT — R4 graduation gate per FR-15) cannot pass because the `PlaybookOrchestrationService` template engine only does literal `{{paramName}}` substitution — it does NOT carry node outputs forward as resolvable context, lacks the custom helpers (`{{json}}`, `{{map}}`, `{{flatten}}`, `{{distinct}}`, `{{concat}}`, `{{join}}`), and lacks fan-out iteration semantics. The deployed `DAILY-BRIEFING-NARRATE` playbook uses all of these. So `/narrate` returns HTTP 200 but with empty `summary` / `keyTakeaways[]` / `channelNarratives[]`. Wave 11 closes that gap. **Until Wave 11 + UAT pass, R7 cannot ship — there is no "closure" without passing UAT.**
 
 ### Dependencies (inter-wave)
 
@@ -129,7 +131,8 @@ Wave 1 → Wave 2 → Wave 5 → Wave 8 (UI completeness) → Wave 10. Estimated
 |---|---|
 | Wave 1 (AiCompletionNodeExecutor compiles + DI registered) | Wave 2 enum rename (avoids merge conflicts) |
 | Wave 2 (`sprk_executortype` reads canonical in orchestrator) | Wave 5 (backfill writes values for orchestrator to read) |
-| Wave 5 (94 nodes populated) | Wave 10 UAT (no null `sprk_executortype` in spaarkedev1) |
+| Wave 5 (94 nodes populated) | Wave 11 + Wave 10 UAT (no null `sprk_executortype` in spaarkedev1) |
+| Wave 11 (orchestrator runtime variable resolution + UAT drive) | Wave 10 task 101 (UAT closure) + `090-project-wrap-up` |
 | Wave 4 (legacy `ExecuteAnalysisAsync` deleted) | Wave 9 (chat-summarize migration must precede deletion) — note: order Wave 9 before Wave 4 |
 
 ## Work Breakdown Structure (WBS)
@@ -278,13 +281,34 @@ Goal: migrate chat-summarize + wire Playbook Library into ≥3 consumer surfaces
 
 ### Wave 10 — Wrap-up
 
-Goal: graduation criteria verification + lessons learned + project close. Estimated ~3 tasks, 1 day.
+Goal: graduation criteria verification + lessons learned + project close. Estimated ~3 tasks, 1 day. **Tasks 101 + 090-project-wrap-up now block on Wave 11 completion** (added 2026-06-29).
 
 | ID | Title | Inputs | Outputs | Dependencies |
 |---|---|---|---|---|
 | 100 | Run end-to-end verification of all 15 success criteria from spec.md | All prior waves | Verification report in `notes/handoffs/graduation-verification.md` | 047, 054, 067, 089d, 096 |
-| 101 | UAT — `/narrate` via Daily Briefing widget (R4 graduation gate, FR-15) | 100 | Owner sign-off captured | 100 |
-| 090-project-wrap-up | Wrap-up — README status → Complete, lessons-learned.md, archive project artifacts | 101 | Project closed | 101 |
+| 101 | UAT — `/narrate` via Daily Briefing widget (R4 graduation gate, FR-15) | 100, **Wave 11 task 117** | Owner sign-off captured | 100, **117** |
+| 090-project-wrap-up | Wrap-up — README status → Complete, lessons-learned.md, archive project artifacts | 101, **Wave 11 task 119** | Project closed | 101, **119** |
+
+### Wave 11 — Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive
+
+> Added 2026-06-29 after Wave 10 task 100 marked verification GREEN but Wave 10 task 101 (UAT) discovered the orchestrator template-resolution gap — the actual root cause of empty `/narrate` responses end-to-end. R7 cannot "close" without UAT passing; Wave 11 drives toward that.
+
+**Goal**: wire existing `ITemplateEngine` (Handlebars.NET, `src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs`) into `PlaybookOrchestrationService.ApplyConfigJsonTemplates`; carry node outputs forward as resolvable context to subsequent nodes via `RunContext.NodeOutputs`; add the custom helpers (`{{json}}`, `{{map}}`, `{{flatten}}`, `{{distinct}}`, `{{concat}}`, `{{join}}`, `{{flatMap}}` — last replaces inline `lambda` per T113 decision) the playbook source expressions use; implement fan-out iteration semantics (`iteration.iterateOver` + `itemAlias`); restore source-correct `ValidateEntityNames` node configJson (replace smoke-test PATCH from 2026-06-29 R7 hotfix); smoke `/narrate` + drive Daily Briefing widget UAT to passing; address other operator-flagged UAT issues.
+
+**Estimated**: ~10 tasks, 3-4 days. Critical path linear: 110 → 111 → 112+113+114 (parallel) → 115 → 116 → 117 → 118 → 119.
+
+| ID | Title | Inputs | Outputs | Dependencies |
+|---|---|---|---|---|
+| 110 | Audit current orchestrator template resolution + design `RunContext.NodeOutputs` surface | `PlaybookOrchestrationService.cs`, `RunContext.cs`, `ITemplateEngine.cs`, `TemplateEngine.cs`, `daily-briefing-narrate.json` | `notes/spikes/wave11-orchestrator-resolution-design.md` | — |
+| 111 | Wire `ITemplateEngine` into `PlaybookOrchestrationService.ApplyConfigJsonTemplates` + carry `RunContext.NodeOutputs` to subsequent nodes | 110 design, existing orchestrator tests | Orchestrator + RunContext edits; unit tests; literal `{{paramName}}` behavior preserved | 110 |
+| 112 | Register custom Handlebars helpers: `{{json X}}`, `{{map COLL 'field'}}`, `{{flatten X}}`, `{{distinct X}}`, `{{concat A B …}}`, `{{join SEP A B …}}` | 111, `TemplateEngine.cs` | `TemplateEngine.cs` helper registrations + per-helper xUnit tests | 111 |
+| 113 | Eliminate `{{lambda}}` from playbook source by adding `{{flatMap COLL 'nested.path'}}` helper + rewriting `ValidateEntityNames.allowList` expression in source | 111, `daily-briefing-narrate.json`, `brief-validate-entity-names.action.json` | `TemplateEngine.cs` `flatMap` helper + source playbook JSON edit + unit tests | 111 |
+| 114 | Implement fan-out iteration semantics in `PlaybookOrchestrationService` — when node configJson has `iteration.iterateOver` + `iteration.itemAlias`, orchestrator runs executor N times, binds alias per-iteration, collects outputs as array | 111, ADR-037, INodeExecutor interface | Orchestrator iteration semantics + unit tests with mock executor | 111 |
+| 115 | Restore source-correct `ValidateEntityNames` node configJson (replace smoke-test PATCH); author `scripts/dataverse/Sync-DailyBriefingNarratePlaybookNodes.ps1` (pattern: `Sync-BriefNarrateOutputSchemas.ps1`) so source config can be re-applied to spaarkedev1 | 112, 113, 114; `daily-briefing-narrate.json`; existing sync-script pattern | New sync script + deployed `sprk_playbooknode` PATCH on `ValidateEntityNames` | 112, 113, 114 |
+| 116 | Build BFF + deploy via `bff-deploy`; smoke `/narrate` via direct curl with realistic payload; expect non-empty `summary` + `keyTakeaways[]` + `channelNarratives[]` | 115; `bff-deploy` skill | `notes/handoffs/wave11-narrate-smoke.md` (HTTP 200 + non-empty content evidence) | 115 |
+| 117 | UAT — Daily Briefing widget renders TL;DR + per-channel narratives with real spaarkedev1 notification data; closes FR-15 / R4 graduation gate | 116; widget at `src/client/shared/Spaarke.DailyBriefing.Components/` | Owner sign-off + `notes/handoffs/wave11-uat-r4-graduation.md` | 116 |
+| 118 | Address operator-flagged UAT issues from 2026-06-29: "not seeing any events", "links / tools do not work", "two I don't know where those are coming from". Step 1 = investigate + characterize each. If findings interrelate → one fix-task. If independent → spawn T118a / T118b / T118c. | 117; operator UAT feedback | `notes/handoffs/wave11-other-uat-resolutions.md` + zero-or-more sub-tasks | 117 |
+| 119 | Wave 11 BFF publish + size check (NFR-01) + CVE scan (NFR-02) | 111-118 | `notes/handoffs/wave11-publish-report.md` (compressed size ≤ 60 MB ceiling, ≤ +2 MB single-task delta vs Wave 5 baseline; 0 new HIGH CVE) | 118 |
 
 ## Dependencies
 
@@ -324,6 +348,10 @@ See [README.md Risks & Mitigations](./README.md#risks--mitigations). Additional 
 | Wave 5 owner-review checkpoint delays critical path | Surface checkpoint early; provide review tool output in CSV for owner workflow |
 | Wave 8 PlaybookBuilder UI changes regress Power Apps form | Test deploy to spaarkedev1 dev before test/prod; capture before/after screenshots |
 | Wave 4 schema field drop blocks if any code still reads dropped fields | Wave 4 must follow Wave 9 (chat-summarize migration). Dependency enforced in WBS. |
+| **Wave 11**: Handlebars subexpressions can't express the playbook's nested `{{distinct (concat (map …))}}` cleanly | T113 explicitly biases toward rewriting the source `allowList` expression using a new `{{flatMap COLL 'nested.path'}}` helper rather than registering a true lambda — simpler engine, cleaner source |
+| **Wave 11**: Fan-out iteration (per-iteration alias binding + output-collection-as-array) not natively in Handlebars `#each` | T114 implements iteration AS ORCHESTRATOR LOGIC (not as a Handlebars helper); engine resolves per-iteration context overlays |
+| **Wave 11**: T118 may surface deeper gaps requiring additional R7 work | T118 produces investigation findings; if a finding requires >1 day of work, file as DEF-NNN via `/project-defer-issue-tracking` and surface to operator; do not silently extend Wave 11 |
+| **Wave 11**: Restoring source-correct ValidateEntityNames config breaks the smoke-test path I PATCHed 2026-06-29 | T115 only proceeds after T112 + T113 + T114 are merged + tested; sync script is dry-run-first; smoke at T116 confirms before T117 UAT |
 
 ## Parallel Execution Groups
 
@@ -350,7 +378,15 @@ Tasks within a group can run concurrently; dependencies between groups enforce o
 | W6 | 060-069 | W2 done | yes within group |
 | W8 | 080-089d | W2 done + W3 033 done | yes within group |
 | W9 | 090-096 | W2 024 done | yes within group |
-| W10 | 100, 101, 090-project-wrap-up | All other waves done | sequential |
+| W11-A | 110 | W5 + W8 done (orchestrator end-to-end usable) | yes |
+| W11-B | 111 | 110 done | yes |
+| W11-C | 112, 113, 114 | 111 done | yes (3 in parallel) |
+| W11-D | 115 | 112, 113, 114 done | no (touches deployed data — sequential) |
+| W11-E | 116 | 115 done | no (deploys + smokes BFF — sequential) |
+| W11-F | 117 | 116 done | no (operator UAT — sequential) |
+| W11-G | 118 | 117 done | no (operator review — sequential) |
+| W11-H | 119 | 118 done | yes |
+| W10 | 100 ✅; 101 + 090-project-wrap-up | 100 done + W11 119 done | sequential |
 
 ## Next Steps
 
