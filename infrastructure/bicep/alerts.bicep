@@ -273,7 +273,11 @@ resource missedRotationAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-
         actionGroupResourceId
       ]
     }
-    autoMitigate: true
+    // Azure constraint: stateful (autoMitigate=true) scheduled-query rules cannot
+    // run at frequency >12h. Since this alert evaluates daily (P1D) and we want
+    // it to stay fired until manually resolved (a missed rotation is a sustained
+    // condition, not a transient blip), autoMitigate must be false here.
+    autoMitigate: false
   }
 }
 
