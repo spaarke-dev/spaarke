@@ -24,7 +24,7 @@ import * as React from 'react';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { ActivityNotesSection } from '../src/components/ActivityNotesSection';
-import type { ChannelFetchResult, NotificationItem } from '../src/types/notifications';
+import type { NotificationItem } from '../src/types/notifications';
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -52,21 +52,11 @@ function makeItem(overrides: Partial<NotificationItem> = {}): NotificationItem {
   };
 }
 
-const CHANNELS: ChannelFetchResult[] = [
-  {
-    status: 'success',
-    group: {
-      meta: {
-        category: 'tasks-overdue',
-        label: 'Overdue Tasks',
-        iconName: 'Warning',
-        order: 1,
-      },
-      items: [makeItem({ id: 'n-1' })],
-      unreadCount: 1,
-    },
-  },
-];
+// R7 Wave 12 (2026-06-30): the `channels: ChannelFetchResult[]` prop was
+// removed from ActivityNotesSection — /render drives the widget directly with
+// no appnotification source. Keep `makeItem` import for type-only checks that
+// the bullet shape can still be derived from a NotificationItem if needed.
+void makeItem;
 
 const CHANNEL_NARRATIVES = [
   {
@@ -107,7 +97,6 @@ function renderSection(opts: RenderOpts = {}): {
     <FluentProvider theme={webLightTheme}>
       <ActivityNotesSection
         channelNarratives={CHANNEL_NARRATIVES}
-        channels={CHANNELS}
         onAddToTodo={callbacks.onAddToTodo}
         onDismiss={callbacks.onDismiss}
         isTodoCreated={() => false}
