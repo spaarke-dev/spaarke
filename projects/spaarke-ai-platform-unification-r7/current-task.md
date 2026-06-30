@@ -10,13 +10,63 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 116 — Build BFF + deploy via bff-deploy; smoke /narrate via direct curl |
+| **Task** | 116 — Build BFF + deploy + smoke /narrate (PARTIALLY COMPLETE; HTTP 200 + dispatch works; LLM content empty pending data-shape investigation) |
 | **Task File** | tasks/116-deploy-and-smoke-narrate.poml |
 | **Phase / Wave** | Wave 11 — Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive |
-| **Step** | 0 (not-started) |
-| **Status** | not-started |
-| **Started** | — |
-| **Next Action** | Begin Step 1 of task 116: build BFF locally + run tests; then invoke bff-deploy skill to push to spaarkedev1; then compose realistic curl payload with non-empty categories/priorityItems/channels and POST to /api/ai/daily-briefing/narrate. Expect non-empty `summary` + `keyTakeaways[]` + `channelNarratives[]`. |
+| **Step** | 7 of 9 (in-progress) — Steps 1-6 done; Step 7 blocked on LLM-empty-content investigation |
+| **Status** | in-progress |
+| **Last Updated** | 2026-06-30 (context-handoff checkpoint) |
+| **Last Commit** | `967fbfdde` — wip(bff/r7): Wave 11 T116 — Option D JSON-aware Layer 1 + auto-wrap + helper consolidation (CHECKPOINT) — pushed to origin |
+| **Next Action** | (1) Investigate why LLM returns empty `summary`/`keyTakeaways[]` despite HTTP 200 + dispatch chain working end-to-end. Likely root cause: GenerateChannelNarratives inputBinding ALSO needs flattening (still has `"payload": "{{json channel}}"` wrapper). (2) Flatten GenerateChannelNarratives inputBinding the same way GenerateTldr was flattened in 967fbfdde. (3) Re-run Sync-DailyBriefingNarratePlaybookNodes.ps1 to push to spaarkedev1. (4) Smoke `/narrate` again. (5) If still empty: file DEF-002 for BFF DTO ↔ JPS field-name alignment (BFF sends `title`, JPS expects `regardingName` per its examples). |
+
+### Files Modified This Session (Wave 11 T112-T116)
+**All committed to origin (5 commits ahead pushed; nothing lost)**:
+- `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs` — Option D JSON-aware Layer 1 + auto-wrap
+- `src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs` — 7 custom helpers (json/map/flatten/distinct/concat/join/flatMap); dual-helper registration REMOVED
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs` — converter reverted
+- `src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs` — `## Input` section (Layer 2)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookTemplateContextBuilder.cs` (NEW) — Layer 1 shared helper
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs` — ExtractInputBindingAsJsonElement
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LoadKnowledgeNodeExecutor.cs` + `ReturnResponseNodeExecutor.cs` — call shared helper
+- `projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json` — lambda+pipe eliminated (T113), ValidateEntityNames moved to top level, GenerateTldr inputBinding FLATTENED (T116 fix)
+- `scripts/dataverse/Sync-DailyBriefingNarratePlaybookNodes.ps1` (NEW) — idempotent sync of 6 nodes
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngine_Wave11Debug.cs` (NEW) — 4 debug tests verify json composition
+
+### Critical Context (continuation)
+**Wave 11 status**: 7 of 11 tasks ✅ COMPLETE (110, 111, 111a, 112, 113, 114, 115). T116 in-progress — infrastructure works, content blocked. T117-T119 pending.
+
+**T116 verified working**: HTTP 200 + 8.9s response + ValidateEntityNames passes + EntityNameValidator deserializes correctly. The orchestrator template engine + Option D + custom helpers + fan-out + Layer 2 PromptSchemaRenderer all confirmed working via unit tests (147/147 pass) + live smoke tests.
+
+**T116 not yet complete**: LLM returns `tldr.summary=""` and `channelNarratives=[]`. The response shape projection works correctly (categoryCount + priorityItemCount come from request, not from playbook output). The LLM IS being called (8.9s latency) but producing empty content.
+
+**Diagnostic findings during this session**:
+1. Confirmed Option D JSON-aware substitution works (4/4 debug tests pass with full distinct(concat(map(flatMap()))) chain)
+2. Confirmed PromptSchemaRenderer assembles "## Input" section correctly (test prints prompt with role + task + constraints + ## Input + ## Output Format)
+3. Confirmed deployed Action sprk_systemprompt is fine (MCP queried)
+4. Identified GenerateTldr inputBinding had wrapper-key issue — FIXED (flattened)
+5. **NOT YET FIXED**: GenerateChannelNarratives still has `"payload": "{{json channel}}"` wrapper — likely same fix needed
+
+**To resume**:
+```bash
+# 1. Check GenerateChannelNarratives inputBinding shape in source
+grep -A 3 "\"GenerateChannelNarratives\"" projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json
+
+# 2. Flatten the inputBinding (replace `"payload": "{{json channel}}"` with the
+#    channel fields directly, mirroring the GenerateTldr fix in 967fbfdde)
+
+# 3. Re-sync to spaarkedev1
+pwsh ./scripts/dataverse/Sync-DailyBriefingNarratePlaybookNodes.ps1
+
+# 4. (No re-deploy needed unless code changed)
+
+# 5. Smoke
+TOKEN=$(az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c --query accessToken -o tsv)
+curl -s -X POST "https://spaarke-bff-dev.azurewebsites.net/api/ai/daily-briefing/narrate" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d @projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-narrate-smoke-payload.json
+```
+
+**If smoke STILL returns empty content after GenerateChannelNarratives flatten**: the deeper issue is BFF DTO ↔ JPS field-name mismatch. DTO has `title`/`category`/`dueDate`/`unreadCount`. JPS examples reference `regardingName`/`viaMatter.name`/`source.owningUser`. The LLM may defensively return empty per its grounding constraints. File DEF-002 + escalate to operator for scope decision (fix DTO, fix JPS examples, OR accept that LLM has to be flexible).
 
 ### T115 — COMPLETE ✅ (2026-06-29)
 - **Rigor**: FULL (data-modifying on spaarkedev1 + new script)
