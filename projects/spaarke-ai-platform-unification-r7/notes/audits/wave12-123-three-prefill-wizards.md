@@ -541,8 +541,8 @@ Per T143 POML fallback instruction: *"If you cannot reach spaarkedev1 for browse
 - [x] Minimal fix recommended (§10.4) — data-layer only; no BFF code change; preserves §7 contract
 - [x] T144 (WA wizard) inheritance confirmed (§10.5)
 - [x] Audit notes updated with Resolution (this section)
-- [ ] Operator applies §10.4 fixes (deferred to operator)
-- [ ] T145 UAT — wizard end-to-end in spaarkedev1 (deferred per T143 POML)
+- [x] **Operator applied §10.4 fixes — applied 2026-06-30 via MCP (see §10.10)**
+- [ ] T145 UAT — wizard end-to-end in spaarkedev1 (operator-driven; ready to run)
 
 ### 10.8 Confidence
 
@@ -560,8 +560,27 @@ Per T143 POML fallback instruction: *"If you cannot reach spaarkedev1 for browse
 
   No additional EntityNameValidator orphans exist. The Matter node is the only instance of this misconfiguration pattern. Scope of cleanup confirmed limited to §10.4 fix A.
 
-- For Wave 5 backfill audit (parallel concern, separate from EntityNameValidator class): the systemPrompt-override clobbering pattern in §10.3 may exist on other AiAnalysis nodes that received node-level stub overrides during Power Apps Maker canvas authoring. A broader sweep `SELECT sprk_name, sprk_playbookid, sprk_configjson FROM sprk_playbooknode WHERE sprk_executortype = 0 AND sprk_configjson LIKE '%systemPrompt%'` would surface candidates. Optional; track as DEF if operator wants comprehensive cleanup; not blocking for T145 UAT (Matter fix is the only one needed for Wave 12 MVP).
+- For Wave 5 backfill audit (parallel concern, separate from EntityNameValidator class): the systemPrompt-override clobbering pattern in §10.3 may exist on other AiAnalysis nodes that received node-level stub overrides during Power Apps Maker canvas authoring. A broader sweep `SELECT sprk_name, sprk_playbookid, sprk_configjson FROM sprk_playbooknode WHERE sprk_executortype = 0 AND sprk_configjson LIKE '%systemPrompt%'` would surface candidates. **Tracked as Wave 12 task T124 (operator-approved 2026-06-30).**
+
+### 10.10 Fix Applied (operator-approved 2026-06-30 main session)
+
+Both §10.4 fixes applied via main-session MCP calls after explicit operator approval.
+
+**Fix A — DELETE EntityNameValidator node**:
+- Pre-state read: confirmed stub configJson `{"__canvasNodeId":"node_1782477270462_pehsxfjnu","__actionType":141}` (missing required candidateText + allowList)
+- Dependency scan: `SELECT ... WHERE sprk_dependsonjson LIKE '%c3c5226d%'` → 0 rows (no node depends on this validator's output)
+- `mcp__dataverse__delete_record('sprk_playbooknode', 'c3c5226d-5b71-f111-ab0d-7ced8ddc4a05')` → "Record deleted successfully."
+- Post-state read: node `c3c5226d-...` absent from result set ✅
+
+**Fix B — PATCH AI Analysis systemPrompt strip**:
+- Pre-state: configJson contained `"systemPrompt":"{...\"task\":\"Task\",\"role\":\"You are a document reviewer\"}"` clobbering ACT-023
+- `mcp__dataverse__update_record('sprk_playbooknode', '444b06d3-...')` with `sprk_configjson = {"__canvasNodeId":"node_1772743778436_khspxdutg","__actionType":0,"modelDeploymentId":"cdfa4e52-7c16-f111-8343-7c1e520aa4df"}` → "Record updated successfully."
+- Post-state read: configJson now has 3 keys only (no `systemPrompt`) ✅
+
+**Net effect**: Matter wizard playbook now has 2 nodes (Start → AI Analysis). Validator that killed runs is gone. AI Analysis receives ACT-023's real Matter-field-extraction prompt with `$choices` lookups against `sprk_mattertype` and `sprk_practicearea`. Ready for T144 (WA inherits) + T145 (operator UAT).
+
+**Time to fix**: 2 MCP calls + verification reads; ~5 minutes total from operator approval.
 
 ---
 
-*End of audit 123. Resolution §10 appended 2026-06-30 by T143 (T142 §8.5 added by sibling task earlier the same day).*
+*End of audit 123. Resolution §10 + §10.10 appended 2026-06-30 by T143 (diagnostic) + main session (fix application). T142 §8.5 added by sibling task earlier the same day.*

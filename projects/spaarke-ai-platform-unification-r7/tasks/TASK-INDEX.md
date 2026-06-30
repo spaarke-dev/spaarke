@@ -233,6 +233,7 @@
 | 121 | ✅ | Audit wizard file summary — RESTORE (1-3hr config drift; SIMPLE playbook healthy) | audit, bff-api, wizard, playbook, wave12 | yes | — |
 | 122 | ✅ | Audit document create profile — Dataverse data fix + UI cosmetic (2-4hr) | audit, bff-api, wizard, playbook, document, wave12 | yes | — |
 | 123 | ✅ | Audit three Prefill wizards — RESTORE all 3 (Project FK 1-2hr; Matter smoke; WA inherits) — architecture already shared, NO new abstractions needed | audit, bff-api, code-page, wizard, playbook, prefill, wave12 | yes | — |
+| 124 | 🔲 | AUDIT — Wave 5 backfill-health sweep (T142+T143 surfaced systemic issue; sweep all backfilled nodes for stub configJson + orphan FK + clobbering overrides) | audit, dataverse, backfill, wave5, follow-up, wave12 | yes | — |
 
 ### Wave 12.2 — Daily Briefing (READY TO EXECUTE — 7 POMLs generated 2026-06-30)
 
