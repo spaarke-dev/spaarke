@@ -376,12 +376,12 @@ public sealed class AiCompletionNodeExecutor : INodeExecutor
             // propagates (per task 004 acceptance criterion).
             // ─────────────────────────────────────────────────────────────────────────
             var rawJson = await _openAiClient.GetStructuredCompletionRawAsync(
-                prompt:            rendered.PromptText,
-                jsonSchema:        BinaryData.FromString(outputSchemaJson),
-                schemaName:        schemaName,
-                model:             context.ModelDeploymentId?.ToString(),
-                maxOutputTokens:   context.MaxTokens,
-                temperature:       effectiveTemperature,
+                prompt: rendered.PromptText,
+                jsonSchema: BinaryData.FromString(outputSchemaJson),
+                schemaName: schemaName,
+                model: context.ModelDeploymentId?.ToString(),
+                maxOutputTokens: context.MaxTokens,
+                temperature: effectiveTemperature,
                 cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
 

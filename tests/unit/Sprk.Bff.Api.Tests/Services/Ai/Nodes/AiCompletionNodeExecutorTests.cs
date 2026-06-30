@@ -322,8 +322,8 @@ public class AiCompletionNodeExecutorTests
         string task = "Base task",
         string[]? constraints = null)
     {
-        var roleJson      = role is null ? "null" : JsonSerializer.Serialize(role);
-        var taskJson      = JsonSerializer.Serialize(task);
+        var roleJson = role is null ? "null" : JsonSerializer.Serialize(role);
+        var taskJson = JsonSerializer.Serialize(task);
         var constraintsJs = constraints is null
             ? "null"
             : JsonSerializer.Serialize(constraints);

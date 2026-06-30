@@ -38,12 +38,12 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Narrators;
 public sealed class DailyBriefingCollectorTests
 {
     private static readonly Guid SystemUserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
-    private static readonly Guid MatterId1   = Guid.Parse("22222222-2222-2222-2222-222222222221");
-    private static readonly Guid MatterId2   = Guid.Parse("22222222-2222-2222-2222-222222222222");
-    private static readonly Guid ProjectId1  = Guid.Parse("33333333-3333-3333-3333-333333333331");
-    private static readonly Guid EventId1    = Guid.Parse("44444444-4444-4444-4444-444444444441");
-    private static readonly Guid DocId1      = Guid.Parse("55555555-5555-5555-5555-555555555551");
-    private static readonly Guid TodoId1     = Guid.Parse("66666666-6666-6666-6666-666666666661");
+    private static readonly Guid MatterId1 = Guid.Parse("22222222-2222-2222-2222-222222222221");
+    private static readonly Guid MatterId2 = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid ProjectId1 = Guid.Parse("33333333-3333-3333-3333-333333333331");
+    private static readonly Guid EventId1 = Guid.Parse("44444444-4444-4444-4444-444444444441");
+    private static readonly Guid DocId1 = Guid.Parse("55555555-5555-5555-5555-555555555551");
+    private static readonly Guid TodoId1 = Guid.Parse("66666666-6666-6666-6666-666666666661");
 
     // ─────────────────────────────────────────────────────────────────────────
     // Helper builders
@@ -180,8 +180,8 @@ public sealed class DailyBriefingCollectorTests
         // Arrange — resolver returns memberships for the user across event + matter + project
         var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
         {
-            ["sprk_event"]   = MembershipWith("sprk_event", EventId1),
-            ["sprk_matter"]  = MembershipWith("sprk_matter", MatterId1, MatterId2),
+            ["sprk_event"] = MembershipWith("sprk_event", EventId1),
+            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1, MatterId2),
             ["sprk_project"] = MembershipWith("sprk_project", ProjectId1),
         });
 
@@ -239,8 +239,8 @@ public sealed class DailyBriefingCollectorTests
         // Arrange — exhaustively cover the 3 entity types the resolver is called for.
         var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
         {
-            ["sprk_event"]   = MembershipWith("sprk_event", EventId1),
-            ["sprk_matter"]  = MembershipWith("sprk_matter", MatterId1),
+            ["sprk_event"] = MembershipWith("sprk_event", EventId1),
+            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1),
             ["sprk_project"] = MembershipWith("sprk_project", ProjectId1),
         });
         var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>());
@@ -256,10 +256,10 @@ public sealed class DailyBriefingCollectorTests
         // Assert — resolver was called for the 3 candidate-set entity types (and ONLY those —
         // sprk_document/sprk_todo are filtered downstream off the resolved sets).
         resolverMock.Verify(r => r.ResolveAsync(
-            SystemUserId, "sprk_event",   It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
+            SystemUserId, "sprk_event", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
             Times.Once);
         resolverMock.Verify(r => r.ResolveAsync(
-            SystemUserId, "sprk_matter",  It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
+            SystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
             Times.Once);
         resolverMock.Verify(r => r.ResolveAsync(
             SystemUserId, "sprk_project", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
@@ -273,8 +273,8 @@ public sealed class DailyBriefingCollectorTests
         // (it requires matter or project candidate ids), so it returns empty WITHOUT calling Dataverse.
         var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
         {
-            ["sprk_event"]   = MembershipWith("sprk_event", EventId1),
-            ["sprk_matter"]  = EmptyMembership("sprk_matter"),
+            ["sprk_event"] = MembershipWith("sprk_event", EventId1),
+            ["sprk_matter"] = EmptyMembership("sprk_matter"),
             ["sprk_project"] = EmptyMembership("sprk_project"),
         });
         var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>());
@@ -297,17 +297,17 @@ public sealed class DailyBriefingCollectorTests
         // Arrange — populate each channel with at least one row that carries regarding metadata
         var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
         {
-            ["sprk_event"]   = MembershipWith("sprk_event", EventId1),
-            ["sprk_matter"]  = MembershipWith("sprk_matter", MatterId1),
+            ["sprk_event"] = MembershipWith("sprk_event", EventId1),
+            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1),
             ["sprk_project"] = MembershipWith("sprk_project", ProjectId1),
         });
         var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>
         {
-            ["sprk_event"]    = new EntityCollection(new List<Entity> { MakeEventEntity(EventId1, "Task X", "Matter Alpha", MatterId1) }),
+            ["sprk_event"] = new EntityCollection(new List<Entity> { MakeEventEntity(EventId1, "Task X", "Matter Alpha", MatterId1) }),
             ["sprk_document"] = new EntityCollection(new List<Entity> { MakeDocumentEntity(DocId1, "Doc Y", "Matter Alpha", MatterId1) }),
-            ["sprk_matter"]   = new EntityCollection(new List<Entity> { MakeMatterEntity(MatterId1, "Matter Alpha") }),
-            ["sprk_project"]  = new EntityCollection(new List<Entity> { MakeProjectEntity(ProjectId1, "Project Beta") }),
-            ["sprk_todo"]     = new EntityCollection(new List<Entity> { MakeTodoEntity(TodoId1, "Send agenda", MatterId1, "Matter Alpha") })
+            ["sprk_matter"] = new EntityCollection(new List<Entity> { MakeMatterEntity(MatterId1, "Matter Alpha") }),
+            ["sprk_project"] = new EntityCollection(new List<Entity> { MakeProjectEntity(ProjectId1, "Project Beta") }),
+            ["sprk_todo"] = new EntityCollection(new List<Entity> { MakeTodoEntity(TodoId1, "Send agenda", MatterId1, "Matter Alpha") })
         });
 
         var sut = new DailyBriefingCollector(
@@ -340,7 +340,7 @@ public sealed class DailyBriefingCollectorTests
         // Arrange — only matter channel populated
         var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
         {
-            ["sprk_matter"]  = MembershipWith("sprk_matter", MatterId1),
+            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1),
         });
         var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>
         {
@@ -401,8 +401,8 @@ public sealed class DailyBriefingCollectorTests
         // Membership resolver succeeds for all 3.  Other channel queries succeed.
         var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
         {
-            ["sprk_event"]   = MembershipWith("sprk_event", EventId1),
-            ["sprk_matter"]  = MembershipWith("sprk_matter", MatterId1),
+            ["sprk_event"] = MembershipWith("sprk_event", EventId1),
+            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1),
             ["sprk_project"] = MembershipWith("sprk_project", ProjectId1),
         });
 
@@ -498,7 +498,7 @@ public sealed class DailyBriefingCollectorTests
         // Arrange — exactly 2 matter rows, 1 todo row
         var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
         {
-            ["sprk_matter"]  = MembershipWith("sprk_matter", MatterId1, MatterId2),
+            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1, MatterId2),
         });
 
         var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>

@@ -35,7 +35,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Narrators;
 [Trait("status", "task-132-r7")]
 public sealed class DailyBriefingNarratorTldrChainingTests
 {
-    private const string TldrActionCode    = "BRIEF-NARRATE-TLDR";
+    private const string TldrActionCode = "BRIEF-NARRATE-TLDR";
     private const string ChannelActionCode = "BRIEF-NARRATE-CHANNEL";
 
     // ─── Action-row stand-ins (mirrors what AnalysisActionService.GetActionByCodeAsync returns) ───
@@ -117,16 +117,16 @@ public sealed class DailyBriefingNarratorTldrChainingTests
         // captured per call so we can assert chaining of TLDR content into the prompt.
         var req = MakeRequestWithTwoChannels();
 
-        const string tldrSummary     = "Three urgent matters need attention today.";
-        const string tldrTakeaway1   = "Acme contract overdue";
-        const string tldrTakeaway2   = "Bravo brief due tomorrow";
-        const string tldrTopAction   = "Review the Acme engagement letter (2 days overdue).";
+        const string tldrSummary = "Three urgent matters need attention today.";
+        const string tldrTakeaway1 = "Acme contract overdue";
+        const string tldrTakeaway2 = "Bravo brief due tomorrow";
+        const string tldrTopAction = "Review the Acme engagement letter (2 days overdue).";
 
         var tldrResponseJson = JsonSerializer.Serialize(new
         {
-            summary       = tldrSummary,
-            keyTakeaways  = new[] { tldrTakeaway1, tldrTakeaway2 },
-            topAction     = tldrTopAction
+            summary = tldrSummary,
+            keyTakeaways = new[] { tldrTakeaway1, tldrTakeaway2 },
+            topAction = tldrTopAction
         });
 
         var actions = new Mock<AnalysisActionService>(MockBehavior.Loose,
@@ -231,9 +231,9 @@ public sealed class DailyBriefingNarratorTldrChainingTests
 
         var tldrResponseJson = JsonSerializer.Serialize(new
         {
-            summary       = "ONE-AND-ONLY-SUMMARY",
-            keyTakeaways  = new[] { "ONE-AND-ONLY-TAKEAWAY" },
-            topAction     = "ONE-AND-ONLY-ACTION"
+            summary = "ONE-AND-ONLY-SUMMARY",
+            keyTakeaways = new[] { "ONE-AND-ONLY-TAKEAWAY" },
+            topAction = "ONE-AND-ONLY-ACTION"
         });
 
         var actions = new Mock<AnalysisActionService>(MockBehavior.Loose,
@@ -247,7 +247,7 @@ public sealed class DailyBriefingNarratorTldrChainingTests
                .ReturnsAsync(MakeChannelAction());
 
         var llm = new Mock<IOpenAiClient>(MockBehavior.Strict);
-        var tldrCallCount     = 0;
+        var tldrCallCount = 0;
         var capturedChannelPrompts = new List<string>();
 
         llm.Setup(c => c.GetStructuredCompletionRawAsync(

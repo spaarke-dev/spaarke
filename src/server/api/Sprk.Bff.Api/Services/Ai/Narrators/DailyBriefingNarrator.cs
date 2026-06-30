@@ -42,8 +42,8 @@ namespace Sprk.Bff.Api.Services.Ai.Narrators;
 /// </summary>
 public sealed class DailyBriefingNarrator
 {
-    private const string TldrActionCode      = "BRIEF-NARRATE-TLDR";
-    private const string ChannelActionCode   = "BRIEF-NARRATE-CHANNEL";
+    private const string TldrActionCode = "BRIEF-NARRATE-TLDR";
+    private const string ChannelActionCode = "BRIEF-NARRATE-CHANNEL";
 
     private static readonly JsonSerializerOptions InputSerializerOptions = new()
     {
@@ -68,10 +68,10 @@ public sealed class DailyBriefingNarrator
         IEntityNameScrubber scrubber,
         ILogger<DailyBriefingNarrator> logger)
     {
-        _actions  = actions  ?? throw new ArgumentNullException(nameof(actions));
-        _llm      = llm      ?? throw new ArgumentNullException(nameof(llm));
+        _actions = actions ?? throw new ArgumentNullException(nameof(actions));
+        _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _scrubber = scrubber ?? throw new ArgumentNullException(nameof(scrubber));
-        _logger   = logger   ?? throw new ArgumentNullException(nameof(logger));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <summary>
@@ -144,9 +144,9 @@ public sealed class DailyBriefingNarrator
         // surface — preserves the no-hardcoded-LLM-behavior-in-C# rule from §G Home A).
         var tldrContextForChannels = new
         {
-            summary       = tldr.Summary,
-            keyTakeaways  = tldr.KeyTakeaways,
-            topAction     = tldr.TopAction
+            summary = tldr.Summary,
+            keyTakeaways = tldr.KeyTakeaways,
+            topAction = tldr.TopAction
         };
 
         var channelTasks = req.Channels.Select(async ch =>
@@ -241,12 +241,12 @@ public sealed class DailyBriefingNarrator
             actionCode, fullPrompt.Length, outputSchemaJson.Length);
 
         var raw = await _llm.GetStructuredCompletionRawAsync(
-            prompt:            fullPrompt,
-            jsonSchema:        BinaryData.FromString(outputSchemaJson),
-            schemaName:        actionCode.Replace('-', '_'),  // schema names cannot contain hyphens
-            model:             null,                          // use configured default
-            maxOutputTokens:   null,
-            temperature:       temperature.HasValue ? (float)temperature.Value : (float?)null,
+            prompt: fullPrompt,
+            jsonSchema: BinaryData.FromString(outputSchemaJson),
+            schemaName: actionCode.Replace('-', '_'),  // schema names cannot contain hyphens
+            model: null,                          // use configured default
+            maxOutputTokens: null,
+            temperature: temperature.HasValue ? (float)temperature.Value : (float?)null,
             cancellationToken: ct).ConfigureAwait(false);
 
         _logger.LogDebug(
@@ -334,7 +334,7 @@ public sealed class DailyBriefingNarrator
                 .Where(id => !string.IsNullOrEmpty(id))
                 .ToArray(),
             PrimaryEntityType = primary.RegardingEntityType ?? string.Empty,
-            PrimaryEntityId   = primary.RegardingId ?? string.Empty,
+            PrimaryEntityId = primary.RegardingId ?? string.Empty,
             PrimaryEntityName = primary.RegardingName ?? string.Empty,
         };
     }

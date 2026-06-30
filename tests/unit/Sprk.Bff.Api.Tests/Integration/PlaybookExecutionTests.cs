@@ -656,7 +656,8 @@ public class PlaybookExecutionTests
         // the AIAnalysis default on the delivery node to route to DeliverOutput.
         var analysisNode = CreateNode("AI Analysis", analysisActionId, "analysis_result", 1);
         var deliveryNode = CreateNode("Deliver Output", deliveryActionId, "delivery_result", 2, analysisNode.Id)
-            with { SprkExecutortype = ExecutorType.DeliverOutput };
+            with
+        { SprkExecutortype = ExecutorType.DeliverOutput };
 
         var nodes = new[] { analysisNode, deliveryNode };
         var (service, mocks) = CreateTestService();
