@@ -449,9 +449,7 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
             size="small"
             icon={
               <CheckmarkRegular
-                className={
-                  isTodoCreated || isTodoPending ? styles.addTodoIconDisabled : styles.addTodoIcon
-                }
+                className={isTodoCreated || isTodoPending ? styles.addTodoIconDisabled : styles.addTodoIcon}
               />
             }
             aria-label="Add To Do"
