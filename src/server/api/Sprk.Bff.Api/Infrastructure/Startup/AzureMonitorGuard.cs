@@ -18,14 +18,27 @@ namespace Sprk.Bff.Api.Infrastructure.Startup;
 /// <para>
 /// R2 FR-06 changes the behavior:
 /// <list type="bullet">
-///   <item>Non-Development env + missing/empty conn string → throw
-///   <see cref="InvalidOperationException"/> at startup with an actionable
-///   message.</item>
-///   <item>Development env + missing/empty conn string → return
-///   <see langword="false"/> (caller skips wiring; preserves dev convenience).</item>
+///   <item>Deployed env (Staging, Production, Demo, etc.) + missing/empty conn
+///   string → throw <see cref="InvalidOperationException"/> at startup with an
+///   actionable message.</item>
+///   <item>Development or Testing env + missing/empty conn string → return
+///   <see langword="false"/> (caller skips wiring; preserves dev convenience
+///   and avoids breaking CI integration-test fixtures that don't provide a
+///   real connection string).</item>
 ///   <item>Any env + non-empty conn string → return <see langword="true"/>
 ///   (caller wires the exporter).</item>
 /// </list>
+/// </para>
+/// <para>
+/// <c>Testing</c> is allow-listed alongside <c>Development</c> because it is
+/// the canonical ASP.NET Core test-runtime env name (used by
+/// <c>WebApplicationFactory&lt;Program&gt;</c>-based integration tests).
+/// CI doesn't deploy; CI fixtures don't have an App Insights pipeline to
+/// validate; throwing in <c>Testing</c> breaks every WAF-based fixture across
+/// the repo with no benefit. App Service uses <c>ASPNETCORE_ENVIRONMENT=Production</c>,
+/// never <c>Testing</c>, so allow-listing it does not weaken the deployed-env
+/// guarantee. (Added 2026-06-29 as a follow-on to FR-06 after CI breakage
+/// surfaced via PR #520.)
 /// </para>
 /// </remarks>
 public static class AzureMonitorGuard
@@ -35,7 +48,7 @@ public static class AzureMonitorGuard
     /// </summary>
     /// <param name="environmentName">
     /// The ASP.NET Core environment name (e.g., <c>Development</c>,
-    /// <c>Production</c>, <c>Staging</c>).
+    /// <c>Testing</c>, <c>Production</c>, <c>Staging</c>).
     /// </param>
     /// <param name="connectionString">
     /// The value of <c>APPLICATIONINSIGHTS_CONNECTION_STRING</c>, resolved from
@@ -45,17 +58,19 @@ public static class AzureMonitorGuard
     /// <returns>
     /// <see langword="true"/> when the caller should invoke
     /// <c>UseAzureMonitor()</c>; <see langword="false"/> when it should skip
-    /// (Development env only).
+    /// (Development or Testing env only).
     /// </returns>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when <paramref name="environmentName"/> is not
-    /// <c>Development</c> and <paramref name="connectionString"/> is missing
-    /// or whitespace.
+    /// Thrown when <paramref name="environmentName"/> is neither
+    /// <c>Development</c> nor <c>Testing</c> and
+    /// <paramref name="connectionString"/> is missing or whitespace.
     /// </exception>
     public static bool ShouldWireExporter(string environmentName, string? connectionString)
     {
         var hasConnString = !string.IsNullOrWhiteSpace(connectionString);
-        var isDevelopment = string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase);
+        var isLocalLike =
+            string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(environmentName, "Testing", StringComparison.OrdinalIgnoreCase);
 
         if (hasConnString)
         {
@@ -63,21 +78,25 @@ public static class AzureMonitorGuard
             return true;
         }
 
-        if (isDevelopment)
+        if (isLocalLike)
         {
-            // Development env + missing conn string → skip silently (dev convenience).
+            // Development or Testing env + missing conn string → skip silently.
+            // Dev convenience for local runs; CI safety for WAF-based integration tests.
             return false;
         }
 
-        // Non-Development env + missing conn string → fail fast.
+        // Deployed env (Staging, Production, Demo, etc.) + missing conn string → fail fast.
         throw new InvalidOperationException(
-            "APPLICATIONINSIGHTS_CONNECTION_STRING is required in non-Development environments. " +
+            "APPLICATIONINSIGHTS_CONNECTION_STRING is required in deployed environments " +
+            "(Staging, Production, etc.). " +
             $"ASPNETCORE_ENVIRONMENT={environmentName}. " +
             "Set it via App Service application settings or a Key Vault reference of the form " +
             "'@Microsoft.KeyVault(VaultName=<vault>;SecretName=<secret>)'. " +
             "Without this, the OpenTelemetry → Azure Monitor exporter is not wired, no Redis " +
             "dependency telemetry or Sprk.Bff.Api.* Meters reach App Insights, and the failure " +
             "is invisible until someone queries customMetrics and sees nothing. " +
-            "See spaarke-redis-cache-remediation-r2 FR-06.");
+            "See spaarke-redis-cache-remediation-r2 FR-06. " +
+            "(Note: Development and Testing envs are explicitly allow-listed to support local " +
+            "dev and CI integration-test fixtures.)");
     }
 }
