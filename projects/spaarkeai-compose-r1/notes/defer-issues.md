@@ -20,7 +20,8 @@
 | **T-2** | Path A | W5-026 `LoadDocxAsync` / `SaveDocxAsync` round-trip — full coverage via W5-027 integration tests (not in-task unit tests) | ✅ FORMALIZED | POML 026 `<notes>` block |
 | **T-3** | Path A | W4-033 SemanticSearch SCAFFOLDING smoke test declined per ADR-038 §7 ban list | ✅ DOCUMENTED | POML 033 `<notes>` block |
 | **OI-5** | Spike #3 OI | Should `sprk_lastheartbeatutc` PATCH bump `modifiedon` on `sprk_document`? | 📋 OPEN (operator decision — non-blocking; default Dataverse behavior in place) | Spike #3 §7.2 + this file |
-| **FU-1** | Follow-up | ComposeEditor (W4-045) should pause heartbeat when `checkoutStatus !== 'acquired'` | 📋 OPEN (non-blocking; minor efficiency only — server 404s harmlessly) | this file |
+| **FU-1** | Follow-up | ComposeEditor (W4-045) should pause heartbeat when `checkoutStatus !== 'acquired'` | ✅ **RESOLVED 2026-06-29** in code-review cleanup R3 (PR #515 commit `fcb69ed17`) — heartbeat hoisted to `useComposeHeartbeatGate` hook with `checkoutStatus === 'acquired'` guard | n/a (in-PR fix) |
+| **FU-4** | Follow-up | Remove `virtual` modifiers from `ComposeSessionService` by rewriting `ComposeServiceTests` to use real instance + `ChatSessionManager` test double (R4 Option C trade-off; small testability smell) | 📋 OPEN (non-blocking; documented in `ComposeSessionService.cs` XML doc) | this file + `ComposeSessionService.cs` XML doc |
 | **FU-2** | Follow-up | FR-06 concurrent-Save live test against deployed BFF + live Dataverse Alt Key | 📋 OPEN (belongs to W10 smoke-after-deploy OR separate `tests/integration/Spe.Integration.Tests/` track) | this file + W8-061 POML notes |
 | **FU-3** | Follow-up | Pattern D placeholder swap: `LegalWorkspace/sections/composeEditor.registration.ts` (W1b-040 inline placeholder → `@spaarke/compose-components` real widget) | 📋 OPEN (intentionally deferred; Path A modal launch is R1 mount path) | W4-042 agent report + design notes |
 | **DEF-7SCs** | Deferred SCs | 7 success criteria from spec.md require live Dev BFF verification (SC4/SC5/SC9-live/SC10-live/SC13/SC14/SC15) | 📋 OPEN — operator runs at W10/W11 | `notes/audits/success-criteria-audit.md` + W10 task 080/081 |
@@ -184,19 +185,30 @@ cd src/solutions/SpaarkeAi && npm audit --omit=dev
 
 ---
 
-## FU-1 — ComposeEditor heartbeat-gate when `checkoutStatus !== 'acquired'`
+## FU-1 — ComposeEditor heartbeat-gate when `checkoutStatus !== 'acquired'` (RESOLVED)
 
 **Source**: W7-051 final report (multi-tab UX implementation)
+**Status**: ✅ **RESOLVED 2026-06-29** in code-review cleanup R3 (PR #515 commit `fcb69ed17`)
 
-**Issue**: Client heartbeat (W4-045) fires every 3 min regardless of checkout state. After force-close, a cancelled tab continues heart-beating a lock it no longer holds.
+**Resolution**: Heartbeat hoisted from `ComposeEditor` (W4-045) to a new `useComposeHeartbeatGate` hook at `src/solutions/SpaarkeAi/src/components/compose/hooks/useComposeHeartbeatGate.ts`. The hook guards with `if (checkoutStatus !== 'acquired') return;` BEFORE the visibility-state check, so cancelled/failed/probing/discarding tabs no longer hit the heartbeat endpoint. `ComposeEditor` is now a pure drafting surface with no lock-lifecycle concerns.
 
-**Server-side mitigation in place**: W7-052 `RefreshHeartbeatAsync` has same-user guard — returns 404 (no info leak) for cross-user or no-lock heartbeats. So cancelled-tab heartbeats fail harmlessly.
+**Original issue**: Client heartbeat (W4-045) fired every 3 min regardless of checkout state. After force-close, a cancelled tab continued heart-beating a lock it no longer held.
 
-**Cost-of-doing-nothing**: minor inefficiency only (HTTP round-trip every 3 min from cancelled tabs until tab closes). Server-side correctness preserved by same-user guard.
+**Server-side mitigation was in place**: W7-052 `RefreshHeartbeatAsync` had same-user guard — returned 404 (no info leak) for cross-user or no-lock heartbeats. So cancelled-tab heartbeats failed harmlessly. R3 fix eliminates the wasted HTTP traffic entirely.
 
-**Fix path** (small): thread `checkoutStatus` prop from `ComposeWorkspace` → `ComposeEditor`; gate `setInterval` heartbeat on `checkoutStatus === 'acquired'`. ~15-20 LOC across 2 files.
+---
 
-**Permanent home**: this file (registry)
+## FU-4 — Remove `virtual` modifiers from `ComposeSessionService` (R4 Option C trade-off)
+
+**Source**: Code-review cleanup R4 Option C (2026-06-29)
+
+**Issue**: To collapse the single-impl `IComposeSessionService` interface to concrete per ADR-010 strict, `ComposeSessionService` was changed from `sealed class` → `class` with `virtual` on 3 public methods. This is purely for the Moq test boundary in `ComposeServiceTests` (which uses `Mock<ComposeSessionService>(...)`). The `virtual` modifiers are a small "for testability" smell.
+
+**Cost-of-doing-nothing**: code-quality smell only. `virtual` modifiers signal "subclasses may override" to readers when no subclassing is intended. The single legitimate "override" is the Moq test mock.
+
+**Fix path** (medium effort, ~2-3 hr): rewrite `ComposeServiceTests` to use a real `ComposeSessionService` instance + `Mock<ChatSessionManager>` (or a `ChatSessionManager` test double). This is integration-first per `tests/CLAUDE.md` preference; eliminates the need for `virtual`. Estimated ~30 test method updates.
+
+**Permanent home**: this file (registry) + `ComposeSessionService.cs` XML doc (line-level note inviting the future refactor)
 
 ---
 
