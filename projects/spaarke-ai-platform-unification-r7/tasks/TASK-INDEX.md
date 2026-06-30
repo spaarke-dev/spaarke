@@ -30,9 +30,9 @@
 | Wave 9 | Consumer migration (FR-17, FR-18) | 🟢 COMPLETE (090 ✅ audit/design; 091 ✅ FR-17 SessionSummarizeOrchestrator migrated; 092 ✅ chat-summarize sprk_playbookconsumer row verified; 093 ✅; 094 ✅ /playbooks hard slash + Library modal browse-mode + PlaybookCardGrid consumer chips; 095 ✅ Library modal wired into Daily Briefing widget via DigestHeader overflow; 096 ✅ Library modal wired into LegalWorkspace Get Started 9th "Browse Playbooks" card — FR-18 ≥3 surfaces acceptance MET; see notes/handoffs/fr18-closure.md) | 090 ✅, 091 ✅, 092 ✅, 093 ✅, 094 ✅, 095 ✅, 096 ✅ |
 | Wave 10 | Wrap-up + R4 graduation gate close | 🔄 in-progress (100 ✅ end-to-end verification report 2026-06-29 marked 11/15 PASS at verification-report level, but Wave 10 task 101 UAT discovered orchestrator template-engine gap — Wave 11 added 2026-06-29 to close that gap; 101 + 090-wrap-up NOW BLOCK on Wave 11 task 119 GREEN) | 100 ✅, 101 ⏸️ (blocks on W11-117), 090-project-wrap-up ⏸️ (blocks on W11-119) |
 | Wave 11 | Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive | 🔄 in-progress (110 ✅ + 111 ✅ + 111a ✅ + 112 ✅ + 113 ✅ + 114 ✅ + 115 ✅ 2026-06-29 — Option B Layer 1+2 + 7 helpers + lambda+pipe eliminated + fan-out iteration + ValidateEntityNames smoke-test value REPLACED by source-correct templates; 131/131 Wave 11 + regression tests pass; 0 regressions across 7,532 BFF tests; AiAnalysis wiring deferred via DEF-001; T118 ACHIEVED via POC pivot — DailyBriefingCollector live-render path operator-verified in spaarkedev1; T119 publish gate pending) | 110-119 + 111a ✅ generated; 8/11 executed (T117 substantively SATISFIED by T118 POC) |
-| Wave 12 | MVP Completion — Daily Briefing 6-entity + Wizards + Assistant↔Workspace (audits-first) | 🔄 in-progress (W12.1 audits 120-123 generated 2026-06-30; W12.2-12.5 placeholders pending audit findings) | 120-123 ✅ generated (4 audit POMLs); W12.2+ POMLs post-audit |
+| Wave 12 | MVP Completion — Daily Briefing 6-entity + Wizards + Assistant↔Workspace | 🔄 in-progress (W12.1 audits ✅ ALL 4 COMPLETE 2026-06-30; W12.2/12.3/12.4 POMLs ✅ ALL 18 GENERATED 2026-06-30; ready to execute starting at T130) | 120-123 + 130-136 + 140-145 + 150-154 ✅ generated (22 POMLs); 4/22 executed (audits 120-123) |
 
-**Total: 96 POML files generated across 12 waves. Wave 11 and Wave 12 both in-progress; Wave 12 audits are next executable.**
+**Total: 114 POML files generated across 12 waves. Wave 12.2/12.3/12.4 ready for execution. Audits returned: all RESTORATION dispositions (no remediation needed); membership resolver path chosen (T130 fixes IMembershipResolverService root cause).**
 
 ---
 
@@ -229,41 +229,43 @@
 
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
-| 120 | 🔲 | Audit Assistant↔Workspace state — gap list + UAT failures + scope recommendation | audit, bff-api, code-page, assistant, wave12 | yes | — |
-| 121 | 🔲 | Audit wizard file summary — reproduce + categorize + restoration vs remediation | audit, bff-api, wizard, playbook, wave12 | yes | — |
-| 122 | 🔲 | Audit document create profile — reproduce + categorize + restoration vs remediation | audit, bff-api, wizard, playbook, document, wave12 | yes | — |
-| 123 | 🔲 | Audit three Prefill wizards (Create Matter/Project/Work Assignment) — Action-output-schema contract + UI-binding pattern + disposition | audit, bff-api, code-page, wizard, playbook, prefill, wave12 | yes | — |
+| 120 | ✅ | Audit Assistant↔Workspace — PLUMBING-ONLY (2-4d); naming-split + EntityName + PageType gaps | audit, bff-api, code-page, assistant, wave12 | yes | — |
+| 121 | ✅ | Audit wizard file summary — RESTORE (1-3hr config drift; SIMPLE playbook healthy) | audit, bff-api, wizard, playbook, wave12 | yes | — |
+| 122 | ✅ | Audit document create profile — Dataverse data fix + UI cosmetic (2-4hr) | audit, bff-api, wizard, playbook, document, wave12 | yes | — |
+| 123 | ✅ | Audit three Prefill wizards — RESTORE all 3 (Project FK 1-2hr; Matter smoke; WA inherits) — architecture already shared, NO new abstractions needed | audit, bff-api, code-page, wizard, playbook, prefill, wave12 | yes | — |
 
-### Wave 12.2 — Daily Briefing (PLACEHOLDER — pending W12.1 task 120 audit for membership filter recommendation)
+### Wave 12.2 — Daily Briefing (READY TO EXECUTE — 7 POMLs generated 2026-06-30)
 
-| Anticipated ID | Title | Notes |
-|---|---|---|
-| 130 | Extend DailyBriefingCollector with 6 entity-type queries | Upcoming Tasks, Overdue Tasks, Documents, Matters, Projects, ToDos |
-| 131 | Implement membership filter (resolver fix OR inline FetchXml per W12.1) | Operator-pre-approved fallback fields documented in wave12 plan §2.1 |
-| 132 | TLDR↔ActivityNotes consistency — chain TLDR as input to channel narratives | |
-| 133 | Channel registry expansion to 6 entries + label polish | |
-| 134 | Widget tools — 'Add To Do' checkmark + preserve three-dot menu | |
-| 135 | Verify per-bullet entity links work for all 6 entity types | |
-| 136 | BFF deploy + smoke + operator UAT | |
+| ID | Status | Title | Tags | Parallel-safe | Dependencies |
+|---|---|---|---|---|---|
+| 130 | 🔲 | Diagnose + fix IMembershipResolverService root cause (operator-chosen durable path) | bff-api, code-impl, dataverse, membership, wave12 | yes | — |
+| 131 | 🔲 | Extend DailyBriefingCollector to 6 entity types + use IMembershipResolverService | bff-api, code-impl, daily-briefing, wave12 | no | 130 |
+| 132 | 🔲 | TLDR↔Activity Notes consistency — chain TLDR as input to channel narratives | bff-api, code-impl, ai, narrator, wave12 | yes | — |
+| 133 | 🔲 | Channel registry expansion (BFF response shape + widget CHANNEL_REGISTRY) | bff-api, pcf, widget, wave12 | yes | — |
+| 134 | 🔲 | Widget tools — 'Add To Do' checkmark + preserve three-dot menu | pcf, react, fluent-ui, widget, wave12 | yes | — |
+| 135 | 🔲 | Verify per-bullet entity links work for all 6 entity types | bff-api, narrator, testing, wave12 | no | 131 |
+| 136 | 🔲 | Wave 12.2 deploy + smoke + UAT (combinable with T154 deploy event) | deploy, smoke, uat, gate, wave12 | no | 130-135 |
 
-### Wave 12.3 — Wizards (PLACEHOLDER — pending W12.1 audits 121/122/123)
+### Wave 12.3 — Wizards (READY TO EXECUTE — 6 POMLs generated 2026-06-30; all RESTORATION)
 
-| Anticipated ID | Title | Notes |
-|---|---|---|
-| 140 | Restore OR remediate wizard file summary | Per audit 121 |
-| 141 | Restore OR remediate document create profile | Per audit 122 |
-| 142 | Restore OR remediate Create Matter prefill | Per audit 123; preserve Action output schema as wizard contract |
-| 143 | Restore OR remediate Create Project prefill | Per audit 123 |
-| 144 | Restore OR remediate Create Work Assignment prefill | Per audit 123 |
-| 145 | Wizard end-to-end UAT (all 5) | |
+| ID | Status | Title | Tags | Parallel-safe | Dependencies |
+|---|---|---|---|---|---|
+| 140 | 🔲 | RESTORE wizard file summary (smoke + config drift fix per audit 121) | wizard, deploy, config, smoke, wave12 | yes | — |
+| 141 | 🔲 | RESTORE document create profile (Dataverse + Action JPS + UI cosmetic per audit 122) | wizard, document, dataverse, config, wave12 | yes | — |
+| 142 | 🔲 | RESTORE Create Project — single Dataverse PATCH (sprk_actionid FK re-link per audit 123) | wizard, project, dataverse, data-fix, wave12 | yes | — |
+| 143 | 🔲 | SMOKE Create Matter wizard — verify code path healthy per audit 123 | wizard, matter, smoke, wave12 | yes | — |
+| 144 | 🔲 | VERIFY Create Work Assignment inherits Matter fix per audit 123 | wizard, work-assignment, smoke, wave12 | no | 143 |
+| 145 | 🔲 | UAT — all 5 wizards end-to-end (Wave 12.3 gate) | wizard, uat, gate, wave12 | no | 140-144 |
 
-### Wave 12.4 — Assistant↔Workspace (PLACEHOLDER — pending W12.1 task 120)
+### Wave 12.4 — Assistant↔Workspace (READY TO EXECUTE — 5 POMLs generated 2026-06-30; PLUMBING-ONLY)
 
-| Anticipated ID | Title | Notes |
-|---|---|---|
-| 150 | Assistant↔Workspace plumbing fixes (claims, context, session) | Per audit 120 plumbing findings |
-| 151 | Assistant current-matter awareness | Per audit 120 |
-| 152 | Assistant↔Workspace UAT | |
+| ID | Status | Title | Tags | Parallel-safe | Dependencies |
+|---|---|---|---|---|---|
+| 150 | 🔲 | Gap A — Naming normalization at BFF boundary (most-impactful single fix) | bff-api, code-impl, assistant, normalization, wave12 | yes | — |
+| 151 | 🔲 | Gap B — Server-side EntityName lazy-fetch in PlaybookChatContextProvider | bff-api, code-impl, assistant, wave12 | yes | — |
+| 152 | 🔲 | Gap C — Default PageType in PlaybookChatContextProvider | bff-api, code-impl, assistant, wave12 | yes | — |
+| 153 | 🔲 | Audit 120 Gaps D-H — apply remaining 5 smaller fixes per §5 disposition table | bff-api, code-impl, assistant, wave12 | yes | — |
+| 154 | 🔲 | Assistant↔Workspace UAT (Wave 12.4 gate) | uat, gate, assistant, wave12 | no | 150-153, 136 |
 
 ### Wave 12.5 — Wrap-up (PLACEHOLDER)
 

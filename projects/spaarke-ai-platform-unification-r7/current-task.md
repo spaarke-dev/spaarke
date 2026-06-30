@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-30 (Wave 12 kickoff — audits dispatched)
+> **Last Updated**: 2026-06-30 (Wave 12.1 audits ✅ ALL DONE; Wave 12.2/12.3/12.4 POMLs ✅ ALL GENERATED; PR #520 awaiting CI re-run after CI fix; ready to execute starting at T130)
 
 ---
 
@@ -9,88 +9,91 @@
 
 | Field | Value |
 |---|---|
-| **Task** | Wave 12.1 — 4 parallel audits dispatched (120 Assistant↔Workspace, 121 wizard file summary, 122 doc create profile, 123 three Prefill wizards) |
-| **Task File** | Multiple — `tasks/120-audit-assistant-workspace.poml` through `tasks/123-audit-three-prefill-wizards.poml` |
+| **Task** | Wave 12.2/12.3/12.4 POMLs ready to execute (18 tasks: 130-136, 140-145, 150-154). Coordinated with PR #520 merge for R7→master. |
+| **Task File** | All 18 POMLs at `projects/spaarke-ai-platform-unification-r7/tasks/{130..136,140..145,150..154}-*.poml` |
 | **Phase / Wave** | Wave 12 — MVP Completion (Daily Briefing 6-entity + Wizards + Assistant↔Workspace) |
-| **Sub-wave** | W12.1 — Audits (read-only investigation; Wave 12.2-12.5 POMLs generated post-audit) |
-| **Step** | Audits dispatched as background agents 2026-06-30; awaiting completion + notes docs |
-| **Status** | Wave 12 plan + audit POMLs in place; agents running in parallel |
-| **Next Action** | Wait for audit completion notifications. When all 4 land, aggregate findings + recommend Wave 12.2/12.3/12.4 POML generation per audit dispositions. |
+| **Sub-wave** | W12.1 audits ✅ DONE; W12.2/12.3/12.4 POMLs ✅ GENERATED; awaiting operator go-ahead to start T130 (start of critical path) |
+| **Step** | PR #520 (R7→master) commits pushed; CI fix for APPLICATIONINSIGHTS_CONNECTION_STRING applied; CI re-running |
+| **Status** | Wave 12 PLAN + AUDITS + POMLS complete; PR #520 waiting on CI green |
+| **Next Action** | (1) Wait for PR #520 CI green + merge. (2) Operator triggers Wave 12 execution starting at T130 (or T130 + parallel-safe siblings T132/T133/T134/T140/T141/T142/T143/T150/T151/T152/T153 in one parallel kickoff). |
 
-### Wave 12 plan + scope
+### Wave 12 dependency-driven execution plan (recap)
 
-Full scope + plan: [`notes/wave12-mvp-completion-plan.md`](notes/wave12-mvp-completion-plan.md)
+**Parallel Group A** (Dataverse + config + smoke; no BFF deploy needed):
+- T130 IMembershipResolverService fix (gates T131, T135 in W12.2)
+- T140 Wizard file summary config fix
+- T141 Document Create Profile Dataverse fix
+- T142 Project Wizard FK re-link
+- T143 Matter Wizard smoke (gates T144)
 
-Three deliverable groups for MVP completion:
-1. **Daily Briefing** — extend POC live-render path from 4 sprk_event channels to 6 operator-specified entity types (Upcoming Tasks, Overdue Tasks, Documents, Matters, Projects, ToDos) with TLDR↔Activity-Notes consistency + UI polish
-2. **Wizards** — restore OR remediate 5 broken wizards (file summary, doc create profile, Create Matter, Create Project, Create Work Assignment) per audit findings
-3. **Assistant↔Workspace** — audit-then-fix; scope (plumbing-only vs partial-grounding) determined by audit 120
+**Parallel Group B** (BFF code; gates ONE BFF deploy event):
+- T131 Daily Briefing collector 6-entity extension (after T130)
+- T132 TLDR↔Notes chaining
+- T133 Channel registry expansion
+- T134 Widget tools update
+- T135 Entity-link verification (after T131)
+- T150 Gap A naming normalization
+- T151 Gap B EntityName lazy-fetch
+- T152 Gap C default PageType
+- T153 Gaps D-H fixes
 
-### Wave 12.1 audit dispatch
+**Sequential Gate** (single combined deploy):
+- T136 + T154 combined deploy + Daily Briefing UAT + Assistant↔Workspace UAT
 
-| Task | Title | Effort |
-|---|---|---|
-| 120 | Assistant↔Workspace state | 1-2 days |
-| 121 | Wizard file summary | ~half day |
-| 122 | Document create profile | ~half day |
-| 123 | Three Prefill wizards | ~1 day |
+**Sequential Wrap-up** (T145 wizard UAT + W12.5 close-out + R7 wrap-up).
 
-All 4 read-only, parallel-safe, no `.claude/` writes. Outputs land at `notes/audits/wave12-NNN-*.md`.
+### Recently completed (this session, 2026-06-30)
 
-### Previous Wave 11 / R7 state
+| Step | Outcome |
+|---|---|
+| Wave 12.1 audits (120/121/122/123) | ✅ all 4 returned; aggregate disposition: ALL RESTORATION; NO new abstractions needed; assistant↔workspace PLUMBING-ONLY (in MVP scope, no retrieval blocker) |
+| R7 → master merge prep (PR #520) | ✅ created; CONFLICT in .claude/CHANGELOG.md resolved; 24 master commits integrated via merge commit; pushed |
+| CI failure investigation | ✅ root cause: APPLICATIONINSIGHTS_CONNECTION_STRING required by spaarke-redis-cache-remediation-r2 FR-06 validation; NOT R7 regression |
+| CI fix applied | ✅ commit `fd657e0b2` — fake instrumentation key added to ci-tier1-blocking.yml global env |
+| 18 Wave 12 POMLs generated | ✅ commit `0ad2a5cb5` — pushed |
 
-- W11 POC pivot delivered end-to-end working Daily Briefing live-render at commit `85c762081`
-- 26 real notifications including 17 user-recent-updates verified by operator
-- Architecture comparison doc at `notes/spikes/poc-vs-playbook-engine-architecture.md`
-- W11 T117 substantively SATISFIED by T118 POC; formal close-out part of Wave 12.5 wrap-up
-- W11 T119 (publish gate) remains pending; rolls into Wave 12.5
+### Open items
 
-### Other R7 wrap-up tasks (continue in parallel where time permits)
-
-- W5 T056 (sanity redeploy)
-- W6 T063 + T068 + T069 (3 doc tasks)
-- W7 T070-T075 (6 skill rewrites — sequential main-session-only)
-- W8 T087 + T089 + T089d (UI polish + Code Page deploy)
-- W11 T119 (publish gate)
-
-### Critical Context — deployment coordination concern (operator-raised 2026-06-30)
-
-Another project (TBD identified) needs to deploy BFF + SpaarkeAi code page to spaarkedev1. Currently deployed state:
-- BFF: R7 POC narrator + DailyBriefingCollector + `/api/ai/daily-briefing/render` endpoint (R7 commits `3affa952f`, `85c762081`)
-- SpaarkeAi widget: `USE_LIVE_RENDER=true` flag (R7 commit `85c762081`)
-
-Risk: another deploy reverts these — Daily Briefing widget breaks. Coordination questions pending (which project, branch, scope, timeline). See wave12 plan §9 + main-session response for recommended approach.
+| Item | Status |
+|---|---|
+| PR #520 CI re-run | 🟡 waiting (post CI-fix push) |
+| PR #520 merge to master | 🟡 awaiting CI green |
+| Wave 12 execution (T130 + parallel siblings) | 🔲 ready; awaits operator go-ahead |
+| ISS-NNN to file (redis-cache-r2 validation in Testing env) | 🔲 to file after PR #520 merges (so the ISS reference makes sense) |
+| spaarkeai-compose-r1 rebase coordination | 🔲 after PR #520 merges, notify their owner to rebase + deploy |
 
 ---
 
 ## Skills Loaded This Session
 
-- TodoWrite (tracking Wave 12 scaffolding)
-- Bash (folder restructure)
-- Write / Edit (R7 file updates)
-- Agent (Wave 12.1 audit dispatch — 4 parallel general-purpose agents running task-execute)
+- TodoWrite (Wave 12 scaffolding + agent dispatch + POML generation)
+- Bash (git ops, build verify, push, CI checks, merge conflict resolution)
+- Read / Grep / Glob (audits, file inspection)
+- Edit / Write (R7 file updates, 18 POML creation, CI workflow fix)
+- Agent (4 parallel general-purpose agents for Wave 12.1 audits — all returned successfully)
 
 ## Knowledge Files Loaded
 
 - projects/spaarke-ai-platform-unification-r7/notes/spikes/poc-vs-playbook-engine-architecture.md
-- projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md
-- projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md
-- projects/spaarke-ai-platform-unification-r7/CLAUDE.md
-- src/client/shared/CLAUDE.md
-- Root CLAUDE.md
+- projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (NEW this session)
+- projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-{120,121,122,123}-*.md (4 NEW audit findings docs)
+- projects/spaarke-ai-platform-unification-r7/CLAUDE.md (updated decisions table + hot-path)
+- Root CLAUDE.md (§10 BFF Hygiene, §11 Component Justification, §3 Sub-Agent Write Boundary)
 
 ## Constraints / Patterns Applied
 
-- CLAUDE.md §11 (Component Justification) — operator strict; no new abstractions without 2+ demonstrated consumer need
-- CLAUDE.md §10 (BFF Hygiene) — Wave 12.2-12.4 BFF tasks will run constraints checklist
-- Sub-Agent Write Boundary (§3) — Wave 12 does NOT plan any `.claude/` writes
-- ADR-013 (BFF AI), ADR-029 (Publish Hygiene), ADR-038 (Testing Strategy) — applied per task as relevant
+- CLAUDE.md §11 (Component Justification) — operator strict; T150 has explicit `<justification>` block (only POML adding new surface, a single normalization helper)
+- CLAUDE.md §10 (BFF Hygiene) — every BFF-touching POML in Wave 12 has publish-size + constraints checklist requirements
+- Sub-Agent Write Boundary (§3) — Wave 12 does not plan `.claude/` writes
+- ADR-013 (BFF AI), ADR-029 (Publish Hygiene), ADR-038 (Testing Strategy) — applied per POML
 
 ## Quality Gates
 
-- N/A for audits (STANDARD rigor; read-only; no quality gates required at task end)
-- Wave 12.2-12.4 implementation tasks will be FULL rigor (code-review + adr-check at Step 9.5)
+- N/A for Wave 12.1 audits (STANDARD rigor; read-only)
+- N/A for Wave 12.3 wizard restoration (mostly Dataverse data fixes)
+- Wave 12.2/12.4 implementation POMLs are FULL rigor — code-review + adr-check at Step 9.5 will run for each
+- T136 + T154 deploys require: publish-size ≤60 MB (NFR-01) + 0 new HIGH CVE (NFR-02)
 
 ---
 
-*Wave 12.1 audits running. Aggregate findings + Wave 12.2/12.3/12.4 POML generation after audits complete.*
+*All Wave 12 planning artifacts in place. Ready to execute on operator go-ahead.*
