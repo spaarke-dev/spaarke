@@ -89,6 +89,12 @@ docs/CONFIGURATION_REQUIREMENTS.md
 **/appsettings.*.json
 !**/appsettings.Development.json.template
 !**/appsettings.Production.json.template
+# appsettings.Testing.json is allow-listed because it contains ONLY CI-safe defaults
+# (no secrets, no connection strings) — see src/server/api/Sprk.Bff.Api/appsettings.Testing.json.
+# ASP.NET Core loads it ONLY when ASPNETCORE_ENVIRONMENT=Testing (never Production, never
+# Development), so anything in it cannot reach a deployed environment. PRs touching this
+# file must keep that invariant (no real conn strings, no real Azure AD tenant IDs, etc.).
+!**/appsettings.Testing.json
 
 # Secrets and keys
 *.secret
