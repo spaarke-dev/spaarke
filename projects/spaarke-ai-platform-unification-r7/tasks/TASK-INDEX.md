@@ -238,7 +238,7 @@
 
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
-| 130 | 🔲 | Diagnose + fix IMembershipResolverService root cause (operator-chosen durable path) | bff-api, code-impl, dataverse, membership, wave12 | yes | — |
+| 130 | ✅ | Diagnose + fix IMembershipResolverService root cause (operator-chosen durable path) — root cause: empty default `IncludedIdentityTables`; fix via `MembershipOptionsDefaults` post-configure; 3 regression tests added; commit `451603bac` | bff-api, code-impl, dataverse, membership, wave12 | yes | — |
 | 131 | 🔲 | Extend DailyBriefingCollector to 6 entity types + use IMembershipResolverService | bff-api, code-impl, daily-briefing, wave12 | no | 130 |
 | 132 | 🔲 | TLDR↔Activity Notes consistency — chain TLDR as input to channel narratives | bff-api, code-impl, ai, narrator, wave12 | yes | — |
 | 133 | 🔲 | Channel registry expansion (BFF response shape + widget CHANNEL_REGISTRY) | bff-api, pcf, widget, wave12 | yes | — |

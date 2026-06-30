@@ -367,4 +367,78 @@ This fits comfortably in the wave12-mvp-completion-plan W12.4 envelope of "1-4 w
 
 ---
 
-*End audit 120 — ready for Wave 12.4 task generation per disposition table §5.*
+## 8. Resolution — Wave 12 task 130 (added 2026-06-30)
+
+> **Author**: Wave 12.2 task 130 (task-execute FULL rigor)
+> **Date**: 2026-06-30
+> **Scope of this Resolution subsection**: covers ONLY the `IMembershipResolverService` 0-results-for-all-users bug. The Gap A/B/C plumbing fixes for Assistant↔Workspace remain owned by Wave 12.4 tasks T150/T151/T152/T153 — those are independent of this membership-resolver fix.
+> **Why this Resolution lives in audit 120**: audit 120 §2.1 (line 6 of original audit) flagged `IMembershipResolverService` as broken context and routed it to Wave 12.2 T130; this is the resolution record for that referral.
+
+### Root cause (file:line evidence)
+
+**`src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipOptions.cs:30` (pre-fix)** — `IncludedIdentityTables` defaulted to an empty `List<IdentityTableConfig>`.
+
+**`MembershipFieldDiscoveryService.cs:268-299`** — `BuildDiscoveryResult` classifies every membership-bearing lookup as `IgnoredField` with reason `target-table-not-in-identity-list` because no target matches an identity table (the gate at line 280 `identityTypeByTable.TryGetValue(...)` returns false for every entry).
+
+**`MembershipResolverService.cs:220-244`** — `ResolveAsync` short-circuits when `descriptors.Count == 0` and returns an empty `MembershipResponse` via `BuildEmptyResponse`. No FetchXml query is ever built.
+
+### Why this happened (configuration omission)
+
+The `"Membership"` appsettings section is present in **only one** file: `src/server/api/Sprk.Bff.Api/appsettings.Development.json.template` — a TEMPLATE for the **gitignored** `appsettings.Development.json` that exists only on local developer machines. The deployed-environment configs (`appsettings.template.json`, `appsettings.Production.json.template`, and the Bicep `appSettings` block in `infrastructure/bicep/stacks/model2-full.bicep:187-225`) all OMIT it. Result: every deployed BFF instance ran with empty `IncludedIdentityTables` + empty `GlobalFieldExclusions`.
+
+Verified in spaarkedev1 via `mcp__dataverse`:
+- `sprk_matter` schema has all the expected membership-bearing lookups: `ownerid` (systemuser), `owningteam` (team), `owningbusinessunit` (businessunit), `sprk_assignedattorney1/2` + `sprk_assignedparalegal1/2` + `sprk_assignedtoexternal` + `sprk_assignedtointernal` (all contact), `sprk_assignedlawfirm1/2` (sprk_organization).
+- Real matter rows exist with `sprk_assignedattorney1` populated (e.g., matter `491b1efe-e562-f111-ab0c-000d3a4d8152` "Test New Matter via Workspace", attorney = `8e9918a9-9021-f111-88b5-7c1e520aa4df`).
+- The data is fine; the discovery layer was filtering everything out.
+
+### Fix (smallest change targeting root cause)
+
+Two-file edit, NO interface change, NO new abstraction:
+
+1. **`MembershipOptions.cs`** — added a new class `MembershipOptionsDefaults : IPostConfigureOptions<MembershipOptions>` that seeds the 6 canonical Spaarke identity tables + 4 standard audit-field exclusions ONLY when the bound list is empty. Constants `CanonicalIdentityTables` + `CanonicalAuditFieldExclusions` are public static for test reuse + future operator inspection.
+2. **`MembershipModule.cs`** — registered the post-configure via `services.AddSingleton<IPostConfigureOptions<MembershipOptions>, MembershipOptionsDefaults>()` immediately after the existing `Configure<MembershipOptions>` call.
+
+**Why post-configure (not property-initializer defaults)**: `IConfiguration.Bind` APPENDS to `List<T>` properties — property-initializer defaults would double up entries when operators bind the same names. The post-configure pattern runs AFTER binding and only seeds when the bound list is empty, so operator config replaces cleanly. This invariant is pinned by a dedicated test (`AddMembership_WithOperatorBoundIdentityTables_DoesNotSeedDefaults`).
+
+### Tests added (per ADR-038 KEEP-path conventions)
+
+1. **`DiscoverAsync_WithPostConfiguredDefaultMembershipOptions_DiscoversMatterAssignmentFields`** (in `MembershipFieldDiscoveryServiceTests.cs`) — the regression-protection test. Constructs default `MembershipOptions`, applies `MembershipOptionsDefaults.PostConfigure`, runs discovery against canonical `sprk_matter` lookup roster, asserts all 6 membership-bearing lookups land in `DiscoveredFields`. Pre-fix, all 6 would land in `IgnoredFields` with reason `target-table-not-in-identity-list`.
+2. **`AddMembership_WithEmptyConfig_SeedsCanonicalDefaultsViaPostConfigure`** (in `MembershipOptionsTests.cs`) — DI-level verification: empty `IConfiguration` → 6 identity tables + 4 exclusions present via the full DI pipeline.
+3. **`AddMembership_WithOperatorBoundIdentityTables_DoesNotSeedDefaults`** (in `MembershipOptionsTests.cs`) — pins the gating contract: operator-bound list of 1 stays at 1 (no append). Protects against future regression to property-initializer defaults.
+4. **Updated**: `DefaultValues_RawConstruction_AreEmptyAndScalarsSetToCanonical` (renamed from `DefaultValues_AreConservativeEmptyDefaults`) — documents the property-level-empty + post-configure-seeds split.
+
+Tests follow ADR-038: integration-shape where DI wiring matters; pure unit-test for the `PostConfigure(options)` invariant. NO `Mock<HttpMessageHandler>`, NO DI-registration tests of the form `Assert.NotNull(services.GetRequiredService<X>())`, NO ctor null-check tests.
+
+### Verification
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: 0 errors (19 pre-existing warnings unrelated to T130).
+- `dotnet test --filter ~Membership`: 195/195 pass.
+- Full BFF unit suite: 7,570 pass / 6 pre-existing baseline failures unrelated to T130 (confirmed by stashing the T130 change and re-running — failures reproduce). The 6 baseline failures are in `AuditLogServiceTests`, `ExecutorConfigSchemasEndpointTests`, `SummarizeSessionEndpointContractTests`, `KnowledgeDeploymentConfigTests`, `PlaybookDispatcherPhaseBTests`, `SessionFilesCleanupJobTests` — none touch `Membership/**`.
+- Publish-size impact: negligible (one new class + property setter changes; no new packages).
+- No new DI registrations beyond `IPostConfigureOptions<MembershipOptions>` (zero transient/scoped registrations added).
+- `IMembershipResolverService` interface signature unchanged (binding contract per POML constraint).
+
+### Post-deploy validation (reserved for T136 wave-end gate)
+
+After deploying the fix to spaarkedev1:
+
+1. **Smoke against `GET /api/users/me/memberships/sprk_matter`** for 3 test systemuserids:
+   - **Operator (Ralph Schroeder spaarke.com)** systemuserid `1d02f31c-1872-f011-b4cb-7c1e52671ad0` — expect non-zero matter list (he owns multiple matters per the spaarkedev1 query).
+   - 2 additional test users selected by operator.
+2. **Expected response shape**: `Count > 0`, `ByRole` contains at least one of `owner`, `assignedAttorney`, `assignedParalegal`, `assignedLawFirm`, `owningTeam`, `owningBusinessUnit` per the canonical strategy.
+3. **NEGATIVE test**: query a user known to have no matter assignments → expect `Count: 0` + empty `Ids` (not an error).
+4. **Cross-check by oracle**: the systemuserid's matters reported by the resolver MUST match a hand-rolled FetchXml that ORs `ownerid eq <userId>` with `sprk_assignedattorney1 eq <contactId-for-user>` (where contactId comes from `IIdentityNormalizationService` cross-ref — note that for spaarkedev1 the contact cross-ref may need verification because the audit found only 1 contact has `sprk_systemuser` populated and it points to a different systemuserid than the AAD oid mapping would suggest; if matter `ByRole.assignedAttorney` returns empty when it should not, this points to a secondary cache-refresh / identity-normalization issue surfaced after this fix unblocks the discovery layer).
+
+### Out of scope for T130 (handed off elsewhere)
+
+- **Identity normalization issue** (contact cross-ref via `azureactivedirectoryobjectid` — the audit notes that `contact.azureactivedirectoryobjectid` field appears not to be present in the spaarkedev1 schema per `mcp__dataverse__describe tables/contact`; the canonical path may need to be `contact.sprk_systemuser` for this environment). This is a candidate follow-up if T136 post-deploy validation surfaces it as a remaining blocker.
+- **Gap A/B/C plumbing fixes for Assistant↔Workspace** (separate POMLs T150/T151/T152/T153).
+- **Operator deployment of `Membership__*` App Service settings** — NOT required after this fix because defaults are seeded in code. Operator can still set them to override; the existing R3 runbook (`projects/spaarke-platform-foundations-r3/notes/bff-deploy-runbook.md` lines 109-118) remains valid for the EventPublisher / JunctionUpdater / CacheInvalidator flags (those are independent kill-switches and remain unaffected by this fix).
+
+### Commit
+
+- `451603bac` — `fix(bff/r7): seed canonical MembershipOptions defaults via post-configure (T130 root-cause fix)`
+
+---
+
+*End audit 120 — ready for Wave 12.4 task generation per disposition table §5; Resolution §8 records T130 closure.*
