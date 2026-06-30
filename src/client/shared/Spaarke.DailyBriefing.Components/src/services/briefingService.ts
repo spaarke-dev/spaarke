@@ -386,15 +386,19 @@ export async function fetchBriefingNarration(channels: ChannelFetchResult[]): Pr
 
 /**
  * Fetch the AI Daily Briefing via the live `/render` endpoint. Server-side
- * collector runs Dataverse queries directly (Tasks Due Soon, Tasks Overdue,
- * Recent Matter Activity, My Recent Updates) — bypasses the appNotification
- * table entirely. Returns the SAME NarrateResponse shape as `/narrate` so
- * downstream rendering code is unchanged.
+ * collector runs Dataverse queries directly across 6 entity types (sprk_event,
+ * sprk_document, sprk_matter, sprk_project, sprk_todo) — bypasses the
+ * `appnotification` table entirely. Returns the SAME NarrateResponse shape as
+ * `/narrate` so downstream rendering code is unchanged.
  *
  * No request body needed — the user is identified from their OBO token's
  * AAD oid claim, which the server maps to a Dataverse systemuserid.
+ *
+ * Exported (R7 Wave 12 cutover, 2026-06-30) so `useBriefingRender` can call
+ * `/render` unconditionally on mount, without the appnotification load gate
+ * that `useBriefingNarration` had.
  */
-async function fetchBriefingLive(): Promise<NarrationResult> {
+export async function fetchBriefingLive(): Promise<NarrationResult> {
   try {
     const response = await authenticatedFetch('/api/ai/daily-briefing/render', {
       method: 'POST',
