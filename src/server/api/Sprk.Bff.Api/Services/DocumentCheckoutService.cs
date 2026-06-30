@@ -424,6 +424,102 @@ public class DocumentCheckoutService
     }
 
     /// <summary>
+    /// Refresh the heartbeat timestamp for a document checked out by the calling user
+    /// (Spaarke Compose R1 — Spike #3 §4.2).
+    ///
+    /// <para>
+    /// Used by the Compose editor's 3-min sliding heartbeat (visibility-gated) to keep
+    /// a Dataverse-side lock alive. The companion <c>StaleCheckoutSweeperHostedService</c>
+    /// releases locks whose <c>sprk_lastheartbeatutc</c> is older than the 15-min stale
+    /// threshold (giving a ≤17-min orphan-lock ceiling: 15 + 2-min scan interval).
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Same-user guard</b>: only refreshes if the calling user is the current lock
+    /// holder (`_sprk_checkedoutby_value == caller's systemuserid`). Cross-user heartbeats
+    /// return <c>false</c> with no Dataverse write — this prevents a misbehaving (or
+    /// malicious) client from refreshing someone else's lock indefinitely.
+    /// </para>
+    /// </summary>
+    /// <param name="documentId">The Dataverse <c>sprk_document</c> id.</param>
+    /// <param name="user">The calling user's ClaimsPrincipal.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// <c>true</c> if the heartbeat was applied (caller owns active checkout);
+    /// <c>false</c> if the document doesn't exist, isn't checked out, or is held by
+    /// another user. Callers should treat <c>false</c> as 404-equivalent at the
+    /// endpoint surface.
+    /// </returns>
+    public async Task<bool> RefreshHeartbeatAsync(
+        Guid documentId,
+        ClaimsPrincipal user,
+        CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var azureAdOid = GetUserId(user);
+        var dataverseUserId = await LookupDataverseUserIdAsync(azureAdOid, ct);
+        if (!dataverseUserId.HasValue)
+        {
+            _logger.LogWarning(
+                "Heartbeat refused: Azure AD OID {AzureAdOid} not mapped to a Dataverse user",
+                azureAdOid);
+            return false;
+        }
+
+        var document = await GetDocumentAsync(documentId, ct);
+        if (document == null)
+        {
+            _logger.LogDebug(
+                "Heartbeat refused: document {DocumentId} not found",
+                documentId);
+            return false;
+        }
+
+        if (!document.IsCheckedOut)
+        {
+            _logger.LogDebug(
+                "Heartbeat refused: document {DocumentId} is not checked out",
+                documentId);
+            return false;
+        }
+
+        // Same-user guard — only the lock holder may refresh heartbeat (Spike #3 §4.2).
+        if (document.CheckedOutById != dataverseUserId.Value)
+        {
+            _logger.LogWarning(
+                "Heartbeat refused: document {DocumentId} held by {LockHolderId} but caller is {CallerId}",
+                documentId, document.CheckedOutById, dataverseUserId.Value);
+            return false;
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_lastheartbeatutc"] = DateTime.UtcNow.ToString("o"),
+        };
+
+        var response = await _httpClient.PatchAsJsonAsync(
+            $"{DocumentEntitySet}({documentId})",
+            payload,
+            ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError(
+                "Heartbeat PATCH failed for document {DocumentId}: {StatusCode}. Response: {ErrorBody}",
+                documentId, response.StatusCode, errorBody);
+            return false;
+        }
+
+        _logger.LogDebug(
+            "Heartbeat refreshed for document {DocumentId} held by user {UserId}",
+            documentId, dataverseUserId.Value);
+
+        return true;
+    }
+
+    /// <summary>
     /// Get checkout status for a document.
     /// </summary>
     public async Task<CheckoutStatusInfo?> GetCheckoutStatusAsync(
@@ -454,6 +550,177 @@ public class DocumentCheckoutService
             CheckedOutAt: document.CheckedOutAt,
             IsCurrentUser: currentUserId.HasValue && document.CheckedOutById == currentUserId.Value
         );
+    }
+
+    /// <summary>
+    /// Scan for documents whose checkout heartbeat has gone stale
+    /// (Spaarke Compose R1 — Spike #3 §4.3 stale-lock sweeper helper).
+    ///
+    /// <para>
+    /// Returns candidates where <c>sprk_checkedoutdate</c> is set AND
+    /// <c>sprk_lastheartbeatutc</c> is either NULL or older than <paramref name="cutoffUtc"/>.
+    /// The NULL case catches legacy or pre-heartbeat checkouts that have never received
+    /// a refresh; the &lt;cutoff case catches Compose sessions whose client stopped
+    /// heartbeating (browser closed, tab backgrounded past threshold, network loss).
+    /// </para>
+    ///
+    /// <para>
+    /// Caller is the <c>StaleCheckoutSweeperHostedService</c> running under the BFF's
+    /// managed identity. It iterates the returned ids and calls
+    /// <see cref="ReleaseCheckoutSystemAsync"/> to release each stale lock.
+    /// </para>
+    /// </summary>
+    /// <param name="cutoffUtc">Documents whose last heartbeat is &lt; this value are stale.</param>
+    /// <param name="maxRows">Cap per scan iteration to bound per-scan cost (default 100).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>List of stale candidate ids; empty if none.</returns>
+    public virtual async Task<IReadOnlyList<Guid>> GetStaleCheckedOutDocumentsAsync(
+        DateTime cutoffUtc,
+        int maxRows,
+        CancellationToken ct = default)
+    {
+        if (maxRows <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxRows), "maxRows must be positive");
+        }
+
+        await EnsureAuthenticatedAsync(ct);
+
+        // Compose filter: checked out (date set) AND heartbeat stale or null.
+        // OData allows "lastheartbeatutc eq null or lastheartbeatutc lt {cutoff}".
+        var cutoffIso = cutoffUtc.ToString("o");
+        var url = $"{DocumentEntitySet}?$select=sprk_documentid" +
+                  $"&$filter=sprk_checkedoutdate ne null and " +
+                  $"(sprk_lastheartbeatutc eq null or sprk_lastheartbeatutc lt {cutoffIso})" +
+                  $"&$top={maxRows}";
+
+        try
+        {
+            var response = await _httpClient.GetAsync(url, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogError(
+                    "Stale-checkout probe failed: {StatusCode} {Body}",
+                    response.StatusCode, body);
+                return Array.Empty<Guid>();
+            }
+
+            var data = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+            if (!data.TryGetProperty("value", out var values) || values.ValueKind != JsonValueKind.Array)
+            {
+                return Array.Empty<Guid>();
+            }
+
+            var ids = new List<Guid>(values.GetArrayLength());
+            foreach (var row in values.EnumerateArray())
+            {
+                if (row.TryGetProperty("sprk_documentid", out var idProp) &&
+                    idProp.ValueKind == JsonValueKind.String &&
+                    Guid.TryParse(idProp.GetString(), out var id))
+                {
+                    ids.Add(id);
+                }
+            }
+
+            return ids;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Stale-checkout probe threw: cutoff={CutoffUtc}", cutoffUtc);
+            return Array.Empty<Guid>();
+        }
+    }
+
+    /// <summary>
+    /// Release a checkout under SYSTEM identity (called by the stale-lock sweeper —
+    /// Spaarke Compose R1 Spike #3 §4.3).
+    ///
+    /// <para>
+    /// Differs from <see cref="DiscardAsync"/> in two ways: (1) no <c>ClaimsPrincipal</c>
+    /// required — the sweeper runs under MI and has no user context; (2) no
+    /// authorization check against <c>CheckedOutById</c> — the sweeper is implicitly
+    /// authorized to release any stale lock by virtue of the heartbeat being expired.
+    /// </para>
+    ///
+    /// <para>
+    /// Functionally equivalent to <c>DiscardAsync</c> minus the same-user check:
+    /// clears <c>sprk_checkedoutdate</c>, disassociates <c>sprk_CheckedOutBy</c>,
+    /// clears <c>sprk_lastheartbeatutc</c>, and marks the open <c>sprk_fileversion</c>
+    /// row as Discarded.
+    /// </para>
+    /// </summary>
+    /// <param name="documentId">Document to release.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><c>true</c> if release succeeded; <c>false</c> if doc gone / not checked out.</returns>
+    public virtual async Task<bool> ReleaseCheckoutSystemAsync(
+        Guid documentId,
+        CancellationToken ct = default)
+    {
+        await EnsureAuthenticatedAsync(ct);
+
+        var document = await GetDocumentAsync(documentId, ct);
+        if (document == null)
+        {
+            _logger.LogDebug("Stale-release skip: document {DocumentId} not found", documentId);
+            return false;
+        }
+
+        if (!document.IsCheckedOut)
+        {
+            _logger.LogDebug(
+                "Stale-release skip: document {DocumentId} not checked out (already released)",
+                documentId);
+            return false;
+        }
+
+        // 1. Mark open FileVersion as Discarded (best-effort — Document clear is what matters).
+        if (document.CurrentVersionId.HasValue)
+        {
+            try
+            {
+                await UpdateFileVersionStatusAsync(
+                    document.CurrentVersionId.Value,
+                    StatusDiscarded,
+                    StateInactive,
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Stale-release: failed to mark FileVersion {FileVersionId} discarded; continuing",
+                    document.CurrentVersionId.Value);
+            }
+        }
+
+        // 2. Clear checkout fields + lastheartbeatutc + disassociate lookup.
+        // ClearDocumentCheckoutStatusAsync already handles sprk_checkedoutdate + lookup;
+        // we add lastheartbeatutc=null in a separate PATCH to keep that method untouched.
+        await ClearDocumentCheckoutStatusAsync(documentId, checkInUserId: null, ct);
+
+        // Clear the heartbeat column so the next checkout starts with a fresh slate.
+        var clearHeartbeatPayload = new Dictionary<string, object?>
+        {
+            ["sprk_lastheartbeatutc"] = null,
+        };
+        var resp = await _httpClient.PatchAsJsonAsync(
+            $"{DocumentEntitySet}({documentId})",
+            clearHeartbeatPayload,
+            ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            // Best-effort — the lock is already cleared above; log and continue.
+            var body = await resp.Content.ReadAsStringAsync(ct);
+            _logger.LogWarning(
+                "Stale-release: failed to clear sprk_lastheartbeatutc for {DocumentId}: {StatusCode} {Body}",
+                documentId, resp.StatusCode, body);
+        }
+
+        _logger.LogInformation(
+            "Stale checkout released for document {DocumentId} (previously held by {LockHolderId})",
+            documentId, document.CheckedOutById);
+
+        return true;
     }
 
     /// <summary>

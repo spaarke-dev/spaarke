@@ -60,6 +60,20 @@
     <Compile Include="..\..\integration\contract\**\*.cs" LinkBase="ContractTests" />
   </ItemGroup>
 
+  <!--
+    W8-060 (2026-06-29) — Regression KEEP-path inclusion per ADR-038 §2 path #2 (every
+    load-bearing R1 acceptance scenario = regression test). The compose-summarize round-trip
+    smoke test (`ComposeSummarizeRoundtripSmokeTests.cs`) is the load-bearing FR-11 acceptance
+    signal for `spaarkeai-compose-r1`. This Compile glob keeps regression tests in the
+    canonical `tests/integration/regression/**` path (per tests/CLAUDE.md KEEP categories)
+    while compiling them into THIS assembly for the same fixture-coupling reason cited for
+    the contract glob above (fixtures, WireMock.Net, Cosmos SDK). New regression-category
+    tests for ANY project add files under `tests/integration/regression/{Module}/`.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\integration\regression\**\*.cs" LinkBase="RegressionTests" />
+  </ItemGroup>
+
   <!-- Insights Engine test fixtures (task 030+: Layer 1 / Layer 2 / D-P7 ingest tests).
        Linked from tests/Insights/fixtures/ so the same fixtures can be consumed by
        unit tests here, D-P16 smoke tests, and D-P14 synthesis playbook integration

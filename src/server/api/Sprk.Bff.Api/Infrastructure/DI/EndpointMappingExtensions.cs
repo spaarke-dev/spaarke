@@ -110,6 +110,14 @@ public static class EndpointMappingExtensions
         app.MapUploadEndpoints();
         app.MapOBOEndpoints();
         app.MapDocumentOperationsEndpoints();
+
+        // Compose drafting workspace endpoints (/api/compose/*) — spaarkeai-compose-r1.
+        // Seven endpoints: upload (R2-reserved 501), GET/{id}, save, promote, checkout/checkin
+        // (Phase 5 stubs), and action/{consumerType} (AI dispatch via PublicContracts facade).
+        // UNCONDITIONAL mapping per bff-extensions.md §F.1; matching unconditional DI is in
+        // ComposeModule.AddComposeModule (called from Program.cs). R1 has no feature gates.
+        app.MapComposeEndpoints();
+
         app.MapEmailEndpoints();
         app.MapOfficeEndpoints();
         // smart-todo-decoupling-r3 task 070a — Office-scoped sprk_communication lookups

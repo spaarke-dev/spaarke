@@ -187,6 +187,14 @@ builder.Services.AddSchedulingModule();
 // M365 Copilot Agent module (gateway, auth, cards, conversation, playbook invocation, telemetry)
 builder.Services.AddAgentModule(builder.Configuration);
 
+// Compose drafting workspace module (spaarkeai-compose-r1) — registers the three Compose
+// orchestration services (IComposeService, IComposeDocumentService, IComposeSessionService)
+// UNCONDITIONALLY per bff-extensions.md §F.1. The /api/compose/* endpoint group maps
+// unconditionally in EndpointMappingExtensions.MapDomainEndpoints, so the DI side MUST
+// match to avoid the RB-T028-03/04/05/06 asymmetric-registration anti-pattern. R1 has
+// no feature gates per project CLAUDE.md.
+builder.Services.AddComposeModule();
+
 // CORS (secure, fail-closed configuration)
 builder.Services.AddCorsModule(builder.Configuration, builder.Environment);
 
