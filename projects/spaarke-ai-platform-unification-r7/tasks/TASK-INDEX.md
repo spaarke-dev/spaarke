@@ -240,7 +240,7 @@
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
 | 130 | ✅ | Diagnose + fix IMembershipResolverService root cause (operator-chosen durable path) — root cause: empty default `IncludedIdentityTables`; fix via `MembershipOptionsDefaults` post-configure; 3 regression tests added; commit `451603bac` | bff-api, code-impl, dataverse, membership, wave12 | yes | — |
-| 131 | 🔲 | Extend DailyBriefingCollector to 6 entity types + use IMembershipResolverService | bff-api, code-impl, daily-briefing, wave12 | no | 130 |
+| 131 | ✅ | Extend DailyBriefingCollector to 6 entity types + use IMembershipResolverService — 6 query methods (`QueryUpcomingTasksAsync`/`QueryOverdueTasksAsync`/`QueryEventsAsync`/`QueryDocumentsAsync`/`QueryMattersAsync`/`QueryProjectsAsync`/`QueryTodosAsync`) + `ResolveMembershipsSafelyAsync` resolver consumption; inline `eq-userid` bypass REMOVED; 10 unit tests added (commit `badcc1309`); collector landed via T133's `5480ef830` due to interleaved staging; publish 46 MB (-1.6 MB vs T150) | bff-api, code-impl, daily-briefing, wave12 | no | 130 |
 | 132 | 🔲 | TLDR↔Activity Notes consistency — chain TLDR as input to channel narratives | bff-api, code-impl, ai, narrator, wave12 | yes | — |
 | 133 | ✅ | Channel registry expansion (BFF response shape + widget CHANNEL_REGISTRY) | bff-api, pcf, widget, wave12 | yes | — |
 | 134 | ✅ | Widget tools — 'Add To Do' checkmark + preserve three-dot menu | pcf, react, fluent-ui, widget, wave12 | yes | ee12e172e |

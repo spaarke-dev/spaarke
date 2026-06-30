@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Text;
+using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Memory;
@@ -64,13 +65,32 @@ public class PlaybookChatContextProvider : IChatContextProvider
     // resolved in practice — but the nullable shape keeps the DI graph honest.
     private readonly IPromptBudgetTracker? _promptBudgetTracker;
 
+    // R7 Wave 12 task 151 (audit 120 Gap B) — server-side EntityName lazy-fetch. The
+    // SpaarkeAi client does not populate EntityName in ChatHostContext, which would cause
+    // AppendEntityEnrichment to short-circuit even with a normalized EntityType (T150 fix
+    // for Gap A). When EntityName is missing but EntityType + EntityId are present, we
+    // retrieve the entity's primary-name attribute (sprk_name) from Dataverse via
+    // IGenericEntityService. Nullable to preserve backward-compat with existing test
+    // fixtures that pre-date T151; production DI always supplies it (forwarded from
+    // IDataverseService composite per GraphModule.AddSingleton<IGenericEntityService>).
+    private readonly IGenericEntityService? _entityService;
+
+    // R7 Wave 12 task 151 — per-request memoization for lazy EntityName fetches. The
+    // provider is Scoped (per AiModule line 233), so this Dictionary is naturally
+    // request-scoped: it is created fresh for each request and disposed with the scope.
+    // Keyed on "{logicalName}:{entityIdGuid}" (case-normalized). A null cached value
+    // means "fetch failed previously this request — do not retry".
+    private readonly Dictionary<string, string?> _entityNameCache =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public PlaybookChatContextProvider(
         IScopeResolverService scopeResolver,
         IPlaybookService playbookService,
         IDocumentDataverseService documentService,
         ILogger<PlaybookChatContextProvider> logger,
         IMatterMemoryService matterMemoryService,
-        IPromptBudgetTracker? promptBudgetTracker = null)
+        IPromptBudgetTracker? promptBudgetTracker = null,
+        IGenericEntityService? entityService = null)
     {
         _scopeResolver = scopeResolver;
         _playbookService = playbookService;
@@ -78,6 +98,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
         _logger = logger;
         _matterMemoryService = matterMemoryService;
         _promptBudgetTracker = promptBudgetTracker;
+        _entityService = entityService;
     }
 
     /// <inheritdoc />
@@ -216,7 +237,9 @@ public class PlaybookChatContextProvider : IChatContextProvider
             }
 
             // 6. Append entity metadata enrichment (generic mode)
-            defaultPrompt = AppendEntityEnrichment(defaultPrompt, hostContext);
+            // R7 Wave 12 task 151 (audit 120 Gap B): now async — performs server-side lazy
+            // EntityName fetch when client did not populate it but EntityType + EntityId are set.
+            defaultPrompt = await AppendEntityEnrichmentAsync(defaultPrompt, hostContext, cancellationToken);
 
             // 7. R6 task 068 (D-C-21 / FR-45) — append cross-session matter memory fragment
             // when the host context identifies a matter and the IMatterMemoryService is wired.
@@ -326,7 +349,9 @@ public class PlaybookChatContextProvider : IChatContextProvider
         systemPrompt = EnrichSystemPrompt(systemPrompt, knowledgeScope);
 
         // 5. Append entity metadata enrichment (after all other sections)
-        systemPrompt = AppendEntityEnrichment(systemPrompt, hostContext);
+        // R7 Wave 12 task 151 (audit 120 Gap B): now async — performs server-side lazy
+        // EntityName fetch when client did not populate it but EntityType + EntityId are set.
+        systemPrompt = await AppendEntityEnrichmentAsync(systemPrompt, hostContext, cancellationToken);
 
         // 5b. R6 task 068 (D-C-21 / FR-45) — append cross-session matter memory fragment
         // when the host context identifies a matter and the IMatterMemoryService is wired.
@@ -533,21 +558,46 @@ public class PlaybookChatContextProvider : IChatContextProvider
     /// the host context provides a valid EntityName and PageType.
     /// </summary>
     /// <remarks>
-    /// Guards:
-    /// - EntityName must be non-null/non-empty
-    /// - PageType must be non-null/non-empty and not "unknown"
-    /// - PageType must map to a known human-readable label
-    /// - Enrichment block must be ≤ <see cref="MaxEnrichmentTokens"/> tokens
-    /// - Total system prompt must not exceed <see cref="MaxSystemPromptTokenBudget"/> tokens
+    /// <para>Guards:</para>
+    /// <list type="bullet">
+    ///   <item><description>EntityName must be non-null/non-empty (server-side lazy-fetched
+    ///     from Dataverse when missing but EntityType + EntityId are present — R7 Wave 12
+    ///     task 151 / audit 120 Gap B).</description></item>
+    ///   <item><description>PageType must be non-null/non-empty and not "unknown"</description></item>
+    ///   <item><description>PageType must map to a known human-readable label</description></item>
+    ///   <item><description>Enrichment block must be ≤ <see cref="MaxEnrichmentTokens"/> tokens</description></item>
+    ///   <item><description>Total system prompt must not exceed <see cref="MaxSystemPromptTokenBudget"/> tokens</description></item>
+    /// </list>
+    /// <para>
+    /// R7 Wave 12 task 151 (audit 120 Gap B): when EntityName is missing but EntityType +
+    /// EntityId are present, this method calls <see cref="TryResolveEntityNameAsync"/>
+    /// which performs a per-request-cached <see cref="IGenericEntityService.RetrieveAsync"/>
+    /// to populate the display name before re-applying the enrichment guards. Fetch failures
+    /// degrade gracefully — the original guard behaviour is preserved (no enrichment, no
+    /// chat-request failure).
+    /// </para>
     /// </remarks>
-    private string AppendEntityEnrichment(string systemPrompt, ChatHostContext? hostContext)
+    private async Task<string> AppendEntityEnrichmentAsync(
+        string systemPrompt,
+        ChatHostContext? hostContext,
+        CancellationToken cancellationToken)
     {
         // Guard: no host context at all
         if (hostContext is null)
             return systemPrompt;
 
-        // Guard: EntityName must be present
-        if (string.IsNullOrWhiteSpace(hostContext.EntityName))
+        // Resolve EntityName — populated from client OR server-side lazy-fetch (T151).
+        var entityName = hostContext.EntityName;
+        if (string.IsNullOrWhiteSpace(entityName) &&
+            !string.IsNullOrWhiteSpace(hostContext.EntityType) &&
+            !string.IsNullOrWhiteSpace(hostContext.EntityId))
+        {
+            entityName = await TryResolveEntityNameAsync(
+                hostContext.EntityType, hostContext.EntityId, cancellationToken);
+        }
+
+        // Guard: EntityName must be present (after optional lazy-fetch)
+        if (string.IsNullOrWhiteSpace(entityName))
             return systemPrompt;
 
         // Guard: PageType must be present and not "unknown"
@@ -566,7 +616,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
 
         // Build the enrichment block
         var enrichmentBlock =
-            $"Context: You are assisting with {hostContext.EntityType} record '{hostContext.EntityName}'. " +
+            $"Context: You are assisting with {hostContext.EntityType} record '{entityName}'. " +
             $"The user is viewing the {humanReadablePageType}.";
 
         // Guard: enrichment block itself must be ≤ MaxEnrichmentTokens
@@ -612,6 +662,125 @@ public class PlaybookChatContextProvider : IChatContextProvider
         }
 
         return systemPrompt + "\n\n" + enrichmentBlock;
+    }
+
+    /// <summary>
+    /// R7 Wave 12 task 151 (audit 120 Gap B) — server-side lazy-fetch of the entity's
+    /// display name when the client did not populate <see cref="ChatHostContext.EntityName"/>.
+    /// Result is memoized per-request to avoid duplicate Dataverse round-trips on the same
+    /// entity within the same chat session-message turn (which composes the prompt twice
+    /// in some code paths — generic + playbook).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Soft-fail posture: any failure path (no <see cref="IGenericEntityService"/> wired,
+    /// invalid GUID, unknown entity type, Dataverse outage, missing <c>sprk_name</c> attribute)
+    /// returns null, which causes <see cref="AppendEntityEnrichmentAsync"/> to skip enrichment
+    /// — preserving the pre-T151 guard behaviour. Chat requests are NEVER failed by this method.
+    /// </para>
+    /// <para>
+    /// Cache scope is per-request: <see cref="_entityNameCache"/> is an instance field of the
+    /// Scoped <see cref="PlaybookChatContextProvider"/>, so it is created fresh per request and
+    /// disposed with the DI scope. A null cached value means "fetch failed previously this
+    /// request; do not retry" — avoids retry storms on persistent Dataverse outages.
+    /// </para>
+    /// </remarks>
+    /// <param name="entityType">Normalized entity type from <see cref="ChatHostContext"/>
+    /// (post-T150 boundary normalization, e.g. <c>"matter"</c>) or a raw Dataverse logical
+    /// name (e.g. <c>"sprk_matter"</c>). Both forms map to the same logical name.</param>
+    /// <param name="entityId">String GUID of the entity record.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The display name, or null when unfetchable / unavailable.</returns>
+    private async Task<string?> TryResolveEntityNameAsync(
+        string entityType,
+        string entityId,
+        CancellationToken ct)
+    {
+        if (_entityService is null)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(entityType) || string.IsNullOrWhiteSpace(entityId))
+        {
+            return null;
+        }
+
+        if (!Guid.TryParse(entityId, out var entityGuid))
+        {
+            _logger.LogDebug(
+                "T151 EntityName lazy-fetch: EntityId '{EntityId}' is not a valid GUID; skipping",
+                entityId);
+            return null;
+        }
+
+        var logicalName = ToDataverseLogicalName(entityType);
+        var cacheKey = $"{logicalName}:{entityGuid:N}";
+
+        // Per-request memoization. A cached null means "previous fetch failed; do not retry".
+        if (_entityNameCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        try
+        {
+            var entity = await _entityService.RetrieveAsync(
+                logicalName,
+                entityGuid,
+                new[] { "sprk_name" },
+                ct);
+
+            var name = entity?.GetAttributeValue<string>("sprk_name");
+            _entityNameCache[cacheKey] = name; // also caches null when name missing
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                _logger.LogDebug(
+                    "T151 EntityName lazy-fetch: '{LogicalName}' {EntityId} has no sprk_name; skipping enrichment",
+                    logicalName, entityGuid);
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "T151 EntityName lazy-fetch: resolved '{LogicalName}' {EntityId} → '{Name}'",
+                    logicalName, entityGuid, name);
+            }
+
+            return name;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Cancellation is a normal control-flow signal; surface to caller.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Soft failure — log + cache null to avoid retry storm + return null so caller
+            // skips enrichment per original guard behaviour. Chat request continues normally.
+            _entityNameCache[cacheKey] = null;
+            _logger.LogWarning(ex,
+                "T151 EntityName lazy-fetch failed for '{LogicalName}' {EntityId}; continuing without entity enrichment",
+                logicalName, entityGuid);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Maps either a T150-normalized canonical entity type (e.g. <c>"matter"</c>) or a raw
+    /// Dataverse logical name (e.g. <c>"sprk_matter"</c>) to the raw logical name needed
+    /// by <see cref="IGenericEntityService.RetrieveAsync"/>. Pass-through for unknown
+    /// types so future entity additions don't require a code change here.
+    /// </summary>
+    private static string ToDataverseLogicalName(string entityType)
+    {
+        return entityType.ToLowerInvariant() switch
+        {
+            "matter" => "sprk_matter",
+            "project" => "sprk_project",
+            "invoice" => "sprk_invoice",
+            _ => entityType
+        };
     }
 
     /// <summary>
