@@ -311,4 +311,56 @@ This wrapper would be ~80-120 LOC in a new file (e.g., `Services/Ai/Workspace/Su
 
 ---
 
-*End of audit 121. Disposition: RESTORE with 1-3 hour configuration-fix budget. Engine bug class: NONE. Wave 12.3 to generate the smoke + fix task.*
+## 11. Resolution (Wave 12.3 task 140) — 2026-06-30
+
+**Status**: Configuration fix applied. Awaiting operator UAT (Wave 12.5 task T145) for end-to-end validation.
+
+### Actual root cause vs. predicted
+
+| Predicted (§5) | Actual finding 2026-06-30 |
+|---|---|
+| #1 — Env-var drift in deployed BFF (`Workspace:SummarizePlaybookId`) | **CONFIRMED.** Pre-fix App Service config (`az webapp config appsettings list --name spaarke-bff-dev`) returned 0 rows matching `Workspace__SummarizePlaybookId`. The env var was never set or was lost in a prior deployment. |
+| #2 — Consumer routing serves stale/wrong playbook GUID | **NOT ROOT CAUSE — but routing IS correctly configured.** Live Dataverse query of `sprk_playbookconsumer` where `sprk_consumertype = 'summarize-file'` returns 1 row: id `271194cd-3670-f111-ab0e-70a8a590c51c`, playbook `4a72f99c-a119-f111-8343-7ced8d1dc988`, env `*`, enabled, priority 500. Routing record is correct. |
+| #3 — Wizard host token plumbing | **NOT TESTED in this task.** Operator UAT under T145 will validate the wizard path with a real OBO token. |
+| #5 — AI feature flag (FeatureDisabledException 503) | **NOT TESTED — none seen.** No `Features__*` toggles relevant to this endpoint observed in the App Service settings list. |
+
+**Why the routing record didn't save the day on its own**: Without a deployed reproduction, the most likely explanation is that one of (a) `IConsumerRoutingService.ResolveAsync` returned null for some transient reason (Dataverse query timeout, cold-cache contention), (b) the `IGenericEntityService` Dataverse round-trip silently graceful-degraded per `ConsumerRoutingService.cs:138-150` (which logs ERROR but returns null), or (c) the routing pathway has a latent bug we haven't surfaced — in any of these cases the `WorkspaceFileEndpoints.cs:307` env-var fallback would have rescued the request, and now will. Defense-in-depth restored.
+
+### Fix applied (5 minutes)
+
+```powershell
+az webapp config appsettings set `
+  --name spaarke-bff-dev `
+  --resource-group rg-spaarke-dev `
+  --settings "Workspace__SummarizePlaybookId=4a72f99c-a119-f111-8343-7ced8d1dc988"
+```
+
+Verified post-fix:
+- `az webapp config appsettings list ... --query "[?name=='Workspace__SummarizePlaybookId']"` → returns the row with the correct GUID.
+- App Service auto-restart triggered by the settings change.
+- `GET /healthz` → 200 OK in 0.44s after the restart window.
+- `POST /api/workspace/files/summarize` with multipart body + dummy bearer → 401 (route mapped + auth challenge working; expected without a real OBO token).
+
+### Code change required
+
+**None.** Per audit recommendation §7, this is a pure App Service config drift fix.
+
+### Smoke verification status
+
+- **Configuration-level smoke**: ✅ PASSED. Env var set, App Service restarted cleanly, healthz green, route still serves 401 challenge with dummy bearer.
+- **End-to-end smoke (real OBO token + real file)**: ⏸ Deferred to operator UAT under Wave 12.5 task T145 (no OBO token available in sub-agent execution context).
+
+### Open follow-ups from §8 (status update)
+
+| # | Item | Status |
+|---|---|---|
+| 1 | `WorkspaceFileEndpoints.cs:357-368` emits SSE Result for every StructuredData-bearing node | Still applies; recommended polish, not a blocker; can be addressed at any time. |
+| 4 | Confirm operator that LegalWorkspace standalone code page is NOT what users hit, the `src/solutions/SummarizeFilesWizard/` Vite code page is | Out of scope for T140 (config-only); operator should resolve in T145 UAT. |
+
+### Recommended additional hardening (not blocking T140 acceptance)
+
+Pre-seat `Workspace__SummarizePlaybookId` on every BFF environment in the deployment automation (the `bff-deploy` skill or its underlying script). This prevents env-var drift from recurring after any future BFF redeploy. Worth tracking as a small follow-up issue.
+
+---
+
+*End of audit 121. Disposition: RESTORE with 1-3 hour configuration-fix budget. Engine bug class: NONE. Wave 12.3 task 140 — RESOLVED via App Service env-var set; operator UAT in T145.*

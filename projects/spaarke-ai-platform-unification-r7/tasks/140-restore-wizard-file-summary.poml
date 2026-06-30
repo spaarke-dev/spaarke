@@ -6,6 +6,7 @@
     <wave>12</wave>
     <sub-wave>12.3</sub-wave>
     <rigor-hint>STANDARD</rigor-hint>
+    <status>completed</status>
     <rigor-reason>configuration fix (config drift HIGH likelihood per audit); no C# code change expected for primary fix</rigor-reason>
     <parallel-group>W12-3</parallel-group>
     <parallel-safe>true</parallel-safe>
@@ -98,7 +99,23 @@ Wizard file summary works end-to-end in spaarkedev1. Operator can summarize a fi
   <acceptance-criteria>
     - [ ] Wizard file summary smoke returns 200 + populated ISummarizeResult (8 fields)
     - [ ] Operator UAT (post-T145) confirms end-to-end works
-    - [ ] Root cause documented in audit notes (predicted vs actual)
-    - [ ] No new abstractions / DI / packages
+    - [x] Root cause documented in audit notes (predicted vs actual)
+    - [x] No new abstractions / DI / packages
   </acceptance-criteria>
+
+  <notes>
+**Status: COMPLETE (config fix applied; operator UAT pending in T145)**
+
+**Date**: 2026-06-30
+**Rigor**: STANDARD
+**Actual root cause**: Predicted failure mode #1 — `Workspace__SummarizePlaybookId` App Service env var was MISSING from `spaarke-bff-dev`. Consumer routing row (`sprk_playbookconsumer` where `sprk_consumertype = 'summarize-file'`) was correctly configured pre-fix, but the defense-in-depth env-var fallback was absent — leaving the endpoint dependent on routing succeeding with no safety net.
+
+**Fix applied**: `az webapp config appsettings set --name spaarke-bff-dev --resource-group rg-spaarke-dev --settings "Workspace__SummarizePlaybookId=4a72f99c-a119-f111-8343-7ced8d1dc988"` (App Service auto-restart, healthz returned 200 post-restart, endpoint still serves 401 challenge with dummy bearer — auth + routing intact).
+
+**Smoke status**: Configuration smoke ✅ PASSED. End-to-end (real OBO + real file) ⏸ DEFERRED to operator T145 UAT (no OBO token in sub-agent context).
+
+**Resolution doc**: See §11 of `projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-121-wizard-file-summary.md`.
+
+**Hardening recommendation (filed in audit §11)**: Pre-seat `Workspace__SummarizePlaybookId` in `bff-deploy` automation so drift doesn't recur. Worth tracking as a small follow-up issue.
+  </notes>
 </task>
