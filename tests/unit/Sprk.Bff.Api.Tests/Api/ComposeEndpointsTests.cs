@@ -103,7 +103,7 @@ public sealed class ComposeEndpointsTests
 
     [Theory]
     [InlineData("POST", "/api/compose/upload", "ComposeUpload")]
-    [InlineData("GET",  "/api/compose/documents/{documentSpeId}", "ComposeLoadDocument")]
+    [InlineData("GET", "/api/compose/documents/{documentSpeId}", "ComposeLoadDocument")]
     [InlineData("POST", "/api/compose/documents/{documentSpeId}/save", "ComposeSaveDocument")]
     [InlineData("POST", "/api/compose/documents/{documentSpeId}/promote", "ComposePromoteDocument")]
     [InlineData("POST", "/api/compose/documents/{documentId:guid}/checkout", "ComposeCheckoutDocument")]

@@ -115,7 +115,7 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
 
     [Theory]
     [InlineData("POST", "/api/compose/upload")]
-    [InlineData("GET",  "/api/compose/documents/spe-item-abc")]
+    [InlineData("GET", "/api/compose/documents/spe-item-abc")]
     [InlineData("POST", "/api/compose/documents/spe-item-abc/save")]
     [InlineData("POST", "/api/compose/documents/spe-item-abc/promote")]
     [InlineData("POST", "/api/compose/documents/00000000-0000-0000-0000-000000000001/checkout")]
