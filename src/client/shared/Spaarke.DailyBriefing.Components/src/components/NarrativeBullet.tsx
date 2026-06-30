@@ -1,23 +1,39 @@
 /**
- * NarrativeBullet -- renders a single AI-narrated bullet with a three-dot
- * overflow action menu.
+ * NarrativeBullet -- renders a single AI-narrated bullet with a primary
+ * `Add To Do` checkmark icon button AND a preserved three-dot overflow
+ * action menu.
  *
  * Each bullet shows the narrative text, a clickable regarding-name link that
- * opens the entity in a Dataverse dialog, and a Fluent v9 three-dot overflow
- * `Menu` (FR-18) replacing the prior inline 5-icon action row.
+ * opens the entity in a Dataverse dialog, a PRIMARY visible Fluent v9
+ * `Checkmark` icon button ('Add To Do') and a Fluent v9 three-dot overflow
+ * `Menu` containing the remaining secondary actions.
  *
- * Overflow menu items (canonical order per spec FR-18 / AC-18a):
+ * Per Wave 12 task 134 (operator MVP spec, wave12 plan §2.1):
+ *   "for the tools only need the 'Add To Do' (so just the checkmark — but in
+ *    future we will add other tools so don't remove the three dot tool menu)"
+ *
+ * The three-dot overflow menu component is PRESERVED in the component tree
+ * for future tool additions (operator emphasis on extensibility). Today it
+ * contains the 5 remaining secondary actions:
+ *
+ * Visible primary tool (R7 W12 task 134):
+ *   • Add To Do (Fluent v9 Checkmark icon) → onAddToTodo(itemIds)  (ADR-024)
+ *
+ * Overflow menu items (canonical order, post-task-134):
  *   1. Mark as read                  → onCheck(primaryItemId)        (R3 FR-4)
  *   2. Remove from briefing          → onRemove(primaryItemId)       (R3 FR-5)
  *   3. Keep on briefing for 7 more days → onKeep(primaryItemId, ttl) (R3 FR-6)
- *   4. Add to To Do                  → onAddToTodo(itemIds)          (ADR-024)
- *   5. Dismiss                       → onDismiss(itemIds)            (FR-14a)
- *   6. Open record                   → onOpenRecord(type, id)        (FR-18 new)
+ *   4. Dismiss                       → onDismiss(itemIds)            (FR-14a)
+ *   5. Open record                   → onOpenRecord(type, id)        (FR-18)
  *
- * The inline 5-icon row is REMOVED per FR-18 ("MUST NOT preserve inline 5-icon
+ * (Pre-task-134 the overflow menu included "Add to To Do" as item 4; task 134
+ * promotes it to a visible primary tool while preserving the menu component.)
+ *
+ * The inline 5-icon row is REMOVED per R4 FR-18 ("MUST NOT preserve inline 5-icon
  * row"). The R3 actions (Check, Remove, Keep) are PRESERVED — they migrate
  * into the overflow menu unchanged in behavior. The R2 ADR-024 `Add to To Do`
- * + Dismiss callbacks are PRESERVED via the same Menu surface.
+ * + Dismiss callbacks are PRESERVED — Add To Do becomes primary visible tool,
+ * Dismiss remains in the menu.
  *
  * Aggregation UX (FR-11): when `itemIds.length > 1` and the optional `items`
  * prop is supplied, an indented per-item sub-list is rendered beneath the
@@ -50,6 +66,8 @@ import {
   makeStyles,
   tokens,
   Text,
+  Button,
+  Tooltip,
   Menu,
   MenuTrigger,
   MenuButton,
@@ -62,10 +80,8 @@ import {
   CheckmarkRegular,
   DismissRegular,
   CalendarAddRegular,
-  AddRegular,
   OpenRegular,
 } from '@fluentui/react-icons';
-import { MicrosoftToDoIcon } from '@spaarke/ui-components';
 import type { NotificationItem } from '../types/notifications';
 import { formatDueDate } from '../utils/formatDueDate';
 import { SubRow } from './SubRow';
@@ -120,8 +136,15 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
   },
-  todoMenuIcon: {
-    color: tokens.colorNeutralForeground1,
+  // Task 134: primary visible 'Add To Do' button styling.
+  // Default checkmark uses brand foreground (semantic token; dark-mode safe).
+  // Created state uses the same brand color so the "added" affordance reads
+  // immediately. ADR-021 compliance: NO hardcoded colors anywhere.
+  addTodoIcon: {
+    color: tokens.colorBrandForeground1,
+  },
+  addTodoIconDisabled: {
+    color: tokens.colorNeutralForegroundDisabled,
   },
   // FR-11: per-item sub-list (rendered only when itemIds.length > 1).
   subList: {
@@ -400,22 +423,61 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
       </div>
       <div className={styles.actions}>
         {/*
-          FR-18 / AC-18a — Three-dot overflow menu replacing the prior inline
-          5-icon action row. Fluent v9 Menu primitive handles keyboard nav
-          (Tab/Enter to open, arrows to move, Enter to select, Esc to close)
-          and ARIA roles out-of-box. MenuButton meets WCAG ≥44×44px touch
-          target at the Fluent v9 default size.
+          R7 Wave 12 task 134 — PRIMARY visible 'Add To Do' tool.
 
-          The 6 items render in canonical order per FR-18:
-            1. Mark as read                 (R3 onCheck)
-            2. Remove from briefing         (R3 onRemove)
+          Operator MVP requirement (wave12 plan §2.1):
+            "for the tools only need the 'Add To Do' (so just the checkmark —
+             but in future we will add other tools so don't remove the three
+             dot tool menu)"
+
+          Implementation:
+            - Fluent v9 IconButton with CheckmarkRegular icon (Fluent UI v9 per
+              ADR-006; semantic-token color per ADR-021 — no hardcoded colors).
+            - aria-label "Add To Do" (operator wording). DISTINCT from the
+              SubRowTodo aria-label "Add to To Do" so per-bullet vs per-sub-row
+              targeting is unambiguous for tests and screen readers.
+            - Wraps in Fluent v9 Tooltip surfacing live state (default / added
+              / pending / error) — matches the SubRowTodo tooltip pattern.
+            - Disabled when isTodoCreated or isTodoPending (prevents duplicates).
+            - Delegates to the SAME `handleMenuAddToTodo` handler used by the
+              prior menu item → onAddToTodo(itemIds) → parent's
+              useInlineTodoCreate (ADR-024 wiring unchanged).
+        */}
+        <Tooltip content={addToDoLabel} relationship="label">
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={
+              <CheckmarkRegular
+                className={
+                  isTodoCreated || isTodoPending ? styles.addTodoIconDisabled : styles.addTodoIcon
+                }
+              />
+            }
+            aria-label="Add To Do"
+            onClick={handleMenuAddToTodo}
+            disabled={isTodoCreated || isTodoPending}
+          />
+        </Tooltip>
+        {/*
+          R4 FR-18 / R7 Wave 12 task 134 — Three-dot overflow menu PRESERVED
+          for future tool additions per operator emphasis. Today it contains
+          the 5 secondary actions (Add To Do promoted to primary above).
+
+          Fluent v9 Menu primitive handles keyboard nav (Tab/Enter to open,
+          arrows to move, Enter to select, Esc to close) and ARIA roles
+          out-of-box. MenuButton meets WCAG ≥44×44px touch target at the
+          Fluent v9 default size.
+
+          Canonical order (post-task-134):
+            1. Mark as read                     (R3 onCheck)
+            2. Remove from briefing             (R3 onRemove)
             3. Keep on briefing for 7 more days (R3 onKeep)
-            4. Add to To Do                 (ADR-024 onAddToTodo)
-            5. Dismiss                      (FR-14a onDismiss)
-            6. Open record                  (FR-18 onOpenRecord)
+            4. Dismiss                          (FR-14a onDismiss)
+            5. Open record                      (FR-18 onOpenRecord)
 
           Items 1/2/3 hide when their callback is undefined (defensive default,
-          back-compat). Item 6 hides when primaryEntityType/Id are missing.
+          back-compat). Item 5 hides when primaryEntityType/Id are missing.
         */}
         <Menu>
           <MenuTrigger disableButtonEnhancement>
@@ -438,19 +500,6 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
                   Keep on briefing for 7 more days
                 </MenuItem>
               )}
-              <MenuItem
-                icon={
-                  isTodoCreated || isTodoPending ? (
-                    <MicrosoftToDoIcon size={16} active={isTodoCreated} className={styles.todoMenuIcon} />
-                  ) : (
-                    <AddRegular />
-                  )
-                }
-                onClick={handleMenuAddToTodo}
-                disabled={isTodoCreated || isTodoPending}
-              >
-                {addToDoLabel}
-              </MenuItem>
               <MenuItem icon={<DismissRegular />} onClick={handleMenuDismiss}>
                 Dismiss
               </MenuItem>
