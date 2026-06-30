@@ -67,17 +67,32 @@
 
 **To resume after /compact**:
 The operator wants to DISCUSS the architecture comparison doc, not execute more code. Read these in order:
-1. `projects/spaarke-ai-platform-unification-r7/notes/spikes/poc-vs-playbook-engine-architecture.md` — the comprehensive comparison
+1. `projects/spaarke-ai-platform-unification-r7/notes/spikes/poc-vs-playbook-engine-architecture.md` — **THE main doc** — comprehensive comparison + **§14 R7 FULL REMAINING SCOPE** (wave-by-wave status, critical path, deferrals, 10 explicit topics for post-/compact discussion)
 2. `projects/spaarke-ai-platform-unification-r7/notes/spikes/narrator-vs-playbook-comparison.md` — earlier T116 empirical comparison
 3. `projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-t116-narrate-systematic-assessment.md` — root-cause analysis of why /narrate was broken
+4. `projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md` — for the formal wave/task ledger
 
-Then await operator's direction. Topics likely to surface:
-- Whether to adopt POC pattern as the standard for all narrative AI functions
-- Phasing for extending collector to other entity types (Documents, ToDos, Matters)
-- Whether to deprecate /narrate eventually
-- Strategy for chat-summarize + Insights Engine (probably stay on playbook engine — different shape)
-- Treatment of the broken notification playbooks (fix vs delete vs ignore)
-- Whether to invest in codegen (playbook canvas → C# narrator) at some future point
+**The architecture doc §14 enumerates 10 explicit topics** for the post-/compact conversation, including:
+- Architecture adoption decision (is POC pattern the standard for narrative endpoints?)
+- R7 closure scope (extend POC to other entity types in-scope, or defer?)
+- Skill rewrites (W7) alignment with architectural direction
+- Disposition of broken notification playbooks (fix / delete / ignore)
+- DEF-001 timing (defer to R8 or pull into R7?)
+- W11 T118 sub-items needing operator clarification (events, links/tools, two unidentified items)
+- Documentation updates required (existing BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md may need revision)
+- R7 publish gate (T119) cumulative impact
+- R7 wrap-up close-out
+
+**Critical reminder: R7 is much more than Daily Briefing.** Open work spans Waves 5-11:
+- W5 T056 (sanity redeploy)
+- W6 T063 + T068 + T069 (3 doc tasks)
+- W7 T070-T075 (6 skill rewrites — ALL pending, sequential main-session-only)
+- W8 T087 + T089 + T089d (UI polish + Code Page deploy)
+- W11 T118 + T119 (operator-flagged items + publish gate)
+- W10 T101 + 090-wrap-up (close-out)
+- DEF-001 (deferred to R8 unless decision changes)
+
+**Est. ~3-4 working days to close R7 if executed efficiently.**
 
 ### Wave 11 status update
 

@@ -552,4 +552,136 @@ Not decided by this spike — explicit calls for follow-up:
 
 ---
 
-*End of architecture comparison.*
+## 14. R7 PROJECT — FULL REMAINING SCOPE (not just Daily Briefing)
+
+The narrator POC addresses ONE consumer (daily briefing). R7's spec covers a much broader scope, and several waves have open work. Capturing here so the post-/compact discussion can reason about the whole project.
+
+### 14.1 R7 wave-by-wave status
+
+| Wave | Goal | Status | What's left |
+|---|---|---|---|
+| **W1** | AiCompletionNodeExecutor build (FR-12 → FR-15) | ✅ COMPLETE | — |
+| **W2** | Dispatch refactor + enum rename `ActionType` → `ExecutorType` (FR-07 → FR-10) | ✅ COMPLETE | — |
+| **W3** | Typed config schemas per executor (FR-16) | ✅ COMPLETE | — |
+| **W4** | Schema cleanup + `ExecuteAnalysisAsync` deletion + legacy column drops (FR-03/04/11) | ✅ COMPLETE | — |
+| **W5** | Existing-playbook backfill — populate `sprk_executortype` on 94 nodes; update Deploy-Playbook.ps1 (FR-19/20) | 🔄 5/7 done | **T056** sanity redeploy of 3 representative playbooks (Daily Briefing, Insights, chat) |
+| **W6** | Documentation deletion + updates (FR-28 → FR-31) | 🔄 7/10 done | **T063** doc update (blocks on W5 T056); **T068** root CLAUDE.md update (main-session-only); **T069** post-audit grep for "deprecated"/"superseded" instances |
+| **W7** | Skill rewrites for jps-* skills (FR-32/33) | ⏸️ 0/6 done — **all blocked on W2**; W2 is complete, so status is stale; can run NOW | All 6 (T070-T075): `jps-action-create`, `jps-playbook-design`, `jps-playbook-audit`, `jps-validate`, `jps-scope-refresh`, validation-on-real-playbooks. **MUST run sequentially, main-session-only** per Sub-Agent Write Boundary |
+| **W8** | Playbook Builder UI — 33-executor selector + typed config forms + Action tab (FR-21 → FR-27) | 🔄 10/14 done | **T087** Prompt tab + per-node override wiring (UAT-class); **T089** unknown-executor warning state; **T089d** deploy PlaybookBuilder Code Page to spaarkedev1 |
+| **W9** | Consumer migration — chat-summarize to consumer routing + Library modal into 3 surfaces (FR-17/18) | ✅ COMPLETE | — |
+| **W10** | Wrap-up + R4 graduation gate close | 🔄 1/3 done | **T101** UAT — substantively SATISFIED by T117 (operator confirmed widget renders with real data); formal close-out + lessons-learned still needed; **090-project-wrap-up** (sets project Status=Complete; depends on W11-T119) |
+| **W11** | Playbook orchestrator runtime variable resolution + R7 UAT drive (ADDED 2026-06-29) | 🔄 7/11 done | **T118** operator-flagged UAT items (events, links/tools, two unidentified items — most still need operator clarification); **T119** BFF publish + size check + CVE scan (NFR-01/02 wave-end gate) |
+
+### 14.2 Critical-path remaining work to close R7
+
+```
+W5 T056 (sanity redeploy)
+   ↓
+W6 T063 (doc, blocked on W5)
+   │
+   ↓ (parallel with W7 + W8 below)
+   │
+W7 T070-T075 (6 skill rewrites, SEQUENTIAL main-session-only)
+   │
+   ↓ (parallel)
+   │
+W8 T087 + T089 + T089d (UI polish + Code Page deploy)
+   │
+   ↓ (parallel)
+   │
+W11 T118 (operator-flagged sub-items — needs operator input first)
+   ↓
+W11 T119 (BFF publish + CVE gate — wave-close)
+   ↓
+W10 T101 (formal close-out of R4 graduation gate)
+   ↓
+W10 090-project-wrap-up (README → Complete; lessons-learned; archive)
+```
+
+**Estimated remaining effort to close R7**: ~3-4 working days IF executed efficiently. Includes:
+- 0.5 days: W5 T056 + W6 cleanup
+- 1-2 days: W7 skill rewrites (sequential)
+- 0.5 days: W8 polish + Code Page deploy
+- 0.5 days: W11 T118 sub-items (depends on operator clarification of what each is)
+- 0.5 days: W11 T119 publish gate + W10 close-out
+
+### 14.3 What R7's POC pivot CHANGES vs original plan
+
+The POC validated an alternative architecture for narrative consumers. This doesn't replace R7's scope — but it adds an architectural decision the project should resolve before closing:
+
+| Decision | Impact on R7 close-out |
+|---|---|
+| Adopt POC pattern for narrative endpoints as standard | Document in lessons-learned + R7 README; potentially file as ADR-039 (new ADR); update guides (BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md probably needs revision or supersession) |
+| Keep playbook engine alongside for chat-summarize + Insights + scheduled notifications | Update `.claude/constraints/bff-extensions.md` decision criteria; clarify in CLAUDE.md §17 pointers |
+| Extend POC pattern to other entity types (Documents, ToDos, Matters) within R7 vs defer to follow-up | If extend within R7: ~2-3 days additional work. If defer: file as DEF-NNN; R7 ships with single-consumer POC + architecture doc |
+| What to do with broken notification playbooks (Tasks Due Soon, Tasks Overdue, New Events) | If POC replaces them: delete the playbooks + their sync scripts + their Action rows. If keep alongside: fix them per the 6 bug classes documented in T118 work (significant effort). |
+| Skill rewrites (W7) — should they reflect the POC pattern? | The jps-* skills are about JPS authoring for the playbook engine. If we're moving narrative consumers off the engine, the skills should explicitly say "for non-narrative use cases" or include the code-based pattern as an alternative. **This needs explicit decision before W7 starts**. |
+
+### 14.4 Open deferrals across R7
+
+| Defer ID | Description | Severity | Effort | When |
+|---|---|---|---|---|
+| **DEF-001** | Wire AiAnalysisNodeExecutor to Wave 11 Option B inputBinding pattern (mirror of T111 work for AiCompletion) | MEDIUM — non-blocking | 1-2 hours | After R7 ships, or as needed when AiAnalysis-based playbook consumer is authored |
+| (potential) | Fix the 3 broken notification playbooks (Tasks Due Soon, Overdue, New Events) — OR delete them if POC replaces | TBD per decision above | TBD | TBD |
+| (potential) | Migrate Insights Engine matter-summary to POC pattern when authored | LOW — Insights doesn't exist yet | ~1 day per consumer | Whenever Insights matter-summary work begins |
+| (potential) | Migrate chat-summarize to POC pattern | NOT RECOMMENDED — chat has legitimate engine needs (streaming, tools, dynamic context) | n/a | n/a — keep on engine |
+
+### 14.5 R7 success criteria — current status
+
+From the spec.md and verification report (W10 T100 — 11/15 PASS at criteria level):
+
+| Criterion | Status |
+|---|---|
+| AiCompletionNodeExecutor builds + dispatches | ✅ via W1 |
+| Single-hop dispatch via sprk_executortype | ✅ via W2 |
+| Typed config schemas per executor | ✅ via W3 |
+| Legacy direct-path removed | ✅ via W4 |
+| 94 existing nodes migrated | ✅ via W5 T054 |
+| Documentation deletes + updates | 🔄 7/10 done |
+| Skill rewrites | ⏸️ 0/6 done |
+| PlaybookBuilder UI updates | 🔄 10/14 done |
+| chat-summarize migration | ✅ via W9 |
+| Library modal in 3 surfaces | ✅ via W9 |
+| **/narrate end-to-end working (R4 graduation)** | ✅ ACHIEVED via W11 T117/T118 POC pivot (operator-verified widget rendering) |
+| Per-bullet entity links | ✅ via T118 (collector + narrator) |
+| Validation metadata sidecar | ✅ via narrator T116 |
+| BFF publish hygiene (NFR-01) | 🔄 multiple deploys all under 60 MB; formal T119 gate pending |
+| Test coverage maintained | ✅ 14/14 narrate-related tests; 7 pre-existing unrelated failures unchanged |
+
+### 14.6 R7 deliverables NOT in scope (explicit)
+
+The POC pivot does NOT change these out-of-scope items:
+- Action Engine R1 (still HOLDS at Phase 0 spike per Q14)
+- Spaarke Claw / Tool Registry classification (Action Engine territory)
+- Gate resolvers (Action Engine territory)
+- Agent UX (Action Engine territory)
+- `docs/architecture/ai-architecture-consumer-routing.md` (READ-ONLY; chat-routing-redesign-r1 owns)
+- `docs/data-model/sprk_playbookconsumer.md` (NOT created by R7)
+
+### 14.7 Recommendations for post-/compact discussion
+
+Topics to address in order:
+
+1. **Architecture adoption decision**: confirm POC pattern is the standard for narrative endpoints going forward. If yes, what's the official threshold (e.g., "any AI function with fixed workflow shape + 1-5 LLM calls + no streaming = code-defined")?
+
+2. **R7 closure scope**: do we extend the POC to other entity types (Documents, ToDos, Matters) WITHIN R7, or close R7 with the single-consumer POC + architecture doc and defer extensions?
+
+3. **Skill rewrites (W7)**: what should the rewrites say? They were originally about jps-* skills for the playbook engine. If we're moving narrative consumers off the engine, do the skills need explicit guidance to either (a) cover both patterns, (b) cover only the engine, or (c) be deprecated in favor of new skills for the code-based pattern?
+
+4. **Notification playbooks**: what's the disposition? Three options: fix them; delete them; ignore them (POC replaces their function for daily briefing; other notification creation paths may still need them).
+
+5. **DEF-001 timing**: still defer AiAnalysis wiring to R8, or address within R7?
+
+6. **W11 T118 sub-items**: what are "events", "tools", "two unidentified items"? Need operator clarification before this can be addressed.
+
+7. **Documentation updates**: the architecture comparison doc itself + the existing `BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md` (T111a deliverable) probably need revision to reflect the POC as the recommended pattern instead of the playbook engine.
+
+8. **W7 skill rewrite content**: needs explicit alignment with the architectural direction.
+
+9. **R7 publish gate (T119)**: cumulative BFF size impact + CVE scan; formal acceptance.
+
+10. **R7 wrap-up**: lessons-learned doc; PR list; archive.
+
+---
+
+*Full R7 scope captured. End of architecture comparison.*
