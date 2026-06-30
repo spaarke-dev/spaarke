@@ -39,6 +39,16 @@ public static class CacheModule
         var logger = LoggerFactory.Create(config => config.AddConsole()).CreateLogger("CacheModule");
 
         var isDevelopment = environment.IsDevelopment();
+        // CI safety carve-out (2026-06-29, follow-on to AzureMonitorGuard Testing
+        // allow-list — see Infrastructure/Startup/AzureMonitorGuard.cs for the
+        // canonical pattern): treat `Testing` like Development for the
+        // AllowInMemoryFallback path. WebApplicationFactory<Program>-based
+        // integration tests set ASPNETCORE_ENVIRONMENT=Testing and rely on
+        // Redis:Enabled=false + AllowInMemoryFallback=true to avoid network
+        // I/O. Throwing here breaks every WAF-based fixture with no benefit
+        // (CI doesn't deploy; App Service uses Production, never Testing).
+        var isLocalLike = isDevelopment ||
+            string.Equals(environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase);
 
         // 4-branch decision matrix on (Enabled, AllowInMemoryFallback, IsDevelopment).
         if (redisOptions.Enabled)
@@ -125,10 +135,10 @@ public static class CacheModule
                 "Distributed cache: Redis enabled with instance name '{InstanceName}'",
                 redisOptions.InstanceName);
         }
-        else if (redisOptions.AllowInMemoryFallback && isDevelopment)
+        else if (redisOptions.AllowInMemoryFallback && isLocalLike)
         {
             // ────────────────────────────────────────────────────────────────────
-            // Branch (b): Redis-off + AllowInMemoryFallback + Development.
+            // Branch (b): Redis-off + AllowInMemoryFallback + Development/Testing.
             // ────────────────────────────────────────────────────────────────────
             services.AddDistributedMemoryCache();
 
@@ -137,16 +147,21 @@ public static class CacheModule
             services.AddSingleton<StackExchange.Redis.IConnectionMultiplexer, NullConnectionMultiplexer>();
 
             logger.LogWarning(
-                "Distributed cache: In-memory mode enabled (Development only). " +
-                "NOT suitable for multi-instance deployment.");
+                "Distributed cache: In-memory mode enabled ({EnvName} env). " +
+                "NOT suitable for multi-instance deployment.",
+                environment.EnvironmentName);
         }
-        else if (redisOptions.AllowInMemoryFallback && !isDevelopment)
+        else if (redisOptions.AllowInMemoryFallback && !isLocalLike)
         {
             // ────────────────────────────────────────────────────────────────────
-            // Branch (c): Redis-off + AllowInMemoryFallback + NOT Development → throw.
+            // Branch (c): Redis-off + AllowInMemoryFallback + deployed env → throw.
+            // Development and Testing are allow-listed (the latter for CI fixtures);
+            // every other env (Staging, Production, Demo, etc.) is treated as
+            // deployed and rejects in-memory fallback because it would silently
+            // break multi-instance deployments.
             // ────────────────────────────────────────────────────────────────────
             throw new InvalidOperationException(
-                $"AllowInMemoryFallback is restricted to Development environments. " +
+                $"AllowInMemoryFallback is restricted to Development and Testing environments. " +
                 $"ASPNETCORE_ENVIRONMENT={environment.EnvironmentName}. Set Redis:Enabled=true.");
         }
         else
@@ -156,7 +171,7 @@ public static class CacheModule
             // ────────────────────────────────────────────────────────────────────
             throw new InvalidOperationException(
                 "Redis is disabled and in-memory fallback not opted in. " +
-                "Set Redis:Enabled=true (recommended) or Redis:AllowInMemoryFallback=true (Development only).");
+                "Set Redis:Enabled=true (recommended) or Redis:AllowInMemoryFallback=true (Development or Testing only).");
         }
 
         services.AddMemoryCache();
