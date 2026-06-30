@@ -298,6 +298,15 @@ function buildNarrationRequest(channels: ChannelFetchResult[]): NarrateRequest {
 // ---------------------------------------------------------------------------
 
 /**
+ * R7 Wave 11 T118 narrator spike (2026-06-30): route through /render endpoint instead of
+ * /narrate when this flag is on. /render runs live Dataverse queries server-side (no
+ * dependency on appNotification rows + no widget-side notification-context loader needed).
+ * Same response shape as /narrate — fully backward-compatible for downstream consumers.
+ * Toggle to `false` to fall back to /narrate (appNotification-derived payload).
+ */
+const USE_LIVE_RENDER = true;
+
+/**
  * Fetch AI-generated narration (TL;DR + per-channel bullets) from the BFF.
  *
  * Returns a NarrationResult discriminated union:
@@ -306,8 +315,15 @@ function buildNarrationRequest(channels: ChannelFetchResult[]): NarrateRequest {
  *   - "error" — unexpected failure
  *
  * @param channels Channel fetch results from useNotificationData
+ *                 (ignored when USE_LIVE_RENDER is on)
  */
 export async function fetchBriefingNarration(channels: ChannelFetchResult[]): Promise<NarrationResult> {
+  // R7 Wave 11 T118: short-circuit to live-render path when enabled. The `channels` arg
+  // becomes informational only (server-side collector queries Dataverse directly).
+  if (USE_LIVE_RENDER) {
+    return fetchBriefingLive();
+  }
+
   const request = buildNarrationRequest(channels);
 
   // Skip if no data to narrate
@@ -360,6 +376,59 @@ export async function fetchBriefingNarration(channels: ChannelFetchResult[]): Pr
     return {
       status: 'error',
       message: error.message ?? 'Failed to generate narration.',
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Live-render path (R7 Wave 11 T118 narrator spike, 2026-06-30)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch the AI Daily Briefing via the live `/render` endpoint. Server-side
+ * collector runs Dataverse queries directly (Tasks Due Soon, Tasks Overdue,
+ * Recent Matter Activity, My Recent Updates) — bypasses the appNotification
+ * table entirely. Returns the SAME NarrateResponse shape as `/narrate` so
+ * downstream rendering code is unchanged.
+ *
+ * No request body needed — the user is identified from their OBO token's
+ * AAD oid claim, which the server maps to a Dataverse systemuserid.
+ */
+async function fetchBriefingLive(): Promise<NarrationResult> {
+  try {
+    const response = await authenticatedFetch('/api/ai/daily-briefing/render', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+
+    const data = (await response.json()) as NarrateResponse;
+    // Defensive normalization (mirrors fetchBriefingNarration).
+    if (data?.tldr) {
+      data.tldr.keyTakeaways = Array.isArray(data.tldr.keyTakeaways) ? data.tldr.keyTakeaways : [];
+      data.tldr.summary = data.tldr.summary ?? '';
+      data.tldr.topAction = data.tldr.topAction ?? '';
+    }
+    return { status: 'success', data };
+  } catch (err: unknown) {
+    const error = err as { statusCode?: number; message?: string };
+
+    if (error.statusCode === 503 || error.statusCode === 429) {
+      return {
+        status: 'unavailable',
+        reason: 'AI briefing service is temporarily unavailable.',
+      };
+    }
+    if (error.statusCode === 401 || error.statusCode === 403) {
+      return {
+        status: 'unavailable',
+        reason: 'Sign-in required to view your daily briefing.',
+      };
+    }
+    console.error('[DailyBriefing] live render failed:', err);
+    return {
+      status: 'error',
+      message: error.message ?? 'Failed to render briefing.',
     };
   }
 }

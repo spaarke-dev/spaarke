@@ -517,6 +517,11 @@ public static class AnalysisServicesModule
                               Sprk.Bff.Api.Services.Ai.Narrators.EntityNameScrubber>();
         services.AddTransient<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator>();
 
+        // R7 Wave 11 T118 (2026-06-30) — DailyBriefingCollector: live-query collector that
+        // backs the new POST /api/ai/daily-briefing/render endpoint. Bypasses appnotification
+        // entirely; runs FetchXML directly via IGenericEntityService (Scoped — matches lifetime).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>();
+
         // R5 task 012 (D2-03) — SessionSummarizeOrchestrator. Concrete sealed class (no
         // interface per ADR-010); registered Scoped to match the lifetime of its dependencies
         // (ChatSessionManager + IGenericEntityService are both Scoped; IRagService + IOpenAiClient
