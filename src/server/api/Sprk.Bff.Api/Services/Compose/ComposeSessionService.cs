@@ -36,7 +36,17 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// is a CRUD-shaped session-store facade and is explicitly the seam this service consumes
 /// (registered unconditionally; no AI dependency in its constructor).
 /// </remarks>
-public sealed class ComposeSessionService : IComposeSessionService
+/// <summary>
+/// Compose session-binding service over the existing <see cref="ChatSessionManager"/>
+/// three-tier persistence pipeline (per CLAUDE.md §11 default-to-reuse).
+///
+/// Per ADR-010 strict compliance (collapsed from single-impl interface 2026-06-29
+/// code-review cleanup): registered as concrete; methods are <c>virtual</c> ONLY to
+/// preserve the Moq-based test boundary that mocks `RebindToDocumentIdAsync` in
+/// <c>ComposeServiceTests</c>. R2 should remediate by rewriting those tests to use
+/// a real instance + a <see cref="ChatSessionManager"/> double.
+/// </summary>
+public class ComposeSessionService
 {
     private readonly ChatSessionManager _sessionManager;
     private readonly ILogger<ComposeSessionService> _logger;
@@ -49,8 +59,7 @@ public sealed class ComposeSessionService : IComposeSessionService
         _logger = logger;
     }
 
-    /// <inheritdoc />
-    public async Task<ChatSession> EnsureSessionForDocumentAsync(
+    public virtual async Task<ChatSession> EnsureSessionForDocumentAsync(
         string tenantId,
         string documentId,
         Guid? playbookId = null,
@@ -87,8 +96,7 @@ public sealed class ComposeSessionService : IComposeSessionService
             ct: ct);
     }
 
-    /// <inheritdoc />
-    public Task<ChatSession?> GetSessionAsync(
+    public virtual Task<ChatSession?> GetSessionAsync(
         string tenantId,
         string sessionId,
         CancellationToken ct = default)
@@ -108,8 +116,7 @@ public sealed class ComposeSessionService : IComposeSessionService
         return _sessionManager.GetSessionAsync(tenantId, sessionId, ct);
     }
 
-    /// <inheritdoc />
-    public async Task<ChatSession?> RebindToDocumentIdAsync(
+    public virtual async Task<ChatSession?> RebindToDocumentIdAsync(
         string tenantId,
         string sessionId,
         string currentDocumentId,

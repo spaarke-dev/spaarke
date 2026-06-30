@@ -48,7 +48,7 @@ namespace Sprk.Bff.Api.Api;
 ///   <c>IPlaybookExecutionEngine</c>. The other six handlers inject the three Compose
 ///   services from task 021/022/023, all CRUD-shaped.</item>
 ///   <item><b>ADR-015</b> Tier 3 multi-tenant isolation — inherited via auth pipeline +
-///   <c>ChatSession</c> binding via <see cref="IComposeSessionService"/>.</item>
+///   <c>ChatSession</c> binding via <see cref="ComposeSessionService"/> (concrete per ADR-010 strict).</item>
 ///   <item><b>ADR-019</b> route conventions — all endpoints under <c>/api/compose/*</c>.</item>
 ///   <item><b>ADR-028</b> Spaarke Auth v2 — bearer-token auth via existing pipeline (the
 ///   <c>RequireAuthorization()</c> on the group hooks into the same auth scheme as the

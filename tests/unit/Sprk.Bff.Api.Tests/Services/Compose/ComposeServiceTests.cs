@@ -70,7 +70,7 @@ public class ComposeServiceTests
     private const string CorrelationId = "corr-026-test";
 
     private readonly Mock<IComposeDocumentService> _docServiceMock;
-    private readonly Mock<IComposeSessionService> _sessionServiceMock;
+    private readonly Mock<ComposeSessionService> _sessionServiceMock; // Concrete mock (interface collapsed 2026-06-29; methods are virtual)
     private readonly Mock<IGenericEntityService> _dataverseMock;
     private readonly Mock<ILogger<ComposeService>> _loggerMock;
     private readonly ComposeService _sut;
@@ -78,7 +78,9 @@ public class ComposeServiceTests
     public ComposeServiceTests()
     {
         _docServiceMock = new Mock<IComposeDocumentService>();
-        _sessionServiceMock = new Mock<IComposeSessionService>();
+        _sessionServiceMock = new Mock<ComposeSessionService>(
+            Mock.Of<Sprk.Bff.Api.Services.Ai.Chat.ChatSessionManager>(),
+            Mock.Of<ILogger<ComposeSessionService>>());
         _dataverseMock = new Mock<IGenericEntityService>();
         _loggerMock = new Mock<ILogger<ComposeService>>();
 

@@ -12,7 +12,7 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// <list type="bullet">
 ///   <item><see cref="IComposeService"/> → <see cref="ComposeService"/> — load/save/promote orchestration (FR-04/05/06).</item>
 ///   <item><see cref="IComposeDocumentService"/> → <see cref="ComposeDocumentService"/> — SPE drive-item DOCX read/write plumbing (FR-04/05).</item>
-///   <item><see cref="IComposeSessionService"/> → <see cref="ComposeSessionService"/> — ChatSession DocumentId binding facade (FR-07).</item>
+///   <item><see cref="ComposeSessionService"/> — ChatSession DocumentId binding facade (FR-07). Concrete registration (ADR-010 strict — interface collapsed 2026-06-29 cleanup).</item>
 /// </list>
 /// </para>
 /// <para>
@@ -57,7 +57,7 @@ public static class ComposeModule
         // service registrations below MUST be unconditional to match. NO feature flag
         // wrapping. Compose R1 has no feature gates per project CLAUDE.md.
         services.AddScoped<IComposeDocumentService, ComposeDocumentService>();
-        services.AddScoped<IComposeSessionService, ComposeSessionService>();
+        services.AddScoped<ComposeSessionService>(); // Concrete (ADR-010 strict; interface collapsed 2026-06-29 cleanup)
         services.AddScoped<IComposeService, ComposeService>();
 
         // ============================================================================

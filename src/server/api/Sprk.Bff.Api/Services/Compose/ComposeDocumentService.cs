@@ -55,7 +55,6 @@ public sealed class ComposeDocumentService : IComposeDocumentService
         string itemId,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(httpContext);
         if (string.IsNullOrWhiteSpace(driveId)) throw new ArgumentException("driveId is required", nameof(driveId));
         if (string.IsNullOrWhiteSpace(itemId)) throw new ArgumentException("itemId is required", nameof(itemId));
 
@@ -144,9 +143,6 @@ public sealed class ComposeDocumentService : IComposeDocumentService
         string correlationId,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(httpContext);
-        ArgumentNullException.ThrowIfNull(content);
-        ArgumentNullException.ThrowIfNull(user);
         if (string.IsNullOrWhiteSpace(driveId)) throw new ArgumentException("driveId is required", nameof(driveId));
         if (string.IsNullOrWhiteSpace(itemId)) throw new ArgumentException("itemId is required", nameof(itemId));
         if (string.IsNullOrWhiteSpace(correlationId)) throw new ArgumentException("correlationId is required", nameof(correlationId));

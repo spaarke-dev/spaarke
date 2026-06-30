@@ -17,7 +17,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// 024) can call. This service owns workflow logic and the FR-06 first-Save promotion
 /// idempotency contract. SPE plumbing (Graph drive-item read/write) is delegated to
 /// <see cref="IComposeDocumentService"/> (task 022); ChatSession binding is delegated to
-/// <see cref="IComposeSessionService"/> (task 023).
+/// <see cref="ComposeSessionService"/> (task 023; concrete per ADR-010 strict — interface collapsed 2026-06-29 cleanup).
 /// </para>
 /// <para>
 /// <b>Upload note (R1)</b>: per spec §10.5 Placement Justification + design.md §14 row 5

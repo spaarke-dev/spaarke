@@ -18,9 +18,9 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// <list type="bullet">
 ///   <item><see cref="IComposeDocumentService"/> (task 022) — SPE plumbing (Graph
 ///   drive-item read/write/version). Owns the wire-level Graph dependency.</item>
-///   <item><see cref="IComposeSessionService"/> (task 023) — ChatSession binding. Owns
-///   the reuse of the existing three-tier (Redis hot / Cosmos warm / Dataverse cold)
-///   session infrastructure.</item>
+///   <item><see cref="ComposeSessionService"/> (task 023; concrete per ADR-010 strict) —
+///   ChatSession binding. Owns the reuse of the existing three-tier (Redis hot / Cosmos
+///   warm / Dataverse cold) session infrastructure.</item>
 ///   <item><see cref="IGenericEntityService"/> (from <c>Spaarke.Dataverse</c>) —
 ///   <c>sprk_document</c> read/create for the first-Save promotion contract.</item>
 /// </list>
@@ -71,13 +71,13 @@ public class ComposeService : IComposeService
     private const string DisplayNameAttribute = "sprk_name";
 
     private readonly IComposeDocumentService _documentService;
-    private readonly IComposeSessionService _sessionService;
+    private readonly ComposeSessionService _sessionService;
     private readonly IGenericEntityService _dataverse;
     private readonly ILogger<ComposeService> _logger;
 
     public ComposeService(
         IComposeDocumentService documentService,
-        IComposeSessionService sessionService,
+        ComposeSessionService sessionService,
         IGenericEntityService dataverse,
         ILogger<ComposeService> logger)
     {
@@ -93,9 +93,6 @@ public class ComposeService : IComposeService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(httpContext);
-
         // Upload-to-SPE for Compose is delegated to the existing Assistant upload pipeline
         // (Assistant → SPE → drive-item id → "Open in Compose" hand-off). Per spec §10.5
         // Placement Justification + design.md §14 row 5 (R1 default-open = Browse + Search),
@@ -121,9 +118,6 @@ public class ComposeService : IComposeService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(httpContext);
-
         if (string.IsNullOrWhiteSpace(request.DriveId))
         {
             throw new ArgumentException("DriveId is required for SPE drive-item access.", nameof(request));
@@ -201,9 +195,6 @@ public class ComposeService : IComposeService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(httpContext);
-
         if (string.IsNullOrWhiteSpace(request.DriveId))
         {
             throw new ArgumentException("DriveId is required for SPE drive-item access.", nameof(request));
@@ -284,8 +275,6 @@ public class ComposeService : IComposeService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(httpContext);
 
         if (string.IsNullOrWhiteSpace(request.DocumentSpeId))
         {

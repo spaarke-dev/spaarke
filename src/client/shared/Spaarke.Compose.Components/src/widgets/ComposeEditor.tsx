@@ -19,14 +19,13 @@
  *     - Flow 1 (`compose_selection_changed` on `context`) — 250ms debounce
  *     - Flow 2 (`compose_selection_offer` on `conversation`) — when selection
  *       is non-collapsed and ≥10 chars
- *  5. Maintain SPE check-out heartbeat per Spike #3 §4.1:
- *     - 3-minute sliding interval
- *     - Gated on `document.visibilityState === 'visible'`
- *     - POST `/api/compose/document/{documentId}/heartbeat` (singular `document` —
- *       endpoint shape per Spike #3 §8 + W7-052)
- *     - Defensive: log + swallow non-2xx (endpoint may not be deployed yet;
- *       W7-052 wires it. Client-side is robust to that).
- *  6. Honor ADR-021 (Fluent v9 semantic tokens; no hex) and ADR-022 (React 19).
+ *  5. Honor ADR-021 (Fluent v9 semantic tokens; no hex) and ADR-022 (React 19).
+ *
+ *  HEARTBEAT HOISTED (R2/R3 refactor, 2026-06-29): The 3-min SPE check-out
+ *  heartbeat that previously lived here has been moved to the workspace level
+ *  (`src/solutions/SpaarkeAi/src/components/compose/hooks/useComposeHeartbeatGate.ts`)
+ *  and gated on `checkoutStatus === 'acquired'` to fix FU-1 (cancelled tab
+ *  continued heart-beating after force-close).
  *
  * What this component DOES NOT do (binding):
  *  - Speak to SPE directly (host pane supplies bytes via prop / receives via
@@ -70,7 +69,6 @@ import TextAlign from '@tiptap/extension-text-align';
 
 import { makeStyles, tokens, Spinner, Text } from '@fluentui/react-components';
 import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widgets';
-import { authenticatedFetch } from '@spaarke/auth';
 
 import { docxToTipTapHtml, tipTapToDocxBytes } from '../utils/docxBridge';
 
@@ -113,11 +111,11 @@ const LOCKED_EXTENSIONS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Constants — heartbeat + selection debounce
+// Constants — selection debounce
 // ---------------------------------------------------------------------------
-
-/** 3-minute sliding interval per Spike #3 §1 (LOCKED). */
-const HEARTBEAT_INTERVAL_MS = 3 * 60 * 1000;
+// (Heartbeat constants removed in R2/R3 refactor — see hoist note below.
+//  The 3-minute interval now lives in
+//  src/solutions/SpaarkeAi/src/components/compose/hooks/useComposeHeartbeatGate.ts.)
 
 /** Selection-change debounce per `compose-contracts.ts` Flow 1 comment (250ms). */
 const SELECTION_DEBOUNCE_MS = 250;
@@ -300,69 +298,26 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// Heartbeat hook (3-min sliding, visibility-gated, defensive)
+// Heartbeat hook — REMOVED in R2/R3 refactor (FU-1 fix, 2026-06-29).
 // ---------------------------------------------------------------------------
-
-/**
- * Maintain the SPE check-out heartbeat for a Compose-open document.
- *
- * Per Spike #3 §4.1 LOCKED behaviour:
- *  - Interval: 3 minutes (sliding)
- *  - Gate: `document.visibilityState === 'visible'`
- *  - Endpoint: POST `/api/compose/document/{documentId}/heartbeat`
- *  - Failure mode: log warning + swallow (no UX impact; W7-052 wires BFF side)
- *
- * The hook ONLY runs when documentRef + bffBaseUrl are both present and
- * documentRef has an `sprkDocumentId` (heartbeat is keyed on the Dataverse
- * document id, which exists post-promotion-on-first-Save per design.md §8).
- * For ephemeral pre-promotion documents, heartbeat is a no-op.
- */
-function useComposeHeartbeat(documentRef: ComposeEditorDocumentRef | undefined, bffBaseUrl: string | undefined): void {
-  const documentId = documentRef?.sprkDocumentId;
-
-  React.useEffect(() => {
-    if (!documentId || !bffBaseUrl) return; // Heartbeat suppressed
-    // Capture the values once for the timer's closure — the dependency array
-    // re-runs the effect if any prop changes.
-
-    const tick = async () => {
-      // Visibility gate per Spike #3 §4.1 commentary. Backgrounded tabs
-      // (mobile lock screen, alt-tab) do NOT count as "still editing".
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-        return;
-      }
-      try {
-        const url = `${bffBaseUrl}/api/compose/document/${documentId}/heartbeat`;
-        const response = await authenticatedFetch(url, { method: 'POST' });
-        if (!response.ok) {
-          // Defensive: 404 = endpoint not deployed yet (W7-052 lands later);
-          // 401/403 = auth issue (upstream concern); 5xx = transient.
-          // R1 logs once at INFO level. No user-visible error.
-          // eslint-disable-next-line no-console
-          console.info(
-            `[ComposeEditor] heartbeat returned ${response.status} for document ${documentId} — swallowing (W7-052 wires endpoint)`
-          );
-        }
-      } catch (err) {
-        // Network errors: log + swallow. The 15-min stale-sweep on the BFF
-        // side handles orphan locks regardless of client-side success.
-        // eslint-disable-next-line no-console
-        console.info(
-          `[ComposeEditor] heartbeat fetch failed for document ${documentId} — swallowing`,
-          err instanceof Error ? err.message : String(err)
-        );
-      }
-    };
-
-    // Initial heartbeat on mount, then 3-min sliding.
-    const timer = setInterval(tick, HEARTBEAT_INTERVAL_MS);
-    void tick(); // fire immediately
-
-    return () => clearInterval(timer);
-    // bffBaseUrl + documentId are the only relevant deps; tick is recreated
-    // on every render but the prior timer is cleared correctly.
-  }, [documentId, bffBaseUrl]);
-}
+//
+// Previously this file owned `useComposeHeartbeat` (3-min sliding, visibility-
+// gated, defensive). The hook fired regardless of the Dataverse-side check-out
+// state, which produced wasted HTTP traffic after a force-close / cancel
+// (FU-1 — cancelled tab continues heart-beating a lock it no longer holds).
+//
+// The heartbeat has been HOISTED to the workspace level and gated on
+// `checkoutStatus === 'acquired'`:
+//
+//   src/solutions/SpaarkeAi/src/components/compose/hooks/useComposeHeartbeatGate.ts
+//
+// The workspace (`ComposeWorkspace.tsx`) owns the checkout reducer, so the
+// gating signal is local to the timer effect there. The editor is now a pure
+// drafting surface with no lock-lifecycle concerns.
+//
+// The `bffBaseUrl` prop is retained on this editor for shape-compatibility
+// (some consumers thread it for future telemetry) but is otherwise unused
+// here.
 
 // ---------------------------------------------------------------------------
 // Selection-event dispatcher (Flow 1 + Flow 2 — debounced)
@@ -549,8 +504,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       };
     }, [editor, docxBytes, onDirtyChange, onImportWarnings]);
 
-    // ----- Heartbeat + selection dispatch ---------------------------------
-    useComposeHeartbeat(documentRef, bffBaseUrl);
+    // ----- Selection dispatch (heartbeat hoisted to ComposeWorkspace) -----
     useSelectionEventDispatch(editor, documentRef, sessionId, dispatch);
 
     // ----- Imperative handle ----------------------------------------------
