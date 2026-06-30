@@ -253,7 +253,7 @@
 | 140 | ✅ | RESTORE wizard file summary (App Service `Workspace__SummarizePlaybookId` env-var was MISSING → set to `4a72f99c-a119-f111-8343-7ced8d1dc988`; defense-in-depth fallback restored; consumer routing row already correct; healthz green post-restart; operator UAT in T145; 2026-06-30) | wizard, deploy, config, smoke, wave12 | yes | — |
 | 141 | ✅ | RESTORE document create profile (Dataverse data-only fix: DELETE broken Save Profile node `c9334fb7-...` + PATCH Update Record node 3 fieldMappings to align with 7 JPS fields; ACT-011 JPS preserved; UI cosmetic deferred; 2026-06-30) | wizard, document, dataverse, config, wave12 | yes | — |
 | 142 | ✅ | RESTORE Create Project — single Dataverse PATCH (sprk_actionid FK re-link per audit 123) | wizard, project, dataverse, data-fix, wave12 | yes | — |
-| 143 | 🔲 | SMOKE Create Matter wizard — verify code path healthy per audit 123 | wizard, matter, smoke, wave12 | yes | — |
+| 143 | ✅ | SMOKE Create Matter wizard — code-path verification (no browser smoke from sandbox); found 2 deterministic data-layer bugs (EntityNameValidator stub configJson + AI Analysis systemPrompt-override clobber); minimal fix recommended (data-only, operator must approve); see audit 123 §10; T144 inherits via Matter endpoint; 2026-06-30 | wizard, matter, smoke, wave12 | yes | — |
 | 144 | 🔲 | VERIFY Create Work Assignment inherits Matter fix per audit 123 | wizard, work-assignment, smoke, wave12 | no | 143 |
 | 145 | 🔲 | UAT — all 5 wizards end-to-end (Wave 12.3 gate) | wizard, uat, gate, wave12 | no | 140-144 |
 
