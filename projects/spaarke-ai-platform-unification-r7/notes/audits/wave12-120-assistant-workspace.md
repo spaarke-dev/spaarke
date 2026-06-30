@@ -1,0 +1,370 @@
+# Wave 12.1 Audit 120 — Assistant ↔ Workspace ↔ Context
+
+> **Status**: COMPLETE — read-only investigation
+> **Author**: Wave 12.1 audit task 120 (task-execute STANDARD rigor)
+> **Date**: 2026-06-30
+> **Scope**: SpaarkeAi assistant chat surface, LegalWorkspace embedding, BFF chat pipeline, context-passing plumbing
+> **Output discipline**: file:line citations throughout; no code fixes proposed (those become Wave 12.4 POMLs)
+> **Operator report**: "nothing fixed" in UAT
+
+---
+
+## 1. Executive summary
+
+### Top-line finding
+
+The Assistant↔Workspace plumbing is **architecturally complete but operationally broken by a naming-convention split** between the SpaarkeAi client (raw Dataverse logical names: `sprk_matter`) and the BFF chat pipeline (normalized canonical enum: `matter`). The split shows up at FIVE independent surfaces in the BFF and is **not** caught by validation. Because `ChatHostContext` carries the raw value through, three different downstream effects all silently no-op:
+
+1. System-prompt entity enrichment (the LLM never learns "you are assisting with matter X")
+2. Matter-memory injection (the LLM never sees prior matter facts/parties/dates)
+3. Entity-scoped RAG search (the documents index expects normalized `'matter'`, gets `'sprk_matter'`, returns 0 hits)
+
+These three failures are consistent with operator's UAT verdict "nothing fixed" — every "what matter am I in?", "what documents are in this matter?", and "what's the latest on this case?" question would degrade to generic tenant-wide behaviour or refusal.
+
+### MVP-scope recommendation
+
+**PLUMBING-ONLY** is in scope for MVP. The fix is small (one normalization layer or one consistent decision on raw-vs-normalized), reversible, and unblocks the three operator-visible UAT scenarios. **Partial grounding** (matter-record fields in system prompt) is also in scope because the existing `AnalysisChatContextResolver` + `PlaybookChatContextProvider` already implement it — the data just isn't reaching them. **Out-of-scope** for MVP: retrieval-over-SPE (not the blocker; matter docs already indexed via FileIndexingService + RagEndpoints when documents flow through the Spaarke pipeline) and tool-use / Action Engine R1 (separate project, on hold).
+
+Effort estimate: **2-4 working days** for plumbing + verification + UAT iteration. See §5.
+
+---
+
+## 2. Inventory — shipped surface
+
+### 2.1 Entry points
+
+| Surface | Path | Status |
+|---|---|---|
+| SpaarkeAi assistant chat code page | `src/solutions/SpaarkeAi/src/main.tsx` | Shipped + deployed (R7 W11 commit `85c762081`) |
+| SpaarkeAi three-pane shell | `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx:569-660` | Shipped |
+| SpaarkeAi conversation pane | `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` | Shipped |
+| LegalWorkspace standalone code page | `src/solutions/LegalWorkspace/src/main.tsx` | **Retired per OC-R4-05** (components retained as library; SpaarkeAi is sole host per `docs/architecture/LEGALWORKSPACE-RETIREMENT.md`) |
+| LegalWorkspace embedded inside SpaarkeAi | `src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx` (no `hostContext`/SprkChat grep matches; LW doesn't host chat — only sections) | Shipped |
+| BFF chat session endpoints | `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs:62-285` | Shipped |
+| BFF context resolver (playbook-driven chat) | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs` | Shipped |
+| BFF standalone context provider | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/StandaloneChatContextProvider.cs` | Shipped |
+| BFF chat dispatcher | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs` | Shipped |
+| BFF matter memory enrichment | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs:650-703` (R6 task 068 / D-C-21 / FR-45) | Shipped |
+| BFF RAG search filter | `src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs:1232-1236` (parent-entity scoping) | Shipped |
+| BFF document-search tool | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs:67-90` (uses `_parentEntityType` from scope) | Shipped |
+| BFF Dataverse query tool | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DataverseQueryTools.cs:36-93` (allow-listed `sprk_matter|sprk_project|contact|account|sprk_document`) | Shipped |
+| LoadKnowledge node executor | `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LoadKnowledgeNodeExecutor.cs:75-362` | Shipped **but**: pass-through placeholder for Daily Briefing (R4); NOT used by chat retrieval. Comment at lines 16-21 confirms R5 will substitute AI Search retrieval but R4/R7 leave it pass-through. |
+
+### 2.2 BFF chat session endpoints (relevant subset)
+
+From `ChatEndpoints.cs:46-285`:
+
+| Endpoint | Purpose | Hostcontext role |
+|---|---|---|
+| `POST /api/ai/chat/sessions` (`CreateSessionAsync`, line 297) | Create session | Accepts `request.HostContext` (line 321), persists into `session.HostContext` |
+| `POST /api/ai/chat/sessions/{id}/messages` (`SendMessageAsync`, line 340) | SSE chat | Reads `session.HostContext` (lines 416, 535, 718, 743) and threads to context provider |
+| `PATCH /api/ai/chat/sessions/{id}/context` (`SwitchContextAsync`) | Switch playbook/doc | Optional `HostContext` override (line 3067) — replaces if provided, keeps current otherwise (line 1158) |
+| `GET /api/ai/chat/context-mappings` (`GetContextMappingsAsync`) | Resolve playbook for entity | Uses `entityType + pageType` (no `hostContext`; this is pre-session discovery) |
+
+### 2.3 Context-passing mechanism (URL → BFF)
+
+```
+1. SpaarkeAi page launched from matter form (Power Apps navigation)
+     URL = ...sprk_spaarkeai...?entityType=sprk_matter&entityId=<guid>&matterId=<guid>
+2. main.tsx:356-377 parses URL params directly (NO normalization, NO useEntityResolver)
+3. main.tsx:399-403 passes raw `entityLogicalName="sprk_matter"` to <App />
+4. ThreePaneShell.tsx:580-591 builds EntityContext { entityType: "sprk_matter" as EntityType, ... }
+     (line 586-587 comment explicitly notes the cast: "may not narrow to EntityType literal union")
+5. ThreePaneShell.tsx:618-620 passes entityContext → AiSessionProvider
+6. ConversationPane.tsx:2204-2211 builds hostContext { entityType: entityContext.entityType, ... }
+     EntityName: NEVER set
+     WorkspaceType: hardcoded "spaarke-ai"
+     PageType: NEVER set
+7. ConversationPane.tsx:2435 passes hostContext to SprkChat
+8. SprkChat sends to BFF: POST /api/ai/chat/sessions with { HostContext: { EntityType: "sprk_matter", EntityId, EntityName: null, WorkspaceType: "spaarke-ai", PageType: null } }
+```
+
+**Comparison**: `useEntityResolver` (`src/client/shared/Spaarke.AI.Context/src/providers/useEntityResolver.ts:97-103`) DOES normalize via `TYPENAME_TO_ENTITY_TYPE`: `sprk_matter → 'matter'`, `sprk_project → 'project'`. **SpaarkeAi doesn't use this hook.** The hook is the standard normalization layer the rest of the codebase implicitly assumes.
+
+---
+
+## 3. Gap list
+
+### Gap A — Naming-convention split: SpaarkeAi sends `sprk_matter`, BFF expects `matter` for enrichment + matter-memory + RAG-scope; expects `sprk_matter` for matter-id extraction + StandaloneChatContextProvider; **the system is fragmented**
+
+**Category**: **PLUMBING** (the most-impactful, multi-headed root cause)
+
+**Evidence — convention-A "normalized" surfaces (expect `matter`/`project`/`invoice`/`account`/`contact`)**:
+- `src/server/api/Sprk.Bff.Api/Models/Ai/ParentEntityContext.cs:35-64` — `EntityTypes.All = [matter, project, invoice, account, contact]`; `IsValid` lowercases and matches against this set
+- `src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatHostContext.cs:44-48` — `IsValid()` delegates to above (never called anywhere — `grep "IsValid"` shows zero call sites for `ChatHostContext.IsValid`)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs:666` — `AppendMatterMemoryAsync` requires `EntityType == "matter"`
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs:1133-1144` — `MapEntityTypeToRecordType` maps `matter → sprk_matter`, etc. (i.e., INPUT is normalized)
+- `src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs:668-689` — when indexing documents, sets `ParentEntityContext.EntityType = "matter"` / `"project"` / `"invoice"` (so AI Search index has `parentEntityType = "matter"`)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/BulkRagIndexingJobHandler.cs:278` — same pattern as above
+
+**Evidence — convention-B "raw" surfaces (expect `sprk_matter`/`sprk_project`)**:
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs:1542` — `TryParseMatterId` checks `ParentEntityType == "sprk_matter"` (matter-id telemetry only)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/StandaloneChatContextProvider.cs:63-85` — `SupportedEntityTypes` + `EntityDisplayNames` keys are `sprk_matter`
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs:550-559` — `GetEntityContextColumns` switches on `sprk_matter|sprk_project|sprk_invoice`
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DataverseQueryTools.cs:45-106` — `AllowedEntityTypes` + all dictionaries keyed on `sprk_matter|sprk_project|contact|account|sprk_document`
+
+**Operational consequence when SpaarkeAi sends `EntityType="sprk_matter"`**:
+
+| Component | Result | Operator impact |
+|---|---|---|
+| `AppendEntityEnrichment` (line 543) | Skipped (EntityName null at line 550; PageType null at line 554) | LLM has no "you are assisting with matter X" context |
+| `AppendMatterMemoryAsync` (line 650) | Skipped (line 666 expects "matter" not "sprk_matter") | LLM has no prior matter facts/parties/dates |
+| `RagService` parent-entity filter (line 1234) | Filter is `parentEntityType eq 'sprk_matter'` but index has `'matter'` — **0 hits** | Document search returns "no relevant documents" for every matter-scoped query |
+| `DocumentSearchTools.SearchDocumentsAsync` (line 67) | Inherits the 0-hit filter via `_parentEntityType` (line 53) | Same as above — assistant cannot find matter docs |
+| `DocumentSearchTools.SearchDiscoveryAsync` | Same issue | Same |
+| `TryParseMatterId` (line 1542) | **Works** — matter-id captured for telemetry only | None directly user-visible (telemetry only) |
+| `StandaloneChatContextProvider` (sibling pre-session endpoint) | Works (expects raw form) | Pre-session entity probe is fine |
+| `AnalysisChatContextResolver` (sibling) | Works (expects raw form) | Independent of chat-session flow |
+
+**Note**: `ChatHostContext.IsValid()` exists (line 44) but is never invoked. There's no validation gate that catches the mismatched naming at the BFF boundary.
+
+### Gap B — `EntityName` never populated by SpaarkeAi → entity enrichment unconditionally skipped even if naming convention is normalized
+
+**Category**: **PLUMBING**
+
+**Evidence**:
+- `ConversationPane.tsx:2204-2211` — `hostContext` build omits `EntityName`
+- `PlaybookChatContextProvider.cs:550-551` — `AppendEntityEnrichment` early-exits on null/whitespace EntityName
+
+**Operational consequence**: Even after Gap A is fixed (naming normalized to "matter"), the system prompt enrichment ("Context: You are assisting with matter record '<name>'. The user is viewing the <page-type>.") still won't fire because EntityName is null.
+
+**Fix surface**: SpaarkeAi must populate EntityName. Options:
+- Read from Xrm `formContext.data.entity.getPrimaryAttributeValue()` (PCF-frame-walk; useEntityResolver-style)
+- Lazy-fetch from Dataverse via Xrm.WebApi inside `ThreePaneShell` (per CLAUDE.md DATA-ACCESS-DECISION-CRITERIA: this is fine — single record, read-only, no auth crossing BFF)
+- Or: have the BFF lazy-fetch on session-create if EntityName missing but EntityId present (simpler at-the-boundary; matches the convention in StandaloneChatContextProvider which does its own lookup)
+
+### Gap C — `PageType` never populated → enrichment doubly blocked + telemetry impoverished
+
+**Category**: **PLUMBING** (small)
+
+**Evidence**:
+- `ConversationPane.tsx:2204-2211` — no `pageType` in hostContext build
+- `PlaybookChatContextProvider.cs:554-556` — `AppendEntityEnrichment` early-exits when PageType is null or "unknown"
+- `PlaybookChatContextProvider.cs:559-565` — even with a value, must match `PageTypeLabels` dictionary (need to grep that dictionary; assume e.g. "MainForm", "AnalysisView", "DocumentPanel")
+
+**Operational consequence**: Independent third guard rail on enrichment. Even with Gaps A + B fixed, enrichment still skipped without a valid PageType. From SpaarkeAi, the natural value is "MainForm" or "Dashboard" or "AssistantPane" — needs operator + LLM-utility decision on which contributes most signal.
+
+### Gap D — Chat `hostContext` is fixed at mount (URL params); switching workspace tabs does NOT refresh chat context
+
+**Category**: **MISSING IMPLEMENTATION** (potentially **OUT OF MVP** depending on UX expectation)
+
+**Evidence**:
+- `ConversationPane.tsx:853-871` — `usePaneEvent("workspace", ...)` handles `tab_change` (line 854) for tab-id tracking only; `selection_changed` (line 859) for selection chip; **no `active_widget_changed` subscription that refreshes `hostContext`**
+- `ThreePaneShell.tsx:580-591` — `entityContext` is `React.useMemo` on `[entityLogicalName, entityId, matterId]` — these come from URL props which don't change post-mount
+- `AiSessionProvider.tsx:147,199,289-297` — accepts `entityContext` prop; the only way to change it is to remount the provider tree
+
+**Operational consequence**: If the operator opens SpaarkeAi from matter X, then switches to a "Documents" workspace tab showing project Y's documents (or to "Daily Briefing" with no entity context), the chat still thinks it's talking about matter X. Inverse: opening SpaarkeAi without an entity URL (e.g., direct dashboard link) means there's no way to "promote" the active workspace's entity into the chat context.
+
+**MVP scope decision**:
+- If operator's UAT expectation is "chat follows the URL/launch context" (most common pattern), this gap is **NOT a blocker** — out of MVP.
+- If operator's UAT expectation is "chat follows the active workspace tab", this gap is **plumbing-class** (subscribe to `active_widget_changed`, update entityContext state, re-create session if needed) but not trivially small — likely 1-2 days.
+
+**Recommendation**: Defer to operator decision. If unspecified, defer this gap to a follow-up project — Gap A + B + C fixes already restore the URL-launched matter-context scenario, which is the documented Wave 12 success criterion (AC13/AC14).
+
+### Gap E — No "current entity context" tool surfaced to the LLM; assistant cannot self-answer "what matter am I in?" deterministically
+
+**Category**: **MISSING IMPLEMENTATION** (small, in-MVP if Gap A blocks enrichment)
+
+**Evidence**:
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/` — no tool named `GetCurrentMatter`, `GetMatterContext`, `WhereAmI`, etc. (verified by grep `GetCurrentContext|GetMatterDetails|currentMatter|whereAmI` returning 0 files)
+- `DataverseQueryTools` exists but the LLM has no signal of "which entity ID is the current one" beyond what's in the system prompt — and Gap A blocks the system prompt
+
+**Operational consequence**: When operator asks "what matter am I in?", the LLM must either (a) read it from the system prompt enrichment (broken by Gaps A+B+C) or (b) be told via tool. Today neither path works.
+
+**Resolution path**: If Gaps A+B+C are fixed, the system-prompt enrichment block ("Context: You are assisting with matter record 'Smith v. Jones'. The user is viewing the MainForm.") naturally answers Scenario A below. No new tool needed.
+
+**MVP scope**: subsumed by Gaps A+B+C fix; no separate work.
+
+### Gap F — RAG index population for matter documents — separate concern; assumed populated in spaarkedev1
+
+**Category**: **CONFIGURATION / DATA** (out of audit scope to verify here; flag for UAT)
+
+**Evidence**:
+- `src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs:668-672` shows the indexing path with `EntityType: "matter"` (normalized) at the index-write side
+- `src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs:315-331` writes `ParentEntityType = parentEntity?.EntityType` directly (passes through whatever caller provides)
+- **Whether matter documents have actually been indexed in spaarkedev1** is a separate UAT verification. The audit confirms the WRITE path is normalized; if operator-observed UAT failure says "no documents found" even after Gap A fix, then this is the next-most-likely root cause.
+
+**MVP scope**: not a Wave 12.4 task per se — it's a UAT verification step. Wave 12.4 fix for Gap A unblocks the search; if results are still empty, a separate ad-hoc "verify documents are indexed in spaarkedev1" task or operator-run check is needed.
+
+### Gap G — LoadKnowledgeNodeExecutor is NOT the chat retrieval path; the operator's "retrieval over SPE deferred" concern is about a different surface
+
+**Category**: **OUT OF SCOPE** (not blocking; operator clarification)
+
+**Evidence**:
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LoadKnowledgeNodeExecutor.cs:16-50` — explicitly a Daily Briefing playbook control node, R4 pass-through placeholder. Comment at line 46-50: "R5 will substitute the bind with AI Search retrieval". R7 left this pass-through.
+- Chat-time retrieval (the operator-relevant path) flows through `DocumentSearchTools` + `KnowledgeRetrievalTools` → `RagService`, **NOT** through `LoadKnowledgeNodeExecutor`.
+
+**Operational consequence**: The "R5 deferred work" placeholder mentioned in task POML inputs is a RED HERRING for Assistant↔Workspace. RAG search for chat is shipped + functional; it's just not getting matter-scoped because of Gap A.
+
+**MVP scope**: NO ACTION. Document the misdirection so future audits don't conflate the two retrieval paths.
+
+### Gap H — Wave 12 plan §10 Q3 deployment-coordination concern affects UAT environment, not the code
+
+**Category**: **CONFIGURATION**
+
+**Evidence**: `notes/wave12-mvp-completion-plan.md:178-197` documents that other-project deployment risk has been flagged but unresolved. Until the BFF + SpaarkeAi code-page deployed to spaarkedev1 match this branch's state, UAT scenarios below can't be reliably reproduced.
+
+**MVP scope**: Coordination question for operator. Audit doesn't block on it.
+
+---
+
+## 4. UAT scenarios — defined + traced (deployed-env reproduction blocked per Gap H)
+
+> **Reproduction status**: code paths traced exhaustively; live spaarkedev1 reproduction NOT attempted within audit scope (would require operator session + network access).
+
+### Scenario A: User in matter X workspace asks "what matter am I in?"
+
+**Expected**: Assistant responds "You are working with matter 'Smith v. Jones' (or matter name from Dataverse). You're viewing the [page label]."
+
+**Actual** (traced through code):
+1. URL: `...?entityType=sprk_matter&entityId=<guid>&matterId=<guid>`
+2. SpaarkeAi parses URL (main.tsx:356-377) → entityLogicalName="sprk_matter" (raw)
+3. ThreePaneShell builds entityContext { entityType: "sprk_matter" } (line 580-591)
+4. ConversationPane builds hostContext { entityType: "sprk_matter", entityId, entityName: undefined, workspaceType: "spaarke-ai", pageType: undefined } (lines 2204-2211)
+5. SprkChat POSTs to BFF: `POST /api/ai/chat/sessions` with body `{ HostContext: { EntityType: "sprk_matter", EntityId: "<guid>" } }`
+6. BFF persists into session (ChatEndpoints.cs:317-322)
+7. On first message: `PlaybookChatContextProvider.AppendEntityEnrichment` (line 543) called
+   - Guard at line 546: `hostContext is null` → false (have one)
+   - Guard at line 550: `EntityName` null → **return early without enrichment**
+8. Even if EntityName fix applied (Gap B):
+   - Guard at line 554: `PageType` null → **return early without enrichment**
+9. Even if PageType fix applied (Gap C):
+   - Guard at line 559: PageType must be in `PageTypeLabels` dictionary
+10. `AppendMatterMemoryAsync` (line 650):
+    - Guard at line 666: `EntityType == "matter"` (lowercased) — `"sprk_matter" != "matter"` → **return early without matter memory**
+11. LLM receives bare system prompt + user question
+12. **LLM response**: generic refusal or "I don't have information about your current matter" — matches operator's "nothing fixed" verdict
+
+**Gap categorization**: Gaps A + B + C (PLUMBING)
+
+### Scenario B: User in matter X asks "what documents are in this matter?"
+
+**Expected**: Assistant calls SearchDocuments tool, returns list of matter X's documents.
+
+**Actual** (traced):
+1. Steps 1-6 same as Scenario A
+2. `ResolveKnowledgeScopeAsync` (PlaybookChatContextProvider.cs:387) builds `ChatKnowledgeScope` with `ParentEntityType: hostContext?.EntityType = "sprk_matter"` (line 452)
+3. `SprkChatAgentFactory.CreateAgentAsync` builds `DocumentSearchTools(_parentEntityType="sprk_matter", _parentEntityId=<guid>, ...)` (DocumentSearchTools.cs:53)
+4. LLM calls `SearchDocumentsAsync(query="documents in this matter")`
+5. Tool builds `RagSearchOptions { ... }` (line 74-82) — but **does NOT pass `ParentEntityType`/`ParentEntityId`** on this overload!
+   - Need to verify: does `SearchDocumentsAsync` (line 67) pass parent-entity filter? Tool source at line 172 shows `ParentEntityType = _parentEntityType` only on `SearchDiscoveryAsync`. `SearchDocumentsAsync` body (lines 67-90) **does not pass `_parentEntityType` to RagSearchOptions**.
+   - **Implication**: `SearchDocumentsAsync` is tenant-wide; `SearchDiscoveryAsync` is entity-scoped (when scope is valid).
+6. RagService.cs:1232-1236 — applies `parentEntityType eq 'sprk_matter'` filter when SearchDiscoveryAsync is invoked
+7. Index has `parentEntityType = 'matter'` (per RagEndpoints.cs:669, FileIndexingService population)
+8. Filter `'sprk_matter' eq parentEntityType` matches zero documents
+9. **LLM response**: "No relevant documents found" — matches "nothing fixed"
+
+**Gap categorization**: Gap A (PLUMBING — naming convention); secondary: `SearchDocumentsAsync` vs `SearchDiscoveryAsync` tool selection by LLM is fragile (tool-design issue, not audit-blocking)
+
+### Scenario C: User opens SpaarkeAi from outside a matter context (e.g., direct dashboard link)
+
+**Expected**: Assistant degrades gracefully — "I don't have a matter context. What can I help you with?"
+
+**Actual** (traced):
+1. URL: no entityType/entityId params
+2. SpaarkeAi main.tsx:364-372 sets `entityLogicalName=undefined, entityId=undefined`
+3. ThreePaneShell.tsx:581 — `if (!entityLogicalName || !entityId) return null;` → entityContext = null
+4. ConversationPane.tsx:2205 — `hostContext = entityContext ? {...} : undefined`
+5. BFF receives session-create with `HostContext: null` (or absent)
+6. All three enrichment paths in PlaybookChatContextProvider correctly no-op on null hostContext (guards at line 546, 663)
+7. **Assistant works generically** — this scenario is ACTUALLY fine. Tenant-wide search still works.
+
+**Gap categorization**: NONE — this scenario degrades gracefully; not a UAT failure.
+
+### Scenario D: Multi-turn conversation — does context persist across messages?
+
+**Expected**: Asking "what about that matter again?" in turn 5 should reference the same matter context.
+
+**Actual** (traced):
+1. Session persisted in Redis (per ChatEndpoints.cs comments about "Redis hot cache")
+2. `session.HostContext` persisted at session-create (line 321), preserved across messages
+3. Every message-send (SendMessageAsync) re-reads `session.HostContext` (line 535)
+4. So HostContext IS persisted. The problem is the same as Scenario A — the persisted HostContext is unusable due to Gaps A+B+C.
+
+**Gap categorization**: Subsumed by Gap A — no new gap surfaces in multi-turn.
+
+### Scenario E: User on matter X workspace, switches to "Daily Briefing" workspace tab, asks chat "what's in my daily briefing?"
+
+**Expected (if "chat follows tab" UX)**: Assistant knows the active workspace is Daily Briefing.
+**Expected (if "chat follows launch context" UX)**: Assistant still talks about matter X.
+
+**Actual** (traced):
+- `ConversationPane` does NOT subscribe to `active_widget_changed` events from the pane bus (only `tab_change` for telemetry + `selection_changed` for chip)
+- `hostContext` is fixed at mount per URL — switching tabs has no effect
+- LLM continues thinking about matter X (assuming Gaps A+B+C fixed)
+
+**Gap categorization**: Gap D (MISSING IMPLEMENTATION, possibly out-of-MVP per operator UX decision)
+
+---
+
+## 5. Disposition recommendation — Wave 12.4 task scope
+
+### Per-gap disposition
+
+| Gap | Disposition | Recommended Wave 12.4 task | Effort |
+|---|---|---|---|
+| **A** Naming convention split | **FIX IN MVP** — most-impactful single root cause | Add normalization layer at BFF boundary: in `ChatEndpoints.CreateSessionAsync` (or in `ChatHostContext` constructor / a validator filter), normalize `sprk_matter|sprk_project|sprk_invoice → matter|project|invoice`. Decision required: do we ALSO update `StandaloneChatContextProvider` / `DataverseQueryTools` / `AnalysisChatContextResolver` to use normalized form (consistency wins) — or accept the existing split and ONLY normalize at the chat-session boundary (minimum-touch fix)? Recommend MINIMUM-TOUCH (normalize at boundary only); the other surfaces aren't operator-blocking today. | 0.5 day (normalize at boundary) — 1 day (add an `EntityTypeNormalizer` helper + tests + flip both boundaries) |
+| **B** EntityName never populated | **FIX IN MVP** | Add server-side lazy-fetch of EntityName when HostContext arrives with EntityId but no EntityName: in `PlaybookChatContextProvider` add a small Dataverse name-lookup before `AppendEntityEnrichment`. Single read, cached for session lifetime. (Decision rationale: minimum-touch — SpaarkeAi-side fix would require Xrm form access which adds frame-walk fragility; server-side fix is centralized.) | 0.5 day |
+| **C** PageType never populated | **FIX IN MVP** | Either: (a) SpaarkeAi sends a default `pageType: "AssistantPane"` (1-line change in ConversationPane.tsx:2208), and BFF `PageTypeLabels` dictionary gets a corresponding entry; OR (b) loosen the `AppendEntityEnrichment` guard at line 554 to use a default label when PageType is null. Recommend (a) for explicit telemetry value. | 0.25 day |
+| **D** Tab-change doesn't refresh hostContext | **DEFER post-MVP** | Subscribe ConversationPane to `active_widget_changed`, plumb a setter into AiSessionProvider for entityContext, decide on session-recreate vs in-place update semantics. Non-trivial; operator hasn't surfaced this specific UX expectation in Wave 12 AC13/AC14 wording. | 1-2 days; defer to a follow-up "assistant-workspace-context-sync" project IF operator wants this UX |
+| **E** No "current matter" tool | **NO ACTION** (subsumed by A+B+C) | — | — |
+| **F** Verify matter documents indexed in spaarkedev1 | **UAT VERIFICATION STEP** (not a code task) | Wave 12.4 includes "after deploying Gap A fix, smoke `POST /sessions/{id}/messages` with 'what documents are in this matter?' and confirm RAG returns >0 hits. If 0 hits, file separate task for indexing verification". | 0.25 day of UAT time |
+| **G** LoadKnowledgeNodeExecutor is not the chat retrieval path | **NO ACTION** (documentation only) | Note in Wave 12.4 design doc that the R5 "deferred retrieval over SPE" concern is about Daily Briefing's LoadKnowledge node — NOT chat retrieval. Chat retrieval works via `DocumentSearchTools` + `RagService` and is functional once Gap A is fixed. | — |
+| **H** Deployment coordination | **OPERATOR DECISION** | Track in wave12 plan §10 Q3; not a Wave 12.4 task | — |
+
+### Total MVP effort estimate
+
+**1.5 working days code** (Gaps A + B + C) + **0.25 day UAT verification** (Gap F) + **0.25 day for code-review/adr-check at FULL rigor on the Gap A change** = **2 days minimum, 4 days with iteration buffer**.
+
+This fits comfortably in the wave12-mvp-completion-plan W12.4 envelope of "1-4 weeks (audit-dependent)" — actually well below the high end.
+
+### MVP-scope recommendation
+
+**PLUMBING-ONLY** is in MVP scope (Gaps A, B, C). The plumbing already exists; it just doesn't reach end-to-end because of naming inconsistency + two missing client-side fields (or one server-side lazy fetch).
+
+**Partial-grounding** (matter-record fields injected into system prompt) is ALSO in MVP scope by side effect — `AppendEntityEnrichment` + `AppendMatterMemoryAsync` are already implemented and ship enrichment when their guards pass. Fixing Gap A unlocks both.
+
+**Out-of-scope-retrieval-needed** scenario is NOT triggered: chat-time RAG retrieval over already-indexed matter documents IS implemented (`DocumentSearchTools` + `RagService`) and works once naming convention is normalized. The "retrieval-over-SPE-deferred" concern in the task POML inputs refers to the Daily Briefing `LoadKnowledgeNodeExecutor` placeholder (Gap G) — a different code path.
+
+**Out-of-scope-tool-use-needed** scenario is also NOT triggered: the assistant doesn't need new tools for Scenarios A-D. System prompt enrichment + existing search tools cover the MVP behaviour. Action Engine / tool-use (e.g., "create a task in this matter") remains on hold per separate project status.
+
+---
+
+## 6. Blockers + assumptions
+
+1. **Deployed-env reproduction not attempted** — audit is code-trace only. Operator UAT against actual spaarkedev1 deployment may surface additional gaps (e.g., the documents aren't indexed at all — Gap F).
+2. **`useEntityResolver`-style normalization is the canonical client-side pattern** but SpaarkeAi doesn't use it. Decision needed: bring SpaarkeAi onto `useEntityResolver` (consistency win, larger diff) OR add a minimum-touch normalization line in main.tsx OR do the normalization at the BFF boundary. Recommend BFF-side per Gap A disposition above (smallest blast radius).
+3. **Documentation drift**: SPAARKEAI-WORKSPACE-ARCHITECTURE.md §1 (line 192-208) documents the URL-param entity context flow but does NOT call out the convention split or the missing EntityName/PageType. Wave 12.4 should update this doc as part of the fix.
+4. **`ChatHostContext.IsValid()` is dead code** (zero call sites). Fixing the convention split is a good moment to either delete IsValid OR wire it up + fail-fast on invalid inputs. Recommend wiring it up — gives the boundary observable invariant.
+
+---
+
+## 7. References
+
+| File | Lines | What it shows |
+|---|---|---|
+| `src/solutions/SpaarkeAi/src/main.tsx` | 356-377, 388-406 | URL param parsing + raw entityType pass-through |
+| `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx` | 580-591 | EntityContext build with `as EntityType` cast |
+| `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` | 2204-2211, 2435, 853-871 | hostContext build (no EntityName/PageType) + workspace pane subscriptions |
+| `src/client/shared/Spaarke.AI.Context/src/providers/useEntityResolver.ts` | 97-103, 128-177 | The canonical normalization (UNUSED by SpaarkeAi) |
+| `src/client/shared/Spaarke.AI.Context/src/types/entity-context.ts` | 19, 36-58 | EntityType union (normalized) + EntityContext shape |
+| `src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatHostContext.cs` | 34-48 | DTO contract; IsValid never called |
+| `src/server/api/Sprk.Bff.Api/Models/Ai/ParentEntityContext.cs` | 35-64 | Normalized allow-list (matter/project/invoice/account/contact) |
+| `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` | 297-329, 416-417, 535, 1158 | HostContext receive + persistence + reads |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs` | 387-464, 543-615, 650-703 | Knowledge scope build + entity enrichment + matter memory (3 guards each) |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs` | 1133-1144 | INVERSE map matter→sprk_matter (assumes normalized input) |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs` | 1539-1545 | Convention-B "sprk_matter" usage |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/StandaloneChatContextProvider.cs` | 63-85 | Convention-B "sprk_matter" usage (standalone endpoint) |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs` | 550-559 | Convention-B "sprk_matter" usage (resolver) |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DataverseQueryTools.cs` | 36-106 | Convention-B "sprk_matter" allow-list |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs` | 41-90, 167-180 | parent-entity-scoped vs unscoped tool methods |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs` | 1232-1236 | RAG OData filter for parentEntityType |
+| `src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs` | 668-689 | Convention-A "matter" usage at index-write side |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs` | 315-331 | Pass-through of caller-provided ParentEntityType to index |
+| `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LoadKnowledgeNodeExecutor.cs` | 16-50, 75-362 | Daily Briefing placeholder; NOT the chat retrieval path |
+| `docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md` | 192-208 | Context flow documentation (now known to be incomplete re: convention) |
+| `projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md` | 66-73, 95-103, 113 | Wave 12 plan: Assistant↔Workspace is MVP-critical; AC13-AC15 |
+
+---
+
+*End audit 120 — ready for Wave 12.4 task generation per disposition table §5.*
