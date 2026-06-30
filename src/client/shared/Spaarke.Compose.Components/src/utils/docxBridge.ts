@@ -102,8 +102,7 @@ export async function docxToTipTapHtml(docxBytes: ArrayBuffer): Promise<MammothC
     default?: { convertToHtml: typeof mammothModule.convertToHtml };
     convertToHtml?: typeof mammothModule.convertToHtml;
   };
-  const convertToHtml =
-    mammothCandidate.default?.convertToHtml ?? mammothCandidate.convertToHtml;
+  const convertToHtml = mammothCandidate.default?.convertToHtml ?? mammothCandidate.convertToHtml;
   if (!convertToHtml) {
     throw new Error('docxBridge: mammoth.convertToHtml export not found');
   }
@@ -113,7 +112,7 @@ export async function docxToTipTapHtml(docxBytes: ArrayBuffer): Promise<MammothC
   return {
     html: result.value,
     // mammoth Result.messages is `Array<{ type: 'warning' | 'error'; message: string }>`
-    messages: result.messages.map((m) => ({ type: m.type, message: m.message })),
+    messages: result.messages.map(m => ({ type: m.type, message: m.message })),
   };
 }
 
@@ -191,7 +190,7 @@ export async function tipTapToDocxBytes(editor: Editor): Promise<ArrayBuffer> {
     const runs: InstanceType<typeof TextRun>[] = [];
     for (const n of nodes) {
       if (n.type === 'text' && n.text) {
-        const marks = new Set(n.marks?.map((m) => m.type) ?? []);
+        const marks = new Set(n.marks?.map(m => m.type) ?? []);
         runs.push(
           new TextRun({
             text: n.text,

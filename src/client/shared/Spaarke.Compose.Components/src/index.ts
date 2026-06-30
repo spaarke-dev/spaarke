@@ -19,16 +19,9 @@
 // DOCX bridge: mammoth ^1.8.0 (BSD-2-Clause) + docx ^9.0.3 (MIT). All OSS.
 
 export { ComposeEditor } from './widgets/ComposeEditor';
-export type {
-  ComposeEditorProps,
-  ComposeEditorHandle,
-  ComposeEditorDocumentRef,
-} from './widgets/ComposeEditor';
+export type { ComposeEditorProps, ComposeEditorHandle, ComposeEditorDocumentRef } from './widgets/ComposeEditor';
 
 // DOCX bridge helpers — exported for advanced consumers + R2 tests. Most
 // consumers should use ComposeEditor (which orchestrates these internally).
-export {
-  docxToTipTapHtml,
-  tipTapToDocxBytes,
-} from './utils/docxBridge';
+export { docxToTipTapHtml, tipTapToDocxBytes } from './utils/docxBridge';
 export type { MammothConversionResult } from './utils/docxBridge';

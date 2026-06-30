@@ -54,11 +54,7 @@
  */
 
 import * as React from 'react';
-import {
-  useEditor,
-  EditorContent,
-  type Editor,
-} from '@tiptap/react';
+import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
@@ -72,16 +68,8 @@ import TaskItem from '@tiptap/extension-task-item';
 import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
-import {
-  makeStyles,
-  tokens,
-  Spinner,
-  Text,
-} from '@fluentui/react-components';
-import {
-  useDispatchPaneEvent,
-  type DispatchPaneEvent,
-} from '@spaarke/ai-widgets';
+import { makeStyles, tokens, Spinner, Text } from '@fluentui/react-components';
+import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widgets';
 import { authenticatedFetch } from '@spaarke/auth';
 
 import { docxToTipTapHtml, tipTapToDocxBytes } from '../utils/docxBridge';
@@ -329,10 +317,7 @@ const useStyles = makeStyles({
  * document id, which exists post-promotion-on-first-Save per design.md §8).
  * For ephemeral pre-promotion documents, heartbeat is a no-op.
  */
-function useComposeHeartbeat(
-  documentRef: ComposeEditorDocumentRef | undefined,
-  bffBaseUrl: string | undefined
-): void {
+function useComposeHeartbeat(documentRef: ComposeEditorDocumentRef | undefined, bffBaseUrl: string | undefined): void {
   const documentId = documentRef?.sprkDocumentId;
 
   React.useEffect(() => {
@@ -416,9 +401,7 @@ function useSelectionEventDispatch(
       debounceTimerRef.current = setTimeout(() => {
         const { from, to } = editor.state.selection;
         const rawText = editor.state.doc.textBetween(from, to, ' ');
-        const selectionText = rawText.length > SELECTION_TEXT_CAP
-          ? rawText.slice(0, SELECTION_TEXT_CAP)
-          : rawText;
+        const selectionText = rawText.length > SELECTION_TEXT_CAP ? rawText.slice(0, SELECTION_TEXT_CAP) : rawText;
 
         const timestamp = new Date().toISOString();
 
@@ -496,14 +479,7 @@ function useSelectionEventDispatch(
  */
 export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditorProps>(
   function ComposeEditor(props, ref) {
-    const {
-      docxBytes,
-      documentRef,
-      bffBaseUrl,
-      sessionId = '',
-      onDirtyChange,
-      onImportWarnings,
-    } = props;
+    const { docxBytes, documentRef, bffBaseUrl, sessionId = '', onDirtyChange, onImportWarnings } = props;
 
     const styles = useStyles();
     const dispatch = useDispatchPaneEvent();
@@ -559,12 +535,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           }
           onImportWarnings?.(messages);
         })
-        .catch((err) => {
+        .catch(err => {
           // eslint-disable-next-line no-console
-          console.error(
-            '[ComposeEditor] DOCX import failed',
-            err instanceof Error ? err.message : String(err)
-          );
+          console.error('[ComposeEditor] DOCX import failed', err instanceof Error ? err.message : String(err));
           // Caller can detect via onImportWarnings empty + ProseMirror empty;
           // R2 will add a structured error callback.
         })
