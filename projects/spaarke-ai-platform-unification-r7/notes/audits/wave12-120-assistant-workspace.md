@@ -441,4 +441,74 @@ After deploying the fix to spaarkedev1:
 
 ---
 
-*End audit 120 — ready for Wave 12.4 task generation per disposition table §5; Resolution §8 records T130 closure.*
+## 9. Resolution — Wave 12 task 150 / Gap A (added 2026-06-30)
+
+> **Author**: Wave 12.4 task 150 (task-execute FULL rigor)
+> **Date**: 2026-06-30
+> **Scope of this Resolution subsection**: covers ONLY Gap A — boundary normalization at ChatHostContext. Gaps B (EntityName lazy-fetch), C (default PageType), D-H remain owned by parallel/follow-up POMLs T151/T152/T153.
+
+### Approach
+
+Single normalization point at the BFF chat-session boundary (the smallest blast radius per §5 disposition A recommendation). The fix is implemented in `ChatHostContext` via an init-accessor that invokes a new static helper `EntityTypeNormalizer.Normalize()`. The accessor pattern is load-bearing because it covers ALL three construction paths — primary constructor, `with` expression (used by `SwitchContextAsync`), and System.Text.Json deserialization (the Redis hot-tier round-trip used on every chat message).
+
+### Actual surfaces touched (vs §5 disposition prediction)
+
+The audit's §3 evidence list called out 5 inbound consumers of the convention. The fix landed on a slightly different distribution because the boundary normalization resolves 3 consumers by side effect (no code change needed) BUT requires 2 OTHER read-site updates that the audit didn't predict — they only become broken once normalization is in place:
+
+| # | Surface | File:line | Required change |
+|---|---|---|---|
+| 1 | **Boundary normalization point** | `src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatHostContext.cs:34-86` | NEW init-accessor pattern + new helper at `Models/Ai/Chat/EntityTypeNormalizer.cs` |
+| 2 | System prompt enrichment | `Services/Ai/Chat/PlaybookChatContextProvider.cs:543` (`AppendEntityEnrichment`) | None — guard now passes because HostContext.EntityType is canonical |
+| 3 | Matter memory injection | `Services/Ai/Chat/PlaybookChatContextProvider.cs:650-666` (`AppendMatterMemoryAsync`) | None — guard now passes (EntityType == "matter") |
+| 4 | Knowledge-scope build → RAG filter + DocumentSearchTools | `Services/Ai/Chat/PlaybookChatContextProvider.cs:452` (`ResolveKnowledgeScopeAsync`) → flows to `RagService.cs:1232-1236` + `Tools/DocumentSearchTools.cs:53` | None — scope's `ParentEntityType` is now canonical, matching the index's `parentEntityType = 'matter'` |
+| 5 | Matter-id telemetry extraction | `Services/Ai/Chat/SprkChatAgentFactory.cs:1539-1551` (`TryParseMatterId`) | UPDATED — now accepts both "matter" (post-fix) AND "sprk_matter" (defensive forward-compat). Without this, matter-id telemetry would have BROKEN post-fix because the check was raw-only. |
+| 6 | Analysis chat entity-context columns + Dataverse retrieve | `Services/Ai/Chat/AnalysisChatContextResolver.cs:362-374, 550-580` (`GetEntityContextColumns` + new `ToDataverseLogicalName`) | UPDATED — switch arms accept both forms; explicit inverse-map (canonical → raw) for `IDataverseEntityService.RetrieveAsync`. Without this, analysis chat entity-record retrieval would have BROKEN post-fix. |
+
+### Surfaces NOT touched (audit §3 mentioned them but no change needed)
+
+- `StandaloneChatContextProvider.cs:63-85` — pre-session probe receives `entityType` directly from URL parameter, NOT via HostContext. Different bounded context.
+- `DataverseQueryTools.cs:45-106` — tool allow-list operates on raw Dataverse names; LLM passes entity type as a tool argument, not via HostContext.
+- `RagEndpoints.cs:668-689` + `BulkRagIndexingJobHandler.cs:278` — INDEX-WRITE side already operates on canonical form (per audit §3 evidence list "convention-A").
+- `PlaybookDispatcher.MapEntityTypeToRecordType` (line 1133-1144) — expects canonical input (per audit §3); now correctly receives canonical.
+
+### Tests added (per ADR-038 KEEP-path conventions)
+
+- New: `tests/unit/Sprk.Bff.Api.Tests/Models/Ai/Chat/EntityTypeNormalizerTests.cs` — 30 tests (16 [Fact]/[Theory] methods, 30 expanded cases) covering:
+  - Helper raw → canonical mapping for all 3 Spaarke logical names
+  - Helper idempotence on already-canonical inputs (matter/project/invoice/account/contact)
+  - Case-insensitivity + whitespace trimming
+  - Pass-through for unknown / non-parent-business types (e.g. `sprk_analysisoutput` — critical regression-protection for the analysis-session HostContext slot)
+  - Null / empty / whitespace input handling
+  - `ChatHostContext` primary constructor normalization
+  - `ChatHostContext` `with` expression normalization (load-bearing for `SwitchContext`)
+  - `ChatHostContext` System.Text.Json round-trip (load-bearing for Redis hot tier)
+  - `ChatHostContext.IsValid()` behaviour pre/post normalization (the dead-code validator now meaningfully passes for raw inputs)
+
+No `Mock<HttpMessageHandler>`, no DI-registration tests, no ctor null-check tests.
+
+### Verification
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: **0 errors**, 19 pre-existing warnings (none from T150 surface area)
+- `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj`: **0 new failures** added. Before-T150 baseline on master after T130 landed: 13 failures / 7563 passed. After T150: **6 failures / 7570 passed** — T150 indirectly resolved 7 pre-existing failures (likely tests previously depending on broken canonical-form path). The 6 remaining failures are all unrelated to chat HostContext (KnowledgeDeploymentConfig defaults, SessionFilesCleanupJob, AuditLogService, SummarizeSessionEndpoint, ExecutorConfigSchemas) — confirmed pre-existing by stash + reproduction.
+- **Compressed publish size**: 47.6 MB (well within 60 MB ceiling per `.claude/constraints/azure-deployment.md` NFR-01)
+- **Code review + ADR check**: 0 violations, 0 warnings (Step 9.5 Quality Gates per task-execute protocol)
+
+### Backward / forward compatibility
+
+- **Backward**: Clients may send either `sprk_matter` or `matter`; both normalize. Legacy raw-form data in Redis caches normalizes on JSON deserialize (covered by `ChatHostContext_JsonRoundTrip_NormalizesRawInputFromDeserialization` test).
+- **Forward**: `SprkChatAgentFactory.TryParseMatterId` accepts BOTH forms defensively (canonical post-fix + raw for any code path that bypasses `ChatHostContext` construction). No callers currently do this; the dual-form acceptance is a forward-compat insurance.
+
+### Out of scope for T150 (deliberately preserved for follow-up tasks)
+
+- **Gap B** (EntityName lazy-fetch in `PlaybookChatContextProvider`) — T151
+- **Gap C** (default PageType handling) — T152
+- **Gaps D-H** (chat hostContext refresh on tab change, current-matter tool, etc.) — T153
+- **`PlaybookChatContextProvider.cs` itself** — deliberately NOT modified by T150 so T151/T152/T153 can layer cleanly without merge conflict.
+
+### Commit
+
+- `287e7b0a9` — `fix(bff/r7): T150 Wave 12 — normalize EntityType at ChatHostContext boundary (audit 120 Gap A)` (pushed to `work/spaarke-ai-platform-unification-r7`)
+
+---
+
+*End audit 120 — Resolution §8 records T130 closure; Resolution §9 records T150 / Gap A closure. T151/T152/T153 remain open for Gaps B/C/D-H per disposition §5.*

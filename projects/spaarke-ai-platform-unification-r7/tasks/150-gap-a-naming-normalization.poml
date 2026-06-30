@@ -11,6 +11,9 @@
     <parallel-safe>true</parallel-safe>
     <tags>bff-api, code-impl, assistant, normalization, wave12</tags>
     <estimated-effort>1-2 days</estimated-effort>
+    <status>completed</status>
+    <completion-date>2026-06-30</completion-date>
+    <commit>287e7b0a9</commit>
   </metadata>
 
   <prompt>
@@ -100,13 +103,23 @@ Assistant chat in workspace context with matter scope renders matter-aware respo
   </justification>
 
   <acceptance-criteria>
-    - [ ] Single normalization point implemented at BFF boundary
-    - [ ] All 5 audit-identified surfaces consume canonical form
-    - [ ] Unit tests cover normalization (raw → canonical; canonical → unchanged; unknown → graceful)
-    - [ ] `dotnet test` 0 new failures
-    - [ ] `dotnet build` 0 errors
-    - [ ] Publish-size diff reported
-    - [ ] Backward compatibility preserved (clients may send either convention)
-    - [ ] Client-side code unchanged
+    - [x] Single normalization point implemented at BFF boundary (ChatHostContext init-accessor + new EntityTypeNormalizer helper)
+    - [x] All 5 audit-identified surfaces consume canonical form (3 by side effect + 2 read-site updates in SprkChatAgentFactory + AnalysisChatContextResolver; full mapping in audit §9 Resolution table)
+    - [x] Unit tests cover normalization (30 tests in EntityTypeNormalizerTests.cs — raw → canonical, canonical → unchanged, unknown → unchanged, null/whitespace handling, primary ctor + `with` + JSON round-trip)
+    - [x] `dotnet test` 0 new failures (6 pre-existing failures unrelated to chat HostContext — 13 → 6 means T150 indirectly resolved 7)
+    - [x] `dotnet build` 0 errors
+    - [x] Publish-size diff reported: 47.6 MB compressed (within 60 MB ceiling)
+    - [x] Backward compatibility preserved (both forms accepted; Redis round-trip normalizes on deserialize)
+    - [x] Client-side code unchanged
   </acceptance-criteria>
+
+  <notes status="completed" completion-date="2026-06-30" commit="287e7b0a9">
+T150 completed via task-execute FULL rigor. Step 9.5 Quality Gates passed (code-review + adr-check 0 violations).
+
+Audit 120 §9 Resolution records full mapping: 1 boundary fix + 3 surfaces unblocked by side effect + 2 read-sites updated (SprkChatAgentFactory.TryParseMatterId and AnalysisChatContextResolver.GetEntityContextColumns + new ToDataverseLogicalName inverse map).
+
+Surfaces NOT touched (audit §3 mentioned but no change needed): StandaloneChatContextProvider (different bounded context), DataverseQueryTools (tool-allow-list operates on raw names), RagEndpoints + BulkRagIndexingJobHandler + PlaybookDispatcher (already operate on canonical).
+
+PlaybookChatContextProvider.cs deliberately NOT modified so T151/T152/T153 (which all touch that file) can layer cleanly. Hand-off: minimal + well-commented changes elsewhere.
+  </notes>
 </task>

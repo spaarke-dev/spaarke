@@ -262,7 +262,7 @@
 
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
-| 150 | 🔲 | Gap A — Naming normalization at BFF boundary (most-impactful single fix) | bff-api, code-impl, assistant, normalization, wave12 | yes | — |
+| 150 | ✅ | Gap A — Naming normalization at BFF boundary (most-impactful single fix) — commit `287e7b0a9` | bff-api, code-impl, assistant, normalization, wave12 | yes | — |
 | 151 | 🔲 | Gap B — Server-side EntityName lazy-fetch in PlaybookChatContextProvider | bff-api, code-impl, assistant, wave12 | yes | — |
 | 152 | 🔲 | Gap C — Default PageType in PlaybookChatContextProvider | bff-api, code-impl, assistant, wave12 | yes | — |
 | 153 | 🔲 | Audit 120 Gaps D-H — apply remaining 5 smaller fixes per §5 disposition table | bff-api, code-impl, assistant, wave12 | yes | — |
