@@ -36,13 +36,7 @@ import { fetchBriefingLive } from '../services/briefingService';
 // Hook types
 // ---------------------------------------------------------------------------
 
-export type BriefingRenderStatus =
-  | 'idle'
-  | 'loading'
-  | 'success'
-  | 'empty'
-  | 'unavailable'
-  | 'error';
+export type BriefingRenderStatus = 'idle' | 'loading' | 'success' | 'empty' | 'unavailable' | 'error';
 
 export interface UseBriefingRenderResult {
   /** Discriminator for the current state. */

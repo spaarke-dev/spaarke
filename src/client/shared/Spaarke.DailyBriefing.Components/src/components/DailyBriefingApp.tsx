@@ -50,11 +50,7 @@ import { TldrSection } from './TldrSection';
 import { ActivityNotesSection } from './ActivityNotesSection';
 import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
-import {
-  useBriefingRender,
-  useInlineTodoCreate,
-  useBriefingPreferences,
-} from '../hooks';
+import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';
 import type { IWebApi, NotificationCategory, NotificationItem } from '../types/notifications';
 import type { ChannelNarrationResult, NarrativeBulletResult } from '../services/briefingService';
@@ -126,10 +122,7 @@ export interface DailyBriefingAppProps {
  * entity as the regarding target so the sprk_todo `regarding` lookup
  * resolves via the existing ADR-024 catalog.
  */
-function bulletToNotificationItem(
-  bullet: NarrativeBulletResult,
-  generatedAtUtc?: string
-): NotificationItem {
+function bulletToNotificationItem(bullet: NarrativeBulletResult, generatedAtUtc?: string): NotificationItem {
   const narrative = bullet.narrative ?? '';
   // Trim narrative to fit sprk_todo.subject (200 char default limit).
   const title = narrative.length > 197 ? `${narrative.slice(0, 197)}...` : narrative;
@@ -342,14 +335,11 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
    * onDismiss prop, but a no-op in the /render path (nothing to dismiss; the
    * source records aren't appnotification rows we can mark read).
    */
-  const handleDismiss = React.useCallback(
-    (_itemIds: string[]) => {
-      // R7 Wave 12: no appnotification target; the per-bullet dismiss menu
-      // item is hidden by default in NarrativeBullet (onCheck/onRemove/onKeep
-      // are not wired). Kept as a no-op so the contract surface is stable.
-    },
-    []
-  );
+  const handleDismiss = React.useCallback((_itemIds: string[]) => {
+    // R7 Wave 12: no appnotification target; the per-bullet dismiss menu
+    // item is hidden by default in NarrativeBullet (onCheck/onRemove/onKeep
+    // are not wired). Kept as a no-op so the contract surface is stable.
+  }, []);
 
   /**
    * R4 task 046+047 / FR-18 + FR-19 — open a Dataverse record in a modal dialog.
