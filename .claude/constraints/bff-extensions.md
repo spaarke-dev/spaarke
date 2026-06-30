@@ -152,6 +152,52 @@ DO NOT collapse fixture-config gaps into "upstream cluster fix subsumes it" — 
 
 **Cross-reference**: Phase 5 procedure-doc codification at [`docs/procedures/testing-and-code-quality.md`](../../docs/procedures/testing-and-code-quality.md) §18.2.
 
+##### F.2.1 Env-name allow-list parity rule (Binding per spaarke-redis-cache-remediation-r2 FR-06 followup, 2026-06-29)
+
+**Codified 2026-06-29** from the AzureMonitorGuard (R2 task 006) + CacheModule (R1 task 003) twin incident: both shipped startup fail-fast guards that allow-listed only `ASPNETCORE_ENVIRONMENT=Development`. Both broke CI months later when `WebApplicationFactory<Program>` fixtures landed using `ASPNETCORE_ENVIRONMENT=Testing` (the canonical ASP.NET Core test-runtime name). PR #520 surfaced the AzureMonitorGuard breakage; the proactive audit dispatched after that fix found the CacheModule had the same latent bug. Both fixed in PR #521.
+
+**The bug class**:
+- Code throws / returns based on `IHostEnvironment.IsDevelopment()` or `EnvironmentName == "Development"`.
+- The only allow-listed env is `Development`.
+- A `WebApplicationFactory<Program>`-based integration test fixture uses `UseEnvironment("Testing")` (canonical ASP.NET Core convention) and inherits the throwing path.
+- CI is invisibly broken until someone runs full integration tests + sees `InvalidOperationException` at `WebApplicationFactory<>` construction time.
+
+**Binding rule — when adding ANY startup invariant that branches on env name**:
+
+1. **Allow-list `Testing` alongside `Development`** (the default). Use a single helper variable named `isLocalLike` (or equivalent) computed once at the top:
+   ```csharp
+   var isLocalLike = environment.IsDevelopment() ||
+       string.Equals(environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase);
+   ```
+   App Service uses `ASPNETCORE_ENVIRONMENT=Production`, never `Testing`, so allow-listing it does NOT weaken the deployed-env guarantee. `Staging` / `Demo` / `QA` are deployed envs where the invariant MUST still fire.
+
+2. **OR**, if the gate genuinely needs to throw in `Testing` (rare; argue the case): perform a full §F.2 fixture sweep in the SAME PR, updating EVERY `WebApplicationFactory<Program>`-based fixture that may inherit the throwing path. This is the same protocol R1 task 009 used for the original CacheModule 4-branch fail-fast (337 latent test failures swept in 15 fixtures).
+
+3. **Add a case-insensitive Theory unit test** verifying the env-name allow-list matches ASP.NET Core's convention:
+   ```csharp
+   [Theory]
+   [InlineData("testing")]
+   [InlineData("TESTING")]
+   [InlineData("Testing")]
+   public void Guard_TestingEnvNameIsCaseInsensitive(string envName) { ... }
+   ```
+   The Theory acts as a forcing function: if someone tightens the env-name match later, this test breaks loudly.
+
+4. **Update the InvalidOperationException message** to enumerate the actual allow-list explicitly (e.g., "Development or Testing only", NOT "Development only" or "non-Development"). Operators reading the error need the correct allow-list to debug. The original FR-06 message said "non-Development environments" — accurate-but-misleading; the followup PR #521 changed it to "deployed environments (Staging, Production, etc.)".
+
+5. **Reviewer checklist** (load this section explicitly when reviewing any BFF-touching task that adds a `throw new InvalidOperationException(...)` in `Infrastructure/DI/*Module.cs` or `Infrastructure/Startup/*.cs`):
+   - [ ] Does the gate allow-list `Testing` alongside `Development`? (If no: rule 2 above must be argued.)
+   - [ ] Is the exception message accurate about which envs are allow-listed? (Avoid "non-X" phrasing; enumerate explicitly.)
+   - [ ] Is there a case-insensitive Theory test for the Testing env-name match?
+
+**Audit lineage** (2026-06-29):
+- AzureMonitorGuard.cs — broken on master from 2026-06-27 (PR #489 merge); fixed in PR #521.
+- CacheModule.cs — broken from R1 task 003 (2026-06-25, PR #458 merge); fixed in PR #521.
+- CorsModule.cs — already correctly allow-lists both `Development` AND `Testing` (no fix needed).
+- StartupValidationService.cs — does NOT gate by env; throws on missing required options in any env. No bug class match.
+
+**Cross-reference**: `projects/spaarke-redis-cache-remediation-r2/notes/post-deploy-verification.md` for FR-06 implementation; audit report compiled into PR #521 description.
+
 #### F.3 Empirical-Reproduction-FIRST Protocol (Binding per r2 task 081 / D-13)
 
 **Codified 2026-06-01** from r2 tasks 010 (RB-T044-01), 011 (RB-T028-03/04/05/06 cluster), 012 (RB-T028-02) execution: **r1 ledger entries' recommended fixes were INCOMPLETE in 100% of investigated cases**. Each task's agent surfaced an empirical correction:
